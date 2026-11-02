@@ -4,6 +4,8 @@ Inert on import. Only SemanticProvider construction opens a loopback listener;
 pure protocol controls never construct it. No canonical outcome is synthesized.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections import Counter
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -12,6 +14,17 @@ import time
 
 MARKER = 'NAC_SEMANTIC_FINITE_MARKER'
 BEHAVIORS = ('orchestrator', 'direct', 'direct-with-orchestrator')
+
+
+def _string_values(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _string_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _string_values(child)
 
 
 class Protocol:
@@ -57,11 +70,44 @@ class Protocol:
             assert not decoded.get('error') and not decoded.get('is_error'), 'Read returned an error'
         return text
 
+    def _matches(self, body):
+        return [token for token in self.scripts if any(re.search(
+            r'(?<![A-Za-z0-9_-])' + re.escape(token) + r'(?![A-Za-z0-9_-])', text)
+            for text in _string_values(body))]
+
+    def discrimination(self, body, wire=None):
+        """Read-only bounded metadata, never prompt/header/tool-result text."""
+        with self.lock:
+            matches = self._matches(body)
+            steps = {token[:96]: self.scripts[token]['calls'] for token in matches}
+        rows = body.get('input', []) if isinstance(body, dict) else []
+        rows = rows if isinstance(rows, list) else []
+        roles = {'user', 'assistant', 'system', 'developer', 'tool'}
+        types = {'message', 'input_text', 'output_text', 'function_call', 'function_call_output', 'input_image'}
+        def counts(field, known):
+            return dict(Counter(row.get(field) if isinstance(row.get(field), str) and row.get(field) in known else 'other'
+                                for row in rows if isinstance(row, dict)))
+        tools = body.get('tools', []) if isinstance(body, dict) else []
+        names = set()
+        for row in tools if isinstance(tools, list) else []:
+            if isinstance(row, dict):
+                nested = row.get('function')
+                name = row.get('name', nested.get('name') if isinstance(nested, dict) else None)
+                if isinstance(name, str):
+                    names.add(name)
+        raw = wire if wire is not None else json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+        return dict(matched_tokens=[token[:96] for token in matches], matched_token_count=len(matches),
+                    expected_steps=steps, input_count=len(rows), input_roles=counts('role', roles),
+                    input_types=counts('type', types),
+                    tool_names=sorted({name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.-]{0,63}', name)
+                                       else '<invalid-name>' for name in names})[:32],
+                    tool_name_count=len(names), tool_names_truncated=len(names) > 32 or any(len(n) > 64 for n in names),
+                    body_bytes=len(raw), body_sha256=hashlib.sha256(raw).hexdigest(),
+                    body_encoding='wire' if wire is not None else 'canonical-json')
+
     def accept(self, body):
         with self.lock:
-            encoded = json.dumps(body, sort_keys=True)
-            matches = [token for token in self.scripts if re.search(
-                r'(?<![A-Za-z0-9_-])' + re.escape(token) + r'(?![A-Za-z0-9_-])', encoded)]
+            matches = self._matches(body)
             # A queued B request includes A's retained transcript. B wins only
             # when exactly one registered queue token is actually present.
             queued = [token for token in matches if self.scripts[token]['mode'] == 'queue']
@@ -150,13 +196,16 @@ class SemanticProvider:
                 self.end_headers()
 
             def do_POST(self):
+                discrimination = None
                 try:
                     self.connection.settimeout(3)
                     assert self.path.rstrip('/') in ('/responses', '/v1/responses')
                     assert self.headers.get('Authorization') == 'Bearer attention-semantic-dummy-only'
                     length = int(self.headers.get('Content-Length', '0'))
                     assert 0 < length <= 1024 * 1024
-                    body = json.loads(self.rfile.read(length))
+                    wire = self.rfile.read(length)
+                    body = json.loads(wire)
+                    discrimination = owner.protocol.discrimination(body, wire)
                     token, item, gates, record = owner.protocol.accept(body)
                     owner.save('model-request', record)
                     for gate in gates:
@@ -180,7 +229,8 @@ class SemanticProvider:
                     owner.save('model-response', dict(token=token, response=response))
                 except Exception as error:
                     owner.errors.append(repr(error))
-                    owner.save('model-error', dict(error=repr(error)))
+                    owner.save('model-error', dict(error=repr(error), error_class=type(error).__name__,
+                                                   discrimination=discrimination))
                     self.send_error(500)
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)

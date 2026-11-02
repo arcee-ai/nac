@@ -1,6 +1,8 @@
 """Pure protocol/oracle/source controls; no listener, model, app or SDK."""
 import ast
 import copy
+import hashlib
+import io
 import json
 import re
 import tempfile
@@ -19,40 +21,164 @@ def body(token, outputs=()):
                 tools=[dict(type='function', name=name) for name in ('read', 'update_goal')], stream=True)
 
 
+def goal_prompt(token):
+    owner = (HERE.parent.parent / 'crates/nac-core/src/session_service.rs').read_text()
+    literal = re.search(r'format!\(\s*("(?:\\.|[^"\\])*"),\s*goal\.goal_id, goal\.objective, budget',
+                        owner).group(1)
+    return json.loads(literal).format('fixture-goal', token + ': read semantic-marker.txt before completing.',
+                                      'No token budget was set.')
+
+
 class ProtocolControls(unittest.TestCase):
+    def test_actual_goal_continuation_wrapper_selects_real_caller_token(self):
+        caller = (HERE / 'attention_semantic_app_smoke.py').read_text()
+        self.assertIn("token = 'SEMANTIC_GOAL_' + behavior", caller)
+        token = 'SEMANTIC_GOAL_direct'
+        prompt = goal_prompt(token)
+        self.assertIn('\n' + token + ':', prompt)
+        protocol = Protocol('/owned/semantic-marker.txt')
+        protocol.register(token, 'goal')
+        selected, item, gates, _ = protocol.accept(body(prompt))
+        self.assertEqual(selected, token)
+        self.assertEqual(item['name'], 'read')
+        self.assertEqual(gates, [token + ':allow-read'])
+
     def goal(self, protocol, token):
         protocol.register(token, 'goal')
-        protocol.bind_goal(token, 'goal-' + token, 'run-' + token)
-        first = protocol.accept(body(token))
+        prompt = goal_prompt(token)
+        first = protocol.accept(body(prompt))
         self.assertEqual(first[1]['name'], 'read')
+        self.assertEqual(first[2], [token + ':allow-read'])
+        protocol.bind_goal(token, 'goal-' + token, 'run-' + token)
         read = ('read-' + token, '1: ' + MARKER)
-        second = protocol.accept(body(token, [read]))
+        second = protocol.accept(body(prompt, [read]))
         self.assertEqual(second[1]['name'], 'update_goal')
+        self.assertEqual(json.loads(second[1]['arguments']), dict(goal_id='goal-' + token, status='complete'))
         mark = dict(goal_id='goal-' + token, accounting_run_id='run-' + token, status='complete', version=7)
-        last = protocol.accept(body(token, [read, ('mark-' + token, json.dumps(mark))]))
+        last = protocol.accept(body(prompt, [read, ('mark-' + token, json.dumps(mark))]))
         self.assertEqual(last[2], [token + ':final-tail'])
         self.assertEqual(protocol.marks[token], mark)
 
     def test_planned_matrix_is_fourteen_real_model_steps_without_extra_goal_calls(self):
         p = Protocol('/owned/semantic-marker.txt')
+        caller = (HERE / 'attention_semantic_app_smoke.py').read_text()
+        for label in ['FIRST', 'OFFLINE']:
+            self.assertIn("request_case(behavior, '" + label + "')", caller)
+        self.assertIn("token = 'SEMANTIC_' + label + '_' + behavior", caller)
+        self.assertIn("queued = 'SEMANTIC_QUEUE_' + behavior", caller)
         for behavior in BEHAVIORS:
-            token = 'FIRST_' + behavior
+            token = 'SEMANTIC_FIRST_' + behavior
             p.register(token)
             self.assertEqual(p.accept(body(token))[1]['type'], 'message')
         for behavior in BEHAVIORS[1:]:
-            token = 'GOAL_' + behavior
+            token = 'SEMANTIC_GOAL_' + behavior
             self.goal(p, token)
-            queued = 'QUEUE_' + behavior
+            queued = 'SEMANTIC_QUEUE_' + behavior
             p.register(queued, 'queue', parent=token)
-            result = p.accept(body(queued + ' ' + token))
+            result = p.accept(dict(body(queued), input=[dict(role='user', content=goal_prompt(token)),
+                                                       dict(role='user', content=queued)]))
             self.assertEqual(result[0], queued)
             self.assertEqual(result[2], [queued + ':finish-B'])
         for behavior in BEHAVIORS:
-            token = 'OFFLINE_' + behavior
+            token = 'SEMANTIC_OFFLINE_' + behavior
             p.register(token)
             p.accept(body(token))
         self.assertEqual(len(p.requests), 14)
         self.assertEqual(len(p.marks), 2)
+        p.register('SEMANTIC_EXTRA')
+        with self.assertRaisesRegex(AssertionError, 'Matrix model call bound exceeded'):
+            p.accept(body('SEMANTIC_EXTRA'))
+
+    def test_decoded_leaf_boundaries_and_direct_suffixes(self):
+        direct = 'SEMANTIC_GOAL_direct'
+        dwo = direct + '-with-orchestrator'
+        for prefix in ['\n', '\r\n', '\t', '"', "'"]:
+            for token in [direct, dwo]:
+                with self.subTest(prefix=repr(prefix), token=token):
+                    p = Protocol('/owned/marker')
+                    p.register(direct, 'goal');p.register(dwo, 'goal')
+                    request = body(prefix + token + ': objective')
+                    request['input'][0]['content'] = [dict(type='input_text', text=prefix + token + ': objective')]
+                    self.assertEqual(p.accept(request)[0], token)
+        p = Protocol('/owned/marker');p.register(direct, 'goal')
+        request = body('unused');request['input'][0]['content'] = ['n', direct]
+        self.assertEqual(p.accept(request)[0], direct, 'Individual leaves must not be concatenated')
+
+    def test_embedded_unknown_ambiguous_key_only_and_split_tokens_fail_closed(self):
+        token = 'SEMANTIC_GOAL_direct'
+        other = 'SEMANTIC_GOAL_direct-with-orchestrator'
+        for text in [r'\n' + token, 'a' + token, token + 'a', '0' + token, token + '0',
+                     '_' + token, token + '_', '-' + token, token + '-', 'unknown', token + ' ' + other]:
+            p = Protocol('/owned/marker');p.register(token, 'goal');p.register(other, 'goal')
+            with self.subTest(text=text), self.assertRaisesRegex(AssertionError, 'Unknown/ambiguous'):
+                p.accept(body(text))
+            self.assertEqual(p.requests, [])
+        for request in [dict(body('unknown'), **{token: 'unknown'}),
+                        dict(body('unknown'), input=[dict(content=[token[:12], token[12:]])])]:
+            p = Protocol('/owned/marker');p.register(token, 'goal')
+            with self.assertRaisesRegex(AssertionError, 'Unknown/ambiguous'):
+                p.accept(request)
+
+    def test_marked_queue_cannot_claim_an_unrelated_parent(self):
+        p = Protocol('/owned/marker')
+        direct = 'SEMANTIC_GOAL_direct';dwo = direct + '-with-orchestrator'
+        self.goal(p, direct);p.register(dwo, 'goal')
+        queued = 'SEMANTIC_QUEUE_direct';p.register(queued, 'queue', parent=direct)
+        with self.assertRaisesRegex(AssertionError, 'Wrong queued-goal context'):
+            p.accept(body(queued + ' ' + dwo))
+
+    def test_discrimination_is_bounded_read_only_and_does_not_double_decode(self):
+        token = 'SEMANTIC_GOAL_direct';p = Protocol('/owned/marker');p.register(token, 'goal')
+        request = body(goal_prompt(token))
+        request.update(credentials='PRIVATE_SENTINEL_' * 1000, headers=dict(Authorization='PRIVATE_HEADER'))
+        request['input'].append(dict(role=['unexpected'], type=dict(unexpected=True), content='PRIVATE_CONTENT'))
+        request['tools'].extend(dict(name='invalid tool name ' * 100) for _ in range(40))
+        before = copy.deepcopy(p.scripts)
+        wire = json.dumps(request, indent=2).encode()
+        diagnostic = p.discrimination(request, wire)
+        self.assertEqual(p.scripts, before);self.assertEqual(p.requests, []);self.assertEqual(p.marks, {})
+        self.assertFalse(any(event.is_set() for event in p.events.values()))
+        self.assertEqual(diagnostic['matched_tokens'], [token])
+        self.assertEqual(diagnostic['expected_steps'], {token: 0})
+        self.assertEqual(diagnostic['body_bytes'], len(wire))
+        self.assertEqual(diagnostic['body_sha256'], hashlib.sha256(wire).hexdigest())
+        self.assertEqual(diagnostic['body_encoding'], 'wire')
+        self.assertEqual(diagnostic['input_roles'], dict(user=1, other=1))
+        self.assertIn('read', diagnostic['tool_names']);self.assertIn('update_goal', diagnostic['tool_names'])
+        encoded = json.dumps(diagnostic)
+        self.assertLess(len(encoded), 8192)
+        for private in ['PRIVATE_SENTINEL', 'PRIVATE_HEADER', 'PRIVATE_CONTENT', 'invalid tool name']:
+            self.assertNotIn(private, encoded)
+        self.assertEqual(p.discrimination(body(r'\n' + token))['matched_token_count'], 0)
+        other = Protocol('/owned/marker');other.register(token, 'goal')
+        # Diagnostics may not change the acceptance of the same decoded request.
+        clean = body(goal_prompt(token));p.discrimination(clean)
+        self.assertEqual(p.accept(clean)[:3], other.accept(clean)[:3])
+
+    def test_actual_rejection_handler_records_metadata_without_listener_or_body(self):
+        token = 'SEMANTIC_GOAL_direct';p = Protocol('/owned/marker');p.register(token, 'goal')
+        request = body('PRIVATE_REJECTED_PROMPT');wire = json.dumps(request).encode();saved = []
+        owner = SimpleNamespace(protocol=p, errors=['prior error'], save=lambda op, value: saved.append((op, value)))
+        tree = ast.parse((HERE / 'attention_semantic_fixture.py').read_text())
+        handler = next(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == 'Handler')
+        method = next(node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name == 'do_POST')
+        scope = dict(json=json, owner=owner)
+        exec(compile(ast.Module(body=[method], type_ignores=[]), 'actual rejection handler only', 'exec'), scope)
+        errors = []
+        actor = SimpleNamespace(connection=SimpleNamespace(settimeout=lambda value: None), path='/responses',
+                                headers={'Authorization': 'Bearer attention-semantic-dummy-only', 'Content-Length': str(len(wire))},
+                                rfile=io.BytesIO(wire), send_error=errors.append)
+        scope['do_POST'](actor)
+        self.assertEqual(errors, [500]);self.assertEqual(len(owner.errors), 2)
+        self.assertEqual(owner.errors[0], 'prior error')
+        self.assertEqual(saved[0][0], 'model-error')
+        logged = saved[0][1]
+        self.assertEqual(logged['error_class'], 'AssertionError')
+        self.assertEqual(logged['discrimination']['matched_token_count'], 0)
+        self.assertEqual(logged['discrimination']['body_sha256'], hashlib.sha256(wire).hexdigest())
+        self.assertNotIn('PRIVATE_REJECTED_PROMPT', json.dumps(logged))
+        self.assertEqual(p.requests, []);self.assertEqual(p.scripts[token]['calls'], 0)
+        self.assertEqual(p.marks, {});self.assertFalse(any(e.is_set() for e in p.events.values()))
 
     def test_read_error_missing_or_duplicate_call_cannot_mark_goal(self):
         for outputs in [[], [('wrong', MARKER)], [('read-A', 'Error: ' + MARKER)],
