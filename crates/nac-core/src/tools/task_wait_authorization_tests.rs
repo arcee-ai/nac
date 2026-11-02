@@ -147,7 +147,6 @@ async fn mixed_project_wait_revalidates_reassignment_after_once_approval() {
             PermissionRule::new("task_read", "project:p1", PermissionEffect::Ask),
             PermissionRule::new("task_read", "project:p3", PermissionEffect::Deny),
         ]);
-        crate::tools::task_discovery::tests::project(&rt.store_path, "p3");
         let broker = Arc::clone(rt.permission_broker.as_ref().unwrap());
         broker.remember_caller_project("p1");
         let foreign =
@@ -182,7 +181,23 @@ async fn mixed_project_wait_revalidates_reassignment_after_once_approval() {
         .await
         .unwrap();
         assert!(request.resources.iter().any(|r| r.resource == "project:p1"));
-        // Real supported mutations while the prepared invocation awaits Once.
+        // Project deletion releases these sessions. Reassignment uses the
+        // supported API and preserves the exact existing location/backend.
+        store::delete_project(&rt.store_path, "p1").unwrap();
+        store::insert_project(
+            &rt.store_path,
+            store::NewProject {
+                project_id: "p3".into(),
+                name: None,
+                description: None,
+                cwd: std::path::PathBuf::from("/tmp/p1"),
+                ssh_host: None,
+                ssh_port: None,
+                ssh_identity_file: None,
+                default_model_config_id: None,
+            },
+        )
+        .unwrap();
         store::assign_session_to_project(&rt.store_path, "p3", "peer-a").unwrap();
         if move_caller {
             store::assign_session_to_project(&rt.store_path, "p3", "caller").unwrap();
