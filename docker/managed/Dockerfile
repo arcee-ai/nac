@@ -6,6 +6,7 @@
 FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS build
 
 ARG RUST_VERSION=1.98.0
+ARG CARGO_BUILD_JOBS=5
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG NAC_BUILD_TRACK=dev
@@ -34,6 +35,7 @@ RUN test "$(apk --print-arch)" = x86_64 \
 WORKDIR /src/nac
 COPY . .
 RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" \
     NAC_BUILD_ID="${NAC_BUILD_ID}" \
     NAC_SOURCE_REVISION="${NAC_SOURCE_REVISION}" \
     cargo build --release --locked -p nac-server --bin nac-web
@@ -174,6 +176,10 @@ RUN test "$(apk --print-arch)" = x86_64 \
 COPY --from=build /usr/local/rustup /usr/local/rustup
 COPY --from=build /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=build /src/nac/target/release/nac-web /usr/local/bin/nac-web
+# Verify the final executable contains release-local help without a checkout.
+RUN /usr/local/bin/nac-web guide skills discovery >/tmp/nac-guide.json \
+    && jq -e '.provenance == "first-party bundled NAC Guide" and (.result.text | contains(".nac/skills"))' /tmp/nac-guide.json >/dev/null \
+    && rm /tmp/nac-guide.json
 COPY docker/managed/entrypoint.sh /usr/local/bin/nac-managed-entrypoint
 COPY docker/managed/check-process-capabilities.sh /usr/local/libexec/nac/check-process-capabilities
 COPY docker/managed/packages/collect-runtime-provenance.py /usr/local/libexec/nac/collect-runtime-provenance.py

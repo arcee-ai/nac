@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub(super) struct PresentationDocument(pub(super) Arc<str>);
 
 #[derive(Clone, Serialize)]
-struct Binding {
+pub(super) struct PresentationBinding {
     owner: String,
     profile: &'static str,
     organization: String,
@@ -21,8 +21,8 @@ struct Binding {
     release: String,
 }
 
-impl Binding {
-    fn capture() -> Self {
+impl PresentationBinding {
+    pub(super) fn capture() -> Self {
         let incarnation = Uuid::new_v4().to_string();
         let build = crate::build_identity::current();
         Self {
@@ -52,9 +52,18 @@ impl Binding {
     }
 }
 
-impl PresentationDocument {
-    pub(super) fn capture() -> Self {
-        Binding::capture().document(include_str!("../../assets/dist/index.html"))
+impl PresentationBinding {
+    pub(super) fn embedded_document(&self) -> PresentationDocument {
+        self.document(include_str!("../../assets/dist/index.html"))
+    }
+
+    /// Optional stale-client fence, never authentication or product authority.
+    /// Native/headless clients have no browser document and omit this header.
+    pub(super) fn matches_product_request(&self, headers: &axum::http::HeaderMap) -> bool {
+        match headers.get("x-nac-presentation-incarnation") {
+            None => true,
+            Some(value) => value.to_str().is_ok_and(|value| value == self.incarnation),
+        }
     }
 }
 
@@ -64,7 +73,7 @@ mod tests {
 
     #[test]
     fn embeds_actual_build_and_one_stable_serving_lifetime() {
-        let binding = Binding::capture();
+        let binding = PresentationBinding::capture();
         let document = binding.document("<html><head></head><body></body></html>");
         assert_eq!(
             document.0,
@@ -85,7 +94,7 @@ mod tests {
                 build.source_revision
             ]
         );
-        let replacement = Binding::capture();
+        let replacement = PresentationBinding::capture();
         assert_ne!(binding.incarnation, replacement.incarnation);
         assert_ne!(
             document.0,
@@ -97,7 +106,7 @@ mod tests {
 
     #[test]
     fn embeds_only_opaque_scope_and_escapes_html_in_build_metadata() {
-        let mut binding = Binding::capture();
+        let mut binding = PresentationBinding::capture();
         binding.release = "build</script><img src=x>&".to_string();
         let document = binding.document("<head></head>");
         assert_eq!(binding.host, binding.incarnation);

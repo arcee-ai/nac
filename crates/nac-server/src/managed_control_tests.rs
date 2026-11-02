@@ -1388,3 +1388,41 @@ async fn accepted_replacement_fences_old_public_completion_and_private_control_r
         nac_core::store::ManagedMaintenanceState::Serving
     );
 }
+
+#[tokio::test]
+async fn managed_product_context_is_scoped_sanitized_and_passive() {
+    use crate::application::product_context::ProductContextApplication;
+    let fixture = Fixture::new();
+    crate::tests::seed_direct_session(&fixture.root, "managed-current");
+    let context = ProductContextApplication::new(fixture.manager.clone())
+        .read(Some("managed-current"))
+        .await
+        .unwrap();
+    assert!(context.managed);
+    assert_eq!(
+        context.session.as_ref().unwrap().behavior,
+        nac_core::sessions::SessionBehavior::Direct
+    );
+    assert_eq!(
+        context.session.as_ref().unwrap().execution_backend,
+        nac_core::product_context::ProductExecutionBackend::Local
+    );
+    let encoded = serde_json::to_string(&context).unwrap();
+    for private in [
+        "not-a-real-secret",
+        "owner@example.test",
+        "host-123",
+        "incarnation-456",
+        "nac.example.test",
+    ] {
+        assert!(!encoded.contains(private));
+    }
+    assert!(!encoded.contains(fixture.root.to_str().unwrap()));
+    assert!(fixture
+        .manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .is_empty());
+}
