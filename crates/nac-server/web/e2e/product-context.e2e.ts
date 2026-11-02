@@ -107,12 +107,14 @@ for (const mobile of [false, true]) {
       await context.getByRole("button", { name: `Open ${label}`, exact: true }).click();
       await expect(context).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/session/${id}/${panel}$`));
-      const panelDialog = mobile
+      // A phone opens the panel as its dialog; wider, the panel is focused in
+      // place beside the covered chat, and Escape goes back to the split.
+      const opened = mobile
         ? page.getByRole("dialog", { name: label, exact: true })
-        : page.getByRole("dialog");
-      await expect(panelDialog).toBeVisible();
+        : page.getByRole("heading", { name: `${label} — focused`, exact: true });
+      await expect(opened).toBeVisible();
       await page.keyboard.press("Escape");
-      await expect(panelDialog).toBeHidden();
+      await expect(opened).toBeHidden();
     }
     context = await inspect(page, mobile);
     await context.getByRole("button", { name: "Open History", exact: true }).click();
