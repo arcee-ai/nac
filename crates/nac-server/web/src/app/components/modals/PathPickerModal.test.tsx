@@ -234,6 +234,36 @@ it("a slow check blocks a second Select and is dropped once the draft changes", 
   expect(onSelect).toHaveBeenCalledWith(SPACED);
 });
 
+it("a Select retried on the same path asks again instead of reusing the superseded check", async () => {
+  // The first check is still running when the user edits away and back and
+  // selects again. By then the folder is gone, and only the new answer counts.
+  const first = deferred<BrowseListing>();
+  const second = deferred<BrowseListing>();
+  const answers = [first, second];
+  answerLocal("/work/retry", () => (answers.shift() ?? second).promise);
+  const onSelect = vi.fn();
+  renderWithClient(<Picker onSelect={onSelect} />);
+  await listed("nested");
+
+  fireEvent.change(pathInput(), { target: { value: "/work/retry" } });
+  fireEvent.click(selectButton());
+  fireEvent.change(pathInput(), { target: { value: "/work/elsewhere" } });
+  fireEvent.change(pathInput(), { target: { value: "/work/retry" } });
+  fireEvent.click(selectButton());
+
+  expect(
+    vi.mocked(api.browsePath).mock.calls.filter(([path]) => path === "/work/retry"),
+  ).toHaveLength(2);
+  await act(async () => first.resolve(listing("/work/retry")));
+  await act(async () =>
+    second.reject(
+      new ApiError(404, "GET", "/fs/browse", "path '/work/retry' does not exist", "req-2"),
+    ),
+  );
+  expect(onSelect).not.toHaveBeenCalled();
+  expect((await screen.findByRole("alert")).textContent).toContain("does not exist");
+});
+
 it("a double-clicked slow Select applies its folder exactly once", async () => {
   const slow = deferred<BrowseListing>();
   answerLocal("/work/slow", () => slow.promise);
