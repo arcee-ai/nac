@@ -243,8 +243,31 @@ test("ALL472-D4 human cancellation after settled question wakes once without ans
       inbox,
       guidance_run: live.active_run,
     };
+    const reservedUrl = `${harness.baseUrl}/#/session/${peer}/insights?question_request=${q.request.request_id}`;
+    await page.goto(reservedUrl);
+    await expect(page).toHaveURL(reservedUrl);
+    await expect
+      .poll(() => question(request, harness, q))
+      .toMatchObject({
+        request: q.request,
+        status: "answered",
+        answer: receipt,
+        continuation_state: "cancelled",
+      });
+    await expect(
+      page.getByText("Guidance survives reservation cancellation.", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(/This task question is no longer pending/)).toBeVisible();
-    await page.screenshot({ path: info.outputPath("d4-cancelled.png"), animations: "disabled" });
+    await expect(page.getByRole("region", { name: "Task question", exact: true })).toHaveCount(0);
+    await page.evaluate("document.fonts.ready");
+    const screenshot = "d4-reserved-continuation-cancelled.png";
+    evidence.cancelled_reservation_visual = {
+      session_id: peer,
+      request: q.request,
+      url: page.url(),
+      screenshot,
+    };
+    await page.screenshot({ path: info.outputPath(screenshot), animations: "disabled" });
     harness.provider.assertConsumed();
   } finally {
     await retain(info, harness, evidence);
