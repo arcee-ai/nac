@@ -22,6 +22,7 @@ const runtime = createNativeRuntime({
     release: "standalone",
   },
   client,
+  standaloneServingIncarnation: scope?.incarnation,
   storage: localStorage,
   draftStorage: scope
     ? {

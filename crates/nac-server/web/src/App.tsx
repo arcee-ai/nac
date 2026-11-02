@@ -1,3 +1,4 @@
+import { ProductNavigationProvider } from "@/app/features/product-context/ProductNavigationProvider";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { UiPolicyProvider } from "@/app/features/ui-policy/UiPolicyProvider";
@@ -46,15 +47,17 @@ export default function App() {
         <SessionActionsProvider>
           <ProjectActionsProvider>
             <ManagedHostProvider>
-              <Routes>
-                <Route element={<AppShell />}>
-                  <Route path="/" element={<ProjectsListPage />} />
-                  <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                  <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
-                </Route>
-                <Route path="/design" element={<DesignRoute />} />
-                <Route path="*" element={<Navigate to={routes.list()} replace />} />
-              </Routes>
+              <ProductNavigationProvider>
+                <Routes>
+                  <Route element={<AppShell />}>
+                    <Route path="/" element={<ProjectsListPage />} />
+                    <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                    <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
+                  </Route>
+                  <Route path="/design" element={<DesignRoute />} />
+                  <Route path="*" element={<Navigate to={routes.list()} replace />} />
+                </Routes>
+              </ProductNavigationProvider>
             </ManagedHostProvider>
           </ProjectActionsProvider>
         </SessionActionsProvider>

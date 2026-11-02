@@ -309,6 +309,7 @@ jobs:
         run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
       - name: Preserve source, size, and lifecycle contracts on every PR
         run: |
+          make test-nac-guide
           make test-source-size test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
 

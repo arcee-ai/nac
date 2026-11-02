@@ -1,3 +1,6 @@
+import SessionNameDisclosure, {
+  useSessionNameDisclosure,
+} from "@/app/atoms/session-name-disclosure";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -108,32 +111,37 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
     ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
     : undefined;
   const parentTitle = parent ? sessionTitle(parent.summary) : "Parent session";
+  const parentDisclosure = useSessionNameDisclosure(parentTitle);
 
   const title = (
-    <p
+    <SessionNameDisclosure
+      key={sessionId}
+      name={sessionTitle(entry?.summary)}
+      running={running}
       className={cn(
-        "text-sm leading-5 font-medium min-w-0 flex-1 truncate",
-        running ? "text-shimmer-basic" : "text-btn-secondary-pressed",
+        "text-sm leading-5 font-medium min-w-0 flex-1 truncate text-left",
+        "text-btn-secondary-pressed",
       )}
-    >
-      {sessionTitle(entry?.summary)}
-    </p>
+    />
   );
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       {lineage ? (
         <div className="flex w-full items-center gap-1">
-          <Button
-            variant={ButtonVariant.Tertiary}
-            size={ButtonSize.Medium}
-            className="min-w-0 max-w-16 shrink-0"
-            aria-label={`${parentTitle}, parent chat`}
-            title={parentTitle}
-            onClick={() => navigate(routes.session(lineage.parent_session_id, "delegated"))}
-          >
-            <span className="truncate underline">{parentTitle}</span>
-          </Button>
+          {parentDisclosure.hint(
+            <Button
+              variant={ButtonVariant.Tertiary}
+              size={ButtonSize.Medium}
+              className="min-w-0 max-w-16 shrink-0"
+              aria-label={`${parentTitle}, parent chat`}
+              onClick={() => navigate(routes.session(lineage.parent_session_id, "delegated"))}
+            >
+              <span className="truncate underline">{parentTitle}</span>
+            </Button>,
+          )}
+          {parentDisclosure.action}
+          {parentDisclosure.overlay}
           <Icon
             iconName={IconName.Right}
             size={16}

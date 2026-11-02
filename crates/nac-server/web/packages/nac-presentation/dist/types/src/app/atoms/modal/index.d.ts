@@ -23,6 +23,8 @@ interface ModalProps {
     /** Controls of the dialog's own, trailing the title in the header row. */
     headerActions?: React.ReactNode;
     size?: ModalSize;
+    /** Surface and scrim layer for a dialog opened above a panel or sheet. */
+    zIndex?: number;
     closeOnOverlay?: boolean;
     /** Stretch the body over a card the caller sizes; it still grows with its content. */
     flush?: boolean;

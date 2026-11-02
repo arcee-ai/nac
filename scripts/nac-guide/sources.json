@@ -1,0 +1,280 @@
+[
+  {
+    "document_id": "setup",
+    "source_path": "README.md",
+    "title": "Setup and quickstart",
+    "sections": [
+      {
+        "section_id": "quickstart",
+        "heading": "Quickstart"
+      },
+      {
+        "section_id": "documentation",
+        "heading": "Documentation"
+      },
+      {
+        "section_id": "contributing",
+        "heading": "Contributing"
+      }
+    ]
+  },
+  {
+    "document_id": "mcp",
+    "source_path": "docs/usage/mcp.md",
+    "title": "MCP in NAC",
+    "sections": [
+      {
+        "section_id": "add-a-server",
+        "heading": "Add a server"
+      },
+      {
+        "section_id": "connect-an-external-client",
+        "heading": "Connect an external client"
+      },
+      {
+        "section_id": "availability-and-backend-limits",
+        "heading": "Availability and backend limits"
+      }
+    ]
+  },
+  {
+    "document_id": "skills",
+    "source_path": "docs/usage/skills.md",
+    "title": "Skills",
+    "sections": [
+      {
+        "section_id": "discovery",
+        "heading": "Discovery"
+      },
+      {
+        "section_id": "skillmd-format",
+        "heading": "`SKILL.md` format"
+      },
+      {
+        "section_id": "local-direct-sessions",
+        "heading": "Local direct sessions"
+      },
+      {
+        "section_id": "how-the-orchestrator-uses-skills",
+        "heading": "How the orchestrator uses skills"
+      },
+      {
+        "section_id": "referencing-skills-in-a-prompt",
+        "heading": "Referencing skills in a prompt"
+      }
+    ]
+  },
+  {
+    "document_id": "session-behaviors",
+    "source_path": "docs/usage/session-behaviors.md",
+    "title": "Session behaviors: orchestrator, direct and direct-with-orchestrator",
+    "sections": []
+  },
+  {
+    "document_id": "subagents",
+    "source_path": "docs/usage/traditional-children.md",
+    "title": "Traditional child sessions",
+    "sections": []
+  },
+  {
+    "document_id": "managed-orchestrators",
+    "source_path": "docs/usage/managed-orchestrators.md",
+    "title": "Managed orchestrators",
+    "sections": []
+  },
+  {
+    "document_id": "workspace-backends",
+    "source_path": "docs/usage/sandbox.md",
+    "title": "Workspace and sandbox backends",
+    "sections": [
+      {
+        "section_id": "current-mvp-limitation",
+        "heading": "Current MVP limitation"
+      }
+    ]
+  },
+  {
+    "document_id": "models",
+    "source_path": "docs/configuration/model.md",
+    "title": "Model configuration",
+    "sections": [
+      {
+        "section_id": "project-defaults",
+        "heading": "Project defaults"
+      },
+      {
+        "section_id": "orchestrator-compaction-threshold",
+        "heading": "Orchestrator compaction threshold"
+      },
+      {
+        "section_id": "api-key-selection",
+        "heading": "API-key selection"
+      },
+      {
+        "section_id": "reasoning-effort",
+        "heading": "Reasoning effort"
+      },
+      {
+        "section_id": "openai-chat-completions",
+        "heading": "OpenAI Chat Completions"
+      }
+    ]
+  },
+  {
+    "document_id": "auth",
+    "source_path": "docs/configuration/credentials.md",
+    "title": "Providers and logins",
+    "sections": [
+      {
+        "section_id": "chatgpt-codex-oauth",
+        "heading": "ChatGPT Codex OAuth"
+      },
+      {
+        "section_id": "arcee-managed-auth-and-api-keys",
+        "heading": "Arcee managed auth and API keys"
+      },
+      {
+        "section_id": "credential-files",
+        "heading": "Credential files"
+      }
+    ]
+  },
+  {
+    "document_id": "configuration",
+    "source_path": "docs/configuration/example.md",
+    "title": "Example configuration",
+    "sections": []
+  },
+  {
+    "document_id": "instructions",
+    "source_path": "docs/usage/agents-md.md",
+    "title": "AGENTS.md instructions",
+    "sections": [
+      {
+        "section_id": "where-files-are-loaded",
+        "heading": "Where files are loaded"
+      }
+    ]
+  },
+  {
+    "document_id": "permissions",
+    "source_path": "docs/usage/permissions.md",
+    "title": "Permissions",
+    "sections": [
+      {
+        "section_id": "approve-for-me",
+        "heading": "Approve for me"
+      }
+    ]
+  },
+  {
+    "document_id": "recovery",
+    "source_path": "docs/configuration/data-stores.md",
+    "title": "Stores, restart and migration",
+    "sections": []
+  },
+  {
+    "document_id": "goals",
+    "source_path": "docs/usage/direct-goals.md",
+    "title": "Durable direct goals",
+    "sections": []
+  },
+  {
+    "document_id": "retained-tasks",
+    "source_path": "docs/usage/retained-tasks.md",
+    "title": "Retained tasks and workspace ownership",
+    "sections": [
+      {
+        "section_id": "retries-and-interrupted-preparation",
+        "heading": "Retries and interrupted preparation"
+      },
+      {
+        "section_id": "retention",
+        "heading": "Retention"
+      }
+    ]
+  },
+  {
+    "document_id": "web-retrieval",
+    "source_path": "docs/usage/web-retrieval.md",
+    "title": "Web retrieval and subagent availability",
+    "sections": []
+  },
+  {
+    "document_id": "managed",
+    "source_path": "docs/managed/README.md",
+    "title": "Managed NAC host",
+    "sections": [
+      {
+        "section_id": "trust-and-ownership-boundary",
+        "heading": "Trust and ownership boundary"
+      },
+      {
+        "section_id": "runtime-image-contract",
+        "heading": "Runtime image contract"
+      },
+      {
+        "section_id": "managed-configuration",
+        "heading": "Managed configuration"
+      },
+      {
+        "section_id": "upgrade-control-and-maintenance",
+        "heading": "Upgrade control and maintenance"
+      },
+      {
+        "section_id": "probes-and-shutdown",
+        "heading": "Probes and shutdown"
+      },
+      {
+        "section_id": "local-build-and-smoke",
+        "heading": "Local build and smoke"
+      },
+      {
+        "section_id": "image-ci-and-publication-ownership",
+        "heading": "Image CI and publication ownership"
+      },
+      {
+        "section_id": "first-dogfood-and-external-gaps",
+        "heading": "First dogfood and external gaps"
+      }
+    ]
+  },
+  {
+    "document_id": "guide",
+    "source_path": "docs/usage/nac-guide.md",
+    "title": "NAC Guide",
+    "sections": [
+      {
+        "section_id": "sources-and-retrieval",
+        "heading": "Sources and retrieval"
+      },
+      {
+        "section_id": "provenance-and-collisions",
+        "heading": "Provenance and collisions"
+      },
+      {
+        "section_id": "maintenance",
+        "heading": "Maintenance"
+      }
+    ]
+  },
+  {
+    "document_id": "workspaces",
+    "source_path": "docs/usage/workspaces.md",
+    "title": "Workspaces: Local, SSH, Podman and managed backends",
+    "sections": [
+      {
+        "section_id": "local-and-ssh",
+        "heading": "Local and SSH"
+      },
+      {
+        "section_id": "podman-and-managed-hosts",
+        "heading": "Podman and managed hosts"
+      },
+      {
+        "section_id": "retained-tasks-and-recovery",
+        "heading": "Retained tasks and recovery"
+      }
+    ]
+  }
+]

@@ -307,6 +307,17 @@ pub struct OrchestratorRunConfig {
 }
 
 impl OrchestratorRunConfig {
+    /// Bind host observations to the exact session selected by construction.
+    pub fn bind_product_context(
+        &mut self,
+        factory: impl FnOnce(&str) -> std::sync::Arc<dyn crate::product_context::ProductContextPort>,
+    ) -> Result<()> {
+        if let Some(session) = self.session.session_id() {
+            self.agent.bind_product_context(factory(session))?;
+        }
+        Ok(())
+    }
+
     pub fn resume_base_cwd(&self) -> &Path {
         &self.resume_base_cwd
     }
