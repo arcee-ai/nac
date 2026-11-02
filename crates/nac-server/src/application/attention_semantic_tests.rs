@@ -1,5 +1,7 @@
 //! Real HTTP admission/model/terminal transaction/semantic SSE at exact G2.
 //! This is canonical service evidence, never an AppKit crash/ACK cutpoint.
+//! Direct pauses at actual Idle; DWO at actual IdleUnverified. Both pauses
+//! follow durable terminal settlement/local release and precede publication attempt.
 #![expect(clippy::unwrap_used, reason = "isolated integration test assertions")]
 use super::*;
 use crate::tests::{ScopedModelEnv, SERVER_MODEL_ENV_LOCK};
@@ -10,6 +12,7 @@ use axum::{
     Json, Router,
 };
 use futures_core::Stream;
+use nac_core::session_service::AttentionPublicationSelection;
 use nac_core::store;
 use std::{
     pin::Pin,
@@ -73,7 +76,11 @@ async fn open(app: Router, cursor: &str) -> Feed {
     assert_eq!(response.status(), StatusCode::OK);
     Box::pin(response.into_body().into_data_stream())
 }
-async fn frame(body: &mut Feed) -> serde_json::Value {
+async fn frame(body: &mut Feed, stage: &str) -> serde_json::Value {
+    eprintln!(
+        "semantic-g2-stage {}",
+        serde_json::json!({"stage":stage,"poll":"begin"})
+    );
     let bytes = tokio::time::timeout(
         Duration::from_secs(5),
         std::future::poll_fn(|cx| body.as_mut().poll_next(cx)),
@@ -83,12 +90,17 @@ async fn frame(body: &mut Feed) -> serde_json::Value {
     .unwrap()
     .unwrap();
     let text = std::str::from_utf8(&bytes).unwrap();
-    serde_json::from_str(
+    let value: serde_json::Value = serde_json::from_str(
         text.lines()
             .find_map(|line| line.strip_prefix("data: "))
             .unwrap(),
     )
-    .unwrap()
+    .unwrap();
+    eprintln!(
+        "semantic-g2-stage {}",
+        serde_json::json!({"stage":stage,"frame":value})
+    );
+    value
 }
 async fn completion(
     body: &mut Feed,
@@ -97,7 +109,7 @@ async fn completion(
     seen: &mut std::collections::BTreeSet<i64>,
 ) -> serde_json::Value {
     for _ in 0..100 {
-        let value = frame(body).await;
+        let value = frame(body, run).await;
         assert_ne!(value["kind"], "reset", "{value}");
         assert!(
             !(value["change"]["work"]["run_id"] == stale
@@ -149,6 +161,25 @@ async fn interleave(behavior: &str) {
             async move {
                 let index = calls.fetch_add(1, Ordering::SeqCst);
                 assert!(index < 2);
+                let prompt = request["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|item| item["role"] == "user")
+                    .unwrap()["content"]
+                    .to_string();
+                assert!(prompt.len() <= 4096);
+                let expected = if index == 0 {
+                    "semantic A"
+                } else {
+                    "semantic B"
+                };
+                assert!(prompt.contains(expected), "provider {index}: {prompt}");
+                eprintln!(
+                    "semantic-g2-provider {}",
+                    serde_json::json!({"index":index,"prompt":prompt,"stage":"entered"})
+                );
                 let (entered, release) = if index == 0 {
                     (entered_a, release_a)
                 } else {
@@ -158,6 +189,10 @@ async fn interleave(behavior: &str) {
                 tokio::time::timeout(Duration::from_secs(5), release.notified())
                     .await
                     .unwrap();
+                eprintln!(
+                    "semantic-g2-provider {}",
+                    serde_json::json!({"index":index,"stage":"released"})
+                );
                 let item = serde_json::json!({"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":format!("semantic result {index}")}]});
                 let response = serde_json::json!({"status":"completed","output":[item.clone()],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}});
                 if request["stream"] == true {
@@ -204,11 +239,12 @@ async fn interleave(behavior: &str) {
     assert_eq!(created["metadata"]["behavior"], behavior);
     let service = manager.attach_session(&id).await.unwrap();
     let mut feed = open(app.clone(), "new").await;
-    let cutoff = frame(&mut feed).await;
+    let cutoff = frame(&mut feed, "cutoff").await;
     assert_eq!(cutoff["kind"], "completions");
     assert_eq!(cutoff["page"]["baseline"], true);
     assert!(cutoff["page"]["items"].as_array().unwrap().is_empty());
-    assert_eq!(frame(&mut feed).await["kind"], "baseline");
+    let baseline = frame(&mut feed, "baseline").await;
+    assert_eq!(baseline["kind"], "baseline");
     let a = post(
         app.clone(),
         &format!("/sessions/{id}/runs"),
@@ -221,11 +257,42 @@ async fn interleave(behavior: &str) {
         .unwrap();
     let barrier = service.hold_attention_publication_for_test(&a).unwrap();
     release_a.notify_one();
-    barrier.arrived().await.unwrap();
+    let selection = barrier.arrived().await.unwrap();
+    match (behavior, &selection) {
+        ("direct", AttentionPublicationSelection::Idle { goal, last_run }) => {
+            assert!(goal.is_none());
+            assert_eq!(last_run.as_deref(), Some(a.as_str()));
+        }
+        ("direct-with-orchestrator", AttentionPublicationSelection::IdleUnverified) => {
+            assert_eq!(
+                baseline["sources"][0]["availability"]["questions"],
+                "unsupported"
+            );
+        }
+        _ => panic!("unexpected actual continuation selection for {behavior}: {selection:?}"),
+    }
+    eprintln!(
+        "semantic-g2-cutpoint {}",
+        serde_json::json!({"behavior":behavior,"session":id,"run_a":a,"actual_selection":format!("{selection:?}")})
+    );
     assert!(
         service.active_run().is_none(),
-        "barrier must be AFTER verified Idle, not terminal-but-finishing"
+        "cutpoint must be AFTER actual selection and local active-run release"
     );
+    let after = store::CompletionCursor {
+        store: cutoff["page"]["store_id"].as_str().unwrap().into(),
+        sequence: cutoff["page"]["cursor"].as_i64().unwrap(),
+    };
+    canonical_a(
+        &manager,
+        &path,
+        &after,
+        &a,
+        &id,
+        behavior,
+        "selected-before-B",
+    )
+    .await;
     let b = post(
         app.clone(),
         &format!("/sessions/{id}/runs"),
@@ -239,7 +306,17 @@ async fn interleave(behavior: &str) {
         .unwrap();
     assert_eq!(service.active_run().unwrap().run_id.as_str(), b);
     barrier.release();
-    barrier.published().await.unwrap();
+    barrier.publication_attempted().await.unwrap();
+    canonical_a(
+        &manager,
+        &path,
+        &after,
+        &a,
+        &id,
+        behavior,
+        "B-active-after-A-publication-attempt",
+    )
+    .await;
     let mut seen = std::collections::BTreeSet::new();
     let first = completion(&mut feed, &a, &a, &mut seen).await;
     assert_eq!(
@@ -252,8 +329,29 @@ async fn interleave(behavior: &str) {
     assert_eq!(first["item"]["kind"], "request");
     assert!(first["item"]["goal_id"].is_null());
     assert!(first["item"]["mark_version"].is_null());
-    release_b.notify_one();
-    let second = completion(&mut feed, &b, &a, &mut seen).await;
+    // Keep the original sole stream past an actual empty canonical read before
+    // the real B provider finishes. This is a timing gate, never a seeded page.
+    let (resume_wait, receive_wait) = tokio::sync::oneshot::channel();
+    let waiting = Arc::new(HistoryWaitGate {
+        reached: Notify::new(),
+        resume: Mutex::new(Some(receive_wait)),
+    });
+    manager.inner.attention.0.lock().unwrap().history_wait_gate = Some(waiting.clone());
+    let release_when_waiting = async {
+        tokio::time::timeout(Duration::from_secs(5), waiting.reached.notified())
+            .await
+            .unwrap();
+        eprintln!(
+            "semantic-g2-wait-entry {}",
+            serde_json::json!({"behavior":behavior,"run_b":b})
+        );
+        resume_wait.send(()).unwrap();
+        release_b.notify_one();
+    };
+    let (_, second) = tokio::join!(
+        release_when_waiting,
+        completion(&mut feed, &b, &a, &mut seen)
+    );
     for item in [&first["item"], &second["item"]] {
         assert_eq!(item["session_id"], id);
         assert_eq!(item["behavior"], behavior);
@@ -282,7 +380,7 @@ async fn interleave(behavior: &str) {
     .await
     .unwrap();
     let mut replay = open(app.clone(), &cursor).await;
-    let page = frame(&mut replay).await;
+    let page = frame(&mut replay, "replay").await;
     assert_eq!(page["kind"], "completions");
     let items = page["page"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
@@ -295,6 +393,7 @@ async fn interleave(behavior: &str) {
         "semantic-g2-evidence {}",
         serde_json::json!({
             "behavior":behavior,"session":id,"run_a":a,"run_b":b,
+            "actual_selection":format!("{selection:?}"),
             "silent_cutoff":cutoff["page"],"semantic_a_while_b_active":first,
             "semantic_b":second,"replayed":items,"model_posts":calls.load(Ordering::SeqCst)
         })
@@ -309,13 +408,88 @@ async fn interleave(behavior: &str) {
     provider.stop().await;
     std::fs::remove_dir_all(root).unwrap();
 }
+async fn canonical_a(
+    manager: &SessionManager,
+    path: &std::path::Path,
+    after: &store::CompletionCursor,
+    run: &str,
+    session: &str,
+    behavior: &str,
+    stage: &str,
+) {
+    let path = path.to_owned();
+    let after = after.clone();
+    let page = manager
+        .inner
+        ._store_ownership
+        .call_legacy(move || store::read_completion_page(&path, Some(&after)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        page.items.len(),
+        1,
+        "canonical A missing at {stage}: {page:?}"
+    );
+    let item = serde_json::to_value(&page.items[0]).unwrap();
+    assert_eq!(item["run_id"], run);
+    assert_eq!(item["session_id"], session);
+    assert_eq!(item["behavior"], behavior);
+    assert_eq!(item["kind"], "request");
+    let live = manager
+        .inner
+        .attention
+        .0
+        .lock()
+        .unwrap()
+        .live
+        .upgrade()
+        .unwrap();
+    let boundary = live.hub.boundary();
+    let (questions_supported, current_completed_a) = {
+        let state = live.state.lock().unwrap();
+        let source = state.sources.get(session).unwrap();
+        let completed = source
+            .service
+            .as_ref()
+            .unwrap()
+            .settled
+            .as_ref()
+            .is_some_and(|work| {
+                work.run_id == run
+                    && work.disposition == nac_core::events::SettledWorkDisposition::Completed
+            });
+        (
+            source.stored.as_ref().unwrap().questions_supported,
+            completed,
+        )
+    };
+    if behavior == "direct-with-orchestrator" {
+        assert!(!questions_supported);
+        assert!(
+            !current_completed_a,
+            "DWO must not invent a current Completed(A)"
+        );
+    }
+    eprintln!(
+        "semantic-g2-canonical {}",
+        serde_json::json!({
+            "stage":stage,"page":page,"questions_supported":questions_supported,
+            "current_completed_a":current_completed_a,"current_boundary":{
+                "engine":boundary.engine.to_string(),"epoch":boundary.epoch.to_string(),
+                "sequence":boundary.sequence,
+            },
+        })
+    );
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn semantic_g2_real_http_direct_idle_before_publish_keeps_exact_a_during_b_and_replays() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     interleave("direct").await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn semantic_g2_real_http_dwo_idle_before_publish_keeps_exact_a_during_b_and_replays() {
+async fn semantic_g2_real_http_dwo_idle_unverified_before_publication_attempt_keeps_exact_a_during_b_and_replays(
+) {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     interleave("direct-with-orchestrator").await;
 }

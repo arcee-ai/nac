@@ -12,7 +12,10 @@ use std::{
     sync::{Arc, Mutex, Weak},
     time::Duration,
 };
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::{
+    sync::{watch, Notify},
+    task::JoinHandle,
+};
 use uuid::Uuid;
 
 mod projection;
@@ -36,6 +39,19 @@ struct RuntimeState {
     after_read_gate: Option<Arc<ReadGate>>,
     #[cfg(test)]
     limits: Option<AttentionLimits>,
+    #[cfg(test)]
+    history_read_gate: Option<Arc<ReadGate>>,
+    #[cfg(test)]
+    history_wait_gate: Option<Arc<HistoryWaitGate>>,
+    #[cfg(test)]
+    history_reads: usize,
+    #[cfg(test)]
+    history_waits: usize,
+}
+#[cfg(test)]
+struct HistoryWaitGate {
+    reached: Notify,
+    resume: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 #[cfg(test)]
 #[derive(Default)]
@@ -120,6 +136,8 @@ struct Live {
     limits: AttentionLimits,
     state: Mutex<Projection>,
     wake: Notify,
+    // Scheduling only: retained checked dirty generation, never a durable cursor.
+    history: watch::Sender<Option<u64>>,
     task: Mutex<Option<JoinHandle<()>>>,
     // The task also holds this permit, until its actual receiver is dropped.
     _permit: Arc<Permit>,
@@ -210,9 +228,48 @@ impl AttentionServiceObserver for Sink {
 
 pub(crate) struct NativeAttentionSubscription {
     subscription: AttentionSubscription,
+    history: watch::Receiver<Option<u64>>,
     _lease: ObservationLease,
 }
+pub(crate) enum NativeAttentionActivity {
+    Current(AttentionRead),
+    Dirty,
+}
 impl NativeAttentionSubscription {
+    pub(crate) fn is_closed(&self) -> bool {
+        self.history.has_changed().is_err() || self.history.borrow().is_none()
+    }
+
+    /// One private fanout on this physical Live; reconciliation keeps its own
+    /// Notify. Current/reset/closed controls win simultaneous dirty readiness.
+    pub(crate) async fn next_activity(&mut self) -> NativeAttentionActivity {
+        tokio::select! {
+            biased;
+            record = self.subscription.next() => NativeAttentionActivity::Current(record),
+            changed = self.history.changed() => {
+                if changed.is_err() || self.is_closed() {
+                    NativeAttentionActivity::Current(AttentionRead::Closed)
+                } else {
+                    NativeAttentionActivity::Dirty
+                }
+            },
+        }
+    }
+    #[cfg(test)]
+    pub(crate) async fn before_history_wait_for_test(&self) {
+        let gate = {
+            let mut state = self._lease.0._permit.runtime.lock().unwrap();
+            state.history_waits += 1;
+            state.history_wait_gate.take()
+        };
+        if let Some(gate) = gate {
+            gate.reached.notify_one();
+            let resume = gate.resume.lock().unwrap().take();
+            if let Some(resume) = resume {
+                let _ = tokio::time::timeout(Duration::from_secs(5), resume).await;
+            }
+        }
+    }
     /// Borrow the owner as a whole so stream closure capture retains the
     /// lease as well as the receiver, including before its first poll.
     pub fn subscription(&mut self) -> &mut AttentionSubscription {
@@ -222,24 +279,58 @@ impl NativeAttentionSubscription {
     /// Same physical native seat, passive bounded metadata read. Retain the
     /// permit until an accepted read actually returns even if HTTP is cancelled.
     pub async fn completions(
-        &self,
+        &mut self,
         manager: &SessionManager,
         after: Option<nac_core::store::CompletionCursor>,
     ) -> Result<nac_core::store::CompletionPage> {
+        if self.is_closed() {
+            return Err(AttentionSubscribeError::Unavailable(
+                AttentionUnavailable::Reset,
+            ));
+        }
+        // Checkpoint BEFORE every accepted read, including the initial cutoff
+        // and drain pages. Drop the Ref before any owner lock/store await.
+        // A dirty revision during the read or return-to-wait gap stays unseen.
+        drop(self.history.borrow_and_update());
         let permit = Arc::clone(&self._lease.0._permit);
         let path = manager.inner.store_path.clone();
-        manager
+        let result = manager
             .inner
             ._store_ownership
             .call_legacy(move || {
                 let _permit = permit;
-                nac_core::store::read_completion_page(&path, after.as_ref())
+                #[cfg(test)]
+                let gate = {
+                    let mut state = _permit.runtime.lock().unwrap();
+                    state.history_reads += 1;
+                    state.history_read_gate.take()
+                };
+                let result = nac_core::store::read_completion_page(&path, after.as_ref());
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    gate.reached.notify_one();
+                    let _ = gate
+                        .release
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5));
+                }
+                result
             })
             .await
             .and_then(|result| result)
             .map_err(|_| {
                 AttentionSubscribeError::Unavailable(AttentionUnavailable::InvalidMetadata)
-            })
+            });
+        // Never acknowledge after the read. A retired initial read must not
+        // become an HTTP cutoff; the streaming caller also rechecks controls.
+        if self.is_closed() {
+            Err(AttentionSubscribeError::Unavailable(
+                AttentionUnavailable::Reset,
+            ))
+        } else {
+            result
+        }
     }
 }
 struct ObservationLease(Arc<Live>);
@@ -349,6 +440,8 @@ impl AttentionRuntime {
                 limits,
             )
         };
+        // Keep this exact receiver from construction through all reads/waits.
+        let (history_sender, history) = watch::channel(Some(0));
         let live = Arc::new(Live {
             hub: AttentionHub::new(engine, limits).map_err(AttentionSubscribeError::Unavailable)?,
             limits,
@@ -359,6 +452,7 @@ impl AttentionRuntime {
                 closed: false,
             }),
             wake: Notify::new(),
+            history: history_sender,
             task: Mutex::new(None),
             _permit: Arc::clone(&permit),
         });
@@ -461,6 +555,7 @@ impl AttentionRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(task);
         Ok(NativeAttentionSubscription {
             subscription,
+            history,
             _lease: lease,
         })
     }
@@ -526,6 +621,9 @@ impl Live {
             .or_insert_with(Source::new))
     }
     fn dirty(&self, state: &mut Projection, id: &str) {
+        if state.closed {
+            return;
+        }
         let Some(generation) = state.generation.checked_add(1) else {
             self.fail(state);
             return;
@@ -541,7 +639,11 @@ impl Live {
         state.dirty.insert(id.to_owned());
         if self.check_bytes(state).is_err() {
             self.fail(state);
+            return;
         }
+        // Called under the existing projection mutex, in checked generation
+        // order. send_replace retains the newest value even without receivers.
+        self.history.send_replace(Some(generation));
         self.wake.notify_one();
     }
     fn check_bytes(&self, state: &Projection) -> Result<()> {
@@ -591,6 +693,7 @@ impl Live {
     fn fail(&self, state: &mut Projection) {
         state.closed = true;
         self.hub.reset();
+        self.history.send_replace(None);
         self.wake.notify_one();
     }
     fn drain(&self, observation: &mut AttentionStoreObservation) -> Result<()> {
@@ -698,6 +801,7 @@ impl Live {
                 .collect::<Vec<_>>()
         };
         self.hub.reset();
+        self.history.send_replace(None);
         self.wake.notify_one();
         let task = self
             .task
@@ -829,3 +933,7 @@ mod tests;
 #[cfg(test)]
 #[path = "attention_semantic_tests.rs"]
 mod semantic_tests;
+
+#[cfg(test)]
+#[path = "attention_history_tests.rs"]
+mod history_tests;

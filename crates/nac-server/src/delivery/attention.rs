@@ -1,6 +1,9 @@
 use super::attention_contracts::AttentionFrame;
+use crate::application::attention_runtime::NativeAttentionActivity;
 use crate::{
-    application::attention::{AttentionBoundary, AttentionRead, AttentionSubscribeError},
+    application::attention::{
+        AttentionBoundary, AttentionRead, AttentionSubscribeError, AttentionSubscription,
+    },
     ApiError, ApiErrorBody, SessionManager,
 };
 use axum::{
@@ -125,6 +128,16 @@ fn event(frame: AttentionFrame, boundary: Option<AttentionBoundary>) -> Result<E
     })
 }
 
+/// Drain ready current-state controls before history without waiting for an
+/// unrelated projection change. `next` checks retained state before awaiting.
+async fn ready(subscription: &mut AttentionSubscription) -> Option<AttentionRead> {
+    tokio::select! {
+        biased;
+        record = subscription.next() => Some(record),
+        _ = std::future::ready(()) => None,
+    }
+}
+
 #[utoipa::path(get,path="/attention/events",operation_id="get_attention_events",tag="native",
 params(("Last-Event-ID"=Option<String>,Header,description="Engine UUID:projection UUID:sequence cursor"),
 ("X-NAC-Completion-Cursor"=Option<String>,Header,description="Native semantic replay: new cutoff or stable store UUID:sequence; independent from current-state baseline")),
@@ -166,7 +179,12 @@ pub(crate) async fn events(
     };
     Ok(Sse::new(async_stream::stream! {
         let mut completion_after=first_page.as_ref().map(|page|page.cursor.clone());
-        let mut completion_more=first_page.as_ref().is_some_and(|page|page.more);
+        if observer.is_closed() {
+            if let Some(AttentionRead::Reset(reason))=ready(observer.subscription()).await {
+                yield event(AttentionFrame::Reset{reason:reason.into()},None);
+            }
+            return;
+        }
         if let Some(page)=first_page {yield event(AttentionFrame::Completions{page:page.into()},None);}
         yield event(AttentionFrame::baseline(&observer.subscription().initial),Some(observer.subscription().initial.boundary));
         for record in std::mem::take(&mut observer.subscription().initial.replay) {
@@ -174,9 +192,49 @@ pub(crate) async fn events(
         }
         observer.subscription().initial.baseline.clear();
         loop {
-            let record=if completion_more {None} else if completion_after.is_some() {
+            if let Some(record)=ready(observer.subscription()).await {
+                match record {
+                    AttentionRead::Record(record)=>yield event(AttentionFrame::record(&record),Some(record.boundary)),
+                    AttentionRead::Reset(reason)=>{yield event(AttentionFrame::Reset{reason:reason.into()},None);break;},
+                    AttentionRead::Closed=>break,
+                }
+                continue;
+            }
+            if let Some(after)=completion_after.as_ref() {
+                let result=observer.completions(&manager,Some(after.clone())).await;
+                // The read may suspend while the observation retires or current
+                // state changes. Never emit its history ahead of that control.
+                if let Some(record)=ready(observer.subscription()).await {
+                    match record {
+                        AttentionRead::Record(record)=>yield event(AttentionFrame::record(&record),Some(record.boundary)),
+                        AttentionRead::Reset(reason)=>{yield event(AttentionFrame::Reset{reason:reason.into()},None);break;},
+                        AttentionRead::Closed=>break,
+                    }
+                    continue;
+                }
+                match result {
+                    Ok(page)=>{
+                        let changed=page.cursor.sequence!=after.sequence;
+                        completion_after=Some(page.cursor.clone());
+                        if changed {
+                            yield event(AttentionFrame::Completions{page:page.into()},None);
+                            continue;
+                        }
+                    },
+                    Err(_)=>{yield event(AttentionFrame::Reset{reason:crate::application::attention::AttentionReset::ReplayGap.into()},None);break;}
+                }
+            }
+            // An empty page waits once before another canonical read; bounded
+            // pages with an advancing cursor drain without this fallback delay.
+            let record=if completion_after.is_some() {
+                #[cfg(test)]
+                observer.before_history_wait_for_test().await;
                 tokio::select! {
-                    record=observer.subscription().next()=>Some(record),
+                    biased;
+                    activity=observer.next_activity()=>match activity {
+                        NativeAttentionActivity::Current(record)=>Some(record),
+                        NativeAttentionActivity::Dirty=>None,
+                    },
                     _=tokio::time::sleep(std::time::Duration::from_secs(5))=>None,
                 }
             } else {Some(observer.subscription().next().await)};
@@ -185,17 +243,6 @@ pub(crate) async fn events(
                     AttentionRead::Record(record)=>yield event(AttentionFrame::record(&record),Some(record.boundary)),
                     AttentionRead::Reset(reason)=>{yield event(AttentionFrame::Reset{reason:reason.into()},None);break;},
                     AttentionRead::Closed=>break,
-                }
-            }
-            if let Some(after)=completion_after.as_ref() {
-                match observer.completions(&manager,Some(after.clone())).await {
-                    Ok(page)=>{
-                        let changed=page.cursor.sequence!=after.sequence;
-                        completion_more=page.more;
-                        completion_after=Some(page.cursor.clone());
-                        if changed {yield event(AttentionFrame::Completions{page:page.into()},None);}
-                    },
-                    Err(_)=>{yield event(AttentionFrame::Reset{reason:crate::application::attention::AttentionReset::ReplayGap.into()},None);break;}
                 }
             }
         }

@@ -198,16 +198,12 @@ impl SessionService {
             match selection {
                 Ok(selection) => {
                     #[cfg(any(test, feature = "test-support"))]
-                    let publication = if matches!(
-                        &selection.disposition,
-                        attention::ContinuationDisposition::Idle { .. }
-                    ) {
-                        // Selection has returned: no store transaction, operation
-                        // lease, inbox wake lock or attention hub lock is held.
-                        self.wait_attention_publication_for_test(&run_id).await
-                    } else {
-                        None
-                    };
+                    // Selection has returned: no store transaction, operation
+                    // lease, inbox wake lock or attention hub lock is held.
+                    // The nonshipping owner accepts only actual Idle/IdleUnverified.
+                    let publication = self
+                        .wait_attention_publication_for_test(&run_id, &selection.disposition)
+                        .await;
                     self.publish_attention_completion(
                         &run_id,
                         attention_success,
@@ -216,7 +212,7 @@ impl SessionService {
                     );
                     #[cfg(any(test, feature = "test-support"))]
                     if let Some(publication) = publication {
-                        publication.published();
+                        publication.publication_attempted();
                     }
                 }
                 Err(error) => {

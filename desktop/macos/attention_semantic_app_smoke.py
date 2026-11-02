@@ -110,7 +110,7 @@ def run_contract(bundle, destination, observer, source_ref):
     assert build['engine_sha256'] == digest(bundle / 'Contents/Resources/nac-web')
     for path, expected_hash in build['native_source_files'].items():
         assert digest(path) == expected_hash
-    root = Path(tempfile.mkdtemp(prefix='nac-attention-semantic-', dir=destination)).resolve()
+    root = Path(tempfile.mkdtemp(prefix='nac-attention-app-semantic-', dir=destination)).resolve()
     profile = root / 'profile'
     profile.mkdir(mode=0o700)
     (profile / 'semantic-marker.txt').write_text(MARKER + '\n')

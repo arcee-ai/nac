@@ -49,6 +49,7 @@ class AttentionInventoryTests(unittest.TestCase):
         self.assertGreater(semantic.countTestCases(), 0)
         semantic_selected = set(identities(semantic))
         semantic_required = {
+            'test_actual_caller_root_and_cleanup_argument_obey_real_helper_namespace',
             'test_planned_matrix_is_fourteen_real_model_steps_without_extra_goal_calls',
             'test_read_error_missing_or_duplicate_call_cannot_mark_goal',
             'test_exact_goal_accounting_run_status_version_and_result_call_are_required',

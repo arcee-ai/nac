@@ -2,6 +2,9 @@
 import ast
 import copy
 import json
+import re
+import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 import unittest
 
@@ -83,6 +86,37 @@ class ProtocolControls(unittest.TestCase):
 
 
 class NativeOracleControls(unittest.TestCase):
+    def test_actual_caller_root_and_cleanup_argument_obey_real_helper_namespace(self):
+        source = ast.parse((HERE / 'attention_semantic_app_smoke.py').read_text())
+        run = next(node for node in source.body if isinstance(node, ast.FunctionDef)
+                   and node.name == 'run_contract')
+        root = next(node for node in ast.walk(run) if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == 'root'
+                            for target in node.targets))
+        cleanup = next(node for node in ast.walk(run) if isinstance(node, ast.Expr)
+                       and isinstance(node.value, ast.Call)
+                       and 'AttentionFixtureCleanup' in ast.unparse(node))
+        helper = (HERE / 'AttentionFixtureCleanup.swift').read_text()
+        prefix = re.search(r'root.lastPathComponent.hasPrefix\("([^"]+)"\)', helper).group(1)
+        calls = []
+        with tempfile.TemporaryDirectory() as destination:
+            scope = dict(Path=Path, tempfile=tempfile, destination=Path(destination),
+                         observer=Path('/owned/AttentionAppObserver'), environment={},
+                         subprocess=SimpleNamespace(run=lambda *args, **kwargs: calls.append((args, kwargs))))
+            exec(compile(ast.Module(body=[root, cleanup], type_ignores=[]),
+                         'actual semantic caller allocation and cleanup call', 'exec'), scope)
+            actual = Path(calls[0][0][0][1])
+            self.assertEqual(actual, scope['root'])
+            self.assertEqual(calls[0][0][0][0], '/owned/AttentionFixtureCleanup')
+            self.assertTrue(actual.name.startswith(prefix), 'S2_CALLER_PREFIX_EXPECTED')
+            self.assertEqual(actual.stat().st_mode & 0o077, 0)
+        self.assertFalse('nac-attention-semantic-foreign'.startswith(prefix))
+        for guard in ['root.resolvingSymlinksInPath() == root', 'lstat(root.path, &status)',
+                      'status.st_uid == getuid()', 'status.st_mode & 0o077 == 0',
+                      'input.home == home.path', 'input.receipt.store == store.path',
+                      'WorkspaceStorageProfile(receipt:', 'remove(forIdentifier: profile.identifier)']:
+            self.assertIn(guard, helper)
+
     def setUp(self):
         source = ast.parse((HERE / 'attention_semantic_app_smoke.py').read_text())
         oracles = [node for node in source.body if isinstance(node, ast.FunctionDef)

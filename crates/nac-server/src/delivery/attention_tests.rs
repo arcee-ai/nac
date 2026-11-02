@@ -7,6 +7,9 @@ use std::pin::Pin;
 use std::{path::PathBuf, time::Duration};
 use tower::ServiceExt;
 
+#[path = "attention_progress_tests.rs"]
+mod progress;
+
 fn root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("nac-attention-http-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
