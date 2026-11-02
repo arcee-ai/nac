@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and qualify the actual development app on a dedicated hosted Mac."""
 import argparse
-from ci_paths_budget import active, check as budget_check, time_limit, using, PathBudget
+from ci_paths_budget import active, check as budget_check, time_limit, timeout_options, using, PathBudget
 from collections import deque
 import hashlib
 import importlib.util
@@ -367,7 +367,8 @@ def main():
         report['toolchain'] = actual
         report['xcode_select_default'] = command(['xcode-select', '-p'])
         compiler_pinned = qualify_toolchain(actual, expected)
-        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'],timeout=time_limit(30))
+        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], **timeout_options(30))
+        budget_check()
         report['console_state'] = console_state(console, os.getuid())
         gui_helper = raw / 'native-gui-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIGUI.swift',
@@ -476,7 +477,8 @@ def main():
         report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
         if lifecycle:
             lifecycle_gui_guard(report['quartz_end'], [(str(source_root), '<target-checkout>'), *redact_values()])
-        console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
+        console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=time_limit(15))
+        budget_check()
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
         require_checkout(source_root, report['source_sha'])
         require_checkout(ROOT, args.expected_sha)
@@ -512,17 +514,27 @@ def main():
             report['result'] = 'failed'
             raise
         finally:
+            primary_info = sys.exc_info()
+            scope_error = None
             if path_scope is not None:
-                path_scope.__exit__(None,None,None)
-                path_scope=None
+                try:
+                    # Throw the real pending failure through the work scope;
+                    # its failed normal-exit check must not gate retention.
+                    path_scope.__exit__(*primary_info)
+                except BaseException as error:
+                    scope_error = error
+                    report['result'] = 'failed'
+                    report.setdefault('error', str(error))
+                finally:
+                    path_scope = None
             crashes = Path.home() / 'Library/Logs/DiagnosticReports'
             if lifecycle:
                 report['elapsed_seconds'] = round(time.time() - started, 3)
                 finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
                                    crashes=crashes, started=started)
             else:
-                with using(path_budget.retention if path_budget else None):
-                    try:
+                try:
+                    with using(path_budget.retention if path_budget else None):
                         count = 0
                         for crash in sorted(crashes.glob('NACPreview*')):
                             if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
@@ -534,14 +546,22 @@ def main():
                         (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
                         export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
                         if path_budget is not None:path_budget.require_success()
-                    except BaseException:
-                        report['result']='failed'
+                except BaseException as error:
+                    report['result'] = 'failed'
+                    if paths:report['finalization_error'] = str(error)
+                    try:
                         (raw / 'ci-report.json').write_text(json.dumps(report,indent=2)+'\n')
                         if (output / 'ci-report.json').exists():
                             (output / 'ci-report.json').write_text(json.dumps({'result':'failed','retention_complete':False})+'\n')
+                    except BaseException:
+                        if not paths or (primary_info[1] is None and scope_error is None):
+                            raise
+                    # Retention may fail too, but cannot replace the path
+                    # owner's original exception or its failed scope exit.
+                    if not paths or (primary_info[1] is None and scope_error is None):
                         raise
-                    finally:
-                        if path_scope is not None:path_scope.__exit__(None,None,None)
+            if scope_error is not None and primary_info[1] is None:
+                raise scope_error
 
 
 if __name__ == '__main__':
