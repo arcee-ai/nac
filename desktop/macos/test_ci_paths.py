@@ -36,7 +36,7 @@ class AdapterControls(unittest.TestCase):
             path = Path(temporary).resolve() / 'allocation.json'
             value = dict(version=1, H='a'*40, T=PRODUCT, cases=list(CASES), source_preflight=True,
                          native_eligibility=True, allocation_id='synthetic-unit-only',
-                         started_at_epoch=1000, deadline_epoch=3700, retry_budget=0)
+                         started_at_epoch=1000, deadline_epoch=3340, retry_budget=0)
             variants = ({'H':'b'*40}, {'T':'b'*40}, {'cases':list(reversed(CASES))},
                         {'source_preflight':False}, {'native_eligibility':False}, {'retry_budget':1},
                         {'started_at_epoch':2100}, {'deadline_epoch':2000}, {'deadline_epoch':9999})
