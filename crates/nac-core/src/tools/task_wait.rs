@@ -25,8 +25,6 @@ pub(crate) struct WaitInput {
     targets: Vec<Target>,
     #[serde(default)]
     timeout_ms: Option<u64>,
-    #[serde(skip)]
-    authorized_project: Option<String>,
 }
 
 pub(crate) struct WaitTasksTool;
@@ -141,9 +139,24 @@ impl NativeTool for WaitTasksTool {
         &self,
         input: &mut Self::Input,
         resources: &[PermissionResource],
-        _services: ToolServices<'_>,
+        services: ToolServices<'_>,
     ) -> Result<(), ToolResult> {
-        input.authorized_project = read::authorized_project(resources);
+        let (_, broker) = read::caller(services)?;
+        for target in &mut input.targets {
+            // Bind only this target's prepared project. Another target's
+            // approval cannot stand in for an unknown or changed scope.
+            target.authorized_project = target
+                .project_id
+                .as_deref()
+                .or(broker.caller_project())
+                .filter(|project| {
+                    resources.iter().any(|resource| {
+                        resource.action == "task_read"
+                            && resource.resource == format!("project:{project}")
+                    })
+                })
+                .map(str::to_owned);
+        }
         Ok(())
     }
 
@@ -178,13 +191,7 @@ impl NativeTool for WaitTasksTool {
                         context,
                         (caller.clone(), Arc::clone(&broker)),
                         target.session_id.clone(),
-                        (
-                            target.project_id.clone(),
-                            target
-                                .authorized_project
-                                .clone()
-                                .or_else(|| input.authorized_project.clone()),
-                        ),
+                        (target.project_id.clone(), target.authorized_project.clone()),
                     )
                     .await
                     {
@@ -353,3 +360,7 @@ impl NativeTool for WaitTasksTool {
 #[cfg(test)]
 #[path = "task_wait_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_wait_authorization_tests.rs"]
+mod authorization_tests;
