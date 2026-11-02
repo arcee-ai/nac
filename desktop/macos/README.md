@@ -512,8 +512,9 @@ adapter or qualification entry invokes these modules. Full-Xcode/pinned OS,
 trusted desktop input, clock admission, actual 8-case/19-frame qualification
 and independent acceptance remain separate gates.
 
-Portable synthetic controls (no SDK, app, engine or network):
+These 38 portable synthetic controls also run in the Stable release
+`workflow-lint` job on each PR (no SDK, app, engine or network):
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
+python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
 ```
