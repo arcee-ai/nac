@@ -128,6 +128,20 @@ test("focuses Insights in place and goes back to the same split and selection", 
   await splitState();
   await expect(focusPanel).toBeFocused();
 
+  // An open menu in the panel takes the first Escape; the next goes back.
+  await focusPanel.click();
+  await expect(focusedHeading).toBeVisible();
+  // The menu opens inside the group, so its trigger is the one that expands.
+  const showFilter = page.getByRole("group", { name: "Show:" }).locator("button[aria-expanded]");
+  await showFilter.click();
+  await expect(showFilter).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(showFilter).toHaveAttribute("aria-expanded", "false");
+  await expect(focusedHeading).toBeVisible();
+  await page.keyboard.press("Escape");
+  await splitState();
+  await expect(focusPanel).toBeFocused();
+
   await focusPanel.click();
   await expect(focusedHeading).toBeVisible();
   await backToChat.click();

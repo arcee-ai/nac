@@ -59,7 +59,7 @@ vi.mock("@/app/features/terminal-selection/TerminalWorkspace", () => ({
 }));
 vi.mock("@/app/components/inspector/HistoryView", () => ({ HistoryView: () => null }));
 vi.mock("@/app/components/inspector/WorksetsView", () => ({ WorksetsView: () => null }));
-/** A menu on the app's popover, which takes Escape through the layer stack. */
+/** A menu on the app's popover, whose layer takes Escape before the panel. */
 function FakeMenu() {
   const [open, setOpen] = useState(false);
   return (
@@ -215,9 +215,12 @@ describe("focused side panel", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(sessionLayoutStore.getState().expanded).toBe(true);
 
-    // A disclosure stays expanded, so it must not keep the panel focused.
+    // A disclosure stays expanded, so it must not keep the panel focused. An
+    // Escape that ends an input method's composition is the input's.
     const folder = screen.getByRole("button", { name: "Folder" });
     folder.focus();
+    fireEvent.keyDown(folder, { key: "Escape", isComposing: true });
+    expect(sessionLayoutStore.getState().expanded).toBe(true);
     fireEvent.keyDown(folder, { key: "Escape" });
     expectSplitRestored(list);
   });

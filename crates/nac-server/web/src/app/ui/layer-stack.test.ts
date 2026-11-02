@@ -71,18 +71,6 @@ describe("Escape", () => {
     expect(stack.modalDepth()).toBe(0);
   });
 
-  it("tells the view beneath whether a layer other than a tooltip will take it", () => {
-    const stack = createLayerStack();
-    expect(stack.hasOpenLayer()).toBe(false);
-    const hint = layer(stack, "hint");
-    expect(stack.hasOpenLayer()).toBe(false);
-    const menu = layer(stack, "panel");
-    expect(stack.hasOpenLayer()).toBe(true);
-    stack.close(menu.token);
-    expect(stack.hasOpenLayer()).toBe(false);
-    stack.close(hint.token);
-  });
-
   it("is swallowed by a layer that does not close on it", () => {
     const stack = createLayerStack();
     const dialog = layer(stack, "modal");

@@ -7662,7 +7662,6 @@ function Cp() {
 			t.delete(e);
 		}),
 		modalDepth: () => e.filter((e) => a(e) === "modal").length,
-		hasOpenLayer: () => s((e) => a(e) !== "hint") !== void 0,
 		isTop: (e, t = !1) => s((e) => t || a(e) !== "hint")?.token === e,
 		hasModalAbove: (t) => {
 			let n = e.findIndex((e) => e.token === t);
