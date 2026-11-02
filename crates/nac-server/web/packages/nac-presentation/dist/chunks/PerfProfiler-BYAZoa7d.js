@@ -18325,12 +18325,8 @@ function SG(e, t, n, r) {
 	});
 }
 function CG() {
-	let { api: e } = Q(), t = S();
-	return o((n, r, i, a) => t.fetchQuery({
-		...bG(e, n, r, i, a),
-		staleTime: 0,
-		retry: !1
-	}), [e, t]);
+	let { api: e } = Q();
+	return o((t, n, r, i) => bG(e, t, n, r, i).queryFn({ signal: new AbortController().signal }), [e]);
 }
 function wG() {
 	let { api: e } = Q(), t = S();
