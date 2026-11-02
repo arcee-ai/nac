@@ -21,7 +21,7 @@ use nac_core::store::{
 };
 use tokio::sync::Semaphore;
 
-use super::persistence::OperationSessionScope;
+use super::persistence::{OperationSessionRefusal, OperationSessionScope};
 use super::session_attachment::SessionAttachmentApplication;
 use crate::SessionManager;
 
@@ -90,6 +90,14 @@ fn internal(error: anyhow::Error) -> Error {
     Error::Internal(error)
 }
 
+fn primary_refusal(error: anyhow::Error) -> Error {
+    if error.downcast_ref::<OperationSessionRefusal>().is_some() {
+        Error::NotFound
+    } else {
+        internal(error)
+    }
+}
+
 fn binding(error: SelectionQuestionError) -> Error {
     match error {
         SelectionQuestionError::Invalid(message) => Error::Invalid(message),
@@ -148,12 +156,13 @@ impl<'a> SelectionQuestionApplication<'a> {
     }
 
     /// Persisted primary session; delegated sessions stay indistinguishable
-    /// from unknown ids, as at every other generic-work boundary.
+    /// from unknown ids, as at every other generic-work boundary. A failed
+    /// lookup, store contention included, is not a missing session.
     async fn require_primary(&self, session_id: &str) -> Result<(), Error> {
         self.manager
             .validate_operation_session(session_id, OperationSessionScope::Direct)
             .await
-            .map_err(|_| Error::NotFound)
+            .map_err(primary_refusal)
     }
 
     async fn eligible_snapshot(
@@ -354,5 +363,35 @@ impl<'a> SelectionQuestionApplication<'a> {
             in_flight().remove(&question_id);
         });
         Ok(admitted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_missing_or_delegated_session_is_not_found() {
+        for refusal in [
+            OperationSessionRefusal::NotFound("chat".to_owned()),
+            OperationSessionRefusal::DelegatedInput,
+        ] {
+            assert!(matches!(primary_refusal(refusal.into()), Error::NotFound));
+        }
+        // The lookup itself failed. Contention reaches the busy 409 and other
+        // store failures the 500; neither may claim the session is missing.
+        let busy = anyhow::Error::new(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ))
+        .context("load session lineage");
+        for failure in [
+            busy,
+            anyhow::Error::new(store::PersistenceAdmissionError::Overloaded),
+            anyhow::Error::new(store::PersistenceAdmissionError::ExecutorStopped),
+            anyhow::anyhow!("session store is corrupt"),
+        ] {
+            assert!(matches!(primary_refusal(failure), Error::Internal(_)));
+        }
     }
 }

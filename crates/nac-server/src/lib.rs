@@ -162,6 +162,7 @@ use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::{Config as SwaggerConfig, SwaggerUi};
 
+use application::persistence::OperationSessionRefusal;
 use application::request_validation::{
     create_compaction_threshold_override, model_options, nonblank_request_string,
     parse_prospective_model_config, request_configuration_error, request_configuration_error_from,
@@ -1217,16 +1218,14 @@ impl SessionManager {
         if self.persisted_operation_session_exists(session_id)? {
             Ok(())
         } else {
-            Err(anyhow!("session '{session_id}' was not found"))
+            Err(OperationSessionRefusal::NotFound(session_id.to_owned()).into())
         }
     }
 
     fn require_primary_operation_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
         if self.session_lineage(session_id)?.is_some() {
-            return Err(anyhow!(
-                "delegated sessions accept work only through their parent"
-            ));
+            return Err(OperationSessionRefusal::DelegatedWork.into());
         }
         Ok(())
     }
@@ -1234,9 +1233,7 @@ impl SessionManager {
     fn require_primary_direct_session(&self, session_id: &str) -> Result<()> {
         self.require_persisted_operation_session(session_id)?;
         if self.session_lineage(session_id)?.is_some() {
-            return Err(anyhow!(
-                "delegated sessions accept input only through their parent"
-            ));
+            return Err(OperationSessionRefusal::DelegatedInput.into());
         }
         Ok(())
     }

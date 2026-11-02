@@ -247,3 +247,27 @@ fn selection_question_store_contention_maps_to_conflict_but_uncertain_commits_do
         );
     }
 }
+
+#[test]
+fn operation_session_refusals_keep_their_generic_statuses_and_text() {
+    use crate::application::persistence::OperationSessionRefusal;
+    let missing = ApiError::from(anyhow::Error::from(OperationSessionRefusal::NotFound(
+        "chat".to_owned(),
+    )));
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    assert_eq!(missing.message, "session 'chat' was not found");
+    for (refusal, text) in [
+        (
+            OperationSessionRefusal::DelegatedWork,
+            "delegated sessions accept work only through their parent",
+        ),
+        (
+            OperationSessionRefusal::DelegatedInput,
+            "delegated sessions accept input only through their parent",
+        ),
+    ] {
+        let error = ApiError::from(anyhow::Error::from(refusal));
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.message, text);
+    }
+}

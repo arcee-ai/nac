@@ -561,6 +561,15 @@ async fn selection_binding_scope_and_bounds_are_enforced_over_http() {
         base,
         sessions::SessionBehavior::DirectWithOrchestrator,
     );
+    seed_chat(&root, "delegated", base, sessions::SessionBehavior::Direct);
+    nac_core::store::create_traditional_child_relationship(
+        &root.join("store.db"),
+        "chat",
+        "delegated",
+        nac_core::store::GENERAL_CHILD_PROFILE,
+        "delegated child",
+    )
+    .unwrap();
     let manager = test_manager(&root);
     let app = router(manager);
     let ask = |session: &str, body: serde_json::Value| {
@@ -601,6 +610,14 @@ async fn selection_binding_scope_and_bounds_are_enforced_over_http() {
     assert_eq!(ask("orchestrator", valid()).await, StatusCode::CONFLICT);
     assert_eq!(ask("hybrid", valid()).await, StatusCode::CONFLICT);
     assert_eq!(ask("missing", valid()).await, StatusCode::NOT_FOUND);
+    // A delegated child is as unknown as a missing session.
+    assert_eq!(ask("delegated", valid()).await, StatusCode::NOT_FOUND);
+    assert_eq!(
+        get(app.clone(), "/sessions/delegated/selection-questions")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
     assert_eq!(
         get(app.clone(), "/sessions/missing/selection-questions")
             .await
