@@ -221,6 +221,7 @@ describe("focused side panel", () => {
     folder.focus();
     fireEvent.keyDown(folder, { key: "Escape", isComposing: true });
     expect(sessionLayoutStore.getState().expanded).toBe(true);
+    expect(document.activeElement).toBe(folder);
     fireEvent.keyDown(folder, { key: "Escape" });
     expectSplitRestored(list);
   });
