@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import SessionNameDisclosure from "@/app/atoms/session-name-disclosure";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo, useState } from "react";
@@ -290,14 +291,11 @@ export function DelegatedWorkView({
       listTitle="Subagents"
       title={
         selected ? (
-          <span
-            className={cn(
-              isTablet && "font-medium",
-              selected.status === "running" && "text-shimmer-basic",
-            )}
-          >
-            {rowTitle(selected)}
-          </span>
+          <SessionNameDisclosure
+            name={rowTitle(selected)}
+            running={selected.status === "running"}
+            className={cn("min-w-0 max-w-full", isTablet && "font-medium")}
+          />
         ) : undefined
       }
       actions={openButton}

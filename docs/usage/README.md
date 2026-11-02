@@ -3,6 +3,9 @@
 How nac loads project instructions, skills, sandboxed tool execution, and
 durable direct-session work.
 
+- [NAC Guide](nac-guide.md)
+- [MCP in NAC](mcp.md)
+
 - [AGENTS.md Files](agents-md.md)
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)

@@ -889,6 +889,72 @@ export interface components {
       requests: components["schemas"]["PermissionRequest"][];
       reviews?: components["schemas"]["PermissionReview"][];
     };
+    ProductAvailability: "available" | "disabled" | "unavailable" | "unknown";
+    ProductBuild: {
+      build_id: string;
+      product_version: string;
+      source_revision: string;
+      track: string;
+    };
+    ProductCapability: {
+      availability: components["schemas"]["ProductAvailability"];
+      count: number | null;
+    };
+    ProductContext: {
+      build: components["schemas"]["ProductBuild"];
+      destinations: components["schemas"]["ProductDestinationInfo"][];
+      features: components["schemas"]["ProductFeature"][];
+      managed: boolean;
+      mcp: components["schemas"]["ProductCapability"];
+      schema_version: number;
+      session: components["schemas"]["ProductSessionContext"] | null;
+      source: string;
+    };
+    ProductDestination:
+      | "projects"
+      | "mcp-settings"
+      | "configurations"
+      | "model-authentication"
+      | "ssh-configurations"
+      | "session-subagents"
+      | "session-files"
+      | "session-terminal"
+      | "session-history";
+    ProductDestinationInfo: {
+      availability: components["schemas"]["ProductAvailability"];
+      destination: components["schemas"]["ProductDestination"];
+      label: string;
+      steps: string;
+    };
+    ProductExecutionBackend: "local" | "ssh" | "podman";
+    ProductFeature: {
+      availability: components["schemas"]["ProductAvailability"];
+      feature: components["schemas"]["ProductFeatureKind"];
+      label: string;
+    };
+    ProductFeatureKind:
+      | "traditional_subagents"
+      | "managed_orchestrators"
+      | "managed_host"
+      | "product_navigation";
+    ProductNavigationRequest: {
+      destination: components["schemas"]["ProductDestination"];
+      expected_build_id: string;
+      session_id?: string | null;
+    };
+    ProductNavigationResolution: {
+      build: components["schemas"]["ProductBuild"];
+      opened: boolean;
+      session_id: string | null;
+      target: components["schemas"]["ProductDestinationInfo"];
+    };
+    ProductSessionContext: {
+      behavior: components["schemas"]["SessionBehavior"];
+      execution_backend: components["schemas"]["ProductExecutionBackend"];
+      session_id: string;
+      skills: components["schemas"]["ProductCapability"];
+      tools: components["schemas"]["ProductCapability"];
+    };
     ProjectList: { projects: components["schemas"]["ProjectRecord"][] };
     ProjectRecord: {
       created_at: string;

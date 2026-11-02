@@ -1028,6 +1028,8 @@ mod compaction;
 mod configuration;
 #[path = "tests/contract.rs"]
 mod contract;
+#[path = "tests/direct_qa.rs"]
+mod direct_qa;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]
@@ -1089,3 +1091,6 @@ mod openapi_contract;
 #[cfg(unix)]
 #[path = "tests/task_launch_shutdown.rs"]
 mod task_launch_shutdown;
+
+#[path = "tests/desktop_lifecycle.rs"]
+mod desktop_lifecycle;

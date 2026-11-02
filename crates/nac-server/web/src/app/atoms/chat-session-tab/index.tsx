@@ -7,7 +7,7 @@ import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import Icon, { IconName } from "../icon";
 import ShimmerLoader from "../loader/ShimmerLoader";
 import SessionBehaviorIcon, { SessionBehaviorIconSize } from "../session-behavior-icon";
-import Tooltip from "../tooltip";
+import { useSessionNameDisclosure } from "../session-name-disclosure";
 
 interface ChatSessionTabProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "title"> {
   title: string;
@@ -68,6 +68,7 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   "aria-label": ariaLabel,
   ...props
 }) => {
+  const disclosure = useSessionNameDisclosure(title, behaviorLabel);
   const labelClass = running
     ? "text-shimmer-basic"
     : forkedFromTitle
@@ -84,10 +85,9 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
   const tabButton = (
     <button
       type={type}
-      title={title}
       aria-label={ariaLabel ?? (behaviorLabel ? `${title}, ${behaviorLabel}` : title)}
       aria-current={active ? "page" : undefined}
-      className="flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-8 group-has-[:focus-visible]:pr-8"
+      className="session-name-tab-trigger flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-1 py-1 pl-2 pr-2 group-hover:pr-14 group-has-[:focus-visible]:pr-14"
       {...props}
     >
       <ChatSessionLeadingMark
@@ -127,36 +127,29 @@ const ChatSessionTab: React.FC<ChatSessionTabProps> = ({
         className,
       )}
     >
-      {behaviorLabel ? (
-        <Tooltip
-          title={behaviorLabel}
-          position={Tooltip.Position.BottomLeft}
-          sticky
-          className="min-w-0 flex-1"
-        >
-          {tabButton}
-        </Tooltip>
-      ) : (
-        tabButton
-      )}
-      {onDismiss ? (
-        <Button
-          variant={ButtonVariant.Tertiary}
-          size={ButtonSize.Small}
-          content={ButtonContent.Icon}
-          aria-label={`Close ${title}`}
-          title="Close tab"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDismiss();
-          }}
-          // Stay in layout (`display` is `.btn`'s) and fade in on hover. Toggling
-          // `hidden` never wins against unlayered `.btn { display: inline-flex }`.
-          className="absolute right-1 top-1/2 -translate-y-1/2 shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto"
-        >
-          <Icon iconName={IconName.Close} />
-        </Button>
-      ) : null}
+      {disclosure.hint(tabButton)}
+      <div className="session-name-tab-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[:focus-visible]:pointer-events-auto">
+        {disclosure.action}
+        {onDismiss ? (
+          <Button
+            variant={ButtonVariant.Tertiary}
+            size={ButtonSize.Small}
+            content={ButtonContent.Icon}
+            aria-label={`Close ${title}`}
+            title="Close tab"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDismiss();
+            }}
+            // Stay in layout (`display` is `.btn`'s) and fade in on hover. Toggling
+            // `hidden` never wins against unlayered `.btn { display: inline-flex }`.
+            className="shrink-0"
+          >
+            <Icon iconName={IconName.Close} />
+          </Button>
+        ) : null}
+      </div>
+      {disclosure.overlay}
     </div>
   );
 };

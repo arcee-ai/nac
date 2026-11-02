@@ -1,4 +1,6 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /product-context": "api.getProductContext";
+    readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
     readonly "POST /task-launches": "private:standalone Local retained task launch";
     readonly "GET /task-launches/{request_id}": "private:standalone passive launch status";
     readonly "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation";
