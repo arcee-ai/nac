@@ -1,0 +1,56 @@
+.session-name-dialog {
+  max-height: min(100%, calc(100dvh - 2rem));
+}
+
+/* Pointer capability and viewport width are independent on tablets and hybrid devices. */
+@media (hover: none) {
+  .session-name-row-actions {
+    clip-path: none;
+    white-space: normal;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    position: static;
+    overflow: visible;
+  }
+
+  .session-name-tab-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .session-name-tab-trigger {
+    padding-right: 56px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* Respect both a smaller hosted frame and a phone's dynamic visible viewport. */
+  .session-name-dialog {
+    height: min(100%, 100dvh);
+    min-height: min(100%, 100dvh);
+    max-height: min(100%, 100dvh);
+  }
+
+  .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .session-name-tab-actions .btn.btn-icon.btn-tertiary.session-name-view {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .chat-session-tab:hover .session-name-tab-trigger,
+  .chat-session-tab:focus-within .session-name-tab-trigger {
+    padding-right: 64px;
+  }
+}
+
+@media (hover: none) and (max-width: 767.98px) {
+  .session-name-tab-trigger {
+    padding-right: 64px;
+  }
+}
