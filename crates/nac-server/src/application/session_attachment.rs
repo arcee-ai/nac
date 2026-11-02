@@ -20,7 +20,10 @@ pub(crate) struct SessionAttachmentApplication<'a> {
 }
 
 impl<'a> SessionAttachmentApplication<'a> {
-    fn resume_model_options(&self, session_id: &str) -> Result<runtime::ResumeModelOptions> {
+    pub(crate) fn resume_model_options(
+        &self,
+        session_id: &str,
+    ) -> Result<runtime::ResumeModelOptions> {
         let Some(profile) = self.manager.managed_model() else {
             return Ok(runtime::ResumeModelOptions::default());
         };

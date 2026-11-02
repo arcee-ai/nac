@@ -507,6 +507,7 @@ pub async fn send_responses(
     tools: Vec<ToolDefinition>,
     thinking_levels: &ThinkingLevelMap,
     prompt_cache_key: Option<&str>,
+    pinned_account: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
@@ -518,7 +519,7 @@ pub async fn send_responses(
         thinking_levels,
         prompt_cache_key,
     );
-    let auth = fresh_auth(client)
+    let auth = fresh_auth_for(client, pinned_account)
         .await
         .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
 
@@ -527,7 +528,7 @@ pub async fn send_responses(
     {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
-            let refreshed = force_refresh_auth(client)
+            let refreshed = force_refresh_auth_for(client, pinned_account)
                 .await
                 .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
             let value = post_codex_json_with_retry(
@@ -862,12 +863,36 @@ async fn parse_token_response(
 }
 
 async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
+    fresh_auth_for(client, None).await
+}
+
+/// `fresh_auth` for a client pinned to one account: a stored login for
+/// another account is refused rather than used or refreshed.
+async fn fresh_auth_for(client: &Client, pin: Option<&str>) -> Result<StoredCodexAuth> {
     let _lock = acquire_auth_lock()?;
     let auth = read_auth_file()?;
+    admit_account(pin, &auth)?;
     if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
         return Ok(auth);
     }
-    refresh_and_store_auth(client, auth).await
+    let refreshed = refresh_and_store_auth(client, auth).await?;
+    admit_account(pin, &refreshed)?;
+    Ok(refreshed)
+}
+
+/// The account the stored login is for now, for pinning a client to it.
+pub(super) fn stored_account_id() -> Result<String> {
+    Ok(read_auth_file()?.account_id)
+}
+
+/// A pinned client keeps to its account; rotated tokens for it are fine.
+fn admit_account(pin: Option<&str>, auth: &StoredCodexAuth) -> Result<()> {
+    match pin {
+        Some(pin) if pin != auth.account_id => Err(anyhow::anyhow!(
+            "a different ChatGPT account is signed in than the one this request was admitted under"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Bearer token and account id for a read-only call to the Codex API, renewed
@@ -877,10 +902,13 @@ pub(super) async fn stored_auth_for_request(client: &Client) -> Result<(String, 
     Ok((auth.access, auth.account_id))
 }
 
-async fn force_refresh_auth(client: &Client) -> Result<StoredCodexAuth> {
+async fn force_refresh_auth_for(client: &Client, pin: Option<&str>) -> Result<StoredCodexAuth> {
     let _lock = acquire_auth_lock()?;
     let auth = read_auth_file()?;
-    refresh_and_store_auth(client, auth).await
+    admit_account(pin, &auth)?;
+    let refreshed = refresh_and_store_auth(client, auth).await?;
+    admit_account(pin, &refreshed)?;
+    Ok(refreshed)
 }
 
 async fn refresh_and_store_auth(

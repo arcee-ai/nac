@@ -21,6 +21,8 @@ mod render;
 mod review_intent;
 mod run_recovery;
 mod schema;
+mod selection_questions;
+pub use selection_questions::*;
 mod session_forks;
 mod session_goals;
 mod session_inbox;

@@ -66,6 +66,34 @@ pub(crate) enum OperationSessionScope {
     Direct,
 }
 
+/// A missing or delegated session refused by `validate_operation_session`.
+/// Its text is the established API message. A failed lookup stays an
+/// ordinary error, so callers can tell a refusal from store trouble.
+#[derive(Debug)]
+pub(crate) enum OperationSessionRefusal {
+    NotFound(String),
+    DelegatedWork,
+    DelegatedInput,
+}
+
+impl std::fmt::Display for OperationSessionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(session_id) => {
+                write!(formatter, "session '{session_id}' was not found")
+            }
+            Self::DelegatedWork => {
+                formatter.write_str("delegated sessions accept work only through their parent")
+            }
+            Self::DelegatedInput => {
+                formatter.write_str("delegated sessions accept input only through their parent")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OperationSessionRefusal {}
+
 impl crate::SessionManager {
     pub(crate) async fn managed_completion_admission_async(
         &self,

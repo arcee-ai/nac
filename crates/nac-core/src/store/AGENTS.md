@@ -56,6 +56,10 @@ workspace revisions, recovery markers, and cross-process coordination.
 - `traditional_children.rs`, `managed_orchestrators.rs` — distinct relationship
   topologies and completion state.
 - `session_inbox.rs`, `session_goals.rs`, `steering.rs` — durable continuation.
+- `selection_questions.rs` — bounded history of tool-free questions about
+  selected reply text (ALL-559). It never writes the transcript, inbox, goals
+  or run state; a `pending` row whose per-session question lease is free is
+  settled `interrupted`, never replayed.
 - `run_recovery.rs`, `orchestrator_compaction.rs` — recovery markers.
 - `permission_grants.rs` — remembered authorization persistence.
 - `review_intent.rs` — the messages a person typed to a session tree,

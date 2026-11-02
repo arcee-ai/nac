@@ -5,6 +5,7 @@ pub(crate) mod error;
 pub(crate) mod managed_secrets;
 pub(crate) mod model_configurations;
 pub(crate) mod projects;
+pub(crate) mod selection_questions;
 pub(crate) mod server;
 pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;

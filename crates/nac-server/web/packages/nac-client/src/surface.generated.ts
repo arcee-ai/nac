@@ -122,6 +122,13 @@ export const NAC_API_SURFACE = {
   "GET /sessions/{session_id}/events": "api.getRecentEvents",
   "GET /sessions/{session_id}/events/stream": "stream.subscribeToSessionEvents",
   "POST /sessions/{session_id}/fork": "api.forkSession",
+  "POST /sessions/{session_id}/selection-questions":
+    "private:standalone Local direct question about selected reply text",
+  "GET /sessions/{session_id}/selection-questions": "private:standalone selection question history",
+  "GET /sessions/{session_id}/selection-questions/{question_id}":
+    "private:standalone selection question status",
+  "POST /sessions/{session_id}/selection-questions/{question_id}/cancel":
+    "private:standalone selection question cancellation",
   "DELETE /sessions/{session_id}/forks/{fork_id}": "api.dismissSessionFork",
   "GET /sessions/{session_id}/goal": "api.getGoal",
   "POST /sessions/{session_id}/goal": "api.createGoal",

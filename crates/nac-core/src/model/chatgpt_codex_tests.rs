@@ -1217,3 +1217,13 @@ async fn codex_without_delta_sink_finishes_before_sse_body_closes() {
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["call_id"], "call_1");
 }
+
+#[test]
+fn a_pinned_account_accepts_its_own_rotated_tokens_and_refuses_another() {
+    let mine = stored_codex_auth("rotated-access");
+    assert!(admit_account(None, &mine).is_ok());
+    assert!(admit_account(Some(mine.account_id.as_str()), &mine).is_ok());
+    let error = admit_account(Some("another-account"), &mine).unwrap_err();
+    assert!(error.to_string().contains("different ChatGPT account"));
+    assert!(!error.to_string().contains("rotated-access"));
+}

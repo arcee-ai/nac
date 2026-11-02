@@ -304,7 +304,7 @@ pub struct TranscriptLogWriter {
 /// Length of the log tail relative to a snapshot blob of `blob_len`, read from
 /// the newest row's `idx`. Callers must use the same SQLite read transaction
 /// for this probe and the window query; the object lock does not exclude peers.
-fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
+pub(super) fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
     let mut statement = connection.prepare(
         "SELECT id, event_json
          FROM thread_events

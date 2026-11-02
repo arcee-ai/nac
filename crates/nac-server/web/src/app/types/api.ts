@@ -463,6 +463,11 @@ export type RegenerateSessionRequest = ApiSchema<"RegenerateSessionRequest">;
 export type ForkSessionRequest = ApiSchema<"ForkSessionRequest">;
 
 export type ForkSessionResponse = ApiSchema<"ForkSessionResponse">;
+export type AskSelectionQuestionRequest = ApiSchema<"AskSelectionQuestionRequest">;
+export type AskSelectionQuestionResponse = ApiSchema<"AskSelectionQuestionResponse">;
+export type SelectionQuestion = ApiSchema<"SelectionQuestionResponse">;
+export type SelectionQuestionList = ApiSchema<"SelectionQuestionListResponse">;
+export type SelectionQuestionStatus = ApiSchema<"SelectionQuestionStatus">;
 
 export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
 
