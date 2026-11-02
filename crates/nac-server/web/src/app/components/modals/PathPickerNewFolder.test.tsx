@@ -286,6 +286,50 @@ it("leaving the directory drops a late answer instead of navigating", async () =
   expect(screen.queryByRole("group", { name: "New folder" })).toBeNull();
 });
 
+it("a path typed while the folder is made is still what Select applies", async () => {
+  const slow = deferred<CreatedFolder>();
+  vi.spyOn(api, "createFolder").mockReturnValue(slow.promise);
+  const typed = "/work/elsewhere";
+  answer(typed, listing(typed));
+  const { onSelect } = renderPicker();
+  const form = await openForm();
+  createIn(form, "my project ü");
+
+  fireEvent.change(draft(), { target: { value: typed } });
+  answer(
+    PARENT,
+    listing(PARENT, [
+      { name: "taken", path: `${PARENT}/taken`, is_directory: true },
+      { name: "my project ü", path: CREATED, is_directory: true },
+    ]),
+  );
+  await act(async () => slow.resolve({ path: CREATED }));
+
+  // The folder is made and listed, but the newer path is not replaced by it.
+  await waitFor(() => expect(screen.queryByRole("group", { name: "New folder" })).toBeNull());
+  expect(draft().value).toBe(typed);
+  await screen.findByRole("button", { name: "my project ü" });
+  expect(draft().value).toBe(typed);
+
+  fireEvent.click(screen.getByRole("button", { name: "Select" }));
+  await waitFor(() => expect(onSelect).toHaveBeenCalledWith(typed));
+  expect(onSelect).toHaveBeenCalledTimes(1);
+});
+
+it("entering the listed path while the folder is made keeps the picker there", async () => {
+  const slow = deferred<CreatedFolder>();
+  vi.spyOn(api, "createFolder").mockReturnValue(slow.promise);
+  renderPicker();
+  const form = await openForm();
+  createIn(form, "my project ü");
+
+  fireEvent.keyDown(draft(), { key: "Enter" });
+  await act(async () => slow.resolve({ path: CREATED }));
+
+  await waitFor(() => expect(screen.queryByRole("group", { name: "New folder" })).toBeNull());
+  expect(draft().value).toBe(PARENT);
+});
+
 it("typing or entering a path never creates anything", async () => {
   const create = vi.spyOn(api, "createFolder");
   const { onSelect } = renderPicker();

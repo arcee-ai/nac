@@ -92,6 +92,7 @@ function PathPicker({
     source: ssh ?? null,
     parent: data?.path ?? null,
     binding: `${picker.binding}:${data?.path ?? ""}`,
+    fence: picker.fence,
     onCreated: picker.goTo,
   });
 

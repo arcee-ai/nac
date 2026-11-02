@@ -8,7 +8,16 @@ interface NewFolderOptions {
      * different directory, source or opening of the picker.
      */
     binding: string;
-    /** Called with the server's path once the folder certainly exists. */
+    /**
+     * Starts a check that holds until the picker's path is next edited or the
+     * picker navigates: whatever the person typed or browsed to while a folder
+     * was being made is the newer choice.
+     */
+    fence: () => () => boolean;
+    /**
+     * Called with the server's path once the folder certainly exists, unless the
+     * picker was edited or navigated after Create.
+     */
     onCreated: (path: string) => void;
 }
 /**
@@ -49,7 +58,7 @@ export type NewFolderStatus = {
  * Create, made in the listed directory and bound to it, so a late answer for a
  * directory, source or picker the person has left is dropped.
  */
-export declare function useNewFolder({ source, parent, binding, onCreated }: NewFolderOptions): {
+export declare function useNewFolder({ source, parent, binding, fence, onCreated }: NewFolderOptions): {
     open: boolean;
     start: () => void;
     cancel: () => void;
