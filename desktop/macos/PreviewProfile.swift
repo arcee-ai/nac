@@ -6,13 +6,19 @@ final class PreviewProfile {
     var workspace: URL { root.appendingPathComponent("workspace") }
     var store: URL { root.appendingPathComponent("store.db") }
     var environment: [String: String] {
-        ["HOME": root.appendingPathComponent("home").path,
+        var result = ["HOME": root.appendingPathComponent("home").path,
          "NAC_HOME": root.appendingPathComponent("nac-home").path,
          "XDG_CONFIG_HOME": root.appendingPathComponent("xdg").path,
          "TMPDIR": root.appendingPathComponent("tmp").path,
          "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8",
          "BROWSER": "none", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
          "NAC_TELEMETRY": "disabled", "NAC_ORCHESTRATION": "0"]
+        #if PREVIEW_SMOKE
+        let args = CommandLine.arguments
+        if let at = args.firstIndex(of: "--smoke-scenario"), args.indices.contains(at + 1),
+           args[at + 1] == "workspace-legacy" { result["NAC_ORCHESTRATION"] = "1" }
+        #endif
+        return result
     }
 
     init() throws {
