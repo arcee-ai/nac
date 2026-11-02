@@ -46,7 +46,7 @@ const TextArea: React.FC<TextAreaProps> & { Size: typeof TextAreaSize } = ({
     <textarea
       ref={ref}
       className={cn(
-        "w-full input font-normal rounded-[4px]",
+        "w-full input font-normal rounded-interaction",
         textAreaSize,
         isDisabled && "input-disabled",
         validation && "input-validation",

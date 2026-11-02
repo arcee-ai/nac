@@ -244,6 +244,61 @@ describe("scoped terminal observation", () => {
     });
     await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
   });
+  it.each([
+    {
+      view: "a read-only view of a live human shell",
+      origin: "human",
+      resize: true,
+      readonly: true,
+    },
+    { view: "an agent's shell", origin: "agent", resize: false, readonly: false },
+  ] as const)("fits $view to its panel without resizing the process", async (row) => {
+    const f = fixture();
+    f.view.fit.mockReturnValue({ cols: 91, rows: 31 });
+    const source = {
+      id: "terminal",
+      origin: row.origin,
+      representation: "pty" as const,
+      backend: "local",
+      cwd: "/workspace",
+      alive: true,
+      process_state: "running" as const,
+      input: row.origin === "human",
+      resize: row.resize,
+      stop: true,
+      retained: true,
+      output_complete: false,
+      cols: 80,
+      rows: 24,
+    };
+    closers.push(
+      openTerminalObservation({
+        ...f.ports,
+        source,
+        readonly: row.readonly,
+        api: {
+          ...f.api,
+          attachExecution: f.api.attachUserTerminal,
+          pullExecution: async (...args: Parameters<typeof f.api.pullUserTerminal>) => ({
+            ...(await f.api.pullUserTerminal(...args)),
+            execution: source,
+            segments: [],
+          }),
+          detachExecution: f.api.detachUserTerminal,
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+    expect(f.ports.phase).toHaveBeenCalledWith("Connected");
+    await vi.waitFor(() => expect(f.view.fit).toHaveBeenCalledTimes(2));
+    resized();
+    await vi.waitFor(() => expect(f.view.fit).toHaveBeenCalledTimes(3));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.api.resizeUserTerminal).not.toHaveBeenCalled();
+    expect(f.ports.notice).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^Terminal resize failed/),
+    );
+  });
   it("discards queued input on revision change while preserving observer and unresolved active delivery", async () => {
     const f = fixture();
     const active = deferred<{ outcome: "written"; error: null }>();

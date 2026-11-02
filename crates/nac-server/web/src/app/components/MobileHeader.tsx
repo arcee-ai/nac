@@ -37,11 +37,12 @@ export function MobileHeader() {
 
   return (
     <>
-      <header className="fade-from-top fixed inset-x-0 top-0 z-10 flex items-center gap-4 p-2">
-        <div className="flex min-w-0 flex-1 items-center gap-4">
+      <header className="fade-from-top fixed inset-x-0 top-0 z-10 flex items-center gap-2 p-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <StickyButton
             content={ButtonContent.Icon}
-            className="shrink-0"
+            className="!size-11 shrink-0"
+            buttonClassName="!size-11"
             aria-label="All projects"
             onClick={() => navigate(routes.list())}
           >
@@ -56,16 +57,18 @@ export function MobileHeader() {
         {sessionId ? (
           <StickyButton
             content={ButtonContent.Icon}
-            className="shrink-0"
+            className="!size-11 shrink-0"
+            buttonClassName="!size-11"
             aria-label="Open panel"
             onClick={() => openSidePanelList()}
           >
-            <Icon iconName={IconName.OpenMobileModal} />
+            <Icon iconName={IconName.ShowSidePanel} />
           </StickyButton>
         ) : null}
         <StickyButton
           content={ButtonContent.Icon}
-          className="shrink-0"
+          className="!size-11 shrink-0"
+          buttonClassName="!size-11"
           aria-label="Open the menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}
@@ -109,7 +112,7 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
   const title = (
     <p
       className={cn(
-        "header-sm min-w-0 flex-1 truncate",
+        "text-sm leading-5 font-medium min-w-0 flex-1 truncate",
         running ? "text-shimmer-basic" : "text-btn-secondary-pressed",
       )}
     >

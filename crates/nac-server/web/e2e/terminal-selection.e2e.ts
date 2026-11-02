@@ -67,9 +67,9 @@ for (const mobile of [false, true]) {
       if (await show.isVisible()) await show.click();
     }
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-    await pane.getByRole("button", { name: "New shell", exact: true }).click();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-    await pane.getByRole("button", { name: "Focus terminal" }).click();
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
     await page.keyboard.type(`printf '${octal(evidence + "\n")}'`);
     await page.keyboard.press("Enter");
     await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
@@ -155,8 +155,13 @@ for (const mobile of [false, true]) {
     // The canonical/model evidence remains byte exact while normal chat uses a
     // passive attachment. Navigation/reload do not submit or observe a source.
     await page.goto(`${harness.baseUrl}/#/session/${session}`);
-    if (mobile)
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    if (mobile) {
+      // The panel left a row open, whose screen leads back to its list first.
+      const panel = page.getByRole("dialog");
+      const list = panel.getByRole("button", { name: "Open list", exact: true });
+      if (await list.isVisible()) await list.click();
+      await panel.getByRole("button", { name: "Close", exact: true }).click();
+    }
     const card = page.getByRole("region", { name: "Terminal selection", exact: true });
     await expect(card).toHaveCount(1);
     await expect(card.getByLabel("Attached terminal output")).toHaveText(evidence);
@@ -297,9 +302,9 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-  await pane.getByRole("button", { name: "Focus terminal" }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type(`printf '${octal(evidence + "\n")}'`);
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);
@@ -365,9 +370,9 @@ test("queued attachment waits for an exact human command outcome and follows its
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await pane.getByRole("button", { name: "New shell", exact: true }).click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-  await pane.getByRole("button", { name: "Focus terminal" }).click();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await page.keyboard.type(`printf '${octal(evidence + "\n")}'`);
   await page.keyboard.press("Enter");
   await expect(pane.locator(".xterm-accessibility")).toContainText(evidence);

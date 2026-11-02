@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 
-import { usePresentationKeyboardOwner } from "@/app/providers/PresentationBoundary";
-import { useModalStack } from "@/app/hooks/useModalStack";
+import {
+  usePresentationKeyboardOwner,
+  usePresentationLayers,
+} from "@/app/providers/PresentationBoundary";
 import { hasModifier, matchesShortcut } from "@/app/lib/shortcuts";
 
 export interface KeyboardShortcutBinding {
@@ -31,7 +33,7 @@ function isTyping(target: EventTarget | null): boolean {
 export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void {
   // Read through a ref, so a caller may pass a fresh array each render without
   // the listener being torn down and rebuilt along with it.
-  const { getStackLength: modalStackDepth } = useModalStack();
+  const layers = usePresentationLayers();
   const ownsKeyboard = usePresentationKeyboardOwner();
   const latest = useRef(bindings);
   useEffect(() => {
@@ -45,7 +47,7 @@ export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void 
       for (const binding of latest.current) {
         if (binding.enabled === false) continue;
         if (!matchesShortcut(event, binding.keys)) continue;
-        if (modalStackDepth() > 0) return;
+        if (layers.modalDepth() > 0) return;
         if (!hasModifier(binding.keys) && isTyping(event.target)) return;
         event.preventDefault();
         binding.onTrigger();
@@ -54,5 +56,5 @@ export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void 
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modalStackDepth, ownsKeyboard]);
+  }, [layers, ownsKeyboard]);
 }

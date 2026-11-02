@@ -52,7 +52,7 @@ export const InsightsList = memo(function InsightsList({
   /** The prompt a streamed turn answers before the snapshot shows it. */
   pendingPrompt: string;
   emptyCopy: InsightsEmptyCopy;
-  /** Bumps on every pick; the picked row is scrolled into view. */
+  /** Bumps on every pick; the shown row is scrolled into view. */
   focusNonce: number;
   controller: InsightsRowController;
   /** After the oldest section, and under the empty copy too. */
@@ -62,8 +62,8 @@ export const InsightsList = memo(function InsightsList({
   const size = useIsMobile() ? ActionListButtonSize.Large : ActionListButtonSize.Small;
 
   useEffect(() => {
-    const picked = listRef.current?.querySelectorAll<HTMLElement>('[aria-pressed="true"]');
-    const row = picked?.[picked.length - 1];
+    const shown = listRef.current?.querySelectorAll<HTMLElement>("[data-shown]");
+    const row = shown?.[shown.length - 1];
     if (row) revealRow(row);
   }, [focusNonce]);
 

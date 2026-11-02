@@ -1,4 +1,5 @@
 import React from "react";
+import { DialogDescription } from "../../ui/dialog";
 import { IconName } from "../icon";
 export declare enum ModalSize {
     Small = "max-w-[400px]",
@@ -49,6 +50,11 @@ interface ModalProps {
      * puts the route there — the session side box switches panels by navigating.
      */
     keepOnNavigate?: boolean;
+    /**
+     * A confirmation before something that cannot be undone: the card is an
+     * `alertdialog`, described by the `ModalDescription` in its body.
+     */
+    alert?: boolean;
     className?: string;
     /** Overrides the body's own padding and scrolling, for full-bleed content. */
     bodyClassName?: string;
@@ -63,4 +69,6 @@ interface ModalProps {
 declare const Modal: React.FC<ModalProps> & {
     Size: typeof ModalSize;
 };
+/** Body text the dialog is described by; an `alert` confirmation says in it what goes. */
+export declare const ModalDescription: typeof DialogDescription;
 export default Modal;

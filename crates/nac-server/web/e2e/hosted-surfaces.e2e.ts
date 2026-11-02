@@ -168,7 +168,11 @@ for (const mobile of [false, true]) {
       expect((await git("log", "-1", "--format=%s")).stdout.trim()).toBe("accepted response lost");
       expect(fixture.lostResponses[0].status).toBe(200);
       // A phone's panel covers the host's own controls until Escape closes it.
+      // The commit sheet above it takes the first Escape on its own.
       if (mobile) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByPlaceholder("Commit message")).toHaveCount(0);
+        await expect(page.getByRole("dialog", { name: "Files", exact: true })).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(page.getByRole("dialog", { name: "Files", exact: true })).toHaveCount(0);
       }

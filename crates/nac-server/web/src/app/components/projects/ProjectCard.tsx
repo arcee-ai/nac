@@ -1,17 +1,19 @@
 import { useRef, useState } from "react";
 
 import {
-  ChatSessionOrphanAvatar,
   Icon,
   IconName,
-  Loader,
-  LoaderSize,
+  ModelLoader,
+  ModelLoaderSize,
   SessionAvatar,
+  SessionBehaviorIcon,
+  SessionBehaviorIconSize,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
 import { ProjectCardActions } from "@/app/components/projects/ProjectCardActions";
-import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
+import { useIsDesktop } from "@/app/hooks/useMediaQuery";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { formatCostMicros, isActiveRun, sessionEnvLabel } from "@/app/lib/format";
@@ -247,8 +249,8 @@ export function ProjectCard({
   const facts = factsFor(item, sessionTitle);
   const configError = facts.representative?.model_config_error;
 
-  const isMobile = useIsMobile();
   const isDesktop = useIsDesktop();
+  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -280,9 +282,9 @@ export function ProjectCard({
       data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
       className={cn(
-        "group fade relative flex flex-col rounded-[8px] overflow-hidden cursor-default",
-        isMobile ? "gap-4 px-4 pt-4 pb-2" : "gap-4 px-6 pt-5 pb-3",
-        "shadow-convex bg-elevation-level-1",
+        "group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default",
+        isDesktop ? "px-5 pt-4 pb-3" : "p-4",
+        "bg-elevation-level-1",
         dragging && "shadow-lg",
       )}
       role="button"
@@ -320,7 +322,7 @@ export function ProjectCard({
       onPointerCancel={() => setPressed(false)}
     >
       <div
-        className="absolute inset-0 rounded-[8px] pointer-events-none ease-out"
+        className="absolute inset-0 rounded-[inherit] pointer-events-none ease-out"
         style={{
           backgroundColor: `var(${surfaceToken({
             highlighted: facts.running,
@@ -331,7 +333,7 @@ export function ProjectCard({
       />
       {selected || focused || dragging ? (
         <div
-          className="absolute inset-0 rounded-[8px] pointer-events-none border-2"
+          className="absolute inset-0 rounded-[inherit] pointer-events-none border-2"
           style={{ borderColor: "var(--blue-500)" }}
         />
       ) : null}
@@ -342,7 +344,7 @@ export function ProjectCard({
           sticky
           className="absolute left-2 top-2 z-1"
         >
-          <span className="block size-2 rounded-full bg-accent-primary" />
+          <span className="block size-2 rounded-full bg-brand-450" />
         </Tooltip>
       ) : null}
 
@@ -359,21 +361,37 @@ export function ProjectCard({
         />
       ) : null}
 
-      <div className="relative flex items-center gap-4 w-full">
-        {facts.orphan ? (
-          <ChatSessionOrphanAvatar isRunning={facts.running} />
-        ) : (
-          <SessionAvatar id={facts.id} size={40} isRunning={facts.running} />
-        )}
-        <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 w-full">
+      <div className={cn("relative flex gap-4 w-full", isDesktop ? "items-center" : "items-start")}>
+        {facts.orphan ? null : <SessionAvatar id={facts.id} size={40} isRunning={facts.running} />}
+        <div
+          className={cn(
+            "flex flex-col flex-1 min-w-0",
+            facts.orphan ? "gap-2" : facts.pinned ? "gap-1" : "gap-0.5",
+          )}
+        >
+          <div className={cn("flex items-center w-full", facts.orphan ? "gap-2" : "gap-1.5")}>
+            {facts.orphan ? (
+              facts.running ? (
+                <ModelLoader size={ModelLoaderSize.Large} />
+              ) : showBehaviorIcon ? (
+                <SessionBehaviorIcon
+                  behavior={facts.representative?.behavior}
+                  size={SessionBehaviorIconSize.Large}
+                  className="text-fill-btn-secondary"
+                />
+              ) : null
+            ) : null}
             {facts.pinned ? (
-              <Icon iconName={IconName.Pin} className="text-basic-secondary shrink-0" />
+              <Icon
+                iconName={IconName.Pin}
+                size={16}
+                className="shrink-0 text-fill-basic-primary"
+              />
             ) : null}
             <div
               className={cn(
-                "header-md flex-1 min-w-0 truncate",
-                facts.running ? "text-shimmer-basic" : "text-basic-primary",
+                "text-base leading-6 font-medium flex-1 min-w-0 truncate",
+                facts.running ? "text-shimmer-primary" : "text-basic-primary",
               )}
             >
               {facts.title}
@@ -384,26 +402,25 @@ export function ProjectCard({
               </Tooltip>
             ) : null}
             {/* A project counts the chats currently running inside it; a loose
-                chat is its own run, so the spinner alone says it. */}
-            {facts.running ? (
-              facts.orphan ? (
-                <Loader size={LoaderSize.XSmall} className="shrink-0" />
-              ) : (
-                <div className="flex items-center gap-1 shrink-0">
-                  <Loader size={LoaderSize.XSmall} />
-                  <span className="text-micro text-basic-primary whitespace-nowrap">
-                    {facts.runningCount} Running
-                  </span>
-                </div>
-              )
+                chat is its own run, so the loader leading its title says it. */}
+            {facts.running && !facts.orphan ? (
+              <div className="flex items-center gap-1 shrink-0">
+                <ModelLoader size={ModelLoaderSize.Small} />
+                <span className="text-micro text-basic-primary whitespace-nowrap">
+                  {facts.runningCount}
+                  <span className="sr-only"> running</span>
+                </span>
+              </div>
             ) : null}
           </div>
-          <div className="code code-micro text-basic-tertiary truncate w-full">{facts.cwd}</div>
+          <div className="code text-xs leading-5 text-basic-tertiary truncate w-full">
+            {facts.cwd}
+          </div>
         </div>
       </div>
       {!isDesktop ? <Provenance facts={facts} /> : null}
 
-      <div className="relative flex items-center justify-between w-full h-6 gap-2">
+      <div className="relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2">
         <Metrics facts={facts} />
         {showActions ? (
           <ProjectCardActions

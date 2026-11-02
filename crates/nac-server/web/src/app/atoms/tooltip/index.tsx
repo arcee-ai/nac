@@ -1,9 +1,9 @@
-import { usePresentationPortalTarget } from "@/app/providers/PresentationBoundary";
-import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useIsMobile } from "../../hooks/useMediaQuery";
-import { AnchorPlacement, anchorClasses, anchorCoords } from "../../lib/anchor";
+import { ANCHOR_GAP, AnchorPlacement, anchorSides } from "../../lib/anchor";
 import { cn } from "../../lib/cn";
+import { TooltipContent, TooltipTrigger, Tooltip as UITooltip } from "../../ui/tooltip";
+import { composeRefs } from "../../ui/compose-refs";
 import Icon, { IconName } from "../icon";
 import KeyboardShortcut from "../keyboard-shortcut";
 import Popover from "../popover";
@@ -12,31 +12,25 @@ export { AnchorPlacement as TooltipPosition };
 type TooltipPosition = AnchorPlacement;
 
 const BOX_BASE =
-  "tooltip-box text-left w-max h-fit max-w-[240px] flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-[4px] fade";
+  "tooltip-box text-left w-max h-fit max-w-[240px] flex flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade motion-reduce:!animate-none";
 
-interface TooltipBoxProps {
-  boxRef?: React.Ref<HTMLDivElement>;
+interface TooltipTextProps {
   title?: React.ReactNode;
   description?: React.ReactNode;
   keyboardShortcuts?: string[];
-  className?: string;
-  style?: React.CSSProperties;
   /** Mobile sheet uses the regular (non-inverse) surface tokens. */
   inverted?: boolean;
   isMobile?: boolean;
 }
 
-const TooltipBox: React.FC<TooltipBoxProps> = ({
-  boxRef,
+const TooltipText: React.FC<TooltipTextProps> = ({
   title,
   description,
   keyboardShortcuts = [],
-  className,
-  style,
   inverted = true,
   isMobile = false,
 }) => (
-  <div ref={boxRef} className={className} style={style}>
+  <>
     <div className="flex gap-2 items-center">
       <div
         className={cn(
@@ -63,175 +57,75 @@ const TooltipBox: React.FC<TooltipBoxProps> = ({
         {description}
       </div>
     ) : null}
-  </div>
+  </>
 );
 
-interface StickyTooltipProps extends TooltipBoxProps {
-  position: TooltipPosition;
-  boxClassName?: string;
-  showOnMobile?: boolean;
-  /** Keep the trigger mounted, but do not draw the tip. */
-  disabled?: boolean;
+interface MobileTooltipProps extends TooltipTextProps {
+  className?: string;
   children?: React.ReactNode;
 }
 
 /**
- * Portalled variant: the box lives in the presentation overlay target, so an ancestor with
- * `overflow: hidden` (session cards) or a scroll container cannot clip it.
- * Coordinates are measured from the trigger on hover, hence the two-pass render
- * — the box is laid out invisibly first so its size is known.
- *
- * On a phone (when `showOnMobile`), the same content opens as a bottom sheet
- * via Popover — hover tooltips are useless without a pointer.
+ * Hover tips are useless without a pointer, so on a phone a tap opens the
+ * same content as a bottom sheet.
  */
-const StickyTooltip: React.FC<StickyTooltipProps> = ({
+const MobileTooltip: React.FC<MobileTooltipProps> = ({
   title,
   description,
   keyboardShortcuts,
-  position,
   className,
-  boxClassName,
-  showOnMobile = false,
-  disabled = false,
   children,
 }) => {
-  const portalTarget = usePresentationPortalTarget();
-
-  const isMobile = useIsMobile();
-  const [trigger, setTrigger] = useState<DOMRect | null>(null);
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [wasMobile, setWasMobile] = useState(isMobile);
+  const [open, setOpen] = useState(false);
   const justOpenedRef = useRef(false);
 
-  // Growing past the breakpoint hands the hint back to hover, so the sheet
-  // state left behind must not survive into the next narrow layout.
-  if (wasMobile !== isMobile) {
-    setWasMobile(isMobile);
-    if (!isMobile) setMobileOpen(false);
-  }
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  const show = useCallback(() => {
-    if (disabled) return;
-    const anchor = anchorRef.current;
-    if (anchor) setTrigger(anchor.getBoundingClientRect());
-  }, [disabled]);
-  const hide = useCallback(() => {
-    setTrigger(null);
-    setCoords(null);
-  }, []);
-
-  // A tip already on screen has to leave when it becomes disabled, without
-  // unmounting the trigger — that would reset whatever the tip wraps.
-  if (disabled && trigger) {
-    setTrigger(null);
-    setCoords(null);
-  }
-
-  useLayoutEffect(() => {
-    if (!trigger || isMobile) return undefined;
-    const box = boxRef.current;
-    if (box) {
-      setCoords(anchorCoords(position, trigger, box.getBoundingClientRect()));
-    }
-    // Fixed coordinates go stale once anything moves underneath.
-    window.addEventListener("scroll", hide, true);
-    window.addEventListener("resize", hide);
-    return () => {
-      window.removeEventListener("scroll", hide, true);
-      window.removeEventListener("resize", hide);
-    };
-  }, [trigger, position, hide, isMobile]);
-
-  const handleMobileToggle = (e: React.MouseEvent | React.TouchEvent) => {
+  const handleToggle = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     if (e.type === "touchend") e.preventDefault();
     justOpenedRef.current = true;
-    setMobileOpen((prev) => !prev);
+    setOpen((prev) => !prev);
     setTimeout(() => {
       justOpenedRef.current = false;
     }, 100);
   };
 
-  const handleCloseMobile = () => {
+  const handleClose = () => {
     // Ignore the synthetic click that follows touchend right after open.
     if (justOpenedRef.current) return;
-    setMobileOpen(false);
+    setOpen(false);
   };
 
-  if (showOnMobile && isMobile) {
-    return (
-      <Popover
-        open={mobileOpen}
-        onClose={handleCloseMobile}
-        className={className}
-        content={
-          <div className="px-4 py-2 flex overflow-hidden gap-3">
-            <Icon
-              iconName={IconName.Info}
-              size={24}
-              className="w-6 min-w-6 max-w-6"
-              color="var(--color-fill-basic-tertiary)"
-            />
-            <div className="flex flex-col gap-2 min-w-0">
-              <TooltipBox
+  return (
+    <Popover
+      open={open}
+      onClose={handleClose}
+      className={className}
+      content={
+        <div className="px-4 py-2 flex overflow-hidden gap-3">
+          <Icon
+            iconName={IconName.Info}
+            size={24}
+            className="w-6 min-w-6 max-w-6"
+            color="var(--color-fill-basic-tertiary)"
+          />
+          <div className="flex flex-col gap-2 min-w-0">
+            <div className="flex flex-col gap-2">
+              <TooltipText
                 title={title}
                 description={description}
                 keyboardShortcuts={keyboardShortcuts}
                 inverted={false}
-                className="flex flex-col gap-2"
-                isMobile={isMobile}
+                isMobile
               />
             </div>
           </div>
-        }
-      >
-        <div
-          ref={anchorRef}
-          onClick={handleMobileToggle}
-          onTouchEnd={handleMobileToggle}
-          className="inline-block"
-        >
-          {children}
         </div>
-      </Popover>
-    );
-  }
-
-  return (
-    <div
-      ref={anchorRef}
-      className={cn("w-fit h-fit leading-[0]", className)}
-      onMouseEnter={isMobile ? undefined : show}
-      onMouseLeave={isMobile ? undefined : hide}
-      onFocusCapture={isMobile ? undefined : show}
-      onBlurCapture={isMobile ? undefined : hide}
+      }
     >
-      {children}
-      {!isMobile && !disabled && trigger
-        ? createPortal(
-            <TooltipBox
-              boxRef={boxRef}
-              title={title}
-              description={description}
-              keyboardShortcuts={keyboardShortcuts}
-              className={cn(
-                BOX_BASE,
-                "fixed flex z-[200] pointer-events-none",
-                coords ? null : "invisible",
-                boxClassName,
-              )}
-              style={{
-                left: `${coords?.left ?? 0}px`,
-                top: `${coords?.top ?? 0}px`,
-              }}
-            />,
-            portalTarget,
-          )
-        : null}
-    </div>
+      <div onClick={handleToggle} onTouchEnd={handleToggle} className="inline-block">
+        {children}
+      </div>
+    </Popover>
   );
 };
 
@@ -242,8 +136,12 @@ interface TooltipProps {
   position?: TooltipPosition;
   className?: string;
   boxClassName?: string;
+  /** Keep the trigger mounted, but do not draw the tip. */
   disabled?: boolean;
-  /** Portal the box to the body when an ancestor clips overflow. */
+  /**
+   * Lay the trigger out without a positioning context of its own. The box is
+   * portalled either way, so no ancestor that clips overflow can cut it off.
+   */
   sticky?: boolean;
   /**
    * On a phone, tap opens the tip as a bottom sheet (via Popover). Only
@@ -253,6 +151,70 @@ interface TooltipProps {
   children?: React.ReactNode;
 }
 
+/**
+ * Keep arbitrary children and their refs/events intact. Radix describes this
+ * layout wrapper, so also associate its hint with the controls inside it.
+ */
+function TooltipAnchor({
+  ref,
+  "aria-describedby": describedBy,
+  ...props
+}: React.ComponentPropsWithRef<"div">) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const composedRef = useMemo(() => composeRefs(ref, anchor), [ref]);
+  useLayoutEffect(() => {
+    const node = anchor.current;
+    if (!node || !describedBy) return undefined;
+    const ids = describedBy.split(/\s+/).filter(Boolean);
+    const owned = new Map<HTMLElement, Set<string>>();
+    const sync = () => {
+      for (const target of node.querySelectorAll<HTMLElement>(
+        "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]",
+      )) {
+        const current = target.getAttribute("aria-describedby")?.split(/\s+/).filter(Boolean) ?? [];
+        const added = owned.get(target) ?? new Set<string>();
+        for (const id of ids) {
+          if (!current.includes(id)) {
+            current.push(id);
+            added.add(id);
+          }
+        }
+        owned.set(target, added);
+        const next = current.join(" ");
+        if (target.getAttribute("aria-describedby") !== next)
+          target.setAttribute("aria-describedby", next);
+      }
+    };
+    sync();
+    // A compound child can mount controls or change its own description
+    // without rerendering the Tooltip. Preserve those updates while open.
+    const observer = new MutationObserver(sync);
+    observer.observe(node, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["aria-describedby"],
+    });
+    return () => {
+      observer.disconnect();
+      for (const [target, added] of owned) {
+        const remaining = (target.getAttribute("aria-describedby") ?? "")
+          .split(/\s+/)
+          .filter((id) => id && !added.has(id))
+          .join(" ");
+        if (remaining) target.setAttribute("aria-describedby", remaining);
+        else target.removeAttribute("aria-describedby");
+      }
+    };
+  }, [describedBy]);
+  return <div {...props} ref={composedRef} aria-describedby={describedBy} />;
+}
+
+/**
+ * A hint shown while the trigger is hovered or holds keyboard focus. Escape
+ * dismisses it before anything beneath it, and a press on the trigger hides
+ * it until the pointer comes back.
+ */
 const Tooltip: React.FC<TooltipProps> & {
   Position: typeof AnchorPlacement;
 } = ({
@@ -268,41 +230,67 @@ const Tooltip: React.FC<TooltipProps> & {
   children,
 }) => {
   const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const available = !disabled && !isMobile;
 
-  if (sticky) {
+  // A tip already on screen has to leave when it becomes disabled, without
+  // unmounting the trigger — that would reset whatever the tip wraps.
+  if (open && !available) setOpen(false);
+
+  if (sticky && showTooltipOnMobile && isMobile) {
     return (
-      <StickyTooltip
+      <MobileTooltip
         title={title}
         description={description}
         keyboardShortcuts={keyboardShortcuts}
-        position={position}
         className={className}
-        boxClassName={boxClassName}
-        showOnMobile={showTooltipOnMobile}
-        disabled={disabled}
       >
         {children}
-      </StickyTooltip>
+      </MobileTooltip>
     );
   }
-  // Absolute (non-sticky) tips rely on hover; hide them on a phone.
+
+  const { side, align } = anchorSides[position];
   return (
-    <div className={cn("relative w-fit h-fit leading-[0] group", className)}>
-      {children}
-      {!isMobile && !disabled ? (
-        <TooltipBox
+    <UITooltip
+      open={open}
+      onOpenChange={(next) => setOpen(next && available)}
+      disableHoverableContent
+    >
+      <TooltipTrigger asChild>
+        <TooltipAnchor
+          className={cn(
+            sticky ? "w-fit h-fit leading-[0]" : "relative w-fit h-fit leading-[0] group",
+            className,
+          )}
+          onMouseEnter={() => setOpen(available)}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={(event) => {
+            // Focus a closing dialog hands back after a click is no reason to
+            // show the hint; focus that arrived from the keyboard is.
+            const target = event.target;
+            if (target === document.activeElement && !target.matches(":focus-visible")) {
+              event.preventDefault();
+            }
+          }}
+        >
+          {children}
+        </TooltipAnchor>
+      </TooltipTrigger>
+      <TooltipContent
+        side={side}
+        align={align}
+        sideOffset={ANCHOR_GAP}
+        collisionPadding={ANCHOR_GAP}
+        className={cn(BOX_BASE, "pointer-events-none", boxClassName)}
+      >
+        <TooltipText
           title={title}
           description={description}
           keyboardShortcuts={keyboardShortcuts}
-          className={cn(
-            BOX_BASE,
-            "absolute hidden group-hover:flex z-10",
-            anchorClasses[position],
-            boxClassName,
-          )}
         />
-      ) : null}
-    </div>
+      </TooltipContent>
+    </UITooltip>
   );
 };
 
