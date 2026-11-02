@@ -49,6 +49,9 @@ class AttentionInventoryTests(unittest.TestCase):
         self.assertGreater(semantic.countTestCases(), 0)
         semantic_selected = set(identities(semantic))
         semantic_required = {
+            'test_replacement_during_callback_retains_both_generations',
+            'test_real_driver_cleanup_blocks_reject_callback_replacement',
+            'test_helper_root_replacement_retains_original_and_successor',
             'test_actual_caller_root_and_cleanup_argument_obey_real_helper_namespace',
             'test_planned_matrix_is_fourteen_real_model_steps_without_extra_goal_calls',
             'test_read_error_missing_or_duplicate_call_cannot_mark_goal',

@@ -113,7 +113,8 @@ case "$mode" in
                 -framework WebKit desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift \
                 desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift \
                 desktop/macos/WorkspaceCheckpoint.swift desktop/macos/WorkspaceStorage.swift \
-                desktop/macos/WorkspaceNotificationState.swift desktop/macos/AttentionFixtureCleanup.swift \
+                desktop/macos/WorkspaceNotificationState.swift desktop/macos/AttentionFixtureRoot.swift \
+                desktop/macos/AttentionFixtureCleanup.swift \
                 -o "$output/AttentionFixtureCleanup"
         fi
         if [[ "$mode" == instance-smoke ]]; then

@@ -21,6 +21,8 @@ from attention_feed_build import source_binding
 from attention_fixture_control import console_facts, require_console
 from attention_semantic_fixture import BEHAVIORS, MARKER, SemanticProvider
 from instance_contract import digest
+from attention_reset_readout import ResetReadout
+from attention_fixture_cleanup import cleanup_fixture, write_input
 from instance_smoke import verify_embedded_assets
 
 
@@ -111,19 +113,24 @@ def run_contract(bundle, destination, observer, source_ref):
     for path, expected_hash in build['native_source_files'].items():
         assert digest(path) == expected_hash
     root = Path(tempfile.mkdtemp(prefix='nac-attention-app-semantic-', dir=destination)).resolve()
-    profile = root / 'profile'
-    profile.mkdir(mode=0o700)
-    (profile / 'semantic-marker.txt').write_text(MARKER + '\n')
-    moved = root / 'Relocated app with spaces' / bundle.name
-    shutil.copytree(bundle, moved)
-    store = profile / 'selected store.db'
-    journeys = []
-    provider = None
-    sequence = 0
-    evidence = dict(source_binding=binding, build_receipt=build, actual_local_app=True,
-                    system_wk=True, native_os_delivery=False, trusted_input=False,
-                    hidden_cpu_qualified=False, cases=[], expected=[])
+    owned = ResetReadout(root)
+    try:
+        profile = root / 'profile'
+        profile.mkdir(mode=0o700)
+        (profile / 'semantic-marker.txt').write_text(MARKER + '\n')
+        moved = root / 'Relocated app with spaces' / bundle.name
+        shutil.copytree(bundle, moved)
+        store = profile / 'selected store.db'
+        journeys = []
+        provider = None
+        sequence = 0
+        evidence = dict(source_binding=binding, build_receipt=build, actual_local_app=True,
+                        system_wk=True, native_os_delivery=False, trusted_input=False,
+                        hidden_cpu_qualified=False, cases=[], expected=[])
 
+    except BaseException:
+        owned.close()
+        raise
     def save(name, value):
         (destination / name).write_text(json.dumps(value, indent=2) + '\n')
 
@@ -186,7 +193,7 @@ def run_contract(bundle, destination, observer, source_ref):
         journeys.append(first)
         first.launch()
         ready = first.stage('ready')
-        (root / 'cleanup-input.json').write_text(json.dumps(dict(receipt=ready['ready_receipt'], home=str(profile))))
+        write_input(owned, dict(receipt=ready['ready_receipt'], home=str(profile)))
         endpoint = ready['base_url'].rstrip('/')
         evidence['embedded_assets'] = verify_embedded_assets(endpoint)
         command(first, 'enable')
@@ -307,51 +314,49 @@ def run_contract(bundle, destination, observer, source_ref):
         evidence.update(passed=False, error=repr(error), fixture_retained=str(root))
         raise
     finally:
-        errors = []
-        for journey in reversed(journeys):
-            try:
-                if journey.observe()['apps']:
-                    sequence += 1
-                    journey.custody.cleanup(journey, f'attention-{sequence:04d}')
-                    attention_owner.wait_for('Semantic failure cleanup app exit', lambda: not journey.observe()['apps'], timeout=28)
-                assert journey.engine_pid is not None
-                attention_owner.wait_for('Semantic failure exact engine exit', lambda: attention_owner.engine_settled(moved, journey.engine_pid), timeout=25)
-            except BaseException as error:
-                errors.append(repr(error))
-            finally:
-                journey.custody.close()
-                journey.log.close()
-        if provider:
-            try:
-                provider.close()
-                evidence['model_request_count'] = len(provider.requests)
-                evidence['provider_errors'] = provider.errors
-                assert not provider.errors, provider.errors
-            except BaseException as error:
-                errors.append('Provider cleanup: ' + repr(error))
-        if not errors and (root / 'cleanup-input.json').exists():
-            try:
-                subprocess.run([str(observer.parent / 'AttentionFixtureCleanup'), str(root)],
-                               env=environment, check=True, timeout=15)
-                evidence['website_cleanup'] = json.loads((root / 'cleanup-result.json').read_text())
-                assert evidence['website_cleanup']['root'] == str(root)
-                assert evidence['website_cleanup']['initialization_ephemeral'] is True
-                for name in ('cleanup-input.json', 'cleanup-result.json'):
-                    shutil.copyfile(root / name, destination / name)
-                shutil.rmtree(root)
-                evidence['private_root_removed'] = not root.exists()
-            except BaseException as error:
-                errors.append('Exact website/profile cleanup: ' + repr(error))
-        evidence['cleanup_errors'] = errors
-        if errors:
-            evidence['passed'] = False
         try:
-            assert source_binding(Path(__file__).resolve().parents[2], source_ref) == binding
-        except BaseException as error:
-            evidence['passed'] = False
-            errors.append('Source changed: ' + repr(error))
-        save('summary.json', evidence)
-        assert not errors, errors
+            errors = []
+            for journey in reversed(journeys):
+                try:
+                    if journey.observe()['apps']:
+                        sequence += 1
+                        journey.custody.cleanup(journey, f'attention-{sequence:04d}')
+                        attention_owner.wait_for('Semantic failure cleanup app exit', lambda: not journey.observe()['apps'], timeout=28)
+                    assert journey.engine_pid is not None
+                    attention_owner.wait_for('Semantic failure exact engine exit', lambda: attention_owner.engine_settled(moved, journey.engine_pid), timeout=25)
+                except BaseException as error:
+                    errors.append(repr(error))
+                finally:
+                    journey.custody.close()
+                    journey.log.close()
+            if provider:
+                try:
+                    provider.close()
+                    evidence['model_request_count'] = len(provider.requests)
+                    evidence['provider_errors'] = provider.errors
+                    assert not provider.errors, provider.errors
+                except BaseException as error:
+                    errors.append('Provider cleanup: ' + repr(error))
+            if not errors:
+                try:
+                    evidence['website_cleanup'] = cleanup_fixture(
+                        owned, observer.parent / 'AttentionFixtureCleanup', environment, destination)
+                    evidence['private_root_removed'] = True
+                except BaseException as error:
+                    errors.append('Exact website/profile cleanup: ' + repr(error))
+            evidence['cleanup_errors'] = errors
+            if errors:
+                evidence['passed'] = False
+            try:
+                assert source_binding(Path(__file__).resolve().parents[2], source_ref) == binding
+            except BaseException as error:
+                evidence['passed'] = False
+                errors.append('Source changed: ' + repr(error))
+            save('summary.json', evidence)
+            assert not errors, errors
+        finally:
+            owned.close()
+
 
 
 if __name__ == '__main__':

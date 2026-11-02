@@ -23,6 +23,7 @@ from attention_app_smoke import AttentionJourney
 from attention_feed_build import source_binding
 from attention_fixture_control import console_facts, require_console
 from attention_reset_readout import ResetReadout
+from attention_fixture_cleanup import run_helper, write_input
 from attention_semantic_fixture import SemanticProvider
 from instance_contract import digest
 from instance_smoke import remaining, wait_for, engine_settled
@@ -307,7 +308,7 @@ def run_contract(bundle, destination, observer, source_ref, deadline):
         ready = journey.stage('ready', deadline=case_end)
         oracle = ResetOracle(ready, profile, source_ref)
         assert ready['ready_receipt']['identity'] == build['engine_identity']
-        (root / 'cleanup-input.json').write_text(json.dumps(dict(receipt=ready['ready_receipt'], home=str(profile))))
+        write_input(owned, dict(receipt=ready['ready_receipt'], home=str(profile)))
         save('ready.json', ready)
         command('enable')
         native('enabled', oracle.enabled)
@@ -414,21 +415,8 @@ def run_contract(bundle, destination, observer, source_ref, deadline):
         try:
             if native_settled and not errors:
                 owned.validate()
-                # Keep the original helper handle through timeout/receipt failure.
-                helper = subprocess.Popen([str(observer.parent / 'AttentionFixtureCleanup'), str(root)], env=environment)
-                evidence['cleanup_helper'] = dict(pid=helper.pid, argv=helper.args)
-                try:
-                    assert helper.wait(timeout=15) == 0
-                finally:
-                    while True:
-                        try:
-                            if helper.poll() is not None:
-                                break
-                            time.sleep(0.25)
-                        except BaseException:
-                            pass
-                    evidence['cleanup_helper']['exit_code'] = helper.wait()
-                result = json.loads((root / 'cleanup-result.json').read_text())
+                result = run_helper(owned, observer.parent / 'AttentionFixtureCleanup', environment,
+                                    lambda record: evidence.update(cleanup_helper=record))
                 assert result['root'] == str(root) and result['profile'] == oracle.digest
                 assert result['initialization_ephemeral'] is True
                 expected_uuid = uuid.UUID(bytes=bytes.fromhex(oracle.digest)[:16], version=5)

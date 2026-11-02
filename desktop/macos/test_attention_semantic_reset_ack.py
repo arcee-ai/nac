@@ -531,8 +531,17 @@ class MaintainedDriverTests(unittest.TestCase):
             def __init__(self, args, **kwargs):
                 self.args = args; self.pid = 99; self.returncode = None; self.polls = 0; helpers.append(self)
                 root = Path(args[1]); actor = actors[0]
-                (root / 'cleanup-result.json').write_text(json.dumps(dict(root=str(root), profile=actor.digest,
-                    initialization_ephemeral=True, website_store_removed=str(uuid.UUID(bytes=bytes.fromhex(actor.digest)[:16], version=5)))))
+                if failure == 'helper-replace':
+                    root.rename(root.with_name(root.name + '-retained'))
+                    root.mkdir(mode=0o700)
+                    (root / 'successor-sentinel').write_text('preserve')
+                held, parent = os.fstat(int(args[2])), os.fstat(int(args[3]))
+                receipt = dict(root=str(root), profile=actor.digest, initialization_ephemeral=True,
+                    website_store_removed=str(uuid.UUID(bytes=bytes.fromhex(actor.digest)[:16], version=5)),
+                    root_device=held.st_dev, root_inode=held.st_ino,
+                    parent_device=parent.st_dev, parent_inode=parent.st_ino)
+                fd = os.open(root / 'cleanup-result.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, 'w') as stream: json.dump(receipt, stream)
             def wait(self, **kwargs):
                 if failure == 'helper-timeout' and 'timeout' in kwargs: raise subprocess.TimeoutExpired(self.args, 15)
                 self.returncode = 0; return 0
@@ -596,6 +605,13 @@ class MaintainedDriverTests(unittest.TestCase):
         actions, result = self.drive('receipt')
         self.assertEqual(actions, ['enable', 'hold', 'close', 'reset', 'release', 'cleanup'])
         self.assertFalse(result['passed']); self.assertIn('receipt failure', result['error'])
+
+    def test_helper_root_replacement_retains_original_and_successor(self):
+        actions, result = self.drive('helper-replace')
+        self.assertFalse(result['passed'])
+        root = Path(result['fixture_root'])
+        self.assertEqual((root / 'successor-sentinel').read_text(), 'preserve')
+        self.assertTrue(root.with_name(root.name + '-retained').exists())
 
     def test_cleanup_helper_timeout_retains_original_until_late_exit_and_is_not_pass(self):
         actions, result = self.drive('helper-timeout')

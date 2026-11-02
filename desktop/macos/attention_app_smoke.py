@@ -20,6 +20,8 @@ sys.dont_write_bytecode = True
 
 from instance_contract import digest
 from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, wait_for, remaining
+from attention_reset_readout import ResetReadout
+from attention_fixture_cleanup import cleanup_fixture, write_input
 from quit_fixture import QuitProvider, TRANSCRIPT, request
 from attention_fixture_control import AttentionControl, console_facts, require_console
 from attention_feed_build import source_binding
@@ -88,30 +90,36 @@ def run_contract(bundle, destination, observer, source_ref):
     for source, expected in build['native_source_files'].items():
         assert digest(source) == expected, source
     root = Path(tempfile.mkdtemp(prefix='nac-attention-app-', dir=destination)).resolve()
-    profile = root / 'profile'
-    profile.mkdir(mode=0o700)
-    moved = root / 'Relocated app with spaces' / bundle.name
-    shutil.copytree(bundle, moved)
-    provider = QuitProvider(profile)
-    environment = dict(HOME=str(profile), NAC_HOME=str(profile / 'nac-home'),
-        PATH='/usr/bin:/bin:/usr/sbin:/sbin', LANG='en_US.UTF-8', BROWSER='none',
-        NAC_TELEMETRY='disabled', NAC_ORCHESTRATION='0', GIT_CONFIG_NOSYSTEM='1',
-        GIT_CONFIG_GLOBAL='/dev/null', MODELS_DEV_URL=provider.endpoint + '/models-dev',
-        OPENAI_API_KEY='attention-fixture-dummy-only')
-    subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(profile)],
-                   env=environment, check=True, timeout=5)
-    store = profile / 'selected store.db'
-    journeys = []
-    evidence = dict(build_receipt=build, source_binding=binding, actual_local_app=True, system_wk=True,
-        native_os_delivery=False, trusted_input=False, hidden_cpu_qualified=False, cases=[])
-    evidence['os_version'] = subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip()
-    with Path('/System/Library/Frameworks/WebKit.framework/Resources/Info.plist').open('rb') as stream:
-        evidence['system_webkit_version'] = plistlib.load(stream)['CFBundleVersion']
-    evidence['fixture_sources'] = {str(Path(__file__).resolve()): digest(__file__),
-        **{str(Path('desktop/macos') / name): digest(Path('desktop/macos') / name) for name in
-           ('AttentionFixtureCleanup.swift', 'attention_fixture_control.py', 'attention_feed_build.py')}}
-    evidence['cleanup_helper_sha256'] = digest(observer.parent / 'AttentionFixtureCleanup')
-    sequence = 0
+    owned = ResetReadout(root)
+    try:
+        profile = root / 'profile'
+        profile.mkdir(mode=0o700)
+        moved = root / 'Relocated app with spaces' / bundle.name
+        shutil.copytree(bundle, moved)
+        provider = QuitProvider(profile)
+        environment = dict(HOME=str(profile), NAC_HOME=str(profile / 'nac-home'),
+            PATH='/usr/bin:/bin:/usr/sbin:/sbin', LANG='en_US.UTF-8', BROWSER='none',
+            NAC_TELEMETRY='disabled', NAC_ORCHESTRATION='0', GIT_CONFIG_NOSYSTEM='1',
+            GIT_CONFIG_GLOBAL='/dev/null', MODELS_DEV_URL=provider.endpoint + '/models-dev',
+            OPENAI_API_KEY='attention-fixture-dummy-only')
+        subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(profile)],
+                       env=environment, check=True, timeout=5)
+        store = profile / 'selected store.db'
+        journeys = []
+        evidence = dict(build_receipt=build, source_binding=binding, actual_local_app=True, system_wk=True,
+            native_os_delivery=False, trusted_input=False, hidden_cpu_qualified=False, cases=[])
+        evidence['os_version'] = subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip()
+        with Path('/System/Library/Frameworks/WebKit.framework/Resources/Info.plist').open('rb') as stream:
+            evidence['system_webkit_version'] = plistlib.load(stream)['CFBundleVersion']
+        evidence['fixture_sources'] = {str(Path(__file__).resolve()): digest(__file__),
+            **{str(Path('desktop/macos') / name): digest(Path('desktop/macos') / name) for name in
+               ('AttentionFixtureCleanup.swift', 'AttentionFixtureRoot.swift', 'attention_fixture_cleanup.py',
+                'attention_reset_readout.py', 'attention_fixture_control.py', 'attention_feed_build.py')}}
+        evidence['cleanup_helper_sha256'] = digest(observer.parent / 'AttentionFixtureCleanup')
+        sequence = 0
+    except BaseException:
+        owned.close()
+        raise
     def command(journey, action, deadline=None, **payload):
         nonlocal sequence
         sequence += 1
@@ -170,7 +178,7 @@ def run_contract(bundle, destination, observer, source_ref):
         (destination / 'second').mkdir(exist_ok=True)
         first = AttentionJourney(moved, destination / 'first/native.json', profile, environment, store, observer)
         journeys.append(first); first.launch(); ready = first.stage('ready')
-        (root / 'cleanup-input.json').write_text(json.dumps(dict(receipt=ready['ready_receipt'], home=str(profile))))
+        write_input(owned, dict(receipt=ready['ready_receipt'], home=str(profile)))
         assert not ready['attention']['enabled'] and ready['attention']['observer_connections'] == 0
         assert ready['center']['permission_requests'] == 0
         evidence['embedded_assets'] = verify_embedded_assets(ready['base_url'])
@@ -224,42 +232,43 @@ def run_contract(bundle, destination, observer, source_ref):
         evidence.update(passed=False, error=str(error), fixture_retained=str(root))
         raise
     finally:
-        errors = []
-        for journey in reversed(journeys):
-            try:
-                if journey.observe()['apps']:
-                    sequence += 1
-                    journey.custody.cleanup(journey, f'attention-{sequence:04d}')
-                    wait_for('Failure cleanup app exit', lambda: not journey.observe()['apps'], timeout=28)
-                assert journey.engine_pid is not None, 'No exact engine cleanup observation'
-                wait_for('Failure cleanup exact engine exit', lambda: engine_settled(moved, journey.engine_pid), timeout=25)
-                journey.log.close()
-            except Exception as error:
-                errors.append(str(error))
-            finally:
-                journey.custody.close()
-                journey.log.close()
-        provider.close()
-        evidence['cleanup_errors'] = errors
-        if not errors and (root / 'cleanup-input.json').exists():
-            try:
-                cleanup = observer.parent / 'AttentionFixtureCleanup'
-                subprocess.run([str(cleanup), str(root)], env=environment, check=True, timeout=15)
-                evidence['website_cleanup'] = json.loads((root / 'cleanup-result.json').read_text())
-                assert evidence['website_cleanup']['root'] == str(root)
-                shutil.rmtree(root)
-                evidence['private_root_removed'] = not root.exists()
-            except Exception as error:
-                errors.append('Owned website/profile cleanup: ' + str(error))
-        if errors:
-            evidence['passed'] = False
         try:
-            assert source_binding(Path(__file__).resolve().parents[2], source_ref) == binding
-        except Exception as error:
-            evidence['passed'] = False
-            errors.append('Final source binding: ' + str(error))
-        (destination / 'summary.json').write_text(json.dumps(evidence, indent=2) + '\n')
-        assert not errors, errors
+            errors = []
+            for journey in reversed(journeys):
+                try:
+                    if journey.observe()['apps']:
+                        sequence += 1
+                        journey.custody.cleanup(journey, f'attention-{sequence:04d}')
+                        wait_for('Failure cleanup app exit', lambda: not journey.observe()['apps'], timeout=28)
+                    assert journey.engine_pid is not None, 'No exact engine cleanup observation'
+                    wait_for('Failure cleanup exact engine exit', lambda: engine_settled(moved, journey.engine_pid), timeout=25)
+                    journey.log.close()
+                except Exception as error:
+                    errors.append(str(error))
+                finally:
+                    journey.custody.close()
+                    journey.log.close()
+            provider.close()
+            evidence['cleanup_errors'] = errors
+            if not errors:
+                try:
+                    cleanup = observer.parent / 'AttentionFixtureCleanup'
+                    evidence['website_cleanup'] = cleanup_fixture(owned, cleanup, environment)
+                    evidence['private_root_removed'] = True
+                except Exception as error:
+                    errors.append('Owned website/profile cleanup: ' + str(error))
+            if errors:
+                evidence['passed'] = False
+            try:
+                assert source_binding(Path(__file__).resolve().parents[2], source_ref) == binding
+            except Exception as error:
+                evidence['passed'] = False
+                errors.append('Final source binding: ' + str(error))
+            (destination / 'summary.json').write_text(json.dumps(evidence, indent=2) + '\n')
+            assert not errors, errors
+        finally:
+            owned.close()
+
 
 
 if __name__ == '__main__':
