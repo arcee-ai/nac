@@ -872,11 +872,55 @@ async fn acquire_refresh_lock(lock_path: &Path) -> Result<FileLock> {
 /// (credential writes are atomic renames, so a reader always sees a complete
 /// record); the refresh itself is serialized in- and cross-process.
 pub(super) async fn fresh_access_token(client: &Client, expected_base_url: &str) -> Result<String> {
+    fresh_access_token_for(client, expected_base_url, None).await
+}
+
+/// `fresh_access_token` for a client pinned to one login: a stored login for
+/// another workspace is refused rather than used.
+pub(super) async fn fresh_access_token_for(
+    client: &Client,
+    expected_base_url: &str,
+    pin: Option<&ArceeLoginIdentity>,
+) -> Result<String> {
     let auth = read_stored_auth_for_base_url(expected_base_url)?;
+    ArceeLoginIdentity::admit(pin, &auth)?;
     if !near_expiry(&auth) {
         return Ok(auth.access_token);
     }
-    refresh_locked(client, expected_base_url, near_expiry).await
+    refresh_locked(client, expected_base_url, near_expiry, pin).await
+}
+
+/// Which stored Arcee login a pinned client may keep using: the organization
+/// and workspace its tokens are for, not the tokens themselves, so ordinary
+/// rotation keeps it while a different sign-in fails closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ArceeLoginIdentity {
+    organization_id: String,
+    workspace_name: String,
+}
+
+impl ArceeLoginIdentity {
+    /// The login stored for `expected_base_url` now.
+    pub(super) fn current(expected_base_url: &str) -> Result<Self> {
+        read_stored_auth_for_base_url(expected_base_url).map(|auth| Self::of(&auth))
+    }
+
+    fn of(auth: &StoredArceeAuth) -> Self {
+        Self {
+            organization_id: auth.organization_id.clone(),
+            workspace_name: auth.workspace_name.clone(),
+        }
+    }
+
+    fn admit(pin: Option<&Self>, auth: &StoredArceeAuth) -> Result<()> {
+        match pin {
+            Some(pin) if *pin != Self::of(auth) => bail!(
+                "a different Arcee workspace is signed in than the one this request was \
+                 admitted under"
+            ),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Refreshes after a 401. Passing the access token that failed lets a queued
@@ -888,9 +932,22 @@ pub(super) async fn force_refresh_access_token(
     expected_base_url: &str,
     stale_access_token: &str,
 ) -> Result<String> {
-    refresh_locked(client, expected_base_url, |auth| {
-        auth.access_token == stale_access_token
-    })
+    force_refresh_access_token_for(client, expected_base_url, stale_access_token, None).await
+}
+
+/// `force_refresh_access_token` for a client pinned to one login.
+pub(super) async fn force_refresh_access_token_for(
+    client: &Client,
+    expected_base_url: &str,
+    stale_access_token: &str,
+    pin: Option<&ArceeLoginIdentity>,
+) -> Result<String> {
+    refresh_locked(
+        client,
+        expected_base_url,
+        |auth| auth.access_token == stale_access_token,
+        pin,
+    )
     .await
 }
 
@@ -901,20 +958,23 @@ async fn refresh_locked(
     client: &Client,
     expected_base_url: &str,
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+    pin: Option<&ArceeLoginIdentity>,
 ) -> Result<String> {
     let auth_path = arcee_auth_file_path()?;
     let lock_path = arcee_auth_lock_path()?;
-    refresh_locked_with(
+    refresh_locked_pinned(
         client,
         expected_base_url,
         should_refresh,
         &auth_path,
         &lock_path,
         ArceeAuthService::approved,
+        pin,
     )
     .await
 }
 
+#[cfg(test)]
 async fn refresh_locked_with(
     client: &Client,
     expected_base_url: &str,
@@ -923,9 +983,33 @@ async fn refresh_locked_with(
     lock_path: &Path,
     resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
 ) -> Result<String> {
+    refresh_locked_pinned(
+        client,
+        expected_base_url,
+        should_refresh,
+        auth_path,
+        lock_path,
+        resolve_service,
+        None,
+    )
+    .await
+}
+
+/// The refresh itself. The record re-read under both locks is the one that
+/// counts, so a pinned login is checked there too, before any rotation.
+async fn refresh_locked_pinned(
+    client: &Client,
+    expected_base_url: &str,
+    should_refresh: impl Fn(&StoredArceeAuth) -> bool,
+    auth_path: &Path,
+    lock_path: &Path,
+    resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
+    pin: Option<&ArceeLoginIdentity>,
+) -> Result<String> {
     let _gate = refresh_gate().lock().await;
     let _lock = acquire_refresh_lock(lock_path).await?;
     let auth = read_stored_auth_for_base_url_at(auth_path, expected_base_url)?;
+    ArceeLoginIdentity::admit(pin, &auth)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
     }

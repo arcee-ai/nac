@@ -346,7 +346,10 @@ impl PinnedQuestionModel {
         snapshot: &SessionSnapshot,
         model: &ResumeModelOptions,
     ) -> anyhow::Result<Self> {
-        let client = crate::runtime::pinned_session_model_client(snapshot, model)?;
+        let mut client = crate::runtime::pinned_session_model_client(snapshot, model)?;
+        // A stored login is re-read for each request and refresh; keep this
+        // question on the workspace or account signed in when it was admitted.
+        client.pin_stored_login()?;
         Ok(Self::from_client(client, snapshot.config_version))
     }
 
