@@ -48,6 +48,25 @@ describe("bindSelection", () => {
     expect(bindSelection(source, "   ")).toBeNull();
   });
 
+  it("never binds to source the reply does not show as text", () => {
+    // Rendered "a-b ab": the selected final "ab" sits 4/6 of the way in, which
+    // is nearer the hidden URL's "a-b" than the "ab" itself.
+    expect(bindSelection("[a-b](https://example.com/a-b) ab", "ab", 4 / 6)).toEqual({
+      start: 31,
+      end: 33,
+      excerpt: "ab",
+    });
+    expect(bindSelection("![plot of runs](plot.png) The plot", "plot", 0)?.start).toBe(30);
+    expect(bindSelection("<!-- cache --> The cache", "cache", 0)?.start).toBe(19);
+    expect(bindSelection("Let $x + y$ be x", "x", 0)?.start).toBe(15);
+    // Only hidden copies match: refused rather than guessed.
+    const referenced = "See [the docs][guide].\n\n[guide]: https://example.com/guide";
+    expect(bindSelection(referenced, "guide", 1)).toBeNull();
+    // Code shows its Markdown as typed, so a selection there still binds.
+    expect(bindSelection("Use `[x](y)` here", "[x](y)", 0.5)?.excerpt).toBe("[x](y)");
+    expect(bindSelection("```\n<b>bold</b>\n```", "<b>bold</b>", 0.5)?.start).toBe(4);
+  });
+
   it("prefers the occurrence nearest to where the selection was made", () => {
     const repeated = "same words here. same words here.";
     expect(bindSelection(repeated, "same words", 0)?.start).toBe(0);

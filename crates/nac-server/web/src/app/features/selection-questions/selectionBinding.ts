@@ -5,6 +5,9 @@
  * the range the person meant.
  */
 
+import { FENCE, closesFence, lineAt, nextLine } from "@/app/lib/markdown-lines";
+import { normalizeMath } from "@/app/lib/math-source";
+
 /** Must match the server's documented excerpt bound. */
 export const MAX_EXCERPT_CHARS = 4_000;
 export const MAX_QUESTION_CHARS = 2_000;
@@ -20,6 +23,72 @@ export interface SelectionBinding {
 // headings, quotes, list bullets, table pipes and link brackets.
 const MARKUP = new Set(["*", "_", "`", "~", "#", ">", "|", "-", "+", "[", "]"]);
 const isSpace = (char: string) => /\s/u.test(char);
+
+// Source the rendered reply never shows as text: an image (alt text included),
+// a link's destination and title, a reference label or definition, and raw
+// HTML. Each applies outside code only, where Markdown is shown as typed.
+const HIDDEN = [
+  /!\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)/g,
+  /(?<=\])\((?:[^()\n]|\([^()\n]*\))*\)/g,
+  /(?<=\])\[[^\]\n]*\]/g,
+  /^ {0,3}\[[^\]\n]+\]:[^\n]*$/gm,
+  /<!--[\s\S]*?-->/g,
+  /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/g,
+];
+
+/** UTF-16 ranges of fenced blocks and inline code spans. */
+function codeRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let opener: string | null = null;
+  let blockStart = 0;
+  for (let index = 0; index < text.length; index = nextLine(text, index)) {
+    const line = lineAt(text, index);
+    if (opener === null) {
+      const fence = FENCE.exec(line);
+      if (fence) {
+        opener = fence[1];
+        blockStart = index;
+      }
+    } else if (closesFence(line, opener)) {
+      ranges.push([blockStart, index + line.length]);
+      opener = null;
+    }
+  }
+  if (opener !== null) ranges.push([blockStart, text.length]);
+  const blocks = ranges.slice();
+  for (const span of text.matchAll(/(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g)) {
+    if (!blocks.some(([start, end]) => start <= span.index && span.index < end)) {
+      ranges.push([span.index, span.index + span[0].length]);
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Scalar-offset ranges of `text` the reply does not show as text: the
+ * constructs above, and math, which renders as a formula.
+ */
+function hiddenRanges(text: string): Array<[number, number]> {
+  const code = codeRanges(text);
+  const hidden = normalizeMath(text).spans;
+  for (const pattern of HIDDEN) {
+    for (const match of text.matchAll(pattern)) {
+      if (!code.some(([start, end]) => start <= match.index && match.index < end)) {
+        hidden.push([match.index, match.index + match[0].length]);
+      }
+    }
+  }
+  // Offsets so far are UTF-16; bindings count Unicode scalars.
+  const scalar = new Uint32Array(text.length + 1);
+  let count = 0;
+  for (let unit = 0; unit < text.length; count += 1) {
+    const width = (text.codePointAt(unit) ?? 0) > 0xffff ? 2 : 1;
+    scalar.fill(count, unit, unit + width);
+    unit += width;
+  }
+  scalar[text.length] = count;
+  return hidden.map(([start, end]) => [scalar[start], scalar[end]]);
+}
 
 function matchAt(source: string[], selected: string[], from: number): number | null {
   let k = from;
@@ -40,8 +109,10 @@ function matchAt(source: string[], selected: string[], from: number): number | n
  * Map rendered selected text onto the stored text. Whitespace runs compare as
  * one space and Markdown markup in the source may be skipped; every other
  * character must match exactly. `hint` (0..1) prefers the occurrence nearest
- * to where the selection sat in the rendered block. Null when the selection
- * does not map, for example across a link target or a rendered formula.
+ * to where the selection sat in the rendered block, among occurrences the
+ * reply shows: one in a link target, an image, raw HTML or math is never
+ * chosen. Null when the selection does not map, for example across a link
+ * target or a rendered formula, or when only hidden text matches it.
  */
 export function bindSelection(
   sourceText: string,
@@ -52,11 +123,13 @@ export function bindSelection(
   if (selected.length === 0) return null;
   const source = Array.from(sourceText);
   const target = Math.round(Math.min(Math.max(hint, 0), 1) * source.length);
+  const hidden = hiddenRanges(sourceText);
   let best: SelectionBinding | null = null;
   for (let start = 0; start < source.length; start += 1) {
     if (source[start] !== selected[0]) continue;
     const end = matchAt(source, selected, start);
     if (end == null) continue;
+    if (hidden.some(([from, to]) => start < to && from < end)) continue;
     if (best == null || Math.abs(start - target) < Math.abs(best.start - target)) {
       best = { start, end, excerpt: source.slice(start, end).join("") };
     }

@@ -17,8 +17,10 @@ export interface SelectionBinding {
  * Map rendered selected text onto the stored text. Whitespace runs compare as
  * one space and Markdown markup in the source may be skipped; every other
  * character must match exactly. `hint` (0..1) prefers the occurrence nearest
- * to where the selection sat in the rendered block. Null when the selection
- * does not map, for example across a link target or a rendered formula.
+ * to where the selection sat in the rendered block, among occurrences the
+ * reply shows: one in a link target, an image, raw HTML or math is never
+ * chosen. Null when the selection does not map, for example across a link
+ * target or a rendered formula, or when only hidden text matches it.
  */
 export declare function bindSelection(sourceText: string, renderedSelection: string, hint?: number): SelectionBinding | null;
 /**
