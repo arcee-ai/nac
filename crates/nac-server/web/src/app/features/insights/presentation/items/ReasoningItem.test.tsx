@@ -3,12 +3,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadMarkdownRenderer } from "@/app/lib/markdownChunk";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ReasoningItem } from "./ReasoningItem";
 import type { ReasoningSegment } from "./itemContent";
 
 vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
+
+// Synchronize the real renderer before testing focus and selection retention.
+beforeAll(async () => {
+  await loadMarkdownRenderer();
+});
 
 afterEach(() => {
   cleanup();
