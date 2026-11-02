@@ -11,6 +11,7 @@ import plistlib
 import re
 import shutil
 import time
+from ci_paths_budget import active, using, check as budget_check, path_digest
 
 from ci_paths_protocol import CASES, Cursor, PRODUCT, HELPER, decode, final_record, read_record, require
 from ci_paths_attachments import TESTS, collect
@@ -45,7 +46,7 @@ def validate_allocation(value, harness_sha, *, now=None):
     started, deadline = value['started_at_epoch'], value['deadline_epoch']
     stamp = time.time() if now is None else now
     require(type(started) in (int, float) and type(deadline) in (int, float)
-            and started <= stamp < deadline and 0 < deadline - started <= 2700, 'original allocation clock')
+            and started <= stamp < deadline and 0 < deadline - started <= 2340, 'original allocation clock')
     return value
 
 
@@ -77,13 +78,13 @@ def verify_build(product, app, mode):
             and receipt.get('engine_identity', {}).get('source_revision') == PRODUCT, 'owning build/source receipt')
     for key, relative in (('native_sha256', 'Contents/MacOS/NACPreview'),
                           ('engine_sha256', 'Contents/Resources/nac-web'), ('info_plist_sha256', 'Contents/Info.plist')):
-        require(receipt.get(key) == digest((app / relative).read_bytes()), 'owning build bytes: ' + key)
+        require(receipt.get(key) == path_digest(app/relative), 'owning build bytes: ' + key)
     for roster in ('native_source_files', 'build_support_files'):
         require(type(receipt.get(roster)) is dict and receipt[roster], 'build source list')
         for relative, expected in receipt[roster].items():
             path = product / relative
             require(path.resolve() == path and path.is_relative_to(product)
-                    and digest(path.read_bytes()) == expected, 'build compiler/support input changed')
+                    and path_digest(path) == expected, 'build compiler/support input changed')
     if mode == 'app-build':
         require(receipt.get('normal_startup') is True and receipt.get('smoke_instrumentation') is False
                 and receipt.get('preview_definitions_excluded') is True
@@ -156,7 +157,7 @@ def settle_case(evidence, relocated, collection, settle):
                 owner='accepted H541 settle_apps; no Finder signal/input/close')
 
 
-def run_case(raw, product, app, selection, harness_sha, scenario, run, command, settle, deadline, *, build_deadline=None):
+def run_case(raw, product, app, selection, harness_sha, scenario, run, command, settle, deadline, *, build_deadline=None, budget=None):
     folder = raw / scenario
     folder.mkdir(mode=0o700)
     evidence_dir = folder / 'app-evidence'
@@ -186,22 +187,23 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
         tool = AttachmentTool(folder, command)
         stage = 'build'
         try:
-            helper_build_limit = min(deadline, build_deadline or deadline) - time.time()
-            require(helper_build_limit > 0, 'original build/helper deadline')
-            run(['xcodebuild', 'build-for-testing', '-project', selection['project'], '-scheme', selection['scheme'],
-                 '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
-                 '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(config_path),
-                 'NAC_PATH_HARNESS_SHA=' + harness_sha, 'NAC_PATH_CONFIGURATION_SHA256=' + config_hash],
-                folder / 'build.log', min(240, helper_build_limit))
-            runners = list((derived / 'Build/Products').glob('*.xctestrun'))
-            require(len(runners) == 1, 'actual generated runner count')
-            data = bounded_file(runners[0], 256 * 1024)
-            target = require_generated_runner(plistlib.loads(data), config_path, 'NACPathUITests',
-                                               project_selection=selection['receipt'],
-                                               paths_binding=dict(harness_sha=harness_sha, configuration_sha256=config_hash))
-            proof['runner'] = dict(xctestrun_sha256=digest(data), configuration_sha256=config_hash,
-                                   target=target, selection=selection['receipt'])
-            write(folder / 'runner.json', proof['runner'])
+            with using(budget.work.capped(build_deadline) if budget else None):
+                helper_build_limit = min(deadline,build_deadline or deadline)-(budget.monotonic() if budget else time.time())
+                require(helper_build_limit > 0, 'original build/helper deadline')
+                run(['xcodebuild', 'build-for-testing', '-project', selection['project'], '-scheme', selection['scheme'],
+                     '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
+                     '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(config_path),
+                     'NAC_PATH_HARNESS_SHA=' + harness_sha, 'NAC_PATH_CONFIGURATION_SHA256=' + config_hash],
+                    folder / 'build.log', min(240, helper_build_limit))
+                runners = list((derived / 'Build/Products').glob('*.xctestrun'))
+                require(len(runners) == 1, 'actual generated runner count')
+                data = bounded_file(runners[0], 256 * 1024)
+                target = require_generated_runner(plistlib.loads(data), config_path, 'NACPathUITests',
+                                                   project_selection=selection['receipt'],
+                                                   paths_binding=dict(harness_sha=harness_sha, configuration_sha256=config_hash))
+                proof['runner'] = dict(xctestrun_sha256=digest(data), configuration_sha256=config_hash,
+                                       target=target, selection=selection['receipt'])
+                write(folder / 'runner.json', proof['runner'])
             stage = 'admission'
             tool.prepare()
             require(authorization_policy(observe_prerequisites(command)) == policy, 'policy changed during build')
@@ -209,7 +211,11 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
             for source, expected in selection['receipt']['sources'].items():
                 require(digest(bounded_file(Path(source), 256 * 1024)) == expected, 'XCTest compiler input changed')
             verify_build(product, relocated, 'smoke-build')
-            require(time.time() < deadline, 'original native deadline')
+            if budget is not None:budget.observe()
+            require((budget.monotonic() if budget else time.time()) < deadline,'original native deadline')
+            if budget is not None:
+                require(budget.work.capped(deadline).timeout(480,15)>=480,
+                        'insufficient original full test/helper slot before input')
             stage = 'test'
             relocation['safe_to_remove'] = False
             attempted = True
@@ -217,7 +223,7 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
                  '-only-testing:NACPathUITests/PathJourneys/' + TESTS[CASES.index(scenario)]],
-                folder / 'test.log', min(480, max(1, deadline - time.time())))
+                folder / 'test.log', min(480,deadline-(budget.monotonic() if budget else time.time())))
             final_record(read_record(evidence, evidence_dir), scenario)
             proof['product_passed'] = True
         except BaseException as error:
@@ -235,29 +241,33 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
                 errors['result'] = 'MissingActualResult'
             if attempted:
                 try:
-                    proof['cleanup'] = settle_case(evidence, relocated, collection, settle)
+                    with using(budget.cleanup if budget else None):
+                        proof['cleanup'] = settle_case(evidence,relocated,collection,settle)
+                    if budget is not None:budget.require_success()
                     relocation['safe_to_remove'] = True
                 except BaseException as error:
                     errors['cleanup'] = type(error).__name__
                 try:
-                    after = observe_prerequisites(command)
-                    write(folder / 'prerequisites-after.json', after)
-                    require(authorization_policy(after) == policy, 'end policy changed')
+                    with using(budget.cleanup if budget else None):
+                        after=observe_prerequisites(command)
+                        write(folder/'prerequisites-after.json',after)
+                        require(authorization_policy(after)==policy,'end policy changed')
                     proof['persistent_authorization_policy_unchanged'] = True
                 except BaseException as error:
                     errors['policy'] = type(error).__name__
-            proof.update(attempted=attempted, errors=errors, source_controls_only=False,
-                         passed=attempted and not errors, retained_bundle=not relocation['safe_to_remove'])
-            # Actual runner artifacts are hashed above; raw generated build metadata
-            # is neither a fixture receipt nor a permitted host diagnostic export.
-            if derived.exists():
-                shutil.rmtree(derived)
-            write(folder / 'essential.json', proof)
+            with using(budget.retention if budget else None):
+                proof.update(attempted=attempted, errors=errors, source_controls_only=False,
+                             passed=attempted and not errors, retained_bundle=not relocation['safe_to_remove'])
+                # Actual runner artifacts are hashed above; raw generated build metadata
+                # is neither a fixture receipt nor a permitted host diagnostic export.
+                if derived.exists():
+                    shutil.rmtree(derived)
+                write(folder / 'essential.json', proof)
     require(proof['passed'], 'path case failed; later case unrun')
     return proof
 
 
-def qualify(raw, product, target, harness_sha, run, command, settle, allocation):
+def qualify(raw, product, target, harness_sha, run, command, settle, allocation, *, budget=None):
     require({k: target[k] for k in TARGET} == TARGET, 'fixed two-case target')
     require_checkout(product, PRODUCT)
     require_checkout(ROOT, harness_sha)
@@ -266,22 +276,28 @@ def qualify(raw, product, target, harness_sha, run, command, settle, allocation)
                                    output=raw / 'path-project')
     # Original stage caps never reset between builds or fresh cases. The
     # existing overall H deadline can only shorten this later allocation.
-    build_deadline = min(allocation['started_at_epoch'] + 1200, allocation['deadline_epoch'] - 600)
+    build_deadline = (min(budget.origin+1200,budget.work.deadline) if budget else
+                      min(allocation['started_at_epoch']+1200,allocation['deadline_epoch']-600))
     def build(mode, name):
-        remaining = build_deadline - time.time()
+        remaining = build_deadline-(budget.monotonic() if budget else time.time())
         require(remaining > 0, 'original build/helper deadline')
-        run(['bash', 'desktop/macos/preview.sh', mode], raw / name, min(900, remaining), cwd=product)
+        with using(budget.work.capped(build_deadline) if budget else None):
+            run(['bash','desktop/macos/preview.sh',mode],raw/name,min(900,remaining),cwd=product)
     # Existing app writer exclusively owns both builds and their receipts.
     build('app-build', 'path-ordinary-build.log')
     ordinary = verify_build(product, raw / 'NAC.app', 'app-build')
     build('smoke-build', 'path-smoke-build.log')
     smoke = verify_build(product, raw / 'NAC Development Preview Smoke.app', 'smoke-build')
     cases = []
-    native_deadline = min(time.time() + 900, allocation['deadline_epoch'] - 600)
+    native_deadline = (min(budget.monotonic()+900,budget.work.deadline) if budget else
+                       min(time.time()+900,allocation['deadline_epoch']-600))
     for scenario in CASES:
-        require(time.time() < allocation['deadline_epoch'] - 600, 'reserved cleanup/retention clock')
-        cases.append(run_case(raw, product, raw / 'NAC Development Preview Smoke.app', selection,
-                              harness_sha, scenario, run, command, settle, native_deadline, build_deadline=build_deadline))
+        budget_check()
+        if budget is not None:budget.observe()
+        require((budget.monotonic() if budget else time.time()) < native_deadline,'reserved cleanup/retention clock')
+        with using(budget.work.capped(native_deadline) if budget else None):
+            cases.append(run_case(raw,product,raw/'NAC Development Preview Smoke.app',selection,
+                harness_sha,scenario,run,command,settle,native_deadline,build_deadline=build_deadline,budget=budget))
     require_checkout(product, PRODUCT)
     require_checkout(ROOT, harness_sha)
     return dict(paths=dict(H=harness_sha, T=PRODUCT, helper_sha256=HELPER, ordinary_build=ordinary,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual AppKit/WKWebView acceptance; requires an interactive Aqua session."""
 import hashlib
+from ci_paths_budget import check as budget_check, timeout_options
 import json
 import os
 import plistlib
@@ -55,11 +56,12 @@ def cleanup_failed_case(evidence, relocated):
         os.kill(helper, signal.SIGTERM)
     for key, executable in [('engine_pid', relocated / 'Contents/Resources/nac-web'),
                             ('app_pid', relocated / 'Contents/MacOS/NACPreview')]:
+        budget_check()
         pid = record.get(key, 0)
         if not pid:
             continue
         command = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'command='],
-                                 capture_output=True, text=True).stdout
+                                 capture_output=True,text=True,**timeout_options()).stdout
         if not command:
             continue
         if str(executable) not in command:
@@ -68,21 +70,24 @@ def cleanup_failed_case(evidence, relocated):
             raise RuntimeError(f'Refusing cleanup of unowned engine group {pid}')
         send = (lambda sig: os.killpg(pid, sig)) if key == 'engine_pid' else (lambda sig: os.kill(pid, sig))
         try:
+            budget_check()
             send(signal.SIGTERM)
             deadline = time.monotonic() + (25 if key == 'engine_pid' else 3)
             while time.monotonic() < deadline:
+                budget_check()
                 state = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='],
-                                       capture_output=True, text=True).stdout.strip()
+                                       capture_output=True,text=True,**timeout_options()).stdout.strip()
                 if not state or state.startswith('Z'):
                     break
                 time.sleep(0.05)
+            budget_check()
             send(signal.SIGKILL)
         except ProcessLookupError:
             pass
         except PermissionError:
             # Darwin can report EPERM for an already dead process group. Never
             # hide a permission failure while any group member can still run.
-            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True)
+            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True,**timeout_options())
             members = [line.split() for line in rows.splitlines()]
             live = [row for row in members if len(row) == 3 and
                     int(row[1 if key == 'engine_pid' else 0]) == pid and not row[2].startswith('Z')]
@@ -91,6 +96,7 @@ def cleanup_failed_case(evidence, relocated):
     root = Path(record.get('profile', '/missing-ownership-record'))
     if (root.name.startswith('nac-mac-preview-') and not root.is_symlink()
             and root.resolve().parent == Path(tempfile.gettempdir()).resolve()):
+        budget_check()
         if root.exists():
             shutil.rmtree(root)
 

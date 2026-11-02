@@ -1,5 +1,6 @@
 """Retain only the terminal driver's bounded, actual XCTest attachments."""
 import hashlib
+from ci_paths_budget import check as budget_check, checked_digest
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ def digest(data):
 
 
 def bounded_file(path, limit):
+    budget_check()
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor, 'rb') as stream:
         info = os.fstat(stream.fileno())
@@ -31,6 +33,7 @@ def bounded_file(path, limit):
         data = stream.read(limit + 1)
     if len(data) > limit:
         raise RuntimeError('Attachment file changed beyond its bound')
+    budget_check()
     return data
 
 
@@ -288,7 +291,7 @@ class AttachmentTool:
         if not tool.is_file() or not tool.is_relative_to(developer.parent.parent):
             raise RuntimeError('Resolved xcresulttool is outside the selected Xcode bundle')
         with tool.open('rb') as stream:
-            tool_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
+            tool_hash = checked_digest(stream).hexdigest()
         self.identity = {'path': self.path, 'sha256': tool_hash,
                          'version': self.capture([self.path, 'version'], 'xctest-tool-version').decode()}
         self.save()

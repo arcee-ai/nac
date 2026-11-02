@@ -1,5 +1,6 @@
 """Shared public XCTest launcher; never provisions host permissions."""
 import hashlib
+from ci_paths_budget import active, using, check as budget_check, timeout_options, checked_items
 import json
 import os
 from contextlib import contextmanager
@@ -32,15 +33,22 @@ def relocation_directory(raw):
     try:
         yield lease
     finally:
-        if lease['safe_to_remove']:
-            shutil.rmtree(path)
-        (raw / 'xctest-relocation.json').write_text(json.dumps({
-            'path': str(path), 'bundle_retained_for_unresolved_cleanup': not lease['safe_to_remove']}, indent=2) + '\n')
+        bound=active()
+        if bound is not None and bound.owner.failed:lease['safe_to_remove']=False
+        with using(bound.owner.retention if bound else None):
+            try:
+                if lease['safe_to_remove']:
+                    budget_check()
+                    shutil.rmtree(path)
+            finally:
+                (raw / 'xctest-relocation.json').write_text(json.dumps({
+                    'path':str(path),'bundle_retained_for_unresolved_cleanup':not lease['safe_to_remove']},indent=2)+'\n')
 
 
 def observe_process_status(pid, *, strict=False):
     """Existing exact-PID observer; strict historical checks reject unknown rows."""
-    result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
+    result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True,text=True,**timeout_options())
+    budget_check()
     if result.returncode not in (0, 1):
         raise RuntimeError('Cannot observe owned fixture process settlement')
     if strict and (type(result.stdout) is not str or type(result.stderr) is not str
@@ -164,7 +172,8 @@ def result_receipt(path):
         raise RuntimeError('Xcode did not generate its required result bundle')
     digest = hashlib.sha256()
     count = total = 0
-    for file in sorted(path.rglob('*')):
+    for file in sorted(checked_items(path.rglob('*'))):
+        budget_check()
         if file.is_symlink():
             raise RuntimeError('Unexpected symlink in generated XCTest result')
         if not file.is_file():
@@ -175,7 +184,9 @@ def result_receipt(path):
         digest.update(str(file.relative_to(path)).encode() + b'\0' + str(size).encode() + b'\0')
         with file.open('rb') as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                budget_check()
                 digest.update(chunk)
+    budget_check()
     return {'files': count, 'bytes': total, 'tree_sha256': digest.hexdigest(),
             'retention': 'Sanitized xcresulttool export only; raw result may contain host diagnostics'}
 

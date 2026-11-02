@@ -1,4 +1,5 @@
 """Path-specific attachment admission through H's existing SDK export owner."""
+from ci_paths_budget import check as budget_check, checked_items
 from collections import Counter
 import json
 from pathlib import Path
@@ -34,11 +35,13 @@ def validate_payloads(values, config, configuration_hash, *, passing):
     scope = {k: v for k, v in history[0].items() if k not in ('version', 'name', 'sequence')}
     cursor = Cursor(scope)
     for phase in history:
+        budget_check()
         cursor.accept(phase)
     inputs = controller.get('inputs')
     require(type(inputs) is int and 0 <= inputs <= 160, 'input bound')
     rows = []
     for number in range(1, inputs + 1):
+        budget_check()
         row = decode(values[f'nac347-input-{number:03d}'])
         require(row.get('schema') == 'nac347-input-v1' and row.get('index') == number
                 and row.get('configuration_sha256') == configuration_hash
@@ -64,6 +67,7 @@ def validate_payloads(values, config, configuration_hash, *, passing):
     total = 0
     images = []
     for name in actual:
+        budget_check()
         data = values['nac347-' + name]
         # The existing PNG framing/CRC writer owns validation; smaller Finder
         # images are intentionally unqualified until the real readability gate.
@@ -88,6 +92,7 @@ def validate_payloads(values, config, configuration_hash, *, passing):
                *('nac347-' + n for n in actual), *('nac347-caption-' + n for n in actual)}
     if scenario == CASES[0]:
         for stage, sequence in (('before', 3), ('after', 4)):
+            budget_check()
             name = 'nac347-finder-' + stage
             if name not in values:
                 require(not passing, 'missing Finder baseline/selection receipt')
@@ -104,6 +109,7 @@ def validate_payloads(values, config, configuration_hash, *, passing):
             windows = row.get('windows')
             require(type(windows) is list and len(windows) <= 64, 'Finder bounded windows')
             for ordinal, window in enumerate(windows):
+                budget_check()
                 require(type(window) is dict and window.get('index') == ordinal
                         and type(window.get('owned_title')) is bool
                         and all(type(window.get(k)) is int and 0 <= window[k] <= 4096
@@ -119,6 +125,7 @@ def validate_payloads(values, config, configuration_hash, *, passing):
     if passing:
         cursor.finish()
         require(inputs > 0 and set(actual) == set(expected), 'incomplete passing controller/captures')
+    budget_check()
     return dict(complete=passing, scope=scope, history=history, inputs=rows, images=images,
                 actual_image_review_required=True, Finder_window_left_open=True)
 
@@ -134,9 +141,11 @@ def collect(tool, result, config, configuration_hash, output, *, passing):
                 if value.get('nodeType') == 'Test Case':
                     yield value
                 for child in value.values():
+                    budget_check()
                     yield from cases(child)
             elif isinstance(value, list):
                 for child in value:
+                    budget_check()
                     yield from cases(child)
         found = list(cases(decode(tree_data)))
         require(len(found) == 1 and found[0].get('nodeIdentifier') == test_id
@@ -148,7 +157,7 @@ def collect(tool, result, config, configuration_hash, output, *, passing):
             tool.capture([tool.path, 'export', 'attachments', '--path', str(result), '--test-id', test_url,
                           '--output-path', str(export)], 'paths-export', retain=False)
             require(export.is_dir() and not export.is_symlink()
-                    and not any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in export.rglob('*')), 'export inventory')
+                    and not any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in checked_items(export.rglob('*'))), 'export inventory')
             manifest = decode(bounded_file(export / 'manifest.json', 256 * 1024))
             require(type(manifest) is list and len(manifest) == 1 and manifest[0].get('testIdentifier') == test_id
                     and manifest[0].get('testIdentifierURL', test_url) == test_url, 'export test binding')
@@ -157,6 +166,7 @@ def collect(tool, result, config, configuration_hash, output, *, passing):
             named, filenames = {}, []
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             for entry in entries:
+                budget_check()
                 name, filename = entry.get('suggestedHumanReadableName'), entry.get('exportedFileName')
                 require(type(filename) is str and filename not in ('', '.', '..')
                         and '/' not in filename and '\\' not in filename and '\0' not in filename, 'attachment filename')
@@ -169,6 +179,7 @@ def collect(tool, result, config, configuration_hash, output, *, passing):
             require(all(count == 1 for count in Counter(filenames).values()), 'duplicate export file')
             values, total = {}, 0
             for name, filename in named.items():
+                budget_check()
                 limit = 2 * 1024 * 1024 if name in {'nac347-' + n for group in CAPTURES for n in group} else 256 * 1024
                 data = bounded_file(export / filename, limit)
                 total += len(data)
@@ -176,6 +187,7 @@ def collect(tool, result, config, configuration_hash, output, *, passing):
                 values[name] = data
             proof = validate_payloads(values, config, configuration_hash, passing=passing)
             for name, data in values.items():
+                budget_check()
                 extension = '.png' if name in {'nac347-' + n for group in CAPTURES for n in group} else '.json'
                 (output / (name + extension)).write_bytes(data)
                 index['retained'].append(dict(file=name + extension, bytes=len(data), sha256=digest(data)))

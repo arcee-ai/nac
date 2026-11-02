@@ -401,7 +401,7 @@ also needs an explicit `NAC_PATHS_CUSTODY` capsule from ROOT's separately review
 source/host/custody allocation and `CARGO_BUILD_JOBS=2`. The bounded capsule binds
 version 1, H, T, both ordered cases, `source_preflight=true`,
 `native_eligibility=true`, one allocation ID, original start/deadline epochs
-(maximum 2700 seconds), and zero retries. Exclusive `.consumed` creation prevents
+(maximum 2340 queue-inclusive seconds), and zero retries. Exclusive `.consumed` creation prevents
 reusing it. The maintained manual selector transports the optional `paths_custody` JSON
 through `macos-qualification.yml`; its path-only step validates the original
 contract and writes those exact bytes into a fresh private runner directory,
@@ -438,3 +438,18 @@ and are discovered by the existing workflow-lint job. They establish no compiled
 XCTest import/target, sandbox readability, trusted input, actual chooser/Finder,
 minimum-OS or complete ALL-354/ALL-347 acceptance. Those gates remain **UNRUN**
 until a separate frozen-source native allocation.
+
+The path clock uses one original ROOT allocation started before its one exact
+dispatch, at most2340s including queues. ROOT’s operation ledger must bind the
+actual repository/ref/H/run/firstattempt and exact original capsule bytes; local
+`.consumed` is not cross-run replay evidence. `native_eligibility=true` expresses
+conditional ROOT authorization; actual clean source/toolchain/console/policy
+checks before input remain mandatory. It does not attest to a future host.
+
+Under the existing synchronized-UTC engineering premise, a declared60s allowance
+shortens the ROOT deadline once; it is not measured skew evidence. C' is the
+earlier of that conservative conversion and H's original import+1800s deadline.
+Work/collection ends C'-600, cleanup C'-120 and retention C'. Build1200s and
+sharedcases900s only shorten those fixed bounds. Clock discontinuity, expiry or
+unknown cleanup latches failure, retains relocated bundles and permits only
+independent bounded cleanup/retention; it never renews a case or grants input.
