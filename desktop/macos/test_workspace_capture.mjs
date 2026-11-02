@@ -35,9 +35,17 @@ function fixture(html, hash = '#/session/owned-child/insights') {
     const original = evaluate(originalScript);
     const result = evaluate(script);
     const projection = { ...result };
-    for (const key of ['approval_predicates', 'resource_predicates', 'settled_predicates']) delete projection[key];
+    for (const key of ['approval_predicates', 'resource_predicates', 'settled_predicates', 'message_page']) delete projection[key];
     const plain = value => JSON.parse(JSON.stringify(value));
-    assert.deepEqual(plain(projection), plain(original), 'diagnostics must preserve every prior readiness field');
+    // Deliberate contract delta: an explicit COMPLETE visible page is now
+    // mandatory. All other frozen fields and all approval behavior stay exact.
+    const page = sessionState?.message_page;
+    const completePage = page?.start === 0 && page?.end === 2 && page?.total === 2 && page?.has_older === false;
+    if (expected.kind === 'rich' && !completePage && original.reason !== 'requested route not current') {
+      original.ready = false;
+      original.reason = 'owned full answer not settled';
+    }
+    assert.deepEqual(plain(projection), plain(original), 'only the declared mandatory-page delta may change prior fields');
     assert.equal(dom.window.document.body.innerHTML, before, 'neither probe may mutate the document');
     return result;
   },
@@ -228,7 +236,7 @@ test('wrong current route cannot qualify approval', () => {
 const richMarkdown = "WK_RICH_COMPLETE\n\n| Engine | Workspace |\n| --- | --- |\n| System WebKit | shared React |\n\nA formula: $x^2 + y^2 = z^2$.\n\n```typescript\nexport const webkitFixture = 351;\n```\n\n[Fixture source](workspace.ts) and [NAC documentation](https://github.com/arcee-ai/nac).";
 
 const richTarget = {kind:'rich',id:'owned-rich',markdown:richMarkdown};
-const richState = {metadata:{session_id:'owned-rich'},messages:[{role:'user',content:'WK_RICH'},{role:'assistant',content:richMarkdown}],message_created_at:[null,'fixture-timestamp']};
+const richState = {message_page:{start:0,end:2,total:2,has_older:false},metadata:{session_id:'owned-rich'},messages:[{role:'user',content:'WK_RICH'},{role:'assistant',content:richMarkdown}],message_created_at:[null,'fixture-timestamp']};
 const richHTML = '<div data-nac-content><div class="overflow-auto"><div class="markdown-content"><p>WK_RICH_COMPLETE</p><table><tr><th>Engine</th><th>Workspace</th></tr><tr><td>System WebKit</td><td>shared React</td></tr></table><p>A formula <mjx-container jax="CHTML"><mjx-math><mjx-mi><mjx-c>x</mjx-c></mjx-mi></mjx-math></mjx-container></p><pre><code><span style="color:teal">export const webkitFixture = 351;</span></code></pre></div></div></div>' + composer;
 function richObservation(html=richHTML,state=richState,options={}) {
  const f=fixture(html,options.hash||'#/session/owned-rich/insights');
@@ -280,10 +288,11 @@ test('the original comparator is the frozen 24d probe, not revised expectations'
 test('rich diagnostics retain every settled conjunct without choosing readiness', () => {
   const result = richObservation();
   assert.equal(result.ready, true);
+  assert.equal(result.settled_predicates.page_absent, false);
   for (const value of Object.values(result.settled_predicates)) assert.equal(typeof value, 'boolean');
   for (const key of ['owner', 'no_active_run', 'no_active_compaction', 'no_run_failure',
     'no_recovery_warning', 'message_count_2', 'answer_index_1', 'first_role_user',
-    'first_content_WK_RICH', 'page_absent', 'page_valid', 'settled']) {
+    'first_content_WK_RICH', 'page_start_0', 'page_end_2', 'page_total_2', 'page_no_older', 'page_valid', 'settled']) {
     assert.equal(result.settled_predicates[key], true, key);
   }
 });
@@ -398,4 +407,25 @@ test('more pending requests than the diagnostic cap never become a singleton', (
   const result = approvalObservation(approvalHTML, state);
   assert.equal(result.ready, false);
   assert.equal(result.approval_predicates.one_request, false);
+});
+
+// No fetches: explicit source-contract examples, not a native/server result.
+for (const page of [null, {}, {start:0,total:2},
+  {start:1,end:2,total:2,has_older:false}, {start:0,end:1,total:2,has_older:false},
+  {start:0,end:2,total:3,has_older:false}, {start:0,end:2,total:2,has_older:true},
+  {start:false,end:2,total:2,has_older:false}, {start:0,end:'2',total:2,has_older:false},
+  {start:0,end:2,total:2,has_older:0}]) {
+ test('explicit visible page must be complete and strictly typed: '+JSON.stringify(page),()=>{
+  const state=structuredClone(richState);state.message_page=page;
+  const result=richObservation(richHTML,state);
+  assert.equal(result.ready,false);assert.equal(result.settled_predicates.page_valid,false);
+ });
+}
+test('unfiltered modeled canonical history cannot satisfy the separate visible-page guard',()=>{
+ const canonical=structuredClone(richState); delete canonical.message_page;
+ canonical.messages.unshift({role:'system',content:'new offline synthetic System, no historical plaintext claim'});
+ const original=structuredClone(canonical);
+ assert.equal(richObservation(richHTML,canonical).ready,false);
+ assert.equal(richObservation().ready,true);
+ assert.deepEqual(canonical,original);
 });

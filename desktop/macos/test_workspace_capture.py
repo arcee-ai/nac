@@ -18,15 +18,29 @@ class WorkspaceCaptureTests(unittest.TestCase):
         print(result.stdout, end='')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_diagnostic_changes_preserve_original_assertions_fetches_and_entire_snapshot(self):
+    def test_declared_visible_page_delta_preserves_approval_and_entire_snapshot(self):
         """Source preservation only; this does not execute Swift or native paint."""
         source = self.source('WorkspaceSmoke.swift')
         script = re.search(r'static let captureReadinessScript = #"""\n([\s\S]*?)\n    """#', source)[1]
-        for declaration in ['owned', 'settled']:
-            pattern = r'const ' + declaration + r' = [\s\S]*?;\n'
-            self.assertEqual(re.search(pattern, script)[0], re.search(pattern, self.frozen('originalScript'))[0])
+        pattern = r'const owned = [\s\S]*?;\n'
+        self.assertEqual(re.search(pattern, script)[0], re.search(pattern, self.frozen('originalScript'))[0])
+        pattern = r'const settled = [\s\S]*?;\n'
+        original = re.search(pattern, self.frozen('originalScript'))[0]
+        old = '(!sessionState.message_page || sessionState.message_page.start === 0 && sessionState.message_page.total === 2)'
+        new = ('sessionState.message_page?.start === 0 && sessionState.message_page?.end === 2 &&\n'
+               '        sessionState.message_page?.total === 2 && sessionState.message_page?.has_older === false')
+        self.assertIn(old, original)
+        self.assertEqual(re.search(pattern, script)[0], original.replace(old, new))
         prefix = source[source.index('    func captureReadiness('):source.index('        guard var value = try await')]
-        self.assertEqual(prefix, self.frozen('originalCapturePrefix'))
+        canonical = prefix[prefix.index('            canonicalState ='):prefix.index('            arguments["sessionState"]')]
+        self.assertIn("'?include_sessions=false'", canonical)
+        self.assertIn('Canonical snapshot owner differs', canonical)
+        self.assertNotIn('.filter', prefix)
+        self.assertNotIn('.drop', prefix)
+        projected = prefix.replace('        var canonicalState: [String: Any]?\n', '').replace(canonical, '')
+        projected = projected.replace(" + '?message_limit=3&include_system=false&include_sessions=false'", '')
+        self.assertEqual(projected, self.frozen('originalCapturePrefix'))
+        self.assertIn('value["canonical_snapshot"] = canonicalState', source)
         self.assertEqual(source[source.index('    func snapshot('):], self.frozen('originalSnapshotBlock'))
 
     def test_goal_dependency_source_blocks_all_actions_without_changing_the_success_branch(self):
@@ -43,7 +57,7 @@ class WorkspaceCaptureTests(unittest.TestCase):
         self.assertNotIn('webView', no)
         self.assertIn('record(["checks": checks])', no)
 
-    def test_diagnostic_caps_and_hash_source_do_not_filter_guard_inputs_or_log_message_text(self):
+    def test_visible_diagnostics_are_bounded_and_hash_content_with_separate_raw_snapshot(self):
         """Check declared source bounds; Swift helper runtime is unqualified."""
         source = self.source('WorkspaceSmoke.swift')
         result_at = source.index('        guard var value = try await')
@@ -61,6 +75,28 @@ class WorkspaceCaptureTests(unittest.TestCase):
         self.assertIn('if text {', helper)
         self.assertIn('result["json_sha256"]', helper)
         self.assertIn('[.sortedKeys, .fragmentsAllowed]', helper)
+
+
+class CanonicalFixtureSourceTests(unittest.TestCase):
+    def test_strict_owned_binding_precedes_provider_and_expectation(self):
+        root = Path(__file__).parent
+        fixture = (root / 'WorkspaceFixture.swift').read_text()
+        journey = (root / 'WorkspaceJourneys.swift').read_text()
+        smoke = (root / 'WorkspaceSmoke.swift').read_text()
+        self.assertIn('try WorkspaceFixture.prepareExternalReadTarget(in: profile.root)', smoke)
+        for token in ('realpath(root.path, nil)', 'realpath(requested, nil)', 'O_EXCL | O_NOFOLLOW',
+                      'O_RDONLY | O_NOFOLLOW | O_NONBLOCK', 'bound.st_dev == identity.device',
+                      'bound.st_ino == identity.inode', 'bound.st_nlink == 1',
+                      'owner.st_ino == identity.rootInode', 'owner.st_uid == getuid()',
+                      'owner.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0'):
+            self.assertIn(token, fixture)
+        self.assertIn('guard let path = try? requireExternalReadTarget()', fixture)
+        self.assertIn('"WK_APPROVAL_FIXTURE_INVALID"', fixture)
+        self.assertLess(journey.index('_ = try WorkspaceFixture.requireExternalReadTarget()'),
+                        journey.index('try await self.send("WK_APPROVAL")'))
+        self.assertIn('let path = try WorkspaceFixture.requireExternalReadTarget()', journey)
+        self.assertNotIn('resolvingSymlinksInPath', journey)
+        # Static checks only: Swift compilation and OS/broker characterization UNRUN.
 
 
 if __name__ == '__main__':

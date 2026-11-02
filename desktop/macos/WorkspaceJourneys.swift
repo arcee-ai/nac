@@ -116,9 +116,12 @@ extension WorkspaceSmoke {
             return "Actual Git branch, authoritative file diff and rendered hunk; no terminal input claim"
         }
         await check("approvals") {
+            _ = try WorkspaceFixture.requireExternalReadTarget()
             try await self.send("WK_APPROVAL")
             try await self.waitJS("real Rust approval request", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Allow once') && document.body.innerText.includes('approval.txt');")
-            let path = URL(fileURLWithPath: WorkspaceFixture.externalPath).resolvingSymlinksInPath().path
+            // Keep the POSIX canonical identity bound before model invocation.
+            // Use the stored POSIX spelling directly for the exact-match target.
+            let path = try WorkspaceFixture.requireExternalReadTarget()
             guard let requestID = try await self.js("const r=await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/permissions',{cache:'no-store'}); if(!r.ok)return null; const state=await r.json(); return state.requests.length === 1 ? state.requests[0].id : null;") as? String else {
                 throw PreviewError.message("Expected one owned pending approval request")
             }

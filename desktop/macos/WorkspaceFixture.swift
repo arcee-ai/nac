@@ -1,9 +1,81 @@
 #if PREVIEW_SMOKE
 import Foundation
+import Darwin
 
 /// Fixture-only model output. Never handles real credentials or user stores.
 enum WorkspaceFixture {
-    static var externalPath = ""
+    private(set) static var externalPath = ""
+    private static var externalIdentity: (root: String, rootDevice: dev_t, rootInode: ino_t,
+                                          device: dev_t, inode: ino_t)?
+
+    // Disposable fixture only. Freeze a POSIX canonical existing-file identity
+    // before constructing provider arguments or the expected approval target.
+    static func prepareExternalReadTarget(in root: URL) throws {
+        let directory = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directory >= 0 else { throw PreviewError.message("Owned approval root unavailable") }
+        defer { _ = close(directory) }
+        var owner = stat()
+        guard fstat(directory, &owner) == 0,
+              owner.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR), owner.st_uid == getuid(),
+              owner.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0 else {
+            throw PreviewError.message("Approval root is not an owned private directory")
+        }
+        let descriptor = openat(directory, "approval.txt", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+                                mode_t(S_IRUSR | S_IWUSR))
+        guard descriptor >= 0 else { throw PreviewError.message("Owned approval fixture creation failed") }
+        defer { _ = close(descriptor) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+        try handle.write(contentsOf: Data("Owned external fixture for approval\n".utf8))
+        var created = stat()
+        guard fstat(descriptor, &created) == 0,
+              created.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), created.st_uid == getuid(),
+              created.st_nlink == 1, created.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0,
+              let rootBytes = realpath(root.path, nil) else {
+            throw PreviewError.message("Owned approval fixture identity unavailable")
+        }
+        defer { free(rootBytes) }
+        let canonicalRoot = String(cString: rootBytes)
+        let requested = root.appendingPathComponent("approval.txt").path
+        guard let fileBytes = realpath(requested, nil) else {
+            throw PreviewError.message("Owned approval fixture canonical binding failed")
+        }
+        defer { free(fileBytes) }
+        let canonical = String(cString: fileBytes)
+        guard canonical == canonicalRoot + "/approval.txt" else {
+            throw PreviewError.message("Owned approval fixture escaped its private root")
+        }
+        externalPath = canonical
+        externalIdentity = (canonicalRoot, owner.st_dev, owner.st_ino, created.st_dev, created.st_ino)
+        _ = try requireExternalReadTarget()
+    }
+
+    static func requireExternalReadTarget() throws -> String {
+        guard let identity = externalIdentity, !externalPath.isEmpty else {
+            throw PreviewError.message("Owned approval target was not bound")
+        }
+        let directory = open(identity.root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directory >= 0 else { throw PreviewError.message("Owned approval root changed") }
+        defer { _ = close(directory) }
+        var owner = stat()
+        guard fstat(directory, &owner) == 0, owner.st_uid == getuid(),
+              owner.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+              owner.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0,
+              owner.st_dev == identity.rootDevice, owner.st_ino == identity.rootInode else {
+            throw PreviewError.message("Owned approval root identity changed")
+        }
+        let descriptor = openat(directory, "approval.txt", O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else { throw PreviewError.message("Owned approval target changed") }
+        defer { _ = close(descriptor) }
+        var bound = stat()
+        guard fstat(descriptor, &bound) == 0, bound.st_uid == getuid(), bound.st_nlink == 1,
+              bound.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              bound.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0,
+              bound.st_dev == identity.device, bound.st_ino == identity.inode,
+              externalPath == identity.root + "/approval.txt" else {
+            throw PreviewError.message("Owned approval target identity changed")
+        }
+        return externalPath
+    }
     // Static JSON-RPC metadata over stdio; no tools or shell commands run on behalf of a model.
     static let mcpScript = #"""
     #!/bin/sh
@@ -65,9 +137,12 @@ enum WorkspaceFixture {
         guard let user = input.last(where: { $0["role"] as? String == "user" }) else { return nil }
         let serialized = String(decoding: try! JSONSerialization.data(withJSONObject: user), as: UTF8.self)
         if serialized.contains("WK_APPROVAL") {
+            guard let path = try? requireExternalReadTarget() else {
+                return text("WK_APPROVAL_FIXTURE_INVALID")
+            }
             return ["id": "fc-wk-approval", "type": "function_call", "status": "completed",
                     "call_id": "wk-approval", "name": "read",
-                    "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: ["path": externalPath]), as: UTF8.self)]
+                    "arguments": String(decoding: try! JSONSerialization.data(withJSONObject: ["path": path]), as: UTF8.self)]
         }
         if serialized.contains("WK_RICH") { return text(rich) }
         return nil

@@ -53,8 +53,8 @@ final class WorkspaceSmoke {
         // and UI configuration reads also need their normal bounded window.
         try await waitJS("fixture configuration", "return !!document.querySelector('[role=dialog]');", timeout: 60)
         guard let profile = app.profile else { throw PreviewError.message("Missing isolated profile") }
-        WorkspaceFixture.externalPath = profile.root.appendingPathComponent("approval.txt").path
-        try Data("Owned external fixture for approval\n".utf8).write(to: URL(fileURLWithPath: WorkspaceFixture.externalPath))
+        // Create and bind the canonical owned file before any fixture model read.
+        try WorkspaceFixture.prepareExternalReadTarget(in: profile.root)
         try Data("export const workspaceFileFixture = 351;\n".utf8).write(to: profile.workspace.appendingPathComponent("workspace.ts"))
         try Data(WorkspaceFixture.mcpScript.utf8).write(to: profile.root.appendingPathComponent("tmp/workspace-mcp.sh"))
         record(["profile": profile.root.path, "engine_pid": app.engine.pid,
@@ -260,17 +260,18 @@ final class WorkspaceSmoke {
         resource_predicates:resourcePredicates};
     }
     if (expected.kind === 'rich') {
-      // One freshly created owned fixture, one WK_RICH prompt and one settled
-      // exact answer. The public snapshot has ordinals, not durable message IDs.
+      // Use the server's visible-message page, not its full canonical transcript.
+      // Require the entire two-message visible fixture; never filter locally.
       const messages = sessionState?.messages || [];
       const index = messages.findIndex(m => m.role === 'assistant' && m.content === expected.markdown);
       const fullAnswer = index >= 0 ? messages[index].content : null;
       const settled = sessionState?.metadata?.session_id === expected.id && !sessionState.active_run &&
         !sessionState.active_compaction && !sessionState.run_failure && !sessionState.transcript_recovery_warning &&
         messages.length === 2 && index === 1 && messages[0].role === 'user' && messages[0].content === 'WK_RICH' &&
-        (!sessionState.message_page || sessionState.message_page.start === 0 && sessionState.message_page.total === 2);
+        sessionState.message_page?.start === 0 && sessionState.message_page?.end === 2 &&
+        sessionState.message_page?.total === 2 && sessionState.message_page?.has_older === false;
       // Evaluate every conjunct separately for the retained observation only.
-      // The settled expression, its exact 2/1 expectations, and reason stay unchanged.
+      // Strict visible 2/1 expectations remain; complete page metadata is required.
       const settledPredicates = {
         owner:sessionState?.metadata?.session_id === expected.id,
         no_active_run:!sessionState?.active_run, no_active_compaction:!sessionState?.active_compaction,
@@ -279,8 +280,10 @@ final class WorkspaceSmoke {
         first_role_user:messages[0]?.role === 'user', first_content_WK_RICH:messages[0]?.content === 'WK_RICH',
         page_absent:!sessionState?.message_page, page_start_0:sessionState?.message_page?.start === 0,
         page_total_2:sessionState?.message_page?.total === 2,
-        page_valid:!sessionState?.message_page ||
-          sessionState.message_page.start === 0 && sessionState.message_page.total === 2,
+        page_end_2:sessionState?.message_page?.end === 2,
+        page_no_older:sessionState?.message_page?.has_older === false,
+        page_valid:sessionState?.message_page?.start === 0 && sessionState?.message_page?.end === 2 &&
+          sessionState?.message_page?.total === 2 && sessionState?.message_page?.has_older === false,
         settled:!!settled
       };
       const candidates = [...document.querySelectorAll('[data-nac-content] .markdown-content')].filter(e =>
@@ -318,6 +321,7 @@ final class WorkspaceSmoke {
       return {ready:reason==='ready',reason,expected,hash,loadingConversation:loading,visibility:document.visibilityState,
         full_answer:fullAnswer, message_identity:{session_id:expected.id,visible_index:index,
           created_at:sessionState?.message_created_at?.[index] ?? null,message_count:messages.length},
+        message_page:sessionState?.message_page || null,
         viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},fonts_ready:!!fonts,surfaces,
         sentinel_observation:richInspect(sentinel), settled_predicates:settledPredicates};
     }
@@ -363,8 +367,13 @@ final class WorkspaceSmoke {
 
     func captureReadiness(_ target: CaptureTarget) async throws -> [String: Any] {
         var arguments: [String: Any] = ["expected": target.payload, "permissionState": NSNull(), "sessionState": NSNull()]
+        var canonicalState: [String: Any]?
         if case let .rich(id, _) = target {
-            arguments["sessionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)),{cache:'no-store'}); if(!r.ok)throw Error('Owned snapshot unavailable'); return await r.json();")
+            canonicalState = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '?include_sessions=false',{cache:'no-store'}); if(!r.ok)throw Error('Canonical snapshot unavailable'); return await r.json();") as? [String: Any]
+            guard (canonicalState?["metadata"] as? [String: Any])?["session_id"] as? String == id else {
+                throw PreviewError.message("Canonical snapshot owner differs")
+            }
+            arguments["sessionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '?message_limit=3&include_system=false&include_sessions=false',{cache:'no-store'}); if(!r.ok)throw Error('Owned snapshot unavailable'); return await r.json();")
         }
         if case let .approval(id, _, _) = target {
             arguments["permissionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/permissions',{cache:'no-store'}); if(!r.ok)throw Error('Permission state unavailable'); return await r.json();")
@@ -373,8 +382,14 @@ final class WorkspaceSmoke {
             arguments: arguments, in: nil, contentWorld: .page) as? [String: Any] else {
             throw PreviewError.message("Capture readiness returned no observation")
         }
-        // Hash only the already-fetched snapshot. No extra request, mutation,
-        // filtering, canonical rewrite, readiness override, or retry is added.
+        if let canonicalState {
+            // Keep the unfiltered canonical fixture transcript separately from
+            // the explicit visible page. This does not identify any old lost text.
+            value["canonical_snapshot"] = canonicalState
+        }
+        // Hash only the already-fetched visible page. No extra request, local
+        // filtering, readiness override or retry is added. Full snapshots retain
+        // canonical system messages and are not this probe's cardinality contract.
         if case .rich = target, let state = arguments["sessionState"] as? [String: Any] {
             let messages = state["messages"] as? [[String: Any]] ?? []
             let times = state["message_created_at"] as? [Any] ?? []

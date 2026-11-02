@@ -13,6 +13,7 @@ import time
 
 from smoke import cleanup_failed_case
 from workspace_report import identity, sha256, write_report
+from workspace_critical import write_critical_receipts
 
 
 def console_state():
@@ -38,7 +39,7 @@ def build_manifest(app):
     print(json.dumps(record, indent=2))
 
 
-def run_case(app, output, scenario, *, slow_start=False):
+def run_case(app, output, scenario, *, slow_start=False, provenance=None):
     """Use the existing bounded ownership cleanup on timeout and failed launch."""
     evidence = output / f'{scenario}.json'
     if evidence.exists():
@@ -96,6 +97,7 @@ def run_case(app, output, scenario, *, slow_start=False):
                 record.update(runner_cleanup_attempted=evidence.exists(),
                               relocated_app=str(relocated))
                 evidence.write_text(json.dumps(record, indent=2) + '\n')
+                write_critical_receipts(output, scenario, record, provenance or {})
                 raise
     record['elapsed_seconds'] = round(time.monotonic() - started, 3)
     native_success = (record.get('passed') is True and record.get('engine_reaped') is True
@@ -119,8 +121,11 @@ def run_case(app, output, scenario, *, slow_start=False):
         else:
             record.update(passed=False, runner_error='Engine identity survived cleanup')
     evidence.write_text(json.dumps(record, indent=2) + '\n')
-    if record.get('engine_reaped') and record.get('profile_removed') and process.returncode == 0:
-        shutil.rmtree(temporary)
+    try:
+        write_critical_receipts(output, scenario, record, provenance or {})
+    finally:
+        if record.get('engine_reaped') and record.get('profile_removed') and process.returncode == 0:
+            shutil.rmtree(temporary)
     print(json.dumps({'scenario': scenario, 'passed': record.get('passed'),
                       'checks': {k: v['status'] for k, v in record.get('checks', {}).items()}}), flush=True)
     return record
@@ -162,7 +167,7 @@ def main():
         provenance['baseline_evidence'] = str(args.baseline.resolve())
     try:
         for scenario in [args.scenario] if args.scenario else ['workspace-direct', 'workspace-legacy']:
-            episodes[scenario] = run_case(app, output, scenario, slow_start=args.slow_start)
+            episodes[scenario] = run_case(app, output, scenario, slow_start=args.slow_start, provenance=provenance)
             write_report(output, provenance, episodes, baseline)
     finally:
         # An interrupted case can still have useful per-feature receipts.
