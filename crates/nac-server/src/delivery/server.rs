@@ -1,5 +1,5 @@
 use super::http_listener::HttpListener;
-use super::presentation_bootstrap::PresentationDocument;
+use super::presentation_bootstrap::{PresentationBinding, PresentationDocument};
 use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
@@ -604,7 +604,14 @@ pub fn router(manager: SessionManager) -> Router {
                 .config(SwaggerConfig::default().validator_url("none")),
         )
         .layer(middleware::from_fn(secure_docs));
-    secure_public_router(api.merge(docs).merge(embedded_frontend_router()), manager)
+    let presentation = PresentationBinding::capture();
+    let document = presentation.embedded_document();
+    secure_public_router(
+        api.merge(docs)
+            .merge(embedded_frontend_router(document))
+            .layer(axum::Extension(presentation)),
+        manager,
+    )
 }
 
 fn secure_public_router(router: Router, manager: SessionManager) -> Router {
@@ -662,18 +669,20 @@ fn managed_migration_recovery_router(manager: SessionManager) -> Router {
     ))
 }
 
-fn embedded_frontend_router() -> Router {
+fn embedded_frontend_router(document: PresentationDocument) -> Router {
     Router::new()
         .route("/", get(index_html))
         .route("/app", get(index_html))
         .route("/assets/{*path}", get(serve_asset))
-        .layer(axum::Extension(PresentationDocument::capture()))
+        .layer(axum::Extension(document))
 }
 
 fn documented_api() -> OpenApiRouter<SessionManager> {
     let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(ui_configuration::get_ui_configuration))
+        .routes(routes!(delivery::product_context::read))
+        .routes(routes!(delivery::product_context::resolve))
         .routes(routes!(managed_status::healthz_handler))
         .routes(routes!(managed_status::readyz_handler))
         .routes(routes!(managed_status::managed_status_handler))
@@ -994,6 +1003,25 @@ pub(crate) async fn serve_with_policy_and_readiness(
     on_listening: impl FnOnce(SocketAddr),
     readiness_policy: application::managed::ManagedReadinessPolicy,
 ) -> Result<()> {
+    serve_with_lifecycle(
+        addr,
+        policy,
+        manager,
+        on_listening,
+        readiness_policy,
+        shutdown_signal(),
+    )
+    .await
+}
+
+pub(crate) async fn serve_with_lifecycle(
+    addr: SocketAddr,
+    policy: BindPolicy,
+    manager: SessionManager,
+    on_listening: impl FnOnce(SocketAddr),
+    readiness_policy: application::managed::ManagedReadinessPolicy,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     policy.validate(addr)?;
     // Establish the durable store before serving requests. Readiness probes
     // then verify this store in place and never create a blank replacement if
@@ -1072,7 +1100,7 @@ pub(crate) async fn serve_with_policy_and_readiness(
         control_listener.map(|listener| (listener, managed_control::router(manager.clone()))),
         app,
         manager,
-        shutdown_signal(),
+        shutdown,
         COMPLETE_SHUTDOWN_TIMEOUT,
         || std::process::exit(0),
     )
@@ -1201,15 +1229,24 @@ where
     result
 }
 
-fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
-    eprintln!(
-        "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
-        timeout.as_millis()
-    );
+pub(crate) fn forced_shutdown_after_timeout(timeout: Duration, force_shutdown: impl FnOnce()) {
+    // Diagnostic readers disappear with a dead parent, and a stalled reader
+    // can leave another writer holding stderr's lock. Neither may defeat the
+    // independent watchdog. Best-effort reporting never gates forced exit.
+    let _ = std::thread::Builder::new()
+        .name("nac-shutdown-diagnostic".into())
+        .spawn(move || {
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "nac: complete graceful shutdown exceeded {} ms; forcing runtime exit",
+                timeout.as_millis()
+            );
+        });
     force_shutdown();
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(error) = tokio::signal::ctrl_c().await {
             eprintln!("nac: failed to install Ctrl-C handler: {error}");

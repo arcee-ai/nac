@@ -9,6 +9,14 @@ import { routes } from "@/app/lib/routes";
 import type { ManagedSessionSummary, SessionBehavior } from "@/app/types/api";
 import { useSidebarCommands } from "./useSidebarCommands";
 
+vi.mock("@/app/features/product-context/context", () => ({
+  useProductNavigationOwner: () => ({
+    openMcp: vi.fn(),
+    openSsh: vi.fn(),
+    openConfigurations: vi.fn(),
+    inspect: vi.fn(),
+  }),
+}));
 const state = vi.hoisted(() => ({
   sessions: undefined as ManagedSessionSummary[] | undefined,
   newChat: vi.fn(),
