@@ -30,6 +30,11 @@ pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
 pub(crate) const MAX_ALIASES: usize = 1000;
 /// Directory entries examined to expand one `Include` glob.
 pub(crate) const MAX_GLOB_ENTRIES: usize = 1024;
+/// Filesystem lookups made to follow Includes across the whole walk: one per
+/// Include target visited, glob directory listed or directory entry examined.
+/// A repeated Include repeats its lookups even when it adds nothing, so this
+/// bounds them walk-wide; it leaves room for a full-size glob at every depth.
+pub(crate) const MAX_INCLUDE_LOOKUPS: usize = MAX_INCLUDE_DEPTH * MAX_GLOB_ENTRIES;
 
 /// Why a discovery result may be incomplete. Each names a class of problem
 /// only; none carries a path or file contents.
@@ -41,6 +46,8 @@ pub(crate) enum AliasDiscoveryWarning {
     MissingInclude,
     IncludeCycle,
     IncludeDepthExceeded,
+    /// The walk-wide file or Include lookup budget ran out, so later
+    /// Includes were not followed.
     FileLimitReached,
     AliasLimitReached,
     /// An Include that needs runtime evaluation (tokens, environment
@@ -86,10 +93,7 @@ pub(crate) fn discover(home: Option<&Path>) -> AliasDiscovery {
         walk.warn(AliasDiscoveryWarning::HomeUnavailable);
         return walk.finish();
     };
-    let mut walk = Walk::new(home.to_path_buf());
-    let root = home.join(".ssh").join("config");
-    walk.visit(&root, 0, true);
-    walk.finish()
+    Walk::from_home(home).finish()
 }
 
 struct Walk {
@@ -101,6 +105,8 @@ struct Walk {
     /// Canonical files on the current include chain, for cycle detection.
     chain: Vec<PathBuf>,
     files_read: usize,
+    /// Include lookups spent so far, against `MAX_INCLUDE_LOOKUPS`.
+    include_lookups: usize,
 }
 
 impl Walk {
@@ -112,7 +118,15 @@ impl Walk {
             visited: HashSet::new(),
             chain: Vec::new(),
             files_read: 0,
+            include_lookups: 0,
         }
+    }
+
+    /// Reads `~/.ssh/config` and every Include it can resolve statically.
+    fn from_home(home: &Path) -> Self {
+        let mut walk = Self::new(home.to_path_buf());
+        walk.visit(&home.join(".ssh").join("config"), 0, true);
+        walk
     }
 
     fn finish(self) -> AliasDiscovery {
@@ -125,7 +139,23 @@ impl Walk {
         }
     }
 
+    /// Pays for one Include lookup before it is made. Once the file budget
+    /// is spent no Include can add a file, and once the lookup budget is
+    /// spent none is followed at all; Host lines in text already read are
+    /// still collected either way.
+    fn spend_lookup(&mut self) -> bool {
+        if self.files_read == MAX_FILES || self.include_lookups == MAX_INCLUDE_LOOKUPS {
+            self.warn(AliasDiscoveryWarning::FileLimitReached);
+            return false;
+        }
+        self.include_lookups += 1;
+        true
+    }
+
     fn visit(&mut self, path: &Path, depth: usize, is_root: bool) {
+        if !is_root && !self.spend_lookup() {
+            return;
+        }
         let canonical = match std::fs::canonicalize(path) {
             Ok(canonical) => canonical,
             // No ~/.ssh/config at all is the ordinary empty case.
@@ -143,9 +173,6 @@ impl Walk {
         // A file included twice without a cycle has already contributed.
         if self.visited.contains(&canonical) {
             return;
-        }
-        if self.files_read == MAX_FILES {
-            return self.warn(AliasDiscoveryWarning::FileLimitReached);
         }
         self.files_read += 1;
         self.visited.insert(canonical.clone());
@@ -288,6 +315,9 @@ impl Walk {
     }
 
     fn expand_glob(&mut self, directory: &Path, pattern: &str) -> Option<Vec<PathBuf>> {
+        if !self.spend_lookup() {
+            return None;
+        }
         let entries = match std::fs::read_dir(directory) {
             Ok(entries) => entries,
             // OpenSSH treats a glob that matches nothing as nothing to read.
@@ -302,6 +332,9 @@ impl Walk {
             if examined == MAX_GLOB_ENTRIES {
                 self.warn(AliasDiscoveryWarning::UnsupportedInclude);
                 break;
+            }
+            if !self.spend_lookup() {
+                return None;
             }
             let Ok(entry) = entry else { continue };
             let file_name = entry.file_name();

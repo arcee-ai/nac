@@ -31,6 +31,11 @@ impl Home {
     fn discover(&self) -> AliasDiscovery {
         discover(Some(&self.0))
     }
+
+    /// The walk itself, so a test can count the Include lookups it made.
+    fn walk(&self) -> Walk {
+        Walk::from_home(&self.0)
+    }
 }
 
 impl Drop for Home {
@@ -344,6 +349,66 @@ fn the_number_of_files_read_is_bounded() {
     assert_eq!(
         discovery.aliases.first().map(String::as_str),
         Some("many000")
+    );
+    assert_eq!(discovery.warnings, [W::FileLimitReached]);
+}
+
+#[test]
+fn repeated_globs_after_the_file_limit_make_no_further_lookups() {
+    // One static glob repeated far more often than it can contribute, over
+    // more files than the walk may read.
+    let home = Home::new("repeated_glob_files");
+    let files = MAX_FILES + 1;
+    for index in 0..files {
+        home.write(
+            &home.ssh(&format!("d/{index:03}")),
+            &format!("Host d{index:03}\n"),
+        );
+    }
+    home.config(&format!(
+        "Host before\nHost *\n{}Host after\n",
+        "Include d/*\n".repeat(1000)
+    ));
+    let walk = home.walk();
+    // One listing, each entry examined once, and a visit for each file read
+    // until the root and these fill the file limit. No repetition after that
+    // looks anything up.
+    assert_eq!(walk.include_lookups, 1 + files + (MAX_FILES - 1));
+    let discovery = walk.finish();
+    assert_eq!(discovery.aliases.len(), 1 + (MAX_FILES - 1) + 1);
+    assert_eq!(discovery.aliases[1], "d000");
+    assert_eq!(
+        discovery.aliases.last().map(String::as_str),
+        Some("after"),
+        "Host lines after the stopped Includes are still collected"
+    );
+    assert_eq!(discovery.warnings, [W::FileLimitReached]);
+}
+
+#[test]
+fn includes_that_read_nothing_new_stop_at_the_lookup_budget() {
+    // Re-including files already read never reaches the file limit, but each
+    // repetition lists, examines and visits again.
+    let home = Home::new("repeated_glob_lookups");
+    for name in ["a", "b", "c"] {
+        home.write(
+            &home.ssh(&format!("d/{name}")),
+            &format!("Host in-{name}\n"),
+        );
+    }
+    home.write(&home.ssh("seen"), "Host seen\n");
+    // A listing, three entries and three visits for the glob; one visit for `seen`.
+    let per_repetition = 1 + 3 + 3 + 1;
+    home.config(&format!(
+        "Host before\nHost *\n{}Host after\n",
+        "Include d/* seen\n".repeat(2 * MAX_INCLUDE_LOOKUPS / per_repetition)
+    ));
+    let walk = home.walk();
+    assert_eq!(walk.include_lookups, MAX_INCLUDE_LOOKUPS);
+    let discovery = walk.finish();
+    assert_eq!(
+        aliases(&discovery),
+        ["before", "in-a", "in-b", "in-c", "seen", "after"]
     );
     assert_eq!(discovery.warnings, [W::FileLimitReached]);
 }
