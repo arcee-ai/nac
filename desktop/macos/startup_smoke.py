@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real relocated LOCAL_APP / system WKWebView startup qualification."""
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -38,10 +39,45 @@ class Catalog(BaseHTTPRequestHandler):
         pass
 
 
+@contextmanager
+def startup_profile(evidence, relocated, retained):
+    """Keep private roots in custody until existing exact-owner cleanup settles."""
+    root = Path(tempfile.mkdtemp(prefix='nac-finder-profile-')).resolve()
+    failure = None
+    try:
+        yield root
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            record = json.loads(evidence.read_text())
+            if (not isinstance(record, dict)
+                    or type(record.get('app_pid')) is not int or record['app_pid'] <= 0
+                    or type(record.get('engine_pid')) is not int or record['engine_pid'] < 0):
+                raise RuntimeError('Incomplete startup ownership record; cleanup is unproven')
+            cleanup_failed_case(evidence, relocated)
+            shutil.rmtree(root)
+        except BaseException as error:
+            retained.append(root)
+            diagnostic = f'Startup cleanup unproven; retained profile {root} and app {relocated}: {error}'
+            print(diagnostic, file=sys.stderr)
+            if failure is None:
+                raise
+            failure.add_note(diagnostic)
+
+
 def main():
     app, destination = (Path(value).resolve() for value in sys.argv[1:])
     destination.mkdir(parents=True, exist_ok=True)
     locked = console_locked()
+    vendor = os.environ.get('NAC_STARTUP_SCENARIOS') == 'startup-real-arcee'
+    if vendor and os.environ.get('NAC_STARTUP_REAL_VENDOR') != '1':
+        raise RuntimeError('The real-vendor case requires explicit NAC_STARTUP_REAL_VENDOR=1')
+    if vendor and 'ARCEE_API_KEY' not in os.environ:
+        raise RuntimeError('The authorized existing ARCEE_API_KEY environment reference is unavailable')
+    if 'startup-real-arcee' in os.environ.get('NAC_STARTUP_SCENARIOS', '') and not vendor:
+        raise RuntimeError('Run the single bounded real-vendor case separately from dummy fixtures')
     identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
     metadata = {
         'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -53,7 +89,7 @@ def main():
         'sdk': subprocess.check_output(['xcrun', '--show-sdk-version'], text=True).strip(),
         'screen_locked': locked,
         'visible_paint_acceptance': 'pending_locked_session' if locked else 'requires_image_review',
-        'vendor_authentication': 'not_exercised_dummy_provider',
+        'vendor_authentication': 'arcee_api_environment_reference_requested' if vendor else 'not_exercised_dummy_provider',
     }
     (destination / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     catalog = ThreadingHTTPServer(('127.0.0.1', 0), Catalog)
@@ -64,7 +100,9 @@ def main():
     provider_url = json.loads(provider.stdout.readline())['base_url']
     results = []
     try:
-        with tempfile.TemporaryDirectory(prefix='nac-finder-relocation-') as relocation:
+        relocation = Path(tempfile.mkdtemp(prefix='nac-finder-relocation-')).resolve()
+        retained_profiles = []
+        try:
             relocated = Path(relocation).resolve() / 'Moved app folder with spaces' / app.name
             shutil.copytree(app, relocated)
             scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
@@ -73,8 +111,7 @@ def main():
             for scenario in scenarios:
                 case = destination / scenario
                 case.mkdir(exist_ok=True)
-                with tempfile.TemporaryDirectory(prefix='nac-finder-profile-') as temporary:
-                    root = Path(temporary).resolve()
+                with startup_profile(case / 'result.json', relocated, retained_profiles) as root:
                     home, workspace = root / 'home with spaces', root / 'workspace with spaces'
                     home.mkdir(mode=0o700)
                     workspace.mkdir(mode=0o700)
@@ -82,6 +119,10 @@ def main():
                         'LANG': 'en_US.UTF-8', 'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0',
                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none',
                         'MODELS_DEV_URL': f'http://127.0.0.1:{catalog.server_port}/models-dev'}
+                    if vendor:
+                        # Existing child-environment inheritance only: never use
+                        # command arguments, fixtures, preferences or key files.
+                        environment['ARCEE_API_KEY'] = os.environ['ARCEE_API_KEY']
                     nac = home / '.config/nac'
                     if scenario == 'startup-nac-relative':
                         environment.update(NAC_HOME='selected nac', XDG_CONFIG_HOME='ignored xdg')
@@ -141,6 +182,8 @@ def main():
                         '--smoke-scenario', scenario, '--smoke-output', str(evidence),
                         '--smoke-workspace', str(workspace), '--smoke-expected-store', str(store),
                         '--smoke-provider', provider_url, '--smoke-paint', '0' if locked else '1'] + launch_options
+                    if vendor and os.environ.get('NAC_STARTUP_VENDOR_SELECTION_ONLY') == '1':
+                        command += ['--smoke-selection-only', '1']
                     with (case / 'launch.log').open('w') as log:
                         opened = subprocess.Popen(command, cwd='/', env=environment, stdout=log, stderr=log)
                         try:
@@ -159,12 +202,19 @@ def main():
                             record['profile_cleaned_by_runner'] = True
                             record['screen_locked'] = locked
                             results.append(record)
-                        except BaseException:
-                            if opened.poll() is None:
-                                opened.terminate()
-                                opened.wait(timeout=5)
-                            cleanup_failed_case(evidence, relocated)
+                        except BaseException as failure:
+                            try:
+                                if opened.poll() is None:
+                                    opened.terminate()
+                                    opened.wait(timeout=5)
+                            except BaseException as error:
+                                failure.add_note(f'LaunchServices wrapper cleanup failed: {error}')
                             raise
+        finally:
+            if retained_profiles:
+                print(f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', file=sys.stderr)
+            else:
+                shutil.rmtree(relocation)
         provider.stdin.write('{"kind":"finish"}\n')
         provider.stdin.flush()
         report = json.loads(provider.stdout.readline())
@@ -174,16 +224,23 @@ def main():
         assert provider.returncode == 0
         (destination / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     finally:
-        catalog.shutdown()
-        catalog.server_close()
-        if provider.poll() is None:
-            provider.stdin.close()
-            try:
-                provider.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                provider.terminate()
-                provider.wait(timeout=5)
-        provider_log.close()
+        failure = sys.exception()
+        try:
+            catalog.shutdown()
+            catalog.server_close()
+            if provider.poll() is None:
+                provider.stdin.close()
+                try:
+                    provider.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    provider.terminate()
+                    provider.wait(timeout=5)
+        except BaseException as error:
+            if failure is None:
+                raise
+            failure.add_note(f'Provider teardown failed: {error}')
+        finally:
+            provider_log.close()
 
 
 if __name__ == '__main__':

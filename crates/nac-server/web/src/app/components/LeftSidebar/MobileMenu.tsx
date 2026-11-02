@@ -113,6 +113,10 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
               <Badge text={String(commands.sshCount)} color={BadgeColor.Gray} background={false} />
             ) : null}
           </TabButton>
+          <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.inspectProduct)}>
+            <Icon iconName={IconName.Info} />
+            <span className="flex-grow text-left">NAC capabilities</span>
+          </TabButton>
           <Separator />
           <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.openConfigurations)}>
             <Icon iconName={IconName.Gear} />
@@ -149,7 +153,6 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
         activeSessionId={commands.sessionId}
         activeProjectId={commands.projectId}
       />
-      {commands.modals}
     </>
   );
 }
