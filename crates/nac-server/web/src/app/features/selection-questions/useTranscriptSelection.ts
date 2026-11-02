@@ -38,7 +38,9 @@ export function readTranscriptSelection(container: HTMLElement | null): Transcri
   const rect =
     typeof range.getBoundingClientRect === "function"
       ? range.getBoundingClientRect()
-      : { bottom: 0, left: 0 };
+      : { top: 0, bottom: 0, left: 0 };
+  // Scrolled out of view: there is nothing on screen to point the control at.
+  if (rect.bottom < 0 || rect.top > window.innerHeight) return null;
   return {
     messageIndex,
     text,
@@ -68,9 +70,16 @@ export function useTranscriptSelection(
       );
     };
     document.addEventListener("selectionchange", update);
+    // The reply moves under the fixed control whenever the transcript scrolls,
+    // including while a running chat keeps it pinned to the bottom. Scroll
+    // does not bubble, so it is caught on the way down.
+    document.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("selectionchange", update);
+      document.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
     };
   }, [containerRef, enabled]);
   return [enabled ? selection : null, () => setSelection(null)];

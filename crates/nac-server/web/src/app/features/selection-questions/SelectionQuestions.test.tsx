@@ -125,6 +125,50 @@ function select(node: Node, start: number, end: number) {
 }
 
 describe("SelectionQuestions", () => {
+  it("keeps the Ask control on the selection as the transcript scrolls, and hides it off screen", async () => {
+    let rect = { top: 100, bottom: 120, left: 40 };
+    const geometry = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ ...rect, right: rect.left + 100, width: 100, height: 20 }) as DOMRect,
+    });
+    try {
+      const value = runtime(
+        vi.fn(async () =>
+          Response.json({ items: [], limits }),
+        ) as unknown as typeof globalThis.fetch,
+      );
+      render(
+        <QueryClientProvider client={value.queryClient}>
+          <RuntimeContext.Provider value={value}>
+            <Harness />
+          </RuntimeContext.Provider>
+        </QueryClientProvider>,
+      );
+      select(screen.getByText("Entries expire after an hour.").firstChild!, 0, 7);
+      const control = async () =>
+        (await screen.findByRole("button", { name: "Ask about selection" })).parentElement!;
+      expect((await control()).style.top).toBe("126px");
+
+      const scroll = async () => {
+        await act(async () => {
+          screen.getByTestId("outside").parentElement!.dispatchEvent(new Event("scroll"));
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        });
+      };
+      rect = { top: 300, bottom: 320, left: 40 };
+      await scroll();
+      expect((await control()).style.top).toBe("326px");
+
+      rect = { top: -80, bottom: -60, left: 40 };
+      await scroll();
+      expect(screen.queryByRole("button", { name: "Ask about selection" })).toBeNull();
+    } finally {
+      if (geometry) Object.defineProperty(Range.prototype, "getBoundingClientRect", geometry);
+      else delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+    }
+  });
+
   it("asks about a selection inside one completed reply and shows the attributed answer", async () => {
     let listed: SelectionQuestion[] = [];
     const bodies: Record<string, unknown>[] = [];

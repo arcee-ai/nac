@@ -27452,10 +27452,11 @@ function LA(e) {
 	let o = document.createRange();
 	o.selectNodeContents(r), o.setEnd(n.startContainer, n.startOffset);
 	let s = r.textContent?.length ?? 0, c = typeof n.getBoundingClientRect == "function" ? n.getBoundingClientRect() : {
+		top: 0,
 		bottom: 0,
 		left: 0
 	};
-	return {
+	return c.bottom < 0 || c.top > window.innerHeight ? null : {
 		messageIndex: a,
 		text: i,
 		hint: s > 0 ? o.toString().length / s : 0,
@@ -27470,8 +27471,8 @@ function RA(e, t) {
 		let n = 0, i = () => {
 			cancelAnimationFrame(n), n = requestAnimationFrame(() => r(LA(e.current)));
 		};
-		return document.addEventListener("selectionchange", i), () => {
-			cancelAnimationFrame(n), document.removeEventListener("selectionchange", i);
+		return document.addEventListener("selectionchange", i), document.addEventListener("scroll", i, !0), window.addEventListener("resize", i), () => {
+			cancelAnimationFrame(n), document.removeEventListener("selectionchange", i), document.removeEventListener("scroll", i, !0), window.removeEventListener("resize", i);
 		};
 	}, [e, t]), [t ? n : null, () => r(null)];
 }
