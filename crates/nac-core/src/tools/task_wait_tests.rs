@@ -2,6 +2,22 @@ use super::*;
 use crate::store::{GoalStatus, UserGoalUpdate};
 use crate::tools::task_discovery::tests::{call, cleanup, runtime, session, value};
 
+#[test]
+fn wait_inventory_preserves_guide_and_product_context_capabilities() {
+    for definitions in [
+        crate::tools::direct_tool_definitions(false),
+        crate::tools::direct_with_orchestrator_tool_definitions(false),
+    ] {
+        for name in ["nac_guide", "wait_tasks"] {
+            assert!(definitions.iter().any(|tool| tool.function.name == name));
+        }
+    }
+    let context = crate::tools::product_context_tool_definitions();
+    for name in ["get_product_context", "resolve_product_destination"] {
+        assert!(context.iter().any(|tool| tool.function.name == name));
+    }
+}
+
 fn target(id: &str) -> Value {
     json!({"session_id":id,"mode":"goal"})
 }
