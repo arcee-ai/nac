@@ -227,6 +227,9 @@ fn assert_current_schema(conn: &Connection) {
             "child_execution_mode",
             "child_wait_id",
             "review_intent",
+            "completion_source",
+            "completion_session_id",
+            "completion_generation",
         ]
     );
     assert_eq!(
@@ -690,6 +693,9 @@ fn v17_store_adds_the_durable_session_inbox() {
             "child_execution_mode",
             "child_wait_id",
             "review_intent",
+            "completion_source",
+            "completion_session_id",
+            "completion_generation",
         ]
     );
     assert_eq!(
