@@ -39,6 +39,8 @@ export declare function usePathPicker({ open, kind, initialPath, ssh, showHidden
     draft: string;
     setDraft: (value: string) => void;
     goTo: (path: string) => void;
+    /** Starts a check that holds until the draft is next edited or the picker navigates. */
+    fence: () => () => boolean;
     file: string | null;
     chooseFile: import("react").Dispatch<import("react").SetStateAction<string | null>>;
     hidden: boolean;

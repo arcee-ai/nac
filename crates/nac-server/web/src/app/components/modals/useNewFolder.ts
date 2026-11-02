@@ -12,7 +12,16 @@ interface NewFolderOptions {
    * different directory, source or opening of the picker.
    */
   binding: string;
-  /** Called with the server's path once the folder certainly exists. */
+  /**
+   * Starts a check that holds until the picker's path is next edited or the
+   * picker navigates: whatever the person typed or browsed to while a folder
+   * was being made is the newer choice.
+   */
+  fence: () => () => boolean;
+  /**
+   * Called with the server's path once the folder certainly exists, unless the
+   * picker was edited or navigated after Create.
+   */
   onCreated: (path: string) => void;
 }
 
@@ -52,7 +61,7 @@ function childPath(parent: string, name: string): string {
  * Create, made in the listed directory and bound to it, so a late answer for a
  * directory, source or picker the person has left is dropped.
  */
-export function useNewFolder({ source, parent, binding, onCreated }: NewFolderOptions) {
+export function useNewFolder({ source, parent, binding, fence, onCreated }: NewFolderOptions) {
   const [open, setOpen] = useState(false);
   const [name, setNameValue] = useState("");
   const [status, setStatus] = useState<NewFolderStatus>({ kind: "editing" });
@@ -125,6 +134,7 @@ export function useNewFolder({ source, parent, binding, onCreated }: NewFolderOp
     const folder = name;
     const target = parent;
     const ticket = ++generation.current;
+    const untouched = fence();
     busy.current = true;
     setStatus({ kind: "creating", name: folder });
     create(source, target, folder).then(
@@ -135,7 +145,8 @@ export function useNewFolder({ source, parent, binding, onCreated }: NewFolderOp
         setOpen(false);
         setNameValue("");
         setStatus({ kind: "editing" });
-        onCreated(created.path);
+        // A newer path keeps its place; the refreshed listing still shows the folder.
+        if (untouched()) onCreated(created.path);
       },
       (error: unknown) => {
         if (ticket !== generation.current) return;

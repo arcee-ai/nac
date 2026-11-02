@@ -7478,38 +7478,38 @@ function qp(e) {
 function Jp(e, t) {
 	return e.endsWith("/") ? `${e}${t}` : `${e}/${t}`;
 }
-function Yp({ source: e, parent: t, binding: n, onCreated: r }) {
-	let [i, a] = q(!1), [o, s] = q(""), [c, l] = q({ kind: "editing" }), u = bn(), d = D(), f = K(0), p = K(!1), [m, h] = q(n);
-	m !== n && (h(n), a(!1), s(""), l({ kind: "editing" })), Si(() => {
-		let e = f, t = p;
+function Yp({ source: e, parent: t, binding: n, fence: r, onCreated: i }) {
+	let [a, o] = q(!1), [s, c] = q(""), [l, u] = q({ kind: "editing" }), d = bn(), f = D(), p = K(0), m = K(!1), [h, g] = q(n);
+	h !== n && (g(n), o(!1), c(""), u({ kind: "editing" })), Si(() => {
+		let e = p, t = m;
 		return () => {
 			e.current += 1, t.current = !1;
 		};
 	}, [n]);
-	let g = () => {
-		f.current += 1, p.current = !1, l({ kind: "editing" });
-	}, _ = (t, n, r, i) => {
-		l({
+	let _ = () => {
+		p.current += 1, m.current = !1, u({ kind: "editing" });
+	}, v = (t, n, r, i) => {
+		u({
 			kind: "checking",
 			name: r,
 			cause: i
-		}), d(e, Jp(n, r), "directory", !1).then((e) => {
-			t === f.current && (p.current = !1, l({
+		}), f(e, Jp(n, r), "directory", !1).then((e) => {
+			t === p.current && (m.current = !1, u({
 				kind: "uncertain-exists",
 				name: r,
 				path: e.path,
 				cause: i
 			}));
 		}, (e) => {
-			t === f.current && (p.current = !1, e instanceof je && e.status === 404 ? l({
+			t === p.current && (m.current = !1, e instanceof je && e.status === 404 ? u({
 				kind: "uncertain-absent",
 				name: r,
 				cause: i
-			}) : qp(e) ? l({
+			}) : qp(e) ? u({
 				kind: "refused",
 				name: r,
 				error: Kp(e)
-			}) : l({
+			}) : u({
 				kind: "uncertain-unknown",
 				name: r,
 				cause: i,
@@ -7518,38 +7518,38 @@ function Yp({ source: e, parent: t, binding: n, onCreated: r }) {
 		});
 	};
 	return {
-		open: i,
+		open: a,
 		start: () => {
-			g(), s(""), a(!0);
+			_(), c(""), o(!0);
 		},
 		cancel: () => {
-			g(), a(!1), s("");
+			_(), o(!1), c("");
 		},
-		name: o,
-		setName: s,
-		status: c,
-		pending: c.kind === "creating" || c.kind === "checking",
-		blocked: c.kind === "uncertain-unknown" && c.name === o,
+		name: s,
+		setName: c,
+		status: l,
+		pending: l.kind === "creating" || l.kind === "checking",
+		blocked: l.kind === "uncertain-unknown" && l.name === s,
 		submit: () => {
-			if (p.current || !t || c.kind === "uncertain-unknown" && c.name === o) return;
-			let n = o, i = t, d = ++f.current;
-			p.current = !0, l({
+			if (m.current || !t || l.kind === "uncertain-unknown" && l.name === s) return;
+			let n = s, a = t, f = ++p.current, h = r();
+			m.current = !0, u({
 				kind: "creating",
 				name: n
-			}), u(e, i, n).then((e) => {
-				d === f.current && (f.current += 1, p.current = !1, a(!1), s(""), l({ kind: "editing" }), r(e.path));
+			}), d(e, a, n).then((e) => {
+				f === p.current && (p.current += 1, m.current = !1, o(!1), c(""), u({ kind: "editing" }), h() && i(e.path));
 			}, (e) => {
-				d === f.current && (qp(e) ? (p.current = !1, l({
+				f === p.current && (qp(e) ? (m.current = !1, u({
 					kind: "refused",
 					name: n,
 					error: Kp(e)
-				})) : _(d, i, n, Kp(e)));
+				})) : v(f, a, n, Kp(e)));
 			});
 		},
 		checkAgain: () => {
-			if (c.kind !== "uncertain-unknown" || p.current || !t) return;
-			let e = ++f.current;
-			p.current = !0, _(e, t, c.name, c.cause);
+			if (l.kind !== "uncertain-unknown" || m.current || !t) return;
+			let e = ++p.current;
+			m.current = !0, v(e, t, l.name, l.cause);
 		}
 	};
 }
@@ -7562,63 +7562,67 @@ function Xp(e) {
 	]) : "local";
 }
 function Zp({ open: e, kind: t, initialPath: n, ssh: r, showHidden: i, onSelect: a }) {
-	let o = t !== "directory", [c, l] = q(n.trim()), [u, d] = q(n.trim()), [f, p] = q(null), [m, h] = q(i), [g, _] = q(null), [v, y] = q(null), b = K(0), x = K(null), S = un(c || null, t, m, !r), C = s(r, c || null, m, !!r), w = r ? C : S, T = D(), E = U(() => {
+	let o = t !== "directory", [c, l] = q(n.trim()), [u, d] = q(n.trim()), [f, p] = q(null), [m, h] = q(i), [g, _] = q(null), [v, y] = q(null), b = K(0), x = K(null), S = K(0), C = un(c || null, t, m, !r), w = s(r, c || null, m, !!r), T = r ? w : C, E = D(), O = U(() => {
 		b.current += 1, x.current = null, _(null);
-	}, []), O = `${e ? "open" : "closed"}:${Xp(r)}`, [k, A] = q({
-		binding: O,
+	}, []), k = `${e ? "open" : "closed"}:${Xp(r)}`, [A, j] = q({
+		binding: k,
 		epoch: 0
 	});
-	k.binding !== O && A({
-		binding: O,
-		epoch: k.epoch + 1
+	A.binding !== k && j({
+		binding: k,
+		epoch: A.epoch + 1
 	});
-	let j = k.binding === O ? k.epoch : k.epoch + 1;
+	let M = A.binding === k ? A.epoch : A.epoch + 1;
 	Si(() => {
 		let e = b, t = x;
 		return () => {
 			e.current += 1, t.current = null;
 		};
-	}, [O]);
-	let M = (e) => {
-		E(), y(null), l(e), d(e), p(null);
-	}, N = (e) => {
-		E(), y(null), d(e);
-	}, ee = u.trim() || c;
+	}, [k]);
+	let N = (e) => {
+		S.current += 1, O(), y(null), l(e), d(e), p(null);
+	}, ee = (e) => {
+		S.current += 1, O(), y(null), d(e);
+	}, te = () => {
+		let e = S.current;
+		return () => S.current === e;
+	}, ne = u.trim() || c;
 	return {
-		binding: O,
+		binding: k,
 		pickingFile: o,
 		directory: c,
 		draft: u,
-		setDraft: N,
-		goTo: M,
+		setDraft: ee,
+		goTo: N,
+		fence: te,
 		file: f,
 		chooseFile: p,
 		hidden: m,
 		toggleHidden: () => h((e) => !e),
-		listing: w,
-		chosen: o ? f : ee || (w.data?.path ?? ""),
+		listing: T,
+		chosen: o ? f : ne || (T.data?.path ?? ""),
 		select: () => {
 			if (o) {
 				f && a(f);
 				return;
 			}
 			if (x.current !== null) return;
-			let e = ee, n = ++b.current;
+			let e = ne, n = ++b.current;
 			x.current = n, _({
 				path: e,
-				epoch: j
-			}), y(null), T(r, e || null, t, m).then((e) => {
+				epoch: M
+			}), y(null), E(r, e || null, t, m).then((e) => {
 				n === b.current && (b.current += 1, x.current = null, _(null), a(e.path));
 			}, (t) => {
 				n === b.current && (x.current = null, _(null), y({
 					path: e,
-					epoch: j,
+					epoch: M,
 					error: t instanceof Error ? t : Error(String(t))
 				}));
 			});
 		},
-		checking: g?.epoch === j ? g.path : null,
-		failure: v?.epoch === j ? v : null
+		checking: g?.epoch === M ? g.path : null,
+		failure: v?.epoch === M ? v : null
 	};
 }
 // src/app/components/modals/PathPickerModal.tsx
@@ -7648,6 +7652,7 @@ function $p({ open: e, kind: n, initialPath: r, ssh: i, title: a, showHidden: s 
 		source: i ?? null,
 		parent: S?.path ?? null,
 		binding: `${p.binding}:${S?.path ?? ""}`,
+		fence: p.fence,
 		onCreated: p.goTo
 	});
 	return /* @__PURE__ */ Y($r, {
