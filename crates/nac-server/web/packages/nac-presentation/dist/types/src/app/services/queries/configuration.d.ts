@@ -26,13 +26,18 @@ export declare function useSshBrowsePath(target: SshTarget | null, path: string 
     truncated: boolean;
 }>, Error>;
 /**
- * Asks the server afresh for the listing a typed path names, through the same
- * query the picker browses with. The server expands `~` and canonicalizes, so
- * whatever resolves here is the path the listing would show after Enter;
+ * Asks the server afresh for the listing a typed path names, with the same
+ * request the picker browses with. The server expands `~` and canonicalizes,
+ * so whatever resolves here is the path the listing would show after Enter;
  * a missing, non-directory or unreadable path rejects with the server's error.
+ *
+ * Every call is its own request, outside the query cache: a request already
+ * running for the same path may predate a change on disk, and a listing or
+ * another picker may share that cache entry, so it is neither reused nor
+ * canceled.
  */
 export declare function useResolveBrowsePath(): (source: BrowseSource, path: string | null, kind: BrowseKind, hidden: boolean) => Promise<{
-    entries: import("../../types/openapi.generated").components["schemas"]["BrowseEntry"][];
+    entries: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["BrowseEntry"][];
     home?: string | null;
     parent?: string | null;
     path: string;

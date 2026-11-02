@@ -92,23 +92,25 @@ export function useSshBrowsePath(
 }
 
 /**
- * Asks the server afresh for the listing a typed path names, through the same
- * query the picker browses with. The server expands `~` and canonicalizes, so
- * whatever resolves here is the path the listing would show after Enter;
+ * Asks the server afresh for the listing a typed path names, with the same
+ * request the picker browses with. The server expands `~` and canonicalizes,
+ * so whatever resolves here is the path the listing would show after Enter;
  * a missing, non-directory or unreadable path rejects with the server's error.
+ *
+ * Every call is its own request, outside the query cache: a request already
+ * running for the same path may predate a change on disk, and a listing or
+ * another picker may share that cache entry, so it is neither reused nor
+ * canceled.
  */
 export function useResolveBrowsePath() {
   const { api } = useNativeRuntime();
-  const client = useQueryClient();
 
   return useCallback(
     (source: BrowseSource, path: string | null, kind: BrowseKind, hidden: boolean) =>
-      client.fetchQuery<BrowseListing>({
-        ...browseQuery(api, source, path, kind, hidden),
-        staleTime: 0,
-        retry: false,
+      browseQuery(api, source, path, kind, hidden).queryFn({
+        signal: new AbortController().signal,
       }),
-    [api, client],
+    [api],
   );
 }
 

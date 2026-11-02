@@ -129,10 +129,14 @@ if [ ! -d "$target" ]; then
 	exit 0
 fi
 
-# cd plus pwd -P is the shell's own realpath, with no dependency to install, and
-# it doubles as the readability test: a directory that cannot be entered cannot
-# be listed either.
+# cd plus pwd -P is the shell's own realpath, with no dependency to install.
+# Entering a directory needs only search permission, so whether it can be
+# listed is checked on its own: a search-only one would otherwise list as empty.
 cd -- "$target" 2>/dev/null || {
+	printf 'denied\n'
+	exit 0
+}
+[ -r . ] || {
 	printf 'denied\n'
 	exit 0
 }
@@ -152,8 +156,7 @@ case $pwd in
 	;;
 esac
 
-# An unquoted glob is the listing: it leaves a directory nac cannot read as an
-# empty one rather than as an error. Dot-prefixed names need globs of their own,
+# An unquoted glob is the listing. Dot-prefixed names need globs of their own,
 # written so that neither `.` nor `..` is ever matched. A name is tested with -d
 # so a symlink to a directory stays navigable.
 if [ "$hidden" = 1 ]; then
@@ -335,5 +338,90 @@ pub(super) fn first_stderr_line(stderr: &[u8]) -> String {
         "no error output".to_string()
     } else {
         line.to_string()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestoreEnv(Vec<(&'static str, Option<OsString>)>);
+
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Lists through a stand-in `ssh` that runs the remote command on this
+    /// machine, so the real browse script meets real permissions.
+    #[tokio::test]
+    async fn a_directory_that_can_be_entered_but_not_read_is_denied() {
+        let _environment = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = std::env::temp_dir().join(format!("nac-ssh-browse-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        let open = root.join("open");
+        let search_only = root.join("search-only");
+        for dir in [bin.clone(), open.join("child"), search_only.join("child")] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let ssh = bin.join("ssh");
+        fs::write(
+            &ssh,
+            "#!/bin/sh\ncommand=''\nfor argument in \"$@\"; do command=$argument; done\nexec /bin/sh -c \"$command\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&ssh, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&search_only, fs::Permissions::from_mode(0o111)).unwrap();
+
+        let _restore = RestoreEnv(vec![
+            ("PATH", std::env::var_os("PATH")),
+            ("NAC_HOME", std::env::var_os("NAC_HOME")),
+        ]);
+        let mut paths = vec![bin.clone()];
+        if let Some(path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&path));
+        }
+        unsafe {
+            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+            // Keeps the control socket directory inside this test's root.
+            std::env::set_var("NAC_HOME", root.join("nac-home"));
+        }
+        let connection = SshConnection::new("fake-host");
+        let context = PathContext::new(&root);
+
+        let listed = browse_remote_directory(&connection, open.to_str(), false, &context).await;
+        let denied =
+            browse_remote_directory(&connection, search_only.to_str(), false, &context).await;
+        // Root can read any directory, so there is no search-only case to see.
+        let unreadable_here = fs::read_dir(&search_only).is_err();
+        fs::set_permissions(&search_only, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&root);
+
+        let listed = listed.expect("a readable directory lists");
+        let names: Vec<&str> = listed
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, ["child"]);
+        if unreadable_here {
+            assert!(
+                matches!(denied, Err(RemoteBrowseError::Unreadable { .. })),
+                "{denied:?}"
+            );
+        }
     }
 }
