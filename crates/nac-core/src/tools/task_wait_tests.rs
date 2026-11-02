@@ -1,6 +1,250 @@
 use super::*;
 use crate::store::{GoalStatus, UserGoalUpdate};
 use crate::tools::task_discovery::tests::{call, cleanup, runtime, session, value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+
+type Snapshot = (tokio::time::Instant, Vec<Value>);
+
+struct SnapshotBarrier {
+    reached: tokio::sync::oneshot::Sender<Snapshot>,
+    release: tokio::sync::oneshot::Receiver<()>,
+}
+
+static SNAPSHOT_BARRIERS: LazyLock<Mutex<HashMap<PathBuf, SnapshotBarrier>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(super) async fn after_snapshot(path: &Path, deadline: tokio::time::Instant, reports: &[Value]) {
+    let barrier = SNAPSHOT_BARRIERS.lock().unwrap().remove(path);
+    if let Some(barrier) = barrier {
+        barrier.reached.send((deadline, reports.to_vec())).unwrap();
+        barrier.release.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn multi_target_hint_at_deadline_revalidates_authoritative_goal_state() {
+    let runtime = runtime(Vec::new());
+    let first =
+        store::create_session_goal(&runtime.store_path, "peer-a", "first", None, None).unwrap();
+    let second =
+        store::create_session_goal(&runtime.store_path, "peer-b", "second", None, None).unwrap();
+    let (reached, observed) = tokio::sync::oneshot::channel();
+    let (release, resume) = tokio::sync::oneshot::channel();
+    SNAPSHOT_BARRIERS.lock().unwrap().insert(
+        runtime.store_path.clone(),
+        SnapshotBarrier {
+            reached,
+            release: resume,
+        },
+    );
+    let wait = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[
+            {"session_id":"peer-a","mode":"goal","goal_id":first.goal_id},
+            {"session_id":"peer-b","mode":"goal","goal_id":second.goal_id}
+        ],"timeout_ms":1_000}),
+    );
+    let pause_after_read = async {
+        let (deadline, reports) = observed.await.unwrap();
+        assert_eq!(reports[0]["status"], "active");
+        assert_eq!(reports[1]["status"], "active");
+        store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-b",
+            &second.goal_id,
+            second.version,
+            UserGoalUpdate {
+                status: Some(GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real pause must commit before the observed wait deadline"
+        );
+        eprintln!("F2_HINT_COMMITTED_BEFORE_DEADLINE true");
+        // The barrier, rather than scheduling luck, holds the already-built
+        // reports until the actual invocation's observation deadline passes.
+        tokio::time::sleep_until(deadline).await;
+        assert!(tokio::time::Instant::now() >= deadline);
+        release.send(()).unwrap();
+    };
+    let (result, ()) = tokio::join!(wait, pause_after_read);
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-a")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Active
+    );
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-b")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Paused
+    );
+    eprintln!("F2_FINAL_AUTHORITATIVE_RESULT {result}");
+    cleanup(&runtime);
+    assert_eq!(result["status"], "target_changed");
+    assert_eq!(result["targets"][0]["status"], "active");
+    assert_eq!(result["targets"][0]["resolved_identity"], first.goal_id);
+    assert_eq!(result["targets"][1]["status"], "goal_paused");
+    assert_eq!(result["targets"][1]["resolved_identity"], second.goal_id);
+}
+
+#[tokio::test]
+async fn observation_timeout_and_explicit_execution_cap_remain_distinct() {
+    let mut input = json!({"timeout_ms":40});
+    assert_eq!(
+        WaitTasksTool.timeout(&mut input, None).unwrap().duration,
+        Duration::from_millis(5_040)
+    );
+    assert_eq!(
+        WaitTasksTool
+            .timeout(&mut input, Some(Duration::from_millis(5)))
+            .unwrap()
+            .duration,
+        Duration::from_millis(5)
+    );
+    let runtime = runtime(Vec::new());
+    let goal =
+        store::create_session_goal(&runtime.store_path, "peer-a", "observe", None, None).unwrap();
+    let snapshot = value(
+        &runtime,
+        "wait_tasks",
+        json!({
+            "targets":[{"session_id":"peer-a","mode":"goal","goal_id":goal.goal_id}],
+            "timeout_ms":40,"_nac":null
+        }),
+    )
+    .await;
+    assert_eq!(snapshot["status"], "timeout");
+    let bounded = call(
+        &runtime,
+        "wait_tasks",
+        json!({
+            "targets":[{"session_id":"peer-a","mode":"goal","goal_id":goal.goal_id}],
+            "timeout_ms":1_000,"_nac":{"timeout_ms":5}
+        }),
+    )
+    .await;
+    assert!(bounded.is_error);
+    let bounded: Value = serde_json::from_str(bounded.content.as_text().unwrap()).unwrap();
+    assert_eq!(bounded["_nac"]["status"], "timed_out");
+    assert_eq!(bounded["_nac"]["timeout_ms"], 5);
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-a")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Active
+    );
+    assert!(!runtime.command_cancellation.is_cancelled());
+    cleanup(&runtime);
+}
+
+#[tokio::test]
+async fn late_hint_after_final_pass_requests_resync_without_another_read() {
+    let runtime = runtime(Vec::new());
+    let first =
+        store::create_session_goal(&runtime.store_path, "peer-a", "first", None, None).unwrap();
+    let second =
+        store::create_session_goal(&runtime.store_path, "peer-b", "second", None, None).unwrap();
+    let (initial_reached, initial_observed) = tokio::sync::oneshot::channel();
+    let (initial_release, initial_resume) = tokio::sync::oneshot::channel();
+    let (final_reached, final_observed) = tokio::sync::oneshot::channel();
+    let (final_release, final_resume) = tokio::sync::oneshot::channel();
+    SNAPSHOT_BARRIERS.lock().unwrap().insert(
+        runtime.store_path.clone(),
+        SnapshotBarrier {
+            reached: initial_reached,
+            release: initial_resume,
+        },
+    );
+    let wait = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[
+        {"session_id":"peer-a","mode":"goal","goal_id":first.goal_id},
+        {"session_id":"peer-b","mode":"goal","goal_id":second.goal_id}
+    ],"timeout_ms":1_000}),
+    );
+    let changes = async {
+        let (deadline, reports) = initial_observed.await.unwrap();
+        assert_eq!(reports[0]["status"], "active");
+        assert_eq!(reports[1]["status"], "active");
+        store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-b",
+            &second.goal_id,
+            second.version,
+            UserGoalUpdate {
+                status: Some(GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(tokio::time::Instant::now() < deadline);
+        SNAPSHOT_BARRIERS.lock().unwrap().insert(
+            runtime.store_path.clone(),
+            SnapshotBarrier {
+                reached: final_reached,
+                release: final_resume,
+            },
+        );
+        tokio::time::sleep_until(deadline).await;
+        initial_release.send(()).unwrap();
+        let (same_deadline, final_reports) = final_observed.await.unwrap();
+        assert_eq!(same_deadline, deadline);
+        assert!(tokio::time::Instant::now() >= deadline);
+        assert_eq!(final_reports[0]["status"], "active");
+        assert_eq!(final_reports[1]["status"], "goal_paused");
+        // A second real commit arrives after the one permitted final pass.
+        store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-a",
+            &first.goal_id,
+            first.version,
+            UserGoalUpdate {
+                status: Some(GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        final_release.send(()).unwrap();
+    };
+    let (result, ()) = tokio::join!(wait, changes);
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-a")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Paused
+    );
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-b")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Paused
+    );
+    cleanup(&runtime);
+    assert_eq!(result["status"], "target_changed");
+    assert_eq!(
+        result["targets"][0]["status"], "active",
+        "no unbounded third read"
+    );
+    assert_eq!(result["targets"][0]["resolved_identity"], first.goal_id);
+    assert_eq!(result["targets"][1]["status"], "goal_paused");
+    assert_eq!(result["targets"][1]["resolved_identity"], second.goal_id);
+    assert_eq!(result["targets"][0]["resync"], true);
+    assert_eq!(result["targets"][1]["resync"], true);
+}
 
 #[test]
 fn wait_inventory_preserves_guide_and_product_context_capabilities() {

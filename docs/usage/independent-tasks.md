@@ -92,6 +92,13 @@ and goal shapes list every field explicitly and require the other mode's
 identity to be null. Compact native calls may omit these fields. Supplying a
 non-null identity for the wrong mode remains an error; it is never ignored.
 
+The observation `timeout_ms` is separate from the kernel's nullable `_nac`
+execution deadline. Omitting `_nac` or setting it to null gives the wait its
+observation duration plus five seconds of execution slack. An explicit
+`_nac.timeout_ms` stays a hard execution cap: a shorter cap can return
+`_nac.status: "timed_out"` before the observation's `status: "timeout"`
+snapshot. Neither deadline cancels the independent target or changes its goal.
+
 Omit the identity to resolve the current run or goal once. Run mode uses the
 current durable run, or the most recent retained result if no run is current.
 Save each returned `resolved_identity` and `after_cursor`. Reuse that cursor

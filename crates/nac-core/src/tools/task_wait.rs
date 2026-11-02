@@ -167,6 +167,7 @@ impl NativeTool for WaitTasksTool {
             // Subscribe before the first snapshot; hints only trigger a read.
             let mut goals = store::goal_changes::subscribe(&services.runtime.store_path);
             let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+            let mut final_revalidation_used = false;
             loop {
                 let mut reports = Vec::new();
                 let mut actionable = false;
@@ -249,6 +250,8 @@ impl NativeTool for WaitTasksTool {
                     reports.push(report);
                     actionable |= ready;
                 }
+                #[cfg(test)]
+                tests::after_snapshot(&services.runtime.store_path, deadline, &reports).await;
                 let path = services.runtime.store_path.clone();
                 let coordinator = caller.clone();
                 let interrupted = match store::spawn_blocking_store_caller(move || {
@@ -275,8 +278,27 @@ impl NativeTool for WaitTasksTool {
                     }
                     _ => false,
                 };
-                if revalidate && !actionable && !interrupted && timeout_ms > 0 && now < deadline {
-                    continue;
+                if revalidate && timeout_ms > 0 {
+                    if !actionable && !interrupted {
+                        if now < deadline {
+                            continue;
+                        }
+                        // Honor an in-hand hint with one final authoritative
+                        // pass. The independent kernel deadline still applies.
+                        if !final_revalidation_used {
+                            final_revalidation_used = true;
+                            continue;
+                        }
+                    }
+                    if now >= deadline && final_revalidation_used {
+                        // More hints cannot extend the deadline again. Mark
+                        // the bounded snapshot for resync instead of implying
+                        // that a later committed change was revalidated.
+                        for (target, report) in input.targets.iter_mut().zip(&mut reports) {
+                            target.resync = true;
+                            report["resync"] = json!(true);
+                        }
+                    }
                 }
                 let reason = if interrupted {
                     Some("coordinator_input")
