@@ -2,6 +2,68 @@ import { describe, expect, it, vi } from "vitest";
 import { createPromptDraftStore, type PromptDraftStorage } from "./promptDraftStore";
 import type { NativeRuntimeScope } from "../runtime/nativeRuntime";
 
+it("keeps ordinary claims exclusive and allows only distinct captured revisions for steering", () => {
+  const drafts = createPromptDraftStore();
+  const first = drafts.update("a", "same");
+  const finishFirst = drafts.claimSubmission("a", first)!;
+  expect(drafts.claimSubmission("a", first)).toBeNull();
+  expect(drafts.claimSubmission("a")).toBeNull();
+  const next = drafts.update("a", "same");
+  const finishNext = drafts.claimSubmission("a", next)!;
+  finishFirst();
+  finishFirst();
+  expect(drafts.isSubmitting("a")).toBe(true);
+  finishNext();
+  const finishExclusive = drafts.claimSubmission("a")!;
+  expect(drafts.claimSubmission("a", next)).toBeNull();
+  finishExclusive();
+  expect(drafts.isSubmitting("a")).toBe(false);
+});
+
+it("keeps claimed live text through retention pressure and fences purged claim completions", () => {
+  const drafts = createPromptDraftStore();
+  const first = drafts.update("a", "still pending");
+  const finish = drafts.claimSubmission("a", first)!;
+  drafts.update("other", "x".repeat(1_000_000));
+  expect(drafts.get("a")).toBe(first);
+  drafts.purgeSessions(["a"]);
+  const next = drafts.update("a", "new lifetime");
+  const nextFinish = drafts.claimSubmission("a", next)!;
+  finish();
+  drafts.noteUnretainedSubmission("a", first);
+  expect(drafts.isSubmitting("a")).toBe(true);
+  expect(drafts.getUnretainedSubmission("a")).toBeUndefined();
+  nextFinish();
+});
+
+it("binds runtime uncertainty dismissal to its token without persisting text or replacing the live draft", () => {
+  const adapter = storage();
+  const drafts = createPromptDraftStore(scope, adapter);
+  const first = drafts.update("a", "first");
+  const finishFirst = drafts.claimSubmission("a", first)!;
+  drafts.noteUnretainedSubmission("a", first);
+  const oldToken = drafts.getUnretainedSubmission("a")!;
+  const next = drafts.update("a", "next");
+  expect(drafts.getUnretainedSubmission("a")).toBe(oldToken);
+  const finishNext = drafts.claimSubmission("a", next)!;
+  drafts.noteUnretainedSubmission("a", next);
+  const token = drafts.getUnretainedSubmission("a")!;
+  drafts.dismissUnretainedSubmission("a", oldToken);
+  expect(drafts.getUnretainedSubmission("a")).toBe(token);
+  expect(drafts.get("a")).toBe(next);
+  expect(JSON.parse([...adapter.values.values()][0]).drafts).toEqual([["a", "next"]]);
+  expect([...adapter.values.values()][0]).not.toContain("unretained");
+  drafts.dismissUnretainedSubmission("a", token);
+  expect(drafts.get("a")).toBe(next);
+  expect(drafts.getUnretainedSubmission("a")).toBeUndefined();
+  finishFirst();
+  finishNext();
+  drafts.release();
+  drafts.noteUnretainedSubmission("a", next);
+  drafts.dismissUnretainedSubmission("a", token);
+  expect(drafts.getUnretainedSubmission("a")).toBeUndefined();
+});
+
 const scope: NativeRuntimeScope = {
   owner: "owner",
   profile: "profile",

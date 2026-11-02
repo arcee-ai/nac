@@ -2,6 +2,12 @@
 // Coverage is not hosted authorization. Run make generate-api-contract.
 export const NAC_API_SURFACE = {
   "GET /attention/events": "private:native opt-in metadata attention stream",
+  "POST /sessions/{session_id}/task-followup-delegations":
+    "private:human task follow-up delegation issuance",
+  "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:passive human delegation inspection",
+  "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:human task follow-up delegation revocation",
   "GET /sessions/{session_id}/questions": "private:standalone exact structured questions",
   "GET /sessions/{session_id}/questions/{request_id}":
     "private:standalone exact structured question read",
@@ -9,6 +15,8 @@ export const NAC_API_SURFACE = {
     "private:authenticated human question answer",
   "POST /sessions/{session_id}/questions/{request_id}/cancel":
     "private:authenticated human question cancellation",
+  "GET /product-context": "api.getProductContext",
+  "POST /product-destinations/resolve": "api.resolveProductDestination",
   "POST /task-launches": "private:standalone Local retained task launch",
   "GET /task-launches/{request_id}": "private:standalone passive launch status",
   "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",

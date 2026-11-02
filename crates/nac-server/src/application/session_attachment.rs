@@ -429,6 +429,7 @@ impl<'a> SessionAttachmentApplication<'a> {
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
         super::task_questions::bind_native(self.manager, &mut run_config);
+        self.manager.bind_product_context(&mut run_config)?;
         let mut service = SessionService::from_orchestrator_run_config(run_config).service;
         if self.manager.managed_host().is_some() {
             service.enable_managed_admission(self.manager.managed_identity().cloned());
@@ -490,6 +491,7 @@ impl<'a> SessionAttachmentApplication<'a> {
         self.manager
             .attach_managed_command_environment(&mut run_config)?;
         super::task_questions::bind_native(self.manager, &mut run_config);
+        self.manager.bind_product_context(&mut run_config)?;
         let mut service = SessionService::from_orchestrator_run_config(run_config).service;
         if self.manager.managed_host().is_some() {
             service.enable_managed_admission(self.manager.managed_identity().cloned());

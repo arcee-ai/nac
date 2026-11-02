@@ -2676,6 +2676,109 @@
         }
       }
     },
+    "/product-context": {
+      "get": {
+        "operationId": "get_product_context",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sanitized passive product facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductContext"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Context unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-destinations/resolve": {
+      "post": {
+        "operationId": "resolve_product_destination",
+        "parameters": [
+          {
+            "name": "X-NAC-Presentation-Incarnation",
+            "in": "header",
+            "description": "Optional standalone presentation lifetime fence; grants no authority",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductNavigationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Validated logical destination; no browser action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductNavigationResolution"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Destination unavailable or stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects": {
       "get": {
         "tags": [
@@ -7684,6 +7787,220 @@
           },
           "500": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/task-followup-delegations": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_task_followup_delegations",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskFollowupDelegationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact human delegation issued or original request reconciled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Policy or scope denies delegation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Caller unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting identity or current caller owner unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unknown commit outcome; retry identical request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/task-followup-delegations/{delegation_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_task_followup_delegations_delegation_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Passive exact delegation evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegation unavailable to this caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "delete_sessions_session_id_task_followup_delegations_delegation_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delegation revoked; accepted input and audit evidence retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegation unavailable to this caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Admission is stopping",
             "content": {
               "application/json": {
                 "schema": {
@@ -15827,6 +16144,264 @@
           }
         }
       },
+      "ProductAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "disabled",
+          "unavailable",
+          "unknown"
+        ]
+      },
+      "ProductBuild": {
+        "type": "object",
+        "required": [
+          "product_version",
+          "build_id",
+          "track",
+          "source_revision"
+        ],
+        "properties": {
+          "build_id": {
+            "type": "string"
+          },
+          "product_version": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductCapability": {
+        "type": "object",
+        "required": [
+          "availability",
+          "count"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "A count is present only when observed in this bound runtime.",
+            "minimum": 0
+          }
+        }
+      },
+      "ProductContext": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "build",
+          "source",
+          "managed",
+          "features",
+          "session",
+          "mcp",
+          "destinations"
+        ],
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ProductBuild"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductDestinationInfo"
+            }
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductFeature"
+            }
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/ProductCapability",
+            "description": "Host dashboard readiness, not session tool authorization or connectivity."
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductSessionContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "Source identity for facts, distinct from a future Guide document reference."
+          }
+        }
+      },
+      "ProductDestination": {
+        "type": "string",
+        "enum": [
+          "projects",
+          "mcp-settings",
+          "configurations",
+          "model-authentication",
+          "ssh-configurations",
+          "session-subagents",
+          "session-files",
+          "session-terminal",
+          "session-history"
+        ]
+      },
+      "ProductDestinationInfo": {
+        "type": "object",
+        "required": [
+          "destination",
+          "label",
+          "availability",
+          "steps"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ProductDestination"
+          },
+          "label": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductExecutionBackend": {
+        "type": "string",
+        "enum": [
+          "local",
+          "ssh",
+          "podman"
+        ]
+      },
+      "ProductFeature": {
+        "type": "object",
+        "required": [
+          "feature",
+          "label",
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ProductAvailability"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/ProductFeatureKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ProductFeatureKind": {
+        "type": "string",
+        "enum": [
+          "traditional_subagents",
+          "managed_orchestrators",
+          "managed_host",
+          "product_navigation"
+        ]
+      },
+      "ProductNavigationRequest": {
+        "type": "object",
+        "required": [
+          "destination",
+          "expected_build_id"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ProductDestination"
+          },
+          "expected_build_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProductNavigationResolution": {
+        "type": "object",
+        "required": [
+          "build",
+          "session_id",
+          "target",
+          "opened"
+        ],
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ProductBuild"
+          },
+          "opened": {
+            "type": "boolean",
+            "description": "Resolution never claims that a browser opened anything."
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/ProductDestinationInfo"
+          }
+        }
+      },
+      "ProductSessionContext": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "behavior",
+          "execution_backend",
+          "skills",
+          "tools"
+        ],
+        "properties": {
+          "behavior": {
+            "$ref": "#/components/schemas/SessionBehavior"
+          },
+          "execution_backend": {
+            "$ref": "#/components/schemas/ProductExecutionBackend",
+            "description": "Construction-time execution backend, never the model provider."
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "skills": {
+            "$ref": "#/components/schemas/ProductCapability"
+          },
+          "tools": {
+            "$ref": "#/components/schemas/ProductCapability"
+          }
+        }
+      },
       "ProjectList": {
         "type": "object",
         "required": [
@@ -19000,6 +19575,86 @@
             "type": "string"
           }
         }
+      },
+      "TaskFollowupAction": {
+        "type": "string",
+        "enum": [
+          "queue",
+          "steer",
+          "auto"
+        ]
+      },
+      "TaskFollowupDelegation": {
+        "type": "object",
+        "required": [
+          "id",
+          "caller_session_id",
+          "human_request_id",
+          "target_session_id",
+          "action",
+          "issued_config_version",
+          "origin",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TaskFollowupAction"
+          },
+          "caller_session_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "human_request_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issued_config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskFollowupDelegationRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "target_session_id",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TaskFollowupAction"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "target_session_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "TaskLaunchPhase": {
         "type": "string",

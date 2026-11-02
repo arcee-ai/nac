@@ -27,10 +27,13 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
   startManagedUpgrade(idempotencyKey: string): Promise<unknown>;
   generateOverview(id: string): Promise<{ session_id: string; summary: string }>;
 };
-export function createNativeApi(client: typeof nacClient): NativeApi {
+export function createNativeApi(
+  client: typeof nacClient,
+  productContextBinding?: string,
+): NativeApi {
   const request = client.transport.request.bind(client.transport);
   return {
-    ...createNacApi(client),
+    ...createNacApi(client, { productContextBinding }),
     taskQuestions: (id, signal) =>
       request<QuestionRecord[]>("GET", `/sessions/${encodeURIComponent(id)}/questions`, { signal }),
     answerTaskQuestion: (id, answer) =>

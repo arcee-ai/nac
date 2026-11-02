@@ -8,14 +8,14 @@ export declare function useSidebarCommands(): {
     activeMcp: number;
     sshCount: number;
     mcpLabel: string;
-    newSession: () => void;
+    newSession: () => boolean;
     newProject: () => void;
     createLabel: string;
     openProjects: () => void | Promise<void>;
     openMcp: () => void;
     openSsh: () => void;
     openConfigurations: () => void;
+    inspectProduct: () => void;
     openManaged: () => void;
-    modals: import("react").JSX.Element;
 };
 export type SidebarCommands = ReturnType<typeof useSidebarCommands>;

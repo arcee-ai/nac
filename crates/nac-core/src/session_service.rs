@@ -53,6 +53,9 @@ mod shell_command_types;
 mod shell_commands;
 mod shell_output;
 mod shell_settlement;
+mod task_followup_admission;
+mod task_followup_delegations;
+pub(crate) use task_followup_delegations::SubmittedTaskFollowupDelegation;
 mod terminal_selection_admission;
 pub(crate) use shell_command_types::SubmittedShell;
 pub use shell_command_types::{
@@ -979,6 +982,23 @@ impl SessionService {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
         registry.resolve_prompt_invocation(invocation).await
+    }
+
+    /// Passive counts from the already constructed runtime. No discovery,
+    /// attachment or permission decision is performed. Exposure is not authority.
+    pub fn runtime_capability_counts(&self) -> (Option<usize>, Option<usize>) {
+        let skills = self
+            .skills
+            .as_ref()
+            .map(|registry| registry.catalog_entries().len());
+        // A running agent owns its request snapshot; never block that loop or
+        // report a stale shell-context clone as the current model capabilities.
+        let tools = self
+            .agent
+            .try_lock()
+            .ok()
+            .and_then(|agent| agent.runtime_tool_count());
+        (skills, tools)
     }
 
     pub fn skill_catalog_entries(&self) -> Vec<crate::skill_catalog::SkillCatalogEntry> {

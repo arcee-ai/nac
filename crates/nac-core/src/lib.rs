@@ -14,6 +14,7 @@ mod mcp;
 pub mod model;
 pub mod orchestration_control;
 pub mod peer_goal_control;
+pub mod task_followups;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.
@@ -146,3 +147,5 @@ pub mod test_support {
 
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+pub mod product_context;

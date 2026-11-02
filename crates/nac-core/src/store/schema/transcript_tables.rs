@@ -37,3 +37,21 @@ pub(super) fn create_transcript_append_receipts_table(conn: &Connection) -> Resu
     )?;
     Ok(())
 }
+
+/// Seeds the run counter for sessions that predate it. One run submits exactly
+/// one user message, so the stored history is the best available estimate.
+/// Rows that already counted a run keep their value, and unparseable history
+/// stays at zero rather than failing the migration.
+pub(super) fn backfill_run_counts(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions
+         SET run_count = (
+             SELECT COUNT(*)
+             FROM json_each(sessions.messages_json)
+             WHERE json_extract(value, '$.role') = 'user'
+         )
+         WHERE run_count = 0 AND json_valid(messages_json)",
+        [],
+    )?;
+    Ok(())
+}
