@@ -1,4 +1,4 @@
-<!-- See docs/contributing/pull-requests.md for what each section needs. -->
+What each section needs: [pull request guidance](https://github.com/arcee-ai/nac/blob/dev/docs/contributing/pull-requests.md).
 
 ## Problem
 
