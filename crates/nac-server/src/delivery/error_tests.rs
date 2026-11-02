@@ -211,3 +211,39 @@ fn genuine_terminal_cleanup_failure_remains_internal() {
         StatusCode::INTERNAL_SERVER_ERROR
     );
 }
+
+#[test]
+fn selection_question_store_contention_maps_to_conflict_but_uncertain_commits_do_not() {
+    use crate::application::selection_questions::SelectionQuestionApplicationError as Error;
+    let sqlite = |code| {
+        anyhow::Error::new(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+        .context("record selection question")
+    };
+    for contention in [
+        sqlite(rusqlite::ffi::SQLITE_BUSY),
+        sqlite(rusqlite::ffi::SQLITE_LOCKED),
+        anyhow::Error::new(nac_core::store::PersistenceAdmissionError::Overloaded),
+        anyhow::Error::new(nac_core::store::PersistenceAdmissionError::CallerOverloaded),
+    ] {
+        let error = ApiError::from(Error::Internal(contention));
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(
+            error.message,
+            "the question store is busy; try again shortly"
+        );
+    }
+    for failure in [
+        sqlite(rusqlite::ffi::SQLITE_BUSY)
+            .context(nac_core::store::TranscriptAppendError::CommitUncertain),
+        anyhow::Error::new(nac_core::store::PersistenceAdmissionError::ExecutorStopped),
+        anyhow::anyhow!("selection question store is corrupt"),
+    ] {
+        assert_eq!(
+            ApiError::from(Error::Internal(failure)).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}

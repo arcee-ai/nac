@@ -28,6 +28,16 @@ impl From<Error> for ApiError {
             Error::Unsupported | Error::Conflict(_) | Error::InFlight => StatusCode::CONFLICT,
             Error::Busy => StatusCode::TOO_MANY_REQUESTS,
             Error::Maintenance => StatusCode::SERVICE_UNAVAILABLE,
+            // Busy/locked SQLite or a full persistence queue refused the work
+            // before it committed, so nothing changed and the same request can
+            // be retried. An uncertain commit is never treated as contention.
+            // Its own message keeps it apart from this route's other 409s.
+            Error::Internal(cause) if super::error::is_precommit_contention(cause) => {
+                return ApiError::new(
+                    StatusCode::CONFLICT,
+                    "the question store is busy; try again shortly".to_owned(),
+                );
+            }
             Error::Internal(cause) => {
                 eprintln!("nac: selection question failed: {cause:#}");
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -165,7 +175,7 @@ fn limits() -> SelectionQuestionLimits {
         (status = 200, description = "Admitted (or replayed) question; the answer arrives asynchronously", body = AskSelectionQuestionResponse),
         (status = 400, description = "Invalid request, bounds, unmappable selection or model configuration", content((ApiErrorBody = "application/json"), (String = "text/plain"))),
         (status = 404, description = "Session not found", body = ApiErrorBody),
-        (status = 409, description = "Unsupported chat, changed or deleted source, conflicting request key, or a question already in flight", body = ApiErrorBody),
+        (status = 409, description = "Unsupported chat, changed or deleted source, conflicting request key, a question already in flight, or a busy store that recorded nothing", body = ApiErrorBody),
         (status = 413, description = "Request body too large", body = String, content_type = "text/plain"),
         (status = 415, description = "Unsupported media type", body = String, content_type = "text/plain"),
         (status = 422, description = "JSON body validation failed, including unknown fields", body = String, content_type = "text/plain"),
@@ -203,6 +213,7 @@ pub(crate) async fn ask(
     responses(
         (status = 200, description = "Bounded question history, separate from the transcript", body = SelectionQuestionListResponse),
         (status = 404, description = "Session not found", body = ApiErrorBody),
+        (status = 409, description = "The store is busy; try again", body = ApiErrorBody),
         (status = 500, description = "Request failed", body = ApiErrorBody)))]
 pub(crate) async fn list(
     State(manager): State<SessionManager>,
@@ -223,6 +234,7 @@ pub(crate) async fn list(
     responses(
         (status = 200, description = "One question", body = SelectionQuestionResponse),
         (status = 404, description = "Session or question not found", body = ApiErrorBody),
+        (status = 409, description = "The store is busy; try again", body = ApiErrorBody),
         (status = 500, description = "Request failed", body = ApiErrorBody)))]
 pub(crate) async fn get(
     State(manager): State<SessionManager>,
@@ -242,6 +254,7 @@ pub(crate) async fn get(
     responses(
         (status = 200, description = "The question after cancellation; settled questions are unchanged", body = SelectionQuestionResponse),
         (status = 404, description = "Session or question not found", body = ApiErrorBody),
+        (status = 409, description = "The store is busy and nothing was canceled; try again", body = ApiErrorBody),
         (status = 500, description = "Request failed", body = ApiErrorBody)))]
 pub(crate) async fn cancel(
     State(manager): State<SessionManager>,

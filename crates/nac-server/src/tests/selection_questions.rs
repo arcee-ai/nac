@@ -478,6 +478,53 @@ async fn cancel_affects_only_the_question_and_restart_interrupts_without_replay(
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn store_contention_is_409_and_the_same_request_is_admitted_after_it_clears() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("selection_question_busy");
+    let home = root.join("nac-home");
+    let _env =
+        ScopedModelEnv::with_config_home(Some(&home), None, Some(&home), Some("question-key"));
+    let model = QuestionModelServer::start(vec![(text_body("Per chat."), None)]);
+    seed_chat(
+        &root,
+        "chat",
+        &model.base_url,
+        sessions::SessionBehavior::Direct,
+    );
+    let store = root.join("store.db");
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let ask = || ask_body(KEY_A, "keyed by session id", "What does keyed mean here?");
+
+    // A real foreign writer exhausts the serving connection's finite busy wait
+    // before admission commits. WAL readers still validate the source.
+    let blocker = rusqlite::Connection::open(&store).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let busy = post(app.clone(), "/sessions/chat/selection-questions", ask()).await;
+    assert_eq!(busy.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(busy).await["error"],
+        "the question store is busy; try again shortly"
+    );
+    assert_eq!(model.request_count(), 0);
+    blocker.execute_batch("ROLLBACK").unwrap();
+
+    // Nothing was recorded, so the identical retry is a first admission.
+    let admitted =
+        response_json(post(app.clone(), "/sessions/chat/selection-questions", ask()).await).await;
+    assert_eq!(admitted["replayed"], false);
+    let question = admitted["question"]["question_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(settled(&app, "chat", &question).await["status"], "answered");
+    let listed = response_json(get(app.clone(), "/sessions/chat/selection-questions").await).await;
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+    model.handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn record_context() -> nac_core::store::SelectionQuestionContext {
     nac_core::store::SelectionQuestionContext {
         source_message_index: 2,
