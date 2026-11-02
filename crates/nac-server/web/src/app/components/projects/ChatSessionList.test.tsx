@@ -41,6 +41,8 @@ function session(
   };
 }
 
+vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
+
 afterEach(cleanup);
 
 describe("chat session behavior identity", () => {

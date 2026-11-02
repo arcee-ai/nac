@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Cr as r, Fn as i, Ln as a, Pr as o, Vi as s, Wi as c, hi as l, l as u, mi as d, n as f, r as p, t as m, u as h, wr as g, xr as _ } from "./PerfProfiler-BQYSgr9o.js";
+import { Cr as r, Fn as i, Ln as a, Pr as o, Wi as s, hi as c, l, mi as u, n as d, qi as f, r as p, t as m, u as h, wr as g, xr as _ } from "./PerfProfiler-AVeRGrSc.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6521,7 +6521,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-BuGu2tzy.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-DTA6iqib.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
@@ -6536,11 +6536,11 @@ function vl(e) {
 }
 function yl({ children: e }) {
 	let t = _l(e).replace(/\n$/, ""), n = vl(e);
-	return /* @__PURE__ */ M(d, {
+	return /* @__PURE__ */ M(u, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: l.Small,
+		size: c.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6558,12 +6558,12 @@ function bl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function xl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: s, selectFile: l, revealSidePanel: d } = a().stores.sessionLayoutStore, { api: p } = a(), m = A(), g = te(), _ = c(), v = o(), y = ee(), b = h(g.pathname), x = b ? y.getQueryData(i.sessionSnapshot(b)) : void 0, S = f(e, [
+	let { selectRevision: r, selectFileListing: s, selectFile: c, revealSidePanel: u } = a().stores.sessionLayoutStore, { api: p } = a(), m = A(), g = te(), _ = f(), v = o(), y = ee(), b = h(g.pathname), x = b ? y.getQueryData(i.sessionSnapshot(b)) : void 0, S = d(e, [
 		x?.workspace?.host_root,
 		x?.metadata.workspace_host_path,
 		x?.metadata.cwd
 	]), C = (e) => {
-		b && (r(null), s("tree"), l(e), d(_), m(u.session(b, "files")));
+		b && (r(null), s("tree"), c(e), u(_), m(l.session(b, "files")));
 	};
 	return S.kind === "workspace" && b ? /* @__PURE__ */ M("a", {
 		...n,
