@@ -102,7 +102,7 @@ class AdapterControls(unittest.TestCase):
                 ci_paths.settle_case(evidence,folder/'app',None,called.append)
             self.assertEqual(called,[])
             with self.assertRaisesRegex(RuntimeError,'changed'):
-                ci_paths.settle_case(evidence,folder/'app',dict(scope={**scope,'app_pid':99},inputs=[{}]),called.append)
+                ci_paths.settle_case(evidence,folder/'app',dict(scope={**scope,'app_pid':99},history=rows[:1],inputs=[{}]),called.append)
             with patch('ci_paths.require_settled') as settled:
                 proof=ci_paths.settle_case(evidence,folder/'app',dict(scope=scope,history=rows[:1],inputs=[{}]),called.append)
             self.assertTrue(proof['app_engine_settled']);settled.assert_called_once()

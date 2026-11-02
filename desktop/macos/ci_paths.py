@@ -12,11 +12,11 @@ import re
 import shutil
 import time
 
-from ci_paths_protocol import CASES, PRODUCT, HELPER, decode, final_record, read_record, require
+from ci_paths_protocol import CASES, Cursor, PRODUCT, HELPER, decode, final_record, read_record, require
 from ci_paths_attachments import TESTS, collect
 from ci_qualifications import require_checkout
 from ci_xctest import (authorization_policy, observe_prerequisites, relocation_directory,
-                       require_generated_runner, require_settled, result_receipt)
+                       require_generated_runner, require_settled, observe_process_status, result_receipt)
 from ci_xctest_attachments import AttachmentTool, bounded_file, digest
 from ci_xctest_project import materialize_project
 
@@ -95,24 +95,64 @@ def verify_build(product, app, mode):
 
 
 def settle_case(evidence, relocated, collection, settle):
-    """Reuse repaired H settlement; missing actor/ownership proof retains roots."""
+    """Keep current producer PIDs distinct from independently settled history."""
     record = read_record(evidence, evidence.parent)
-    require(collection and collection.get('scope') and collection.get('inputs'), 'no compiled actor custody proof; retain roots')
+    require(type(collection) is dict and type(collection.get('scope')) is dict
+            and type(collection.get('inputs')) is list and collection['inputs']
+            and type(collection.get('history')) is list and collection['history'],
+            'no compiled actor custody proof; retain roots')
     scope = collection['scope']
-    require(record.get('app_pid') == scope['app_pid'] and record.get('engine_pid') == scope['engine_pid']
-            and collection.get('history')
-            and record.get('paths_phase') == collection['history'][-1], 'cleanup ownership receipt changed')
-    # The accepted 541 settlement owner receives only this exact known record.
-    # It retains its source-owned disappearance/engine/later-record handling.
+    require(type(record.get('app_pid')) is int and record['app_pid'] == scope.get('app_pid')
+            and type(record.get('engine_pid')) is int and record['engine_pid'] >= 0,
+            'cleanup ownership receipt changed')
+    cursor = Cursor(scope)
+    for phase in collection['history']:
+        cursor.accept(phase)
+    cursor.accept(record.get('paths_phase'))  # Includes exact source/operation/document and field types.
+    require(record['paths_phase'] == collection['history'][-1], 'cleanup ownership receipt changed')
+    current_engine = record['engine_pid']
+    historical_identity = None
+    engine_observations = []
+    if current_engine == 0:
+        require(record.get('scenario') == CASES[1] and scope['operation'] == 'pending-engine-failure',
+                'zero current engine outside exact failure operation')
+        cursor.finish()
+        identity = collection['inputs'][0].get('engine_start') if type(collection['inputs'][0]) is dict else None
+        require(type(identity) is list and len(identity) == 3
+                and all(type(value) is int for value in identity)
+                and identity[0] == scope['engine_pid'] and identity[1] > 0 and 0 <= identity[2] < 1_000_000
+                and all(type(row) is dict and row.get('engine_start') == identity for row in collection['inputs']),
+                'unverified original actor engine identity; retain roots')
+        historical_identity = list(identity)
+    else:
+        require(current_engine == scope['engine_pid'], 'cleanup ownership receipt changed')
+
+    def verify_historical_engine(stage):
+        state = observe_process_status(scope['engine_pid'], strict=True)
+        require(type(state) is str and (state == '' or state.startswith('Z')),
+                'original actor engine is live or unknown; retain roots')
+        engine_observations.append(dict(stage=stage, engine_identity=historical_identity,
+                                        observed_state=state, settled=True))
+
+    if historical_identity is not None:
+        verify_historical_engine('before_owner')
+    # Never rewrite the raw producer file or turn a historical PID into a new
+    # signal target. H541 receives the current zero plus explicit history.
     recovery = evidence.parent.parent / 'cleanup'
     recovery.mkdir(exist_ok=True)
     (recovery / 'evidence').mkdir(exist_ok=True)
-    copy = recovery / 'evidence' / evidence.name
-    record['relocated_app'] = str(relocated)
-    write(copy, record)
-    settle(recovery)
+    derived = dict(record, relocated_app=str(relocated))
+    if historical_identity is not None:
+        derived.update(historical_engine_identity=historical_identity,
+                       engine_identity_semantics='engine_pid is current; historical identity is observation-only',
+                       producer_evidence=str(evidence))
+    write(recovery / 'evidence' / evidence.name, derived)
+    settle(recovery)  # Existing owner/profile cleanup and its signal checks remain unchanged.
     require_settled(record)
+    if historical_identity is not None:
+        verify_historical_engine('after_owner')
     return dict(exact_actor_scope=scope, app_engine_settled=True, profile_removed=True,
+                historical_engine_observations=engine_observations,
                 owner='accepted H541 settle_apps; no Finder signal/input/close')
 
 
