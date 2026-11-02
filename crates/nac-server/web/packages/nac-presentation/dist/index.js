@@ -1,4 +1,4 @@
-import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as ee, Fi as te, Fn as k, Fr as A, Ft as ne, G as re, Gi as j, Gn as ie, Gr as ae, Gt as oe, H as se, Hi as ce, Hn as le, Hr as M, Ht as ue, I as de, Ii as fe, In as pe, Ir as me, It as he, J as N, Ji as ge, Jn as _e, Jr as ve, Jt as ye, K as P, Ki as be, Kn as xe, Kr as Se, Kt as Ce, L as we, Li as Te, Ln as Ee, Lr as F, Lt as De, M as Oe, Mi as ke, Mn as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as Re, On as ze, Or as Be, Ot as Ve, P as He, Pi as Ue, Pn as We, Pr as Ge, Pt as Ke, Q as qe, Qi as Je, Qn as Ye, Qr as Xe, Qt as Ze, R as Qe, Ri as $e, Rn as et, Rr as tt, Rt as nt, S as rt, Si as it, Sn as at, Sr as ot, St as st, T as ct, Ti as lt, Tn as ut, Tr as dt, Tt as ft, U as pt, Ui as mt, Un as ht, Ur as I, Ut as gt, V as _t, Vi as vt, Vn as yt, Vr as L, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as kt, Xt as At, Y as jt, Yi as Mt, Yn as Nt, Yr as Pt, Yt as Ft, Z as It, Zi as Lt, Zn as Rt, Zr as R, Zt as zt, _ as Bt, _i as Vt, _n as Ht, _r as z, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as B, gt as Cn, h as wn, hi as Tn, hn as En, hr as Dn, ht as On, i as kn, ii as An, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, ot as cr, p as lr, pi as ur, pn as dr, pr as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as V, vt as Vr, w as Hr, wi as Ur, wn as Wr, wr as Gr, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as H, yt as ti, z as ni, zi as ri, zn as ii, zr as ai, zt as oi } from "./chunks/PerfProfiler-itpVk3zS.js";
+import { $ as e, $n as t, $r as n, $t as r, A as i, Ai as a, An as o, Ar as s, At as c, B as l, Bi as u, Bn as d, Br as f, Bt as p, C as m, Ci as h, Cn as g, Cr as _, Ct as v, D as y, Di as b, Dn as x, Dr as S, Dt as C, E as w, Ei as T, En as E, Er as D, Et as O, F as ee, Fi as te, Fn as k, Fr as A, Ft as ne, G as re, Gi as j, Gn as ie, Gr as ae, Gt as oe, H as se, Hi as ce, Hn as le, Hr as M, Ht as ue, I as de, Ii as fe, In as pe, Ir as me, It as he, J as N, Ji as ge, Jn as _e, Jr as ve, Jt as ye, K as P, Ki as be, Kn as xe, Kr as Se, Kt as Ce, L as we, Li as Te, Ln as Ee, Lr as F, Lt as De, M as Oe, Mi as ke, Mn as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as Re, On as ze, Or as Be, Ot as Ve, P as He, Pi as Ue, Pn as We, Pr as Ge, Pt as Ke, Q as qe, Qi as Je, Qn as Ye, Qr as Xe, Qt as Ze, R as Qe, Ri as $e, Rn as et, Rr as tt, Rt as nt, S as rt, Si as it, Sn as at, Sr as ot, St as st, T as ct, Ti as lt, Tn as ut, Tr as dt, Tt as ft, U as pt, Ui as mt, Un as ht, Ur as I, Ut as gt, V as _t, Vi as vt, Vn as yt, Vr as L, Vt as bt, W as xt, Wi as St, Wn as Ct, Wr as wt, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as kt, Xt as At, Y as jt, Yi as Mt, Yn as Nt, Yr as Pt, Yt as Ft, Z as It, Zi as Lt, Zn as Rt, Zr as R, Zt as zt, _ as Bt, _i as Vt, _n as Ht, _r as z, _t as Ut, a as Wt, ai as Gt, an as Kt, ar as qt, at as Jt, b as Yt, bi as Xt, bn as Zt, br as Qt, bt as $t, c as en, ci as tn, cn as nn, cr as rn, ct as an, d as on, di as sn, dn as cn, dr as ln, dt as un, ei as dn, en as fn, er as pn, et as mn, f as hn, fi as gn, fn as _n, fr as vn, ft as yn, g as bn, gi as xn, gn as Sn, gr as B, gt as Cn, h as wn, hi as Tn, hn as En, hr as Dn, ht as On, i as kn, ii as An, in as jn, ir as Mn, it as Nn, j as Pn, ji as Fn, jn as In, jr as Ln, jt as Rn, k as zn, ki as Bn, kn as Vn, kr as Hn, kt as Un, l as Wn, li as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mi as Xn, mn as Zn, mr as Qn, mt as $n, n as er, ni as tr, nn as nr, nr as rr, nt as ir, o as ar, oi as or, on as sr, ot as cr, p as lr, pi as ur, pn as dr, pr as fr, pt as pr, q as mr, qi as hr, qn as gr, qr as _r, qt as vr, ri as yr, rn as br, rr as xr, rt as Sr, s as Cr, si as wr, sn as Tr, sr as Er, st as Dr, t as Or, ti as kr, tn as Ar, tr as jr, tt as Mr, u as Nr, ui as Pr, un as Fr, ur as Ir, ut as Lr, v as Rr, vi as zr, vn as Br, vr as V, vt as Vr, w as Hr, wi as Ur, wn as Wr, wr as Gr, wt as Kr, x as qr, xi as Jr, xn as Yr, xr as Xr, xt as Zr, y as Qr, yi as $r, yn as ei, yr as H, yt as ti, z as ni, zi as ri, zn as ii, zr as ai, zt as oi } from "./chunks/PerfProfiler-FtX-Pe8a.js";
 import * as si from "react";
 import ci, { Fragment as li, Suspense as ui, createContext as di, lazy as fi, memo as pi, use as mi, useCallback as U, useContext as hi, useEffect as W, useId as gi, useLayoutEffect as _i, useMemo as G, useRef as K, useState as q, useSyncExternalStore as vi } from "react";
 import { QueryClientProvider as yi, QueryObserver as bi, replaceEqualDeep as xi, useIsFetching as Si, useMutation as Ci, useQueries as wi, useQuery as Ti, useQueryClient as Ei } from "@tanstack/react-query";
@@ -15011,7 +15011,7 @@ function Iv(e, t) {
 // src/app/lib/markdownChunk.ts
 var Lv = null, Rv = !1;
 function zv() {
-	return Lv ??= import("./chunks/markdown-renderer-DaJGdqgt.js").then((e) => e.t).then((e) => (Rv = !0, e)), Lv;
+	return Lv ??= import("./chunks/markdown-renderer-C3YNO7mj.js").then((e) => e.t).then((e) => (Rv = !0, e)), Lv;
 }
 function Bv() {
 	return Rv;
@@ -16969,16 +16969,17 @@ function ub({ compact: e, className: t, ...n }) {
 	});
 }
 // src/app/features/direct-session/promptRecovery.ts
-async function db(e, t, n, r) {
-	let i = null;
+async function db(e, t, n, r, i) {
+	let a = null;
 	if (n) try {
-		i = e.retainSubmission(t, n);
+		a = e.retainSubmission(t, n);
 	} catch {}
 	try {
+		a && i?.();
 		let n = await r();
-		return i && e.settleSubmission(t, i, "confirmed"), n;
+		return a && e.settleSubmission(t, a, "confirmed"), n;
 	} catch (n) {
-		throw i && e.settleSubmission(t, i, "uncertain"), n;
+		throw a && e.settleSubmission(t, a, "uncertain"), n;
 	}
 }
 // src/app/components/inspector/PromptRecoveryMessage.tsx
@@ -18542,38 +18543,40 @@ function ax({ value: e, onChange: t, onSubmit: n, onStop: r, running: i, backgro
 }
 // src/app/components/inspector/SubagentComposer.tsx
 function ox({ parentSessionId: e, target: t, permissionSessionId: n, permissionBehavior: r, requesterLabel: i, showPermissions: a = !0, floating: o = !1 }) {
-	let s = ar(), c = A(), l = Tt(), u = gt(), d = je(), f = Rn(), p = R().stores.promptDraftStore, m = p.useDraft(t.id), h = [...p.useUnreviewed(t.id), ...p.useRecoveries(t.id)], g = p.useRetentionLimited(), _ = p.useSubmitting(t.id), [v, y] = q(null), b = v ?? t.background, x = t.status === "running", S = p.useCancelling(t.id), C = async () => {
+	let s = ar(), c = A(), l = Tt(), u = gt(), d = je(), f = Rn(), p = R().stores.promptDraftStore, m = p.useDraft(t.id), h = [...p.useUnreviewed(t.id), ...p.useRecoveries(t.id)], g = p.useRetentionLimited(), _ = p.useUnretainedSubmission(t.id), v = p.useSubmitting(t.id), [y, b] = q(null), x = y ?? t.background, S = t.status === "running", C = p.useCancelling(t.id), w = async () => {
 		let n = p.get(t.id), r = n.text.trim();
-		if (!r) return;
-		let i = p.claimSubmission(t.id);
-		if (!i && !x) return;
-		let a = null;
+		if (!r || !S && p.isSubmitting(t.id)) return;
+		let i = p.claimSubmission(t.id, n);
+		if (!i) return;
+		let a = !1;
 		try {
-			if (a = p.retainSubmission(t.id, n), !a) return;
-			p.acknowledge(t.id, n), t.mode === "orchestrator" ? await u.mutateAsync({
+			await db(p, t.id, n, async () => t.mode === "orchestrator" ? u.mutateAsync({
 				sessionId: e,
 				payload: {
 					description: t.description,
 					prompt: r,
-					background: b,
+					background: x,
 					orchestrator_session_id: t.id
 				}
-			}) : await l.mutateAsync({
+			}) : l.mutateAsync({
 				sessionId: e,
 				payload: {
 					profile: "general",
 					description: t.description,
 					prompt: r,
-					background: b,
+					background: x,
 					child_session_id: t.id
 				}
-			}), p.settleSubmission(t.id, a, "confirmed");
+			}), () => {
+				a = !0, p.acknowledge(t.id, n);
+			}), p.hasSubmission(t.id, n) && p.acknowledge(t.id, n);
 		} catch (e) {
-			a && p.settleSubmission(t.id, a, "uncertain"), s.error(`Unable to update the subagent: ${Wt($(e))}`);
+			if (!p.hasSubmission(t.id, n)) return;
+			a || p.noteUnretainedSubmission(t.id, n), s.error(`Unable to update the subagent: ${Wt($(e))}`);
 		} finally {
 			i?.();
 		}
-	}, w = async () => {
+	}, T = async () => {
 		let n = p.claimCancellation(t.id);
 		if (n) try {
 			t.mode === "child" ? await d.mutateAsync({
@@ -18595,20 +18598,20 @@ function ox({ parentSessionId: e, target: t, permissionSessionId: n, permissionB
 			/* @__PURE__ */ Y(ax, {
 				value: m.text,
 				onChange: (e) => p.update(t.id, e),
-				onSubmit: () => void C(),
-				onStop: () => void w(),
-				running: x,
-				background: x ? t.background : b,
-				onBackgroundChange: y,
-				busy: S,
-				starting: _,
+				onSubmit: () => void w(),
+				onStop: () => void T(),
+				running: S,
+				background: S ? t.background : x,
+				onBackgroundChange: b,
+				busy: C,
+				starting: v,
 				floating: o,
 				permission: a ? /* @__PURE__ */ Y(Pb, {
 					sessionId: n,
 					behavior: r,
 					autoApprovalAvailable: !1,
 					retryParentSessionId: t.mode === "child" ? e : void 0,
-					poll: x,
+					poll: S,
 					requesterLabel: i,
 					compact: c
 				}) : null
@@ -18617,6 +18620,17 @@ function ox({ parentSessionId: e, target: t, permissionSessionId: n, permissionB
 				role: "status",
 				className: "text-small text-basic-secondary",
 				children: "Text recovery storage is full or unavailable. You can keep typing and sending; new edits may not restore. Review or dismiss older text to free space."
+			}) : null,
+			_ ? /* @__PURE__ */ X("div", {
+				role: "status",
+				className: "text-small text-basic-secondary",
+				children: [/* @__PURE__ */ Y("p", { children: "Message delivery is unconfirmed. Submitted text was not saved for recovery. Check the transcript before sending again." }), /* @__PURE__ */ Y(B, {
+					type: "button",
+					size: V.Small,
+					variant: H.Ghost,
+					onClick: () => p.dismissUnretainedSubmission(t.id, _),
+					children: "Acknowledge delivery uncertainty"
+				})]
 			}) : null,
 			h.length ? /* @__PURE__ */ Y("div", {
 				role: "region",
