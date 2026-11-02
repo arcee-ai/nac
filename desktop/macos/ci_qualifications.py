@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from ci_paths_budget import check as budget_check, time_limit
 
 DIRECTORY = Path(__file__).resolve().parent
 PROFILES = {'macos26': ('macos-26', 'ci-toolchain.json'),
@@ -45,7 +46,9 @@ def select_target(key):
 
 def require_checkout(root, expected):
     def git(*args):
-        return subprocess.check_output(['git', *args], cwd=root, text=True, timeout=15).strip()
+        value = subprocess.check_output(['git', *args], cwd=root, text=True, timeout=time_limit(15))
+        budget_check()
+        return value.strip()
     actual = git('rev-parse', 'HEAD')
     dirty = bool(git('status', '--porcelain'))
     if Path(git('rev-parse', '--show-toplevel')).resolve() != root.resolve():
