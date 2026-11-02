@@ -240,7 +240,9 @@ impl NativeTool for ReadQuestionTool {
             })
             .await
             {
-                Ok(value) => outcome(value),
+                Ok(value) => outcome(value.and_then(|question| {
+                    question.ok_or_else(|| crate::store::QuestionError::NotFound.into())
+                })),
                 Err(e) => read::unavailable(e),
             }
         })
@@ -355,3 +357,7 @@ impl NativeTool for AnswerQuestionTool {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "task_questions_tests.rs"]
+mod tests;
