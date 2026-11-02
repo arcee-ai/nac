@@ -55,8 +55,12 @@ for (const viewport of VIEWPORTS) {
       name: "Open the menu",
       exact: true,
     });
+    const configurations = page.getByRole("button", { name: "Configurations", exact: true });
+    // A phone keeps Configurations inside the menu; wait for either to paint
+    // so the branch never reads the page before it renders.
+    await expect(menu.or(configurations).first()).toBeVisible();
     if (await menu.isVisible()) await menu.click();
-    await page.getByRole("button", { name: "Configurations", exact: true }).click();
+    await configurations.click();
     const dialog = page.getByRole("dialog", {
       name: "Configurations",
       exact: true,
