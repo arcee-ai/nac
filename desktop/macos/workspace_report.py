@@ -79,7 +79,10 @@ def matrix(provenance, episodes, baseline=None):
                     episode = episodes.get(feature.get('scenario'), {})
                     check = episode.get('checks', {}).get(feature['id'])
                     if check:
-                        row.update(tested=True, status=check['status'], evidence=check,
+                        # Older present checks imply execution only when the flag is absent.
+                        # An explicit flag must be the boolean True to mean tested.
+                        row.update(tested=check.get('executed', True) is True,
+                                   status=check['status'], evidence=check,
                                    reason=check.get('detail', ''))
             rows.append(row)
     return {'ticket': inventory['ticket'], 'minimum_candidate': '14',
