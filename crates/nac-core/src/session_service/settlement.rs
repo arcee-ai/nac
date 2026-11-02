@@ -196,12 +196,25 @@ impl SessionService {
                     self.select_next_direct_inbox_item().await
                 };
             match selection {
-                Ok(selection) => self.publish_attention_completion(
-                    &run_id,
-                    attention_success,
-                    goal_attention,
-                    selection.disposition,
-                ),
+                Ok(selection) => {
+                    #[cfg(any(test, feature = "test-support"))]
+                    // Selection has returned: no store transaction, operation
+                    // lease, inbox wake lock or attention hub lock is held.
+                    // The nonshipping owner accepts only actual Idle/IdleUnverified.
+                    let publication = self
+                        .wait_attention_publication_for_test(&run_id, &selection.disposition)
+                        .await;
+                    self.publish_attention_completion(
+                        &run_id,
+                        attention_success,
+                        goal_attention,
+                        selection.disposition,
+                    );
+                    #[cfg(any(test, feature = "test-support"))]
+                    if let Some(publication) = publication {
+                        publication.publication_attempted();
+                    }
+                }
                 Err(error) => {
                     eprintln!(
                         "nac: failed to promote direct inbox after run settlement: {error:#}"

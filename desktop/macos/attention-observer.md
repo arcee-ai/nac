@@ -111,9 +111,9 @@ the repository's gated setup first. Use a new owned output directory per run:
 
 ```sh
 # Inside the shared Rust lease; copies binaries before releasing that lease:
-python3 desktop/macos/attention_feed_contract.py --build-producers --output /tmp/attention-producers-UNIQUE
+python3 desktop/macos/attention_feed_contract.py --source-ref FULL_ADMITTED_COMMIT_SHA --build-producers --output /tmp/attention-producers-UNIQUE
 # Inside the shared browser/Mac lease:
-python3 desktop/macos/attention_feed_contract.py --producer-receipt /tmp/attention-producers-UNIQUE/producer-binaries.json --output /tmp/attention-results-UNIQUE
+python3 desktop/macos/attention_feed_contract.py --source-ref FULL_ADMITTED_COMMIT_SHA --producer-receipt /tmp/attention-producers-UNIQUE/producer-binaries.json --output /tmp/attention-results-UNIQUE
 ```
 
 Only the explicit fixture driver mutates disposable REST state. Real Ask coverage
@@ -126,6 +126,22 @@ labels adversarial loopback transport frames. Compiler target macOS 14 is not
 supported-OS qualification. These fixtures establish no actual app/WKWebView,
 signed OS delivery, trusted input, Focus behavior or measured idle CPU/wakeups.
 Every remaining full ALL-350 native acceptance gate below remains open.
+
+For N1, supply the exact clean committed candidate in both phases. Producer
+receipts bind its HEAD/tree, executable hash and embedded source identity;
+qualification rejects a dirty or different checkout. Builds consume the allocated
+v5 target and jobs2 contract. No Rust equivalence to the historical e9 producer
+is assumed. Named common sources and main files define each Swift program.
+The frame envelope oracle includes the bounded historical completion page.
+
+Legacy queue/decision cases retain their current-state notice semantics. The
+separate `semantic-pages` cases drive the actual Foundation page parser and
+URLSession backpressure with explicit accepted/rejected mock page ACKs. Their
+checkpoint is a test double, with no durable storage, app or system delivery
+claim. The indicator fixture characterizes unknown projection versus real
+resolution, including muted/denied operation and retained completion counts.
+All-three real-producer semantic completion/restart/queued/disconnected replay,
+actual app/WK checkpoint/OS cases and performance remain separately required.
 
 The 1,024 identity union includes silent current pending decisions as well as
 seen identities, candidates and current work. A labelled faulted-stream fixture
@@ -287,3 +303,44 @@ idle CPU/wakeup/observer measurements with/without notifications; and signed
 build OS-delivery evidence separate from a mock center. Click handling must
 never answer, execute, grant, or replay a command. No signing identity or
 notification delivery evidence is supplied by these fixtures.
+
+### Attention fixture execution custody
+
+The app driver now requires `APP OUTPUT INSTANCE_OBSERVER FULL_SOURCE_REF`.
+Its clean exact-HEAD/tree guard and app receipt must agree with that full commit.
+Each launch/control checks the active console UID, Aqua domain and observed
+Root-unlocked bit. An available CGS lock wins. App identity includes its launch
+time; the first owned window and control nonce stay pinned. A two-second control
+envelope is published atomically; the fixture app repeats lock, UID, focus,
+window and nonce checks at consumption. Unknown/locked state or focus loss
+retires controls. Cleanup uses a separate nonce-bound stop-only verb without
+activation or focus restoration. These controls require actual Aqua execution
+before acceptance; Python fakes and Swift typechecks are preparation evidence.
+
+The standalone port test is run only through `notification_port_fixture.py
+PORT_PROGRAM CLEANUP_HELPER FRESH_OUTPUT FULL_SOURCE_REF`. Compile its existing
+source group with `NotificationPortFixture.swift`; compile the same group with
+`NotificationPortCleanup.swift` replacing the test main for the companion.
+Both receive the controller-created canonical root and inherited directory fd;
+neither discovers a profile or accepts an arbitrary WebKit UUID. The controller
+owns a unique 0700 TMPDIR and reaps its exact child before calling the companion,
+including after assertion failure. The companion uses WorkspaceStorageProfile,
+removes that UUID only, and revalidates the root after the asynchronous callback.
+Only an exact receipt permits descriptor-relative filesystem cleanup. A live
+child, replacement root, unexpected temp entry, symlink or cleanup failure
+retains evidence and fails the episode. No native runtime qualification is
+implied by the accompanying inert directory tests.
+
+Cleanup after custody loss uses the ATTENTION_SMOKE-only
+`cleanupAttentionFixture` entry in the existing AppQuit/AppLifecycle owner.
+It pins the same launch/stop, retires through PreviewApp and waits for the real
+engine owner to reap; it does not call the interactive `stopFixture` helper.
+An existing Quit or recovery sheet stays in place without answering/dismissing
+it. Old answers and queued presentations cannot undo cleanup or restart work.
+Responder changes (including a late recovery retirement), window fronting and
+timeout UI are suppressed for this intent. The 20/23-second engine policy and
+26-second lifecycle timeout remain; timeout retains the original callback and
+does not claim reap. Only actual completion permits normal termination, even
+when it arrives after that timeout. Ordinary finish and product Quit retain
+their previous confirmation/Cancel/Stop behavior. Source fences and lifecycle
+typechecks are not actual AppKit cleanup evidence.

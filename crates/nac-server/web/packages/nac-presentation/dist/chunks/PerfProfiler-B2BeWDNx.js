@@ -63,6 +63,13 @@ var k = class {
 	close() {
 		this.adapter = void 0, this.version++;
 	}
+	async openNotificationSessionTarget(e, t, n) {
+		let r = this.adapter;
+		if (this.closed() || t.aborted || !r?.openNotificationSessionTarget || !this.inspect) return "stale";
+		if (!n()) return "deferred";
+		let i = ++this.version, a = r.currentSession(), o = await this.inspect(e.session_id, t);
+		return this.closed() || t.aborted || this.version !== i || this.adapter !== r || r.currentSession() !== a ? "stale" : o.session?.session_id === e.session_id ? n() ? (r.openNotificationSessionTarget(e.session_id), "opened") : "deferred" : "unavailable";
+	}
 	async open(e) {
 		if (this.closed()) throw Error("Product runtime is closed.");
 		let t = this.adapter, n = ++this.version, r = t?.currentSession(), i = e.session_id ?? null;

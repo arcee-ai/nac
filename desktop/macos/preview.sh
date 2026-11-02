@@ -2,9 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-run}"
-case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build]' >&2; exit 2 ;; esac
+case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|attention-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|attention-build]' >&2; exit 2 ;; esac
 local_app=0
-case "$mode" in app-*|startup-*|instance-*|lifecycle-*) local_app=1 ;; esac
+case "$mode" in app-*|startup-*|instance-*|lifecycle-*|attention-*) local_app=1 ;; esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
     echo 'The development preview requires Apple Silicon macOS and an Apple Swift SDK.' >&2; exit 1;
 }
@@ -17,6 +17,7 @@ if [[ "$mode" == app-* ]]; then app="$output/NAC.app"; fi
 if [[ "$mode" == startup-* ]]; then app="$output/NAC Startup Smoke.app"; fi
 if [[ "$mode" == instance-* ]]; then app="$output/NAC Instance Smoke.app"; fi
 if [[ "$mode" == lifecycle-* ]]; then app="$output/NAC Lifecycle Smoke.app"; fi
+if [[ "$mode" == attention-* ]]; then app="$output/NAC Attention Smoke.app"; fi
 if [[ "${NAC_MAC_SKIP_ENGINE_BUILD:-0}" != 1 ]]; then
     cargo build --locked -p nac-server --bin nac-web
 fi
@@ -33,10 +34,10 @@ if [[ ! "$engine" -ef "$app/Contents/Resources/nac-web" ]]; then
 fi
 engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
 printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
-if [[ "$mode" == app-* || "$mode" == instance-* || "$mode" == lifecycle-* ]]; then
+if [[ "$mode" == app-* || "$mode" == instance-* || "$mode" == lifecycle-* || "$mode" == attention-* ]]; then
     identity_kind=normal
     if [[ "$mode" == instance-* ]]; then identity_kind=instance-smoke; fi
-    if [[ "$mode" == lifecycle-* ]]; then identity_kind=instance-smoke; fi
+    if [[ "$mode" == lifecycle-* || "$mode" == attention-* ]]; then identity_kind=instance-smoke; fi
     bundle_identity=$(bash desktop/macos/BundleIdentity.sh "$app/Contents/Resources/engine-identity.json" "$identity_kind")
     bundle_identifier="${bundle_identity%%$'\n'*}"
     bundle_name="${bundle_identity#*$'\n'}"
@@ -45,21 +46,32 @@ if [[ "$mode" == app-* || "$mode" == instance-* || "$mode" == lifecycle-* ]]; th
     if [[ "$mode" == lifecycle-* ]]; then
         /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier.lifecycle" "$app/Contents/Info.plist"
     fi
+    if [[ "$mode" == attention-* ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier.attention" "$app/Contents/Info.plist"
+    fi
 fi
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
          desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift
          desktop/macos/NativeCommands.swift desktop/macos/NativeCommandState.swift
          desktop/macos/NativeCommandScript.swift desktop/macos/NativeCommandBridge.swift
+         desktop/macos/NativeSessionTarget.swift
          desktop/macos/WorkspaceRecovery.swift desktop/macos/WorkspaceRetirement.swift
          desktop/macos/WorkspaceReadiness.swift
           desktop/macos/WorkspaceCheckpoint.swift desktop/macos/WorkspaceStorage.swift
+          desktop/macos/WorkspaceNotificationState.swift
           desktop/macos/WorkspaceStorageBridge.swift desktop/macos/WorkspaceStorageScript.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
     sources+=(desktop/macos/AppInstance.swift desktop/macos/StoreConflict.swift
-              desktop/macos/AppLifecycle.swift desktop/macos/AppQuit.swift)
-    flags+=(-D LOCAL_APP)
+              desktop/macos/AppLifecycle.swift desktop/macos/AppQuit.swift
+              desktop/macos/AttentionFeedProtocol.swift desktop/macos/AttentionCompletions.swift
+              desktop/macos/AttentionProjection.swift
+              desktop/macos/NativeAttentionObserver.swift
+              desktop/macos/NativeAttentionIndicator.swift
+              desktop/macos/NativeAttentionDelivery.swift desktop/macos/NativeNotificationCenter.swift
+              desktop/macos/NativeAttentionMenu.swift desktop/macos/NativeAttentionCoordinator.swift)
+    flags+=(-D LOCAL_APP -framework UserNotifications)
 else
     sources+=(desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
     flags+=(-framework Network)
@@ -80,6 +92,10 @@ if [[ "$mode" == lifecycle-* ]]; then
     sources+=(desktop/macos/LifecycleSmoke.swift desktop/macos/RecoverySmoke.swift)
     flags+=(-D PREVIEW_SMOKE -D LIFECYCLE_SMOKE)
 fi
+if [[ "$mode" == attention-* ]]; then
+    sources+=(desktop/macos/AttentionSmoke.swift desktop/macos/AttentionFixtureGuard.swift)
+    flags+=(-D PREVIEW_SMOKE -D ATTENTION_SMOKE -framework IOKit)
+fi
 receipt_inputs="$output/build-inputs-$mode.json"
 python3 -B desktop/macos/build_receipt.py capture "$receipt_inputs" "$app" "$mode" "${flags[@]}" -- "${sources[@]}"
 xcrun swiftc "${flags[@]}" \
@@ -89,9 +105,18 @@ printf '%s\n' "$app"
 case "$mode" in
     run) exec /usr/bin/open -n -W "$app" ;;
     app-run) exec /usr/bin/open -W "$app" ;;
-    instance-build|instance-smoke|lifecycle-build)
+    instance-build|instance-smoke|lifecycle-build|attention-build)
         xcrun swiftc -parse-as-library -swift-version 5 -target arm64-apple-macosx14.0 -O \
             -framework AppKit desktop/macos/InstanceObservation.swift -o "$output/InstanceObservation"
+        if [[ "$mode" == attention-build ]]; then
+            xcrun swiftc -parse-as-library -swift-version 5 -target arm64-apple-macosx14.0 -O \
+                -framework WebKit desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift \
+                desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift \
+                desktop/macos/WorkspaceCheckpoint.swift desktop/macos/WorkspaceStorage.swift \
+                desktop/macos/WorkspaceNotificationState.swift desktop/macos/AttentionFixtureRoot.swift \
+                desktop/macos/AttentionFixtureCleanup.swift \
+                -o "$output/AttentionFixtureCleanup"
+        fi
         if [[ "$mode" == instance-smoke ]]; then
             instance_arguments=("$app" "$output/instance-evidence" "$output/InstanceObservation")
             if [[ -n "${NAC_MAC_STABLE_APP:-}" ]]; then instance_arguments+=("$NAC_MAC_STABLE_APP"); fi

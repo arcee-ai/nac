@@ -146,13 +146,15 @@ enum AttentionWire {
     }
     enum Reset: String, Decodable { case incarnation, replay_gap, invalid_cursor }
     enum Frame: Decodable, Equatable {
+        case completions(CompletionPage)
         case baseline(Cursor, [Snapshot], Reset?)
         case record(Cursor, Source, UInt64, Change, Bool)
         case reset(Reset)
-        enum CodingKeys: String, CodingKey { case kind, boundary, sources, reset, source, source_revision, change, new_attention, reason }
+        enum CodingKeys: String, CodingKey { case kind, boundary, sources, reset, source, source_revision, change, new_attention, reason, page }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             switch try c.decode(String.self, forKey: .kind) {
+            case "completions": self = .completions(try c.decode(CompletionPage.self, forKey: .page))
             case "baseline":
                 guard c.contains(.reset) else { throw AttentionFeedError.invalid }
                 self = .baseline(try c.decode(Cursor.self, forKey: .boundary),
@@ -168,7 +170,7 @@ enum AttentionWire {
             }
         }
         var boundary: Cursor? {
-            switch self { case .baseline(let b, _, _), .record(let b, _, _, _, _): return b; case .reset: return nil }
+            switch self { case .baseline(let b, _, _), .record(let b, _, _, _, _): return b; case .reset, .completions: return nil }
         }
     }
     static func validID(_ id: String) -> Bool {
@@ -194,6 +196,7 @@ enum AttentionWire {
     static func validate(_ frame: Frame) throws {
         if let b = frame.boundary, !validUUID(b.engine) || !validUUID(b.epoch) { throw AttentionFeedError.invalid }
         switch frame {
+        case .completions(let page): try page.validate()
         case .baseline(_, let snapshots, _):
             guard snapshots.count <= sources, snapshots.reduce(0, { $0 + $1.bytes }) <= metadataBytes,
                   snapshots.reduce(0, { $0 + $1.pending.count + ($1.work == nil ? 0 : 1) }) <= identities else {
@@ -229,36 +232,44 @@ struct AttentionSSEParser {
     var retainedBytes: Int { line.count + data.count + event.utf8.count + (id?.utf8.count ?? 0) }
 
     mutating func append(_ bytes: Data, receive: (AttentionWire.Frame) throws -> Void) throws {
-        for byte in bytes {
+        _ = try consume(bytes) { frame in try receive(frame); return true }
+    }
+
+    /// Return the unconsumed tail when the owner suspends one page for durable
+    /// native accounting. No unbounded parsed-frame queue is introduced.
+    mutating func consume(_ bytes: Data, receive: (AttentionWire.Frame) throws -> Bool) throws -> Data {
+        for (offset, byte) in bytes.enumerated() {
             if carriageReturn { carriageReturn = false; if byte == 10 { continue } }
             eventBytes += 1
             guard eventBytes <= AttentionWire.eventBytes else { throw AttentionFeedError.capacity }
             if byte == 10 || byte == 13 {
-                try finishLine(receive: receive)
+                let keepReading = try finishLine(receive: receive)
                 if byte == 13 { carriageReturn = true }
+                if !keepReading { return Data(bytes.dropFirst(offset + 1)) }
             } else {
                 guard line.count < AttentionWire.eventBytes else { throw AttentionFeedError.capacity }
                 line.append(byte)
             }
         }
+        return Data()
     }
-    private mutating func finishLine(receive: (AttentionWire.Frame) throws -> Void) throws {
+    private mutating func finishLine(receive: (AttentionWire.Frame) throws -> Bool) throws -> Bool {
         guard let text = String(data: line, encoding: .utf8) else { throw AttentionFeedError.invalid }
         line.removeAll(keepingCapacity: false)
         if text.isEmpty {
             defer { data = Data(); event = ""; id = nil; eventBytes = 0 }
-            guard !data.isEmpty else { return }
+            guard !data.isEmpty else { return true }
             guard event == "attention" else { throw AttentionFeedError.invalid }
             data.removeLast() // Last data-line newline is not part of SSE data.
             let frame = try JSONDecoder().decode(AttentionWire.Frame.self, from: data)
+            if case .completions = frame, data.count > 64 * 1024 + 1024 { throw AttentionFeedError.capacity }
             try AttentionWire.validate(frame)
             if let boundary = frame.boundary {
                 guard id == boundary.id else { throw AttentionFeedError.invalid }
             } else if id != nil { throw AttentionFeedError.invalid }
-            try receive(frame)
-            return
+            return try receive(frame)
         }
-        if text.hasPrefix(":") { return }
+        if text.hasPrefix(":") { return true }
         let parts = text.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         let value = parts.count == 2 ? String(parts[1].hasPrefix(" ") ? parts[1].dropFirst() : parts[1]) : ""
         switch parts[0] {
@@ -269,5 +280,6 @@ struct AttentionSSEParser {
         case "data": data.append(contentsOf: value.utf8); data.append(10)
         default: break // Bounded SSE extension/retry fields confer no authority.
         }
+        return true
     }
 }

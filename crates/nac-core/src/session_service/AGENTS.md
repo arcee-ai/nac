@@ -82,3 +82,9 @@ their delivery owners.
   path.
 - Do not combine topology-wide branches when construction can pass a focused
   component or capability.
+
+`settlement.rs` remains above 800 lines because terminal persistence, goal
+accounting, active-run retirement, continuation selection and final attention
+publication form one ordered settlement boundary. Nonshipping interleave
+synchronization lives in `attention_test_support.rs`; keep its awaits outside
+store/operation/hub locks and compile it out without test-support.

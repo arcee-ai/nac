@@ -166,6 +166,7 @@ export interface components {
     AttentionDispositionDto: "completed" | "continuing" | "waiting_for_decision";
     AttentionFacetDto: "available" | "unknown" | "unsupported";
     AttentionFrame:
+      | { kind: "completions"; page: components["schemas"]["CompletionPageDto"] }
       | {
           boundary: components["schemas"]["AttentionCursor"];
           kind: "baseline";
@@ -259,6 +260,24 @@ export interface components {
           reason: components["schemas"]["CompactionSkipReason"];
           status: "unchanged";
         };
+    CompletionKindDto: "request" | "goal";
+    CompletionOccurrenceDto: {
+      behavior: string;
+      goal_id: string | null;
+      kind: components["schemas"]["CompletionKindDto"];
+      mark_version: number | null;
+      run_id: string;
+      sequence: number;
+      session_id: string;
+    };
+    CompletionPageDto: {
+      baseline: boolean;
+      cursor: number;
+      high_water: number;
+      items: components["schemas"]["CompletionOccurrenceDto"][];
+      more: boolean;
+      store_id: string;
+    };
     ConfigureMcpOAuthRequest: {
       authorization_metadata?: components["schemas"]["McpOAuthAuthorizationMetadataRequest"] | null;
       client_id_credential?: string | null;

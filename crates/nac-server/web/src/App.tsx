@@ -1,4 +1,6 @@
 import { DesktopCommandOwner } from "@/app/features/desktop-commands/DesktopCommandOwner";
+import { DesktopSessionTargetOwner } from "@/app/features/desktop-commands/DesktopSessionTargetOwner";
+import { DesktopVisibility } from "@/app/features/desktop-commands/DesktopVisibility";
 import type { DesktopCommandPort } from "@/app/features/desktop-commands/adapter";
 import { ProductNavigationProvider } from "@/app/features/product-context/ProductNavigationProvider";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
@@ -42,29 +44,34 @@ function DesignRoute() {
 
 export default function App({ desktopCommands }: { desktopCommands?: DesktopCommandPort }) {
   return (
-    <UiPolicyProvider>
-      <ToastProvider>
-        {/* Projects sit outside sessions: deleting a project reaches its chats,
+    <DesktopVisibility port={desktopCommands}>
+      <UiPolicyProvider>
+        <ToastProvider>
+          {/* Projects sit outside sessions: deleting a project reaches its chats,
           never the other way round. */}
-        <SessionActionsProvider>
-          <ProjectActionsProvider>
-            <ManagedHostProvider>
-              <ProductNavigationProvider>
-                {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
-                <Routes>
-                  <Route element={<AppShell />}>
-                    <Route path="/" element={<ProjectsListPage />} />
-                    <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                    <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
-                  </Route>
-                  <Route path="/design" element={<DesignRoute />} />
-                  <Route path="*" element={<Navigate to={routes.list()} replace />} />
-                </Routes>
-              </ProductNavigationProvider>
-            </ManagedHostProvider>
-          </ProjectActionsProvider>
-        </SessionActionsProvider>
-      </ToastProvider>
-    </UiPolicyProvider>
+          <SessionActionsProvider>
+            <ProjectActionsProvider>
+              <ManagedHostProvider>
+                <ProductNavigationProvider>
+                  {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
+                  {desktopCommands?.connectSessionTarget && (
+                    <DesktopSessionTargetOwner port={desktopCommands} />
+                  )}
+                  <Routes>
+                    <Route element={<AppShell />}>
+                      <Route path="/" element={<ProjectsListPage />} />
+                      <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                      <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
+                    </Route>
+                    <Route path="/design" element={<DesignRoute />} />
+                    <Route path="*" element={<Navigate to={routes.list()} replace />} />
+                  </Routes>
+                </ProductNavigationProvider>
+              </ManagedHostProvider>
+            </ProjectActionsProvider>
+          </SessionActionsProvider>
+        </ToastProvider>
+      </UiPolicyProvider>
+    </DesktopVisibility>
   );
 }

@@ -348,6 +348,9 @@ pub(super) fn create_with_connection(
     )?;
     let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("inserted session goal could not be reloaded"))?;
+    if let Some(run) = goal.accounting_run_id.as_deref() {
+        super::completion_occurrences::goal_participated(connection, session_id, run)?;
+    }
     Ok((goal, retired))
 }
 coordinated_command! {
@@ -451,6 +454,9 @@ pub(super) fn update_with_connection(
     )?;
     let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("updated session goal could not be reloaded"))?;
+    if current.status != GoalStatus::Complete && goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(connection, &goal)?;
+    }
     Ok(goal)
 }
 coordinated_command! {
@@ -480,6 +486,9 @@ pub fn update_session_goal_by_model(
     }
     let goal = load_with_connection(&transaction, session_id)?
         .ok_or_else(|| anyhow!("goal disappeared"))?;
+    if goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(&transaction, &goal)?;
+    }
     transaction.commit()?;
     committed(path, &goal, GoalChangeKind::Current);
     Ok(goal)
@@ -539,12 +548,13 @@ pub fn bind_session_goal_run(
     session_id: &str,
     baseline: &GoalRunBaseline,
 ) -> Result<Option<SessionGoalRecord>> {
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    require_direct_session(&transaction, session_id)?;
     let baseline_tokens = checked_integer(baseline.billable_tokens, "run token baseline")?;
     let started_at = checked_integer(baseline.started_at_epoch_ms, "run start time")?;
     let continuation = baseline.continuation.then_some(baseline.run_id.as_str());
-    let changed = connection.execute(
+    let changed = transaction.execute(
         "UPDATE session_goals
          SET accounting_run_id = ?1, accounting_token_baseline = ?2,
              accounting_started_at_epoch_ms = ?3, continuation_run_id = ?4,
@@ -563,7 +573,9 @@ pub fn bind_session_goal_run(
     if changed == 0 {
         return Ok(None);
     }
-    let goal = load_with_connection(&connection, session_id)?;
+    super::completion_occurrences::goal_participated(&transaction, session_id, &baseline.run_id)?;
+    let goal = load_with_connection(&transaction, session_id)?;
+    transaction.commit()?;
     if let Some(goal) = &goal {
         committed(path, goal, GoalChangeKind::Current);
     }

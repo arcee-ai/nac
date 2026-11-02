@@ -105,3 +105,41 @@ authority; the production React UI and HTTP/SSE client remain shared.
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.
+
+ALL-350's NativeAttentionCoordinator is an app/profile owner, independent of
+renderer lifetime. Its passive metadata stream never obtains Ask presence or
+execution authority. Historical completions use Rust's committed semantic ledger;
+the current projection still owns pending decisions and current idle eligibility.
+Native notification state is a typed native-only section of WorkspaceStorage's
+same checkpoint/queue, with exact revision ACKs and generation-scoped capabilities.
+Absent/v1 state defaults off; saved opt-in survives normal cold launches without
+prompting again. Known storage failure suspends delivery. Opt-out/reset fences
+delivery synchronously; a failed save must explain that the old setting may return.
+Scheduling ACK, observed pending/delivered state and visible banners are distinct.
+The bounded session-target response opens the normal shared full-chat lifecycle;
+it carries no command, approval, goal, inbox, path or backend intent. Keep menu
+guards separate and defer IME/modal/unretained editors without a later auto-retry.
+Actual-app fixture source lives in AttentionSmoke/attention_app_smoke.py; its
+injected center cannot establish signed system delivery or hidden CPU acceptance.
+The attention fixture controller requires an owned active Aqua console and an
+observed unlocked Root.IOConsoleLocked bit before each actuation. An observed
+CGS lock overrides that fallback; missing Root state or focus/window/incarnation
+changes retire controls. AttentionFixtureGuard repeats the check when consuming
+each short-lived, nonce-bound control. Its separate exact-owner cleanup verb
+only stops the fixture and cannot activate a window or restore focus. This is
+fixture custody, not a change to product authorization or OS privacy settings.
+After custody retirement the ATTENTION_SMOKE cleanup verb enters the same
+AppLifecycle/AppQuit stop/reap owner directly, without fabricated idle activity
+or interactive Quit. Existing Quit/recovery sheets stay attached in place;
+their late answers cannot cancel cleanup or restart a closed recovery owner.
+Queued presentation, responder changes and timeout fronting are fenced for
+this cleanup intent only. A late original engine reap may finish cleanup after
+the unchanged 26-second UI deadline; it never sends another engine stop. The
+ordinary finish/Cancel/Stop and non-ATTENTION_SMOKE source stay unchanged.
+WorkspaceNotificationPortTests accepts only an externally owned private root
+and inherited directory descriptor. notification_port_fixture.py reaps that
+exact child before NotificationPortCleanup recomputes the production profile's
+WebKit UUID. The controller retains descriptors through failure/late callbacks,
+rejects replaced/symlink/foreign roots, and removes only its original tree after
+an exact cleanup receipt. Never run the port executable directly or use the
+app-shaped AttentionFixtureCleanup for its fixture.db profile.

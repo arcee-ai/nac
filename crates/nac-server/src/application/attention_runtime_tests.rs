@@ -11,6 +11,7 @@ fn live() -> Arc<Live> {
             closed: false,
         }),
         wake: Notify::new(),
+        history: watch::channel(Some(0)).0,
         task: Mutex::new(None),
         _permit: Arc::new(Permit {
             runtime,

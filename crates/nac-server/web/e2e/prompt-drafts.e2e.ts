@@ -1,5 +1,6 @@
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
+import { captureCurrentSuppliers } from "./current-suppliers-visual";
 
 for (const viewport of [
   { name: "desktop", width: 1440, height: 1000 },
@@ -9,7 +10,7 @@ for (const viewport of [
     harness,
     page,
     request,
-  }) => {
+  }, info) => {
     await page.setViewportSize(viewport);
     const a = await createDirectSession(request, harness);
     const b = await createDirectSession(request, harness);
@@ -31,6 +32,8 @@ for (const viewport of [
     await expect(page).toHaveURL(aUrl);
     await expect(page.getByLabel("Loading conversation")).toHaveCount(0);
     await input.fill(aText);
+    if (viewport.name === "desktop")
+      await captureCurrentSuppliers(page, input, harness, info, "draft");
     // Hash routing keeps the same runtime while replacing the keyed session view.
     await page.evaluate((url) => {
       location.hash = new URL(url).hash;
@@ -41,6 +44,8 @@ for (const viewport of [
     await page.goBack();
     await expect(page).toHaveURL(aUrl);
     await expect(input).toHaveValue(aText);
+    if (viewport.name === "desktop")
+      await captureCurrentSuppliers(page, input, harness, info, "navigation");
     await page.goForward();
     await expect(page).toHaveURL(bUrl);
     await expect(input).toHaveValue(bText);
@@ -58,9 +63,13 @@ for (const viewport of [
     await expect(input).toHaveValue(aText);
     await page.reload();
     await expect(input).toHaveValue(aText);
+    if (viewport.name === "desktop")
+      await captureCurrentSuppliers(page, input, harness, info, "reload");
     await input.fill("");
     await page.reload();
     await expect(input).toHaveValue("");
+    if (viewport.name === "desktop")
+      await captureCurrentSuppliers(page, input, harness, info, "cleared");
     expect(mutations).toEqual([]);
     expect(harness.provider.requests).toHaveLength(0);
   });
