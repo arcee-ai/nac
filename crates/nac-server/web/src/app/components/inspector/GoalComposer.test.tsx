@@ -193,6 +193,41 @@ describe("goal editor token budget", () => {
   });
 });
 
+describe("goal editor stored budget beyond the field", () => {
+  // 2^53, stored through the API: valid there, beyond what the field sends exactly.
+  const STORED = 9_007_199_254_740_992;
+
+  it("keeps it untouched on an objective-only edit", async () => {
+    mount(goal({ token_budget: STORED }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("9,007,199,254,740,992 tokens, kept as stored.")).toBeTruthy();
+
+    fireEvent.change(objectiveField(), {
+      target: { value: "Ship safely, then document" },
+    });
+    const update = screen.getByRole("button", { name: "Update" });
+    expect(update).toHaveProperty("disabled", false);
+    fireEvent.click(update);
+
+    await waitFor(() => expect(fakes.updateGoal).toHaveBeenCalledTimes(1));
+    expect(fakes.updateGoal.mock.calls[0]).toStrictEqual([
+      SESSION_ID,
+      "goal-1",
+      { expected_version: 4, objective: "Ship safely, then document" },
+    ]);
+  });
+
+  it("checks the amount once the budget is changed", () => {
+    mount(goal({ token_budget: STORED }));
+    fireEvent.change(amountField(), { target: { value: "9007199254740993" } });
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Enter a whole number of tokens up to 9,007,199,254,740,991.",
+    );
+    expect(screen.getByRole("button", { name: "Update" })).toHaveProperty("disabled", true);
+  });
+});
+
 describe("goal editor versioning", () => {
   it("uses the current version when only run accounting moved", async () => {
     const client = mount(goal());

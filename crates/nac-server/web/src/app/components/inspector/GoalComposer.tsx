@@ -70,6 +70,12 @@ function parseBudget(text: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/** A stored amount as written, grouped, for one the field cannot send exactly. */
+function storedAmountLabel(text: string): string {
+  const digits = text.replace(/[\s,_]/g, "");
+  return /^\d+$/.test(digits) ? BigInt(digits).toLocaleString("en-US") : text;
+}
+
 /** Whether a stored goal still holds the fields an edit was started from. */
 function sameEditableFields(left: SessionGoalRecord, right: SessionGoalRecord): boolean {
   return (
@@ -127,11 +133,13 @@ function useGoalDraft(sessionId: string, open: boolean) {
     }
   }
 
-  const budgetAmount = parseBudget(budgetText);
-  const budgetInvalid = budgetOn && budgetAmount === null;
-
   const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
   const editingExisting = goal != null && goal.status !== "complete";
+  // An update omits a budget the user has not touched, so only an amount that
+  // will be sent is checked: a stored one the field cannot send exactly still
+  // survives an objective edit.
+  const budgetAmount = parseBudget(budgetText);
+  const budgetInvalid = budgetOn && budgetAmount === null && (budgetEdited || !editingExisting);
   const trimmed = objective.trim();
   const tokenBudget = budgetOn ? budgetAmount : null;
   const changed =
@@ -377,9 +385,11 @@ function BudgetNote({ draft, className }: { draft: GoalDraft; className?: string
       >
         {budgetInvalid
           ? `Enter ${BUDGET_INPUT_RULE}.`
-          : budgetAmount !== null && budgetAmount > BUDGET_MAX
-            ? `${budgetAmount.toLocaleString()} tokens, above the slider's range and kept as entered.`
-            : `${(budgetAmount ?? 0).toLocaleString()} tokens.`}
+          : budgetAmount === null
+            ? `${storedAmountLabel(draft.budgetText)} tokens, kept as stored.`
+            : budgetAmount > BUDGET_MAX
+              ? `${budgetAmount.toLocaleString()} tokens, above the slider's range and kept as entered.`
+              : `${budgetAmount.toLocaleString()} tokens.`}
       </span>
     </div>
   );
