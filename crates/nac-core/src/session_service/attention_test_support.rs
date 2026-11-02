@@ -184,6 +184,9 @@ impl SessionService {
 )]
 mod tests {
     use super::*;
+    // Distinct keys still share the registry's capacity; isolate both consumers.
+    static REGISTRY_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     fn key() -> Key {
         Key {
             store: PathBuf::from(format!("/test/{}", Uuid::new_v4())),
@@ -199,6 +202,7 @@ mod tests {
     }
     #[tokio::test]
     async fn attention_publication_barrier_exact_identity_drop_timeout_and_cancellation() {
+        let _registry = REGISTRY_TEST_LOCK.lock().await;
         let key = key();
         let guard = register(key.clone()).unwrap();
         for wrong in [
@@ -278,6 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn attention_publication_barrier_actual_selections_negative_controls_one_shot_and_cap() {
+        let _registry = REGISTRY_TEST_LOCK.lock().await;
         use attention::ContinuationDisposition as D;
         let negatives = [
             D::Busy,
