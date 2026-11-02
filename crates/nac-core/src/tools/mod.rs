@@ -31,6 +31,7 @@ pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
 pub(crate) mod orchestrator;
+pub(crate) mod product_context;
 pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
@@ -163,6 +164,21 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "read_command_output",
 ];
 
+pub(crate) const PRODUCT_CONTEXT_TOOL_NAMES: [&str; 2] =
+    ["get_product_context", "resolve_product_destination"];
+
+#[expect(
+    clippy::expect_used,
+    reason = "static product capabilities are registered and collision checked"
+)]
+pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
+    worker_tool_registry(false)
+        .expect("product tools register without collisions")
+        .snapshot(PRODUCT_CONTEXT_TOOL_NAMES)
+        .expect("product tools are registered")
+        .definitions()
+}
+
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
 pub(crate) const DIRECT_TOOL_NAMES: [&str; 18] = [
     "nac_guide",
@@ -237,6 +253,8 @@ fn worker_tool_registry(
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
         .register(goal::CreateGoalTool)
+        .register(product_context::ReadTool)
+        .register(product_context::ResolveTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
         .register(subagent::SubagentTool)
@@ -326,7 +344,9 @@ pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
 }
 
 fn is_complete_direct_capability(name: &str) -> bool {
-    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name) || WEB_TOOL_NAMES.contains(&name)
+    DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
+        || WEB_TOOL_NAMES.contains(&name)
+        || PRODUCT_CONTEXT_TOOL_NAMES.contains(&name)
 }
 
 #[expect(
@@ -503,6 +523,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
     ToolRuntime {
+        product_context: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
@@ -553,3 +574,6 @@ pub(crate) async fn execute_submitted_shell(
         )
         .await
 }
+
+#[cfg(test)]
+mod product_context_tests;

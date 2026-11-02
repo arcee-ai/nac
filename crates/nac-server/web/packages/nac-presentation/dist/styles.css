@@ -2068,6 +2068,10 @@
     grid-template-columns: auto,minmax(0,1fr);
   }
 
+[data-nac-runtime]:is(.grid-cols-\[auto_1fr\]), [data-nac-runtime] .grid-cols-\[auto_1fr\] {
+    grid-template-columns: auto 1fr;
+  }
+
 [data-nac-runtime]:is(.grid-cols-\[auto_repeat\(3\,auto\)\]),[data-nac-runtime] .grid-cols-\[auto_repeat\(3\,auto\)\] {
     grid-template-columns: auto repeat(3, auto);
   }
