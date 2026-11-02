@@ -13,7 +13,7 @@ class CustodyTransportControls(unittest.TestCase):
     def capsule(self):
         return dict(version=1,H='a'*40,T=PRODUCT,cases=list(CASES),source_preflight=True,
                     native_eligibility=True,allocation_id='synthetic-unit-only',
-                    started_at_epoch=1000,deadline_epoch=3700,retry_budget=0)
+                    started_at_epoch=1000,deadline_epoch=3340,retry_budget=0)
 
     def test_exact_bytes_original_clock_and_absolute_known_file_reaches_cli(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -26,9 +26,20 @@ class CustodyTransportControls(unittest.TestCase):
             self.assertFalse(path.with_name(path.name+'.consumed').exists())
             value=require_allocation(path,'a'*40,now=2001,environment={})
             self.assertEqual(value,self.capsule())
-            self.assertEqual(value['started_at_epoch'],1000);self.assertEqual(value['deadline_epoch'],3700)
+            self.assertEqual(value['started_at_epoch'],1000);self.assertEqual(value['deadline_epoch'],3340)
+            self.assertEqual(value['deadline_epoch']-value['started_at_epoch'],2340)
             with self.assertRaises(FileExistsError):materialize(data,parent,'a'*40,now=2002)
             with self.assertRaises(FileExistsError):require_allocation(path,'a'*40,now=2002,environment={})
+
+    def test_declared_2340_second_boundary_cannot_be_extended(self):
+        self.assertEqual(self.capsule()['deadline_epoch'],3340)
+        self.assertEqual(self.capsule()['deadline_epoch']-self.capsule()['started_at_epoch'],2340)
+        for end in (3341,3340.001):
+            with self.subTest(end=end),tempfile.TemporaryDirectory() as temporary:
+                parent=Path(temporary).resolve()
+                data=json.dumps({**self.capsule(),'deadline_epoch':end}).encode()
+                with self.assertRaises(RuntimeError):materialize(data,parent,'a'*40,now=2000)
+                self.assertFalse((parent/'nac347-path-custody').exists())
 
     def test_missing_malformed_foreign_unapproved_reordered_and_expired_never_write(self):
         values=[b'',b'{',b'[]',b'{"H":1,"H":2}',b' '*8193]
