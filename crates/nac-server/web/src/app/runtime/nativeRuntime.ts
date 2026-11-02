@@ -1,3 +1,4 @@
+import { ProductNavigation } from "../features/product-context/navigation";
 import { hashKey, QueryClient } from "@tanstack/react-query";
 
 import { NacClient, nacClient } from "../services/nacClient";
@@ -34,6 +35,8 @@ export interface NativePresentationAssets {
 
 export interface NativeRuntimeOptions {
   scope: NativeRuntimeScope;
+  /** Parsed embedded-server bootstrap only; an optional rejection fence, never authentication. */
+  standaloneServingIncarnation?: string;
   client: Pick<NacClient, "transport">;
   storage?: Pick<Storage, "getItem" | "setItem">;
   /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
@@ -53,6 +56,7 @@ export class NativeRuntime {
   readonly client: NacClient;
   readonly assets: Readonly<NativePresentationAssets> | undefined;
   readonly api: ReturnType<typeof createNativeApi>;
+  readonly productNavigation: ProductNavigation;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
   readonly terminalInputRecovery = new TerminalInputRecovery();
@@ -84,7 +88,18 @@ export class NativeRuntime {
     this.client = new NacClient(
       new LifetimeTransport(options.client.transport, this.controller.signal),
     );
-    this.api = createNativeApi(this.client);
+    if (
+      options.standaloneServingIncarnation !== undefined &&
+      (this.scope.profile !== "standalone" ||
+        options.standaloneServingIncarnation !== this.scope.incarnation)
+    )
+      throw new Error("Product serving binding must match the standalone runtime scope.");
+    this.api = createNativeApi(this.client, options.standaloneServingIncarnation);
+    this.productNavigation = new ProductNavigation(
+      this.api.resolveProductDestination,
+      this.isClosed,
+      this.api.getProductContext,
+    );
     this.eventSource = options.eventSource;
     runtimes.set(this.queryClient, this);
   }
@@ -130,6 +145,7 @@ export class NativeRuntime {
     if (this.isClosed()) return;
     this.controller.abort(new DOMException("Native runtime was closed.", "AbortError"));
     this.terminalInputRecovery.close();
+    this.productNavigation.close();
     for (const dispose of this.disposers) dispose();
     this.disposers.clear();
     void this.queryClient.cancelQueries();
@@ -151,7 +167,7 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery">>;
+  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }
