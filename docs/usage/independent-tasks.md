@@ -139,8 +139,12 @@ hints include session/goal identity, version, status and current/replaced/cleare
 kind. Hints are lossy process-local notifications, not completion evidence or
 a second history store. A ring gap sets `resync`; periodic authoritative reads
 cover missed hints, other owners, reconnects and restart. Delayed or reordered
-hints can only cause another read. No delta subscription is added, so observing
-cannot keep headless approval alive. Cancelling or timing out the wait never
+hints prompt another authoritative read while the observation budget remains.
+At the deadline, one final revalidation pass is allowed. A further relevant
+hint marks `resync` without claiming that the later change was re-read; obtain
+a fresh snapshot with `read_task` or `wait_tasks`. Notification payloads never
+become proof. No delta subscription is added, so observing cannot keep headless
+approval alive. Cancelling or timing out the wait never
 cancels a target, pauses its goal, or consumes coordinator input.
 
 Calls reject more than eight targets, a timeout over 60,000 ms, identifiers over
