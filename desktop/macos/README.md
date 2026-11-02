@@ -382,3 +382,59 @@ are preserved. A manual stable workflow also starts its existing ordinary CI job
 on their isolated standard hosts; this adapter does not reroute them. Publication
 and the actual hosted admission require separate root decisions. Source controls
 and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
+
+### ALL-347 path adapter (source contract; native qualification pending)
+
+`all-347-paths-macos26` selects only product
+`528b7986f1abbf7e47228d15a48c0492af2c0669` and the ordered fresh-profile cases
+`paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
+references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
+T `NativePathJourney.swift` (SHA-256
+`c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21`), with
+`NATIVE_UI_TESTS`. No helper copy, standalone extraction or fabricated xctestrun
+is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
+their compiler-input, engine identity and output hashes are checked.
+
+The later `ci.py --qualification all-347-paths-macos26 --expected-sha <H>
+--source-root <canonical-T-checkout> --output <absent-private-output>` invocation
+also needs an explicit `NAC_PATHS_CUSTODY` capsule from ROOT's separately reviewed
+source/host/custody allocation and `CARGO_BUILD_JOBS=2`. The bounded capsule binds
+version 1, H, T, both ordered cases, `source_preflight=true`,
+`native_eligibility=true`, one allocation ID, original start/deadline epochs
+(maximum 2700 seconds), and zero retries. Exclusive `.consumed` creation prevents
+reusing it. The maintained manual selector transports the optional `paths_custody` JSON
+through `macos-qualification.yml`; its path-only step validates the original
+contract and writes those exact bytes into a fresh private runner directory,
+then sets `NAC_PATHS_CUSTODY` for the existing CLI. Missing, stale, foreign or
+reused handoffs fail closed. The runner creates no eligibility or deadline,
+and hosted rerun attempts are rejected. Selecting or transporting this contract
+does not itself allocate a run. Local/hosted envelope qualification remains an
+independent prerequisite; no SDK, TCC, toolchain or settings changes are implied.
+
+The actor reads only H's predeclared private app JSON through a no-follow regular
+file descriptor, permits atomic inode replacement and identical rereads, and
+rejects mutated, skipped, backward or foreign phases. Normal phases are ready0,
+document-reloaded1 (one successor UUID), folder-moved2, folder-restored3,
+reveal-observed4; failure is ready0 then failure-panel-observed1 on the initial
+document. Authorization before helper input checks exact app/engine bytes,
+launch/start identity, owner/window, current document/phase, unlocked same-user
+console and unchanged existing helper/developer/automation policy. It never
+activates Finder, sends Finder input or claims Finder close authority.
+
+Named original PNGs bind chooser/Unicode, replacement form, moved-folder error,
+successful session/Files and Finder's unique selected leaf; the failure case
+retains its pending panel. Actual readable paint and non-occlusion review is
+mandatory and cannot be replaced by AX labels, PNG framing, OCR or app receipts.
+Each PNG is at most 2 MiB; the existing exporter retains at most 12 MiB total,
+with complete essential JSON (256 KiB each) before verbose diagnostics. Missing
+proof preserves relocated roots. Case finalization always attempts the existing
+H cleanup owner independently of SDK collection failure. Known Finder residual
+windows stay open and explicit. The original B499-2 disappearance repair stays
+owned by `settle_apps`; this adapter does not duplicate it.
+
+Portable source controls run with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v`
+and are discovered by the existing workflow-lint job. They establish no compiled
+XCTest import/target, sandbox readability, trusted input, actual chooser/Finder,
+minimum-OS or complete ALL-354/ALL-347 acceptance. Those gates remain **UNRUN**
+until a separate frozen-source native allocation.

@@ -108,12 +108,17 @@ def source_variant(base, native_path, external_path, source_hash, target, prefix
 
 def materialize_project(harness_root, harness_sha, *, performance_root=None, performance_sha=None,
                         performance_source_sha256=None, startup_root=None, startup_sha=None,
-                        startup_source_sha256=None, output=None):
+                        startup_source_sha256=None, paths_root=None, paths_sha=None, output=None):
     """Return an actual project/selected scheme plus honest source/hash receipt.
 
     output must be an absent directory below a caller-owned canonical private
     parent outside both sources. No optional input means the original project.
     """
+    if paths_root is not None or paths_sha is not None:
+        if any(value is not None for value in (performance_root, performance_sha, performance_source_sha256,
+                                              startup_root, startup_sha, startup_source_sha256)):
+            raise RuntimeError('External XCTest selections are mutually exclusive')
+        return materialize_paths(harness_root, harness_sha, paths_root, paths_sha, output)
     harness = checkout(harness_root, harness_sha)
     project_path, base = source_file(harness, PROJECT / 'project.pbxproj')
     scheme_path, scheme = source_file(harness, PROJECT / SCHEME)
@@ -191,3 +196,75 @@ def materialize_project(harness_root, harness_sha, *, performance_root=None, per
         receipt['sources'][str(path)] = digest(value)
     (output / 'project-selection.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return {'project': str(project), 'scheme': target, 'receipt': receipt}
+
+
+def materialize_paths(harness_root, harness_sha, product_root, product_sha, output):
+    """Same maintained project, actual H wrapper + T helper; no Swift copies."""
+    from ci_paths_protocol import PRODUCT, HELPER
+    harness = checkout(harness_root, harness_sha)
+    product = checkout(product_root, product_sha)
+    if product_sha != PRODUCT:
+        raise RuntimeError('Path product differs from frozen ALL-347 candidate')
+    _, base = source_file(harness, PROJECT / 'project.pbxproj')
+    _, scheme = source_file(harness, PROJECT / SCHEME)
+    native_path, native = source_file(harness, NATIVE)
+    wrapper_path, wrapper = source_file(harness, Path('desktop/macos/NativeUITests/PathJourneys.swift'))
+    observer_path, observer = source_file(harness, Path('desktop/macos/NativeUITests/PathPhaseObserver.swift'))
+    helper_path, helper = source_file(product, Path('desktop/macos/NativePathJourney.swift'))
+    if digest(base) != PROJECT_HASH or digest(scheme) != SCHEME_HASH or digest(helper) != HELPER:
+        raise RuntimeError('Path maintained project/helper pin differs')
+    output = Path(output) if output is not None else None
+    if (output is None or not output.is_absolute() or output.resolve() != output or output.exists()
+            or not output.parent.is_dir() or output.is_relative_to(harness) or output.is_relative_to(product)):
+        raise RuntimeError('Path project requires absent canonical private output outside sources')
+    target = 'NACPathUITests'
+    generated = source_variant(base, native_path, wrapper_path, digest(wrapper), target, 'PATH').decode()
+    # Only B target gains the two actual source refs and NATIVE_UI_TESTS flag.
+    marker = '    B10000000000000000000013 = {'
+    before, after = generated.split(marker)
+    after = replace_once(after, 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;',
+                         'SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG NATIVE_UI_TESTS";')
+    after = replace_once(after, 'NAC_UI_FIXTURE = "";',
+                         'NAC_UI_FIXTURE = "";\n        NAC_PATH_HARNESS_SHA = "";\n        NAC_PATH_CONFIGURATION_SHA256 = "";')
+    generated = before + marker + after
+    generated = replace_once(generated, 'files = (B10000000000000000000009);',
+                             'files = (B10000000000000000000009, C10000000000000000000002, C10000000000000000000004);')
+    generated = replace_once(generated, 'B10000000000000000000005, A10000000000000000000003);',
+        'B10000000000000000000005, C10000000000000000000001, C10000000000000000000003, A10000000000000000000003);')
+    objects = ''
+    for number, path in ((1, helper_path), (3, observer_path)):
+        objects += ('    C1' + f'{number:022d}' + ' = {\n      isa = PBXFileReference;\n'
+                    '      lastKnownFileType = sourcecode.swift;\n      path = ' + quote(path)
+                    + ';\n      sourceTree = "<absolute>";\n    };\n'
+                    '    C1' + f'{number+1:022d}' + ' = {\n      isa = PBXBuildFile;\n      fileRef = C1'
+                    + f'{number:022d}' + ';\n    };\n')
+    generated = replace_once(generated, '  };\n  rootObject', objects + '  };\n  rootObject').encode()
+    selected = scheme.replace(b'NACNativeUITests', target.encode()).replace(
+        b'A10000000000000000000004', b'B10000000000000000000004').replace(
+        b'container:NACPathUITests.xcodeproj', b'container:NACNativeUITests.xcodeproj')
+    selected = selected.replace(b'    </EnvironmentVariables>',
+        b'      <EnvironmentVariable key="NAC_PATH_SOURCE_PATH" value="$(NAC_PATH_SOURCE_PATH)" isEnabled="YES"/>\n'
+        b'      <EnvironmentVariable key="NAC_PATH_SOURCE_SHA256" value="$(NAC_PATH_SOURCE_SHA256)" isEnabled="YES"/>\n'
+        b'      <EnvironmentVariable key="NAC_PATH_HARNESS_SHA" value="$(NAC_PATH_HARNESS_SHA)" isEnabled="YES"/>\n'
+        b'      <EnvironmentVariable key="NAC_PATH_CONFIGURATION_SHA256" value="$(NAC_PATH_CONFIGURATION_SHA256)" isEnabled="YES"/>\n'
+        b'    </EnvironmentVariables>')
+    sources = {str(native_path): digest(native), str(wrapper_path): digest(wrapper),
+               str(observer_path): digest(observer), str(helper_path): digest(helper)}
+    require_checkout(harness, harness_sha)
+    require_checkout(product, product_sha)
+    for path, expected in sources.items():
+        if digest(bounded_file(Path(path), 256 * 1024)) != expected:
+            raise RuntimeError('Path compiler source changed during materialization')
+    output.mkdir(mode=0o700)
+    project = output / PROJECT.name
+    schemes = project / SCHEME.parent
+    schemes.mkdir(parents=True)
+    (project / 'project.pbxproj').write_bytes(generated)
+    (schemes / SCHEME.name).write_bytes(scheme)
+    (schemes / (target + '.xcscheme')).write_bytes(selected)
+    receipt = dict(harness_sha=harness_sha, paths_sha=product_sha, generated=True, expected_target=target,
+        base_project_sha256=digest(base), base_scheme_sha256=digest(scheme), sources=sources,
+        path_source_path=str(wrapper_path), path_source_sha256=digest(wrapper), helper_sha256=HELPER,
+        generated_project_sha256=digest(generated), selected_scheme_sha256=digest(selected))
+    (output / 'project-selection.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    return dict(project=str(project), scheme=target, receipt=receipt)

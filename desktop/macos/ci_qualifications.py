@@ -18,7 +18,7 @@ def select_target(key):
         raise RuntimeError('Unknown/unapproved qualification target')
     target = catalog[key]
     if (not re.fullmatch('[0-9a-f]{40}', target.get('source_sha', ''))
-            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup', 'lifecycle')
+            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup', 'lifecycle', 'paths')
             or not isinstance(target.get('scenario_count'), int) or target['scenario_count'] < 1):
         raise RuntimeError('Invalid immutable qualification contract')
     if target['suite'] == 'lifecycle' or key == 'all-344-lifecycle-macos26':
@@ -33,6 +33,10 @@ def select_target(key):
             'profile': 'macos26', 'suite': 'startup', 'scenario_count': 4, 'scenarios': list(CASES),
             'test_files': TEST_FILES, 'protocol_files': FILES}:
             raise RuntimeError('Startup P/Q/R four-case source contract differs')
+    if target['suite'] == 'paths':
+        from ci_paths import TARGET
+        if key != 'all-347-paths-macos26' or target != TARGET:
+            raise RuntimeError('Path fixed source/helper/two-case contract differs')
     runner, envelope = PROFILES[target['profile']]
     toolchain = json.loads((DIRECTORY / envelope).read_text())
     return {**target, 'runner': runner, 'envelope': envelope,

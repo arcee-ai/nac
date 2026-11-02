@@ -25,8 +25,14 @@ on:
           - all-352-macos26
           - all-342-startup-macos26
           - all-344-lifecycle-macos26
+          - all-347-paths-macos26
       lifecycle_custody:
         description: Root-admitted ALL-344 custody JSON; required only for its fixed three-case qualification
+        type: string
+        required: false
+        default: ""
+      paths_custody:
+        description: ROOT-issued ALL-347 allocation JSON with exact source, cases and original clock
         type: string
         required: false
         default: ""
@@ -151,6 +157,8 @@ jobs:
           persist-credentials: false
       - name: Require startup console producer and collector controls with zero skips
         run: python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
+      - name: Check portable path adapter contracts without native execution
+        run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v
       - name: Check workflows and scripts, then prove enforcement
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -1027,12 +1035,13 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       startsWith(github.ref, 'refs/heads/codex/') &&
-      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26' || inputs.native_qualification == 'all-344-lifecycle-macos26')
+      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26' || inputs.native_qualification == 'all-344-lifecycle-macos26' || inputs.native_qualification == 'all-347-paths-macos26')
     uses: ./.github/workflows/macos-qualification.yml
     with:
       harness-sha: ${{ needs.prepare.outputs.sha }}
       target: ${{ inputs.native_qualification }}
       lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
+      paths-custody: ${{ inputs.paths_custody || '' }}
 
   managed-image:
     needs: prepare

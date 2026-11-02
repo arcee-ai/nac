@@ -68,5 +68,17 @@
     ],
     "allocation_id": "nac344-ordering-7e-one",
     "retry_budget": 0
+  },
+  "all-347-paths-macos26": {
+    "source_sha": "528b7986f1abbf7e47228d15a48c0492af2c0669",
+    "profile": "macos26",
+    "suite": "paths",
+    "scenario_count": 2,
+    "scenarios": [
+      "paths-xctest",
+      "paths-failure-xctest"
+    ],
+    "helper_sha256": "c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21",
+    "retry_budget": 0
   }
 }
