@@ -70,12 +70,16 @@ def require_terminal_evidence(record):
     return terminal
 
 
-def export_evidence(raw, output, replacements, *, include_hashes=False):
+def export_evidence(raw, output, replacements, *, include_hashes=False, strict_json=False, essential_first=False):
     """Export only our fixture files, never arbitrary HOME or process listings."""
     output.mkdir(parents=True, exist_ok=True)
     total = 0
     manifest = []
-    for source in sorted(raw.rglob('*')):
+    def priority(source):
+        relative = source.relative_to(raw)
+        essential = source.name in ('essential.json', 'ci-report.json', 'runner.json', 'configuration.json')
+        return (0 if essential_first and essential else 1, str(relative))
+    for source in sorted(raw.rglob('*'), key=priority):
         if any(part.endswith(('.app', '.xcresult')) for part in source.relative_to(raw).parts):
             continue
         if source.is_symlink() or not source.is_file():
@@ -111,6 +115,10 @@ def export_evidence(raw, output, replacements, *, include_hashes=False):
             limit = capture['limit_bytes']
         if source.suffix == '.png' and size > limit:
             raise RuntimeError(f'Image exceeds evidence limit: {source.name}')
+        if strict_json and source.suffix == '.json':
+            if size > limit:
+                raise RuntimeError('Essential JSON exceeds evidence limit; original retained: ' + source.name)
+            json.loads(source.read_bytes())
         with source.open('rb') as stream:
             data = stream.read(limit)
             if capture is not None and hashlib.sha256(data).hexdigest() != capture.get('sha256'):
@@ -137,6 +145,9 @@ def export_evidence(raw, output, replacements, *, include_hashes=False):
             entry.update(raw_source_sha256=source_sha256, raw_source_bytes=size,
                          exported_sha256=hashlib.sha256(data).hexdigest())
         manifest.append(entry)
+        if essential_first:
+            # Keep a valid prefix index even when later verbose export fails.
+            (output / 'export.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (output / 'export.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 

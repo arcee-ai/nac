@@ -280,6 +280,8 @@ def main():
     terminal = False
     startup = False
     lifecycle = False
+    paths = False
+    path_allocation = None
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -294,8 +296,15 @@ def main():
             terminal = target['suite'] == 'terminal'
             startup = target['suite'] == 'startup'
             lifecycle = target['suite'] == 'lifecycle'
+            paths = target['suite'] == 'paths'
+            if paths:
+                from ci_paths import require_allocation
+                path_allocation = require_allocation(os.environ.get('NAC_PATHS_CUSTODY', ''), args.expected_sha)
+                report['paths_allocation'] = path_allocation
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
+            if paths and (not args.source_root.is_absolute() or args.source_root.resolve() != args.source_root):
+                raise RuntimeError('Paths require a canonical absolute product checkout')
             source_root = args.source_root.resolve()
             if source_root == ROOT or source_root.is_relative_to(ROOT):
                 raise RuntimeError('Supplier source must be a separate checkout, not part of the harness')
@@ -367,7 +376,7 @@ def main():
             os.environ.pop(key, None)
         os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
                           NAC_BUILD_ID='dev-' + report['source_sha'])
-        if target and not instances and not startup and not lifecycle:
+        if target and not instances and not startup and not lifecycle and not paths:
             # Reuse the exact source owner's failure cleanup, including its
             # native fixture helpers. No code is copied into that checkout.
             sys.path.insert(0, str(source_root / 'desktop/macos'))
@@ -378,7 +387,11 @@ def main():
                 target_module = loaded
             finally:
                 sys.path.pop(0)
-        if lifecycle:
+        if paths:
+            from ci_paths import qualify as qualify_paths
+            report.update(qualify_paths(raw, source_root, target, args.expected_sha, run, command,
+                                       settle_apps, path_allocation))
+        elif lifecycle:
             report.update(qualify_lifecycle(raw, source_root, target, args.expected_sha,
                                            run, command, lifecycle_image_report, RUN_DEADLINE, report=report))
         elif startup:
@@ -472,7 +485,10 @@ def main():
                     report['instance_cleanup'] = audit_instances(raw / 'instances', raw / 'instance-dev/InstanceObservation', command)
                 finally:
                     report['instance_receipt_index'] = retain_instances(raw / 'instances')
-            if startup:
+            if paths:
+                report['cleanup'] = {'owner': 'accepted H541 settlement in per-case finally',
+                                     'missing_proof_retains_bundle': True, 'Finder_window_left_open': True}
+            elif startup:
                 report['cleanup'] = {'owner': 'startup preinstalled OS witness; per-case receipts',
                                      'generic_JSON_PID_cleanup_used': False}
             elif lifecycle:
@@ -502,7 +518,7 @@ def main():
                 report['crash_reports'] = count
                 report['elapsed_seconds'] = round(time.time() - started, 3)
                 (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
-                export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
+                export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
 
 
 if __name__ == '__main__':

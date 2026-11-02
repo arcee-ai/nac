@@ -51,7 +51,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
   const input = stable.on.workflow_dispatch.inputs.native_qualification;
   assert.equal(input.default, "none");
-  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26", "all-344-lifecycle-macos26"]);
+  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26", "all-344-lifecycle-macos26", "all-347-paths-macos26"]);
   const caller = stable.jobs["native-qualification"];
   assert.match(caller.if, /github.event_name == 'workflow_dispatch'/);
   assert.match(caller.if, /startsWith\(github.ref, 'refs\/heads\/codex\/'\)/);
@@ -114,6 +114,38 @@ test("lifecycle custody stays in the named native adapter without rerouting ordi
   assert.equal(exact.on.workflow_call.inputs["lifecycle-custody"].default, "");
   const driver = exact.jobs.native.steps.find(step => step.name === "Qualify the exact supplier without copying or changing its sources");
   assert.equal(driver.env.NAC_LIFECYCLE_CUSTODY, "${{ inputs.lifecycle-custody }}");
+  assert.deepEqual(exact.permissions, { contents: "read" });
+});
+
+test("paths custody reaches only the explicit selector as unchanged external JSON", () => {
+  const stable = workflow("stable-release");
+  const caller = stable.jobs["native-qualification"];
+  assert.match(caller.if, /inputs.native_qualification == 'all-347-paths-macos26'/);
+  assert.equal(stable.on.workflow_dispatch.inputs.paths_custody.type, "string");
+  assert.equal(stable.on.workflow_dispatch.inputs.paths_custody.default, "");
+  assert.equal(caller.with["paths-custody"], "${{ inputs.paths_custody || '' }}");
+  const exact = workflow("macos-qualification");
+  assert.equal(exact.on.workflow_call.inputs["paths-custody"].default, "");
+  const steps = exact.jobs.native.steps;
+  const transport = steps.findIndex(s => s.env?.NAC_PATHS_CUSTODY_JSON);
+  const driver = steps.findIndex(s => s.name === "Qualify the exact supplier without copying or changing its sources");
+  assert.ok(transport >= 0 && driver > transport);
+  assert.equal(steps[transport].if, "inputs.target == 'all-347-paths-macos26'");
+  assert.equal(steps[transport]["working-directory"], "ci-harness");
+  assert.equal(steps[transport].env.NAC_PATHS_CUSTODY_JSON, "${{ inputs.paths-custody }}");
+  assert.equal(steps[transport].env.HARNESS_SHA, "${{ inputs.harness-sha }}");
+  assert.match(steps[transport].run, /ci_paths_custody.py --harness-sha "\$HARNESS_SHA"/);
+  assert.match(steps[transport].run, /--output-parent "\$RUNNER_TEMP" >> "\$GITHUB_ENV"/);
+  assert.equal(steps[driver].env.NAC_PATHS_CUSTODY, undefined, "inherit only the validated known file from GITHUB_ENV");
+  assert.equal(exact.jobs.native.env.CARGO_BUILD_JOBS, "${{ inputs.target == 'all-347-paths-macos26' && '2' || '4' }}");
+  assert.ok(stable.jobs["workflow-lint"].steps.some(s => s.run?.includes("-p 'test_ci_paths*.py'")));
+  for (const [name, job] of Object.entries(stable.jobs)) {
+    if (name !== "native-qualification") {
+      assert.equal(JSON.stringify(job).includes("inputs.paths_custody"), false, name);
+      assert.equal(JSON.stringify(job).includes("all-347-paths-macos26"), false, name);
+    }
+  }
+  assert.deepEqual(Object.keys(exact.jobs).sort(), ["native", "resolve"]);
   assert.deepEqual(exact.permissions, { contents: "read" });
 });
 
