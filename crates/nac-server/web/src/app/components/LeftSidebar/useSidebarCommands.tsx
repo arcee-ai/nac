@@ -1,9 +1,6 @@
-import { useState } from "react";
+import { useProductNavigationOwner } from "@/app/features/product-context/context";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
-import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
-import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
@@ -14,9 +11,7 @@ import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/querie
  * a new session in the project on screen (or a new project when none is).
  */
 export function useSidebarCommands() {
-  const [configuring, setConfiguring] = useState(false);
-  const [ssh, setSsh] = useState(false);
-  const [mcp, setMcp] = useState(false);
+  const navigation = useProductNavigationOwner();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const actions = useProjectActions();
@@ -63,17 +58,11 @@ export function useSidebarCommands() {
     newProject,
     createLabel: managed.isManaged ? "Add repository" : "New Project",
     openProjects: () => navigate(routes.list()),
-    openMcp: () => setMcp(true),
-    openSsh: () => setSsh(true),
-    openConfigurations: () => setConfiguring(true),
+    openMcp: navigation.openMcp,
+    openSsh: navigation.openSsh,
+    openConfigurations: navigation.openConfigurations,
+    inspectProduct: navigation.inspect,
     openManaged: managed.openSettings,
-    modals: (
-      <>
-        <ConfigurationsModal open={configuring} onClose={() => setConfiguring(false)} />
-        <SshConfigsModal open={ssh} onClose={() => setSsh(false)} />
-        <McpServersModal open={mcp} onClose={() => setMcp(false)} />
-      </>
-    ),
   };
 }
 

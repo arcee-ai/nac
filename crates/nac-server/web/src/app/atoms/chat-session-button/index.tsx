@@ -2,6 +2,7 @@ import type React from "react";
 
 import { cn } from "../../lib/cn";
 import type { SessionBehavior, SessionLineage } from "../../types/api";
+import { useSessionNameDisclosure } from "../session-name-disclosure";
 import ChatSessionLeadingMark from "../chat-session-fork-mark";
 import ModelLoader, { ModelLoaderSize } from "../model-loader";
 import SessionBehaviorIcon, { SessionBehaviorIconSize } from "../session-behavior-icon";
@@ -82,6 +83,10 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
   "aria-label": ariaLabel,
   ...props
 }) => {
+  const disclosure = useSessionNameDisclosure(
+    title,
+    [behaviorLabel, badgeLabel].filter(Boolean).join(" · "),
+  );
   const nameParts = [title, behaviorLabel, badgeLabel].filter(Boolean);
 
   return (
@@ -96,74 +101,75 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
         className,
       )}
     >
-      <button
-        type={type}
-        title={nameParts.join(" · ")}
-        aria-label={ariaLabel ?? nameParts.join(", ")}
-        aria-current={active ? "page" : undefined}
-        className={cn(
-          "flex flex-1 items-center min-w-0 text-left outline-none",
-          "after:absolute after:inset-0 after:-z-10 after:rounded-interaction",
-          active
-            ? "text-btn-secondary-pressed"
-            : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
-          "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled",
-          isMobile ? "gap-3" : "gap-1.5",
-        )}
-        {...props}
-      >
-        {running ? (
-          <ModelLoader size={isMobile ? ModelLoaderSize.Large : ModelLoaderSize.Medium} />
-        ) : showBehaviorIcon ? (
-          <SessionBehaviorIcon
-            behavior={behavior}
-            lineage={lineage}
-            size={isMobile ? SessionBehaviorIconSize.Large : SessionBehaviorIconSize.Medium}
-            className={GLYPH_TONE}
+      {disclosure.hint(
+        <button
+          type={type}
+          aria-label={ariaLabel ?? nameParts.join(", ")}
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            "flex flex-1 items-center min-w-0 text-left outline-none",
+            "after:absolute after:inset-0 after:-z-10 after:rounded-interaction",
+            active
+              ? "text-btn-secondary-pressed"
+              : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
+            "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled",
+            isMobile ? "gap-3" : "gap-1.5",
+          )}
+          {...props}
+        >
+          {running ? (
+            <ModelLoader size={isMobile ? ModelLoaderSize.Large : ModelLoaderSize.Medium} />
+          ) : showBehaviorIcon ? (
+            <SessionBehaviorIcon
+              behavior={behavior}
+              lineage={lineage}
+              size={isMobile ? SessionBehaviorIconSize.Large : SessionBehaviorIconSize.Medium}
+              className={GLYPH_TONE}
+            />
+          ) : null}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              isMobile ? "label-medium" : smallTitle ? "label-micro" : "label-small",
+              running && "text-shimmer-primary",
+            )}
+          >
+            {title}
+          </span>
+          <ChatSessionLeadingMark
+            forkedFromTitle={forkedFromTitle}
+            className="text-fill-btn-secondary-disabled"
           />
-        ) : null}
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate",
-            isMobile ? "label-medium" : smallTitle ? "label-micro" : "label-small",
-            running && "text-shimmer-primary",
-          )}
-        >
-          {title}
-        </span>
-        <ChatSessionLeadingMark
-          forkedFromTitle={forkedFromTitle}
-          className="text-fill-btn-secondary-disabled"
-        />
-        {badge ? (
-          <span
-            title={badgeLabel}
-            className="tag-label max-w-[76px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
-          >
-            {badge}
-          </span>
-        ) : null}
-        {unread ? (
-          <span
-            className="h-2 w-2 shrink-0 rounded-full bg-accent-primary"
-            title="Updated since last viewed"
-          >
-            <span className="sr-only">Unread</span>
-          </span>
-        ) : null}
-      </button>
-      {actions ? (
-        <div
-          className={cn(
-            "flex items-center shrink-0",
-            isMobile
-              ? "gap-3"
-              : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
-          )}
-        >
-          {actions}
-        </div>
-      ) : null}
+          {badge ? (
+            <span
+              title={badgeLabel}
+              className="tag-label max-w-[76px] shrink-0 truncate rounded bg-elevation-level-3 px-1 text-basic-tertiary"
+            >
+              {badge}
+            </span>
+          ) : null}
+          {unread ? (
+            <span
+              className="h-2 w-2 shrink-0 rounded-full bg-accent-primary"
+              title="Updated since last viewed"
+            >
+              <span className="sr-only">Unread</span>
+            </span>
+          ) : null}
+        </button>,
+      )}
+      <div
+        className={cn(
+          "session-name-row-actions flex flex-wrap max-w-full justify-end items-center shrink-0",
+          isMobile
+            ? "gap-3"
+            : "gap-1 sr-only group-hover:not-sr-only group-has-[:focus-visible]:not-sr-only focus-within:not-sr-only group-has-[>button:disabled]:hidden",
+        )}
+      >
+        {disclosure.action}
+        {actions}
+      </div>
+      {disclosure.overlay}
     </div>
   );
 };

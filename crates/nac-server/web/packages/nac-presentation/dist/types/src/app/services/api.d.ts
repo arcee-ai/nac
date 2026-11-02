@@ -18,5 +18,5 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     listSelectionQuestions(sessionId: string, signal?: AbortSignal): Promise<SelectionQuestionList>;
     cancelSelectionQuestion(sessionId: string, questionId: string): Promise<SelectionQuestion>;
 };
-export declare function createNativeApi(client: typeof nacClient): NativeApi;
+export declare function createNativeApi(client: typeof nacClient, productContextBinding?: string): NativeApi;
 export declare const api: NativeApi;

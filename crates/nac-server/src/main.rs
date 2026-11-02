@@ -56,6 +56,12 @@ struct Cli {
     reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
 )]
 enum RootCommand {
+    /// Read the bundled release-local NAC Guide without a server or network
+    #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
+    Guide(GuideCli),
+    #[cfg(unix)]
+    #[command(name = "__desktop-identity", hide = true)]
+    DesktopIdentity,
     /// Manage ChatGPT credentials used by Codex models
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
     CodexAuth(CodexAuthCli),
@@ -73,6 +79,40 @@ enum RootCommand {
 
     #[command(name = "__github-credential", hide = true)]
     GitHubCredential(GitHubCredentialCli),
+}
+
+#[derive(Args)]
+struct GuideCli {
+    /// Stable document ID; omit to list the installed topic index
+    document_id: Option<String>,
+    /// Stable section ID; omit to list this document's sections
+    #[arg(requires = "document_id")]
+    section_id: Option<String>,
+    /// Search the installed pack
+    #[arg(long, conflicts_with = "document_id")]
+    query: Option<String>,
+    /// UTF-8 byte offset within a section
+    #[arg(long, default_value_t = 0, requires = "section_id")]
+    offset: usize,
+}
+
+fn read_guide(cli: GuideCli) -> Result<()> {
+    let guide = nac_core::guide::bundled()?;
+    let result = match (cli.document_id.as_deref(), cli.section_id.as_deref()) {
+        (Some(document), Some(section)) => {
+            serde_json::to_value(guide.read(document, section, cli.offset, 6000)?)?
+        }
+        (Some(document), None) => {
+            let document = guide.document(document)?;
+            serde_json::json!({"document_id":document.document_id,"sections":document.sections.iter().map(|section| serde_json::json!({"section_id":section.section_id,"title":section.title})).collect::<Vec<_>>()})
+        }
+        _ => serde_json::to_value(guide.search(cli.query.as_deref().unwrap_or(""), 20)?)?,
+    };
+    println!(
+        "{}",
+        serde_json::json!({"provenance":"first-party bundled NAC Guide","schema_version":guide.schema_version,"fingerprint":guide.fingerprint,"build_identity":nac_contracts::build_identity(),"result":result})
+    );
+    Ok(())
 }
 
 #[derive(Args)]
@@ -493,6 +533,9 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
+    #[cfg(unix)]
+    let desktop = nac_server::desktop_launch::DesktopLaunch::inherit()
+        .map_err(|_| anyhow!("invalid private desktop launch channel"))?;
     if std::env::var_os("NAC_MANAGED_FAULT_ROOT").is_some() {
         #[cfg(not(feature = "managed-fault-fixture"))]
         return Err(anyhow!(
@@ -505,7 +548,24 @@ async fn run() -> Result<()> {
     let matches = cli_command(&invocation_name).get_matches();
     let cli = Cli::from_arg_matches(&matches).map_err(|error| anyhow!(error.to_string()))?;
     match cli.command {
-        None => run_server(cli.server, &invocation_name).await,
+        None => {
+            #[cfg(unix)]
+            if let Some(desktop) = desktop {
+                let result = run_server_inner(cli.server, &invocation_name, Some(&desktop)).await;
+                if result.is_err() {
+                    desktop.failed();
+                    return Err(anyhow!("bundled desktop engine startup failed"));
+                }
+                return result;
+            }
+            run_server(cli.server, &invocation_name).await
+        }
+        #[cfg(unix)]
+        Some(RootCommand::DesktopIdentity) => {
+            println!("{}", nac_server::desktop_launch::identity_json()?);
+            Ok(())
+        }
+        Some(RootCommand::Guide(guide)) => read_guide(guide),
         Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
         Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth, &invocation_name).await,
@@ -588,6 +648,20 @@ fn configured_mcp_oauth_callback_origin(
 }
 
 async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
+    run_server_inner(
+        cli,
+        invocation_name,
+        #[cfg(unix)]
+        None,
+    )
+    .await
+}
+
+async fn run_server_inner(
+    cli: ServerCli,
+    invocation_name: &str,
+    #[cfg(unix)] desktop: Option<&nac_server::desktop_launch::DesktopLaunch>,
+) -> Result<()> {
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
     let managed_config_path = cli
@@ -621,12 +695,19 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
         }
     }
     configure_telemetry(managed_host.as_ref());
-    let manager = SessionManager::new(ServerOptions {
+    let options = ServerOptions {
         root_cwd,
         store_path: cli.store_path,
         worker_executable: cli.worker_executable,
         managed_host,
-    })?;
+    };
+    #[cfg(unix)]
+    let manager = match desktop {
+        Some(_) => SessionManager::new_async(options).await?,
+        None => SessionManager::new(options)?,
+    };
+    #[cfg(not(unix))]
+    let manager = SessionManager::new(options)?;
     // Fire-and-forget models.dev catalog overlay refresh (4h cadence,
     // ETag-revalidated, never on picker/resume/validation paths).
     nac_core::model::spawn_overlay_refresh();
@@ -639,6 +720,10 @@ async fn run_server(cli: ServerCli, invocation_name: &str) -> Result<()> {
     // Anthropic API and merges effort tiers, context window, max tokens,
     // thinking types and context_management support into the catalog).
     nac_core::model::spawn_anthropic_model_refresh();
+    #[cfg(unix)]
+    if let Some(desktop) = desktop {
+        return desktop.serve(bind, manager).await;
+    }
     let info = manager.store_info();
     let store_path = info.store_path.display().to_string();
     let open = should_open_dashboard(cli.open, cli.no_open);

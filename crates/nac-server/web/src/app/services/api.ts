@@ -27,10 +27,13 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
   listSelectionQuestions(sessionId: string, signal?: AbortSignal): Promise<SelectionQuestionList>;
   cancelSelectionQuestion(sessionId: string, questionId: string): Promise<SelectionQuestion>;
 };
-export function createNativeApi(client: typeof nacClient): NativeApi {
+export function createNativeApi(
+  client: typeof nacClient,
+  productContextBinding?: string,
+): NativeApi {
   const request = client.transport.request.bind(client.transport);
   return {
-    ...createNacApi(client),
+    ...createNacApi(client, { productContextBinding }),
     startTaskLaunch: (body: TaskLaunchRequest) =>
       request<TaskLaunchRecord>("POST", "/task-launches", { body }),
     taskLaunchStatus: (id: string, signal?: AbortSignal) =>
