@@ -1,6 +1,7 @@
 # macOS development preview
 
-This owner contains the ALL-340 disposable AppKit/WKWebView preview. Read the
+This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
+ALL-341 private identified engine launch/control seam. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
@@ -13,8 +14,9 @@ authority; the production React UI and HTTP/SSE client remain shared.
 - The loopback provider and two configuration-seeding requests are disposable
   test infrastructure. They never operate on user stores or expose real keys.
 - Window close quits this preview, with bounded child cleanup before deleting
-  its profile. Consumer close/reopen/Quit, versioned engine control, persistent
-  preferences, signing, and distribution belong to later tickets.
+  its profile. Consumer close/reopen/Quit, persistent preferences, signing, and distribution
+  belong to later tickets. EngineProtocol/PreviewEngine own the private bounded
+  launch channel; it conveys identity, never API/permission authority.
 - Keep smoke instrumentation behind `PREVIEW_SMOKE`; it may inspect/drive the
   DOM but must not become an app bridge or replace production workflows.
 - Run `./desktop/macos/preview.sh smoke` on an actual Aqua macOS session and the
