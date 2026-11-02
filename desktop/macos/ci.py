@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and qualify the actual development app on a dedicated hosted Mac."""
 import argparse
-from ci_paths_budget import active, check as budget_check, time_limit, using
+from ci_paths_budget import active, check as budget_check, time_limit, using, PathBudget
 from collections import deque
 import hashlib
 import importlib.util
@@ -282,6 +282,8 @@ def main():
     lifecycle = False
     paths = False
     path_allocation = None
+    path_budget = None
+    path_scope = None
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -301,6 +303,12 @@ def main():
                 from ci_paths import require_allocation
                 path_allocation = require_allocation(os.environ.get('NAC_PATHS_CUSTODY', ''), args.expected_sha)
                 report['paths_allocation'] = path_allocation
+                path_budget=PathBudget(path_allocation,RUN_DEADLINE)
+                path_scope=using(path_budget.work)
+                path_scope.__enter__()
+                report['paths_clock']=path_budget.evidence
+                report['paths_clock'].update(hard=path_budget.hard,work=path_budget.work.deadline,
+                    cleanup=path_budget.cleanup.deadline)
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
             if paths and (not args.source_root.is_absolute() or args.source_root.resolve() != args.source_root):
@@ -359,7 +367,7 @@ def main():
         report['toolchain'] = actual
         report['xcode_select_default'] = command(['xcode-select', '-p'])
         compiler_pinned = qualify_toolchain(actual, expected)
-        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'])
+        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'],timeout=time_limit(30))
         report['console_state'] = console_state(console, os.getuid())
         gui_helper = raw / 'native-gui-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIGUI.swift',
@@ -390,7 +398,7 @@ def main():
         if paths:
             from ci_paths import qualify as qualify_paths
             report.update(qualify_paths(raw, source_root, target, args.expected_sha, run, command,
-                                       settle_apps, path_allocation))
+                                       settle_apps, path_allocation, budget=path_budget))
         elif lifecycle:
             report.update(qualify_lifecycle(raw, source_root, target, args.expected_sha,
                                            run, command, lifecycle_image_report, RUN_DEADLINE, report=report))
@@ -472,6 +480,7 @@ def main():
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
         require_checkout(source_root, report['source_sha'])
         require_checkout(ROOT, args.expected_sha)
+        if path_budget is not None:path_budget.require_success()
         report['result'] = 'passed' if compiler_pinned else 'unqualified-swift'
         if not compiler_pinned:
             raise RuntimeError('Smoke completed; pin observed Swift compiler identity before acceptance')
@@ -503,22 +512,36 @@ def main():
             report['result'] = 'failed'
             raise
         finally:
+            if path_scope is not None:
+                path_scope.__exit__(None,None,None)
+                path_scope=None
             crashes = Path.home() / 'Library/Logs/DiagnosticReports'
             if lifecycle:
                 report['elapsed_seconds'] = round(time.time() - started, 3)
                 finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
                                    crashes=crashes, started=started)
             else:
-                count = 0
-                for crash in sorted(crashes.glob('NACPreview*')):
-                    if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
-                        with crash.open('rb') as stream:
-                            (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
-                        count += 1
-                report['crash_reports'] = count
-                report['elapsed_seconds'] = round(time.time() - started, 3)
-                (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
-                export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
+                with using(path_budget.retention if path_budget else None):
+                    try:
+                        count = 0
+                        for crash in sorted(crashes.glob('NACPreview*')):
+                            if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
+                                with crash.open('rb') as stream:
+                                    (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
+                                count += 1
+                        report['crash_reports'] = count
+                        report['elapsed_seconds'] = round(time.time() - started, 3)
+                        (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
+                        export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
+                        if path_budget is not None:path_budget.require_success()
+                    except BaseException:
+                        report['result']='failed'
+                        (raw / 'ci-report.json').write_text(json.dumps(report,indent=2)+'\n')
+                        if (output / 'ci-report.json').exists():
+                            (output / 'ci-report.json').write_text(json.dumps({'result':'failed','retention_complete':False})+'\n')
+                        raise
+                    finally:
+                        if path_scope is not None:path_scope.__exit__(None,None,None)
 
 
 if __name__ == '__main__':
