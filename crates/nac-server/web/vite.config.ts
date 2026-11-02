@@ -19,6 +19,8 @@ const BASE = "/assets/dist/";
 export const API_PREFIXES = [
   "/health",
   "/ui-config",
+  "/product-context",
+  "/product-destinations",
   "/store",
   "/sessions",
   "/projects",
