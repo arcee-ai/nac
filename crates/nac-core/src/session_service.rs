@@ -975,6 +975,23 @@ impl SessionService {
         registry.resolve_prompt_invocation(invocation).await
     }
 
+    /// Passive counts from the already constructed runtime. No discovery,
+    /// attachment or permission decision is performed. Exposure is not authority.
+    pub fn runtime_capability_counts(&self) -> (Option<usize>, Option<usize>) {
+        let skills = self
+            .skills
+            .as_ref()
+            .map(|registry| registry.catalog_entries().len());
+        // A running agent owns its request snapshot; never block that loop or
+        // report a stale shell-context clone as the current model capabilities.
+        let tools = self
+            .agent
+            .try_lock()
+            .ok()
+            .and_then(|agent| agent.runtime_tool_count());
+        (skills, tools)
+    }
+
     pub fn skill_catalog_entries(&self) -> Vec<crate::skill_catalog::SkillCatalogEntry> {
         self.skills
             .as_deref()
