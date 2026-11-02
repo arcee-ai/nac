@@ -7,6 +7,9 @@ The resulting production-schema records enter the actual Python owner/caller.
 from contextlib import ExitStack
 import hashlib
 import json
+import select
+import threading
+import time
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +21,161 @@ from unittest.mock import MagicMock, Mock, patch
 
 from ci_startup import run_case
 from ci_startup_owner import OwnerWitness
+
+ARGUMENT_KERNEL = r'''
+// All process/AppKit entry points used by snapshot are deterministic fixture
+// adapters. No live PID, window service, sysctl or signal is reached.
+var argumentRoot = ""
+var argumentScenario = ""
+var argumentPhase = 0
+var argumentHelperGone = false
+var argumentHelperReused = false
+var argumentReads = 0
+var argumentAbsenceChecks = 0
+var argumentSignals = 0
+var argumentSettlementDemands = 0
+var argumentReachedBarrier = false
+func getuid() -> UInt32 { 501 }
+func fixturePath(_ pid: Int32) -> String {
+    if pid == 99 { return "/foreign/unowned" }
+    return argumentRoot + "/Moved app folder with spaces/NAC.app/Contents/" +
+        (pid == 10 ? "MacOS/NACPreview" : "Resources/nac-web")
+}
+func fixturePIDs() -> [Int32] {
+    if argumentPhase == 2 { return [99] }
+    let helper = argumentScenario.hasPrefix("known-") || argumentPhase == 1
+    return [10, 11] + (helper ? [12] : []) + [99]
+}
+func proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ argument: UInt64,
+                  _ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    if argumentPhase == 2 || (pid == 12 && argumentHelperGone) { errno = ESRCH; return 0 }
+    var value = proc_bsdinfo()
+    value.pbi_pid = UInt32(pid); value.pbi_ppid = pid == 10 ? 1 : 10
+    value.pbi_uid = 501; value.pbi_start_tvsec = 1234
+    value.pbi_start_tvusec = pid == 12 && argumentHelperReused ? 999 : UInt64(pid)
+    output!.assumingMemoryBound(to: proc_bsdinfo.self).pointee = value
+    return Int32(MemoryLayout<proc_bsdinfo>.size)
+}
+func proc_pidpath(_ pid: Int32, _ output: UnsafeMutableRawPointer?, _ size: UInt32) -> Int32 {
+    if argumentPhase == 2 && pid != 99 { errno = ESRCH; return 0 }
+    let bytes = Array(fixturePath(pid).utf8) + [0]
+    bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
+    return Int32(bytes.count - 1)
+}
+func proc_listallpids(_ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    let pids = fixturePIDs()
+    if let output { pids.withUnsafeBytes { _ = memcpy(output, $0.baseAddress!, $0.count) } }
+    return Int32(pids.count)
+}
+func proc_listchildpids(_ pid: Int32, _ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    let pids: [Int32] = pid == 10 ? fixturePIDs().filter { $0 == 11 || $0 == 12 } : []
+    if !pids.isEmpty { pids.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, $0.count) } }
+    errno = 0
+    return Int32(pids.count)
+}
+func kill(_ pid: Int32, _ signal: Int32) -> Int32 {
+    if signal != 0 { argumentSignals += 1; errno = EPERM; return -1 }
+    argumentAbsenceChecks += 1
+    if argumentPhase == 2 { errno = ESRCH; return -1 }
+    if pid == 12 && argumentScenario == "known-unknown" { errno = EIO; return -1 }
+    if pid == 12 && argumentHelperGone { errno = ESRCH; return -1 }
+    return 0
+}
+func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
+            _ output: UnsafeMutableRawPointer?, _ size: UnsafeMutablePointer<Int>?,
+            _ replacement: UnsafeMutableRawPointer?, _ replacementSize: Int) -> Int32 {
+    let pid = mib![2]
+    argumentReads += 1
+    if pid == 12 && argumentPhase == 1 {
+        if argumentScenario.hasSuffix("exit") || argumentScenario == "known-unknown" {
+            argumentHelperGone = true; errno = ESRCH; return -1
+        }
+        if argumentScenario == "known-denied" || argumentScenario == "known-access-denied" {
+            argumentHelperGone = true
+            errno = argumentScenario == "known-denied" ? EPERM : EACCES
+            return -1
+        }
+        if argumentScenario == "known-live" || argumentScenario == "known-reused" {
+            argumentHelperReused = argumentScenario == "known-reused"
+            errno = EIO; return -1
+        }
+        if argumentScenario == "known-malformed" {
+            let bytes = [UInt8](repeating: 0, count: 8)
+            bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
+            size!.pointee = bytes.count; argumentHelperGone = true
+            return 0
+        }
+    }
+    let executable = fixturePath(pid)
+    let argv = [executable] + (pid == 10 ? [] :
+        (pid == 12 ? ["__desktop-configuration"] : ["--bind", "127.0.0.1:4321"]))
+    var environment = ["HOME": "/private/owned home", "NAC_HOME": "/private/owned home/nac"]
+    if pid == 12 && argumentPhase == 1 && argumentScenario == "known-environment" {
+        environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
+        argumentHelperGone = true
+    }
+    var nargs = Int32(argv.count)
+    var bytes = withUnsafeBytes(of: &nargs) { Array($0) }
+    bytes += Array(executable.utf8) + [0, 0]
+    for word in argv { bytes += Array(word.utf8) + [0] }
+    for key in environment.keys.sorted() { bytes += Array((key + "=" + environment[key]!).utf8) + [0] }
+    bytes.append(0)
+    bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
+    size!.pointee = bytes.count
+    if pid == 12 && argumentPhase == 1 && argumentScenario == "known-reused-after-arguments" {
+        argumentHelperReused = true
+    }
+    return 0
+}
+struct NSRunningApplication {
+    let processIdentifier: Int32 = 10
+    let isTerminated = false
+    var bundleURL: URL? { URL(fileURLWithPath: argumentRoot + "/Moved app folder with spaces/NAC.app") }
+    var executableURL: URL? { URL(fileURLWithPath: fixturePath(10)) }
+    let launchDate: Date? = Date(timeIntervalSince1970: 1234.5)
+    static func runningApplications(withBundleIdentifier: String) -> [Self] {
+        argumentPhase == 2 ? [] : [Self()]
+    }
+}
+enum FixtureWindowOption { case optionOnScreenOnly, excludeDesktopElements }
+let kCGNullWindowID: UInt32 = 0
+let kCGWindowOwnerPID = "owner", kCGWindowLayer = "layer", kCGWindowNumber = "number"
+func CGWindowListCopyWindowInfo(_ options: [FixtureWindowOption], _ window: UInt32) -> Any? {
+    [[kCGWindowOwnerPID: 10, kCGWindowLayer: 0, kCGWindowNumber: 17]]
+}
+func runArgumentControl() throws {
+    argumentScenario = String(CommandLine.arguments[1].dropFirst("argument-".count))
+    argumentRoot = CommandLine.arguments[3]
+    let environment = ["HOME": "/private/owned home", "NAC_HOME": "/private/owned home/nac"]
+    let config: [String: Any] = ["app_path": argumentRoot + "/Moved app folder with spaces/NAC.app",
+        "bundle_id": "ai.arcee.nac.dev", "environment": environment, "child_environment": environment]
+    let resources = try StartupURLResources(root: argumentRoot, app: config["app_path"] as! String)
+    var known: [Int32: StartupProcessIdentity] = [:]
+    try StartupObserver.emit(StartupObserver.readyRecord(CommandLine.arguments[2]))
+    try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
+    argumentPhase = 1
+    do {
+        try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
+        argumentReachedBarrier = true
+        for _ in 0..<2 {
+            // The consumer requests each fresh settlement observation first.
+            guard try FileHandle.standardInput.read(upToCount: 1) == Data([1]) else {
+                throw OwnershipError.invalid
+            }
+            argumentSettlementDemands += 1
+            argumentPhase = 2
+            try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
+        }
+    } catch {
+        try StartupObserver.emit(StartupObserver.failureRecord(error, known: known))
+    }
+    let audit: [String: Any] = ["actual_arguments_reads": argumentReads,
+        "independent_absence_checks": argumentAbsenceChecks, "nonzero_signals": argumentSignals,
+        "all_kernel_appkit_calls_mocked": true, "settlement_demands": argumentSettlementDemands,
+        "reached_settlement_barrier": argumentReachedBarrier]
+    FileHandle.standardError.write(try JSONSerialization.data(withJSONObject: audit))
+}
+'''
 
 DRIVER = r'''
 let fixturePath = "/private/nac342-xctest-unit/NAC.app"
@@ -108,9 +266,14 @@ class ProductionObserverControls(unittest.TestCase):
             assert source.count(begin) == source.count(end) == 1
             return source.split(begin, 1)[1].split('\n', 1)[1].split(end, 1)[0]
         need = '    static func need' + source.split('    static func need', 1)[1].split('    static func arguments', 1)[0]
-        text = ('import Foundation\nimport Darwin\nimport CryptoKit\n'
-                + 'enum OwnershipError: Error { case invalid }\n' + section('STARTUP PROCESS PROBES')
-                + '\nenum StartupObserver {\n' + need + section('STARTUP OBSERVER RECORDS') + '\n}\n' + DRIVER)
+        # Compile the actual snapshot and arguments owners as well as probes.
+        # AppKit metadata/kernel calls are deterministic fixture adapters only.
+        prefix, body = source.split('@main\nenum StartupObserver {', 1)
+        prefix = prefix.replace('import AppKit\n', '')
+        body = body.split('    @MainActor\n    static func main()', 1)[0]
+        text = (prefix + ARGUMENT_KERNEL + '\nenum StartupObserver {\n' + body + '\n}\n'
+                + 'if CommandLine.arguments[1].hasPrefix("argument-") {\n'
+                + 'try runArgumentControl()\n} else {\n' + DRIVER + '\n}\n')
         file = folder / 'main.swift'
         file.write_text(text)
         cls.executable = folder / 'ObserverControls'
@@ -127,6 +290,134 @@ class ProductionObserverControls(unittest.TestCase):
         frames = [json.loads(line) for line in result.stdout.splitlines()]
         self.records[scenario + '-' + configuration_sha[:12]] = frames
         return frames
+
+    def argument_frames(self, scenario, root, configuration_sha='b' * 64):
+        app = root / 'Moved app folder with spaces/NAC.app'
+        native = app / 'Contents/MacOS/NACPreview'
+        native.parent.mkdir(parents=True, exist_ok=True)
+        native.write_bytes(b'inert private resource; never executed')
+        result = subprocess.run([str(self.executable), 'argument-' + scenario,
+                                 configuration_sha, str(root)], capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr[-4096:])
+        self.assertNotIn(b'fixture-secret-never-emitted', result.stdout)
+        audit = json.loads(result.stderr)
+        self.assertTrue(audit['all_kernel_appkit_calls_mocked'])
+        self.assertGreater(audit['actual_arguments_reads'], 0)
+        self.assertEqual(audit['nonzero_signals'], 0)
+        frames = [json.loads(line) for line in result.stdout.splitlines()]
+        self.records['argument-' + scenario] = {'frames': frames, 'audit': audit}
+        config = self.config(str(root))
+        config['app_path'] = str(app)
+        return frames, config, audit
+
+    def argument_exit(self, scenario, *, previously_known):
+        with tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
+            root = Path(temporary).resolve()
+            app = root / 'Moved app folder with spaces/NAC.app'
+            native = app / 'Contents/MacOS/NACPreview'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b'inert private resource; never executed')
+            process = subprocess.Popen([str(self.executable), 'argument-' + scenario,
+                'b' * 64, str(root)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, bufsize=0)
+            frames, errors, demands = [], [], []
+            reader = None
+            def read_frame():
+                self.assertTrue(select.select([process.stdout], [], [], 5)[0], 'bounded fixture frame')
+                line = process.stdout.readline(65537)
+                self.assertTrue(line.endswith(b'\n') and len(line) <= 65536)
+                self.assertNotIn(b'fixture-secret-never-emitted', line)
+                return json.loads(line)
+            try:
+                config = self.config(str(root))
+                config['app_path'] = str(app)
+                owner = OwnerWitness(config, 'b' * 64, uid=501)
+                for _ in range(3):
+                    frame = read_frame()
+                    frames.append(frame)
+                    owner.observe(frame)
+                self.assertIsNone(owner.failure, 'positive helper exit must not stop the witness')
+                self.assertTrue(frames[2]['complete'])
+                key = 'retired' if previously_known else 'enumerated_exits'
+                self.assertIn(12, [r['identity']['pid'] if previously_known else r['pid']
+                                  for r in frames[2][key]])
+                self.assertEqual(12 in owner.history, previously_known)
+                def consume():
+                    try:
+                        for _ in range(2):
+                            frame = read_frame()
+                            frames.append(frame)
+                            owner.observe(frame)
+                    except BaseException as error:
+                        errors.append(repr(error))
+                reader = threading.Thread(target=consume)
+                reader.start()
+                actual_wait_empty = owner.wait_empty
+                def request_fresh(after, seconds=25):
+                    # Forward every real cutoff through the unchanged owner.
+                    # Never substitute a boolean or rewrite a producer stamp.
+                    demands.append(after)
+                    process.stdin.write(bytes([1]))
+                    process.stdin.flush()
+                    return actual_wait_empty(after, seconds=seconds)
+                owner.wait_empty = request_fresh
+                with patch('ci_startup_owner.ctypes.CDLL', side_effect=AssertionError('No live PID probe')),                     patch('ci_startup_owner.os.kill', side_effect=AssertionError('No real signal')):
+                    self.assertTrue(owner.settle(time.monotonic())['owned_processes_settled'])
+                reader.join(timeout=5)
+                self.assertFalse(reader.is_alive())
+                self.assertFalse(errors)
+                self.assertEqual(len(demands), 2)
+                self.assertEqual(len(frames), 5)
+                for frame, cutoff in zip(frames[3:], demands):
+                    self.assertGreaterEqual(int(frame['observed_uptime_ns']) / 1e9, cutoff)
+                self.assertEqual(process.wait(timeout=5), 0)
+                audit = json.loads(process.stderr.read())
+                self.assertEqual(audit['settlement_demands'], 2)
+                self.assertTrue(audit['reached_settlement_barrier'])
+                self.assertEqual(audit['nonzero_signals'], 0)
+                self.assertGreater(audit['independent_absence_checks'], 0)
+                self.assertFalse(owner.signals)
+                self.records['argument-' + scenario] = {'frames': frames, 'audit': audit,
+                                                       'actual_settlement_cutoffs': demands}
+            finally:
+                process.stdin.close()
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                if reader is not None:
+                    reader.join(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
+    def test_actual_argument_known_helper_exit_retires_and_settles(self):
+        self.argument_exit('known-exit', previously_known=True)
+
+    def test_actual_argument_new_helper_exit_is_not_adopted_and_settles(self):
+        self.argument_exit('new-exit', previously_known=False)
+
+    def test_actual_argument_live_denied_unknown_reuse_and_validation_remain_fail_closed(self):
+        for scenario in ('known-live', 'known-denied', 'known-access-denied', 'known-unknown',
+                         'known-reused', 'known-reused-after-arguments', 'known-malformed',
+                         'known-environment'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
+                frames, config, audit = self.argument_frames(scenario, Path(temporary).resolve())
+                owner = OwnerWitness(config, 'b' * 64, uid=501)
+                for frame in frames:
+                    owner.observe(frame)
+                self.assertEqual(frames[-1]['event'], 'failed')
+                self.assertFalse(audit['reached_settlement_barrier'])
+                self.assertFalse(owner.failure_receipt()['positive_settlement'])
+                self.assertEqual(set(owner.history), {10, 11, 12})
+                with self.assertRaises(RuntimeError), patch('ci_startup_owner.ctypes.CDLL',
+                        side_effect=AssertionError('No live PID probe')), patch('ci_startup_owner.os.kill',
+                        side_effect=AssertionError('No real signal')):
+                    owner.settle(0)
+                if scenario in ('known-denied', 'known-access-denied', 'known-malformed', 'known-environment'):
+                    self.assertEqual(audit['independent_absence_checks'], 0)
 
     def config(self, root='/private/nac342-xctest-unit'):
         return {'app_path': '/private/nac342-xctest-unit/NAC.app', 'fixture_root': root,
@@ -196,15 +487,24 @@ class ProductionObserverControls(unittest.TestCase):
         self.assertFalse(owner.failure_receipt()['positive_settlement'])
 
     def test_actual_emitted_uncertainty_reaches_caller_and_preserves_profile(self):
+        self.caller_uncertainty()
+
+    def test_actual_argument_uncertainty_reaches_caller_and_preserves_profile(self):
+        self.caller_uncertainty(argument=True)
+
+    def caller_uncertainty(self, argument=False):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
-            root = Path(temporary).resolve()
+            root = Path(temporary).resolve().resolve()
             fixture, folder = root / 'nac342-xctest-unit', root / 'evidence'
             fixture.mkdir()
             config = self.config(str(fixture))
+            if argument:
+                config['app_path'] = str(fixture / 'Moved app folder with spaces/NAC.app')
             config_path = fixture / 'startup-config.json'
             config_path.write_text(json.dumps(config))
             configuration_sha = hashlib.sha256(config_path.read_bytes()).hexdigest()
-            frames = self.frames('app_exit_engine_unavailable', configuration_sha)
+            frames = (self.argument_frames('known-live', fixture, configuration_sha)[0] if argument
+                      else self.frames('app_exit_engine_unavailable', configuration_sha))
             owner = OwnerWitness(config, configuration_sha, uid=501)
             owner.start = lambda *args: [owner.observe(record) for record in frames[:2]]
             owner.stop = lambda: None
@@ -240,8 +540,10 @@ class ProductionObserverControls(unittest.TestCase):
             self.assertTrue(fixture.is_dir())
             receipt = json.loads((folder / 'owner-observation.json').read_text())
             self.assertFalse(receipt['positive_settlement'])
-            self.assertEqual(receipt['unresolved'][0]['pid'], 11)
-            self.assertEqual({row['pid'] for row in receipt['known_identities']}, {10, 11})
+            if not argument:
+                self.assertEqual(receipt['unresolved'][0]['pid'], 11)
+            self.assertEqual({row['pid'] for row in receipt['known_identities']},
+                             {10, 11, 12} if argument else {10, 11})
             retained = json.loads((folder / 'retained-fixture.json').read_text())
             self.assertFalse(retained['positive_process_settlement'])
 
