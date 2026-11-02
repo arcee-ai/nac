@@ -36,6 +36,7 @@ import {
   type SessionPanel,
 } from "@/app/lib/routes";
 import { PanelPhoneChromeProvider } from "@/app/providers/PanelPhoneChrome";
+import { usePresentationLayers } from "@/app/providers/PresentationBoundary";
 import { useSessionSnapshot, useSessionSummary, useSshConnect } from "@/app/services/queries";
 
 // 80% as wide as the chat beside it, so 4/9 of the row, between 480px and
@@ -133,6 +134,7 @@ export default function SessionPage() {
   const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
   const isMobile = useIsMobile();
+  const layers = usePresentationLayers();
 
   // An omitted behavior on a loaded session is the legacy orchestrator. An
   // unloaded session is not that default: painting Insights/Files/Worksets and
@@ -267,11 +269,12 @@ export default function SessionPage() {
   const onFocusedKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!focused || event.key !== "Escape" || event.defaultPrevented) return;
     // Only from inside the box itself: a dialog or menu portalled out of it
-    // closes on its own Escape. A terminal takes Escape as input, and a menu
-    // still open on its trigger closes first.
+    // closes on its own Escape. A terminal takes Escape as input, and an open
+    // menu or popover closes first, even from its trigger. An expanded folder
+    // or section is no layer, so Escape still goes back from it.
     const target = event.target;
     if (!(target instanceof Element) || !event.currentTarget.contains(target)) return;
-    if (target.closest('.xterm, [aria-expanded="true"]')) return;
+    if (target.closest(".xterm") || layers.hasOpenLayer()) return;
     event.preventDefault();
     leaveFocusedSidePanel();
   };

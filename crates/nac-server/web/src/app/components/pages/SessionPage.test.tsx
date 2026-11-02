@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Popover } from "@/app/atoms";
 import SessionPage from "@/app/components/pages/SessionPage";
 import { sessionLayoutStore, selectInsight } from "@/app/store/sessionLayoutStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -58,8 +59,21 @@ vi.mock("@/app/features/terminal-selection/TerminalWorkspace", () => ({
 }));
 vi.mock("@/app/components/inspector/HistoryView", () => ({ HistoryView: () => null }));
 vi.mock("@/app/components/inspector/WorksetsView", () => ({ WorksetsView: () => null }));
+/** A menu on the app's popover, which takes Escape through the layer stack. */
+function FakeMenu() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onClose={() => setOpen(false)} content={<div role="menu">menu</div>}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(true)}>
+        Menu
+      </button>
+    </Popover>
+  );
+}
+
 // Stands in for the Insights panel with state only a surviving instance keeps:
-// a local pick, a scrolled list and a terminal-like field that owns Escape.
+// a local pick, a scrolled list and a terminal-like field that owns Escape,
+// plus an expanded disclosure and a menu.
 vi.mock("@/app/features/insights/presentation/InsightsView", () => ({
   InsightsView: function FakeInsights() {
     const [picked, setPicked] = useState("none");
@@ -76,6 +90,10 @@ vi.mock("@/app/features/insights/presentation/InsightsView", () => ({
         <div className="xterm">
           <textarea aria-label="Terminal input" />
         </div>
+        <button type="button" aria-expanded="true">
+          Folder
+        </button>
+        <FakeMenu />
       </div>
     );
   },
@@ -181,6 +199,26 @@ describe("focused side panel", () => {
     const back = screen.getByRole("button", { name: "Back to chat" });
     back.focus();
     fireEvent.keyDown(back, { key: "Escape" });
+    expectSplitRestored(list);
+  });
+
+  it("lets an open menu take Escape first, but not an expanded folder", () => {
+    mount();
+    const list = selectInSplit();
+    fireEvent.click(screen.getByRole("button", { name: "Focus panel" }));
+
+    const trigger = screen.getByRole("button", { name: "Menu" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(sessionLayoutStore.getState().expanded).toBe(true);
+
+    // A disclosure stays expanded, so it must not keep the panel focused.
+    const folder = screen.getByRole("button", { name: "Folder" });
+    folder.focus();
+    fireEvent.keyDown(folder, { key: "Escape" });
     expectSplitRestored(list);
   });
 

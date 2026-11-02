@@ -39,6 +39,8 @@ export interface LayerStack {
   subscribe: (listener: () => void) => () => void;
   /** Open modal layers. Global shortcuts stay off while any is open. */
   modalDepth: () => number;
+  /** Whether a layer other than a hint is open: Escape closes it before anything beneath. */
+  hasOpenLayer: () => boolean;
   /** Whether `token` is the topmost layer, hints left out unless asked for. */
   isTop: (token: object, includeHints?: boolean) => boolean;
   /** Whether a modal opened after `token` is still open. */
@@ -152,6 +154,7 @@ export function createLayerStack(): LayerStack {
       };
     },
     modalDepth: () => layers.filter((layer) => kindOf(layer) === "modal").length,
+    hasOpenLayer: () => lastLayer((layer) => kindOf(layer) !== "hint") !== undefined,
     isTop: (token, includeHints = false) =>
       lastLayer((layer) => includeHints || kindOf(layer) !== "hint")?.token === token,
     hasModalAbove: (token) => {
