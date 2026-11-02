@@ -101,16 +101,34 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 154);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 156);
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
 }
 for (const [method, owner] of [
+  ["GET /product-context", "api.getProductContext"],
+  ["POST /product-destinations/resolve", "api.resolveProductDestination"],
   ["GET /sessions/{session_id}/executions/{execution_id}/input-control", "api.getTerminalInputControl"],
   ["POST /sessions/{session_id}/executions/{execution_id}/input-control", "api.transferTerminalInputControl"],
   ["POST /sessions/{session_id}/executions/{execution_id}/input", "api.inputControlledTerminal"],
 ]) assert.equal(NAC_API_SURFACE[method], owner);
+const productCalls = [];
+const productApi = createNacApi(createNacClient({
+  endpoint: "https://nac.example/runtime/v1",
+  credentials: "omit",
+  fetch: async (url, init) => {
+    productCalls.push({ url: String(url), method: init.method, body: init.body });
+    return Response.json({});
+  },
+}));
+await productApi.getProductContext("session /scope");
+await productApi.resolveProductDestination({ destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
+assert.equal(productCalls[0].url, "https://nac.example/runtime/v1/product-context?session_id=session%20%2Fscope");
+assert.equal(productCalls[0].method, "GET");
+assert.equal(productCalls[1].url, "https://nac.example/runtime/v1/product-destinations/resolve");
+assert.equal(productCalls[1].method, "POST");
+assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");

@@ -138,6 +138,10 @@ export function LeftSidebarPanel({
             <Badge text={String(commands.sshCount)} color={BadgeColor.Gray} background={false} />
           ) : null}
         </TabButton>
+        <TabButton onClick={commands.inspectProduct}>
+          <Icon iconName={IconName.Info} />
+          <span className="text-left flex-grow">NAC capabilities</span>
+        </TabButton>
         <TabButton onClick={commands.openConfigurations}>
           <Icon iconName={IconName.Gear} />
           <span className="text-left flex-grow">Configurations</span>

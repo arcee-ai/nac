@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 
+vi.mock("@/app/features/product-context/ProductNavigationProvider", () => ({
+  ProductNavigationProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 vi.mock("@/app/features/ui-policy/UiPolicyProvider", () => ({
   UiPolicyProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

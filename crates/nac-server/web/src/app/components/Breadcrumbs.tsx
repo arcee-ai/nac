@@ -1,3 +1,4 @@
+import { useSessionNameDisclosure } from "@/app/atoms/session-name-disclosure";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -52,6 +53,8 @@ export function Breadcrumbs() {
   // An orphan has a chat but no project, so the trail falls back to its title
   // and the neutral chat tile.
   const label = project?.name ?? sessionTitle(currentEntry?.summary) ?? sessionId ?? "";
+  const disclosure = useSessionNameDisclosure(label);
+  const orphan = Boolean(sessionId && !project);
   const avatarId = project?.project_id ?? sessionId ?? "";
   // The project chip pulses when any chat in that project is running, not
   // only the one whose tab is open. An unassigned chat can only pulse for itself.
@@ -86,36 +89,41 @@ export function Breadcrumbs() {
               <ProjectPopover activeId={projectId ?? sessionId} onClose={() => setOpen(false)} />
             }
           >
-            <Button
-              variant={ButtonVariant.Ghost}
-              size={ButtonSize.Medium}
-              content={ButtonContent.Text}
-              // The atom's own padding is unlayered CSS, so a plain `px-2`
-              // never reaches it.
-              className="!px-2 max-w-[320px]"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              aria-label="Switch project"
-            >
-              {project ? (
-                <SessionAvatar
-                  id={avatarId}
-                  size={24}
-                  isRunning={running}
-                  className="rounded-[2px]"
+            {disclosure.hint(
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Medium}
+                content={ButtonContent.Text}
+                // The atom's own padding is unlayered CSS, so a plain `px-2`
+                // never reaches it.
+                className="!px-2 max-w-[320px]"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                aria-label={orphan ? `${label}, switch project` : "Switch project"}
+              >
+                {project ? (
+                  <SessionAvatar
+                    id={avatarId}
+                    size={24}
+                    isRunning={running}
+                    className="rounded-[2px]"
+                  />
+                ) : (
+                  <ChatSessionOrphanAvatar size={24} isRunning={running} />
+                )}
+                <span className={cn("truncate max-w-[120px]", running && "text-shimmer-basic")}>
+                  {label}
+                </span>
+                <Icon
+                  iconName={IconName.Down}
+                  className={cn("transition-transform", open ? "rotate-180" : undefined)}
                 />
-              ) : (
-                <ChatSessionOrphanAvatar size={24} isRunning={running} />
-              )}
-              <span className={cn("truncate max-w-[120px]", running && "text-shimmer-basic")}>
-                {label}
-              </span>
-              <Icon
-                iconName={IconName.Down}
-                className={cn("transition-transform", open ? "rotate-180" : undefined)}
-              />
-            </Button>
+              </Button>,
+              !orphan,
+            )}
           </Popover>
+          {orphan ? disclosure.action : null}
+          {orphan ? disclosure.overlay : null}
           <Tooltip
             title="New project"
             // Inside a project the chord starts a chat instead, so promising

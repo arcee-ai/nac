@@ -147,6 +147,7 @@ pub struct Agent {
     base_tool_defs: Vec<ToolDefinition>,
     admission_controlled_tools: bool,
     direct_primary: bool,
+    product_context_eligible: bool,
     native_web_capabilities: NativeWebCapabilities,
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
@@ -313,6 +314,22 @@ impl Agent {
                 ),
             },
         };
+        let guide_selected = config.mode == AgentMode::Worker && {
+            let preload = format!(
+                "The orchestrator preloaded this skill for this worker dispatch.\n\n{}",
+                crate::skills::bundled_help_for_prompt()
+            );
+            config.initial_messages.iter().any(
+                |message| matches!(message, Message::System { content } if content == &preload),
+            )
+        };
+        if config.mode != AgentMode::Worker && traditional_child.is_none() {
+            system_prompt.push_str(&crate::guide::primary_prompt());
+        } else if guide_selected || traditional_child.is_some() {
+            // Traditional children retain explicit skill expansion. Keep the
+            // bundled router usable without adding primary self-help routing.
+            tool_defs.push(tools::guide::definition());
+        }
         if config.mode == AgentMode::Orchestrator {
             if let Some(light) = config.light_client.as_deref() {
                 system_prompt.push_str(&light_model_prompt_guidance(light));
@@ -320,6 +337,13 @@ impl Agent {
         }
         let base_tool_defs = tool_defs.clone();
         if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
+            if config
+                .extra_tool_defs
+                .iter()
+                .any(|definition| definition.function.name == tools::guide::NAME)
+            {
+                anyhow::bail!("nac_guide is a reserved first-party capability name");
+            }
             tool_defs.extend(config.extra_tool_defs);
         }
         let native_web_capabilities =
@@ -410,9 +434,12 @@ impl Agent {
             base_tool_defs,
             admission_controlled_tools: mode == AgentMode::Direct,
             direct_primary: mode == AgentMode::Direct,
+            product_context_eligible: mode == AgentMode::Orchestrator
+                || (mode == AgentMode::Direct && traditional_child.is_none()),
             native_web_capabilities,
             compaction,
             tool_runtime: ToolRuntime {
+                product_context: None,
                 workspace_cwd: config.workspace_cwd,
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
@@ -471,6 +498,41 @@ impl Agent {
             broker.set_command_environment(provider.clone());
         }
         self.tool_runtime.command_environment = provider;
+    }
+
+    pub(crate) fn runtime_tool_count(&self) -> Option<usize> {
+        self.tool_runtime
+            .allowed_tools
+            .as_ref()
+            .map(|names| names.len())
+    }
+
+    /// Host composition binds this port to one serving owner and exact session.
+    /// Worker/child capability sets stay unchanged.
+    pub fn bind_product_context(
+        &mut self,
+        port: Arc<dyn crate::product_context::ProductContextPort>,
+    ) -> Result<()> {
+        if !self.product_context_eligible {
+            return Ok(());
+        }
+        let definitions = crate::tools::product_context_tool_definitions();
+        if self.tool_defs.iter().any(|definition| {
+            crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&definition.function.name.as_str())
+        }) {
+            anyhow::bail!("product-context capability name collision");
+        }
+        self.base_tool_defs.extend(definitions.clone());
+        self.fallback_tool_defs.extend(definitions.clone());
+        self.tool_defs.extend(definitions);
+        self.tool_runtime.product_context = Some(port);
+        self.tool_runtime.allowed_tools = Some(Arc::new(
+            self.tool_defs
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect(),
+        ));
+        Ok(())
     }
 
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
@@ -1923,3 +1985,6 @@ impl Agent {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod guide_tests;

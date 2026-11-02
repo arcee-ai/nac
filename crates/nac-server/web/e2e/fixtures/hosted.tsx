@@ -1,4 +1,5 @@
 // Test-only caller of the production native presentation; no alternate feature UI.
+import { SessionNameSurfaces } from "./session-name-surfaces";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -9,6 +10,7 @@ import "../../src/index.css";
 const configuration = (await (await fetch("/fixture-config")).json()) as {
   sessionId: string;
   twoInstances: boolean;
+  nameSurfaces: boolean;
 };
 function openRuntime(release: string, instance: string) {
   return createNativeRuntime({
@@ -54,7 +56,7 @@ function HostedFixture({ instance = "single" }: { instance?: string }) {
           runtime={runtime}
           router={(children) => (
             <MemoryRouter initialEntries={[`/session/${configuration.sessionId}/files`]}>
-              {children}
+              {configuration.nameSurfaces ? <SessionNameSurfaces /> : children}
             </MemoryRouter>
           )}
         />

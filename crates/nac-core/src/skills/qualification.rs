@@ -228,7 +228,11 @@ fn all_four_roots_shadow_in_order_and_registry_retains_loaded_bytes() {
             .to_string();
         assert!(rendered.contains(&format!("source {index}")));
         assert!(rendered.contains(&f.root.join(root).join("linked-demo").display().to_string()));
-        let entries = registry.catalog_entries();
+        let entries = registry
+            .catalog_entries()
+            .into_iter()
+            .filter(|entry| entry.name != "nac-help")
+            .collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].description, "qualification: linked resources");
         assert_eq!(
@@ -244,13 +248,15 @@ fn all_four_roots_shadow_in_order_and_registry_retains_loaded_bytes() {
         .unwrap()
         .contains("source 0"));
     assert!(retained.activate("missing").is_error);
-    assert!(SkillRegistry::load(
+    let bundled_only = SkillRegistry::load(
         Some(&f.project()),
         SkillPathVisibility::Visible,
-        &PathContext::new(f.project())
+        &PathContext::new(f.project()),
     )
     .unwrap()
-    .is_none());
+    .unwrap();
+    assert!(!bundled_only.has_skill("linked-demo"));
+    assert!(bundled_only.has_skill("nac-help"));
 }
 
 #[tokio::test]

@@ -209,7 +209,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 sandbox: None,
                 ssh: None,
                 mcp: None,
-                skills: None,
+                skills: Some(Arc::new(crate::skills::SkillRegistry::bundled_for_test())),
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
@@ -234,10 +234,33 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         names(&parent),
         crate::tools::DIRECT_TOOL_NAMES.map(str::to_string)
     );
-    assert_eq!(
-        names(&child),
-        crate::tools::WORKER_TOOL_NAMES.map(str::to_string)
-    );
+    let child_names: Vec<_> = crate::tools::WORKER_TOOL_NAMES
+        .into_iter()
+        .chain(["nac_guide"])
+        .map(str::to_string)
+        .collect();
+    assert_eq!(names(&child), child_names);
+    let crate::commands::PreparedUserInput::SubmitPrompt(help) =
+        crate::commands::prepare_user_input(
+            "$nac-help How do I add MCP?",
+            child.skills().as_deref(),
+        )
+    else {
+        panic!("child help prompt did not expand")
+    };
+    assert!(help.agent_prompt.contains("first-party bundled NAC Guide"));
+    assert!(help.agent_prompt.contains("nac_guide"));
+    for _ in 0..2 {
+        assert_eq!(
+            child
+                .refresh_model_request_capabilities()
+                .unwrap()
+                .iter()
+                .map(|definition| definition.function.name.clone())
+                .collect::<Vec<_>>(),
+            child_names
+        );
+    }
     assert_eq!(
         names(&delegating),
         crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.map(str::to_string)
@@ -264,12 +287,9 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     );
     let child_web =
         capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary")));
+    assert_eq!(&child_web[..child_names.len()], child_names);
     assert_eq!(
-        &child_web[..crate::tools::WORKER_TOOL_NAMES.len()],
-        crate::tools::WORKER_TOOL_NAMES
-    );
-    assert_eq!(
-        &child_web[crate::tools::WORKER_TOOL_NAMES.len()..],
+        &child_web[child_names.len()..],
         crate::tools::WEB_TOOL_NAMES
     );
     let delegating_web = capability_names(
@@ -288,6 +308,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         Some(Message::System { content })
             if content.contains("traditional child coding agent")
                 && content.contains("review the implementation")
+                && !content.contains("NAC product self-help")
     ));
     assert!(matches!(
         delegating.messages.first(),
@@ -295,6 +316,45 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             if content.contains("Managed orchestration")
                 && content.contains("separate durable NAC orchestrator sessions")
     ));
+
+    struct ProductPort;
+    impl crate::product_context::ProductContextPort for ProductPort {
+        fn read(
+            &self,
+        ) -> crate::product_context::ProductContextFuture<'_, crate::product_context::ProductContext>
+        {
+            Box::pin(async { Err(anyhow!("test-only unavailable context")) })
+        }
+        fn resolve(
+            &self,
+            _: crate::product_context::ProductDestination,
+            _: String,
+        ) -> crate::product_context::ProductContextFuture<
+            '_,
+            crate::product_context::ProductNavigationResolution,
+        > {
+            Box::pin(async { Err(anyhow!("test-only unavailable destination")) })
+        }
+    }
+    let mut worker = Agent::default(ModelClient::new_for_test());
+    worker.bind_product_context(Arc::new(ProductPort)).unwrap();
+    child.bind_product_context(Arc::new(ProductPort)).unwrap();
+    for unbound in [&worker, &child] {
+        assert!(unbound.tool_runtime.product_context.is_none());
+        assert!(!names(unbound)
+            .iter()
+            .any(|name| crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&name.as_str())));
+    }
+    for primary in [&mut parent, &mut delegating] {
+        primary.bind_product_context(Arc::new(ProductPort)).unwrap();
+        let refreshed = capability_names(primary.model_request_capabilities_for_test(None));
+        assert!(crate::tools::PRODUCT_CONTEXT_TOOL_NAMES
+            .iter()
+            .all(|name| refreshed.iter().any(|found| found == name)));
+        let before = names(primary);
+        assert!(primary.bind_product_context(Arc::new(ProductPort)).is_err());
+        assert_eq!(names(primary), before);
+    }
 
     drop(parent);
     drop(child);

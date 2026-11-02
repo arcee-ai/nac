@@ -1,6 +1,6 @@
 //! MCP (Model Context Protocol) server module.
 //!
-//! Exposes nac session management as 11 MCP tools served over the
+//! Exposes session management and passive product-context tools over the
 //! streamable-http transport at `/mcp`.
 
 use crate::orchestration::OrchestrationOperations;
@@ -34,6 +34,7 @@ use serde_json::json;
 #[derive(Clone)]
 pub struct NacMcpService {
     operations: OrchestrationOperations,
+    product_context: crate::ProductContextApplication,
 }
 
 const NAC_MCP_INSTRUCTIONS: &str = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.";
@@ -185,11 +186,80 @@ struct UpdateSessionParams {
 }
 
 // ---------------------------------------------------------------------------
-// Tool router — 11 tools
+// Tool router
 // ---------------------------------------------------------------------------
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ProductContextParams {
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ProductNavigationParams {
+    #[schemars(schema_with = "product_destination_schema")]
+    destination: crate::ProductDestination,
+    session_id: Option<String>,
+    expected_build_id: String,
+}
+fn product_destination_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "string", "enum": crate::ProductDestination::ALL})
+}
 
 #[tool_router]
 impl NacMcpService {
+    #[tool(
+        name = "get_product_context",
+        description = "Inspect sanitized facts about this NAC build and an optional existing session. Passive: never attaches, recovers, connects or starts work. Availability is not authorization. No browser action."
+    )]
+    async fn get_product_context(
+        &self,
+        Parameters(params): Parameters<ProductContextParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .product_context
+            .read(params.session_id.as_deref())
+            .await
+        {
+            Ok(context) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string(&context).map_err(|_| {
+                    ErrorData::internal_error("Could not encode product context", None)
+                })?,
+            )])),
+            Err(_) => Ok(CallToolResult::error(vec![Content::text(
+                "Product context unavailable",
+            )])),
+        }
+    }
+
+    #[tool(
+        name = "resolve_product_destination",
+        description = "Resolve one typed NAC destination against the inspected build and existing session. Returns a logical target and clear steps; does not claim to open a browser. Does not submit forms, change configuration or start work. Model text and Markdown cannot execute navigation."
+    )]
+    async fn resolve_product_destination(
+        &self,
+        Parameters(params): Parameters<ProductNavigationParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .product_context
+            .resolve(crate::ProductNavigationRequest {
+                destination: params.destination,
+                session_id: params.session_id,
+                expected_build_id: params.expected_build_id,
+            })
+            .await
+        {
+            Ok(target) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string(&target)
+                    .map_err(|_| ErrorData::internal_error("Could not encode destination", None))?,
+            )])),
+            Err(_) => Ok(CallToolResult::error(vec![Content::text(
+                "Destination unavailable or stale; inspect product context again",
+            )])),
+        }
+    }
+
     #[tool(
         name = "create_session",
         description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. Pass project_id by itself to use a project's directory and defaults; do not combine it with cwd or SSH fields. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true."
@@ -605,6 +675,7 @@ pub fn streamable_http_service(
         move || {
             Ok(NacMcpService {
                 operations: OrchestrationOperations::new(manager.clone()),
+                product_context: crate::ProductContextApplication::new(manager.clone()),
             })
         },
         LocalSessionManager::default().into(),
@@ -676,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn inbound_mcp_router_preserves_the_exact_eleven_tool_contract() {
+    fn inbound_mcp_router_preserves_orchestration_and_adds_passive_product_tools() {
         let names = NacMcpService::tool_router()
             .list_all()
             .into_iter()
@@ -688,11 +759,13 @@ mod tests {
             vec![
                 "create_session",
                 "get_messages",
+                "get_product_context",
                 "get_session_status",
                 "get_thread_episodes",
                 "get_thread_events",
                 "list_models",
                 "list_sessions",
+                "resolve_product_destination",
                 "send_message",
                 "session_action",
                 "steer",
@@ -715,3 +788,7 @@ mod tests {
         assert!(!ProtocolVersion::LATEST.has_initialize());
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_product_context_tests.rs"]
+mod product_context_wire_tests;

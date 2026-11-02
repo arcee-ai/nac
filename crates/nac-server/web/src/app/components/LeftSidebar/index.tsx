@@ -92,7 +92,6 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           variant={variant}
         />
       </div>
-      {commands.modals}
       <MobileSearchModal
         open={searching}
         onClose={() => setSearching(false)}
