@@ -27483,11 +27483,10 @@ function GA(e) {
 	let o = document.createRange();
 	o.selectNodeContents(r), o.setEnd(n.startContainer, n.startOffset);
 	let s = r.textContent?.length ?? 0, c = typeof n.getBoundingClientRect == "function" ? n.getBoundingClientRect() : {
-		top: 0,
 		bottom: 0,
 		left: 0
 	};
-	return c.bottom < 0 || c.top > window.innerHeight ? null : {
+	return {
 		messageIndex: a,
 		text: i,
 		hint: s > 0 ? o.toString().length / s : 0,

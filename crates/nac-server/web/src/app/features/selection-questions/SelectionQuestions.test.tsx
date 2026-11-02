@@ -125,7 +125,7 @@ function select(node: Node, start: number, end: number) {
 }
 
 describe("SelectionQuestions", () => {
-  it("keeps the Ask control on the selection as the transcript scrolls, and hides it off screen", async () => {
+  it("keeps the Ask control on the selection as the transcript scrolls, held at the edge off screen", async () => {
     let rect = { top: 100, bottom: 120, left: 40 };
     const geometry = Object.getOwnPropertyDescriptor(Range.prototype, "getBoundingClientRect");
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {
@@ -160,9 +160,10 @@ describe("SelectionQuestions", () => {
       await scroll();
       expect((await control()).style.top).toBe("326px");
 
+      // Scrolled above the viewport, it stays reachable at the top edge.
       rect = { top: -80, bottom: -60, left: 40 };
       await scroll();
-      expect(screen.queryByRole("button", { name: "Ask about selection" })).toBeNull();
+      expect((await control()).style.top).toBe("8px");
     } finally {
       if (geometry) Object.defineProperty(Range.prototype, "getBoundingClientRect", geometry);
       else delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;

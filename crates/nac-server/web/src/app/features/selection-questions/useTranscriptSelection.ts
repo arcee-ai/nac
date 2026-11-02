@@ -38,9 +38,7 @@ export function readTranscriptSelection(container: HTMLElement | null): Transcri
   const rect =
     typeof range.getBoundingClientRect === "function"
       ? range.getBoundingClientRect()
-      : { top: 0, bottom: 0, left: 0 };
-  // Scrolled out of view: there is nothing on screen to point the control at.
-  if (rect.bottom < 0 || rect.top > window.innerHeight) return null;
+      : { bottom: 0, left: 0 };
   return {
     messageIndex,
     text,
