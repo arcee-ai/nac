@@ -525,6 +525,35 @@ async fn store_contention_is_409_and_the_same_request_is_admitted_after_it_clear
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn a_failed_session_lookup_is_not_reported_as_a_missing_chat() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("selection_question_lookup_failure");
+    let home = root.join("nac-home");
+    let _env =
+        ScopedModelEnv::with_config_home(Some(&home), None, Some(&home), Some("question-key"));
+    seed_chat(
+        &root,
+        "chat",
+        "http://127.0.0.1:9/v1",
+        sessions::SessionBehavior::Direct,
+    );
+    let app = router(test_manager(&root));
+    // The lineage lookup behind every route now fails outright; the chat
+    // itself is still there.
+    rusqlite::Connection::open(root.join("store.db"))
+        .unwrap()
+        .execute_batch("DROP TABLE traditional_children")
+        .unwrap();
+    assert_eq!(
+        get(app.clone(), "/sessions/chat/selection-questions")
+            .await
+            .status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn record_context() -> nac_core::store::SelectionQuestionContext {
     nac_core::store::SelectionQuestionContext {
         source_message_index: 2,
