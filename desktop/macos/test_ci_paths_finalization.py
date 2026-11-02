@@ -14,7 +14,7 @@ from ci_paths_protocol import CASES, PRODUCT
 
 class CaseFinalizationControls(unittest.TestCase):
     def exercise(self, *, scenario=CASES[0], test_error=False, export_error=False,
-                 cleanup_error=False, build_error=False, missing_result=False):
+                 cleanup_error=False, build_error=False, missing_result=False, budget=None, actual_collector=None, expire_cleanup=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             raw = root / 'raw'; raw.mkdir()
@@ -54,11 +54,16 @@ class CaseFinalizationControls(unittest.TestCase):
                         raise TimeoutError('Injected test timeout, no process started')
             def collect(*args, **kwargs):
                 collect_calls.append(kwargs['passing'])
+                if actual_collector is not None:return actual_collector(*args,**kwargs)
                 if export_error:
                     raise RuntimeError('Injected SDK export failure, no SDK invoked')
                 return dict(scope={'run':'synthetic'},inputs=[{'index':1}],complete=not test_error)
             def settle(*args):
                 cleanup_calls.append(args)
+                if budget is not None:
+                    from ci_paths_budget import active
+                    self.assertEqual(active().kind,'cleanup')
+                if expire_cleanup is not None:expire_cleanup()
                 if cleanup_error or args[2] is None:
                     raise RuntimeError('Injected missing/unsettled custody; preserve relocated root')
                 return dict(app_engine_settled=True,profile_removed=True)
@@ -73,13 +78,13 @@ class CaseFinalizationControls(unittest.TestCase):
                 stack.enter_context(patch('ci_paths.result_receipt',return_value={'files':1,'tree_sha256':'d'*64}))
                 stack.enter_context(patch('ci_paths.collect',side_effect=collect))
                 stack.enter_context(patch('ci_paths.settle_case',side_effect=settle))
-                if any((test_error,export_error,cleanup_error,build_error,missing_result)):
+                if any((test_error,export_error,cleanup_error,build_error,missing_result,expire_cleanup)):
                     with self.assertRaisesRegex(RuntimeError,'path case failed'):
                         ci_paths.run_case(raw,root,app,selection,'a'*40,scenario,run,
-                                          lambda _: self.fail('Unexpected uninjected native command'),lambda _:None,time.time()+1000)
+                                          lambda _: self.fail('Unexpected uninjected native command'),lambda _:None,time.time()+1000,budget=budget)
                 else:
                     result=ci_paths.run_case(raw,root,app,selection,'a'*40,scenario,run,
-                                            lambda _:self.fail('Unexpected uninjected native command'),lambda _:None,time.time()+1000)
+                                            lambda _:self.fail('Unexpected uninjected native command'),lambda _:None,time.time()+1000,budget=budget)
                     self.assertTrue(result['passed'])
             essential=json.loads((raw/scenario/'essential.json').read_text())
             self.assertFalse((raw/scenario/'derived').exists())
@@ -94,7 +99,7 @@ class CaseFinalizationControls(unittest.TestCase):
                 self.assertEqual(cleanup_calls[0][1],Path(config_seen['app_path']))
                 self.assertIn('--smoke-scenario', (Path(__file__).parent/'NativeUITests/PathJourneys.swift').read_text())
                 self.assertIn('-only-testing:NACPathUITests/PathJourneys/'+ci_paths.TESTS[CASES.index(scenario)],commands[-1])
-            if export_error or cleanup_error or missing_result:
+            if export_error or cleanup_error or missing_result or expire_cleanup:
                 self.assertTrue(essential['retained_bundle']);self.assertFalse(relocation['safe_to_remove'])
                 self.assertIn('cleanup',essential['errors'])
             if export_error:
@@ -142,7 +147,7 @@ class StageBudgetControls(unittest.TestCase):
                     def qualify():
                         return ci_paths.qualify(Path(temporary), Path('/synthetic-T'), ci_paths.TARGET,
                             'a'*40, lambda *args, **kwargs: None, lambda _: None, lambda _: None,
-                            dict(started_at_epoch=1000, deadline_epoch=3700))
+                            dict(started_at_epoch=1000, deadline_epoch=3340))
                     if first_failure:
                         with self.assertRaisesRegex(RuntimeError, 'first case failure'): qualify()
                     else:
@@ -152,7 +157,7 @@ class StageBudgetControls(unittest.TestCase):
                 self.assertTrue(all(native == 2000 and build == 2200 for _, native, build in calls))
                 self.assertLessEqual(calls[0][1] - 1100, 900)
                 self.assertLessEqual(calls[0][2] - 1000, 1200)
-                self.assertGreaterEqual(3700 - calls[0][1], 600)
+                self.assertGreaterEqual(3340 - calls[0][1], 600)
 
 
 if __name__=='__main__':unittest.main()
