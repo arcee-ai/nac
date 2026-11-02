@@ -126,7 +126,7 @@ export function SelectionQuestionPane({
   return (
     <aside
       aria-label="Questions about selections"
-      className="pointer-events-auto flex max-h-[min(70vh,560px)] w-[min(380px,calc(100vw-32px))] flex-col gap-3 overflow-auto rounded-[12px] border border-muted bg-elevation-level p-4 shadow-convex"
+      className="pointer-events-auto flex max-h-[min(70vh,560px)] w-[min(380px,calc(100vw-32px))] flex-col gap-3 overflow-auto rounded-[12px] border border-muted bg-elevation-level-2 p-4 shadow-convex"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="label-medium font-medium">Ask about selection</h2>

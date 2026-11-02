@@ -106,6 +106,14 @@ test("asks a tool-free question about earlier reply text while the main run keep
     await expect(answer).toContainText("It means the session id is the cache key (ALL559 answer).");
     await expect(answer).toContainText("About reply #2 · gpt-5.6-sol");
     await expect(answer).toContainText("counted separately from this chat");
+    // The pane floats over the transcript, so it must paint its own surface.
+    await expect(
+      page.getByRole("complementary", { name: "Questions about selections" }),
+    ).toBeVisible();
+    const paneBackground = await page.evaluate(
+      `getComputedStyle(document.querySelector('[aria-label="Questions about selections"]')).backgroundColor`,
+    );
+    expect(paneBackground).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
 
     // The main run is still running and its transcript did not change.
     const state = await request.get(`${harness.baseUrl}/sessions/${sessionId}`);

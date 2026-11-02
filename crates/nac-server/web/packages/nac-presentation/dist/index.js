@@ -27011,7 +27011,7 @@ function CA({ review: e, questions: t, cancelingId: n, onQuestionChange: r, onAs
 	let c = gi(), l = [...t].reverse(), u = e != null && !e.sending && e.question.trim().length > 0 && e.question.length <= 2e3 && !e.blocked;
 	return /* @__PURE__ */ X("aside", {
 		"aria-label": "Questions about selections",
-		className: "pointer-events-auto flex max-h-[min(70vh,560px)] w-[min(380px,calc(100vw-32px))] flex-col gap-3 overflow-auto rounded-[12px] border border-muted bg-elevation-level p-4 shadow-convex",
+		className: "pointer-events-auto flex max-h-[min(70vh,560px)] w-[min(380px,calc(100vw-32px))] flex-col gap-3 overflow-auto rounded-[12px] border border-muted bg-elevation-level-2 p-4 shadow-convex",
 		children: [
 			/* @__PURE__ */ X("div", {
 				className: "flex items-center justify-between gap-2",
