@@ -267,7 +267,11 @@ impl NativeTool for WaitTasksTool {
                 // read exhausted the deadline. Gaps still require explicit resync.
                 let revalidate = match goals.try_recv() {
                     Ok(hint) => {
+                        // One irrelevant event must not hide a queued committed
+                        // change. Queue occupancy only requests a read, never
+                        // proves a target outcome; do not drain at the deadline.
                         relevant_goal_hint(&hint, &services.runtime.store_path, &input.targets)
+                            || !goals.is_empty()
                     }
                     Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
                         for (target, report) in input.targets.iter_mut().zip(&mut reports) {

@@ -98,6 +98,153 @@ async fn multi_target_hint_at_deadline_revalidates_authoritative_goal_state() {
 }
 
 #[tokio::test]
+async fn queued_active_hint_cannot_hide_committed_pause_at_deadline() {
+    let runtime = runtime(Vec::new());
+    let first =
+        store::create_session_goal(&runtime.store_path, "peer-a", "first", None, None).unwrap();
+    let second =
+        store::create_session_goal(&runtime.store_path, "peer-b", "second", None, None).unwrap();
+    let (reached, observed) = tokio::sync::oneshot::channel();
+    let (release, resume) = tokio::sync::oneshot::channel();
+    SNAPSHOT_BARRIERS.lock().unwrap().insert(
+        runtime.store_path.clone(),
+        SnapshotBarrier {
+            reached,
+            release: resume,
+        },
+    );
+    let wait = value(
+        &runtime,
+        "wait_tasks",
+        json!({"targets":[
+            {"session_id":"peer-a","mode":"goal","goal_id":first.goal_id},
+            {"session_id":"peer-b","mode":"goal","goal_id":second.goal_id}
+        ],"timeout_ms":1_000}),
+    );
+    let pause_after_read = async {
+        let (deadline, reports) = observed.await.unwrap();
+        assert_eq!(reports[0]["status"], "active");
+        assert_eq!(reports[1]["status"], "active");
+        // A real committed Current/Active notification arrives first. It is
+        // deliberately irrelevant to waking, but must not hide the next pause.
+        let changed = store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-b",
+            &second.goal_id,
+            second.version,
+            UserGoalUpdate {
+                objective: Some("Still working; progress only".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-b",
+            &second.goal_id,
+            changed.version,
+            UserGoalUpdate {
+                status: Some(GoalStatus::Paused),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real pause must commit before the observed wait deadline"
+        );
+        eprintln!("F3_QUEUED_ACTIVE_THEN_PAUSE_COMMITTED_BEFORE_DEADLINE true");
+        // The barrier, rather than scheduling luck, holds the already-built
+        // reports until the actual invocation's observation deadline passes.
+        tokio::time::sleep_until(deadline).await;
+        assert!(tokio::time::Instant::now() >= deadline);
+        release.send(()).unwrap();
+    };
+    let (result, ()) = tokio::join!(wait, pause_after_read);
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-a")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Active
+    );
+    assert_eq!(
+        store::load_session_goal(&runtime.store_path, "peer-b")
+            .unwrap()
+            .unwrap()
+            .status,
+        GoalStatus::Paused
+    );
+    eprintln!("F2_FINAL_AUTHORITATIVE_RESULT {result}");
+    cleanup(&runtime);
+    assert_eq!(result["status"], "target_changed");
+    assert_eq!(result["targets"][0]["status"], "active");
+    assert_eq!(result["targets"][0]["resolved_identity"], first.goal_id);
+    assert_eq!(result["targets"][1]["status"], "goal_paused");
+    assert_eq!(result["targets"][1]["resolved_identity"], second.goal_id);
+}
+
+#[tokio::test]
+async fn queued_irrelevant_progress_remains_quiet_at_deadline() {
+    for count in [1, 2] {
+        let runtime = runtime(Vec::new());
+        let goal = store::create_session_goal(&runtime.store_path, "peer-a", "working", None, None)
+            .unwrap();
+        let (reached, observed) = tokio::sync::oneshot::channel();
+        let (release, resume) = tokio::sync::oneshot::channel();
+        SNAPSHOT_BARRIERS.lock().unwrap().insert(
+            runtime.store_path.clone(),
+            SnapshotBarrier {
+                reached,
+                release: resume,
+            },
+        );
+        let wait = value(
+            &runtime,
+            "wait_tasks",
+            json!({
+                "targets":[{"session_id":"peer-a","mode":"goal","goal_id":goal.goal_id}],
+                "timeout_ms":1_000
+            }),
+        );
+        let progress = async {
+            let (deadline, reports) = observed.await.unwrap();
+            assert_eq!(reports[0]["status"], "active");
+            let mut current = goal.clone();
+            for i in 0..count {
+                current = store::update_session_goal_by_user(
+                    &runtime.store_path,
+                    "peer-a",
+                    &goal.goal_id,
+                    current.version,
+                    UserGoalUpdate {
+                        objective: Some(format!("progress {i}")),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep_until(deadline).await;
+            release.send(()).unwrap();
+        };
+        let (result, ()) = tokio::join!(wait, progress);
+        assert_eq!(result["status"], "timeout");
+        assert_eq!(result["targets"][0]["status"], "active");
+        assert_eq!(result["targets"][0]["resolved_identity"], goal.goal_id);
+        assert_eq!(result["targets"][0]["resync"], false);
+        assert_eq!(
+            store::load_session_goal(&runtime.store_path, "peer-a")
+                .unwrap()
+                .unwrap()
+                .status,
+            GoalStatus::Active
+        );
+        cleanup(&runtime);
+    }
+}
+
+#[tokio::test]
 async fn observation_timeout_and_explicit_execution_cap_remain_distinct() {
     let mut input = json!({"timeout_ms":40});
     assert_eq!(
@@ -204,12 +351,24 @@ async fn late_hint_after_final_pass_requests_resync_without_another_read() {
         assert!(tokio::time::Instant::now() >= deadline);
         assert_eq!(final_reports[0]["status"], "active");
         assert_eq!(final_reports[1]["status"], "goal_paused");
-        // A second real commit arrives after the one permitted final pass.
-        store::update_session_goal_by_user(
+        // An irrelevant active update precedes the second real pause after
+        // the one permitted final pass. Neither can cause an unbounded read.
+        let progress = store::update_session_goal_by_user(
             &runtime.store_path,
             "peer-a",
             &first.goal_id,
             first.version,
+            UserGoalUpdate {
+                objective: Some("Late progress".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        store::update_session_goal_by_user(
+            &runtime.store_path,
+            "peer-a",
+            &first.goal_id,
+            progress.version,
             UserGoalUpdate {
                 status: Some(GoalStatus::Paused),
                 ..Default::default()
