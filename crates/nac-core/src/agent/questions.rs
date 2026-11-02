@@ -1,6 +1,13 @@
 use super::*;
 
 impl Agent {
+    pub(crate) fn set_task_question_answer_port(
+        &mut self,
+        port: Arc<dyn crate::session_service::TaskQuestionAnswerPort>,
+    ) {
+        self.tool_runtime.task_question_answers = Some(port);
+    }
+
     /// Called after the complete tool-result batch commits. A durable question
     /// yields this run before another provider call, without changing its goal.
     pub(super) async fn yield_for_question(

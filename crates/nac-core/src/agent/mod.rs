@@ -537,13 +537,6 @@ impl Agent {
         Ok(())
     }
 
-    pub(crate) fn set_task_question_answer_port(
-        &mut self,
-        port: Arc<dyn crate::session_service::TaskQuestionAnswerPort>,
-    ) {
-        self.tool_runtime.task_question_answers = Some(port);
-    }
-
     pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
         self.native_web_capabilities
             .set_worker_credential(credential);
