@@ -38,20 +38,28 @@ def relocation_directory(raw):
             'path': str(path), 'bundle_retained_for_unresolved_cleanup': not lease['safe_to_remove']}, indent=2) + '\n')
 
 
+def observe_process_status(pid, *, strict=False):
+    """Existing exact-PID observer; strict historical checks reject unknown rows."""
+    result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
+    if result.returncode not in (0, 1):
+        raise RuntimeError('Cannot observe owned fixture process settlement')
+    if strict and (type(result.stdout) is not str or type(result.stderr) is not str
+            or result.stderr != '' or (result.returncode == 1 and result.stdout != '')
+            or (result.returncode == 0 and not result.stdout.strip())
+            or len(result.stdout.split()) > 1):
+        raise RuntimeError('Historical engine settlement observation is unknown')
+    return result.stdout.strip()
+
+
 def require_settled(record, process_status=None):
     if type(record.get('app_pid')) is not int or record['app_pid'] <= 0:
         raise RuntimeError('No exact app ownership record; preserve relocated bundle for diagnosis')
-    def status(pid):
-        result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
-        if result.returncode not in (0, 1):
-            raise RuntimeError('Cannot observe owned fixture process settlement')
-        return result.stdout.strip()
     for key in ('app_pid', 'engine_pid'):
         pid = record.get(key, 0)
         if type(pid) is not int or pid < 0:
             raise RuntimeError('Invalid exact fixture process identity')
         if pid:
-            state = (process_status or status)(pid)
+            state = (process_status or observe_process_status)(pid)
             if state and not state.startswith('Z'):
                 raise RuntimeError('Owned XCTest fixture process survived cleanup: ' + key)
     profile = record.get('profile')
