@@ -45,6 +45,7 @@ mod manual_compaction;
 mod operation_state;
 pub(crate) mod questions;
 pub use questions::{AuthorizedQuestionInformation, TaskQuestionAnswerPort};
+mod peer_goals;
 mod recovery;
 mod settlement;
 mod shell_command_types;

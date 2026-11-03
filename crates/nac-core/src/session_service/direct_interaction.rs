@@ -806,7 +806,7 @@ impl SessionService {
         .map_err(anyhow::Error::new)
     }
 
-    fn cancel_goal_retry_wake(&self) {
+    pub(super) fn cancel_goal_retry_wake(&self) {
         let wake = self
             .goal_retry_wake
             .lock()

@@ -1292,3 +1292,47 @@ fn codex_wait_wire_schema_keeps_discriminated_nullable_targets() {
     );
     assert_eq!(branches[1]["properties"]["mode"]["enum"], json!(["goal"]));
 }
+
+#[test]
+fn codex_peer_goal_wire_schema_preserves_null_unused_arguments_and_no_implicit_budget() {
+    let messages = [Message::User {
+        content: "inspect an exact peer goal".into(),
+    }];
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &messages,
+        &crate::tools::direct_tool_definitions(false),
+        &levels,
+        Some("caller"),
+    );
+    let tool = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "task_goal")
+        .unwrap();
+    let parameters = &tool["parameters"];
+    let properties = parameters["properties"].as_object().unwrap();
+    let required: std::collections::HashSet<_> = parameters["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(required, properties.keys().map(String::as_str).collect());
+    assert_eq!(parameters["additionalProperties"], false);
+    for field in ["project_id", "request_id", "objective", "goal_id"] {
+        assert_eq!(properties[field]["type"], json!(["string", "null"]));
+    }
+    for field in ["token_budget", "expected_version"] {
+        assert_eq!(properties[field]["type"], json!(["integer", "null"]));
+    }
+    assert!(properties["token_budget"].get("default").is_none());
+    assert_eq!(
+        properties["action"]["enum"],
+        json!(["read", "start", "pause", "resume"])
+    );
+}

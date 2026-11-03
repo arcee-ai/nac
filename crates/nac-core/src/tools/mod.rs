@@ -31,6 +31,7 @@ pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
 pub(crate) mod orchestrator;
+mod peer_goals;
 pub(crate) mod product_context;
 pub mod read;
 mod runtime_context;
@@ -184,7 +185,7 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 23] = [
     "nac_guide",
     "read",
     "write",
@@ -201,6 +202,7 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
     "request_question",
     "read_question",
     "answer_question",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -217,7 +219,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 26] = [
     "nac_guide",
     "read",
     "write",
@@ -231,6 +233,7 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
     "find_tasks",
     "read_task",
     "wait_tasks",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
@@ -265,6 +268,7 @@ fn worker_tool_registry(
         .register(task_questions::CreateQuestionTool)
         .register(task_questions::ReadQuestionTool)
         .register(task_questions::AnswerQuestionTool)
+        .register(peer_goals::PeerGoalTool)
         .register(goal::CreateGoalTool)
         .register(product_context::ReadTool)
         .register(product_context::ResolveTool)
