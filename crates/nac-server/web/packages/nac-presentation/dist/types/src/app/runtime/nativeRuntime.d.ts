@@ -28,6 +28,8 @@ export interface NativeRuntimeOptions {
     storage?: Pick<Storage, "getItem" | "setItem">;
     /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
     draftStorage?: PromptDraftStorage;
+    /** Same-engine native document recovery; conservative restriction, never input authority. */
+    requireTerminalAcknowledgement?: boolean;
     assets?: NativePresentationAssets;
     eventSource?: SessionStreamOptions["eventSource"];
     /** Hosted reads default to no replay; standalone retains its one retry. */
