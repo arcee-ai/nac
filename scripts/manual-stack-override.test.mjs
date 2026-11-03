@@ -17,7 +17,7 @@ function diff(offset = 1, text = 'new', blob = '2222222') {
 function fixture() {
   const repo = { full_name: 'arcee-ai/nac' };
   const make = (number, head, base, baseRef) => ({ number, title: `Layer ${number}`, state: 'open',
-    merged: false, draft: false, mergeable: true, mergeable_state: 'blocked', changed_files: 1,
+    merged: false, merged_at: null, draft: false, mergeable: true, mergeable_state: 'blocked', changed_files: 1,
     head: { ref: `codex/${number}`, sha: sha(head), repo }, base: { ref: baseRef, sha: sha(base), repo } });
   const f = { prs: [make(11, 'a', 'b', 'dev'), make(12, 'c', 'a', 'codex/11')],
     viewer: { login: 'allisoneer', id: 20910163, type: 'User' }, calls: [],
@@ -34,15 +34,17 @@ function fixture() {
     rules: [{ ruleset_id: 26484091, type: 'pull_request' }, { ruleset_id: 25983949, type: 'non_fast_forward' }],
   };
   f.open = () => f.prs.filter(pr => !pr.merged);
-  f.stack = () => ({ number: 99, open: true, base: { ref: 'dev' }, pull_requests: clone(f.open()) });
+  f.stack = () => ({ number: 99, open: true, base: { ref: 'dev' }, pull_requests: clone(f.prs) });
   f.pr = number => {
     const pr = clone(f.prs.find(p => p.number === number));
-    pr.stack = { number: 99, size: f.open().length, position: f.open().findIndex(p => p.number === number) + 1 };
+    pr.stack = { number: 99, size: f.prs.length, position: f.prs.findIndex(p => p.number === number) + 1 };
     return pr;
   };
   f.land = number => {
     const pr = f.prs.find(p => p.number === number);
     pr.merged = true;
+    pr.state = 'closed';
+    pr.merged_at = '2026-11-03T21:00:00Z';
     pr.merge_commit_sha = sha(number === 11 ? 'd' : 'f');
     const next = f.open()[0];
     if (next) {
@@ -135,6 +137,18 @@ test('exact lowest requests, returned UUID, pending to merged and unchanged auto
     [`${root}/pulls/12/merge-async`, { merge_method: 'squash', merge_action: 'default', sha: sha('e'), bypass_rules: true }],
   ]);
   assert.ok(f.calls.some(c => c.endpoint === `${root}/pulls/11/merge-async/${uuid}`));
+  assert.deepEqual(f.stack().pull_requests.map(p => [p.number, p.state]), [[11, 'closed'], [12, 'closed']]);
+});
+
+test('new plan on an already partially merged stack preserves retained history and absolute positions', async () => {
+  const f = fixture();
+  f.land(11);
+  const plan = await f.helper.preview(99, [12]);
+  assert.deepEqual(plan.membership, [11, 12]);
+  assert.deepEqual(plan.members.map(p => p.number), [12]);
+  assert.deepEqual(await f.helper.execute(plan), { landed: [12], remaining: [] });
+  assert.equal(f.writes().length, 1);
+  assert.equal(f.writes()[0].endpoint, `${root}/pulls/12/merge-async`);
 });
 
 test('wrong declared order, unknown members, stale head/base, content, draft or conflict fail closed', async () => {
@@ -146,6 +160,7 @@ test('wrong declared order, unknown members, stale head/base, content, draft or 
     f => { f.prs[0].mergeable = null; }, f => { f.unresolved = true; },
     f => { f.checks[0].status = 'in_progress'; }, f => { f.checks[1].conclusion = 'failure'; },
     f => { f.checks = []; }, f => { f.universal.bypass_actors.push({ actor_id: 1 }); },
+    f => { f.prs[0].state = 'closed'; },
   ]) {
     const f = fixture(), plan = await f.preview();
     change(f);
@@ -161,6 +176,7 @@ test('partial landing stops on unexplained content, membership, trunk or policy 
     f => { f.prs[1].base.sha = sha('f'); },
     f => { f.rules.push({ ruleset_id: 1, type: 'required_signatures' }); },
     f => { f.prs[1].draft = true; }, f => { f.checks[0].status = 'in_progress'; },
+    f => { const stack = f.stack; f.stack = () => ({ ...stack(), pull_requests: stack().pull_requests.slice(1) }); },
   ]) {
     const f = fixture(), plan = await f.preview();
     f.afterLanding = change;

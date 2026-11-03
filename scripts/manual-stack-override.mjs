@@ -133,15 +133,22 @@ export function createHelper(transport = ghTransport, {
     }
     throw new Error('Review pagination limit exceeded');
   }
-  async function snapshot(stackNumber, numbers, currentPolicy) {
+  async function snapshot(stackNumber, numbers, currentPolicy, expectedMembership) {
     const stack = await get(`stacks/${stackNumber}`);
+    const membership = stack.pull_requests.map(pr => pr.number);
+    const entries = stack.pull_requests.filter(pr => pr.state === 'open' && pr.merged_at === null);
+    const historySize = membership.length - entries.length;
     insist(stack.number === stackNumber && stack.open === true && stack.base.ref === 'dev' &&
-      same(stack.pull_requests.map(pr => pr.number), numbers), 'Stack membership/order/base changed');
+      (!expectedMembership || same(membership, expectedMembership)) &&
+      same(entries.map(pr => pr.number), numbers) &&
+      stack.pull_requests.slice(0, historySize).every(pr => pr.state === 'closed' && pr.merged_at) &&
+      same(stack.pull_requests.slice(historySize).map(pr => pr.number), numbers),
+    'Stack membership/order/base changed or contains an unmerged closed member');
     const members = [];
-    for (const [i, entry] of stack.pull_requests.entries()) {
+    for (const [i, entry] of entries.entries()) {
       const pr = await get(`pulls/${entry.number}`);
-      insist(pr.number === entry.number && pr.stack?.number === stackNumber && pr.stack.position === i + 1 &&
-        pr.stack.size === numbers.length && pr.state === 'open' && pr.merged === false &&
+      insist(pr.number === entry.number && pr.stack?.number === stackNumber && pr.stack.position === historySize + i + 1 &&
+        pr.stack.size === membership.length && pr.state === 'open' && pr.merged === false &&
         pr.head.repo?.full_name === REPO && pr.base.repo?.full_name === REPO &&
         SHA.test(pr.head.sha) && SHA.test(pr.base.sha) &&
         same([pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha],
@@ -159,14 +166,14 @@ export function createHelper(transport = ghTransport, {
         base: { ref: pr.base.ref, sha: pr.base.sha }, draft: pr.draft,
         mergeable: pr.mergeable, mergeable_state: pr.mergeable_state, delta, ...checks });
     }
-    return members;
+    return { members, membership };
   }
   async function preview(stack, numbers) {
     await identity();
     const currentPolicy = await policy();
-    const members = await snapshot(stack, numbers, currentPolicy);
+    const { members, membership } = await snapshot(stack, numbers, currentPolicy);
     return { version: 1, repository: REPO, stack, created: new Date(now()).toISOString(),
-      policy: currentPolicy.fingerprint, members };
+      policy: currentPolicy.fingerprint, membership, members };
   }
   async function execute(plan) {
     const landed = [], remaining = plan.members?.map(m => m.number) ?? [];
@@ -174,14 +181,15 @@ export function createHelper(transport = ghTransport, {
     try {
       insist(plan.version === 1 && plan.repository === REPO && Number.isSafeInteger(plan.stack) && plan.stack > 0 &&
         remaining.length > 0 && remaining.every(n => Number.isSafeInteger(n) && n > 0) &&
-        new Set(remaining).size === remaining.length, 'Invalid plan');
+        new Set(remaining).size === remaining.length && Array.isArray(plan.membership) &&
+        plan.membership.length >= remaining.length, 'Invalid plan');
       await identity();
       let previousMerge = null;
       while (remaining.length) {
         await identity();
         const currentPolicy = await policy();
         insist(currentPolicy.fingerprint === plan.policy, 'Policy changed since preview; create a new plan');
-        const current = await snapshot(plan.stack, remaining, currentPolicy);
+        const { members: current } = await snapshot(plan.stack, remaining, currentPolicy, plan.membership);
         for (const [i, member] of current.entries()) {
           const expected = plan.members[landed.length + i];
           insist(member.head.ref === expected.head.ref && member.delta === expected.delta &&
@@ -197,8 +205,11 @@ export function createHelper(transport = ghTransport, {
         // authoritative; no client can atomically lock stack/policy/check state.
         const lowest = current[0];
         const fresh = await get(`stacks/${plan.stack}`);
-        insist(same(fresh.pull_requests.map(p => [p.number, p.head.sha, p.base.ref, p.base.sha]),
+        insist(same(fresh.pull_requests.map(p => p.number), plan.membership) &&
+          same(fresh.pull_requests.filter(p => p.state === 'open' && p.merged_at === null)
+            .map(p => [p.number, p.head.sha, p.base.ref, p.base.sha]),
           current.map(p => [p.number, p.head.sha, p.base.ref, p.base.sha])), 'Stack changed during validation');
+        await identity();
         const options = { merge_method: 'squash', merge_action: 'default', sha: lowest.head.sha, bypass_rules: true };
         const endpoint = `${ROOT}/pulls/${lowest.number}/merge-async`;
         active = { number: lowest.number, uuid: null };
@@ -248,6 +259,7 @@ export async function main(args, { helper = createHelper(), out = console.log } 
     new Set(members).size === members.length, 'Invalid stack/member numbers');
   const plan = await helper.preview(stack, members);
   out(`PREVIEW ONLY: ${REPO} stack ${stack}; exact merge set (bottom to top): ${members.join(', ')}\nSequential squash/default routing; review-only bypass. Partial landing is possible; queued is not merged.`);
+  out(`Full stack membership (including retained merged members): ${plan.membership.join(', ')}`);
   for (const member of plan.members) out(JSON.stringify(member, null, 2));
   fs.writeFileSync(args[5], `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   out(`Saved ${args[5]}. Review every member and blocker. Only a human may explicitly execute this plan.`);

@@ -25,7 +25,8 @@ For example, this only reads stack 571 and writes a new local private plan:
 node scripts/manual-stack-override.mjs --stack 571 --members 491,487 --plan /tmp/nac-stack-571.json
 ```
 
-The command prints the exact merge set, titles, immutable head/base revisions,
+The command prints full membership (including retained merged members), the
+exact open merge set, titles, immutable head/base revisions,
 draft/mergeability state, check results, validation blockers, and a digest of
 each layer's authored diff. Review the complete changes at those revisions and
 the saved plan before choosing execution. Existing plan files are never
