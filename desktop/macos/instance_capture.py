@@ -5,10 +5,12 @@ writes matching PROVISIONAL release records. Only exported public image/metadata
 pairs can later establish capture. This module never claims that acceptance.
 """
 import ctypes
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import secrets
 import stat
@@ -16,6 +18,13 @@ import sys
 
 LIMIT = 32 * 1024
 ENVIRONMENT = 'NAC_INSTANCE_CAPTURE_DIRECTORY'
+PREPARED_ENVIRONMENT = 'NAC_INSTANCE_PREPARED_SHA256'
+NATIVE_INPUTS = ('main', 'PreviewApp', 'PreviewEngine', 'EngineProtocol', 'EngineFailure',
+                 'CommandEnvironment', 'DesktopStartup', 'AppInstance', 'StoreConflict',
+                 'InstanceSmoke', 'InstanceCaptureFiles', 'InstanceCaptureProtocol', 'InstanceCaptureNative')
+SOURCE_INPUTS = tuple(n + '.swift' for n in NATIVE_INPUTS) + ('InstanceObservation.swift',
+    'instance_smoke.py', 'instance_capture.py', 'instance_console.py', 'instance_contract.py',
+    'preview.sh', 'BundleIdentity.sh', 'build_receipt.py')
 STATE_FIELDS = {'root', 'store', 'bundle', 'track', 'app_pid', 'app_incarnation', 'app_launch_epoch',
                 'window_number', 'engine_pid', 'window_frame', 'content_bounds', 'receipt_incarnation',
                 'receipt_store', 'receipt_schema', 'origin', 'receipt_kind', 'receipt_version', 'engine_build',
@@ -41,6 +50,298 @@ def encoded(value):
 
 def hex_value(value, length):
     return isinstance(value, str) and re.fullmatch('[0-9a-f]{%d}' % length, value) is not None
+
+
+def closed(value, fields):
+    if not isinstance(value, dict) or set(value) != set(fields):
+        raise ValueError('Prepared fixture fields differ')
+    return value
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate artifact JSON field')
+        result[key] = value
+    return result
+
+
+def file_identity(info):
+    return {key: str(value) for key, value in zip(('device', 'inode', 'mode', 'size', 'mtime_ns'),
+            (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_size, info.st_mtime_ns))}
+
+
+def artifact_close(primary, *fds):
+    """Close every acquired artifact descriptor, retaining the operation error."""
+    first = None
+    for fd in fds:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except BaseException as error:
+                if first is None:
+                    first = error
+                if primary is not None or error is not first:
+                    preparation_error(primary or first, None, error, 'artifact-descriptor')
+    if primary is None and first is not None:
+        raise first
+
+
+def artifact_open(path, directory=False):
+    """Ordinary artifact modes/format, separate from private canonical Directory."""
+    path = Path(path)
+    if not path.is_absolute() or path != path.resolve():
+        raise ValueError('Artifact path is not canonical')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    primary = None
+    new = None
+    try:
+        for index, part in enumerate(path.parts[1:]):
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+            if directory or index < len(path.parts) - 2:
+                flags |= os.O_DIRECTORY
+            new = os.open(part, flags, dir_fd=fd)
+            previous, fd, new = fd, new, None
+            artifact_close(None, previous)
+        info = os.fstat(fd)
+        if (info.st_uid != os.geteuid() or info.st_mode & 0o022
+                or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+                or (not directory and info.st_nlink != 1)
+                or (info.st_dev, info.st_ino) != (path.lstat().st_dev, path.lstat().st_ino)):
+            raise ValueError('Artifact is foreign, writable, replaced or not regular')
+        result, fd = fd, None
+        return result
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        artifact_close(primary, new, fd)
+
+
+def artifact_file(fd, parent=None, name=None, output=None, metadata=False):
+    before = os.fstat(fd)
+    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or before.st_uid != os.geteuid() or before.st_mode & 0o022
+            or before.st_size <= 0 or (metadata and before.st_size > LIMIT)):
+        raise ValueError('Invalid artifact file or metadata bound')
+    remaining, digest, data = before.st_size, hashlib.sha256(), bytearray()
+    while remaining:
+        chunk = os.read(fd, min(65536, remaining))
+        if not chunk:
+            raise ValueError('Artifact truncated during read')
+        remaining -= len(chunk)
+        digest.update(chunk)
+        if metadata:
+            data.extend(chunk)
+        if output is not None:
+            offset = 0
+            while offset < len(chunk):
+                count = os.write(output, chunk[offset:])
+                if count <= 0:
+                    raise OSError('Artifact copy failed')
+                offset += count
+    if os.read(fd, 1) or file_identity(before) != file_identity(os.fstat(fd)):
+        raise ValueError('Artifact changed during read')
+    if parent is not None and file_identity(before) != file_identity(os.stat(name, dir_fd=parent, follow_symlinks=False)):
+        raise ValueError('Artifact file replaced during read')
+    return dict(identity=file_identity(before), sha256=digest.hexdigest()), bytes(data)
+
+
+def artifact_record(path, plist=False):
+    fd = artifact_open(path)
+    primary = None
+    try:
+        record, raw = artifact_file(fd, metadata=True)
+        value = plistlib.loads(raw) if plist else json.loads(raw, object_pairs_hook=unique_object,
+                            parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Nonfinite artifact JSON')))
+        if not isinstance(value, dict):
+            raise ValueError('Artifact metadata must be an object')
+        if record['identity'] != file_identity(Path(path).lstat()):
+            raise ValueError('Artifact metadata replaced')
+        return value, record
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        artifact_close(primary, fd)
+
+
+def artifact_tree(path, destination=None):
+    """Finite bundle inventory/copy using only retained no-follow descriptors."""
+    fd = artifact_open(path, directory=True)
+    target = None
+    entries = {}
+    def walk(source, copied, prefix):
+        before = os.fstat(source)
+        names = sorted(os.listdir(source))
+        for name in names:
+            if len(entries) >= 64 or name in ('.', '..') or '/' in name:
+                raise ValueError('Artifact inventory bound/name')
+            relative = prefix + name
+            info = os.stat(name, dir_fd=source, follow_symlinks=False)
+            if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+                raise ValueError('Foreign/writable artifact entry')
+            is_dir = stat.S_ISDIR(info.st_mode)
+            if not is_dir and not stat.S_ISREG(info.st_mode):
+                raise ValueError('Artifact symlink/special entry')
+            child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+                            | (os.O_DIRECTORY if is_dir else 0), dir_fd=source)
+            output = None
+            primary = None
+            try:
+                if file_identity(info) != file_identity(os.fstat(child)):
+                    raise ValueError('Artifact entry replaced')
+                if copied is not None:
+                    if is_dir:
+                        os.mkdir(name, 0o700, dir_fd=copied)
+                        output = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=copied)
+                    else:
+                        output = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                         0o600, dir_fd=copied)
+                if is_dir:
+                    entries[relative] = dict(kind='directory', identity=file_identity(info))
+                    walk(child, output, relative + '/')
+                else:
+                    record, _ = artifact_file(child, source, name, output)
+                    entries[relative] = dict(kind='file', **record)
+                if output is not None:
+                    os.fchmod(output, stat.S_IMODE(info.st_mode))
+                if file_identity(info) != file_identity(os.stat(name, dir_fd=source, follow_symlinks=False)):
+                    raise ValueError('Artifact entry changed')
+            except BaseException as error:
+                primary = error
+                raise
+            finally:
+                artifact_close(primary, output, child)
+        if names != sorted(os.listdir(source)) or file_identity(before) != file_identity(os.fstat(source)):
+            raise ValueError('Artifact directory changed')
+    primary = None
+    try:
+        if destination is not None:
+            target = artifact_open(destination, directory=True)
+        identity = file_identity(os.fstat(fd))
+        walk(fd, target, '')
+        if target is not None:
+            os.fchmod(target, int(identity['mode']))
+        if identity != file_identity(Path(path).lstat()):
+            raise ValueError('Artifact root replaced')
+        return dict(root=identity, entries=entries)
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        artifact_close(primary, target, fd)
+
+
+def source_snapshot():
+    result = {}
+    for name in SOURCE_INPUTS:
+        fd = artifact_open(Path(__file__).resolve().parent / name)
+        primary = None
+        try:
+            result[name] = artifact_file(fd)[0]['sha256']
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            artifact_close(primary, fd)
+    return result
+
+
+def bundle_snapshot(path, track, target, sources):
+    tree = artifact_tree(path)
+    members = {'Contents/Info.plist', 'Contents/MacOS/NACPreview', 'Contents/Resources/nac-web',
+               'Contents/Resources/engine-identity.json', 'Contents/Resources/build-receipt.json'}
+    if (set(tree['entries']) != members | {'Contents', 'Contents/MacOS', 'Contents/Resources'}
+            or Path(path).name != 'NAC Instance Smoke.app'):
+        raise ValueError('Unexpected instance artifact inventory/layout')
+    identity, identity_file = artifact_record(path / 'Contents/Resources/engine-identity.json')
+    closed(identity, ('product_version', 'build_id', 'source_revision', 'track'))
+    plist, plist_file = artifact_record(path / 'Contents/Info.plist', plist=True)
+    receipt, receipt_file = artifact_record(path / 'Contents/Resources/build-receipt.json')
+    closed(receipt, ('version', 'phase', 'mode', 'normal_startup', 'smoke_instrumentation',
+        'instance_smoke_instrumentation', 'bundle_identifier', 'bundle_name', 'source_head', 'source_dirty',
+        'compiler_flags', 'native_source_files', 'build_support_files', 'engine_identity', 'engine_sha256',
+        'info_plist_sha256', 'sdk_version', 'os_qualification', 'preview_definitions_excluded', 'native_sha256'))
+    identifier = ('ai.arcee.nac.dev' if track == 'dev' else 'ai.arcee.nac') + '.instance-smoke'
+    expected_native = {'desktop/macos/' + name + '.swift': sources[name + '.swift'] for name in NATIVE_INPUTS}
+    native = tree['entries']['Contents/MacOS/NACPreview']['sha256']
+    engine = tree['entries']['Contents/Resources/nac-web']['sha256']
+    if (any(not isinstance(v, str) or not v for v in identity.values()) or identity['track'] != track
+            or identity['source_revision'] != target or plist.get('CFBundleIdentifier') != identifier
+            or type(receipt.get('version')) is not int or receipt['version'] != 1
+            or receipt.get('source_head') != target or receipt.get('source_dirty') is not False
+            or receipt.get('mode') != 'instance-build' or receipt.get('phase') != 'unsigned-build'
+            or any(receipt.get(k) is not True for k in ('normal_startup', 'smoke_instrumentation',
+                                                       'instance_smoke_instrumentation', 'preview_definitions_excluded'))
+            or receipt.get('engine_identity') != identity or receipt.get('native_source_files') != expected_native
+            or receipt.get('build_support_files') != {'desktop/macos/' + name: sources[name] for name in
+                                                      ('preview.sh', 'BundleIdentity.sh', 'build_receipt.py')}
+            or receipt.get('bundle_identifier') != identifier
+            or receipt.get('native_sha256') != native or receipt.get('engine_sha256') != engine
+            or receipt.get('info_plist_sha256') != plist_file['sha256']):
+        raise ValueError('Instance artifact source/track/build binding differs')
+    for name, record in [('Contents/Info.plist', plist_file),
+                         ('Contents/Resources/engine-identity.json', identity_file),
+                         ('Contents/Resources/build-receipt.json', receipt_file)]:
+        if tree['entries'][name] != dict(kind='file', **record):
+            raise ValueError('Artifact metadata changed during validation')
+    if tree != artifact_tree(path):
+        raise ValueError('Instance artifact changed during validation')
+    return dict(path=str(path), tree=tree, summary=dict(path=str(path), identity=identity,
+                bundle_id=identifier, native_sha256=native, engine_sha256=engine))
+
+
+def observer_snapshot(path):
+    fd = artifact_open(path)
+    primary = None
+    try:
+        record = artifact_file(fd)[0]
+        if record['identity'] != file_identity(Path(path).lstat()):
+            raise ValueError('Observer replaced during read')
+        return dict(path=str(path), **record)
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        artifact_close(primary, fd)
+
+
+def directory_identity(path):
+    with prepared_directory(path) as files:
+        return file_identity(os.fstat(files.fd))
+
+
+@contextmanager
+def prepared_directory(path):
+    """Keep Directory admission unchanged; prepared owners preserve close errors."""
+    files, primary = Directory(path), None
+    try:
+        yield files
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        fd, files.fd = files.fd, None
+        artifact_close(primary, fd)
+
+
+def content_inventory(tree):
+    return {name: dict(kind=entry['kind'], mode=entry['identity']['mode'],
+                      sha256=entry.get('sha256')) for name, entry in tree['entries'].items()}
+
+
+def preparation_error(error, status, secondary=None, owner='prepared-failure-record'):
+    if status is not None:
+        error.instance_preparation_status = status
+    if secondary is not None:
+        raw = str(secondary).encode('utf-8', errors='replace')
+        records = getattr(error, 'instance_cleanup_errors', [])
+        error.instance_cleanup_errors = (records + [dict(owner=owner,
+            type=type(secondary).__name__, message=str(secondary)[:512], message_bytes=len(raw),
+            message_sha256=sha(raw))])[:32]
+        error.instance_cleanup_error_count = getattr(error, 'instance_cleanup_error_count', len(records)) + 1
 
 
 class Directory:
@@ -195,6 +496,143 @@ class CaptureRun:
         with Directory(self.directory) as files:
             files.write('admission.json', dict(schema='nac343-capture-admission-v1',
                         run_nonce=self.manifest['run_nonce'], manifest_sha256=self.digest))
+
+    def _current_manifest(self, files):
+        current, raw = files.read('manifest.json')
+        if sha(raw) != self.digest or encoded(current) != encoded(self.manifest):
+            raise ValueError('Preparation manifest changed')
+
+    def prepare_fixture(self, app, stable, destination, observer):
+        """Filesystem only. Caller has already verified its exact clean H/T sources.
+
+        Failure quarantines partial files; never runs or signals anything. The
+        manifest/source strings are not authority without actual file validation.
+        """
+        destination, app, stable, observer = map(Path, (destination, app, stable, observer))
+        status = dict(schema='nac343-prepared-runtime-status-v1', stage='preparation',
+                      registration='unproved', consumption='not_attempted', unknown_resources=True, retention_required=True)
+        with prepared_directory(self.directory) as files:
+            self._current_manifest(files)
+            if files.read('admission.json', optional=True) is not None:
+                raise ValueError('Runtime admission already consumed')
+            nonce = secrets.token_hex(16)
+            claim = dict(schema='nac343-preparation-admission-v1', run_nonce=self.manifest['run_nonce'],
+                         preparation_nonce=nonce, manifest_sha256=self.digest, destination=str(destination))
+            files.write('preparation-admission.json', claim)
+            try:
+                if (any(not p.is_absolute() or p != p.resolve() for p in (destination, app, stable, observer))
+                        or destination == self.directory or self.directory.is_relative_to(destination)
+                        or any(p.is_relative_to(destination) or destination.is_relative_to(p) for p in (app, stable))
+                        or observer.is_relative_to(destination)):
+                    raise ValueError('Prepared destination must be fresh, canonical and separate')
+                # Parent descriptor precedes creation; no arbitrary existing root
+                # can be adopted. A failed/interrupted gap stays unproved/retained.
+                with prepared_directory(destination.parent) as parent:
+                    parent.check('destination-binding')
+                    os.mkdir(destination.name, 0o700, dir_fd=parent.fd)
+                root = destination / ('nac-instance-app-' + nonce)
+                with prepared_directory(destination) as parent:
+                    os.mkdir(root.name, 0o700, dir_fd=parent.fd)
+                registered = dict(destination=dict(path=str(destination), identity=directory_identity(destination)),
+                                  root=dict(path=str(root), identity=directory_identity(root)))
+                files.write('preparation-resources.json', dict(schema='nac343-preparation-resources-v1',
+                            **{k: claim[k] for k in ('run_nonce', 'preparation_nonce', 'manifest_sha256')}, **registered))
+                status['registration'] = 'registered'
+                status['unknown_resources'] = False
+                sources = source_snapshot()
+                apps = []
+                for index, (track, original) in enumerate((('dev', app), ('stable', stable))):
+                    source = bundle_snapshot(original, track, self.manifest['target_sha'], sources)
+                    folder = root / ('Moved app with spaces ' + str(index))
+                    with prepared_directory(root) as parent:
+                        os.mkdir(folder.name, 0o700, dir_fd=parent.fd)
+                    moved = folder / original.name
+                    with prepared_directory(folder) as parent:
+                        os.mkdir(moved.name, 0o700, dir_fd=parent.fd)
+                    copied_source = artifact_tree(original, moved)
+                    copied = bundle_snapshot(moved, track, self.manifest['target_sha'], sources)
+                    if (copied_source != source['tree']
+                            or copied['tree']['root']['mode'] != source['tree']['root']['mode']
+                            or content_inventory(copied['tree']) != content_inventory(source['tree'])):
+                        raise ValueError('Copied artifact content differs')
+                    apps.append(dict(track=track, source=source, moved=copied))
+                # Directory mtimes are recorded after the final copy, not before.
+                registered['root']['identity'] = directory_identity(root)
+                registered['destination']['identity'] = directory_identity(destination)
+                value = dict(schema='nac343-prepared-fixture-v1', **{k: claim[k] for k in
+                    ('run_nonce', 'preparation_nonce', 'manifest_sha256')}, target_sha=self.manifest['target_sha'],
+                    harness_sha=self.manifest['harness_sha'], state='prepared-files-only', source_files=sources,
+                    observer=observer_snapshot(observer), apps=apps, **registered)
+                self._current_manifest(files)
+                files.write('prepared-fixture.json', value)
+                return dict(receipt=value, sha256=sha(encoded(value)))
+            except BaseException as error:
+                preparation_error(error, status)
+                try:
+                    files.write('preparation-failure.json', status)
+                except BaseException as secondary:
+                    preparation_error(error, status, secondary)
+                raise
+
+    def consume_prepared(self, expected, app, stable, destination, observer):
+        if not hex_value(expected, 64):
+            raise ValueError('Prepared digest must be64lowercasehex')
+        with prepared_directory(self.directory) as files:
+            self._current_manifest(files)
+            if files.read('preparation-failure.json', optional=True) is not None:
+                raise ValueError('Preparation failed; no retry or fallback')
+            claim, _ = files.read('preparation-admission.json')
+            closed(claim, ('schema', 'run_nonce', 'preparation_nonce', 'manifest_sha256', 'destination'))
+            value, raw = files.read('prepared-fixture.json')
+            closed(value, ('schema', 'run_nonce', 'preparation_nonce', 'manifest_sha256', 'target_sha', 'harness_sha',
+                           'state', 'source_files', 'observer', 'apps', 'destination', 'root'))
+            registered, _ = files.read('preparation-resources.json')
+            closed(registered, ('schema', 'run_nonce', 'preparation_nonce', 'manifest_sha256', 'destination', 'root'))
+            nonce = claim['preparation_nonce']
+            if (claim['schema'] != 'nac343-preparation-admission-v1' or not hex_value(nonce, 32)
+                    or value['schema'] != 'nac343-prepared-fixture-v1' or sha(raw) != expected
+                    or any(value[k] != claim[k] for k in ('run_nonce', 'preparation_nonce', 'manifest_sha256'))
+                    or value['run_nonce'] != self.manifest['run_nonce'] or value['manifest_sha256'] != self.digest
+                    or value['target_sha'] != self.manifest['target_sha'] or value['harness_sha'] != self.manifest['harness_sha']
+                    or value['state'] != 'prepared-files-only' or claim['destination'] != str(destination)
+                    or encoded(value['source_files']) != encoded(source_snapshot())
+                    or registered['schema'] != 'nac343-preparation-resources-v1'
+                    or any(registered[k] != claim[k] for k in ('run_nonce', 'preparation_nonce', 'manifest_sha256'))):
+                raise ValueError('Prepared source/manifest/receipt binding differs')
+            closed(value['destination'], ('path', 'identity')); closed(value['root'], ('path', 'identity'))
+            for name in ('destination', 'root'):
+                closed(registered[name], ('path', 'identity'))
+                closed(registered[name]['identity'], ('device', 'inode', 'mode', 'size', 'mtime_ns'))
+                if (registered[name]['path'] != value[name]['path'] or any(
+                        registered[name]['identity'][k] != value[name]['identity'][k] for k in ('device', 'inode', 'mode'))
+                        or any(not isinstance(v, str) or re.fullmatch('[0-9]+', v) is None
+                               for v in registered[name]['identity'].values())):
+                    raise ValueError('Prepared resource registration differs')
+            root = Path(destination) / ('nac-instance-app-' + nonce)
+            if (value['destination']['path'] != str(destination) or value['root']['path'] != str(root)
+                    or directory_identity(destination) != value['destination']['identity']
+                    or directory_identity(root) != value['root']['identity']
+                    or encoded(value['observer']) != encoded(observer_snapshot(Path(observer)))
+                    or not isinstance(value['apps'], list) or len(value['apps']) != 2):
+                raise ValueError('Prepared destination/root/observer replaced')
+            for index, (track, original) in enumerate((('dev', app), ('stable', stable))):
+                row = closed(value['apps'][index], ('track', 'source', 'moved'))
+                actual_source = bundle_snapshot(Path(original), track, self.manifest['target_sha'], value['source_files'])
+                moved = root / ('Moved app with spaces ' + str(index)) / Path(original).name
+                actual_moved = bundle_snapshot(moved, track, self.manifest['target_sha'], value['source_files'])
+                if encoded(row) != encoded(dict(track=track, source=actual_source, moved=actual_moved)):
+                    raise ValueError('Prepared app resource changed')
+            self._current_manifest(files)
+            files.write('preparation-consumption.json', dict(schema='nac343-preparation-consumption-v1',
+                        run_nonce=value['run_nonce'], preparation_nonce=nonce, manifest_sha256=self.digest,
+                        prepared_sha256=expected))
+            self.admit()  # Both exclusive claims precede all product/SDK operations.
+            return value
+
+    def require_inline(self):
+        with Directory(self.directory) as files:
+            if files.read('preparation-admission.json', optional=True) is not None:
+                raise ValueError('Prepared attempt requires exact consumption; no inline fallback')
 
     def journey(self, output, bundle, root, store):
         parent = output.parent

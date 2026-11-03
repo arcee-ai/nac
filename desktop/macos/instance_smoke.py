@@ -23,7 +23,7 @@ import urllib.request
 
 from instance_contract import OwnedEngine, digest, snapshot
 from instance_console import record_console, require_console
-from instance_capture import CaptureRun
+from instance_capture import CaptureRun, ENVIRONMENT, PREPARED_ENVIRONMENT, hex_value
 
 SCENARIOS = ('simultaneous', 'cli', 'symlink', 'directory-symlink', 'crash', 'shutdown', 'app-crash', 'coexist')
 
@@ -563,26 +563,43 @@ def coexist_case(app, stable_app, case, root, observer, console_checks):
 
 
 def main():
+    prepared_digest = os.environ.get(PREPARED_ENVIRONMENT)
+    if prepared_digest is not None and (not os.environ.get(ENVIRONMENT) or not hex_value(prepared_digest, 64)):
+        raise ValueError('Prepared consumption requires capture context and an exact64hex digest')
+    if prepared_digest is not None and any(str(Path(p)) != str(Path(p).resolve()) for p in sys.argv[1:]):
+        raise ValueError('Prepared arguments must be canonical absolute paths')
     app, destination, observer = map(lambda value: Path(value).resolve(), sys.argv[1:4])
     stable = Path(sys.argv[4]).resolve() if len(sys.argv) == 5 else None
-    destination.mkdir(parents=True, exist_ok=True)
+    if prepared_digest is None:
+        destination.mkdir(parents=True, exist_ok=True)
     scenarios = tuple(os.environ.get('NAC_INSTANCE_SCENARIOS', ','.join(SCENARIOS)).split(','))
     assert scenarios and set(scenarios) <= set(SCENARIOS) and len(set(scenarios)) == len(scenarios)
     console_checks = []
     capture = CaptureRun.optional()
-    metadata = dict(source_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-                    source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'])),
-                    fixture_sources={name: digest(Path(__file__).parent / name) for name in (
+    metadata = dict(fixture_sources={name: digest(Path(__file__).parent / name) for name in (
                         'instance_smoke.py', 'instance_console.py', 'instance_contract.py', 'InstanceObservation.swift')},
                     requested_scenarios=scenarios, full_scenario_run=scenarios == SCENARIOS,
                     console_observations=console_checks, instrumentation='INSTANCE_SMOKE + PREVIEW_SMOKE + LOCAL_APP',
                     actual_app_acceptance=False, cases=[])
     receipt = destination / 'summary.json'
     root = None
+    prepared = None
+    primary = None
+    if prepared_digest is not None:
+        metadata['preparation'] = dict(schema='nac343-prepared-runtime-status-v1', stage='runtime',
+            registration='unproved', consumption='unproved', unknown_resources=True, retention_required=True)
     try:
+        metadata.update(source_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                        source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'])))
         if capture:
             capture.require_source(metadata['source_head'], scenarios)
-            capture.admit()
+            if prepared_digest is not None:
+                prepared = capture.consume_prepared(prepared_digest, app, stable, destination, observer)
+                root = Path(prepared['root']['path'])
+                metadata['preparation'].update(registration='registered', consumption='consumed', unknown_resources=False)
+            else:
+                capture.require_inline()
+                capture.admit()
             metadata['fixture_sources']['instance_capture.py'] = digest(Path(__file__).parent / 'instance_capture.py')
         metadata['session'] = require_console(observer, console_checks, 'preflight')
         assert 'coexist' not in scenarios or stable, 'The coexist case requires the exact stable instance-smoke bundle'
@@ -594,12 +611,14 @@ def main():
                         bundles=[])
         xcode = subprocess.run(['xcodebuild', '-version'], capture_output=True, text=True, timeout=10)
         metadata['xcode'] = dict(code=xcode.returncode, output=(xcode.stdout + xcode.stderr).strip())
-        root = Path(tempfile.mkdtemp(prefix='nac-instance-app-', dir=destination)).resolve()
+        if prepared is None:
+            root = Path(tempfile.mkdtemp(prefix='nac-instance-app-', dir=destination)).resolve()
         metadata['fixture'] = str(root)
         moved = []
         for index, bundle in enumerate([app] + ([stable] if stable else [])):
             target = root / ('Moved app with spaces ' + str(index)) / bundle.name
-            shutil.copytree(bundle, target)
+            if prepared is None:
+                shutil.copytree(bundle, target)
             moved.append(target)
             identity = json.loads((target / 'Contents/Resources/engine-identity.json').read_text())
             plist = plistlib.loads((target / 'Contents/Info.plist').read_bytes())
@@ -629,7 +648,10 @@ def main():
         if capture:
             metadata['capture_fixture'] = capture.final_receipt()
         metadata.update(runtime_passed=True, visible_paint_acceptance='captured_pending_image_review')
+        if prepared is not None:
+            metadata['preparation']['retention_required'] = False
     except BaseException as error:
+        primary = error
         cleanup_errors = getattr(error, 'instance_cleanup_errors', [])
         cleanup_count = getattr(error, 'instance_cleanup_error_count', len(cleanup_errors))
         metadata.update(runtime_passed=False, failure=str(error), fixture_retained=root is not None,
@@ -638,9 +660,17 @@ def main():
                         cleanup_errors_truncated=cleanup_count > len(cleanup_errors))
         raise
     finally:
-        receipt.write_text(json.dumps(metadata, indent=2) + '\n')
+        failures = []
+        try:
+            receipt.write_text(json.dumps(metadata, indent=2) + '\n')
+        except BaseException as error:
+            failures.append(('instance-summary', error))
         if metadata.get('runtime_passed') and root:
-            shutil.rmtree(root)
+            try:
+                shutil.rmtree(root)
+            except BaseException as error:
+                failures.append(('instance-fixture-root', error))
+        finish_instance_cleanup(primary, failures)
 
 
 if __name__ == '__main__':
