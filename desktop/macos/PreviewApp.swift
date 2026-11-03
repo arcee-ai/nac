@@ -9,6 +9,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #if !LOCAL_APP
     private(set) var profile: PreviewProfile?
     let provider = FixtureProvider()
+    private var fixtureProject: String?
     #endif
     let engine = PreviewEngine()
     private(set) var baseURL: URL?
@@ -16,8 +17,13 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private(set) var stopping = false
     private(set) var launchConfiguration: EngineLaunchConfiguration?
     private var startup: Task<Void, Never>?
+    private var loading: Task<Void, Never>?
     private var workspaceIncarnation: String?
     private var navigationIncarnations: [WKNavigation: String] = [:]
+    private var activeNavigation: WKNavigation?
+    private var workspaceRetirement: WorkspaceRetirement?
+    private let workspaceDataStore = WKWebsiteDataStore.nonPersistent()
+    private(set) lazy var recovery = WorkspaceRecovery(app: self)
     private var status: NSTextField!
     #if LOCAL_APP
     private(set) lazy var quit = AppQuit(app: self)
@@ -27,6 +33,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private var launchIdentity: EngineIdentity?
     #endif
     #if PREVIEW_SMOKE
+    #if LIFECYCLE_SMOKE || !LOCAL_APP
+    private var recoverySmoke: RecoverySmoke?
+    #endif
     #if LIFECYCLE_SMOKE
     private var lifecycleSmoke: LifecycleSmoke?
     #elseif INSTANCE_SMOKE
@@ -56,7 +65,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         window.isReleasedWhenClosed = false
         window.center()
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = workspaceDataStore
         webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
         #if INSTANCE_SMOKE
         InstanceSmoke.configure(webView)
@@ -65,7 +74,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         webView.navigationDelegate = self
         webView.isHidden = true
         window.contentView!.addSubview(webView)
-        commands = NativeCommands(webView: webView, receipt: { [weak self] in self?.engine.receipt })
+        commands = NativeCommands(webView: webView, receipt: { [weak self] in self?.engine.receipt },
+            connectionLost: { [weak self] in self?.recovery.connectionLost() })
         commands.installMenus(applicationName: name)
         #if LOCAL_APP
         status = NSTextField(wrappingLabelWithString: "Starting NAC…")
@@ -76,6 +86,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         status.autoresizingMask = [.width, .height]
         status.font = .systemFont(ofSize: 16)
         window.contentView!.addSubview(status)
+        recovery.install()
         #if LOCAL_APP
         let retry = NSButton(title: "Retry", target: self, action: #selector(retryStoreConflict(_:)))
         retry.frame = NSRect(x: 40, y: 45, width: 140, height: 32)
@@ -91,12 +102,17 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         NSApp.activate(ignoringOtherApps: true)
         #if PREVIEW_SMOKE
         #if LIFECYCLE_SMOKE
-        lifecycleSmoke = LifecycleSmoke(app: self)
-        lifecycleSmoke?.start()
+        if CommandLine.arguments.contains("--recovery-output") {
+            recoverySmoke = RecoverySmoke(app: self)
+            recoverySmoke?.start()
+        } else {
+            lifecycleSmoke = LifecycleSmoke(app: self)
+            lifecycleSmoke?.start()
+        }
         #elseif INSTANCE_SMOKE
         instanceSmoke = InstanceSmoke(window: window, currentView: { [weak self] in self?.webView },
-            // This prefix retains one document; recovery supplies its live epoch later.
-            documentGeneration: { 0 }, engine: engine, conflicts: storeConflictRetry,
+            // Bind every fixture operation to the current recovery document epoch.
+            documentGeneration: { [weak self] in self?.recovery.documentGeneration ?? -1 }, engine: engine, conflicts: storeConflictRetry,
             retryButton: { [weak self] in self?.storeRetryButton }, baseURL: { [weak self] in self?.baseURL },
             failure: { [weak self] in self?.failure }, requestQuit: { [weak self] in self?.quit.stopFixture() })
         instanceSmoke?.start()
@@ -104,8 +120,13 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         startupSmoke = StartupSmoke(app: self)
         startupSmoke?.start()
         #else
-        smoke = PreviewSmoke(app: self)
-        smoke?.start()
+        if CommandLine.arguments.contains("--recovery-output") {
+            recoverySmoke = RecoverySmoke(app: self)
+            recoverySmoke?.start()
+        } else {
+            smoke = PreviewSmoke(app: self)
+            smoke?.start()
+        }
         #endif
         #endif
         startup = Task { await start() }
@@ -114,16 +135,18 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private func start(retryConfiguration: EngineLaunchConfiguration? = nil) async {
         do {
             #if !LOCAL_APP
-            let profile = try PreviewProfile()
-            self.profile = profile
-            #if PREVIEW_SMOKE
-            try smoke?.configure(profile)
-            smoke?.configure(engine)
-            #endif
-            try await provider.start()
-            #if PREVIEW_SMOKE
-            try await smoke?.beforeLaunch(profile)
-            #endif
+            if profile == nil {
+                let profile = try PreviewProfile()
+                self.profile = profile
+                #if PREVIEW_SMOKE
+                try smoke?.configure(profile)
+                smoke?.configure(engine)
+                #endif
+                try await provider.start()
+                #if PREVIEW_SMOKE
+                try await smoke?.beforeLaunch(profile)
+                #endif
+            }
             #endif
             guard !stopping else { return }
             #if LOCAL_APP
@@ -133,14 +156,14 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             engine.onReady = { [weak self] url in
                 guard let self, !self.stopping, self.failure == nil,
                       let incarnation = self.engine.receipt?.incarnation else { return }
-                self.startup = Task { await self.load(url, incarnation: incarnation) }
+                self.loading = Task { await self.load(url, incarnation: incarnation) }
             }
             engine.onExit = { [weak self] status in
                 #if LOCAL_APP
                 self?.quit.childExited(launch)
-                self?.fail("The bundled engine stopped (status \(status)). Quit NAC and relaunch.")
+                self?.recovery.engineExited("The bundled engine stopped (status \(status)).")
                 #else
-                self?.fail("The bundled engine stopped (status \(status)). Close this window and relaunch the preview.")
+                self?.recovery.engineExited("The bundled engine stopped (status \(status)).")
                 #endif
             }
             engine.onFailure = { [weak self] failure in self?.engineFailed(failure) }
@@ -151,7 +174,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             var arguments = Array(CommandLine.arguments.dropFirst())
             #if PREVIEW_SMOKE
             #if LIFECYCLE_SMOKE
-            arguments = LifecycleSmoke.launchArguments(arguments)
+            arguments = recoverySmoke != nil ? RecoverySmoke.launchArguments(arguments) : LifecycleSmoke.launchArguments(arguments)
             #elseif INSTANCE_SMOKE
             arguments = InstanceSmoke.launchArguments(arguments)
             #else
@@ -170,9 +193,14 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             launchConfiguration = configuration
             try engine.launch(executable: executable, configuration: configuration)
             #else
-            try engine.launch(executable: executable, profile: profile, provider: provider)
+            guard let profile else { return }
+            var environment = profile.environment
+            environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+            let configuration = retryConfiguration ?? EngineLaunchConfiguration(cwd: profile.workspace, store: profile.store, environment: environment)
+            launchConfiguration = configuration
+            try engine.launch(executable: executable, configuration: configuration)
             #endif
-        } catch { if !stopping { fail(error.localizedDescription) } }
+        } catch { if !stopping, !Task.isCancelled { fail(error.localizedDescription) } }
     }
 
     private func load(_ url: URL, incarnation: String) async {
@@ -181,28 +209,44 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             let route = "#/"
             #else
             guard let profile else { return }
-            let project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider)
+            let project: String
+            if let fixtureProject { project = fixtureProject }
+            else {
+                project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider)
+                guard !Task.isCancelled, !stopping, engine.receipt?.incarnation == incarnation else { return }
+                fixtureProject = project
+            }
             #if PREVIEW_SMOKE
             try await smoke?.beforeLoad()
             #endif
             let route = "#/project/\(project)"
             #endif
-            guard !stopping, failure == nil, engine.pid > 0,
+            guard !stopping, !Task.isCancelled, failure == nil, engine.pid > 0,
                   engine.receipt?.incarnation == incarnation else { return }
             baseURL = url
+            guard let receipt = engine.receipt else { return }
+            recovery.seedRoute(String(route.dropFirst()))
+            recovery.engineReady(receipt)
+            guard !recovery.isSuspended, !recovery.busy else { return }
+            if webView == nil {
+                replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()))
+                return
+            }
             workspaceIncarnation = incarnation
             commands.bind()
             if let navigation = webView.load(URLRequest(url: URL(string: route, relativeTo: url)!.absoluteURL)) {
                 navigationIncarnations[navigation] = incarnation
+                activeNavigation = navigation
             }
         } catch {
-            if !stopping, engine.receipt?.incarnation == incarnation { fail(error.localizedDescription) }
+            if !stopping, !Task.isCancelled, engine.receipt?.incarnation == incarnation { fail(error.localizedDescription) }
         }
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, !stopping, failure == nil else { return }
         commands.navigationStarted(in: webView, navigation: navigation)
+        activeNavigation = navigation
         guard let navigation, navigationIncarnations[navigation] == nil,
               let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
               let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
@@ -213,16 +257,18 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard webView === self.webView, let navigation,
+              navigation === activeNavigation,
               let incarnation = navigationIncarnations.removeValue(forKey: navigation),
               !stopping, failure == nil, incarnation == engine.receipt?.incarnation else { return }
         commands.navigationFinished(in: webView, navigation: navigation)
         status.isHidden = true
         webView.isHidden = false
+        recovery.documentLoaded()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard commands.allows(action, in: webView) else {
+        guard commands?.allows(action, in: webView) == true else {
             decisionHandler(.cancel)
             return
         }
@@ -232,23 +278,28 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         guard webView === self.webView, let navigation else { return }
         let incarnation = navigationIncarnations.removeValue(forKey: navigation)
+        guard navigation === activeNavigation else { return }
         if !stopping, incarnation != nil, incarnation == engine.receipt?.incarnation {
-            fail("Could not load the bundled workspace: \(error.localizedDescription)")
+            recovery.rendererFailed("Could not load the bundled workspace.")
         }
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webView === self.webView, let navigation, navigation === activeNavigation,
+              let incarnation = navigationIncarnations.removeValue(forKey: navigation),
+              incarnation == engine.receipt?.incarnation else { return }
+        recovery.rendererFailed("The workspace navigation failed.")
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === self.webView else { return }
-        if !stopping {
-            #if LOCAL_APP
-            fail("The workspace renderer stopped. Quit NAC and relaunch.")
-            #else
-            fail("The workspace renderer stopped. Close this window and relaunch the preview.")
-            #endif
-        }
+        if !stopping { recovery.rendererFailed("The workspace renderer stopped.") }
     }
 
     private func engineFailed(_ reason: EngineFailure) {
         guard !stopping, failure == nil else { return }
+        if baseURL != nil {
+            recovery.engineExited(reason.localizedDescription)
+            return
+        }
         #if LOCAL_APP
         if reason == .storeOwned, let configuration = launchConfiguration, let identity = launchIdentity {
             let conflict = StoreConflict(canonicalStore: configuration.store.path, track: identity.track)
@@ -273,6 +324,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
               storeConflictRetry.episode?.conflict.canonicalStore == configuration.store.path,
               storeConflictRetry.beginRetry(ownedChildHasExited: engine.pid == 0, appIsStopping: stopping) != nil else { return }
         startup?.cancel()
+        loading?.cancel()
         failure = nil
         baseURL = nil
         workspaceIncarnation = nil
@@ -295,9 +347,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private func fail(_ message: String) {
         guard !stopping, failure == nil else { return }
         failure = message
-        commands.retire()
-        webView.stopLoading()
-        webView.isHidden = true
+        recovery.cancelPending()
+        commands?.retire()
+        webView?.stopLoading()
+        webView?.isHidden = true
         status.isHidden = false
         #if LOCAL_APP
         storeRetryButton?.isHidden = true
@@ -336,6 +389,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #endif
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        recovery.applicationQuitRequested()
         #if LOCAL_APP
         return quit.shouldTerminate()
         #else
@@ -353,12 +407,14 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func beginShutdown(completion: @escaping () -> Void) {
         guard !stopping else { return }
         stopping = true
-        commands.retire()
+        recovery.close()
+        commands?.retire()
         #if LOCAL_APP
         storeConflictRetry.clear()
         storeRetryButton?.isEnabled = false
         #endif
         startup?.cancel()
+        loading?.cancel()
         #if INSTANCE_SMOKE
         instanceSmoke?.prepareForStop()
         #endif
@@ -366,11 +422,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         // document itself; stopLoading alone does not release its ownership.
         workspaceIncarnation = nil
         navigationIncarnations.removeAll()
+        activeNavigation = nil
         window.makeFirstResponder(nil)
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-        webView.stopLoading()
-        webView.removeFromSuperview()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
+        webView?.stopLoading()
+        webView?.removeFromSuperview()
         webView = nil
         status.isHidden = false
         #if LOCAL_APP
@@ -395,16 +452,141 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             #endif
             #if PREVIEW_SMOKE
             #if LIFECYCLE_SMOKE
-            self.lifecycleSmoke?.didStop()
+            if let recoverySmoke = self.recoverySmoke { recoverySmoke.didStop() }
+            else { self.lifecycleSmoke?.didStop() }
             #elseif INSTANCE_SMOKE
             self.instanceSmoke?.didStop()
             #elseif LOCAL_APP
             self.startupSmoke?.didStop()
             #else
-            self.smoke?.didCleanUp()
+            if let recoverySmoke = self.recoverySmoke { recoverySmoke.didStop() }
+            else { self.smoke?.didCleanUp() }
             #endif
             #endif
             completion()
         }
+    }
+
+    var canRecoverWorkspace: Bool {
+        guard !stopping, failure == nil else { return false }
+        #if LOCAL_APP
+        return quit.lifecycle.phase == .running
+        #else
+        return true
+        #endif
+    }
+
+    /// Synchronous native fences precede all asynchronous disposal/revalidation.
+    func beginWorkspaceRetirement() -> WorkspaceRetirement {
+        if let workspaceRetirement { return workspaceRetirement }
+        // Engine construction is independent of renderer lifetime. Let initial
+        // bootstrap finish; cancel only an already-bound document's old load.
+        if baseURL != nil { loading?.cancel() }
+        workspaceIncarnation = nil
+        activeNavigation = nil
+        navigationIncarnations.removeAll()
+        // Do not force an IME composition commit by changing the responder
+        // before the live page has closed its terminal input lifetime.
+        let retirement = WorkspaceRetirement(view: webView, commands: commands) { [weak self, weak previous = webView] in
+            guard let self, self.webView === previous else { return }
+            self.webView = nil
+            self.commands = nil
+        }
+        workspaceRetirement = retirement
+        return retirement
+    }
+
+    func replaceWorkspace(receipt: EngineReceipt, fragment: String?,
+                          requireTerminalAcknowledgement: Bool = false) {
+        guard canRecoverWorkspace, let endpoint = receipt.endpoint, let base = URL(string: endpoint),
+              engine.receipt?.incarnation == receipt.incarnation,
+              engine.receipt?.endpoint == receipt.endpoint else { return }
+        workspaceRetirement = nil
+        baseURL = base
+        var address = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+        address.fragment = fragment ?? "/"
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = workspaceDataStore
+        if requireTerminalAcknowledgement {
+            // A dead renderer cannot preserve its local delivery facts. Restrict
+            // first-seen live executions in this same-engine replacement only;
+            // this document fact contains no bytes, handles or input authority.
+            configuration.userContentController.addUserScript(WKUserScript(source: """
+                Object.defineProperty(window, "__nacRequireTerminalAcknowledgement", {
+                    value: true, writable: false, configurable: false
+                });
+                """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        #if PREVIEW_SMOKE
+        #if LIFECYCLE_SMOKE || !LOCAL_APP
+        if recoverySmoke != nil { configuration.userContentController.addUserScript(RecoverySmoke.script) }
+        #endif
+        #endif
+        var frame = window.contentView!.bounds
+        frame.origin.y += recovery.noticeHeight
+        frame.size.height -= recovery.noticeHeight
+        let replacement = WKWebView(frame: frame, configuration: configuration)
+        #if INSTANCE_SMOKE
+        InstanceSmoke.configure(replacement)
+        #endif
+        replacement.autoresizingMask = [.width, .height]
+        replacement.navigationDelegate = self
+        replacement.isHidden = true
+        webView = replacement
+        window.contentView!.addSubview(replacement, positioned: .below, relativeTo: status)
+        commands = NativeCommands(webView: replacement, receipt: { [weak self] in self?.engine.receipt },
+            connectionLost: { [weak self] in self?.recovery.connectionLost() })
+        commands.installMenus(applicationName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC")
+        recovery.installMenus()
+        recovery.showLossNotice()
+        commands.bind()
+        workspaceIncarnation = receipt.incarnation
+        if let navigation = replacement.load(URLRequest(url: address.url!)) {
+            navigationIncarnations[navigation] = receipt.incarnation
+            activeNavigation = navigation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak replacement] in
+                guard let self, let replacement, self.webView === replacement,
+                      self.activeNavigation === navigation,
+                      self.navigationIncarnations[navigation] != nil, !self.stopping else { return }
+                self.recovery.rendererFailed("The workspace did not finish loading within ten seconds.")
+            }
+        }
+    }
+
+    func restartOwnedEngine() async throws {
+        guard canRecoverWorkspace, let configuration = launchConfiguration else {
+            throw PreviewError.message("The selected launch cannot be restarted during Quit or startup.")
+        }
+        #if LOCAL_APP
+        let ownedLaunch = quit.launch
+        #endif
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            var settled = false
+            let finish: (Error?) -> Void = { error in
+                guard !settled else { return }
+                settled = true
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+            engine.stop { [weak self] in
+                guard let self, self.engine.pid == 0 else {
+                    finish(PreviewError.message("The original engine cleanup has not finished.")); return
+                }
+                #if LOCAL_APP
+                if let ownedLaunch { self.quit.childExited(ownedLaunch) }
+                #endif
+                finish(nil)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 26) {
+                finish(PreviewError.message("The original engine is still stopping. No replacement was launched."))
+            }
+        }
+        try Task.checkCancellation()
+        guard canRecoverWorkspace, engine.pid == 0 else {
+            throw PreviewError.message("Restart was retired by application shutdown.")
+        }
+        failure = nil
+        baseURL = nil
+        await start(retryConfiguration: configuration)
     }
 }

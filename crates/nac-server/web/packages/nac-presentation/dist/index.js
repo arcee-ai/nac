@@ -1,4 +1,4 @@
-import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as ee, F as k, Fi as A, Fn as j, Ft as te, G as ne, Gi as re, Gn as M, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as ge, Jr as _e, Jt as ve, K as ye, Ki as be, Kn as xe, Kr as F, Kt as Se, L as Ce, Li as we, Ln as Te, Lr as Ee, Lt as De, M as Oe, Mi as ke, Mn as Ae, Mr as je, Mt as Me, N as Ne, Ni as Pe, Nn as Fe, Nr as Ie, Nt as Le, O as Re, Oi as ze, On as Be, Or as Ve, Ot as He, P as Ue, Pi as We, Pn as Ge, Pr as Ke, Pt as qe, Q as Je, Qi as Ye, Qn as Xe, Qr as Ze, Qt as Qe, R as $e, Ri as et, Rn as tt, Rr as I, Rt as nt, S as rt, Si as it, Sn as at, Sr as ot, St as st, T as ct, Ti as lt, Tn as ut, Tr as dt, Tt as ft, U as pt, Ui as mt, Un as ht, Ur as gt, Ut as _t, V as vt, Vi as yt, Vn as bt, Vr as xt, Vt as St, W as Ct, Wi as wt, Wn as Tt, Wr as L, Wt as Et, X as Dt, Xi as Ot, Xn as kt, Xr as At, Xt as jt, Y as Mt, Yi as Nt, Yn as Pt, Yr as Ft, Yt as It, Z as Lt, Zi as Rt, Zn as zt, Zr as Bt, Zt as Vt, _ as Ht, _i as Ut, _n as Wt, _r as R, _t as Gt, a as Kt, ai as qt, an as Jt, ar as Yt, at as Xt, b as Zt, bi as Qt, bn as $t, br as en, bt as tn, c as nn, ci as rn, cn as an, cr as on, ct as sn, d as cn, di as ln, dn as un, dr as dn, dt as fn, ea as pn, ei as z, en as mn, er as hn, et as gn, f as _n, fi as vn, fn as yn, fr as bn, ft as xn, g as Sn, gi as Cn, gn as wn, gr as B, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, ot as ur, p as dr, pi as fr, pn as pr, pr as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as Er, sn as Dr, sr as Or, st as kr, t as Ar, ta as jr, ti as Mr, tn as Nr, tr as Pr, tt as Fr, u as Ir, ui as Lr, un as Rr, ur as zr, ut as Br, v as Vr, vi as Hr, vn as Ur, vr as V, vt as Wr, w as Gr, wi as Kr, wn as qr, wr as Jr, wt as Yr, x as Xr, xi as Zr, xn as Qr, xr as $r, xt as ei, y as ti, yi as ni, yn as ri, yr as H, yt as ii, z as ai, zi as oi, zn as si, zr as ci, zt as li } from "./chunks/PerfProfiler-BvSA1Lj9.js";
+import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as ee, F as k, Fi as A, Fn as j, Ft as te, G as ne, Gi as re, Gn as M, Gr as N, Gt as ie, H as ae, Hi as oe, Hn as se, Hr as P, Ht as ce, I as le, Ii as ue, In as de, Ir as fe, It as pe, J as me, Ji as he, Jn as ge, Jr as _e, Jt as ve, K as ye, Ki as be, Kn as xe, Kr as F, Kt as Se, L as Ce, Li as we, Ln as Te, Lr as Ee, Lt as De, M as Oe, Mi as ke, Mn as Ae, Mr as je, Mt as Me, N as Ne, Ni as Pe, Nn as Fe, Nr as Ie, Nt as Le, O as Re, Oi as ze, On as Be, Or as Ve, Ot as He, P as Ue, Pi as We, Pn as Ge, Pr as Ke, Pt as qe, Q as Je, Qi as Ye, Qn as Xe, Qr as Ze, Qt as Qe, R as $e, Ri as et, Rn as tt, Rr as I, Rt as nt, S as rt, Si as it, Sn as at, Sr as ot, St as st, T as ct, Ti as lt, Tn as ut, Tr as dt, Tt as ft, U as pt, Ui as mt, Un as ht, Ur as gt, Ut as _t, V as vt, Vi as yt, Vn as bt, Vr as xt, Vt as St, W as Ct, Wi as wt, Wn as Tt, Wr as L, Wt as Et, X as Dt, Xi as Ot, Xn as kt, Xr as At, Xt as jt, Y as Mt, Yi as Nt, Yn as Pt, Yr as Ft, Yt as It, Z as Lt, Zi as Rt, Zn as zt, Zr as Bt, Zt as Vt, _ as Ht, _i as Ut, _n as Wt, _r as R, _t as Gt, a as Kt, ai as qt, an as Jt, ar as Yt, at as Xt, b as Zt, bi as Qt, bn as $t, br as en, bt as tn, c as nn, ci as rn, cn as an, cr as on, ct as sn, d as cn, di as ln, dn as un, dr as dn, dt as fn, ea as pn, ei as z, en as mn, er as hn, et as gn, f as _n, fi as vn, fn as yn, fr as bn, ft as xn, g as Sn, gi as Cn, gn as wn, gr as B, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, ot as ur, p as dr, pi as fr, pn as pr, pr as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as Er, sn as Dr, sr as Or, st as kr, t as Ar, ta as jr, ti as Mr, tn as Nr, tr as Pr, tt as Fr, u as Ir, ui as Lr, un as Rr, ur as zr, ut as Br, v as Vr, vi as Hr, vn as Ur, vr as V, vt as Wr, w as Gr, wi as Kr, wn as qr, wr as Jr, wt as Yr, x as Xr, xi as Zr, xn as Qr, xr as $r, xt as ei, y as ti, yi as ni, yn as ri, yr as H, yt as ii, z as ai, zi as oi, zn as si, zr as ci, zt as li } from "./chunks/PerfProfiler-Cojbn_29.js";
 import * as ui from "react";
 import di, { Fragment as fi, Suspense as pi, createContext as mi, lazy as hi, memo as gi, use as _i, useCallback as U, useContext as vi, useEffect as W, useId as yi, useLayoutEffect as bi, useMemo as G, useRef as K, useState as q, useSyncExternalStore as xi } from "react";
 import { QueryClientProvider as Si, QueryObserver as Ci, replaceEqualDeep as wi, useIsFetching as Ti, useMutation as Ei, useQueries as Di, useQuery as Oi, useQueryClient as ki } from "@tanstack/react-query";
@@ -15134,7 +15134,7 @@ function Hv(e, t) {
 // src/app/lib/markdownChunk.ts
 var Uv = null, Wv = !1;
 function Gv() {
-	return Uv ??= import("./chunks/markdown-renderer-BFe1v7G7.js").then((e) => e.t).then((e) => (Wv = !0, e)), Uv;
+	return Uv ??= import("./chunks/markdown-renderer-Cn3MyjQH.js").then((e) => e.t).then((e) => (Wv = !0, e)), Uv;
 }
 function Kv() {
 	return Wv;
@@ -20505,7 +20505,7 @@ function TS(e) {
 		let T = new ResizeObserver(() => m(x));
 		a(() => T.disconnect()), T.observe(e.host), t.terminal.element && T.observe(t.terminal.element), e.phase("Connecting"), e.notice(""), e.inputFailure(e.previousFailure.current);
 		let E = yield* CS("attach", () => n.attach(r.signal, e.reconnect ? "reconnect" : "attach"));
-		i() && (c = !0, l = E.alive, _(), e.previousFailure.current && e.notice("Input delivery was not confirmed. Check the shell before enabling fresh input."), e.previousFailure.available === !1 && e.notice("Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal."), e.phase(E.alive ? "Connected" : "Retained output"), yield* x, document.fonts.ready.then(() => {
+		i() && (c = !0, l = E.alive, _(), e.previousFailure.current && e.notice("Input delivery was not confirmed. Check the shell before enabling fresh input."), e.previousFailure.available === !1 && !e.previousFailure.observationOnly && e.notice("Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal."), e.phase(E.alive ? "Connected" : "Retained output"), yield* x, document.fonts.ready.then(() => {
 			i() && m(x);
 		}), yield* CS("observe", () => n.run(r.signal, (t) => {
 			l = t.terminal.alive, l || (b = null), _(), t.gap && i() && e.notice("Earlier output was discarded. The display was reset before retained output was replayed.");
@@ -20542,9 +20542,9 @@ function ES(e, t, n, r, i = {}) {
 	}, [C, i.inputPaused]), W(() => {
 		let r = n.current;
 		if (!r) return;
-		let l = Mn(a).acquire(e, t);
-		g.current = l;
-		let u = TS({
+		let l = w.current, u = !!i.readonly || l !== void 0 && !sS(l, !1), f = Mn(a).acquire(e, t, u);
+		g.current = f;
+		let m = TS({
 			api: o,
 			source: w.current,
 			readonly: i.readonly,
@@ -20554,7 +20554,7 @@ function ES(e, t, n, r, i = {}) {
 			terminalId: t,
 			host: r,
 			reconnect: c !== 0,
-			previousFailure: l,
+			previousFailure: f,
 			controls: (e) => {
 				s.current = e, e?.updateInput(E.current.binding, E.current.paused);
 			},
@@ -20563,7 +20563,7 @@ function ES(e, t, n, r, i = {}) {
 			inputFailure: h
 		});
 		return () => {
-			u(), l.release(), g.current === l && (g.current = null);
+			m(), f.release(), g.current === f && (g.current = null);
 		};
 	}, [
 		a,
