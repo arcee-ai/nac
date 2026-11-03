@@ -292,3 +292,46 @@ Programmatic NSMenu results do not qualify OS keyboard/Edit provenance. A locked
 console, missing event-post access or unqualified paint is incomplete acceptance,
 even when compilation, parser tests or scripted DOM journeys pass. Normal app
 compiler inputs and binaries exclude all command fixture instrumentation.
+
+## Normal app close and Quit (ALL-344)
+
+Closing a normal NAC workspace keeps its document, streams, native command
+bridge and owned engine running. Reopening the same app from the Dock restores
+that window. The disposable development preview still quits on close.
+
+Explicit Quit presents **Cancel** and **Stop and Quit**. Activity is conservative:
+the shell does not infer idle from one run while approvals, terminal shells or
+commands with uncertain outcomes may remain. Cancel preserves the workspace.
+Stop retires the bridge, cancels pending startup/navigation and releases the
+WebView before requesting the existing private engine shutdown. Rust owns run,
+descendant and store cleanup under its existing 20-second watchdog. The existing
+owned-engine fallback remains 23 seconds. A later 26-second UI wait can report
+pending cleanup, but cannot claim cleanup, restart the retired
+workspace or send another stop. Quit again waits on that original shutdown.
+Unsettled AppKit termination requests return Cancel immediately while one
+asynchronous confirmation/cleanup episode stays owned by the app. Reentrant
+native and OS requests share that episode. Only settled Stop requests ordinary
+termination again; no terminateLater modal handshake or public-entry guard spans
+the confirmation or engine drain.
+
+`preview.sh lifecycle-build` builds separate test instrumentation around the
+normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT
+OBSERVER` under the coordinated Mac/browser lease, using that exact bundle and
+its compiled `InstanceObservation` helper. The fixture exercises real model,
+approval and terminal activity; native window close and LaunchServices reopen;
+Cancel, duplicate Quit and Stop; document/bridge release; durable transcript and
+goal retention; descendant cleanup and ordinary same-store reacquisition.
+The terminal case starts Quit through the exact-owned OS application helper and
+observes the real delegate confirmation before issuing a reentrant OS request.
+Repeated OS requests can coalesce; the fixture records actual delegate decisions
+and the native duplicate's delegate entry and return. Evidence binds the actual
+OS and system WebKit versions.
+Sheet completion is programmatic AppKit, with no OS input events. Evidence
+records locked-console provenance and keeps visible paint and trusted input
+acceptance false. This is not a substitute for full native acceptance.
+
+The separate `QuitWebViewFixture.swift` / `quit_webview_fixture.py` probe records
+real system WK document/SSE lifetime. Hiding a retained document can keep a live
+observer through graceful shutdown. `stopLoading()` behavior is recorded per OS;
+it does not release ownership of the WebView. Neither helper nor any provider or
+lifecycle fixture is included in the ordinary app's compiler inputs or binary.
