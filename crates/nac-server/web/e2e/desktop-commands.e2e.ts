@@ -1,0 +1,91 @@
+import { createProject, createSession, expect, test } from "./harness";
+
+test("browser without a desktop bridge retains shared New Chat and focus", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
+  await page.goto(`${harness.baseUrl}/#/session/${id}`);
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await expect(composer).toBeVisible();
+  expect(await page.evaluate(() => Reflect.has(globalThis, "__nacDesktop"))).toBe(false);
+  await composer.focus();
+  const mac = await page.evaluate("/Mac|iPhone|iPad|iPod/.test(navigator.userAgent)");
+  await page.keyboard.press(mac ? "Meta+Shift+O" : "Control+Shift+O");
+  const dialog = page.getByRole("dialog", { name: "New Chat", exact: true });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(composer).toBeFocused();
+});
+
+test("injected UI capability opens shared owners once without submitting a session", async ({
+  harness,
+  page,
+  request,
+}) => {
+  await page.addInitScript(() => {
+    let owner: ((message: unknown) => boolean) | undefined;
+    Reflect.set(globalThis, "__nacDesktop", {
+      connect(callback: (message: unknown) => boolean) {
+        owner = callback;
+        return () => {
+          if (owner === callback) owner = undefined;
+        };
+      },
+    });
+    Reflect.set(
+      globalThis,
+      "__desktopFixtureDispatch",
+      (message: unknown) => owner?.(message) ?? false,
+    );
+  });
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
+  await page.goto(`${harness.baseUrl}/#/session/${id}`);
+  const composer = page.getByRole("combobox", { name: "Message" });
+  await expect(composer).toBeVisible();
+  await composer.focus();
+  const mutations: string[] = [];
+  page.on("request", (event) => {
+    const route = new URL(event.url()).pathname;
+    // Both POST routes resolve model catalogs; neither saves configuration or
+    // admits a session. Keep every other non-GET operation in the mutation guard.
+    const catalogQuery =
+      event.method() === "POST" &&
+      (route === "/providers/models" || /^\/model-configs\/[^/]+\/models$/.test(route));
+    if (event.method() !== "GET" && !catalogQuery) {
+      mutations.push(`${event.method()} ${route}`);
+    }
+  });
+  const dispatch = (request: number, action: string) =>
+    page.evaluate(
+      ({ request, action }) => {
+        const send = Reflect.get(globalThis, "__desktopFixtureDispatch") as (
+          message: unknown,
+        ) => boolean;
+        return send({ version: 1, request, action });
+      },
+      { request, action },
+    );
+  expect(await dispatch(1, "settings")).toBe(true);
+  const settings = page.getByRole("dialog", { name: "Configurations", exact: true });
+  await expect(settings).toBeVisible();
+  expect(await dispatch(1, "settings")).toBe(false);
+  expect(await dispatch(2, "newSession")).toBe(false); // Current modal owns focus.
+  await expect(settings).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(composer).toBeFocused();
+  expect(await dispatch(3, "newSession")).toBe(true);
+  const chat = page.getByRole("dialog", { name: "New Chat", exact: true });
+  await expect(chat).toBeVisible();
+  expect(await dispatch(3, "newSession")).toBe(false);
+  await expect(chat).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(composer).toBeFocused();
+  expect(mutations).toEqual([]);
+  // Scripted browser delivery qualifies only this optional UI adapter. Actual
+  // AppKit menus, WK frame provenance and trusted Edit input have native tests.
+});
