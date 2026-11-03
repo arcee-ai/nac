@@ -18,7 +18,9 @@ Root's product nomination is now P
 `d443a2aca506def2817b9afc0c9a20a75f5c4b5d`, with an available normal ad-hoc
 package. The earlier helper Q was `57b16ef4`, followed by published Q
 `1412af562c56edebc63dbf61af849f08e2255b54`. This first path repair requires a
-new exact Q nomination before inclusion. H
+new exact Q nomination before inclusion. Published path repair Q
+`ddb2cb82ba9f17e662a96ccfe7b2f08442470d81` is the base for the separate local
+query-diagnostic unit described below; it also needs a new exact nomination. H
 `a4ec6b17a92dabd28501fa427992528cd3729100` remains an interface reference.
 Keep P, Q and eventual H identities distinct; only the four files in this
 directory may be supplied from Q, and only the Swift file is a test input.
@@ -230,10 +232,116 @@ qualification; launch/input/PNG remain uncaptured and input completion unknown.
 This repair is local source preparation pending the same bounded affected
 review, root nomination and H's matching observer/source-hash update.
 
+## Historical Q55 failure-only onboarding query diagnostics
+
+This section describes the original label assertion through Q55cb. The
+successor assertion below does not emit this unchanged v1 diagnostic.
+
+The Qddb/Hd7b actual onboarding attempt reached the full45s legacy text wait
+and failed `Shared onboarding absent`; its guarded failure PNG painted the
+expected onboarding title and Get Started button. H's readiness/empty-store
+and entry-asset audit passed separately. No actual AX hierarchy was retained,
+so scope/type/attribute cause is unknown. This differs from the earlier
+externally interrupted attempt. No selector or product accessibility repair is
+claimed by this unit, and no new runtime/SDK/input/paint acceptance is supplied.
+
+The named assertion wrapper keeps exactly one call to
+`ui.webViews.staticTexts` with `label CONTAINS` and the same45s wait. A false
+legacy result triggers one best-effort diagnostic, then always throws the same
+NAC342/code1/`Shared onboarding absent` error. Other-query matches cannot turn
+that failure into success. The four cases, inputs and existing observation,
+dispatch and cleanup schemas remain unchanged.
+
+Optional attachment `nac342-query-diagnostic-v1-onboarding` uses schema
+`nac342-query-diagnostic-v1`, version1. The frozen standalone contract SHA256 is
+`c87143afcbe81ea58522f868a96537195ef7d9b8e20068a4c5519d575195b913`;
+append-only clarification SHA256 is
+`fa7d5c8a30001c0ab8065fa3d9cf0020acb16317a3aef4d882f697d4368cf6d5`.
+Examples are synthetic historical bindings, never current Q/H nominations.
+H alone admits/retains this optional failure attachment against its actual
+selected test/config/source/App/window witness; it cannot replace a missing
+final observation or make `input_completion_unknown` false.
+
+The census uses12 ordered, fixed public query materializations for three known
+fixture texts. Only counts and capped type/state/comparison booleans leave the
+actor; no arbitrary label/value/identifier, hierarchy, exception text or hash
+of uncontrolled text is retained. Source/config/PID/epoch/window/native hash
+bind the record; App/window/console/resource guards and unchanged config bytes
+must hold before and after. Failed guards suppress census emission. Only an
+in-memory XCTest attachment is created; no profile/store or app-output file is
+read. Missing/partial evidence stays missing/partial.
+
+Each materialization uses `allElementsBoundByAccessibilityElement`, not a
+separate count evaluation. Query indices0..3 are count-only; index4
+`window_static_title` begins candidate reads. At most4 candidates per query,
+8total,4096 reported matches per row and8KiB JSON are allowed. Longer-than256
+UTF8 attribute strings yield unavailable comparison flags and partial evidence.
+The5s budget is checked before each public attribute getter, between query
+materializations and once after the last operation. An unfinished candidate is
+discarded and remains partial; its attempt still consumes the read budget.
+A synthetic slow-first-getter control covers this boundary. Complete requires final elapsed strictly below5000ms; exactly5000 is partial.
+Invalid/backward clocks become sticky `clock_invalid` with elapsed0 and no
+overflow; finite elapsed above600000 is clamped with overflow/time-budget.
+SDK-internal array/RPC work, memory and individual call latency are unqualified;
+these caps do not bound an individual public framework call. No second wait,
+retry, refocus, input, timeout increase, DOM/private API, OCR-based pass or
+alternate-element fallback is introduced.
+
+## Exact-value onboarding title assertion successor
+
+Root authorized one test-owned source repair after the fourth failed ordinary
+startup episode: run41246104964/job124669877870, Q55cb/H14e/Pd443/R25046.
+The retained complete749ms diagnostic SHA256
+`1a2bc4759bf2c450833eeb53dc2f6afd643b44498f5756e942f8f673232397f6`
+reported zero legacy label matches but exactly one owned-window value-title
+match: StaticText48, existing/enabled/hittable/intersecting, exact String value.
+The subtitle independently had the same value-only result. The original PNG
+was visibly onboarding; the original45s assertion still failed. This evidence
+supports this episode's attribute/query mismatch, not every host or earlier
+failure's cause, and does not qualify a passing startup case.
+
+Only the onboarding title assertion changes. It queries StaticText descendants
+of the already uniquely guarded window with exact `value == "No projects yet"`.
+One45s existence wait precedes one result-set materialization. Exactly one
+candidate is required before reading attributes; its actual SDK type, exact
+String value, existence, enabled/hittable state and finite, nonempty window
+intersection must pass; CoreGraphics infinite sentinel rectangles are refused
+even though their components can be finite. Frame geometry is only a visibility guard, never an
+input coordinate. The final original App/window/console/resource guard and
+unchanged configuration bytes must pass before success. No OR-label fallback,
+contains/trim/case folding, second wait, refocus, retry or global helper change
+is added. Public framework call latency is not given a new hard wall-clock bound.
+
+The unchanged pure wrapper still throws NAC342/code1/`Shared onboarding absent`
+on false. Its diagnostic callback is deliberately empty for the new assertion:
+historical v1 `legacy_exists:false` certifies the original label wait's result,
+which a failed value assertion cannot certify. The frozen c871/fa7 contracts,
+historical producer/policy code and H optional collector are unchanged. A new
+failure may lack that optional census; missing evidence cannot pass acceptance.
+Any future census requires a separately frozen, honest assertion contract.
+
+Get Started and all later-flow/native recovery selectors remain unchanged.
+The current click helper uses `matching(identifier:)`, which Apple defines to
+also match title, label, value and placeholderValue; zero sampled label-button
+matches do not prove that helper fails. Button and later-flow AX attributes
+remain unqualified. The full four-state matrix and existing launch, dispatch,
+observation, source/resource binding and cleanup contracts remain required.
+B1/B2/B3 and no-argument Finder coverage are separate, unallocated work.
+
+`test_title_assertion.py` compiles the exact pure title decision plus original
+error wrapper. Its H14e old-RED/new-model-GREEN fixture uses retained comparison
+facts and explicitly synthetic rectangles, never invented actual raw labels or
+geometry. Negatives reject ambiguity before attribute reads, wrong types/values,
+unavailable interaction state, invalid geometry and failed final bindings.
+These controls establish no XCUI query, actual visibility or input behavior.
+The previous Q55 actor built under Xcode26.6/SDK26.5/Swift5 language mode on H14e;
+the changed actor requires fresh exact-source full SDK build-for-testing and
+separate root runtime allocation. Neither is established by these local controls.
+
 ## Local preparation checks
 
 ```sh
-NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 \
+NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 NAC342_SWIFT_QUERY_PROOF=1 NAC342_SWIFT_TITLE_PROOF=1 \
   python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
 swiftc -frontend -parse desktop/macos/startup_xctest/StartupJourneys.swift
 ```
@@ -248,10 +356,14 @@ block and exercises physical declarations, verified `/var` URL observations,
 spaces, emitted paths, missing/wrong-type resources, lexical/containment/layout
 failures, declared symlinks and same-path resource replacement. Its temporary
 files are inert fixtures; missing profile/store leaves are never inspected.
+The query proof compiles the exact pure assertion/projection block and checks
+failure invariance, scope/type/attribute distinctions, strict types/caps,
+privacy, guard/binding rejection and final clock edges. It does not execute
+XCUI queries, prove actor SDK compilation or produce actual AX evidence.
 These proofs perform no live console observation or GUI action.
 The normal package tests use tiny synthetic non-executable artifacts and P's
 real owner validator; they require the separate nominated P checkout. Missing
-P or either Swift opt-in is an explicit skipped proof, not a passing substitute.
+P or any requested Swift opt-in is an explicit skipped proof, not a passing substitute.
 
 No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by
