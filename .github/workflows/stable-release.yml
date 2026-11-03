@@ -102,7 +102,7 @@ jobs:
       - name: Install locked workflow-parser dependencies
         run: npm --prefix .github/scripts ci --ignore-scripts
       - name: Check workflows and scripts, then prove enforcement
-        run: make lint-workflows test-workflow-lint
+        run: make lint-workflows test-workflow-lint test-manual-stack-override
 
   lint:
     if: ${{ needs.prepare.outputs.run == 'true' }}
