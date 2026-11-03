@@ -26,6 +26,7 @@ final class NativeCommandState {
     let view = UUID().uuidString
     private(set) var binding: NativeDocumentBinding?
     private(set) var ready = false
+    private(set) var connectionLost = false
     private var retired = false
     private var sequence = 0
     private var pending: Int?
@@ -62,7 +63,7 @@ final class NativeCommandState {
         return next
     }
 
-    func endDocument() { binding = nil; ready = false; pending = nil }
+    func endDocument() { binding = nil; ready = false; pending = nil; connectionLost = false }
     func retire() { endDocument(); retired = true }
 
     func issue(_ action: NativeUIAction, receipt: EngineReceipt?) -> NativeUIRequest? {
@@ -87,12 +88,17 @@ final class NativeCommandState {
         let common: Set<String> = ["version", "kind", "launch", "view", "document"]
         switch kind {
         case "ready":
-            guard Set(object.keys) == common, !ready else { return false }
+            guard Set(object.keys) == common, !ready, !connectionLost else { return false }
             ready = true
         case "retired":
             guard Set(object.keys) == common, ready else { return false }
             ready = false
             pending = nil
+        case "connection_lost":
+            guard Set(object.keys) == common, ready, !connectionLost else { return false }
+            ready = false
+            pending = nil
+            connectionLost = true
         case "settled":
             guard Set(object.keys) == common.union(["request", "accepted"]), ready,
                   let request = object["request"] as? NSNumber, CFGetTypeID(request) != CFBooleanGetTypeID(),

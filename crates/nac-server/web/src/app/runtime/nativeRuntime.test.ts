@@ -462,3 +462,40 @@ it("omits a synthetic unbootstrapped Vite incarnation instead of sending a false
     ),
   ).toBe(true);
 });
+
+it("restricts only explicitly recovered runtimes and isolates acknowledgement across full binding replacement", () => {
+  const options = { scope, client: createNacClient({ endpoint: scope.endpoint, fetch: vi.fn() }) };
+  const recovered = createNativeRuntime({ ...options, requireTerminalAcknowledgement: true });
+  opened.push(recovered);
+  const lease = recovered.terminalInputRecovery.acquire("session", "opaque-execution");
+  expect(lease.current).toBe(true);
+  lease.acknowledge();
+  lease.release();
+  expect(recovered.terminalInputRecovery.acquire("session", "opaque-execution").current).toBe(
+    false,
+  );
+  const repeated = createNativeRuntime({ ...options, requireTerminalAcknowledgement: true });
+  opened.push(repeated);
+  expect(repeated.terminalInputRecovery.acquire("session", "opaque-execution").current).toBe(true);
+  for (const field of [
+    "owner",
+    "profile",
+    "organization",
+    "host",
+    "incarnation",
+    "endpoint",
+    "release",
+  ] as const) {
+    const binding = {
+      ...scope,
+      [field]: field === "endpoint" ? "/changed-endpoint" : `changed-${field}`,
+    };
+    const ordinary = runtime(vi.fn(), binding);
+    expect(ordinary.terminalInputRecovery.acquire("session", "opaque-execution").current).toBe(
+      false,
+    );
+  }
+  recovered.close();
+  lease.current = false;
+  expect(repeated.terminalInputRecovery.acquire("session", "opaque-execution").current).toBe(true);
+});
