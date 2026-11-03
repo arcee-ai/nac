@@ -1,0 +1,85 @@
+name: Mac package preparation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - desktop/macos/**
+      - .github/workflows/macos-package.yml
+      - crates/nac-server/build.rs
+      - version.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This lane has no release, signing-account or notarization authority.
+concurrency:
+  group: mac-package-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  fixture:
+    name: Ad-hoc app preparation integrity (not distribution qualification)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Bind exact Apple Silicon source
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: mac-package-preparation
+      - name: Verify portable provenance and signature boundaries
+        run: python3 -B -m unittest discover -s desktop/macos/packaging -p 'test_*.py' -v
+      - name: Compile once and retain private engine receipt
+        run: >-
+          python3 -B desktop/macos/packaging/package.py prepare-engine
+          --output "$RUNNER_TEMP/package-engine"
+      - name: Reuse native builder and package explicit preview fixture
+        run: >-
+          python3 -B desktop/macos/packaging/package.py fixture
+          --engine-receipt "$RUNNER_TEMP/package-engine/engine-build.json"
+          --output "$RUNNER_TEMP/package-fixture"
+      - name: Verify sealed bundle and container
+        run: >-
+          python3 -B desktop/macos/packaging/package.py verify
+          "$RUNNER_TEMP/package-fixture/manifest.json" --signatures
+      - name: Verify archive extraction and relocation with spaces
+        run: >-
+          python3 -B desktop/macos/packaging/package.py relocate-check
+          --manifest "$RUNNER_TEMP/package-fixture/manifest.json"
+          --output "$RUNNER_TEMP/package-relocation"
+      - name: Consume normal native builder and validate its actual compiler receipt
+        run: >-
+          python3 -B desktop/macos/packaging/package.py normal
+          --engine-receipt "$RUNNER_TEMP/package-engine/engine-build.json"
+          --output "$RUNNER_TEMP/package-normal"
+      - name: Verify normal sealed bundle and archive round trip
+        run: |
+          python3 -B desktop/macos/packaging/package.py verify "$RUNNER_TEMP/package-normal/manifest.json" --signatures
+          python3 -B desktop/macos/packaging/package.py relocate-check --manifest "$RUNNER_TEMP/package-normal/manifest.json" --output "$RUNNER_TEMP/package-normal-relocation"
+      - name: Retain preparation evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-package-fixture-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/package-engine/engine-build.json
+            ${{ runner.temp }}/package-fixture/manifest.json
+            ${{ runner.temp }}/package-relocation/relocation.json
+            ${{ runner.temp }}/package-normal/manifest.json
+            ${{ runner.temp }}/package-normal-relocation/relocation.json
+          if-no-files-found: error
