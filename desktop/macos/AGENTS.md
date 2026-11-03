@@ -2,7 +2,7 @@
 
 This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
 ALL-341 private identified engine launch/control seam, and ALL-342 normal local
-startup, plus ALL-343 app reopen and safe store-conflict retry. Read the
+startup, ALL-343 app reopen and safe store-conflict retry, and ALL-344 close/Quit. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
@@ -25,9 +25,22 @@ authority; the production React UI and HTTP/SSE client remain shared.
   parent directories through the Rust owner; it opens no DB or serving lease.
 - The loopback provider and two configuration-seeding requests are disposable
   test infrastructure. They never operate on user stores or expose real keys.
-- Window close quits this preview, with bounded child cleanup before deleting
-  its profile. Consumer close/reopen/Quit, persistent preferences, signing, and distribution
-  belong to later tickets. EngineProtocol/PreviewEngine own the private bounded
+- Window close quits the disposable preview, with bounded child cleanup before
+  deleting its profile. Normal LOCAL_APP close keeps the same window/document,
+  bridge, streams and owned engine; AppInstance reopens it. AppLifecycle/AppQuit
+  own explicit native Cancel or Stop and Quit. Normal-app Quit immediately
+  declines unsettled AppKit termination requests while one asynchronous
+  confirmation/cleanup episode remains owned by AppLifecycle/AppQuit. Cancel
+  preserves work; only settled Stop requests ordinary termination again.
+  There is no outstanding terminateLater handshake or public-entry guard.
+  Preview keeps its existing NSApplication shutdown. Unknown activity requires
+  confirmation; a parent run alone never proves idle. Stop retires NativeCommands
+  and releases the WK document before PreviewEngine.stop. The engine retains its
+  existing Rust 20-second watchdog and owned 23-second fallback. A later 26-second
+  UI wait reports pending cleanup without another stop/signal, keeps
+  the original callback and shows a truthful retired-workspace failure state.
+  Persistent preferences, signing and distribution belong to later tickets.
+  EngineProtocol/PreviewEngine own the private bounded
   launch channel; it conveys identity, never API/permission authority.
 - `AppInstance` owns existing-window presentation, not singleton/store authority.
   Ordinary normal-app launches use LaunchServices reopening. `StoreConflictRetry`
