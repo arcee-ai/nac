@@ -539,8 +539,32 @@ pub fn bind_session_goal_run(
     session_id: &str,
     baseline: &GoalRunBaseline,
 ) -> Result<Option<SessionGoalRecord>> {
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let goal = bind_session_goal_run_with_connection(&transaction, session_id, baseline)?;
+    transaction.commit()?;
+    if let Some(goal) = &goal {
+        committed(path, goal, GoalChangeKind::Current);
+    }
+    Ok(goal)
+}
+command BindSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+    baseline: GoalRunBaseline = baseline.clone(),
+}
+call |command| (&command.session_id, &command.baseline)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+/// Share the exact accounting bind with occurrence admission's transaction.
+/// The outer transaction owner publishes the returned goal only after commit.
+pub(crate) fn bind_session_goal_run_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    baseline: &GoalRunBaseline,
+) -> Result<Option<SessionGoalRecord>> {
+    require_direct_session(connection, session_id)?;
     let baseline_tokens = checked_integer(baseline.billable_tokens, "run token baseline")?;
     let started_at = checked_integer(baseline.started_at_epoch_ms, "run start time")?;
     let continuation = baseline.continuation.then_some(baseline.run_id.as_str());
@@ -563,19 +587,7 @@ pub fn bind_session_goal_run(
     if changed == 0 {
         return Ok(None);
     }
-    let goal = load_with_connection(&connection, session_id)?;
-    if let Some(goal) = &goal {
-        committed(path, goal, GoalChangeKind::Current);
-    }
-    Ok(goal)
-}
-command BindSessionGoalRunCommand {
-    session_id: String = session_id.to_owned(),
-    baseline: GoalRunBaseline = baseline.clone(),
-}
-call |command| (&command.session_id, &command.baseline)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
+    load_with_connection(connection, session_id)
 }
 
 coordinated_command! {

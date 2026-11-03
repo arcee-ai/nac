@@ -18,6 +18,7 @@ use crate::types::{Message, ToolCall, ToolDefinition};
 mod compaction;
 mod dag;
 mod failed_tool_round;
+mod heartbeat;
 pub(crate) mod preview;
 mod prompt_rendering;
 mod questions;
@@ -463,6 +464,10 @@ impl Agent {
                 permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
                 task_question_answers: None,
+                heartbeat_human_request: None,
+                heartbeat_execution: false,
+                heartbeat_goal_id: None,
+                heartbeat_needs_human_action: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 command_environment: None,
                 web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
@@ -699,6 +704,8 @@ impl Agent {
         inbox_item_id: Option<i64>,
         review_intent: Option<String>,
     ) -> Result<String> {
+        self.capture_heartbeat_request(inbox_item_id, review_intent.as_deref())
+            .await;
         if let Some(goals) = &self.tool_runtime.goal_runtime {
             goals.begin_run(run_id.as_str());
         }
@@ -719,6 +726,10 @@ impl Agent {
         prompt: &str,
         session_run: Option<SessionRunPrompt<'_>>,
     ) -> Result<String> {
+        if session_run.is_none() {
+            self.tool_runtime.heartbeat_human_request = None;
+            self.bind_heartbeat_execution(None);
+        }
         let correlation =
             crate::telemetry::Correlation::session(self.tool_runtime.session_id.as_deref())
                 .with_run(session_run.as_ref().map(|run| run.run_id.as_str()));
@@ -1612,73 +1623,6 @@ impl Agent {
         Ok(Some(durable_blob))
     }
 
-    /// Stale-transcript guard for the terminal normalization paths (shared
-    /// store, issue #146): `true` when the durable transcript log holds
-    /// rows at or beyond `committed_log_len` — rows this process never
-    /// committed or adopted, so a peer must have appended them while it
-    /// held the operation lease (e.g. the previous run owner crashed and
-    /// this survivor's long-lived agent never re-restored). Deleting the
-    /// log tail from the stale in-memory length would permanently remove
-    /// those committed rows.
-    async fn durable_log_has_rows_past_own_commits(&self) -> Result<bool> {
-        let Some(sink) = &self.transcript_log else {
-            return Ok(false);
-        };
-        let from_idx = self
-            .pending_log_end
-            .unwrap_or(self.committed_log_len)
-            .max(self.committed_log_len);
-        let writer = Arc::clone(&sink.writer);
-        let session_id = sink.session_id.clone();
-        let tail = crate::store::spawn_blocking_store_caller(move || {
-            writer.read_from(&session_id, from_idx)
-        })
-        .await
-        .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
-        Ok(!tail.is_empty())
-    }
-
-    /// Adopt the durable transcript (snapshot blob ++ log tail) in memory
-    /// without deleting anything: the read-only half of
-    /// [`Agent::refresh_transcript_under_lease`] for the terminal
-    /// normalization paths, which do not hold the operation lease they
-    /// could pass down. A genuine gap is left for the next lease-held
-    /// restore or admission refresh to repair.
-    async fn reload_transcript_from_store(&mut self) -> Result<()> {
-        let Some(sink) = &self.transcript_log else {
-            return Ok(());
-        };
-        let writer = Arc::clone(&sink.writer);
-        let session_id = sink.session_id.clone();
-        let (snapshot, tail) = crate::store::spawn_blocking_store_caller(move || {
-            let snapshot = writer.read_snapshot_messages(&session_id)?;
-            let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
-            Ok::<_, anyhow::Error>((snapshot, tail))
-        })
-        .await
-        .map_err(|error| anyhow!("transcript reload task failed: {error}"))??;
-        let mut merged = snapshot;
-        let mut expected_idx = merged.len() as u64;
-        for (idx, message) in tail {
-            if idx != expected_idx {
-                return Err(anyhow!(
-                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
-                ));
-            }
-            merged.push(message);
-            expected_idx = expected_idx
-                .checked_add(1)
-                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
-        }
-        self.committed_log_len = merged.len() as u64;
-        self.restore_messages(merged);
-        // Failed reads or validation must leave recovery tokens available
-        // for another reload rather than letting cleanup delete unseen rows.
-        self.direct_inbox_append_start = None;
-        self.steering_append_pending = false;
-        Ok(())
-    }
-
     /// Trim a dangling tool turn from the transcript AND the transcript log
     /// tail. Shared by the run-failure path
     /// (`SessionService::finish_run_once`) and the cancel path
@@ -1786,31 +1730,6 @@ impl Agent {
             reasoning_field: None,
         }])
         .await
-    }
-
-    async fn append_cancellation_tail(&mut self, mut messages: Vec<Message>) -> Result<()> {
-        let partial = self.take_partial_stream();
-        if !partial.is_empty() {
-            messages.push(Message::Assistant {
-                content: (!partial.text.is_empty()).then_some(partial.text),
-                reasoning_text: (!partial.reasoning.is_empty()).then_some(partial.reasoning),
-                reasoning_details: None,
-                tool_calls: None,
-                duration_ms: None,
-                model_origin: Some(self.client.model_origin()),
-                reasoning_field: None,
-            });
-        }
-        messages.push(Message::Assistant {
-            content: Some(RUN_CANCELLED_MARKER.to_string()),
-            reasoning_text: None,
-            reasoning_details: None,
-            tool_calls: None,
-            duration_ms: None,
-            model_origin: None,
-            reasoning_field: None,
-        });
-        self.push_terminal_batch_and_log(messages).await
     }
 
     fn clear_partial_stream(&self) {
@@ -1957,7 +1876,12 @@ impl Agent {
     async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
         if self.direct_primary {
             match self.append_pending_direct_inbox().await {
-                Ok(count) => Ok(count),
+                Ok(count) => {
+                    if count > 0 {
+                        self.refresh_heartbeat_request_from_guidance().await;
+                    }
+                    Ok(count)
+                }
                 Err(error) => {
                     self.emit(AgentEvent::Error {
                         thread_name: self.thread_name.clone(),

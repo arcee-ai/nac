@@ -101,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 160);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 164);
 for (const resource of [
   "GET /sessions/{session_id}/questions",
   "GET /sessions/{session_id}/questions/{request_id}",
@@ -138,6 +138,13 @@ assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
+assert.equal("controlHeartbeat" in api, false);
+for (const [operation, owner] of [
+  ["GET /heartbeats", "private:standalone Local heartbeat inventory"],
+  ["GET /sessions/{session_id}/heartbeats/{schedule_id}", "private:standalone passive heartbeat history"],
+  ["POST /sessions/{session_id}/heartbeats/control", "private:standalone human heartbeat control"],
+  ["POST /sessions/{session_id}/heartbeats/attention", "private:standalone human result acknowledgement"],
+]) assert.equal(NAC_API_SURFACE[operation], owner);
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {

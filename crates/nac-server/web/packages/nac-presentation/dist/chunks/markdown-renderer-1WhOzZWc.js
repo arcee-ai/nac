@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Cr as r, Fn as i, Ln as a, Pr as o, Wi as s, hi as c, l, mi as u, n as d, qi as f, r as p, t as m, u as h, wr as g, xr as _ } from "./PerfProfiler-mO5LozGr.js";
+import { Fn as r, Gi as i, Ji as a, Jr as o, Rn as s, Zr as c, l, n as u, qi as d, r as f, si as p, t as m, u as h, vr as g, yr as _ } from "./PerfProfiler-fsvoiW1T.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6521,13 +6521,13 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-0kg0YoaD.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-DnnfOo5c.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
 }
 function _l(e) {
-	return g(e) ? e : r(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
+	return a(e) ? e : d(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
 }
 function vl(e) {
 	if (!E(e)) return "plaintext";
@@ -6536,11 +6536,11 @@ function vl(e) {
 }
 function yl({ children: e }) {
 	let t = _l(e).replace(/\n$/, ""), n = vl(e);
-	return /* @__PURE__ */ M(u, {
+	return /* @__PURE__ */ M(g, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: c.Small,
+		size: _.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6558,18 +6558,18 @@ function bl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function xl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: s, selectFile: c, revealSidePanel: u } = a().stores.sessionLayoutStore, { api: p } = a(), m = A(), g = te(), _ = f(), v = o(), y = ee(), b = h(g.pathname), x = b ? y.getQueryData(i.sessionSnapshot(b)) : void 0, S = d(e, [
+	let { selectRevision: i, selectFileListing: a, selectFile: o, revealSidePanel: d } = p().stores.sessionLayoutStore, { api: f } = p(), m = A(), g = te(), _ = c(), v = s(), y = ee(), b = h(g.pathname), x = b ? y.getQueryData(r.sessionSnapshot(b)) : void 0, S = u(e, [
 		x?.workspace?.host_root,
 		x?.metadata.workspace_host_path,
 		x?.metadata.cwd
 	]), C = (e) => {
-		b && (r(null), s("tree"), c(e), u(_), m(l.session(b, "files")));
+		b && (i(null), a("tree"), o(e), d(_), m(l.session(b, "files")));
 	};
 	return S.kind === "workspace" && b ? /* @__PURE__ */ M("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), p.openWorkspacePath(b, S.path).catch((e) => {
+			e.preventDefault(), f.openWorkspacePath(b, S.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || v.error(`Could not open file: ${t}`), C(S.path);
 			});
@@ -6597,7 +6597,7 @@ function Sl(e) {
 			children: /* @__PURE__ */ M("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = g(e) ? e : "";
+			let t = a(e) ? e : "";
 			return t ? /* @__PURE__ */ M("style", {
 				href: `mathjax-${bl(t)}`,
 				precedence: "mathjax",
@@ -6642,7 +6642,7 @@ var Cl = Sl(!0), wl = Sl(!1);
 function Tl({ source: e, streaming: t }) {
 	let n = al(e), r = t ? Cl : wl, i = /* @__PURE__ */ M(Ha, {
 		remarkPlugins: ml,
-		urlTransform: p,
+		urlTransform: f,
 		components: r,
 		children: n.source
 	});
@@ -6655,18 +6655,18 @@ function Tl({ source: e, streaming: t }) {
 	}) : i;
 }
 function El({ source: e, components: t }) {
-	let n = a(), r = O(gl(n.assets?.mathjaxFontUrl)), i = s(), o = n.assets ? {
+	let n = p(), r = O(gl(n.assets?.mathjaxFontUrl)), i = o(), s = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = g(e) ? e : "";
+			let t = a(e) ? e : "";
 			return t && n.id !== void 0 ? /* @__PURE__ */ M("style", { children: nl(t, n.id, i) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ M(Ha, {
 		remarkPlugins: r.remark,
 		rehypePlugins: r.rehype,
-		urlTransform: p,
-		components: o,
+		urlTransform: f,
+		components: s,
 		children: e
 	});
 }
@@ -6690,13 +6690,13 @@ function kl(e) {
 	return !1;
 }
 var Al = D(function({ children: e, streaming: t = !1 }) {
-	_("Markdown");
+	i("Markdown");
 	let [n, r] = k(t);
 	t && !n && r(!0);
-	let i = t || n && !kl(e);
+	let a = t || n && !kl(e);
 	return /* @__PURE__ */ M(m, {
 		id: "markdown",
-		children: i ? el(e).map((e, t) => /* @__PURE__ */ M(Dl, { source: e }, t)) : /* @__PURE__ */ M(Tl, {
+		children: a ? el(e).map((e, t) => /* @__PURE__ */ M(Dl, { source: e }, t)) : /* @__PURE__ */ M(Tl, {
 			source: e,
 			streaming: !1
 		})

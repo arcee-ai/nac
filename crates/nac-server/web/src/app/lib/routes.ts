@@ -12,6 +12,7 @@ export const SESSION_PANELS = [
   "delegated",
   "files",
   "terminal",
+  "heartbeats",
   "worksets",
   "history",
 ] as const;
@@ -27,6 +28,7 @@ export const SESSION_PANEL_LABEL = {
   delegated: "Subagents",
   files: "Files",
   terminal: "Terminal",
+  heartbeats: "Heartbeats",
   worksets: "Worksets",
   history: "History",
 } satisfies Record<SessionPanel, string>;

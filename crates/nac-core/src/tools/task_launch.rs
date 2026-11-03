@@ -18,6 +18,8 @@ pub(crate) struct ListProjectsTool;
 pub(crate) struct LaunchTaskTool;
 pub(crate) struct TaskLaunchStatusTool;
 
+const HEARTBEAT_LAUNCH_DENIAL: &str = "an automatic heartbeat cannot create a new conversation";
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProjectsInput {
@@ -174,13 +176,17 @@ impl NativeTool for LaunchTaskTool {
     ) -> Result<Vec<PermissionResource>, ToolResult> {
         caller(services)?;
         // Concrete destination and path are authorized after read-only resolution below.
-        Ok(vec![PermissionResource::new(
+        let mut resource = PermissionResource::new(
             "task_launch",
             format!(
                 "project:{}",
                 input.project_id.as_deref().unwrap_or("current")
             ),
-        )])
+        );
+        if services.runtime.heartbeat_execution {
+            resource = resource.with_hard_denial(HEARTBEAT_LAUNCH_DENIAL);
+        }
+        Ok(vec![resource])
     }
     fn execute<'a>(
         &'a self,
@@ -193,6 +199,13 @@ impl NativeTool for LaunchTaskTool {
                 Ok(c) => c,
                 Err(e) => return e,
             };
+            // Typed native handles can enter execution without prepared policy.
+            if services.runtime.heartbeat_execution {
+                super::heartbeat::record_denial(services).await;
+                return error(format!(
+                    "permission denied for launch_task: {HEARTBEAT_LAUNCH_DENIAL}"
+                ));
+            }
             let controller = match task_launch_control::controller_for(&services.runtime.store_path)
             {
                 Ok(c) => c,

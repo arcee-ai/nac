@@ -461,12 +461,30 @@ test("native coordinator answers only exact authorized information and does not 
     harness.provider.requests.filter((entry) => entry.matchedStep === "answered-information"),
   ).toHaveLength(0);
   guidanceGate.release();
+  // The guidance run can publish idle before admitting the queued answer.
+  // Observe this exact durable receipt before waiting for its run to finish.
+  await expect
+    .poll(async () => {
+      const response = await request.get(
+        `${harness.baseUrl}/sessions/${peer}/questions/known-branch`,
+      );
+      expect(response.ok()).toBe(true);
+      const current = await response.json();
+      expect(current.request).toEqual(question.request);
+      expect(current.answer).toEqual(queued.answer);
+      return current.continuation_state;
+    })
+    .toBe("delivered");
   await waitForRunIdle(request, harness, peer);
   const resolved = (
     await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
   )[0];
   expect(resolved.status).toBe("answered");
   expect(resolved.continuation_state).toBe("delivered");
+  expect(resolved.answer).toEqual(queued.answer);
+  expect(
+    harness.provider.requests.filter((entry) => entry.matchedStep === "answered-information"),
+  ).toHaveLength(1);
   const permissions = await (
     await request.get(`${harness.baseUrl}/sessions/${peer}/permissions`)
   ).json();

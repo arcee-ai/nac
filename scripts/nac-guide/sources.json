@@ -180,6 +180,25 @@
     "sections": []
   },
   {
+    "document_id": "heartbeats",
+    "source_path": "docs/heartbeats.md",
+    "title": "Same-chat interval heartbeats",
+    "sections": [
+      {
+        "section_id": "scheduling-and-control",
+        "heading": "Scheduling and control"
+      },
+      {
+        "section_id": "limits-and-retained-history",
+        "heading": "Limits and retained history"
+      },
+      {
+        "section_id": "historical-measurements",
+        "heading": "Historical measurements"
+      }
+    ]
+  },
+  {
     "document_id": "retained-tasks",
     "source_path": "docs/usage/retained-tasks.md",
     "title": "Retained tasks and workspace ownership",

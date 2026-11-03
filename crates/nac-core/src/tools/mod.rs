@@ -186,7 +186,8 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 26] = [
+pub(crate) mod heartbeat;
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 30] = [
     "nac_guide",
     "read",
     "write",
@@ -213,6 +214,10 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 26] = [
     "subagent",
     "subagent_status",
     "subagent_cancel",
+    "heartbeat_control",
+    "list_heartbeats",
+    "read_heartbeat",
+    "report_heartbeat",
 ];
 pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_launch",
@@ -223,7 +228,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 29] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 33] = [
     "nac_guide",
     "read",
     "write",
@@ -247,6 +252,10 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 29] = [
     "subagent",
     "subagent_status",
     "subagent_cancel",
+    "heartbeat_control",
+    "list_heartbeats",
+    "read_heartbeat",
+    "report_heartbeat",
     "orchestrator_launch",
     "orchestrator_status",
     "orchestrator_steer",
@@ -284,6 +293,10 @@ fn worker_tool_registry(
         .register(product_context::ResolveTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
+        .register(heartbeat::HeartbeatControlTool::native())
+        .register(heartbeat::ListHeartbeatsTool)
+        .register(heartbeat::ReadHeartbeatTool)
+        .register(heartbeat::ReportHeartbeatTool)
         .register(subagent::SubagentTool)
         .register(subagent::SubagentStatusTool)
         .register(subagent::SubagentCancelTool)
@@ -576,6 +589,10 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
         task_question_answers: None,
+        heartbeat_human_request: None,
+        heartbeat_execution: false,
+        heartbeat_goal_id: None,
+        heartbeat_needs_human_action: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         command_environment: None,
         web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),
