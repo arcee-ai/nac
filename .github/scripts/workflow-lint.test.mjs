@@ -230,3 +230,30 @@ test("fast lane is exact-candidate, unprivileged and explicitly required on ever
     assert.throws(() => requireComplete(needs, "true", sha), /workflow-lint/);
   }
 });
+
+test("ordinary workflow command executes stack guards and propagates their failure", () => {
+  const stable = YAML.parse(fs.readFileSync(".github/workflows/stable-release.yml", "utf8"));
+  const run = stable.jobs["workflow-lint"].steps.at(-1).run;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nac-workflow-guards-"));
+  const makefile = path.join(directory, "Makefile");
+  // Keep the real guard target/recipe; stub only the lint targets that would
+  // recurse into this test. Exercise the actual workflow command through make.
+  const fixture = "include Makefile\nlint-workflows test-workflow-lint:\n\t@:\n";
+  const environment = { ...process.env, WORKFLOW_TEST_MAKEFILE: makefile };
+  // The nested suite must get its own reporter rather than inherit this test
+  // runner's child-process protocol, which would hide its behavioral output.
+  delete environment.NODE_TEST_CONTEXT;
+  const invoke = () => execFileSync("bash", ["-e", "-c",
+    `make() { command make -f "$WORKFLOW_TEST_MAKEFILE" "$@"; }\n${run}`], {
+    env: environment, encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    fs.writeFileSync(makefile, fixture);
+    assert.match(invoke(), /preview saves exact ordered heads\/base\/check evidence/);
+    fs.appendFileSync(makefile, "test-manual-stack-override:\n\t@exit 73\n");
+    assert.throws(invoke, error => error.status !== 0 && /Error 73/.test(String(error.stderr)));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
