@@ -23,7 +23,9 @@ The same complete current-candidate checks and human policy apply to bot PRs.
 Never enable auto-merge, approve on behalf of a human, use bypass credentials, or
 skip drift/security/browser/image work to land an update. CODEOWNERS and the
 metadata-only reviewer workflow use the canonical verified owner roster; one
-eligible non-author approval is required once the foundation ruleset is active.
+eligible non-author approval is required for ordinary users other than Allison.
+Allison's sole human PR-only review exception does not authorize agents or bots
+to merge or confer scanner-policy trust.
 See [required checks and rollout](required-pr-checks.md) for the still-separate
 platform qualification/activation and Allison's deliberate PR-only override.
 
