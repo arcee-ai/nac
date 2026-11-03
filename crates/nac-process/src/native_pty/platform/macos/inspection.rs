@@ -124,9 +124,19 @@ impl Probe for Native {
         // SAFETY: getsid takes a numeric PID and has no pointer preconditions.
         let sid = unsafe { libc::getsid(pid) };
         if sid >= 0 {
+            #[cfg(test)]
+            super::signal_diagnostics::record(pid, || format!("stage=metadata.getsid sid={sid}"));
             Ok(Some(sid))
         } else {
             let error = io::Error::last_os_error();
+            #[cfg(test)]
+            super::signal_diagnostics::record(pid, || {
+                format!(
+                    "stage=metadata.getsid error_kind={:?} raw_errno={:?}",
+                    error.kind(),
+                    error.raw_os_error()
+                )
+            });
             if error.raw_os_error() == Some(libc::ESRCH) {
                 Ok(None)
             } else {
@@ -152,15 +162,29 @@ fn read_into<T>(
     // in the qualified kernel; any MAC/runtime denial remains an error.
     let returned = unsafe { libc::proc_pidinfo(pid, flavor, 1, record.as_mut_ptr().cast(), size) };
     if returned == size {
+        #[cfg(test)]
+        super::signal_diagnostics::record(pid, || {
+            format!(
+                "stage=metadata.proc_pidinfo flavor={flavor} returned={returned} expected={size}"
+            )
+        });
         return Ok(true);
     }
     if returned <= 0 {
         let error = io::Error::last_os_error();
+        #[cfg(test)]
+        super::signal_diagnostics::record(pid, || {
+            format!("stage=metadata.proc_pidinfo flavor={flavor} returned={returned} expected={size} error_kind={:?} raw_errno={:?}", error.kind(), error.raw_os_error())
+        });
         if error.raw_os_error() == Some(libc::ESRCH) {
             return Ok(false);
         }
         return Err(error);
     }
+    #[cfg(test)]
+    super::signal_diagnostics::record(pid, || {
+        format!("stage=metadata.proc_pidinfo invalid_size flavor={flavor} returned={returned} expected={size}")
+    });
     Err(io::Error::new(
         io::ErrorKind::InvalidData,
         "unsupported native process identity record size",

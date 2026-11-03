@@ -167,7 +167,7 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
-    for _ in 0..48 {
+    for _iteration in 0..48 {
         let pid = root.job().unwrap();
         root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
         assert!(!root.authority.leader_exited().unwrap());
@@ -180,7 +180,12 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
                 .1,
         );
         let weak = Arc::downgrade(&identity);
+        #[cfg(target_os = "macos")]
+        let signal_trace =
+            super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, _iteration);
         identity.signal(libc::SIGKILL).unwrap();
+        #[cfg(target_os = "macos")]
+        drop(signal_trace);
         drop(identity);
         root.until(|authority| {
             authority.members.is_empty() && authority.pending_capture.is_empty()

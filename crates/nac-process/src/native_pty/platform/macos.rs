@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 mod census;
 mod discovery;
 mod inspection;
+#[cfg(test)]
+pub(super) mod signal_diagnostics;
 pub(in crate::native_pty) use census::aligned_delay;
 pub(super) use discovery::Discovery;
 
@@ -120,14 +122,33 @@ impl Identity {
     }
 
     pub fn signal(&self, signal: i32) -> io::Result<bool> {
+        #[cfg(test)]
+        signal_diagnostics::record(self.pid, || {
+            format!(
+                "stage=capability.resolve.begin retained_uniqueid={} signal={signal}",
+                self.uniqueid
+            )
+        });
         self.signal_with(signal, signal_function()?)
     }
 
     fn signal_with(&self, signal: i32, send: AuditSignal) -> io::Result<bool> {
+        #[cfg(test)]
+        signal_diagnostics::record(self.pid, || "stage=signal_with.enter".to_owned());
         for _ in 0..3 {
+            #[cfg(test)]
+            signal_diagnostics::record(self.pid, || "stage=inspect.begin".to_owned());
             let Some(current) = inspect(self.pid)? else {
                 return Ok(false);
             };
+            #[cfg(test)]
+            signal_diagnostics::record(self.pid, || {
+                format!(
+                    "stage=inspect.snapshot retained_uniqueid={} current_uniqueid={} version={} parent_uniqueid={} ppid={} sid={} live={}",
+                    self.uniqueid, current.unique.uniqueid, current.unique.version,
+                    current.unique.parent_uniqueid, current.ppid, current.sid, current.live,
+                )
+            });
             if current.unique.uniqueid != self.uniqueid || !current.live {
                 return Ok(false);
             }
@@ -137,9 +158,20 @@ impl Identity {
             let mut key = [0u32; 8];
             key[5] = self.pid as u32;
             key[7] = current.unique.version as u32;
+            #[cfg(test)]
+            signal_diagnostics::record(self.pid, || {
+                format!(
+                    "stage=audit.begin token_pid={} token_version={} signal={signal}",
+                    key[5], key[7]
+                )
+            });
             // SAFETY: runtime symbol has the installed libproc signature; key
             // is initialized audit-token-sized storage valid for this call.
             let result = unsafe { send(&key, signal) };
+            #[cfg(test)]
+            signal_diagnostics::record(self.pid, || {
+                format!("stage=audit.result return_code={result}")
+            });
             if result == 0 {
                 return Ok(true);
             }
