@@ -37,6 +37,7 @@ pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_launch;
 mod task_questions;
 pub(crate) use task_discovery::url_component;
 mod task_wait;
@@ -185,7 +186,7 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 23] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 26] = [
     "nac_guide",
     "read",
     "write",
@@ -196,6 +197,9 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 23] = [
     "write_stdin",
     "read_command_output",
     "list_executions",
+    "list_projects",
+    "launch_task",
+    "task_launch_status",
     "find_tasks",
     "read_task",
     "wait_tasks",
@@ -219,7 +223,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 26] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 29] = [
     "nac_guide",
     "read",
     "write",
@@ -230,6 +234,9 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 26] = [
     "write_stdin",
     "read_command_output",
     "list_executions",
+    "list_projects",
+    "launch_task",
+    "task_launch_status",
     "find_tasks",
     "read_task",
     "wait_tasks",
@@ -262,6 +269,9 @@ fn worker_tool_registry(
         .register(terminal_tools::WriteStdinTool)
         .register(terminal_tools::ReadCommandOutputTool)
         .register(execution_observation::ListExecutionsTool)
+        .register(task_launch::ListProjectsTool)
+        .register(task_launch::LaunchTaskTool)
+        .register(task_launch::TaskLaunchStatusTool)
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
         .register(task_wait::WaitTasksTool)
@@ -536,10 +546,12 @@ mod tests;
 /// Create a `ToolRuntime` suitable for unit tests.  Uses the current
 /// directory as the workspace, an empty store path, a dummy session id,
 /// and no MCP / skills / worker executable.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
+    let backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
+        workspace_cwd: workspace_cwd.clone(),
+    });
     ToolRuntime {
         product_context: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),

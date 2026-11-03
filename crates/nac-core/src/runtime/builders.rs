@@ -95,6 +95,31 @@ pub async fn prepare_retained_task_run_config(
     .await
 }
 
+/// Prepare the exact session identity reserved by an independent native launch.
+pub async fn prepare_native_task_run_config(
+    options: RunOptions,
+    config: &NacConfig,
+    launch: &crate::task_launch_control::NativeTaskLaunch,
+) -> Result<PreparedSessionRunConfig> {
+    anyhow::ensure!(
+        !launch.retained
+            && options.ssh.host().is_none()
+            && !options.sandbox.sandbox
+            && !options.sandbox.explicit_sandbox_config_flags_present()
+            && options.sandbox.internal_mounts.is_empty()
+            && options.workspace_cwd == launch.source_cwd,
+        "native launch requires its exact saved Local workspace"
+    );
+    prepare_run_config_inner(
+        options,
+        config,
+        Some(launch.project_id.clone()),
+        sessions::SessionBehavior::Direct,
+        Some(launch.session_id.clone()),
+    )
+    .await
+}
+
 async fn prepare_run_config_inner(
     options: RunOptions,
     config: &NacConfig,
