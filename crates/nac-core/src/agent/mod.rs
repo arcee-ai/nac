@@ -20,6 +20,7 @@ mod dag;
 mod failed_tool_round;
 pub(crate) mod preview;
 mod prompt_rendering;
+mod questions;
 mod tool_exec;
 mod transcript_commit;
 mod transcript_state;
@@ -461,6 +462,7 @@ impl Agent {
                 permission_reviewer: None,
                 permission_rules: Arc::new(config.permission_rules.clone()),
                 goal_runtime,
+                task_question_answers: None,
                 command_environment: None,
                 web_credential: None,
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
@@ -1122,6 +1124,9 @@ impl Agent {
                 .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
+            }
+            if let Some(content) = self.yield_for_question(&accumulated_usage).await? {
+                return Ok(content);
             }
             if let Some(reason) = self
                 .tool_runtime
