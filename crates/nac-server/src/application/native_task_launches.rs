@@ -392,6 +392,9 @@ impl TaskLaunchController for NativeTaskLaunchController {
                         "preparing_runtime"
                     };
                     let launch = phase(&manager, &id, phase_name, None).await?;
+                    if launch.phase == "cancelled" {
+                        return receipt(&manager, caller_id, &receipt_id).await;
+                    }
                     if launch.retained {
                         let worker = manager.clone();
                         let (acknowledged, acknowledgement) = tokio::sync::oneshot::channel();

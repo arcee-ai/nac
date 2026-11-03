@@ -281,6 +281,14 @@ pub fn update_task_launch(path: &Path, request_id: &str, phase: TaskLaunchPhase,
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let existing = load(&tx, request_id)?.ok_or_else(|| anyhow!("launch not found"))?;
+    // Native cancellation and the next retained preparation phase share this
+    // writer boundary. Cancellation after reservation must fence Git/runtime
+    // admission too, rather than waiting for the final publication check.
+    let native_cancelled: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 AND phase='cancelled')",
+        [request_id], |row| row.get(0),
+    )?;
+    let phase = if native_cancelled { TaskLaunchPhase::Cancelled } else { phase };
     // Cancellation wins over late preparation/error responses. Publication is
     // only performed by the session creation transaction below.
     if existing.phase != TaskLaunchPhase::Cancelled && (existing.phase != TaskLaunchPhase::Ready || phase == TaskLaunchPhase::Cancelled) {

@@ -54,6 +54,120 @@ async fn settle(manager: &SessionManager) {
     .unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_retained_retry_cancellation_fences_each_preparation_boundary() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for boundary in 0..3 {
+        let root = temp_root("native_retained_cancel_retry");
+        let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+        let manager = test_manager(&root);
+        let (controller, caller, input) = fixture_context(&root, &manager, true).await;
+        let target = controller.resolve(&caller, &input).await.unwrap();
+        let reserved = nac_core::store::reserve_native_task_launch(
+            &manager.inner.store_path,
+            &caller,
+            &target.project_id,
+            &target.cwd,
+            true,
+            input.clone(),
+        )
+        .unwrap();
+        nac_core::store::update_native_task_launch(
+            &manager.inner.store_path,
+            &input.request_id,
+            "failed",
+            Some("interrupted preparation".into()),
+        )
+        .unwrap();
+        let conn = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+        let gate = if boundary == 1 {
+            let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+            *manager
+                .inner
+                .task_preparations
+                .source_resolution
+                .lock()
+                .unwrap() = Some(gate.clone());
+            Some(gate)
+        } else {
+            conn.execute_batch(if boundary == 0 {
+                // The phase command must return the cancellation committed in
+                // its own transaction, not keep its earlier failed snapshot.
+                "CREATE TRIGGER cancel_native_retry AFTER UPDATE ON native_task_launches
+                 WHEN OLD.phase='failed' AND NEW.phase='reserved'
+                 BEGIN UPDATE native_task_launches SET phase='cancelled' WHERE request_id=NEW.request_id; END;"
+            } else {
+                // Shared reservation won, but cancellation wins before the
+                // next phase admits workspace preparation.
+                "CREATE TRIGGER cancel_native_reservation AFTER INSERT ON task_launches
+                 BEGIN UPDATE native_task_launches SET phase='cancelled' WHERE request_id=NEW.request_id; END;"
+            }).unwrap();
+            None
+        };
+        drop(conn);
+        let worker = manager.clone();
+        let owner = caller.clone();
+        let intent = input.clone();
+        let launching = tokio::spawn(async move {
+            let controller = NativeTaskLaunchController::new(&worker);
+            start(&controller, &owner, intent, &worker.inner.store_path).await
+        });
+        if let Some(gate) = gate {
+            tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+                .await
+                .unwrap();
+            nac_core::store::update_native_task_launch(
+                &manager.inner.store_path,
+                &input.request_id,
+                "cancelled",
+                None,
+            )
+            .unwrap();
+            gate.resume.notify_one();
+        }
+        let acknowledgement = launching.await.unwrap();
+        settle(&manager).await;
+        let status = controller.status(&caller, &input.request_id).await.unwrap();
+        assert_eq!(
+            status.launch.phase, "cancelled",
+            "boundary {boundary}: {status:?}"
+        );
+        assert_eq!(status.launch.session_id, reserved.session_id);
+        assert!(status.launch.first_input_id.is_none());
+        assert!(
+            !sessions::session_exists(&manager.inner.store_path, &reserved.session_id).unwrap()
+        );
+        assert!(nac_core::store::list_session_inbox(
+            &manager.inner.store_path,
+            &reserved.session_id
+        )
+        .unwrap()
+        .is_empty());
+        if boundary < 2 {
+            assert_eq!(acknowledgement.launch.phase, "cancelled");
+            assert!(
+                status.retained_launch.is_none(),
+                "cancelled intent reserved retained work"
+            );
+            assert!(nac_core::store::load_project_git_source(
+                &manager.inner.store_path,
+                &target.project_id
+            )
+            .unwrap()
+            .is_none());
+        } else {
+            let retained = status.retained_launch.unwrap();
+            assert_eq!(retained.phase, nac_core::store::TaskLaunchPhase::Cancelled);
+            assert!(
+                !retained.workspace_path.exists(),
+                "cancelled admission prepared a worktree"
+            );
+        }
+        stop(&manager).await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 async fn stop(manager: &SessionManager) {
     manager.stop_local_run_admission().await;
     manager.cancel_local_active_runs_for_shutdown().await;

@@ -20,6 +20,10 @@ pub(crate) fn reserved_identity(
         return Ok(None);
     };
     anyhow::ensure!(
+        record.phase != "cancelled",
+        "native launch was cancelled before retained reservation"
+    );
+    anyhow::ensure!(
         record.retained
             && record.source_cwd == std::fs::canonicalize(&source.project_cwd)?
             && record.project_id == request.project_id
