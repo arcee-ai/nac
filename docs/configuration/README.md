@@ -8,3 +8,4 @@
 - [Providers and logins](credentials.md)
 - [Slack MCP acceptance fixture](slack-mcp-acceptance.md)
 - [Data stores](data-stores.md)
+- [Mac app updates and removal](mac-app-updates.md)
