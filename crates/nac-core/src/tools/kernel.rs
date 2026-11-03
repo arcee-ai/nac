@@ -200,11 +200,12 @@ async fn execution_deadline(
         tokio::time::sleep(budget).await;
         return;
     };
-    let changed = timing
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .changed
-        .clone();
+    let changed = Arc::clone(
+        &timing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .changed,
+    );
     loop {
         let notified = changed.notified();
         tokio::pin!(notified);
