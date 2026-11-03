@@ -124,7 +124,6 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
         rememberRoute()
         let pinned = app.engine.receipt
         let permitted = wake || reloadAttempts < (automatic ? 1 : 3)
-        if permitted && !wake { reloadAttempts += 1 }
         let expected = next()
         let retirement = app.beginWorkspaceRetirement()
         app.showShutdownStatus(message + "\n\nWork may still be running. Previous commands and terminal input will not be resent.")
@@ -144,6 +143,9 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
                 guard self.app.baseURL != nil else {
                     throw PreviewError.message("The engine is still starting. Its initial workspace will open after readiness.")
                 }
+                // Waiting for the old view to release is not an attempt to
+                // recover it. Keep failed readiness/replacement work bounded.
+                if !wake { self.reloadAttempts += 1 }
                 try await WorkspaceReadiness.check(pinned)
                 guard self.current(expected), self.sameEngine(pinned) else { return }
                 guard self.app.canRecoverWorkspace else {
@@ -207,7 +209,6 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
 
     private func performRestart() {
         rememberRoute()
-        restartAttempts += 1
         engineStateLost = true
         let expected = next()
         let retirement = app.beginWorkspaceRetirement()
@@ -218,6 +219,7 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
             do {
                 try await retirement.wait()
                 guard self.current(expected), self.app.canRecoverWorkspace else { return }
+                self.restartAttempts += 1
                 try await self.app.restartOwnedEngine()
             } catch {
                 if self.current(expected) { self.unavailable(error.localizedDescription) }
