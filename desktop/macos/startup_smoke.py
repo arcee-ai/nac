@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real relocated LOCAL_APP / system WKWebView startup qualification."""
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -38,6 +39,34 @@ class Catalog(BaseHTTPRequestHandler):
         pass
 
 
+@contextmanager
+def startup_profile(evidence, relocated, retained):
+    """Keep private roots in custody until existing exact-owner cleanup settles."""
+    root = Path(tempfile.mkdtemp(prefix='nac-finder-profile-')).resolve()
+    failure = None
+    try:
+        yield root
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            record = json.loads(evidence.read_text())
+            if (not isinstance(record, dict)
+                    or type(record.get('app_pid')) is not int or record['app_pid'] <= 0
+                    or type(record.get('engine_pid')) is not int or record['engine_pid'] < 0):
+                raise RuntimeError('Incomplete startup ownership record; cleanup is unproven')
+            cleanup_failed_case(evidence, relocated)
+            shutil.rmtree(root)
+        except BaseException as error:
+            retained.append(root)
+            diagnostic = f'Startup cleanup unproven; retained profile {root} and app {relocated}: {error}'
+            print(diagnostic, file=sys.stderr)
+            if failure is None:
+                raise
+            failure.add_note(diagnostic)
+
+
 def main():
     app, destination = (Path(value).resolve() for value in sys.argv[1:])
     destination.mkdir(parents=True, exist_ok=True)
@@ -71,7 +100,9 @@ def main():
     provider_url = json.loads(provider.stdout.readline())['base_url']
     results = []
     try:
-        with tempfile.TemporaryDirectory(prefix='nac-finder-relocation-') as relocation:
+        relocation = Path(tempfile.mkdtemp(prefix='nac-finder-relocation-')).resolve()
+        retained_profiles = []
+        try:
             relocated = Path(relocation).resolve() / 'Moved app folder with spaces' / app.name
             shutil.copytree(app, relocated)
             scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
@@ -80,8 +111,7 @@ def main():
             for scenario in scenarios:
                 case = destination / scenario
                 case.mkdir(exist_ok=True)
-                with tempfile.TemporaryDirectory(prefix='nac-finder-profile-') as temporary:
-                    root = Path(temporary).resolve()
+                with startup_profile(case / 'result.json', relocated, retained_profiles) as root:
                     home, workspace = root / 'home with spaces', root / 'workspace with spaces'
                     home.mkdir(mode=0o700)
                     workspace.mkdir(mode=0o700)
@@ -172,12 +202,19 @@ def main():
                             record['profile_cleaned_by_runner'] = True
                             record['screen_locked'] = locked
                             results.append(record)
-                        except BaseException:
-                            if opened.poll() is None:
-                                opened.terminate()
-                                opened.wait(timeout=5)
-                            cleanup_failed_case(evidence, relocated)
+                        except BaseException as failure:
+                            try:
+                                if opened.poll() is None:
+                                    opened.terminate()
+                                    opened.wait(timeout=5)
+                            except BaseException as error:
+                                failure.add_note(f'LaunchServices wrapper cleanup failed: {error}')
                             raise
+        finally:
+            if retained_profiles:
+                print(f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', file=sys.stderr)
+            else:
+                shutil.rmtree(relocation)
         provider.stdin.write('{"kind":"finish"}\n')
         provider.stdin.flush()
         report = json.loads(provider.stdout.readline())
@@ -187,16 +224,23 @@ def main():
         assert provider.returncode == 0
         (destination / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     finally:
-        catalog.shutdown()
-        catalog.server_close()
-        if provider.poll() is None:
-            provider.stdin.close()
-            try:
-                provider.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                provider.terminate()
-                provider.wait(timeout=5)
-        provider_log.close()
+        failure = sys.exception()
+        try:
+            catalog.shutdown()
+            catalog.server_close()
+            if provider.poll() is None:
+                provider.stdin.close()
+                try:
+                    provider.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    provider.terminate()
+                    provider.wait(timeout=5)
+        except BaseException as error:
+            if failure is None:
+                raise
+            failure.add_note(f'Provider teardown failed: {error}')
+        finally:
+            provider_log.close()
 
 
 if __name__ == '__main__':
