@@ -8,7 +8,7 @@ enum NativeCommandScript {
     static let source = #"""
     (() => {
       if (window !== window.top) return;
-      let owner = null, binding = null, retired = false;
+      let owner = null, lifetime = null, binding = null, retired = false, disconnected = false;
       const same = b => binding && b && ['launch','view','document'].every(k => b[k] === binding[k]);
       const post = (kind, extra = {}) => {
         if (!binding || retired) return;
@@ -29,6 +29,17 @@ enum NativeCommandScript {
             post('retired');
           };
         },
+        connectLifetime(callback) {
+          if (retired || lifetime || typeof callback !== 'function') throw new Error('UI lifetime unavailable');
+          const connection = {callback};
+          lifetime = connection;
+          return () => { if (lifetime === connection) lifetime = null; };
+        },
+        reportConnectionLost() {
+          if (retired || disconnected || !binding || !owner) return;
+          disconnected = true;
+          post('connection_lost');
+        },
         activate(next) {
           if (retired || binding) return false;
           binding = Object.freeze({...next});
@@ -36,16 +47,19 @@ enum NativeCommandScript {
           return true;
         },
         dispatch(expected, request) {
-          if (retired || !same(expected) || !owner) return false;
+          if (retired || disconnected || !same(expected) || !owner) return false;
           let accepted = false;
           try { accepted = owner.callback(request) === true; } catch {}
           post('settled', {request: request.request, accepted});
           return true;
         },
         retire(expected) {
-          if (!same(expected)) return;
+          if (!same(expected)) return false;
           // Native already retired and may have removed the receipt handler.
-          retired = true; owner = null; binding = null;
+          const closing = lifetime;
+          retired = true; owner = null; lifetime = null; binding = null;
+          if (!closing) return false;
+          try { closing.callback(); return true; } catch { return false; }
         }
       });
       Object.defineProperty(window, '__nacDesktop', {value: port, writable: false, configurable: false});
