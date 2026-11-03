@@ -1,4 +1,9 @@
 import Foundation
+
+enum PreviewError: LocalizedError {
+    case message(String)
+    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+}
 import Darwin
 
 struct EngineIdentity: Codable, Equatable {

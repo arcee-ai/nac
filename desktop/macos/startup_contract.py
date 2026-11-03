@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Bundled-engine configuration contracts; separate from actual AppKit evidence."""
+import json
+import fcntl
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import shutil
+
+
+def parent_loss_contract(engine):
+    root = Path(tempfile.mkdtemp(prefix='nac-config-parent-loss-')).resolve()
+    nac = root / 'nac-home'
+    nac.mkdir()
+    environment = {'HOME': str(root), 'NAC_HOME': str(nac), 'PATH': '/usr/bin:/bin',
+                   'NAC_TELEMETRY': 'disabled'}
+    command = [str(engine), '__desktop-configuration', '--directory', str(root)]
+    child_gone = False
+    try:
+        with (nac / 'config.toml.lock').open('a+') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # The owning parent disappears immediately, before or after helper
+            # adoption. Either path must bound the orphan's lifetime.
+            parent = subprocess.run([sys.executable, '-c',
+                'import subprocess,sys; '
+                'p=subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); '
+                'print(p.pid)', *command], cwd=root, env=environment,
+                capture_output=True, check=True, text=True, timeout=5)
+            pid = int(parent.stdout.strip())
+            deadline = time.monotonic() + 13
+            while True:
+                observed = subprocess.run(['/bin/ps', '-ww', '-p', str(pid), '-o', 'stat=,command='],
+                                          capture_output=True, check=False, text=True, timeout=2).stdout.strip()
+                # A zombie or reused PID is no longer this live owned helper.
+                if not observed or observed.startswith('Z') or str(root) not in observed or str(engine) not in observed:
+                    child_gone = True
+                    return {'immediate_parent_loss_bounded': True}
+                assert time.monotonic() < deadline, f'Private configuration helper survived parent loss; retained {root}'
+                time.sleep(0.05)
+    finally:
+        if child_gone:
+            shutil.rmtree(root)
+        else:
+            print(f'Parent-loss fixture retained for inspection: {root}', file=sys.stderr)
+
+
+def run_contract(engine, destination):
+    results = []
+    identity = json.loads(subprocess.check_output([str(engine), '__desktop-identity'], text=True))
+    with tempfile.TemporaryDirectory(prefix='nac-finder-config-') as temporary:
+        root = Path(temporary).resolve() / 'bootstrap with spaces'
+        root.mkdir()
+        for profile in ('nac-absolute', 'nac-relative', 'xdg-absolute', 'xdg-relative', 'home'):
+            selected = root / ('home/.config/nac' if profile == 'home' else 'selected config')
+            selected.mkdir(parents=True, exist_ok=True)
+            environment = {'HOME': str(root / 'home'), 'PATH': '/usr/bin:/bin', 'NAC_TELEMETRY': 'disabled'}
+            if profile.startswith('nac'):
+                environment['NAC_HOME'] = str(selected) if profile.endswith('absolute') else 'selected config'
+                environment['XDG_CONFIG_HOME'] = str(root / 'ignored xdg')
+            elif profile.startswith('xdg'):
+                selected = root / 'selected xdg/nac'
+                selected.mkdir(parents=True, exist_ok=True)
+                environment['XDG_CONFIG_HOME'] = str(selected.parent) if profile.endswith('absolute') else 'selected xdg'
+            config = selected / 'config.toml'
+            config.write_text('[worker]\nthread_timeout_secs = 342\n')
+            # A broken credential file must not even be read by path selection.
+            (selected / 'credentials.json').write_text('credential-preflight-must-not-read')
+            legacy = selected / 'store.db'
+            legacy.write_bytes(b'legacy-canary')
+            command = [str(engine), '__desktop-configuration', '--directory', str(root)]
+
+            def invoke(extra=(), env=None):
+                response = subprocess.run(command + list(extra), cwd=root, env=env or environment,
+                                          capture_output=True, timeout=10, check=True, text=True)
+                assert len(response.stdout.encode()) <= 16384
+                assert 'credential-preflight-must-not-read' not in response.stdout + response.stderr
+                return json.loads(response.stdout)
+
+            for terminal in (False, True):
+                env = dict(environment, PATH='/custom tools:/usr/bin:/bin') if terminal else environment
+                selection = invoke(env=env)
+                filename = {'dev': 'dev.db', 'beta': 'beta.db', 'stable': 'store.db'}[identity['track']]
+                assert selection == {'status': 'selected', 'version': 1, 'root_cwd': str(root),
+                                     'store': str(selected / filename), 'track': identity['track']}, selection
+                assert invoke(['--store-path', 'override store.db'], env)['store'] == str(root / 'override store.db')
+            config.write_text('[storage]\nstore_path = "configured store.db"\n')
+            assert invoke()['store'] == str(root / 'configured store.db')
+            missing = root / 'missing parents with spaces' / profile / 'selected.db'
+            assert not missing.parent.exists()
+            assert invoke(['--store-path', str(missing)])['store'] == str(missing)
+            assert missing.parent.is_dir() and not missing.exists()
+            assert not list(missing.parent.iterdir()), 'Selection must not acquire a store lease'
+            alias = root / (profile + '-alias.db')
+            alias_target = root / 'missing alias parents' / profile / 'selected.db'
+            alias.symlink_to(alias_target)
+            assert invoke(['--store-path', str(alias)])['store'] == str(alias_target)
+            assert alias.is_symlink() and not alias_target.exists()
+            blocker = root / (profile + '-not-a-directory')
+            blocker.write_text('preserve blocking file')
+            rejected = invoke(['--store-path', str(blocker / 'store.db')])
+            assert rejected['code'] == 'store_directory', rejected
+            assert blocker.read_text() == 'preserve blocking file'
+            config.write_text('[storage]\nstore_path = [ invalid-secret-canary\n')
+            failed = invoke()
+            assert failed['status'] == 'failed' and failed['code'] == 'invalid_configuration', failed
+            assert 'invalid-secret-canary' not in json.dumps(failed)
+            assert legacy.read_bytes() == b'legacy-canary'
+            assert not (selected / 'dev.db').exists() and not (selected / 'stable.db').exists()
+            assert not (root / 'override store.db').exists() and not (root / 'configured store.db').exists()
+            config.unlink()
+            results.append({'profile': profile, 'finder_terminal': True, 'configuration_override': True,
+                            'invalid_configuration_redacted': True, 'no_store_opened': True,
+                            'no_credential_read': True, 'missing_parent_prepared_without_lease': True,
+                            'dangling_alias_target_preserved': True, 'directory_failure_actionable': True})
+        managed = invoke(env=dict(environment, NAC_MANAGED_CONFIG='must-not-be-opened'))
+        assert managed['code'] == 'managed_configuration', managed
+        # A cooperating editor can hold the normal publication lock forever.
+        # The private helper must bound that wait without creating a database.
+        with (selected / 'config.toml.lock').open('a+') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            started = time.monotonic()
+            bounded = subprocess.run(command, cwd=root, env=environment, capture_output=True, timeout=13)
+            elapsed = time.monotonic() - started
+            assert bounded.returncode == 70 and elapsed < 13, (bounded.returncode, elapsed)
+            assert not bounded.stdout and not (selected / 'dev.db').exists()
+        results.append({'publication_lock_wait_bounded': True, 'helper_exit': bounded.returncode})
+        results.append(parent_loss_contract(engine))
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps({'engine_identity': identity, 'profiles': results}, indent=2) + '\n')
+
+
+if __name__ == '__main__':
+    run_contract(Path(sys.argv[1]).resolve(), Path(sys.argv[2]))
