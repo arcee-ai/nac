@@ -68,9 +68,10 @@ def main():
             receipt['preview_definitions_excluded'] = True
             if not receipt['smoke_instrumentation']:
                 if any(Path(path).name.endswith(('Smoke.swift', 'Tests.swift')) or
-                       Path(path).name == 'InstanceObservation.swift' for path in receipt['native_source_files']):
+                       Path(path).name in {'InstanceObservation.swift', 'NativeCommandInput.swift'} for path in receipt['native_source_files']):
                     raise SystemExit('Ordinary app compiler inputs contain smoke/test instrumentation.')
-                markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap']
+                markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap',
+                           'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence']
                 binary = (app / 'Contents/MacOS/NACPreview').read_bytes()
                 if any(marker.encode() in binary for marker in markers):
                     raise SystemExit('Ordinary app binary contains disposable fixture markers.')

@@ -77,6 +77,15 @@ root as their containing block; embedded shortcuts require focus inside
 that boundary. The standalone entry explicitly owns document shortcuts and
 uses the existing document theme provider.
 
+A desktop shell may optionally inject `desktopCommands: DesktopCommandPort` into
+`NativePresentationRoot`. The port connects one UI owner for `newSession`,
+`settings` and `projects`, with monotonic bounded request IDs and retirement on
+unmount. These commands invoke existing shared dialogs/navigation and recheck
+presentation focus and modal ownership; they carry no server or input authority.
+Omit the property in browser-only or other embeddings. The macOS shell's frame,
+origin and launch/view/document fences are documented in
+[`desktop/macos/NativeCommands.md`](../../desktop/macos/NativeCommands.md).
+
 Create a new runtime for every change to any binding, even when session IDs and
 the endpoint are unchanged. Close the old instance before exposing the next;
 close on logout, revoked eligibility and host deletion. Unmounting/replacing
