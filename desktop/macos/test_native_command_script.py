@@ -150,6 +150,50 @@ class NativeCommandScriptTests(unittest.TestCase):
           assert.throws(() => port.connect(callback), /handler unavailable/);
         """)
 
+    def test_matching_retirement_closes_lifetime_once_after_fencing_dispatch(self):
+        self.run_script("""
+          let closed = 0;
+          const release = port.connectLifetime(() => {
+            closed++;
+            assert.equal(port.dispatch(binding, request), false);
+          });
+          assert.equal(port.retire({...binding, document: 'old'}), false);
+          assert.equal(closed, 0);
+          assert.equal(port.retire(binding), true);
+          assert.equal(port.retire(binding), false);
+          release();
+          assert.equal(closed, 1);
+          assert.throws(() => port.connectLifetime(() => {}), /UI lifetime unavailable/);
+        """)
+
+    def test_lifetime_cleanup_cannot_remove_a_successor_registration(self):
+        self.run_script("""
+          let closed = 0;
+          const lifetimeCallback = () => closed++;
+          const old = port.connectLifetime(lifetimeCallback);
+          old();
+          const current = port.connectLifetime(lifetimeCallback);
+          old();
+          assert.equal(port.retire(binding), true);
+          current();
+          assert.equal(closed, 1);
+        """)
+
+    def test_connection_loss_is_a_single_scoped_fact_and_blocks_commands(self):
+        self.run_script("""
+          port.reportConnectionLost();
+          port.reportConnectionLost();
+          assert.equal(receipts.map(value => value.kind).join(','), 'ready,connection_lost');
+          assert.equal(port.dispatch(binding, request), false);
+          assert.equal(calls, 0);
+          let closed = 0;
+          port.connectLifetime(() => closed++);
+          assert.equal(port.retire(binding), true);
+          port.reportConnectionLost();
+          assert.equal(closed, 1);
+          assert.equal(receipts.length, 2);
+        """)
+
 
 if __name__ == '__main__':
     unittest.main()

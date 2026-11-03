@@ -1,4 +1,5 @@
 import { readDesktopCommandPort } from "./app/features/desktop-commands/adapter";
+import { desktopReadFetch, installDesktopLifetime } from "./app/features/desktop-commands/lifetime";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createNativeRuntime } from "./app/runtime/nativeRuntime";
@@ -10,7 +11,12 @@ import { HashRouter } from "react-router-dom";
 import { ThemeProvider } from "./app/providers/ThemeProvider";
 import "./index.css";
 
-const client = createNacClient({ endpoint: location.origin, credentials: "same-origin" });
+const desktopCommands = readDesktopCommandPort(Reflect.get(window, "__nacDesktop"));
+const client = createNacClient({
+  endpoint: location.origin,
+  credentials: "same-origin",
+  fetch: desktopReadFetch(desktopCommands, globalThis.fetch.bind(globalThis)),
+});
 const scope = readStandaloneScope(document, client.transport.endpoint);
 const runtime = createNativeRuntime({
   scope: scope ?? {
@@ -32,6 +38,9 @@ const runtime = createNativeRuntime({
         removeItem: (key) => sessionStorage.removeItem(key),
       }
     : undefined,
+  // Native same-engine recovery injects a fixed restriction before any owner attaches.
+  requireTerminalAcknowledgement:
+    !!desktopCommands && Reflect.get(window, "__nacRequireTerminalAcknowledgement") === true,
   queryRetry: 1,
 });
 
@@ -58,11 +67,13 @@ if (import.meta.env.DEV) {
   });
 }
 
-createRoot(document.getElementById("root")!).render(
+const root = createRoot(document.getElementById("root")!);
+installDesktopLifetime(desktopCommands, runtime, () => root.unmount(), window);
+root.render(
   <StrictMode>
     <NativePresentationRoot
       runtime={runtime}
-      desktopCommands={readDesktopCommandPort(Reflect.get(window, "__nacDesktop"))}
+      desktopCommands={desktopCommands}
       globalKeyboard
       router={(children) => <HashRouter>{children}</HashRouter>}
       theme={(children) => <ThemeProvider>{children}</ThemeProvider>}

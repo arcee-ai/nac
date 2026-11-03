@@ -2,7 +2,8 @@
 
 This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
 ALL-341 private identified engine launch/control seam, and ALL-342 normal local
-startup, ALL-343 app reopen and safe store-conflict retry, and ALL-344 close/Quit. Read the
+startup, ALL-343 app reopen and safe store-conflict retry, ALL-344 close/Quit,
+and ALL-345 workspace recovery. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
@@ -45,6 +46,23 @@ authority; the production React UI and HTTP/SSE client remain shared.
   Persistent preferences, signing and distribution belong to later tickets.
   EngineProtocol/PreviewEngine own the private bounded
   launch channel; it conveys identity, never API/permission authority.
+- `WorkspaceRecovery` distinguishes renderer/navigation/connection loss and
+  sleep/wake from engine exit. Renderer recovery retains the verified engine;
+  explicit Restart waits through existing `PreviewEngine.stop` and reuses the
+  selected launch configuration through `AppQuit`'s existing launch fencing.
+  It adds no daemon, wake lock, process supervisor or alternative backend.
+  `WorkspaceRetirement` closes the live page runtime/React Effects, drops native
+  view ownership and waits for actual weak release before revalidation. A dead
+  renderer cannot acknowledge JavaScript disposal; document destruction remains
+  required. `WorkspaceReadiness` is a bounded read supplement to the private
+  receipt, never launch identity or authorization by itself.
+- The optional page-world lifetime registration and exact-schema
+  `connection_lost` readiness fact expose no API, input, filesystem, shell or
+  permission action. Mutations keep their existing uncertainty/readback owner;
+  only failed GETs signal connection loss. Replacement loads canonical state,
+  never pending intents or terminal bytes. Old terminal handles and process-local
+  output are not restored after engine restart. The app retains one ephemeral
+  website data store; durable preference/draft restoration remains ALL-349.
 - `AppInstance` owns existing-window presentation, not singleton/store authority.
   Ordinary normal-app launches use LaunchServices reopening. `StoreConflictRetry`
   fences each failed child's retirement; only explicit native Retry restarts the
