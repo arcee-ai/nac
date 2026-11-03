@@ -1,3 +1,5 @@
+import { DesktopCommandOwner } from "@/app/features/desktop-commands/DesktopCommandOwner";
+import type { DesktopCommandPort } from "@/app/features/desktop-commands/adapter";
 import { ProductNavigationProvider } from "@/app/features/product-context/ProductNavigationProvider";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
@@ -38,7 +40,7 @@ function DesignRoute() {
   );
 }
 
-export default function App() {
+export default function App({ desktopCommands }: { desktopCommands?: DesktopCommandPort }) {
   return (
     <UiPolicyProvider>
       <ToastProvider>
@@ -48,6 +50,7 @@ export default function App() {
           <ProjectActionsProvider>
             <ManagedHostProvider>
               <ProductNavigationProvider>
+                {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
                 <Routes>
                   <Route element={<AppShell />}>
                     <Route path="/" element={<ProjectsListPage />} />

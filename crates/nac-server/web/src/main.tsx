@@ -1,3 +1,4 @@
+import { readDesktopCommandPort } from "./app/features/desktop-commands/adapter";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createNativeRuntime } from "./app/runtime/nativeRuntime";
@@ -61,6 +62,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <NativePresentationRoot
       runtime={runtime}
+      desktopCommands={readDesktopCommandPort(Reflect.get(window, "__nacDesktop"))}
       globalKeyboard
       router={(children) => <HashRouter>{children}</HashRouter>}
       theme={(children) => <ThemeProvider>{children}</ThemeProvider>}
