@@ -71,7 +71,7 @@ install:
 ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
+test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract test-manual-stack-override
 
 .PHONY: generate-nac-guide test-nac-guide
 ## Rebuild release-local documentation from canonical maintained Markdown
@@ -143,6 +143,11 @@ test-capture-qualification:
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
 	bash scripts/check-source-size.sh
+
+.PHONY: test-manual-stack-override
+## Exercise the human-only stack override without GitHub mutations
+test-manual-stack-override:
+	node --test scripts/manual-stack-override.test.mjs
 
 .PHONY: generate-codeowners
 ## Regenerate ownership files from the verified owner roster
