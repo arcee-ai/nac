@@ -45,9 +45,11 @@ class RestartRecoveryTests(unittest.TestCase):
                        str(OWNER / 'AppLifecycle.swift'), str(swift), '-o', str(binary)]
             compiled = subprocess.run(command, text=True, capture_output=True, timeout=120, check=False)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-            executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=15, check=False)
-            self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
-            print(executed.stdout, end='')
+            for scenario in ['existing', 'retirement-reload', 'retirement-restart', 'failed-attempt-bounds']:
+                with self.subTest(scenario=scenario):
+                    executed = subprocess.run([str(binary), scenario], text=True, capture_output=True, timeout=15, check=False)
+                    self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+                    print(executed.stdout, end='')
 
 
 if __name__ == '__main__':
