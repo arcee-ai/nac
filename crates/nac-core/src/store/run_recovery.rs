@@ -146,6 +146,9 @@ pub(crate) fn clear_active_run(
     if record.run_id != run_id || record.status != RunRecoveryStatus::Active {
         return Ok(());
     }
+    if disposition == RunTerminalDisposition::Cancelled {
+        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    }
     retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
     Ok(())
 }
@@ -232,12 +235,17 @@ pub(crate) fn mark_active_run_failed(
         .map(serde_json::to_string)
         .transpose()
         .context("failed to serialize run failure")?;
-    transaction.execute(
+    let changed = transaction.execute(
         "UPDATE session_run_recovery
          SET status = 'failed', failure_json = ?3
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id, failure_json],
     )?;
+    if changed == 1
+        && !failure.is_some_and(|f| f.kind == crate::run_failure::RunFailureKind::Interrupted)
+    {
+        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    }
     Ok(())
 }
 

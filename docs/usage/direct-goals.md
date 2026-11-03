@@ -33,6 +33,13 @@ next continuation. A failed run marks it blocked. An explicit user cancellation
 accounts the partial run and pauses the goal, so cancelled work does not
 immediately restart. Resume is explicit.
 
+In plain direct sessions on Local, a pending structured question also gates
+autonomous continuation. The goal stays `active`; waiting for an answer does
+not complete, block or pause it. The question survives restart. Ordinary human
+guidance remains deliverable and leaves the question open. One exact accepted
+answer reserves one continuation through the existing inbox; it never steers
+an unrelated active run. See [structured questions](independent-tasks.md#structured-questions).
+
 Each participating run is bound to the current goal generation. Creating a
 goal during an already-running turn records the current token and time baseline,
 so earlier work is not charged to the goal. Run settlement adds only later
