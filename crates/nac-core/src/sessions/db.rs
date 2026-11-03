@@ -427,6 +427,7 @@ pub fn update_raw_session_config(
             ))),
         };
     }
+    crate::store::task_questions::invalidate_questions(&tx,&config.session_id,None)?;
     tx.commit()?;
     Ok(next_version)
 }
