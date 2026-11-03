@@ -16,6 +16,14 @@ enum NativeCommandScript {
           version: 1, kind, ...binding, ...extra
         }));
       };
+      const retireView = () => {
+        if (retired) return false;
+        // Native already retired and may have removed the receipt handler.
+        const closing = lifetime;
+        retired = true; owner = null; lifetime = null; binding = null;
+        if (!closing) return false;
+        try { closing.callback(); return true; } catch { return false; }
+      };
       const port = Object.freeze({
         connect(callback) {
           if (retired || owner || typeof callback !== 'function') throw new Error('UI owner unavailable');
@@ -55,12 +63,11 @@ enum NativeCommandScript {
         },
         retire(expected) {
           if (!same(expected)) return false;
-          // Native already retired and may have removed the receipt handler.
-          const closing = lifetime;
-          retired = true; owner = null; lifetime = null; binding = null;
-          if (!closing) return false;
-          try { closing.callback(); return true; } catch { return false; }
-        }
+          return retireView();
+        },
+        // Native-only destruction of this concrete view. No dispatch, input,
+        // engine or binding admission is granted by this disposal operation.
+        retireView
       });
       Object.defineProperty(window, '__nacDesktop', {value: port, writable: false, configurable: false});
     })();

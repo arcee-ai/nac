@@ -370,6 +370,8 @@ explicitly retries reading canonical state. A replacement is refused while the
 old WebView is still retained; the timeout does not permit bypassing its release.
 Explicit reload is bounded to three total attempts per engine incarnation,
 including the automatic attempt. Wake revalidates the engine separately.
+Waiting for the old view to release does not consume those attempts; failed
+engine-readiness checks do. The same retirement object remains the release barrier.
 
 If the engine has exited, choose **Restart Engine…** and confirm the restart.
 NAC waits for owned cleanup before launching a new engine; restart is bounded
@@ -377,6 +379,8 @@ to two attempts per app launch. Saved chat history remains available, but old
 live terminals and their process-local output cannot be restored. A pending
 Quit confirmation prevents recovery from installing another workspace; Cancel
 leaves explicit recovery available, while Stop retires it.
+The restart budget is consumed only after old-document release and current
+Quit/generation admission, including a failed attempt to restart the engine.
 
 Recovery never resends prompts, approvals, shell commands or terminal bytes.
 Review canonical history and uncertain outcomes before taking another action.
