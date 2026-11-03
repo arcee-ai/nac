@@ -43,6 +43,8 @@ mod direct_interaction;
 mod frontend_projection;
 mod manual_compaction;
 mod operation_state;
+pub(crate) mod questions;
+pub use questions::{AuthorizedQuestionInformation, TaskQuestionAnswerPort};
 mod recovery;
 mod settlement;
 mod shell_command_types;
@@ -623,6 +625,7 @@ impl FrontendSnapshotAfterWorkspaceGate {
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
+    question_owner: Option<Arc<questions::QuestionOwner>>,
     metadata: Arc<SessionMetadata>,
     /// Where git runs for this session's checkout — locally, or on the ssh host
     /// the session is working on. `None` for a sandbox with no mounted working
