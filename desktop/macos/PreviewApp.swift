@@ -61,6 +61,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
+        #if INSTANCE_SMOKE
+        InstanceSmoke.configure(webView)
+        #endif
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         webView.isHidden = true
@@ -89,9 +92,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         NSApp.activate(ignoringOtherApps: true)
         #if PREVIEW_SMOKE
         #if INSTANCE_SMOKE
-        instanceSmoke = InstanceSmoke(window: window, webView: webView, engine: engine, conflicts: storeConflictRetry,
+        instanceSmoke = InstanceSmoke(window: window, currentView: { [weak self] in self?.webView },
+            // This prefix retains one document; recovery supplies its live epoch later.
+            documentGeneration: { 0 }, engine: engine, conflicts: storeConflictRetry,
             retryButton: { [weak self] in self?.storeRetryButton }, baseURL: { [weak self] in self?.baseURL },
-            failure: { [weak self] in self?.failure })
+            failure: { [weak self] in self?.failure }, requestQuit: { NSApp.terminate(nil) })
         instanceSmoke?.start()
         #elseif LOCAL_APP
         startupSmoke = StartupSmoke(app: self)
@@ -303,6 +308,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         storeRetryButton?.isEnabled = false
         #endif
         startup?.cancel()
+        #if INSTANCE_SMOKE
+        instanceSmoke?.prepareForStop()
+        #endif
         webView.stopLoading()
         webView.isHidden = true
         status.isHidden = false
