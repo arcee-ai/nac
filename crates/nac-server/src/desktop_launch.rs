@@ -198,10 +198,16 @@ impl DesktopLaunch {
 
     /// Deliberately constant diagnostics: configuration, credentials and raw
     /// migration/provider errors never cross into a receipt or native log.
-    pub fn failed(&self) {
+    pub fn failed(&self, error: &anyhow::Error) {
+        let code = startup_failure_code(error);
+        let message = if code == "store_owned" {
+            "Another NAC process owns the selected store."
+        } else {
+            "The bundled engine could not initialize its selected store or listener."
+        };
         let _ = self.send(serde_json::json!({"kind":"failed", "version":VERSION,
-            "incarnation":self.incarnation, "stage":"startup", "code":"engine_unavailable",
-            "message":"The bundled engine could not initialize its selected store or listener."}));
+            "incarnation":self.incarnation, "stage":"startup", "code":code,
+            "message":message}));
     }
 
     pub async fn serve(&self, addr: SocketAddr, manager: SessionManager) -> Result<()> {
@@ -254,6 +260,19 @@ impl DesktopLaunch {
             bail!("desktop selected store mismatch");
         }
         result
+    }
+}
+
+fn startup_failure_code(error: &anyhow::Error) -> &'static str {
+    if error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<nac_core::sessions::StoreProcessLeaseError>(),
+            Some(nac_core::sessions::StoreProcessLeaseError::Busy)
+        )
+    }) {
+        "store_owned"
+    } else {
+        "engine_unavailable"
     }
 }
 
