@@ -489,3 +489,6 @@ export type ProductDestination = ApiSchema<"ProductDestination">;
 export type ProductDestinationInfo = ApiSchema<"ProductDestinationInfo">;
 export type ProductNavigationRequest = ApiSchema<"ProductNavigationRequest">;
 export type ProductNavigationResolution = ApiSchema<"ProductNavigationResolution">;
+export type QuestionRecord = ApiSchema<"QuestionRecord">;
+export type QuestionAnswer = ApiSchema<"QuestionAnswer">;
+export type QuestionAnswerReceipt = ApiSchema<"QuestionAnswerReceipt">;

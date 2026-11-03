@@ -38,3 +38,4 @@ pub(crate) mod task_launches;
 pub(crate) mod task_preparations;
 
 pub(crate) mod product_context;
+pub(crate) mod task_questions;
