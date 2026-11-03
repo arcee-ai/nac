@@ -157,6 +157,111 @@ impl crate::peer_goal_control::PeerGoalController for Controller {
     }
 }
 #[tokio::test]
+async fn explicit_peer_goal_approval_does_not_consume_the_execution_deadline() {
+    let runtime = runtime(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    let count = Arc::new(AtomicUsize::new(0));
+    crate::peer_goal_control::register_controller(
+        runtime.store_path.clone(),
+        Arc::new(Controller(count.clone(), runtime.store_path.clone())),
+    );
+    let broker = runtime.permission_broker.as_ref().unwrap().clone();
+    let bus = crate::events::SessionEventBus::new(Some("caller".into()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    let mut events = bus.subscribe();
+    broker.attach_event_bus(bus);
+    let running = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move {
+            let mut input = start();
+            input["_nac"] = json!({"timeout_ms":1000});
+            call(&runtime, input).await
+        })
+    };
+    let request = asked(&mut events).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1250)).await;
+    assert!(
+        !running.is_finished(),
+        "human approval consumed execution time"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(broker.pending().len(), 1);
+    broker.reply(&request.id, PermissionReply::Once).unwrap();
+    let result = running.await.unwrap();
+    assert!(!result.is_error, "{}", result.content);
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert!(broker.grants().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_peer_goal_approval_denial_and_cancellation_never_mutate() {
+    for cancel in [false, true] {
+        let runtime = runtime(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+        let count = Arc::new(AtomicUsize::new(0));
+        crate::peer_goal_control::register_controller(
+            runtime.store_path.clone(),
+            Arc::new(Controller(count.clone(), runtime.store_path.clone())),
+        );
+        let broker = runtime.permission_broker.as_ref().unwrap().clone();
+        let bus = crate::events::SessionEventBus::new(Some("caller".into()));
+        let _interactive = bus.subscribe_assistant_deltas();
+        let mut events = bus.subscribe();
+        broker.attach_event_bus(bus);
+        let running = {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { call(&runtime, start()).await })
+        };
+        let request = asked(&mut events).await;
+        if cancel {
+            runtime.command_cancellation.cancel();
+        } else {
+            broker.reply(&request.id, PermissionReply::Reject).unwrap();
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), running)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_error, "{}", result.content);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        assert!(broker.pending().is_empty());
+        assert!(
+            crate::store::load_session_goal(&runtime.store_path, "target")
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn committed_wake_failure_reports_original_admission_and_redacted_error() {
+    let runtime = runtime(Vec::new());
+    let request = crate::store::PeerGoalStart {
+        caller_session_id: "caller".into(),
+        target_session_id: "target".into(),
+        project_id: Some("project".into()),
+        request_id: "r".into(),
+        objective: "finite task".into(),
+        token_budget: Some(100),
+    };
+    let receipt =
+        crate::store::peer_goals::start_peer_goal(&runtime.store_path, &request, None, 0).unwrap();
+    let original_id = receipt.admitted_goal.goal_id.clone();
+    let result = failure(crate::peer_goal_control::PeerGoalWakeError {
+        outcome: crate::peer_goal_control::PeerGoalOutcome::Started { receipt },
+        source: anyhow::anyhow!("Authorization: Bearer wake-credential-canary"),
+    });
+    assert!(result.is_error);
+    let text = result.content.as_text().unwrap();
+    assert!(!text.contains("wake-credential-canary"));
+    let value: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(value["status"], "started");
+    assert_eq!(value["committed"], true);
+    assert_eq!(value["receipt"]["admitted_goal"]["goal_id"], original_id);
+    assert!(value["wake_error"]
+        .as_str()
+        .is_some_and(|error| !error.is_empty()));
+}
+
+#[tokio::test]
 async fn native_start_ordinary_deny_wins_and_exact_reply_issues_only_narrow_capability() {
     for denied in [true, false] {
         let runtime = runtime(if denied {

@@ -173,8 +173,16 @@ impl SessionService {
         }
         if wake {
             if let Some(lease) = lease {
-                self.start_next_direct_inbox_item_with_lease_async(lease)
-                    .await?;
+                if let Err(source) = self
+                    .start_next_direct_inbox_item_with_lease_async(lease)
+                    .await
+                {
+                    return Err(crate::peer_goal_control::PeerGoalWakeError {
+                        outcome: value,
+                        source,
+                    }
+                    .into());
+                }
             }
             // Active turns already settle through the existing continuation owner.
         }

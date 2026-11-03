@@ -110,6 +110,30 @@ pub enum PeerGoalOutcome {
     },
 }
 
+/// The exact mutation committed; failure belongs only to subsequent admission.
+/// Receipt replay remains passive and cannot supply new wake authority.
+#[derive(Debug)]
+pub(crate) struct PeerGoalWakeError {
+    pub outcome: PeerGoalOutcome,
+    pub source: anyhow::Error,
+}
+
+impl std::fmt::Display for PeerGoalWakeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "peer goal committed but continuation admission failed: {}",
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for PeerGoalWakeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
 pub type PeerGoalFuture<'a, T> = BoxFuture<'a, Result<T>>;
 
 pub trait PeerGoalController: Send + Sync + 'static {

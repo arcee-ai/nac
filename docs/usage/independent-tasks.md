@@ -282,6 +282,13 @@ and never attaches, wakes or changes a replacement objective. Once a fresh
 control invocation is admitted, the serving lifecycle retains its commit and
 existing wake path even if the caller loses the reply.
 
+If a start or resume commits but its continuation cannot be admitted, the error
+reply retains the original `started`/`resumed` identity with `committed: true`
+and a `wake_error`. Do not treat it as an uncommitted mutation or a running turn.
+An exact start replay remains passive and does not retry admission. Read the
+current goal before choosing a fresh, explicitly authorized pause/resume action;
+never replay an old receipt to wake replacement work.
+
 Pause and resume require `goal_id` and `expected_version` from a fresh read.
 Pause leaves an already-running turn/tool running and preserves its accounting;
 it prevents later autonomous continuation. Stopping a run is a separate action.

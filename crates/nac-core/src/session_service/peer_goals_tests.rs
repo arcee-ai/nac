@@ -44,6 +44,93 @@ fn start() -> AuthorizedPeerGoal {
 }
 
 #[tokio::test]
+async fn peer_goal_wake_failure_retains_committed_identity_and_passive_replay() {
+    for resume in [false, true] {
+        let (service, path) = fixture();
+        let action = if resume {
+            let goal = store::create_session_goal(&path, "target", "finite task", Some(100), None)
+                .unwrap();
+            let goal = store::update_session_goal_by_user(
+                &path,
+                "target",
+                &goal.goal_id,
+                goal.version,
+                store::UserGoalUpdate {
+                    status: Some(GoalStatus::Paused),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            request(PeerGoalAction::Resume {
+                goal_id: goal.goal_id,
+                expected_version: goal.version,
+            })
+        } else {
+            start()
+        };
+        // Admission must fail on the real cached-agent fence, after the goal
+        // transaction has committed. No synthetic store success is substituted.
+        let agent = service.agent.lock().await;
+        let error = service.control_peer_goal(action, None).await.unwrap_err();
+        let committed = error
+            .downcast_ref::<crate::peer_goal_control::PeerGoalWakeError>()
+            .expect("post-commit failure must retain the mutation result");
+        let outcome = serde_json::to_value(&committed.outcome).unwrap();
+        assert_eq!(
+            outcome["status"],
+            if resume { "resumed" } else { "started" }
+        );
+        let goal = store::load_session_goal(&path, "target").unwrap().unwrap();
+        let returned = if resume {
+            &outcome["goal"]
+        } else {
+            &outcome["receipt"]["admitted_goal"]
+        };
+        assert_eq!(returned["goal_id"], goal.goal_id);
+        assert_eq!(returned["version"], goal.version);
+        assert_eq!(goal.status, GoalStatus::Active);
+        assert!(service.active_run().is_none());
+        if !resume {
+            assert!(matches!(
+                service.control_peer_goal(start(), None).await.unwrap(),
+                PeerGoalOutcome::Replayed { .. }
+            ));
+            assert!(
+                service.active_run().is_none(),
+                "receipt retry must not wake even its original goal"
+            );
+        }
+        drop(agent);
+        store::update_session_goal_by_model(&path, "target", &goal.goal_id, GoalStatus::Complete)
+            .unwrap();
+        let replacement =
+            store::create_session_goal(&path, "target", "replacement", None, None).unwrap();
+        if resume {
+            assert!(service
+                .control_peer_goal(
+                    request(PeerGoalAction::Resume {
+                        goal_id: goal.goal_id,
+                        expected_version: goal.version
+                    }),
+                    None
+                )
+                .await
+                .is_err());
+        } else {
+            assert!(matches!(
+                service.control_peer_goal(start(), None).await.unwrap(),
+                PeerGoalOutcome::Replayed { .. }
+            ));
+        }
+        assert_eq!(
+            store::load_session_goal(&path, "target").unwrap().unwrap(),
+            replacement
+        );
+        assert!(service.active_run().is_none());
+    }
+}
+
+#[tokio::test]
 async fn peer_goals_pause_running_turn_without_cancel_and_preserve_baseline() {
     let (service, path) = fixture();
     let active = service.try_begin_run(None, "work").unwrap();
