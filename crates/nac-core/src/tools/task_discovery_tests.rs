@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 const CALLER: &str = "caller";
 
-fn session(path: &Path, session_id: &str, project_id: Option<&str>, title: &str) {
+pub(crate) fn session(path: &Path, session_id: &str, project_id: Option<&str>, title: &str) {
     crate::store::insert_test_session(path, session_id);
     let conn = crate::store::open_runtime_connection(path).unwrap();
     conn.execute(
@@ -30,7 +30,7 @@ fn location(project_id: &str) -> String {
     format!("/tmp/{project_id}")
 }
 
-fn project(path: &Path, project_id: &str) {
+pub(crate) fn project(path: &Path, project_id: &str) {
     crate::store::insert_project(
         path,
         NewProject {
@@ -48,7 +48,7 @@ fn project(path: &Path, project_id: &str) {
 }
 
 /// A direct primary in project `p1` with peers in `p1` and `p2`.
-fn runtime(rules: Vec<PermissionRule>) -> ToolRuntime {
+pub(crate) fn runtime(rules: Vec<PermissionRule>) -> ToolRuntime {
     let mut runtime = crate::tools::test_runtime();
     runtime.store_path = std::env::temp_dir()
         .join(format!("nac-task-tools-{}", uuid::Uuid::new_v4()))
@@ -78,7 +78,7 @@ fn runtime(rules: Vec<PermissionRule>) -> ToolRuntime {
     runtime
 }
 
-async fn call(runtime: &ToolRuntime, name: &str, input: Value) -> ToolResult {
+pub(crate) async fn call(runtime: &ToolRuntime, name: &str, input: Value) -> ToolResult {
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
         execute_tool(
@@ -92,13 +92,13 @@ async fn call(runtime: &ToolRuntime, name: &str, input: Value) -> ToolResult {
     .expect("task reads never wait for an approver")
 }
 
-async fn value(runtime: &ToolRuntime, name: &str, input: Value) -> Value {
+pub(crate) async fn value(runtime: &ToolRuntime, name: &str, input: Value) -> Value {
     let result = call(runtime, name, input).await;
     assert!(!result.is_error, "{}", result.content);
     serde_json::from_str(result.content.as_text().unwrap()).unwrap()
 }
 
-fn cleanup(runtime: &ToolRuntime) {
+pub(crate) fn cleanup(runtime: &ToolRuntime) {
     let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
 }
 

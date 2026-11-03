@@ -774,6 +774,10 @@ impl SessionService {
                 .map(Some)
                 .map_err(anyhow::Error::new);
         }
+        if crate::store::pending_task_question(&self.metadata.store_path, session_id)?.is_some() {
+            self.cancel_goal_retry_wake();
+            return Ok(None);
+        }
         let Some(goal) = crate::store::load_session_goal(&self.metadata.store_path, session_id)?
             .filter(|goal| goal.status == crate::store::GoalStatus::Active)
         else {

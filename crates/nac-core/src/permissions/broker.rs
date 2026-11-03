@@ -67,6 +67,22 @@ impl PermissionBroker {
         Ok(())
     }
 
+    /// Human question response is invocation-only: honor Deny, skip Ask and
+    /// never consult or mutate agent approval mode or remembered grants.
+    pub(crate) fn authorize_submitted_question_response(
+        &self,
+        submission: &crate::session_service::questions::SubmittedQuestionResponse,
+    ) -> anyhow::Result<()> {
+        let decision = self
+            .policy
+            .evaluate(std::slice::from_ref(submission.resource()), &[]);
+        anyhow::ensure!(
+            decision.effect != PermissionEffect::Deny,
+            crate::store::QuestionError::Denied
+        );
+        Ok(())
+    }
+
     pub(crate) fn session_config_version(&self) -> i64 {
         self.session_config_version
     }
@@ -108,11 +124,12 @@ impl PermissionBroker {
         self.caller_project.get().map(String::as_str)
     }
 
-    pub(crate) fn attach_event_bus(&self, bus: crate::events::SessionEventBus) {
+    pub(crate) fn attach_event_bus(self: &Arc<Self>, bus: crate::events::SessionEventBus) {
         *self
             .event_bus
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bus);
+        super::task_observation::register(self);
     }
 
     pub fn pending(&self) -> Vec<PermissionRequest> {

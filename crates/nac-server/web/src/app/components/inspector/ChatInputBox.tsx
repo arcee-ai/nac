@@ -1,3 +1,4 @@
+import { QuestionControls } from "@/app/features/questions/QuestionControls";
 import { TerminalSelectionAttachment } from "@/app/features/terminal-selection/TerminalSelectionAttachment";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { shellInput } from "@/app/features/human-shell/input";
@@ -1131,6 +1132,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         void submit();
       }}
     >
+      <QuestionControls sessionId={sessionId} enabled={behavior === "direct"} />
       <ComposerCard
         compact={isMobile}
         surface={inlineGoal ? "goal" : focused ? "focus" : undefined}

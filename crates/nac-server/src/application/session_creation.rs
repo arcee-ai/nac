@@ -471,6 +471,7 @@ impl<'a> SessionCreationApplication<'a> {
             return Err(error);
         }
         let (mut run_config, resources) = prepared.into_parts();
+        super::task_questions::bind_native(self.manager, &mut run_config);
         let creation = async {
             self.manager.bind_product_context(&mut run_config)?;
             let mut service = SessionService::from_orchestrator_run_config(run_config).service;
