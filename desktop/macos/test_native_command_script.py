@@ -166,6 +166,40 @@ class NativeCommandScriptTests(unittest.TestCase):
           assert.throws(() => port.connectLifetime(() => {}), /UI lifetime unavailable/);
         """)
 
+    def test_view_disposal_closes_activated_document_without_a_native_binding(self):
+        self.run_script("""
+          let closed = 0;
+          port.connectLifetime(() => {
+            closed++;
+            assert.equal(port.dispatch(binding, request), false);
+          });
+          // Provisional navigation cleared the native binding while this old
+          // page is still current. Disposal belongs to the concrete view.
+          assert.equal(port.retireView(), true);
+          assert.equal(port.retireView(), false);
+          assert.equal(closed, 1);
+          assert.equal(port.activate(binding), false);
+        """)
+
+    def test_view_disposal_before_activation_closes_lifetime_and_fences_late_setup(self):
+        self.run_script("""
+          const earlyWindow = {webkit: {messageHandlers: {nacUIReceipt: handler}}};
+          earlyWindow.top = earlyWindow;
+          // Install the same document-start script in a fresh unactivated page.
+          const early = (() => { const window = earlyWindow;
+        """ + self.source + """
+            return window.__nacDesktop;
+          })();
+          let closed = 0;
+          early.connectLifetime(() => closed++);
+          assert.equal(early.retireView(), true);
+          assert.equal(early.retireView(), false);
+          assert.equal(closed, 1);
+          assert.equal(early.activate(binding), false);
+          assert.throws(() => early.connect(callback), /UI owner unavailable/);
+          assert.throws(() => early.connectLifetime(() => {}), /UI lifetime unavailable/);
+        """)
+
     def test_lifetime_cleanup_cannot_remove_a_successor_registration(self):
         self.run_script("""
           let closed = 0;
