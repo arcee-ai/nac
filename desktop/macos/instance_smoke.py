@@ -23,8 +23,42 @@ import urllib.request
 
 from instance_contract import OwnedEngine, digest, snapshot
 from instance_console import record_console, require_console
+from instance_capture import CaptureRun
 
 SCENARIOS = ('simultaneous', 'cli', 'symlink', 'directory-symlink', 'crash', 'shutdown', 'app-crash', 'coexist')
+
+
+def instance_error_record(error):
+    message = str(error)
+    raw = message.encode('utf-8', errors='replace')
+    return dict(type=type(error).__name__, message=message[:512], message_bytes=len(raw),
+                message_sha256=hashlib.sha256(raw).hexdigest())
+
+
+def finish_instance_cleanup(primary, failures):
+    """Retain case-local cleanup failures without replacing an active operation error.
+
+    Owners call this after their explicit cleanup attempts. It neither discovers
+    resources nor performs/retries cleanup, and a returned call proves no settlement.
+    """
+    if not failures:
+        return
+    records, count = [], 0
+    for owner, error in failures:
+        nested = getattr(error, 'instance_cleanup_errors', [])
+        count += getattr(error, 'instance_cleanup_error_count', len(nested)) if nested else 1
+        if nested:
+            records.extend(dict(record, owner=(owner + '/' + record['owner'])[:256]) for record in nested)
+        else:
+            records.append(dict(owner=owner, **instance_error_record(error)))
+    target = primary if primary is not None else failures[0][1]
+    previous = getattr(primary, 'instance_cleanup_errors', []) if primary is not None else []
+    count += getattr(primary, 'instance_cleanup_error_count', len(previous)) if primary is not None else 0
+    target.instance_cleanup_errors = (previous + records)[:32]
+    target.instance_cleanup_error_count = count
+    target.instance_cleanup_only = primary is None or getattr(primary, 'instance_cleanup_only', False)
+    if primary is None:
+        raise target
 
 
 def verify_embedded_assets(base):
@@ -75,6 +109,10 @@ class AppJourney:
                         '--instance-output', str(output), '--instance-control', str(self.control),
                         '--instance-store', str(store.resolve())]
         self.command += options if options is not None else ['--directory', str(root), '--store-path', str(store)]
+        capture = CaptureRun.optional()
+        self.capture = capture.journey(output, bundle, root, store) if capture else None
+        if self.capture:
+            self.command += self.capture.arguments()
         self.log = output.with_suffix('.log').open('w')
 
     def observe(self):
@@ -102,7 +140,12 @@ class AppJourney:
         return value
 
     def stage(self, stage):
-        record = wait_for('Actual app stage ' + stage, lambda: (value if (value := self.read()).get('stage') == stage else None))
+        def observed():
+            if self.capture:
+                self.capture.forward(lambda: self.guard_console('capture-forward-' + stage))
+            value = self.read()
+            return value if value.get('stage') == stage else None
+        record = wait_for('Actual app stage ' + stage, observed)
         self.guard_console('observed-stage-' + stage)
         state = self.observe()
         assert len(state['apps']) == 1, state
@@ -150,24 +193,53 @@ class AppJourney:
         return record
 
     def cleanup(self):
+        failures = []
+        try:
+            if self.capture:
+                self.capture.retire()
+        except BaseException as error:
+            failures.append(('capture-retirement', error))
         # Quit only the exact live application incarnation from this bundle.
         # Never look up or signal a store owner from a PID or discovery record.
-        self.restore_prior()
-        apps = self.observe()['apps']
-        for app in apps:
+        try:
+            self.restore_prior()
+        except BaseException as error:
+            failures.append(('restore-prior', error))
+        apps = []
+        try:
+            apps = self.observe()['apps']
+        except BaseException as error:
+            failures.append(('observe-owned-app', error))
+        for index, app in enumerate(apps):
             if self.identity is not None and app != self.identity:
                 continue  # Retirement of an older journey cannot Quit its successor.
-            record_console(self.observer, self.console_checks, 'cleanup-owned-quit')
-            subprocess.run([str(self.observer), 'terminate', str(self.bundle), json.dumps(app)],
-                           check=True, capture_output=True, timeout=4)
-        wait_for('Owned fixture app cleanup', lambda: all(app != self.identity for app in self.observe()['apps'])
-                 if self.identity is not None else not self.observe()['apps'], timeout=28)
+            try:
+                record_console(self.observer, self.console_checks, 'cleanup-owned-quit')
+            except BaseException as error:
+                failures.append(('quit-console-' + str(index), error))
+            try:
+                subprocess.run([str(self.observer), 'terminate', str(self.bundle), json.dumps(app)],
+                               check=True, capture_output=True, timeout=4)
+            except BaseException as error:
+                failures.append(('quit-owned-app-' + str(index), error))
         try:
-            record = json.loads(self.output.read_text())
-        except (FileNotFoundError, json.JSONDecodeError):
-            record = {}
-        wait_for('Owned fixture engine cleanup', lambda: engine_settled(self.bundle, record.get('engine_pid')), timeout=25)
-        self.log.close()
+            wait_for('Owned fixture app cleanup', lambda: all(app != self.identity for app in self.observe()['apps'])
+                     if self.identity is not None else not self.observe()['apps'], timeout=28)
+        except BaseException as error:
+            failures.append(('observe-app-settlement', error))
+        try:
+            try:
+                record = json.loads(self.output.read_text())
+            except (FileNotFoundError, json.JSONDecodeError):
+                record = {}
+            wait_for('Owned fixture engine cleanup', lambda: engine_settled(self.bundle, record.get('engine_pid')), timeout=25)
+        except BaseException as error:
+            failures.append(('observe-engine-settlement', error))
+        try:
+            self.log.close()
+        except BaseException as error:
+            failures.append(('close-journey-log', error))
+        finish_instance_cleanup(None, failures)
 
 
 def environment(root):
@@ -211,8 +283,13 @@ def drain_barrier(owner, root):
 
         wait_for('CLI listener enters shutdown', listener_closed, timeout=4)
         return stream
-    except BaseException:
-        stream.close()
+    except BaseException as primary:
+        failures = []
+        try:
+            stream.close()
+        except BaseException as error:
+            failures.append(('drain-stream', error))
+        finish_instance_cleanup(primary, failures)
         raise
 
 
@@ -224,6 +301,7 @@ def conflict_case(scenario, app, case, root, observer, console_checks):
     require_console(observer, console_checks, 'cli-owner-launch')
     owner = OwnedEngine(binary, root, store, env)
     journey, barrier = None, None
+    primary = None
     try:
         owner.ready()
         if scenario == 'symlink':
@@ -268,32 +346,56 @@ def conflict_case(scenario, app, case, root, observer, console_checks):
                       initial_conflict=first['native_conflict'], scenario=scenario,
                       embedded_assets=assets)
         return result
+    except BaseException as error:
+        primary = error
+        raise
     finally:
+        failures = []
         if barrier:
-            barrier.close()
+            try:
+                barrier.close()
+            except BaseException as error:
+                failures.append(('conflict-barrier', error))
         if journey:
-            journey.cleanup()
-        owner.close()
+            try:
+                journey.cleanup()
+            except BaseException as error:
+                failures.append(('conflict-journey', error))
+        try:
+            owner.close()
+        except BaseException as error:
+            failures.append(('conflict-cli-owner', error))
+        finish_instance_cleanup(primary, failures)
 
 
 def workspace_case(app, case, root, observer, console_checks):
     env = environment(root)
     store = root / 'selected store.db'
     journey = AppJourney(app, case / 'result.json', root, env, store, observer, console_checks)
+    primary = None
     try:
         # Two independent ordinary LaunchServices callers overlap while launch
         # is in progress, as two Finder/Dock launches can.
         opened = []
+        open_primary = None
         try:
             for index in range(2):
                 journey.guard_console('simultaneous-launch-' + str(index))
                 opened.append(subprocess.Popen(journey.command, env=env, cwd='/', stdout=journey.log, stderr=journey.log))
             assert all(process.wait(timeout=12) == 0 for process in opened)
+        except BaseException as error:
+            open_primary = error
+            raise
         finally:
-            for process in opened:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait(timeout=3)
+            failures = []
+            for index, process in enumerate(opened):
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                        process.wait(timeout=3)
+                except BaseException as error:
+                    failures.append(('owned-open-' + str(index), error))
+            finish_instance_cleanup(open_primary, failures)
         ready = journey.stage('ready')
         assets = verify_embedded_assets(ready['base_url'])
         journey.reopen()
@@ -302,14 +404,23 @@ def workspace_case(app, case, root, observer, console_checks):
                       initial_engine_pid=ready['engine_pid'], canonical_store=str(store.resolve()),
                       embedded_assets=assets)
         return result
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        journey.cleanup()
+        failures = []
+        try:
+            journey.cleanup()
+        except BaseException as error:
+            failures.append(('workspace-journey', error))
+        finish_instance_cleanup(primary, failures)
 
 
 def app_crash_case(app, case, root, observer, console_checks):
     env = environment(root)
     store = root / 'selected store.db'
     journeys = []
+    primary = None
     try:
         initial = case / 'initial'
         initial.mkdir()
@@ -337,9 +448,17 @@ def app_crash_case(app, case, root, observer, console_checks):
                       original_engine_settled_after_parent_death=True, stale_discovery_ignored=True,
                       canonical_store=str(store.resolve()), ordinary_lease_after_crash=True)
         return result
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        for journey in reversed(journeys):
-            journey.cleanup()
+        failures = []
+        for index, journey in enumerate(reversed(journeys)):
+            try:
+                journey.cleanup()
+            except BaseException as error:
+                failures.append(('app-crash-journey-' + str(index), error))
+        finish_instance_cleanup(primary, failures)
 
 
 def coexist_selection(binary, root, env, track, diagnostic):
@@ -398,6 +517,7 @@ def coexist_selection(binary, root, env, track, diagnostic):
 def coexist_case(app, stable_app, case, root, observer, console_checks):
     env = environment(root)
     journeys, stores, identities = [], [], []
+    primary = None
     try:
         for index, bundle in enumerate((app, stable_app)):
             if journeys:
@@ -429,9 +549,17 @@ def coexist_case(app, stable_app, case, root, observer, console_checks):
             result['apps'].append(journey.finish())
         result['passed'] = True
         return result
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        for journey in reversed(journeys):
-            journey.cleanup()
+        failures = []
+        for index, journey in enumerate(reversed(journeys)):
+            try:
+                journey.cleanup()
+            except BaseException as error:
+                failures.append(('coexist-journey-' + str(index), error))
+        finish_instance_cleanup(primary, failures)
 
 
 def main():
@@ -441,6 +569,7 @@ def main():
     scenarios = tuple(os.environ.get('NAC_INSTANCE_SCENARIOS', ','.join(SCENARIOS)).split(','))
     assert scenarios and set(scenarios) <= set(SCENARIOS) and len(set(scenarios)) == len(scenarios)
     console_checks = []
+    capture = CaptureRun.optional()
     metadata = dict(source_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                     source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'])),
                     fixture_sources={name: digest(Path(__file__).parent / name) for name in (
@@ -451,6 +580,10 @@ def main():
     receipt = destination / 'summary.json'
     root = None
     try:
+        if capture:
+            capture.require_source(metadata['source_head'], scenarios)
+            capture.admit()
+            metadata['fixture_sources']['instance_capture.py'] = digest(Path(__file__).parent / 'instance_capture.py')
         metadata['session'] = require_console(observer, console_checks, 'preflight')
         assert 'coexist' not in scenarios or stable, 'The coexist case requires the exact stable instance-smoke bundle'
         metadata.update(os=subprocess.check_output(['sw_vers'], text=True).strip(),
@@ -493,9 +626,16 @@ def main():
                 result = conflict_case(scenario, moved[0], case, profile, observer, console_checks)
             metadata['cases'].append(result)
         require_console(observer, console_checks, 'completed')
+        if capture:
+            metadata['capture_fixture'] = capture.final_receipt()
         metadata.update(runtime_passed=True, visible_paint_acceptance='captured_pending_image_review')
     except BaseException as error:
-        metadata.update(runtime_passed=False, failure=str(error), fixture_retained=root is not None)
+        cleanup_errors = getattr(error, 'instance_cleanup_errors', [])
+        cleanup_count = getattr(error, 'instance_cleanup_error_count', len(cleanup_errors))
+        metadata.update(runtime_passed=False, failure=str(error), fixture_retained=root is not None,
+                        operation_failure=None if getattr(error, 'instance_cleanup_only', False) else instance_error_record(error),
+                        cleanup_errors=cleanup_errors, cleanup_error_count=cleanup_count,
+                        cleanup_errors_truncated=cleanup_count > len(cleanup_errors))
         raise
     finally:
         receipt.write_text(json.dumps(metadata, indent=2) + '\n')
