@@ -41,10 +41,19 @@ private typealias WKWebView = View
 @MainActor private enum WorkspaceReadiness {
     static var barrier = Barrier()
     static var calls = 0
-    static func check(_ receipt: EngineReceipt) async throws { calls += 1; await barrier.wait() }
+    static var fail = false
+    static func check(_ receipt: EngineReceipt) async throws {
+        calls += 1
+        if fail { throw PreviewError.message("Readiness refused") }
+        await barrier.wait()
+    }
 }
-@MainActor private struct Retirement {
-    func wait() async throws { try Task.checkCancellation() }
+@MainActor private final class Retirement {
+    var held = false
+    func wait() async throws {
+        try Task.checkCancellation()
+        if held { throw PreviewError.message("The previous workspace is still retiring.") }
+    }
 }
 @MainActor private final class Engine {
     var pid: Int32 = 42
@@ -66,9 +75,11 @@ private typealias WKWebView = View
     var status = ""
     var replacements = 0
     var restarts = 0
+    var restartFails = false
+    let retirement = Retirement()
     // APP_ADMISSION
     // APP_RENDERER_TERMINATION
-    func beginWorkspaceRetirement() -> Retirement { trace.append("retire"); webView = nil; return Retirement() }
+    func beginWorkspaceRetirement() -> Retirement { trace.append("retire"); webView = nil; return retirement }
     func showShutdownStatus(_ message: String) { status = message }
     func replaceWorkspace(receipt: EngineReceipt, fragment: String?, initial: Bool = false,
                           requireTerminalAcknowledgement: Bool = false) {
@@ -76,7 +87,10 @@ private typealias WKWebView = View
             "Only same-engine recovery reaches this replacement fixture, and must require acknowledgement")
         replacements += 1
     }
-    func restartOwnedEngine() async throws { trace.append("restart-owner"); restarts += 1 }
+    func restartOwnedEngine() async throws {
+        trace.append("restart-owner"); restarts += 1
+        if restartFails { throw PreviewError.message("Engine restart refused") }
+    }
 }
 @MainActor private final class Recovery: NSObject {
     private unowned let app: App
@@ -104,12 +118,20 @@ private typealias WKWebView = View
     var work: Task<Void, Never>? { task }
     var isBusy: Bool { busy }
     var attempts: Int { restartAttempts }
+    var reloadCount: Int { reloadAttempts }
     var reloadAvailable: Bool { reload?.isHidden == false && reload?.isEnabled == true }
     func supersede() { generation += 1 }
     func sleep() { willSleep() }
+    func retryReload() { reconnect("Explicit reload", automatic: false) }
 }
 @main private enum RestartOwnerTests {
     @MainActor static func main() async throws {
+        switch CommandLine.arguments.last {
+        case "retirement-reload": try await heldRetirementPreservesReload(); return
+        case "retirement-restart": try await heldRetirementPreservesRestart(); return
+        case "failed-attempt-bounds": await failedAttemptsRemainBounded(); return
+        default: break
+        }
         for source in ["renderer", "connection"] { try await lossThenCancel(source) }
         healthyCancel()
         try await lossThenConfirm()
@@ -124,8 +146,69 @@ private typealias WKWebView = View
         let owner = Recovery(app)
         app.recovery = owner
         WorkspaceReadiness.calls = 0
+        WorkspaceReadiness.fail = false
         WorkspaceReadiness.barrier = Barrier()
         return (app, owner)
+    }
+    @MainActor private static func heldRetirementPreservesReload() async throws {
+        let (app, owner) = fixture()
+        app.retirement.held = true
+        for _ in 0..<4 {
+            owner.retryReload(); await owner.settle()
+            precondition(owner.reloadCount == 0 && owner.reloadAvailable,
+                "Waiting for actual old-view release consumed a reload attempt")
+            precondition(app.replacements == 0 && WorkspaceReadiness.calls == 0)
+        }
+        app.retirement.held = false
+        for expected in 1...3 {
+            WorkspaceReadiness.barrier = Barrier()
+            owner.retryReload()
+            try await waitForReadiness()
+            WorkspaceReadiness.barrier.release(); await owner.settle()
+            precondition(app.replacements == expected && owner.reloadCount == expected)
+        }
+        owner.retryReload(); await owner.settle()
+        precondition(app.replacements == 3 && owner.reloadCount == 3 && !owner.reloadAvailable,
+            "Real replacement attempts must retain their bound")
+        print("Held retirement: four refused reloads preserve all three actual recovery attempts (headless).")
+    }
+    @MainActor private static func heldRetirementPreservesRestart() async throws {
+        let (app, owner) = fixture()
+        app.retirement.held = true
+        for _ in 0..<3 {
+            owner.requestRestart().answer(.alertSecondButtonReturn); await owner.settle()
+            precondition(owner.attempts == 0 && app.restarts == 0,
+                "Waiting for actual old-view release consumed a restart attempt")
+        }
+        app.retirement.held = false
+        for expected in 1...2 {
+            owner.requestRestart().answer(.alertSecondButtonReturn); await owner.settle()
+            precondition(owner.attempts == expected && app.restarts == expected)
+        }
+        precondition(!owner.restartAdmitted(), "Real engine restart attempts must retain their bound")
+        print("Held retirement: three refused restarts preserve both actual engine restart attempts (headless).")
+    }
+    @MainActor private static func failedAttemptsRemainBounded() async {
+        let (app, owner) = fixture()
+        WorkspaceReadiness.fail = true
+        owner.connectionLost(); await owner.settle()
+        precondition(owner.reloadCount == 1 && WorkspaceReadiness.calls == 1)
+        owner.connectionLost(); await owner.settle()
+        precondition(owner.reloadCount == 1 && WorkspaceReadiness.calls == 1,
+            "Automatic readiness failure must retain its one-attempt limit")
+        for expected in 2...3 {
+            owner.retryReload(); await owner.settle()
+            precondition(owner.reloadCount == expected && WorkspaceReadiness.calls == expected)
+        }
+        owner.retryReload(); await owner.settle()
+        precondition(owner.reloadCount == 3 && WorkspaceReadiness.calls == 3 && app.replacements == 0)
+        app.restartFails = true
+        for expected in 1...2 {
+            owner.requestRestart().answer(.alertSecondButtonReturn); await owner.settle()
+            precondition(owner.attempts == expected && app.restarts == expected)
+        }
+        precondition(!owner.restartAdmitted())
+        print("Readiness/restart failures still consume the original automatic/explicit attempt bounds (headless).")
     }
     @MainActor private static func waitForReadiness() async throws {
         for _ in 0..<1000 {

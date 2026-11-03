@@ -78,12 +78,13 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         guard installed else { completion(false); return }
         installed = false
         navigation = nil
-        let binding = state.binding
         state.retire()
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
-        guard let webView, let binding else { completion(false); return }
-        webView.callAsyncJavaScript("return window.__nacDesktop?.retire(binding) === true",
-            arguments: ["binding": object(binding)], in: nil, in: .page) { result in
+        guard let webView else { completion(false); return }
+        // Disposal belongs to this exact view, including its unactivated page
+        // or the old page during provisional navigation. It invokes no action.
+        webView.callAsyncJavaScript("return window.__nacDesktop?.retireView() === true",
+            arguments: [:], in: nil, in: .page) { result in
             if case .success(let value) = result { completion((value as? Bool) == true) }
             else { completion(false) }
         }
