@@ -9,7 +9,7 @@ const sha = letter => letter.repeat(40);
 const root = 'repos/arcee-ai/nac';
 const uuid = '630b9d5e-3f2a-4f7e-8b0c-2d5f9a8c1e42';
 const clone = value => structuredClone(value);
-const file = { filename: 'file.txt', additions: 1, deletions: 1 };
+const file = { filename: 'file.txt', sha: sha('9'), additions: 1, deletions: 1 };
 function diff(offset = 1, text = 'new', blob = '2222222') {
   return `diff --git a/file.txt b/file.txt\nindex 1111111..${blob} 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -${offset} +${offset} @@\n-old\n+${text}\n`;
 }
@@ -74,7 +74,8 @@ function fixture() {
     if (endpoint.includes('/compare/')) {
       if (accept === 'application/vnd.github.diff') return ok(diff(f.offset, f.text));
       const base = endpoint.split('/compare/')[1].split('...')[0];
-      return ok({ base_commit: { sha: base }, merge_base_commit: { sha: base }, status: 'ahead', files: [file] });
+      return ok({ base_commit: { sha: base }, merge_base_commit: { sha: base }, status: 'ahead',
+        files: [{ ...file, sha: f.fileSha ?? file.sha }] });
     }
     const match = endpoint.match(/\/pulls\/(\d+)(.*)$/);
     if (match) {
@@ -176,6 +177,7 @@ test('partial landing stops on unexplained content, membership, trunk or policy 
     f => { f.prs[1].base.sha = sha('f'); },
     f => { f.rules.push({ ruleset_id: 1, type: 'required_signatures' }); },
     f => { f.prs[1].draft = true; }, f => { f.checks[0].status = 'in_progress'; },
+    f => { f.fileSha = sha('8'); },
     f => { const stack = f.stack; f.stack = () => ({ ...stack(), pull_requests: stack().pull_requests.slice(1) }); },
   ]) {
     const f = fixture(), plan = await f.preview();
@@ -262,6 +264,9 @@ test('delta preserves whitespace/context/mode and rejects binary, truncation, mi
   assert.equal(authoredDelta(diff(), [file], 1), authoredDelta(diff(18, 'new', '3333333'), [file], 1));
   assert.notEqual(authoredDelta(diff(), [file], 1), authoredDelta(diff(1, 'new '), [file], 1));
   assert.notEqual(authoredDelta(diff(), [file], 1), authoredDelta(diff().replace('100644', '100755'), [file], 1));
+  // Identical diff text at another occurrence can have identical normalized
+  // hunks but a different resulting file. Full blob identity closes that gap.
+  assert.notEqual(authoredDelta(diff(), [file], 1), authoredDelta(diff(18), [{ ...file, sha: sha('8') }], 1));
   for (const [raw, files, count] of [[diff().replace('+new\n', ''), [file], 1],
     ['diff --git a/file.txt b/file.txt\nBinary files differ\n', [file], 1],
     [diff(), [file], 2], [diff(), [], 0]]) {

@@ -27,8 +27,8 @@ export function ghTransport(method, endpoint, body, accept = 'application/vnd.gi
   return { status: Number(response[1]), body: accept.endsWith('.diff') ? response[2] : JSON.parse(response[2]) };
 }
 
-// Retain exact changed bytes, context, paths, modes and rename metadata. Only
-// blob IDs and hunk offsets may change on a rebase. Reject binary/truncated diffs.
+// Pin full file blob IDs as well as changed bytes/context/paths/modes. A patch
+// with identical text moved to another repeated block is not the same source.
 export function authoredDelta(diff, files, expectedFiles) {
   insist(files.length > 0 && files.length < 300 && files.length === expectedFiles,
     'Incomplete/empty or oversized comparison (maximum 299 files)');
@@ -36,6 +36,7 @@ export function authoredDelta(diff, files, expectedFiles) {
   insist(sections.length === files.length, 'Incomplete diff sections');
   const normalized = sections.map((section, i) => {
     const file = files[i];
+    insist(SHA.test(file.sha), 'Comparison lacks a full file blob revision');
     insist(section.startsWith(`diff --git a/${file.previous_filename ?? file.filename} b/${file.filename}\n`),
       'Unsupported quoted path or comparison/diff order mismatch');
     insist(!/^(Binary files |GIT binary patch)/m.test(section), 'Binary changes require separate human handling');
@@ -46,8 +47,8 @@ export function authoredDelta(diff, files, expectedFiles) {
       else if (inHunk && line.startsWith('-')) deletions++;
     }
     insist(additions === file.additions && deletions === file.deletions, 'Truncated or inconsistent diff');
-    return section.replace(/^index [a-f0-9]+\.\.[a-f0-9]+(.*)$/gm, 'index$1')
-      .replace(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/gm, '@@');
+    return `${file.sha}\n${section.replace(/^index [a-f0-9]+\.\.[a-f0-9]+(.*)$/gm, 'index$1')
+      .replace(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/gm, '@@')}`;
   });
   return digest(normalized.join(''));
 }
