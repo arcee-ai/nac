@@ -2,9 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-run}"
-case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke]' >&2; exit 2 ;; esac
+case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build]' >&2; exit 2 ;; esac
 local_app=0
-case "$mode" in app-*|startup-*|instance-*) local_app=1 ;; esac
+case "$mode" in app-*|startup-*|instance-*|lifecycle-*) local_app=1 ;; esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
     echo 'The development preview requires Apple Silicon macOS and an Apple Swift SDK.' >&2; exit 1;
 }
@@ -16,6 +16,7 @@ if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then app="$output/NAC Devel
 if [[ "$mode" == app-* ]]; then app="$output/NAC.app"; fi
 if [[ "$mode" == startup-* ]]; then app="$output/NAC Startup Smoke.app"; fi
 if [[ "$mode" == instance-* ]]; then app="$output/NAC Instance Smoke.app"; fi
+if [[ "$mode" == lifecycle-* ]]; then app="$output/NAC Lifecycle Smoke.app"; fi
 if [[ "${NAC_MAC_SKIP_ENGINE_BUILD:-0}" != 1 ]]; then
     cargo build --locked -p nac-server --bin nac-web
 fi
@@ -32,14 +33,18 @@ if [[ ! "$engine" -ef "$app/Contents/Resources/nac-web" ]]; then
 fi
 engine_identity=$("$app/Contents/Resources/nac-web" __desktop-identity)
 printf '%s\n' "$engine_identity" > "$app/Contents/Resources/engine-identity.json"
-if [[ "$mode" == app-* || "$mode" == instance-* ]]; then
+if [[ "$mode" == app-* || "$mode" == instance-* || "$mode" == lifecycle-* ]]; then
     identity_kind=normal
     if [[ "$mode" == instance-* ]]; then identity_kind=instance-smoke; fi
+    if [[ "$mode" == lifecycle-* ]]; then identity_kind=instance-smoke; fi
     bundle_identity=$(bash desktop/macos/BundleIdentity.sh "$app/Contents/Resources/engine-identity.json" "$identity_kind")
     bundle_identifier="${bundle_identity%%$'\n'*}"
     bundle_name="${bundle_identity#*$'\n'}"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleName $bundle_name" "$app/Contents/Info.plist"
+    if [[ "$mode" == lifecycle-* ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier.lifecycle" "$app/Contents/Info.plist"
+    fi
 fi
 sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/PreviewEngine.swift
          desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift
@@ -48,7 +53,8 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
-    sources+=(desktop/macos/AppInstance.swift desktop/macos/StoreConflict.swift)
+    sources+=(desktop/macos/AppInstance.swift desktop/macos/StoreConflict.swift
+              desktop/macos/AppLifecycle.swift desktop/macos/AppQuit.swift)
     flags+=(-D LOCAL_APP)
 else
     sources+=(desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
@@ -66,6 +72,10 @@ if [[ "$mode" == instance-* ]]; then
     sources+=(desktop/macos/InstanceSmoke.swift)
     flags+=(-D PREVIEW_SMOKE -D INSTANCE_SMOKE)
 fi
+if [[ "$mode" == lifecycle-* ]]; then
+    sources+=(desktop/macos/LifecycleSmoke.swift)
+    flags+=(-D PREVIEW_SMOKE -D LIFECYCLE_SMOKE)
+fi
 receipt_inputs="$output/build-inputs-$mode.json"
 python3 -B desktop/macos/build_receipt.py capture "$receipt_inputs" "$app" "$mode" "${flags[@]}" -- "${sources[@]}"
 xcrun swiftc "${flags[@]}" \
@@ -75,7 +85,7 @@ printf '%s\n' "$app"
 case "$mode" in
     run) exec /usr/bin/open -n -W "$app" ;;
     app-run) exec /usr/bin/open -W "$app" ;;
-    instance-build|instance-smoke)
+    instance-build|instance-smoke|lifecycle-build)
         xcrun swiftc -parse-as-library -swift-version 5 -target arm64-apple-macosx14.0 -O \
             -framework AppKit desktop/macos/InstanceObservation.swift -o "$output/InstanceObservation"
         if [[ "$mode" == instance-smoke ]]; then
