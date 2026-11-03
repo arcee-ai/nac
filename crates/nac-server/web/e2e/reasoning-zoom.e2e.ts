@@ -86,13 +86,63 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
         .click();
       const detail = page.getByRole("region", { name: "Insights detail" });
       if (!process.env.NAC_REASONING_BASELINE_DIST) {
+        // At real tab zoom this can be a phone dialog. Its disclosure state
+        // settles before the enclosing entry transition finishes.
+        await expect
+          .poll(() =>
+            detail.evaluate((element) => {
+              const surface = element.closest('[data-slot="dialog-content"]');
+              if (!surface)
+                return !element.ownerDocument.defaultView!.matchMedia("(max-width: 767.98px)")
+                  .matches;
+              return (
+                Math.abs(surface.getBoundingClientRect().left) <= 1 &&
+                surface
+                  .getAnimations()
+                  .every(
+                    (animation: { playState: string; pending: boolean }) =>
+                      animation.playState !== "running" && !animation.pending,
+                  )
+              );
+            }),
+          )
+          .toBe(true);
         const toggle = detail.getByRole("button", { name: /^Reasoning/ });
         await toggle.click();
         await expect(toggle).toHaveAttribute("aria-expanded", "true");
-        const box = await toggle.boundingBox();
-        const innerWidth = await page.evaluate(
-          () => (globalThis as unknown as { innerWidth: number }).innerWidth,
-        );
+        const geometry = await toggle.evaluate((element) => {
+          const view = element.ownerDocument.defaultView!;
+          const box = element.getBoundingClientRect();
+          const surface = element.closest('[data-slot="dialog-content"]');
+          const rect = surface?.getBoundingClientRect();
+          return {
+            url: element.ownerDocument.location.href,
+            box: { x: box.x, width: box.width },
+            innerWidth: view.innerWidth,
+            dpr: view.devicePixelRatio,
+            phone: view.matchMedia("(max-width: 767.98px)").matches,
+            dialog: rect
+              ? {
+                  left: rect.left,
+                  right: rect.right,
+                  width: rect.width,
+                  animations: surface!
+                    .getAnimations()
+                    .map((animation: { playState: string; pending: boolean }) => ({
+                      playState: animation.playState,
+                      pending: animation.pending,
+                    })),
+                }
+              : null,
+            dom: element.closest('[aria-label="Insights detail"]')?.outerHTML,
+          };
+        });
+        await info.attach(`zoom-geometry-${width}`, {
+          body: JSON.stringify(geometry, null, 2),
+          contentType: "application/json",
+        });
+        if (geometry.phone) expect(geometry.dialog).not.toBeNull();
+        const { box, innerWidth } = geometry;
         expect(box!.x).toBeGreaterThanOrEqual(0);
         expect(box!.x + box!.width).toBeLessThanOrEqual(innerWidth + 1);
       }
