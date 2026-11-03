@@ -577,7 +577,40 @@ impl SessionService {
             }
         }
 
-        let run_id = SessionRunId::new();
+        if goal_continuation
+            && crate::store::pending_task_question(
+                &self.metadata.store_path,
+                self.metadata.session_id.as_deref().unwrap_or_default(),
+            )
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "question gate unavailable: {error:#}"
+                )),
+            })?
+            .is_some()
+        {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store("a blocking question is pending"),
+            });
+        }
+        let reserved = inbox_item_id
+            .map(|item| {
+                crate::store::question_continuation_run(
+                    &self.metadata.store_path,
+                    self.metadata.session_id.as_deref().unwrap_or_default(),
+                    item,
+                )
+            })
+            .transpose()
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "question continuation changed: {error:#}"
+                )),
+            })?
+            .flatten();
+        let run_id = reserved
+            .map(SessionRunId::from_stored)
+            .unwrap_or_else(SessionRunId::new);
         if !self.active_threads.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
