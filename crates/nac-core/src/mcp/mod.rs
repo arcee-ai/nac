@@ -48,6 +48,7 @@ mod naming;
 mod oauth;
 mod registry;
 mod result;
+mod session_refresh;
 mod sync;
 mod transport;
 
@@ -83,6 +84,8 @@ pub use oauth::{
     MCP_OAUTH_STATE_TTL,
 };
 pub use registry::{McpRegistry, McpRootPolicy, McpToolMetadata, McpTransportPolicy};
+pub(crate) use session_refresh::{mount_source_revision, SessionMcpMounts};
+pub use session_refresh::{SessionMcpRefreshState, SessionMcpRefreshStatus};
 
 /// A tool a probe discovered on a server, before anything is saved.
 #[derive(Debug, Clone, serde::Serialize)]
