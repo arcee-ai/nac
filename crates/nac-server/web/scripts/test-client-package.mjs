@@ -9,6 +9,14 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(scriptDir, "..");
 const repositoryRoot = path.resolve(webDir, "../../..");
 const packageName = "@arcee-ai/nac-client-all-121";
+const openapi = JSON.parse(await readFile(path.join(webDir, "openapi.json"), "utf8"));
+const operationKeys = Object.entries(openapi.paths)
+  .flatMap(([resource, item]) =>
+    Object.keys(item)
+      .filter((method) => ["get", "post", "put", "patch", "delete"].includes(method))
+      .map((method) => `${method.toUpperCase()} ${resource}`),
+  )
+  .sort();
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8" });
@@ -101,7 +109,9 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 173);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 174);
+assert.deepEqual(Object.keys(NAC_API_SURFACE).sort(), ${JSON.stringify(operationKeys)});
+assert.equal(NAC_API_SURFACE["GET /attention/events"], "private:native opt-in metadata attention stream");
 for (const resource of [
   "POST /sessions/{session_id}/task-followup-delegations",
   "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}",
