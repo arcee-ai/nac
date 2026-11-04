@@ -412,6 +412,19 @@ pub(crate) async fn start_login_handler(
     headers: HeaderMap,
 ) -> Result<Json<DeviceLoginStartedResponse>, ApiError> {
     let provider = parse_provider(&provider)?;
+    #[cfg(feature = "native-auth-fixture")]
+    if let Some(origin) = crate::native_auth_fixture::service_origin() {
+        if provider != ManagedAuthProvider::Arcee {
+            return Err(ApiError::bad_request(
+                "This fixture supports only ordinary local Arcee device login".into(),
+            ));
+        }
+        let pending =
+            nac_core::model::begin_local_arcee_login_with_auth_service_for_test(origin).await?;
+        return Ok(Json(
+            manager.register_managed_login(provider, pending).await?,
+        ));
+    }
     if !browser_shares_this_machine(&headers) {
         return Ok(Json(
             manager
@@ -491,3 +504,7 @@ pub(crate) async fn logout_handler(
     managed_auth_logout(provider)?;
     Ok(Json(managed_auth_snapshot(provider)?.into()))
 }
+
+#[cfg(test)]
+#[path = "tests/local_device_login.rs"]
+mod local_device_login_tests;

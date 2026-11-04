@@ -8472,4 +8472,44 @@
 [data-nac-runtime]:is(.xterm .xterm-scrollable-element > .shadow.top.left), [data-nac-runtime] .xterm .xterm-scrollable-element > .shadow.top.left {
 	box-shadow: var(--vscode-scrollbar-shadow, #000) 6px 0 6px -6px inset;
 }
+[data-nac-runtime]:is(.xterm .nac-terminal-link), [data-nac-runtime] .xterm .nac-terminal-link {
+  position: absolute;
+  inset: auto 8px 8px;
+  z-index: 20;
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-basic-primary, #59616d);
+  border-radius: 6px;
+  background: var(--color-bg-elevation-ground, #171a20);
+  color: var(--color-text-basic-primary, #f1f2f5);
+  font:
+    12px/1.5 "IBMPlexMono",
+    Menlo,
+    monospace;
+}
+[data-nac-runtime]:is(.xterm .nac-terminal-link a), [data-nac-runtime] .xterm .nac-terminal-link a {
+  flex: 1;
+  min-width: 0;
+  max-height: 6em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: inherit;
+  text-decoration: underline;
+  user-select: text;
+}
+[data-nac-runtime]:is(.xterm .nac-terminal-link button), [data-nac-runtime] .xterm .nac-terminal-link button {
+  flex: none;
+  border: 0;
+  padding: 0 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+[data-nac-runtime]:is(.xterm .nac-terminal-link :focus-visible), [data-nac-runtime] .xterm .nac-terminal-link :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
 /*$vite$:1*/
