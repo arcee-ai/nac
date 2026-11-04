@@ -13,6 +13,39 @@ fn missed_ranges_exclude_gaps_and_later_folds_with_explicit_utc_endpoints() {
     // LA gap skips March8; fold excludes09:30Z. Lord Howe shifts30minutes.
     // Apia skips a whole local date. Havana2026f has no November fallback.
     for (zone, hour, minute, first, now, last, count, next) in [
+        // Newfoundland has a half-hour base offset and the same date rollback.
+        (
+            "America/St_Johns",
+            0,
+            0,
+            "2009-11-01T02:30:00Z",
+            "2009-11-01T03:00:00Z",
+            "2009-11-01T02:30:00Z",
+            1,
+            "2009-11-02T03:30:00Z",
+        ),
+        // At 00:01 Goose Bay rolled from November1 back into October31.
+        // The earliest November1 midnight has already happened at03:00Z.
+        (
+            "America/Goose_Bay",
+            0,
+            0,
+            "2009-11-01T03:00:00Z",
+            "2009-11-01T03:30:00Z",
+            "2009-11-01T03:00:00Z",
+            1,
+            "2009-11-02T04:00:00Z",
+        ),
+        (
+            "America/Goose_Bay",
+            0,
+            0,
+            "2009-10-31T03:00:00Z",
+            "2009-11-01T03:30:00Z",
+            "2009-11-01T03:00:00Z",
+            2,
+            "2009-11-02T04:00:00Z",
+        ),
         (
             "America/Los_Angeles",
             2,
@@ -195,4 +228,27 @@ fn invalid_or_noncanonical_retained_ranges_fail_instead_of_inventing_identity() 
     assert!(la.missed(-1, first).is_err());
     assert!(la.missed(first, i64::MAX).is_err());
     assert_eq!(la.missed(first, first).unwrap().count, 1);
+}
+
+#[test]
+fn cross_date_fold_keeps_the_canonical_sunday_in_a_weekly_range() {
+    let cadence = CalendarCadence::new(
+        "America/Goose_Bay",
+        DATA_VERSION,
+        Weekdays::selected(&[7]).unwrap(),
+        0,
+        0,
+    )
+    .unwrap();
+    let range = cadence
+        .missed(ms("2009-11-01T03:00:00Z"), ms("2009-11-01T03:30:00Z"))
+        .unwrap();
+    assert_eq!(
+        range,
+        CalendarMissedRange {
+            due_last_ms: ms("2009-11-01T03:00:00Z"),
+            count: 1,
+            next_due_ms: ms("2009-11-08T04:00:00Z"),
+        }
+    );
 }

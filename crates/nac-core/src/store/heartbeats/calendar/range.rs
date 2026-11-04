@@ -78,14 +78,32 @@ impl CalendarCadence {
     }
 
     fn latest(&self, now: Timestamp) -> Result<CalendarOccurrence> {
-        let mut date = self.zone.to_datetime(now).date();
+        // A fold can expose yesterday after tomorrow's earliest wall time
+        // already occurred. Bound civil candidates from UTC using Jiff's full
+        // offset domain, rather than assuming today's displayed date is last.
+        let mut date = jiff::tz::Offset::MAX.to_datetime(now).date();
+        let mut latest: Option<CalendarOccurrence> = None;
         for _ in 0..MAX_SEARCH_DATES {
             if let Some(candidate) = self.on_date(date)? {
-                if candidate.due_ms <= now.as_millisecond() {
-                    return Ok(candidate);
+                if candidate.due_ms <= now.as_millisecond()
+                    && latest
+                        .as_ref()
+                        .is_none_or(|best| candidate.due_ms > best.due_ms)
+                {
+                    latest = Some(candidate);
                 }
             }
             date = date.yesterday().context("calendar date range exhausted")?;
+            if let Some(best) = latest.as_ref() {
+                // No occurrence on this or any older date can exceed the
+                // UTC instant obtained with the minimum possible offset.
+                if jiff::tz::Offset::MIN
+                    .to_timestamp(date.to_datetime(self.time))
+                    .is_ok_and(|upper| upper.as_millisecond() <= best.due_ms)
+                {
+                    return Ok(best.clone());
+                }
+            }
         }
         anyhow::bail!("calendar previous-occurrence search bound exhausted")
     }

@@ -395,3 +395,84 @@ fn calendar_long_downtime_and_history_remain_bounded_in_real_store() {
             <= HEARTBEAT_HISTORY_LIMIT
     );
 }
+
+#[test]
+fn calendar_cross_date_fold_materializes_both_schedules_once_across_restart() {
+    let f = Fixture::new();
+    let first = ms("2009-11-01T03:00:00Z");
+    let now = ms("2009-11-01T03:30:00Z");
+    // Goose Bay November1 00:00 first occurs at03:00Z. At03:30Z, the
+    // post-00:01 rollback displays October31 23:30.04:00Z is its later fold.
+    let calendar = fresh_control(
+        &f,
+        HeartbeatAction::Create {
+            spec: calendar("America/Goose_Bay", 0, 0, HeartbeatCalendarDays::Daily),
+        },
+        first - 1,
+    )
+    .schedule;
+    let interval = f
+        .control(HeartbeatAction::Create { spec: spec() }, first - 60_000)
+        .schedule;
+    assert_eq!(calendar.next_due_ms, first);
+    assert_eq!(interval.next_due_ms, first);
+    initialize(&f.path).unwrap();
+    // This is the actual shared materialization transaction, including an
+    // unrelated interval schedule; a Calendar range error must not block it.
+    let pending = materialize_heartbeats(&f.path, now).unwrap();
+    assert_eq!(pending.len(), 2);
+    let occurrence = pending
+        .iter()
+        .find(|p| p.schedule_id == calendar.schedule_id)
+        .unwrap();
+    let ordinary = pending
+        .iter()
+        .find(|p| p.schedule_id == interval.schedule_id)
+        .unwrap();
+    assert_eq!(
+        (
+            occurrence.due_first_ms,
+            occurrence.due_last_ms,
+            occurrence.coalesced_count
+        ),
+        (first, first, 1)
+    );
+    assert_eq!(
+        (
+            ordinary.due_first_ms,
+            ordinary.due_last_ms,
+            ordinary.coalesced_count
+        ),
+        (first, now, 31)
+    );
+    let identity = occurrence.occurrence_id.clone();
+    assert_eq!(
+        read_heartbeat(&f.path, "direct", &calendar.schedule_id)
+            .unwrap()
+            .next_due_ms,
+        ms("2009-11-02T04:00:00Z")
+    );
+    for clock in [first - 1, now, ms("2009-11-01T04:00:00Z")] {
+        initialize(&f.path).unwrap();
+        let pending = materialize_heartbeats(&f.path, clock).unwrap();
+        let same = pending
+            .iter()
+            .find(|p| p.schedule_id == calendar.schedule_id)
+            .unwrap();
+        assert_eq!(
+            (
+                same.occurrence_id.as_str(),
+                same.due_first_ms,
+                same.due_last_ms,
+                same.coalesced_count
+            ),
+            (identity.as_str(), first, first, 1)
+        );
+    }
+    assert_eq!(
+        read_heartbeat(&f.path, "direct", &calendar.schedule_id)
+            .unwrap()
+            .next_due_ms,
+        ms("2009-11-02T04:00:00Z")
+    );
+}
