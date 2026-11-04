@@ -681,6 +681,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     requestAnimationFrame(beat);
   });
   const measurements: Record<string, unknown> = {};
+  const cleanupErrors: string[] = [];
   try {
     await focus(pane);
     // Redrawing CI's long wrapped prompt after a resize can erase the marker (ALL-495).
@@ -758,7 +759,6 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
-    const cleanupErrors: string[] = [];
     const attempt = async (step: string, work: () => Promise<void>) => {
       await work().catch((error) => cleanupErrors.push(`${step}: ${String(error)}`));
     };
@@ -776,10 +776,10 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       measurements.markerStartedAtEpochMs = armed.startedAtEpochMs;
       measurements.rowsAtMarkerDeadline = armed.rowsAtDeadline;
     });
-    await attempt("geometry", async () => {
-      const final = await api.getUserTerminal(session, terminal);
-      measurements.finalGeometry = `${final.cols}x${final.rows}`;
-    });
+    await api.getUserTerminal(session, terminal).then(
+      (final) => (measurements.finalGeometry = `${final.cols}x${final.rows}`),
+      (error) => (measurements.finalGeometryError = String(error)),
+    );
     await attempt("terminate", () => api.terminateTerminal(session, terminal).then(() => {}));
     await Promise.allSettled(pending);
     await attempt("heartbeat", async () => {
@@ -809,6 +809,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       contentType: "application/json",
     });
   }
+  expect(cleanupErrors).toEqual([]);
   expect(pages.length).toBeGreaterThan(2);
   expect(Math.max(...pages.map((frame) => frame.retained))).toBeLessThanOrEqual(8 * 1024 * 1024);
   expect(Math.max(...pages.map((frame) => frame.bytes))).toBeLessThanOrEqual(32 * 1024);
