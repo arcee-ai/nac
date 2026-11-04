@@ -812,7 +812,7 @@ function CreateProjectForm({
         open={picking}
         kind="directory"
         nativeLocalDirectory={mode === "local"}
-        initialPath={cwd.trim()}
+        initialPath={cwd}
         ssh={connected}
         onClose={() => setPicking(false)}
         onSelect={(path) => {
