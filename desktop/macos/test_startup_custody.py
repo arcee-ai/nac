@@ -17,7 +17,8 @@ class StartupCustody(unittest.TestCase):
     observations = []
 
     def exercise(self, receipt='complete', cleanup_error=None, success=False,
-                 wrapper_error=False, provider_timeout=False, provider_error=False):
+                 wrapper_error=False, provider_timeout=False, provider_error=False,
+                 relocation_error=False, catalog_error=None, stdin_error=False):
         with tempfile.TemporaryDirectory(prefix='nac-custody-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -50,6 +51,9 @@ class StartupCustody(unittest.TestCase):
             provider.stdout = io.StringIO('{"base_url":"http://inert.invalid"}\n'
                                          '{"passed":true,"requests":[]}\n')
             provider.poll.side_effect = lambda: provider.returncode
+            if stdin_error:
+                provider.stdin = Mock(wraps=provider.stdin)
+                provider.stdin.close.side_effect = OSError('stdin close failed')
 
             def provider_wait(timeout):
                 if provider_timeout and not provider.terminate.called:
@@ -98,6 +102,18 @@ class StartupCustody(unittest.TestCase):
                 return opened
 
             catalog = Mock(server_port=12345)
+            if catalog_error:
+                getattr(catalog, catalog_error).side_effect = OSError(f'{catalog_error} failed')
+            real_rmtree = startup_smoke.shutil.rmtree
+            relocation_removals = []
+
+            def rmtree(root, *args, **options):
+                if Path(root).name.startswith('nac-finder-relocation-'):
+                    relocation_removals.append(str(root))
+                    if relocation_error:
+                        raise OSError('relocation removal failed')
+                return real_rmtree(root, *args, **options)
+
             real_cleanup = startup_smoke.cleanup_failed_case
             cleanup = Mock(side_effect=cleanup_error) if cleanup_error else Mock(wraps=real_cleanup)
             captured = io.StringIO()
@@ -108,6 +124,7 @@ class StartupCustody(unittest.TestCase):
                 stack.enter_context(patch.object(startup_smoke, 'ThreadingHTTPServer', return_value=catalog))
                 stack.enter_context(patch.object(startup_smoke.threading, 'Thread'))
                 stack.enter_context(patch.object(startup_smoke, 'cleanup_failed_case', cleanup))
+                stack.enter_context(patch.object(startup_smoke.shutil, 'rmtree', side_effect=rmtree))
                 stack.enter_context(patch.object(startup_smoke.sys, 'argv', ['startup_smoke.py', str(app), str(output)]))
                 stack.enter_context(patch.dict(startup_smoke.os.environ, {'NAC_STARTUP_SCENARIOS': 'startup-fresh'}, clear=True))
                 stack.enter_context(patch.object(subprocess, 'Popen', side_effect=popen))
@@ -133,26 +150,38 @@ class StartupCustody(unittest.TestCase):
                 'caught_message': str(error) if error else None,
                 'caught_traceback': error_trace, 'original_failure_primary': error is primary,
                 'cleanup_calls': cleanup.call_count, 'provider_wait_calls': provider.wait.call_count,
+                'relocation_removals': relocation_removals,
                 'diagnostics': captured.getvalue(),
             })
             self.assertEqual(len(roots), 2)
             retained = receipt != 'complete' or cleanup_error is not None
-            for root in roots:
-                self.assertEqual(root.exists(), retained, str(root))
+            for index, root in enumerate(roots):
+                self.assertEqual(root.exists(), retained or (index == 0 and relocation_error), str(root))
                 if retained:
                     self.assertIn(str(root), captured.getvalue())
+            if retained:
+                self.assertEqual(relocation_removals, [])
             self.assertEqual(sentinel.read_bytes(), b'preserve')
             self.assertTrue(app.exists())
             catalog.shutdown.assert_called_once()
             catalog.server_close.assert_called_once()
             self.assertTrue(provider.wait.called, 'provider shutdown must still be attempted')
             if success:
-                self.assertIsNone(error)
-                self.assertIn('{"kind":"finish"}', provider.stdin.getvalue())
-                self.assertTrue((output / 'provider-result.json').exists())
-                self.assertTrue((output / 'results.json').exists())
+                if relocation_error or catalog_error:
+                    self.assertIsInstance(error, OSError)
+                    self.assertIn('relocation removal failed' if relocation_error else f'{catalog_error} failed', str(error))
+                else:
+                    self.assertIsNone(error)
+                    self.assertIn('{"kind":"finish"}', provider.stdin.getvalue())
+                    self.assertTrue((output / 'provider-result.json').exists())
+                    self.assertTrue((output / 'results.json').exists())
             else:
                 self.assertIs(error, primary)
+                for enabled, message in [(relocation_error and not retained, 'relocation removal failed'),
+                                         (catalog_error, f'{catalog_error} failed'),
+                                         (stdin_error, 'stdin close failed')]:
+                    if enabled:
+                        self.assertIn(message, '\n'.join(error.__notes__))
             if receipt == 'complete':
                 cleanup.assert_called_once()
             else:
@@ -189,6 +218,30 @@ class StartupCustody(unittest.TestCase):
 
     def test_provider_teardown_error_does_not_mask_original_failure(self):
         self.exercise(receipt='missing', provider_error=True)
+
+    def test_relocation_cleanup_failure_preserves_original_failure(self):
+        self.exercise(relocation_error=True)
+
+    def test_relocation_cleanup_failure_after_success_is_reported(self):
+        self.exercise(success=True, relocation_error=True)
+
+    def test_retained_profile_never_removes_relocation(self):
+        self.exercise(receipt='missing', relocation_error=True)
+
+    def test_catalog_teardown_failure_still_reaps_provider(self):
+        for phase in ['shutdown', 'server_close']:
+            for timeout in [False, True]:
+                with self.subTest(phase=phase, timeout=timeout):
+                    self.exercise(catalog_error=phase, provider_timeout=timeout)
+
+    def test_stdin_close_failure_still_reaps_provider(self):
+        self.exercise(stdin_error=True, provider_timeout=True)
+
+    def test_catalog_failure_after_success_is_reported(self):
+        self.exercise(success=True, catalog_error='shutdown')
+
+    def test_multiple_teardown_errors_preserve_scenario_failure(self):
+        self.exercise(relocation_error=True, catalog_error='shutdown', provider_error=True)
 
 
 if __name__ == '__main__':
