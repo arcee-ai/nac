@@ -250,6 +250,7 @@ fn allowed(method: &Method, path: &str) -> bool {
                 | "/models"
                 | "/model-configs"
                 | "/projects"
+                | "/sessions"
                 | "/ssh-configs"
                 | "/mcp_library/servers"
                 | "/mcp_library/servers/status"
