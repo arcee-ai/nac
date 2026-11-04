@@ -44,6 +44,7 @@ mod frontend_projection;
 mod heartbeats;
 pub(crate) use heartbeats::SubmittedHeartbeat;
 mod manual_compaction;
+mod mcp_refresh;
 mod operation_state;
 pub(crate) mod questions;
 pub use questions::{AuthorizedQuestionInformation, TaskQuestionAnswerPort};
@@ -660,8 +661,8 @@ pub struct SessionService {
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
-    /// MCP capability and prompt inventory captured at session construction.
-    mcp: Option<Arc<crate::mcp::McpRegistry>>,
+    /// Independently refreshed inventory shared with this session's agent.
+    mcp: Arc<crate::mcp::SessionMcpMounts>,
     terminal_manager: crate::terminal::TerminalManager,
     user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
     heartbeat_context: Option<Arc<heartbeats::HeartbeatContext>>,
@@ -966,11 +967,15 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input_with_mcp(input, self.skills.as_deref(), self.mcp.as_deref())
+        commands::prepare_user_input_with_mcp(
+            input,
+            self.skills.as_deref(),
+            self.mcp.registry().as_deref(),
+        )
     }
 
     pub fn slash_command_definitions(&self) -> Vec<crate::commands::SlashCommandDefinition> {
-        commands::session_slash_command_definitions(self.mcp.as_deref())
+        commands::session_slash_command_definitions(self.mcp.registry().as_deref())
     }
 
     pub async fn resolve_mcp_prompt(
@@ -979,7 +984,7 @@ impl SessionService {
     ) -> Result<PreparedPrompt> {
         let registry = self
             .mcp
-            .as_deref()
+            .registry()
             .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
         registry.resolve_prompt_invocation(invocation).await
     }
