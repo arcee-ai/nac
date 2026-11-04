@@ -3,22 +3,25 @@
 This owner contains the ALL-340 disposable AppKit/WKWebView preview and the
 ALL-341 private identified engine launch/control seam, and ALL-342 normal local
 startup, ALL-343 app reopen and safe store-conflict retry, ALL-344 close/Quit,
-and ALL-345 workspace recovery. Read the
+and ALL-345 workspace recovery plus ALL-349 presentation storage. Read the
 root guide before changes. Swift owns only the window, isolated fixture, and
 its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
 
 - Bundle `nac-web` and its existing embedded assets. No second frontend build,
-  native chat client or privileged script message handler. NativeCommands owns
+  native chat client or arbitrary native operation handler. NativeCommands owns
   the bounded UI-only page-world adapter: named actions go to shared React owners;
-  web-to-native messages report only readiness/settlement, never operation authority.
+  web-to-native messages report readiness/settlement. The separate bounded
+  presentation-storage protocol writes only allowlisted bytes in the selected
+  private profile; it grants no API, process, permission or caller-path authority.
 - Preview builds create a private temporary HOME/NAC_HOME/workspace/store.
   `LOCAL_APP` builds use DesktopStartup and the bundled Rust preflight to reuse
   normal configuration, credential and track owners. Never seed/delete a normal
   profile. All qualification uses externally owned disposable profiles; never
   open/migrate a personal store for evidence. Read readiness only from the exact
-  launched child, never attach to a fixed/default port. WebKit remains
-  nonpersistent until the separately owned preference/storage slice.
+  launched child, never attach to a fixed/default port. Normal LOCAL_APP WebKit
+  uses a persistent UUID profile selected from verified track/canonical-store
+  identity and the launch's home namespace. Disposable preview remains ephemeral.
 - PreviewEngine accepts EngineLaunchConfiguration(cwd, store, environment).
   The PreviewProfile/provider adapter retains isolated fixture semantics.
   DesktopStartup never parses TOML, copies credential stores or executes a shell.
@@ -43,7 +46,9 @@ authority; the production React UI and HTTP/SSE client remain shared.
   existing Rust 20-second watchdog and owned 23-second fallback. A later 26-second
   UI wait reports pending cleanup without another stop/signal, keeps
   the original callback and shows a truthful retired-workspace failure state.
-  Persistent preferences, signing and distribution belong to later tickets.
+  A bounded half-second presentation checkpoint barrier after owned engine
+  cleanup does not change the existing 20/23/26-second watchdog/control policy.
+  Failure/timeout is not a successful durable flush. Signing/distribution remain separate.
   EngineProtocol/PreviewEngine own the private bounded
   launch channel; it conveys identity, never API/permission authority.
 - `WorkspaceRecovery` distinguishes renderer/navigation/connection loss and
@@ -61,8 +66,19 @@ authority; the production React UI and HTTP/SSE client remain shared.
   permission action. Mutations keep their existing uncertainty/readback owner;
   only failed GETs signal connection loss. Replacement loads canonical state,
   never pending intents or terminal bytes. Old terminal handles and process-local
-  output are not restored after engine restart. The app retains one ephemeral
-  website data store; durable preference/draft restoration remains ALL-349.
+  output are not restored after engine restart. WorkspaceStorage retains the
+  normal profile's website store and opaque presentation checkpoint. React's
+  existing preference/ALL-336 text owners interpret its bounded records; Swift
+  stores no query/domain model. WorkspaceCheckpoint owns private no-follow
+  directory/file descriptors, an exclusive presentation lease, and ordered
+  atomic replacements, including clear tombstones. A successor cannot hydrate
+  over an old profile's pending final writes merely because Rust released its
+  domain serving lease. Profile contention/failure stays explicit and uses
+  isolated memory storage; never attach to another owner or select another store.
+  WorkspaceStorageBridge reuses NativeCommands' launch/view/document identity,
+  rejects stale/frame/origin/sequence/schema mismatches and drains accepted writes
+  before replacement hydration. Native compilation, file-fault and actual
+  cross-Quit/profile/port evidence are required before acceptance.
 - `AppInstance` owns existing-window presentation, not singleton/store authority.
   Ordinary normal-app launches use LaunchServices reopening. `StoreConflictRetry`
   fences each failed child's retirement; only explicit native Retry restarts the
