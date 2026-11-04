@@ -81,6 +81,7 @@ private typealias WKWebView = View
     // APP_RENDERER_TERMINATION
     func beginWorkspaceRetirement() -> Retirement { trace.append("retire"); webView = nil; return retirement }
     func showShutdownStatus(_ message: String) { status = message }
+    func prepareWorkspaceStorage(receipt: EngineReceipt) async throws { try Task.checkCancellation() }
     func replaceWorkspace(receipt: EngineReceipt, fragment: String?, initial: Bool = false,
                           requireTerminalAcknowledgement: Bool = false) {
         precondition(requireTerminalAcknowledgement && !initial,
