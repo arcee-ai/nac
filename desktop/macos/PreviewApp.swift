@@ -298,7 +298,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private func engineFailed(_ reason: EngineFailure) {
         guard !stopping else { return }
         if failure != nil { fail(reason.localizedDescription); return }
-        if baseURL != nil {
+        if baseURL != nil || recovery.engineStateLost {
             recovery.engineExited(reason.localizedDescription)
             return
         }
