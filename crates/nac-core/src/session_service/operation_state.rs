@@ -8,6 +8,8 @@ use std::ops::{Deref, DerefMut};
 pub(super) struct ActiveOperationGuard<'a> {
     operation: std::sync::MutexGuard<'a, Option<ActiveSessionOperation>>,
     published: &'a StdMutex<Option<ActiveSessionOperationSnapshot>>,
+    attention: &'a StdMutex<Option<attention::ServiceAttention>>,
+    session_id: Option<&'a str>,
 }
 impl<'a> ActiveOperationGuard<'a> {
     pub(super) fn new(service: &'a SessionService) -> Self {
@@ -17,6 +19,8 @@ impl<'a> ActiveOperationGuard<'a> {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
             published: &service.published_operation,
+            attention: &service.attention,
+            session_id: service.metadata.session_id.as_deref(),
         }
     }
 }
@@ -33,13 +37,15 @@ impl DerefMut for ActiveOperationGuard<'_> {
 }
 impl Drop for ActiveOperationGuard<'_> {
     fn drop(&mut self) {
-        *self
+        let mut published = self
             .published
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = self
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *published = self
             .operation
             .as_ref()
             .map(ActiveSessionOperation::snapshot);
+        attention::operation_changed(self.attention, self.session_id, published.as_ref());
     }
 }
 

@@ -124,7 +124,8 @@ impl SessionService {
         #[cfg(any(test, feature = "test-support"))]
         self.wait_child_terminal_release_for_test().await;
 
-        self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
+        let goal_attention = self
+            .settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
         let durable_goal_failure = if self.metadata.behavior
             != sessions::SessionBehavior::Orchestrator
@@ -148,6 +149,8 @@ impl SessionService {
 
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
+        let attention_success =
+            matches!(&outcome, RunOutcome::Completed(..)) && persistence_error.is_none();
         let terminal_event = match (outcome, persistence_error) {
             (RunOutcome::Completed(_, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!("run completed, but failed to persist session snapshot: {error}"),
@@ -185,8 +188,38 @@ impl SessionService {
             return false;
         }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if let Err(error) = self.start_next_direct_inbox_item().await {
-                eprintln!("nac: failed to promote direct inbox after run settlement: {error:#}");
+            let selection =
+                if attention_success && goal_attention.known && goal_attention.goal.is_none() {
+                    self.select_direct_continuation_after_settlement(&run_id)
+                        .await
+                } else {
+                    self.select_next_direct_inbox_item().await
+                };
+            match selection {
+                Ok(selection) => {
+                    #[cfg(any(test, feature = "test-support"))]
+                    // Selection has returned: no store transaction, operation
+                    // lease, inbox wake lock or attention hub lock is held.
+                    // The nonshipping owner accepts only actual Idle/IdleUnverified.
+                    let publication = self
+                        .wait_attention_publication_for_test(&run_id, &selection.disposition)
+                        .await;
+                    self.publish_attention_completion(
+                        &run_id,
+                        attention_success,
+                        goal_attention,
+                        selection.disposition,
+                    );
+                    #[cfg(any(test, feature = "test-support"))]
+                    if let Some(publication) = publication {
+                        publication.publication_attempted();
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "nac: failed to promote direct inbox after run settlement: {error:#}"
+                    );
+                }
             }
         }
         true
@@ -224,9 +257,13 @@ impl SessionService {
         usage: Option<crate::model::TokenUsage>,
         disposition: crate::store::GoalRunDisposition,
         failure: Option<&crate::run_failure::RunFailure>,
-    ) {
+    ) -> attention::GoalAttentionSettlement {
+        let mut receipt = attention::GoalAttentionSettlement {
+            known: true,
+            goal: None,
+        };
         if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return;
+            return receipt;
         }
         if let Some(session_id) = self.metadata.session_id.clone() {
             let path = self.metadata.store_path.clone();
@@ -248,13 +285,28 @@ impl SessionService {
             })
             .await
             {
-                Ok(Ok(_)) => {}
+                Ok(Ok(goal)) => {
+                    if let Some(goal) = goal {
+                        receipt.known = goal.accounting_run_id.is_none();
+                        match u64::try_from(goal.version) {
+                            Ok(version) => {
+                                receipt.goal = Some(crate::events::AttentionGoal {
+                                    id: goal.goal_id,
+                                    version,
+                                });
+                            }
+                            Err(_) => receipt.known = false,
+                        }
+                    }
+                }
                 Ok(Err(error)) | Err(error) => {
+                    receipt.known = false;
                     eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
                 }
             }
         }
         self.agent.lock().await.end_goal_run(run_id);
+        receipt
     }
 
     pub(super) async fn settle_traditional_child_run(
