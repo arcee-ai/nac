@@ -37,3 +37,6 @@ pub(crate) mod product_context;
 
 pub(crate) mod task_followup_delegations;
 pub(crate) mod task_questions;
+
+pub(crate) mod attention;
+mod attention_contracts;

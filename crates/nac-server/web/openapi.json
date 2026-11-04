@@ -9,6 +9,102 @@
     "version": "0.1.4"
   },
   "paths": {
+    "/attention/events": {
+      "get": {
+        "tags": [
+          "native"
+        ],
+        "operationId": "get_attention_events",
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "Engine UUID:projection UUID:sequence cursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-NAC-Completion-Cursor",
+            "in": "header",
+            "description": "Native semantic replay: new cutoff or stable store UUID:sequence; independent from current-state baseline",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native-only bounded metadata SSE; baseline is silent",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionFrame"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth": {
       "get": {
         "tags": [
@@ -11878,6 +11974,496 @@
         },
         "additionalProperties": false
       },
+      "AttentionAvailabilityDto": {
+        "type": "object",
+        "required": [
+          "work",
+          "questions",
+          "permissions",
+          "reviews",
+          "topology"
+        ],
+        "properties": {
+          "permissions": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "questions": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "reviews": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "work": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          }
+        }
+      },
+      "AttentionChangeDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "snapshot",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source_replaced"
+                ]
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/AttentionSnapshotDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "work",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "work_settled"
+                ]
+              },
+              "work": {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "work_cleared"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "decision",
+              "kind"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/AttentionDecisionDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decision_pending"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "decision",
+              "kind"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/AttentionDecisionDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decision_resolved"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "session_deleted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "availability",
+              "kind"
+            ],
+            "properties": {
+              "availability": {
+                "$ref": "#/components/schemas/AttentionAvailabilityDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "availability"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "checkpoint"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "AttentionCursor": {
+        "type": "object",
+        "required": [
+          "engine",
+          "epoch",
+          "sequence"
+        ],
+        "properties": {
+          "engine": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AttentionDecisionDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "request_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "permission"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "review_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review"
+                ]
+              },
+              "review_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "request_id",
+              "run_id",
+              "generation",
+              "revision",
+              "kind"
+            ],
+            "properties": {
+              "generation": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "question"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "run_id": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "AttentionDispositionDto": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "continuing",
+          "waiting_for_decision"
+        ]
+      },
+      "AttentionFacetDto": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unknown",
+          "unsupported"
+        ]
+      },
+      "AttentionFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "page",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "completions"
+                ]
+              },
+              "page": {
+                "$ref": "#/components/schemas/CompletionPageDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "boundary",
+              "sources",
+              "reset",
+              "kind"
+            ],
+            "properties": {
+              "boundary": {
+                "$ref": "#/components/schemas/AttentionCursor"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "baseline"
+                ]
+              },
+              "reset": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AttentionResetDto"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AttentionSnapshotDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "boundary",
+              "source",
+              "source_revision",
+              "change",
+              "new_attention",
+              "kind"
+            ],
+            "properties": {
+              "boundary": {
+                "$ref": "#/components/schemas/AttentionCursor"
+              },
+              "change": {
+                "$ref": "#/components/schemas/AttentionChangeDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "record"
+                ]
+              },
+              "new_attention": {
+                "type": "boolean"
+              },
+              "source": {
+                "$ref": "#/components/schemas/AttentionSourceDto"
+              },
+              "source_revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reset"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/AttentionResetDto"
+              }
+            }
+          }
+        ],
+        "description": "Current-state baselines are silent. Historical completion pages use their\nown stable store frontier and never infer that a whole session is idle."
+      },
+      "AttentionGoalDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AttentionResetDto": {
+        "type": "string",
+        "enum": [
+          "incarnation",
+          "replay_gap",
+          "invalid_cursor"
+        ]
+      },
+      "AttentionSnapshotDto": {
+        "type": "object",
+        "required": [
+          "source",
+          "revision",
+          "work",
+          "pending",
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/AttentionAvailabilityDto"
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionDecisionDto"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/AttentionSourceDto"
+          },
+          "work": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AttentionSourceDto": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "epoch"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AttentionWorkDto": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "goal",
+          "disposition"
+        ],
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/AttentionDispositionDto"
+          },
+          "goal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionGoalDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
       "AuthStatus": {
         "type": "string",
         "description": "Whether a provider has a usable credential right now, as served by\n`GET /models`. A picker HINT only — it never changes how auth works:\nAPI-key providers still read only the exact `api_key_env` selector and\nmanaged providers still read only their stored credential file.",
@@ -12219,6 +12805,92 @@
           "no_eligible_boundary",
           "already_compacted"
         ]
+      },
+      "CompletionKindDto": {
+        "type": "string",
+        "enum": [
+          "request",
+          "goal"
+        ]
+      },
+      "CompletionOccurrenceDto": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "session_id",
+          "run_id",
+          "behavior",
+          "kind",
+          "goal_id",
+          "mark_version"
+        ],
+        "properties": {
+          "behavior": {
+            "type": "string"
+          },
+          "goal_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CompletionKindDto"
+          },
+          "mark_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CompletionPageDto": {
+        "type": "object",
+        "required": [
+          "store_id",
+          "cursor",
+          "high_water",
+          "baseline",
+          "more",
+          "items"
+        ],
+        "properties": {
+          "baseline": {
+            "type": "boolean"
+          },
+          "cursor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "high_water": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionOccurrenceDto"
+            }
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "store_id": {
+            "type": "string"
+          }
+        }
       },
       "ConfigureMcpOAuthRequest": {
         "type": "object",

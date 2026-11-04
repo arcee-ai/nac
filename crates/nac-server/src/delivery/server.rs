@@ -680,6 +680,7 @@ fn embedded_frontend_router(document: PresentationDocument) -> Router {
 fn documented_api() -> OpenApiRouter<SessionManager> {
     let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
+        .routes(routes!(delivery::attention::events))
         .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(delivery::product_context::read))
         .routes(routes!(delivery::product_context::resolve))
