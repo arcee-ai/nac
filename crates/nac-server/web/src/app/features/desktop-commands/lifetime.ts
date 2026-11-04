@@ -11,9 +11,6 @@ export function installDesktopLifetime(
   if (typeof port?.connectLifetime !== "function") return () => {};
   let closed = false;
   let disconnect = () => {};
-  const offline = () => {
-    if (typeof port.reportConnectionLost === "function") port.reportConnectionLost();
-  };
   const close = () => {
     if (closed) return;
     closed = true;
@@ -24,13 +21,11 @@ export function installDesktopLifetime(
         unmount();
       } finally {
         disconnect();
-        events.removeEventListener("offline", offline);
         events.removeEventListener("pagehide", close);
       }
     }
   };
   disconnect = port.connectLifetime(close);
-  events.addEventListener("offline", offline);
   events.addEventListener("pagehide", close, { once: true });
   return close;
 }
