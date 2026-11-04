@@ -699,6 +699,9 @@ impl SessionService {
             )
         })
         .await??;
+        #[cfg(test)]
+        self.wait_attention_preflight_for_test(settled_run.as_ref(), has_durable_work)
+            .await;
         if !has_durable_work {
             self.cancel_goal_retry_wake();
         }
@@ -719,14 +722,14 @@ impl SessionService {
             }
             Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
         };
-        if let Some(run) = settled_run.filter(|_| !has_durable_work) {
+        if let Some(run) = settled_run.as_ref().filter(|_| !has_durable_work).cloned() {
             let service = self.clone();
             return crate::store::spawn_blocking_store_caller(move || {
                 service.verify_goal_free_settlement(lease, run)
             })
             .await?;
         }
-        self.select_next_direct_inbox_item_with_lease_async(lease)
+        self.select_next_direct_inbox_item_with_lease_async(lease, settled_run)
             .await
     }
 
@@ -735,7 +738,7 @@ impl SessionService {
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
         Ok(self
-            .select_next_direct_inbox_item_with_lease_async(lease)
+            .select_next_direct_inbox_item_with_lease_async(lease, None)
             .await?
             .run)
     }
@@ -743,6 +746,7 @@ impl SessionService {
     async fn select_next_direct_inbox_item_with_lease_async(
         &self,
         lease: sessions::SessionOperationLease,
+        settled_run: Option<SessionRunId>,
     ) -> Result<attention::ContinuationSelection> {
         if self.has_active_operation() {
             return Ok(attention::ContinuationSelection::stopped(
@@ -771,7 +775,7 @@ impl SessionService {
         }
         let service = self.clone();
         crate::store::spawn_blocking_store_caller(move || {
-            service.select_next_direct_inbox_item_with_lease(lease)
+            service.select_next_direct_inbox_item_with_lease(lease, settled_run)
         })
         .await?
     }
@@ -810,6 +814,7 @@ impl SessionService {
     fn select_next_direct_inbox_item_with_lease(
         &self,
         lease: sessions::SessionOperationLease,
+        settled_run: Option<SessionRunId>,
     ) -> Result<attention::ContinuationSelection> {
         use attention::{
             ContinuationDisposition as Disposition, ContinuationSelection as Selection,
@@ -869,6 +874,13 @@ impl SessionService {
             .filter(|goal| goal.status == crate::store::GoalStatus::Active)
         else {
             self.cancel_goal_retry_wake();
+            if let Some(run) = settled_run {
+                // The preflight is a hint: queued work can be cancelled before
+                // this lease is acquired. Reuse the exact canonical settlement
+                // verifier while retaining the lease, never infer run identity
+                // from the now-empty inbox.
+                return self.verify_goal_free_settlement(lease, run);
+            }
             let disposition = if self.attention_enabled() {
                 let metadata = crate::store::read_attention_metadata(
                     &self.metadata.store_path,

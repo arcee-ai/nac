@@ -6,6 +6,9 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
+#[cfg(test)]
+mod continuation;
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct Key {
     store: PathBuf,

@@ -17,11 +17,18 @@ impl AttentionServiceObserver for Observer {
 
 #[tokio::test]
 async fn actual_goal_settlement_publishes_only_after_existing_continuation_boundary() {
-    let (parts, path) = crate::session_service::tests::test_direct_active_service(
+    let (mut parts, path) = crate::session_service::tests::test_direct_active_service(
         "attention-settlement",
         "session",
         ModelClient::new_for_test(),
     );
+    parts.service.permission_broker = Some(Arc::new(crate::permissions::PermissionBroker::new(
+        path.clone(),
+        "session".into(),
+        crate::permissions::PermissionBackend::Local,
+        parts.service.config_version.unwrap(),
+        vec![],
+    )));
     let observer = Arc::new(Observer::default());
     let registration = parts
         .service
@@ -97,9 +104,48 @@ async fn actual_goal_settlement_publishes_only_after_existing_continuation_bound
     assert!(observations
         .windows(2)
         .all(|pair| pair[0].epoch == pair[1].epoch && pair[0].revision < pair[1].revision));
+    let completed = (*completed[0]).clone();
     drop(observations);
+    // Construct a replacement broker in this fixture, then exercise the real
+    // service registration handoff. This adds no production hot-swap API.
+    let mut replacement = parts.service.clone();
+    replacement.permission_broker = Some(Arc::new(crate::permissions::PermissionBroker::new(
+        path.clone(),
+        "session".into(),
+        crate::permissions::PermissionBackend::Local,
+        parts.service.config_version.unwrap(),
+        vec![],
+    )));
+    let next = Arc::new(Observer::default());
+    let unbound = replacement
+        .install_attention_observer(next.clone())
+        .unwrap();
+    let unknown = next.0.lock().unwrap().last().unwrap().clone();
+    assert!(
+        unknown.broker.is_none(),
+        "a different broker cannot consume the old registration"
+    );
+    assert_eq!(unknown.settled, completed.settled);
+    let confirmed = Arc::new(Observer::default());
+    let current = replacement
+        .install_attention_observer(confirmed.clone())
+        .unwrap();
+    let handed_off = confirmed.0.lock().unwrap().last().unwrap().clone();
+    assert_eq!(handed_off.epoch, completed.epoch);
+    assert_eq!(handed_off.settled, completed.settled);
+    assert_ne!(
+        handed_off.broker.as_ref().unwrap().owner,
+        completed.broker.as_ref().unwrap().owner
+    );
     parts.service.remove_attention_observer(registration);
-    assert!(!parts.service.attention_enabled());
+    replacement.remove_attention_observer(unbound);
+    assert!(
+        replacement.attention_enabled(),
+        "stale registration cannot remove replacement"
+    );
+    replacement.remove_attention_observer(current);
+    assert!(!replacement.attention_enabled());
+    drop(replacement);
     drop(parts);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
@@ -630,6 +676,19 @@ async fn callback_panic_during_real_admission_and_settlement_never_strands_run_t
         );
         let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
         drop(lease);
+        // Clearing the active run precedes the final continuation read. Close
+        // admission and acquire its wake lock before retiring fixture storage.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            parts.service.stop_run_admission().await.unwrap();
+            assert!(parts
+                .service
+                .start_next_direct_inbox_item()
+                .await
+                .unwrap()
+                .is_none());
+        })
+        .await
+        .unwrap();
         owner.shutdown().await.unwrap();
         drop(owner);
         drop(parts);

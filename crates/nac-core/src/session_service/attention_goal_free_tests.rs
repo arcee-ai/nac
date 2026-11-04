@@ -12,6 +12,73 @@ async fn until(mut condition: impl FnMut() -> bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn goal_free_settlement_preserves_run_when_preflight_input_is_cancelled() {
+    let (release, wait) = std::sync::mpsc::channel();
+    let provider = ScriptedServer::start_observed(
+        vec![ScriptedResponse::json("200 OK", serde_json::json!({
+            "status":"completed", "output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]
+        }).to_string())],
+        move |_, _| { wait.recv_timeout(Duration::from_secs(5)).unwrap(); },
+    );
+    let (parts, path) = crate::session_service::tests::test_direct_active_service(
+        "attention-preflight-cancel",
+        "session",
+        ModelClient::new_for_test_server(provider.base_url.clone()),
+    );
+    let observer = Arc::new(Observer::default());
+    parts
+        .service
+        .install_attention_observer(observer.clone())
+        .unwrap();
+    let run = parts.service.try_submit_prompt("work".into()).unwrap();
+    let preflight = parts.service.hold_attention_preflight_for_test(&run.run_id);
+    let publication = parts
+        .service
+        .hold_attention_publication_for_test(run.run_id.as_str())
+        .unwrap();
+    let pending = crate::store::create_session_inbox_item(
+        &path,
+        "session",
+        crate::store::InboxDelivery::Queue,
+        "cancel this",
+        None,
+        None,
+    )
+    .unwrap();
+    release.send(()).unwrap();
+    assert!(
+        preflight.arrived().await,
+        "the real selector saw durable pending work"
+    );
+    crate::store::cancel_pending_session_inbox_item(&path, "session", pending.id, pending.version)
+        .unwrap();
+    preflight.release();
+    let selected = publication.arrived().await.unwrap();
+    publication.release();
+    publication.publication_attempted().await.unwrap();
+    assert_eq!(
+        selected,
+        crate::session_service::attention_test_support::AttentionPublicationSelection::Idle {
+            goal: None,
+            last_run: Some(run.run_id.to_string()),
+        }
+    );
+    assert!(observer.0.lock().unwrap().iter().any(|snapshot| snapshot
+        .settled
+        .as_ref()
+        .is_some_and(|work| work.run_id == run.run_id.as_str()
+            && work.disposition == SettledWorkDisposition::Completed)));
+    parts.service.stop_run_admission().await.unwrap();
+    assert_eq!(
+        provider.finish().len(),
+        1,
+        "cancelled input must not launch a successor"
+    );
+    drop(parts);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attention_goal_free_real_owned_models_continue_queue_then_complete_only_final_run() {
     let response = || {
         ScriptedResponse::json("200 OK", serde_json::json!({
