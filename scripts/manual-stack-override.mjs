@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { inspectChecks } from './manual-stack-checks.mjs';
 
 const REPO = 'arcee-ai/nac';
 const ROOT = `repos/${REPO}`;
@@ -100,20 +101,8 @@ export function createHelper(transport = ghTransport, {
     throw new Error('Pagination limit exceeded');
   }
   async function validation(pr, rules) {
-    const checks = await pages(`commits/${pr.head.sha}/check-runs?filter=latest`, 'check_runs');
-    const statuses = await pages(`commits/${pr.head.sha}/status`, 'statuses');
-    const required = new Set(['Required PR checks', 'source-security / Full locked source scan']);
-    for (const rule of rules.filter(r => r.type === 'required_status_checks')) {
-      for (const check of rule.parameters.required_status_checks) required.add(check.context);
-    }
-    const records = [...checks.map(c => ({ name: c.name,
-      state: c.status === 'completed' ? c.conclusion : c.status })),
-    ...statuses.map(s => ({ name: s.context, state: s.state }))];
-    const blockers = records.filter(r => !['success', 'neutral', 'skipped'].includes(r.state) ||
-      required.has(r.name) && r.state !== 'success').map(r => `${r.name}: ${r.state}`);
-    for (const name of required) if (!records.some(r => r.name === name && r.state === 'success')) {
-      blockers.push(`${name}: missing successful result`);
-    }
+    const evidence = await inspectChecks(pr, rules, { get, pages });
+    const { blockers } = evidence;
     let cursor = null;
     for (let page = 0; page < 100; page++) {
       const data = await api('POST', 'graphql', { query: `query($number:Int!,$cursor:String) {
@@ -127,7 +116,12 @@ export function createHelper(transport = ghTransport, {
         'Review query failed or head changed');
       const threads = data.data.repository.pullRequest.reviewThreads;
       if (threads.nodes.some(t => t.isResolved !== true)) blockers.push('Unresolved review conversations');
-      if (!threads.pageInfo.hasNextPage) return { records, blockers };
+      if (!threads.pageInfo.hasNextPage) {
+        const after = await get(`pulls/${pr.number}`);
+        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha],
+          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha]), 'PR head/base changed during validation');
+        return evidence;
+      }
       insist(threads.pageInfo.endCursor && threads.pageInfo.endCursor !== cursor, 'Invalid review pagination');
       cursor = threads.pageInfo.endCursor;
     }

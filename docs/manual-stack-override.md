@@ -70,8 +70,23 @@ advances. No author code is automatically fixed, rebased or marked ready.
 - Every remaining member must be non-draft, conflict-free, and have known
   mergeability. Unresolved conversations and pending/failed check results stop
   execution. Required status contexts, `Required PR checks` and
-  `source-security / Full locked source scan` must report success. Optional
+  `source-security / Full locked source scan`, plus the existing mandatory
+  native process/credentials job, must report success. Optional
   completed neutral/skipped checks are allowed. No CI/security waiver is offered.
+- Check history stays in the plan, including original failure output and an
+  explicit superseding run/attempt/job map. Only the NAC Stable workflow's
+  historical GitHub Actions suites can be superseded: repository, app, workflow,
+  pull-request event, PR, head and current base must match. The workflow's
+  referenced test-merge commit must have that exact base/head as its parents.
+  The newest run and its latest job executions are selected regardless of their
+  result; queued, running, failed or cancelled work cannot fall back to older
+  green checks. Partial reruns require exact old/new job-attempt proof.
+- Other apps and workflows retain their check-record veto; their latest
+  applicable workflow run must also finish acceptably. Names alone never
+  establish supersession. Missing/ambiguous provenance, a changing run inventory
+  or a changed PR head/base stops validation. Required integration IDs remain
+  effective, and matching commit statuses and checks must both pass. These
+  bounded rules may conservatively hold an unfamiliar workflow for inspection.
 - Full immutable comparisons must contain 1–299 files. Binary changes, quoted
   paths, incomplete diffs, non-linear ancestry and unexpected stack lifecycle
   changes stop for separate human handling. There is no resume/recovery engine.
