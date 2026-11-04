@@ -69,6 +69,7 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
     let schedule_id=match action {
         HeartbeatAction::Create{spec} => {
             spec.validate()?;
+            ensure!(expected_binding.fresh_task.is_none() || matches!(&spec.cadence,HeartbeatCadence::Interval{..}),"fresh task schedules currently require interval cadence");
             ensure!(expected_binding.fresh_task.is_none() || spec.goal_id.is_none(),"fresh scheduled tasks cannot bind or create a goal");
             ensure!(!scheduling_request.trim().is_empty() && scheduling_request.len()<=65_536,"heartbeat creation requires a bounded human scheduling request");
             let mut binding=control_binding(&tx,session_id,expected_binding)?;
@@ -79,7 +80,7 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
             binding.execution_cwd=Some(execution_cwd.to_owned());
             let count:i64=tx.query_row("SELECT count(*) FROM heartbeat_schedules",[],|row| row.get(0))?;
             ensure!(count<MAX_HEARTBEAT_SCHEDULES,"heartbeat schedule capacity exhausted (including retained tombstones)");
-            let due=model::future_due(now_ms,spec.interval_ms,now_ms)?;
+            let due=spec.cadence.future_due(now_ms,now_ms,None)?;
             let id=uuid::Uuid::new_v4().to_string();
             let owning_session=if binding.fresh_task.is_some(){None}else{Some(session_id)};
             tx.execute("INSERT INTO heartbeat_schedules(schedule_id,session_id,version,state,binding_json,specification_json,anchor_ms,next_due_ms,created_at_ms,updated_at_ms) VALUES(?1,?2,1,'active',?3,?4,?5,?6,?5,?5)",params![id,owning_session,encode(&binding)?,encode(spec)?,now_ms,due])?;
@@ -101,6 +102,7 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
             match action {
                 HeartbeatAction::Edit{spec:replacement,..} => {
                     replacement.validate()?;
+                    ensure!(schedule.binding.fresh_task.is_none() || matches!(&replacement.cadence,HeartbeatCadence::Interval{..}),"fresh task schedules currently require interval cadence");
                     ensure!(schedule.binding.fresh_task.is_none() || replacement.goal_id.is_none(),"fresh scheduled tasks cannot bind or create a goal");
                     binding=control_binding(&tx,session_id,expected_binding)?;
                     binding.fresh_task=expected_binding.fresh_task.clone();
@@ -110,9 +112,9 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
                     binding.scheduling_request=Some(scheduling_request.to_owned());
                     ensure!(!execution_cwd.is_empty() && execution_cwd.len()<=8_192,"heartbeat workspace binding is unavailable");
                     binding.execution_cwd=Some(execution_cwd.to_owned());
-                    if replacement.interval_ms!=spec.interval_ms {
+                    if replacement.cadence!=spec.cadence {
                         anchor=now_ms;
-                        due=model::future_due(anchor,replacement.interval_ms,now_ms)?;
+                        due=replacement.cadence.future_due(anchor,now_ms,None)?;
                     }
                     spec=replacement.clone();
                 }
@@ -129,7 +131,7 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
                     ensure!(same_target && binding.execution_cwd.as_deref()==Some(execution_cwd),"heartbeat target configuration/workspace changed; edit after review");
                     ensure!(schedule.starts<spec.max_occurrences,"heartbeat occurrence allowance exhausted");
                     ensure!(spec.token_allowance.is_none_or(|n| schedule.tokens_used<n && !schedule.usage_unknown),"heartbeat usage allowance exhausted or unknown");
-                    due=due.max(model::future_due(anchor,spec.interval_ms,now_ms)?);
+                    due=spec.cadence.future_due(anchor,now_ms,Some(due))?;
                     state=HeartbeatState::Active;
                 }
                 HeartbeatAction::Stop{..} => state=HeartbeatState::Stopped,

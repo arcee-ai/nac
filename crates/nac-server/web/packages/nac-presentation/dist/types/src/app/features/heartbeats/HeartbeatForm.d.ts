@@ -1,10 +1,15 @@
 import { type ReactNode } from "react";
 import type { HeartbeatSpec } from "../../types/api";
-export declare function HeartbeatForm({ initial, disabled, onSubmit, onCancel, freshTasks, children, }: {
+export declare function HeartbeatForm({ sessionId, initial, disabled, onSubmit, onCancel, freshTasks, children, }: {
     initial?: HeartbeatSpec;
     disabled: boolean;
     onSubmit: (spec: HeartbeatSpec) => void;
     onCancel: () => void;
-    freshTasks?: boolean;
     children?: ReactNode;
-}): import("react").JSX.Element;
+} & ({
+    freshTasks: true;
+    sessionId?: undefined;
+} | {
+    freshTasks?: false;
+    sessionId: string;
+})): import("react").JSX.Element;

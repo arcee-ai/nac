@@ -9,6 +9,9 @@ use crate::store::{self, HeartbeatAction, HeartbeatOccurrenceState, HeartbeatOut
 use crate::types::{FunctionDef, ToolDefinition};
 
 mod control_input;
+mod preview;
+mod schema;
+pub(crate) use preview::PreviewHeartbeatTool;
 
 pub(crate) const CONTROL_HEARTBEAT: &str = "heartbeat_control";
 
@@ -130,24 +133,7 @@ impl HeartbeatControlTool {
 impl NativeTool for HeartbeatControlTool {
     type Input = ControlInput;
     fn definition(&self) -> ToolDefinition {
-        definition(CONTROL_HEARTBEAT,
-            "Create or control a durable interval heartbeat in this exact chat. Create/edit/resume/Run now only when the human explicitly requests scheduling or that change; never infer scheduling from ordinary work. Reuse the exact request_id on a retry. Create first fires after interval_ms; Run now retains the anchor. Read the current version before controls. Pause withdraws unstarted checks; stop also cancels the exact active check; delete reports active work and does not cancel it. Automatic turns cannot create or renew scheduling authority/limits. Ordinary heartbeats create neither goals nor new chats.",
-            json!({"type":"object","additionalProperties":false,"required":["request_id","operation"],"properties":{
-                "request_id":{"type":"string","description":"A fresh canonical UUID for this intentional operation; retain it for identical retries."},
-                "operation":{"type":"object","additionalProperties":false,"required":["action"],"properties":{
-                    "action":{"type":"string","enum":["create","edit","pause","resume","stop","delete","run_now"]},
-                    "schedule_id":{"type":["string","null"]},"expected_version":{"type":["integer","null"],"minimum":1},
-                    "spec":{"type":["object","null"],"additionalProperties":false,"required":["name","instructions","interval_ms","end_condition"],"properties":{
-                        "name":{"type":"string","maxLength":120},"instructions":{"type":"string","maxLength":8000},
-                        "skills":{"type":"array","maxItems":8,"items":{"type":"string"}},
-                        "interval_ms":{"type":"integer","minimum":60000,"maximum":31536000000i64},
-                        "end_condition":{"type":"string","maxLength":1000},"goal_id":{"type":["string","null"]},
-                        "execution_timeout_ms":{"type":"integer","minimum":1000,"maximum":3600000,"default":300000},
-                        "max_occurrences":{"type":"integer","minimum":1,"maximum":100000,"default":1000},
-                        "token_allowance":{"type":["integer","null"],"minimum":1}
-                    }}
-                }}
-            }}))
+        definition(CONTROL_HEARTBEAT,"Create/control a durable heartbeat in this exact existing chat only after explicit human scheduling intent. Choose exactly one non-null interval_ms or calendar; calendar saves an explicit IANA zone and preview's pinned data_version. Preview before/after edits. Gap SKIP, earliest fold ONCE. Reuse request_id for identical retries. Read the current version before controls. Run now preserves cadence; pause withdraws unstarted work; stop cancels exact active work; delete reports admitted work without claiming cancellation. Automatic turns cannot create or renew authority/limits. No fresh tasks or goals.",schema::control())
     }
     fn admission(&self) -> ToolAdmission {
         ToolAdmission::Exclusive
@@ -273,7 +259,7 @@ pub(crate) struct ListHeartbeatsTool;
 impl NativeTool for ListHeartbeatsTool {
     type Input = EmptyInput;
     fn definition(&self) -> ToolDefinition {
-        definition("list_heartbeats","Passively list durable interval heartbeats in this exact chat, including limits, saved purpose and current reasons. This read never wakes a chat or goal.",json!({"type":"object","additionalProperties":false,"properties":{}}))
+        definition("list_heartbeats","Passively list durable interval or explicit-zone calendar heartbeats in this exact chat, including limits, saved purpose and current reasons. This read never wakes a chat or goal.",json!({"type":"object","additionalProperties":false,"properties":{}}))
     }
     fn admission(&self) -> ToolAdmission {
         ToolAdmission::Parallel
@@ -341,7 +327,7 @@ impl NativeTool for ReadHeartbeatTool {
                 Ok(id) => id,
                 Err(e) => return e,
             };
-            match store_call(services,move|path|Ok(json!({"schedule":store::read_heartbeat(path,&id,&input.schedule_id)?,"history":store::heartbeat_history(path,&id,&input.schedule_id)?}))).await {Ok(value)=>result(value),Err(e)=>e}
+            match store_call(services,move|path|{let schedule=store::read_heartbeat(path,&id,&input.schedule_id)?;let calendar_preview=schedule.calendar_preview(epoch_ms(),3)?;Ok(json!({"schedule":schedule,"history":store::heartbeat_history(path,&id,&input.schedule_id)?,"calendar_preview":calendar_preview}))}).await {Ok(value)=>result(value),Err(e)=>e}
         })
     }
 }

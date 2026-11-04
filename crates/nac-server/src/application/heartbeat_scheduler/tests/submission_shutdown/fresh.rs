@@ -155,7 +155,9 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
                     name: "Fresh stop boundary".into(),
                     instructions: "Inspect the local fixture.".into(),
                     skills: Vec::new(),
-                    interval_ms: 60_000,
+                    cadence: nac_core::store::HeartbeatCadence::Interval {
+                        interval_ms: 60_000,
+                    },
                     end_condition: "Finish this occurrence.".into(),
                     goal_id: None,
                     execution_timeout_ms: 30_000,

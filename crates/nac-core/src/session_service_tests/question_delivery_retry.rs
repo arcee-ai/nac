@@ -345,7 +345,9 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
                     name: "Typed lifecycle retry".into(),
                     instructions: "Read the goal then ask the exact question.".into(),
                     skills: vec![],
-                    interval_ms: 60_000,
+                    cadence: crate::store::HeartbeatCadence::Interval {
+                        interval_ms: 60_000,
+                    },
                     end_condition: "Review the answer".into(),
                     goal_id: Some(goal.goal_id.clone()),
                     execution_timeout_ms: 60_000,

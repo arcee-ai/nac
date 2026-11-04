@@ -18,7 +18,9 @@ fn create() -> HeartbeatAction {
             name: "Job check".into(),
             instructions: "Check the authorized Local result.".into(),
             skills: Vec::new(),
-            interval_ms: 60_000,
+            cadence: crate::store::HeartbeatCadence::Interval {
+                interval_ms: 60_000,
+            },
             end_condition: "Finish when ready.".into(),
             goal_id: None,
             execution_timeout_ms: 300_000,
@@ -139,6 +141,59 @@ async fn same_chat_heartbeat_commits_admission_created_inbox_once_with_skills() 
     assert!(String::from_utf8_lossy(&requests[0].body).contains("SAME_CHAT_SKILL_TOKEN"));
 }
 
+#[tokio::test]
+async fn heartbeat_native_preview_uses_prepared_read_policy_and_never_creates_or_wakes() {
+    let (parts, path) = fixture();
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    let snapshot = ToolRegistry::builder()
+        .register(crate::tools::heartbeat::PreviewHeartbeatTool)
+        .finish()
+        .unwrap()
+        .snapshot(["preview_heartbeat"])
+        .unwrap();
+    for effect in [PermissionEffect::Allow, PermissionEffect::Deny] {
+        runtime.permission_broker = Some(Arc::new(PermissionBroker::new(
+            path.clone(),
+            "session".into(),
+            PermissionBackend::Local,
+            parts.service.config_version.unwrap(),
+            vec![PermissionRule::new("heartbeat_read", "*", effect)],
+        )));
+        let result=snapshot.invoke("preview_heartbeat",serde_json::json!({"calendar":{"zone":"America/Los_Angeles","data_version":null,"hour":9,"minute":0,"days":{"kind":"weekdays","days":[1,2,3,4,5],"day":null}},"count":3}),ToolServices{runtime:&runtime,client:&ModelClient::new_for_test()},&ToolCallContext::default()).await;
+        assert_eq!(
+            result.is_error,
+            effect == PermissionEffect::Deny,
+            "{}",
+            result.content
+        );
+        if !result.is_error {
+            let preview: crate::store::HeartbeatCalendarPreview =
+                serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+            assert_eq!(preview.calendar.zone, "America/Los_Angeles");
+            assert_eq!(preview.calendar.data_version, "2026f");
+            assert_eq!(preview.occurrences.len(), 3);
+        }
+        let broker = runtime.permission_broker.as_ref().unwrap();
+        assert!(broker.pending().is_empty());
+        assert!(broker.grants().unwrap().is_empty());
+    }
+    assert!(crate::store::list_heartbeats(&path, None)
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+    assert!(parts.service.active_run().is_none());
+}
 async fn native_control(
     runtime: &crate::tools::ToolRuntime,
     operation: HeartbeatAction,
@@ -372,7 +427,9 @@ async fn heartbeat_native_registry_controls_all_actions_inside_an_executing_turn
                 let HeartbeatAction::Create { mut spec } = create() else {
                     unreachable!()
                 };
-                spec.interval_ms = 120_000;
+                spec.cadence = crate::store::HeartbeatCadence::Interval {
+                    interval_ms: 120_000,
+                };
                 HeartbeatAction::Edit {
                     schedule_id: id,
                     expected_version: expected,

@@ -218,7 +218,9 @@ fn heartbeat_question_deferral_does_not_revive_stopped_or_edited_occurrence() {
             }
         } else {
             let mut updated = spec();
-            updated.interval_ms = 120_000;
+            updated.cadence = crate::store::HeartbeatCadence::Interval {
+                interval_ms: 120_000,
+            };
             HeartbeatAction::Edit {
                 schedule_id: schedule.schedule_id.clone(),
                 expected_version: 1,

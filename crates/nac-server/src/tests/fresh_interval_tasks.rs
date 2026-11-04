@@ -131,7 +131,9 @@ fn specification() -> HeartbeatSpec {
         name: "Fresh fixture".into(),
         instructions: "Inspect the isolated fixture without changing files.".into(),
         skills: Vec::new(),
-        interval_ms: 60_000,
+        cadence: nac_core::store::HeartbeatCadence::Interval {
+            interval_ms: 60_000,
+        },
         end_condition: "Complete this occurrence after inspection; retain the schedule.".into(),
         goal_id: None,
         execution_timeout_ms: 30_000,

@@ -182,7 +182,7 @@
   {
     "document_id": "heartbeats",
     "source_path": "docs/heartbeats.md",
-    "title": "Same-chat interval heartbeats",
+    "title": "Existing-chat heartbeats: intervals and explicit-zone calendars",
     "sections": [
       {
         "section_id": "scheduling-and-control",

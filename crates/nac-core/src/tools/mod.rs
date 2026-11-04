@@ -191,7 +191,7 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
 mod fresh_task_schedules;
 pub(crate) mod heartbeat;
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 34] = [
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 35] = [
     "nac_guide",
     "read",
     "write",
@@ -223,6 +223,7 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 34] = [
     "heartbeat_control",
     "list_heartbeats",
     "read_heartbeat",
+    "preview_heartbeat",
     "report_heartbeat",
     "fresh_task_schedule_control",
     "fresh_task_schedule_read",
@@ -236,7 +237,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 35] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 36] = [
     "nac_guide",
     "read",
     "write",
@@ -263,6 +264,7 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 35] = [
     "heartbeat_control",
     "list_heartbeats",
     "read_heartbeat",
+    "preview_heartbeat",
     "report_heartbeat",
     "fresh_task_schedule_control",
     "fresh_task_schedule_read",
@@ -308,6 +310,7 @@ fn worker_tool_registry(
         .register(heartbeat::HeartbeatControlTool::native())
         .register(heartbeat::ListHeartbeatsTool)
         .register(heartbeat::ReadHeartbeatTool)
+        .register(heartbeat::PreviewHeartbeatTool)
         .register(heartbeat::ReportHeartbeatTool)
         .register(fresh_task_schedules::ControlFreshTaskScheduleTool)
         .register(fresh_task_schedules::ReadFreshTaskScheduleTool)

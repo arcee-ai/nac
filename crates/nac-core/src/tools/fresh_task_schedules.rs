@@ -126,6 +126,16 @@ impl NativeTool for ControlFreshTaskScheduleTool {
             .parameters["properties"]["operation"]
             .clone();
         operation["properties"]["spec"]["properties"]["goal_id"] = json!({"type":"null"});
+        let spec = &mut operation["properties"]["spec"];
+        let Value::Object(properties) = &mut spec["properties"] else {
+            unreachable!("shared heartbeat specification has object properties");
+        };
+        properties.remove("calendar");
+        spec["properties"]["interval_ms"]["type"] = json!("integer");
+        let Value::Array(required) = &mut spec["required"] else {
+            unreachable!("shared heartbeat specification has required fields");
+        };
+        required.push(json!("interval_ms"));
         heartbeat::definition("fresh_task_schedule_control","Create or control a standalone interval schedule that launches a fresh retained, visible, goal-free direct task in one exact saved Local project. Only schedule or enlarge authority after an explicit human request. Omit project_id to use this chat's exact bound saved project; this tool does not discover projects. Creation first fires after interval_ms; Run now preserves cadence. Git uses the saved destination default branch, resolved once per occurrence; a full pinned commit wins. Source edits are excluded. Non-Git Local directories are shared, visibly. Reuse request_id for identical retries. Pause withdraws unstarted occurrences; stop cancels only the exact active scheduled initial run; delete preserves active receipts/resources. No automatic cleanup, goals, host/backend fallback or implicit renewal.",json!({"type":"object","additionalProperties":false,"required":["request_id","operation"],"properties":{
             "request_id":{"type":"string"},"project_id":{"type":["string","null"]},"operation":operation,
             "destination":{"type":["object","null"],"additionalProperties":false,"properties":{
@@ -140,8 +150,26 @@ impl NativeTool for ControlFreshTaskScheduleTool {
     }
     fn decode(&self, value: Value) -> Result<ControlInput, ToolResult> {
         let wire: WireControl = heartbeat::decode(value)?;
+        if wire
+            .operation
+            .get("spec")
+            .and_then(Value::as_object)
+            .is_some_and(|spec| spec.contains_key("calendar"))
+        {
+            return Err(heartbeat::error(
+                "fresh task schedules currently require interval cadence",
+            ));
+        }
         let common = heartbeat::HeartbeatControlTool::native()
             .decode(json!({"request_id":wire.request_id,"operation":wire.operation}))?;
+        if matches!(&common.operation,
+            HeartbeatAction::Create { spec } | HeartbeatAction::Edit { spec, .. }
+                if !matches!(&spec.cadence, store::HeartbeatCadence::Interval { .. }))
+        {
+            return Err(heartbeat::error(
+                "fresh task schedules currently require interval cadence",
+            ));
+        }
         Ok(ControlInput {
             request_id: common.request_id,
             project_id: wire.project_id,

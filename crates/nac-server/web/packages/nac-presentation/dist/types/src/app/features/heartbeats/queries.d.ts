@@ -1,5 +1,5 @@
 import type { HeartbeatReceipt } from "../../types/api";
-import type { HeartbeatAction } from "../../types/api";
+import type { HeartbeatAction, HeartbeatCalendarDraft } from "../../types/api";
 export declare const heartbeatKey: (sessionId: string) => readonly ["heartbeats", string];
 export declare function useHeartbeats(sessionId: string, scheduleId: string | null, allChats?: boolean): {
     inventory: import("@tanstack/react-query").UseQueryResult<NoInfer<{
@@ -20,6 +20,7 @@ export declare function useHeartbeats(sessionId: string, scheduleId: string | nu
         version: number;
     }[]>, Error>;
     inspection: import("@tanstack/react-query").UseQueryResult<NoInfer<{
+        calendar_preview?: import("../../types/openapi.generated").components["schemas"]["HeartbeatCalendarPreview"] | null;
         history: import("../../types/openapi.generated").components["schemas"]["HeartbeatOccurrence"][];
         schedule: import("../../types/openapi.generated").components["schemas"]["HeartbeatSchedule"];
     }>, Error>;
@@ -42,3 +43,8 @@ export declare function useHeartbeats(sessionId: string, scheduleId: string | nu
     rejected: boolean;
     retry: () => void;
 };
+export declare function useHeartbeatCalendarPreview(sessionId: string | undefined, calendar: HeartbeatCalendarDraft | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    calendar: import("../../types/openapi.generated").components["schemas"]["HeartbeatCalendarRule"];
+    next_due?: import("../../types/openapi.generated").components["schemas"]["HeartbeatCalendarPreviewPoint"] | null;
+    occurrences: import("../../types/openapi.generated").components["schemas"]["HeartbeatCalendarPreviewPoint"][];
+}>, Error>;

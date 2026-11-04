@@ -21,6 +21,28 @@ pub(crate) struct HeartbeatControlRequest {
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct HeartbeatPreviewRequest {
+    calendar: nac_core::store::HeartbeatCalendarDraft,
+    #[schema(minimum = 1, maximum = 16)]
+    count: Option<usize>,
+}
+
+#[utoipa::path(post,path="/sessions/{session_id}/heartbeats/preview",tag="sessions",params(("session_id"=String,Path)),request_body=HeartbeatPreviewRequest,responses((status=200,body=nac_core::store::HeartbeatCalendarPreview),(status=400,body=ApiErrorBody)))]
+pub(crate) async fn preview(
+    State(manager): State<SessionManager>,
+    Path(session): Path<String>,
+    payload: Result<Json<HeartbeatPreviewRequest>, JsonRejection>,
+) -> Result<Json<nac_core::store::HeartbeatCalendarPreview>, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from)?;
+    HeartbeatApplication::new(&manager)
+        .preview(&session, request.calendar, request.count.unwrap_or(3))
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::bad_request(error.to_string()))
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct HeartbeatAttentionAcknowledgement {
     through_sequence: i64,
 }

@@ -7,6 +7,8 @@ import type {
   FreshTaskScheduleInspection,
   FreshTaskRetainedAllowanceChange,
   FreshTaskRetainedAllowanceReceipt,
+  HeartbeatPreviewRequest,
+  HeartbeatCalendarPreview,
 } from "@/app/types/api";
 // Standalone compatibility facade; feature owners obtain their API from runtime context.
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
@@ -55,6 +57,11 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     signal?: AbortSignal,
   ): Promise<HeartbeatInspection>;
   controlHeartbeat(sessionId: string, request: HeartbeatControlRequest): Promise<HeartbeatReceipt>;
+  previewHeartbeat(
+    sessionId: string,
+    request: HeartbeatPreviewRequest,
+    signal?: AbortSignal,
+  ): Promise<HeartbeatCalendarPreview>;
   acknowledgeHeartbeats(sessionId: string, throughSequence: number): Promise<void>;
   startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
   taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;
@@ -137,6 +144,12 @@ export function createNativeApi(
         "POST",
         `/sessions/${encodeURIComponent(sessionId)}/heartbeats/control`,
         { body },
+      ),
+    previewHeartbeat: (sessionId, body, signal) =>
+      request<HeartbeatCalendarPreview>(
+        "POST",
+        `/sessions/${encodeURIComponent(sessionId)}/heartbeats/preview`,
+        { body, signal },
       ),
     acknowledgeHeartbeats: (sessionId, throughSequence) =>
       request<void>("POST", `/sessions/${encodeURIComponent(sessionId)}/heartbeats/attention`, {

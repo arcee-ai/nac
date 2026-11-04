@@ -14,6 +14,7 @@ use crate::SessionManager;
 pub(crate) struct HeartbeatInspection {
     pub schedule: HeartbeatSchedule,
     pub history: Vec<HeartbeatOccurrence>,
+    pub calendar_preview: Option<store::HeartbeatCalendarPreview>,
 }
 
 pub(crate) struct HeartbeatApplication<'a> {
@@ -43,12 +44,29 @@ impl<'a> HeartbeatApplication<'a> {
     ) -> Result<HeartbeatInspection> {
         let path = self.manager.inner.store_path.clone();
         store::spawn_blocking_store_caller(move || {
+            let schedule = store::read_heartbeat(&path, &session_id, &schedule_id)?;
+            let calendar_preview = schedule.calendar_preview(epoch_ms(), 3)?;
             Ok(HeartbeatInspection {
-                schedule: store::read_heartbeat(&path, &session_id, &schedule_id)?,
+                schedule,
                 history: store::heartbeat_history(&path, &session_id, &schedule_id)?,
+                calendar_preview,
             })
         })
         .await?
+    }
+    pub(crate) async fn preview(
+        &self,
+        session_id: &str,
+        calendar: store::HeartbeatCalendarDraft,
+        count: usize,
+    ) -> Result<store::HeartbeatCalendarPreview> {
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Direct,
+            )
+            .await?;
+        calendar.into_rule().preview(epoch_ms(), None, count)
     }
     pub(crate) async fn acknowledge(&self, session_id: &str, through_sequence: i64) -> Result<()> {
         self.manager
