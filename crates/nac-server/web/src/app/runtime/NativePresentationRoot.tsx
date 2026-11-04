@@ -1,5 +1,6 @@
 import type { DesktopCommandPort } from "../features/desktop-commands/adapter";
 import { HeartbeatAttentionController } from "@/app/features/heartbeats/HeartbeatAttentionController";
+import { TerminalLinkModeProvider } from "../features/terminal/terminalLinkMode";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "../../App";
@@ -46,7 +47,13 @@ function RuntimePresentation({
       styles={styles}
       globalKeyboard={globalKeyboard}
     >
-      {router(<App desktopCommands={desktopCommands} />)}
+      {router(
+        // Explicit desktop presentation capability selects the affordance only;
+        // browser/hosted consumers without it retain their existing behavior.
+        <TerminalLinkModeProvider value={desktopCommands ? "native-visible-anchor" : "browser"}>
+          <App desktopCommands={desktopCommands} />
+        </TerminalLinkModeProvider>,
+      )}
     </ThemedPresentation>
   );
   return (
