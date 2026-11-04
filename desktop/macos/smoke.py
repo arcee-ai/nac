@@ -276,9 +276,14 @@ def main():
             failure = sys.exception()
             if not actors_settled:
                 diagnostic = f'Smoke cleanup unproven; retained app root {temporary}; evidence {evidence}'
-                print(diagnostic, file=sys.stderr)
                 if failure is not None:
                     failure.add_note(diagnostic)
+                try:
+                    print(diagnostic, file=sys.stderr)
+                except BaseException as error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Retention notice could not be written: {error}')
             else:
                 try:
                     shutil.rmtree(temporary)

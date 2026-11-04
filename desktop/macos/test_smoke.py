@@ -52,7 +52,7 @@ class CleanupTests(unittest.TestCase):
 
 class MainCustodyTests(unittest.TestCase):
     def exercise(self, *, receipt='complete', actor_error=None, launch_error='timeout',
-                 wrapper_error=False, wrapper_timeout=False, passed=True):
+                 wrapper_error=False, wrapper_timeout=False, passed=True, stderr_error=None):
         with tempfile.TemporaryDirectory(prefix='nac-smoke-main-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -147,7 +147,8 @@ class MainCustodyTests(unittest.TestCase):
                     stack.enter_context(patch.object(smoke, target, replacement) if '.' not in target
                                         else patch('smoke.' + target, replacement))
                 stack.enter_context(patch.dict('os.environ', {'NAC_MAC_SMOKE_SCENARIOS': 'normal'}))
-                stack.enter_context(patch('sys.stderr', new_callable=io.StringIO))
+                sink = Mock(write=Mock(side_effect=stderr_error)) if stderr_error else io.StringIO()
+                stack.enter_context(patch('sys.stderr', sink))
                 stack.enter_context(patch('sys.stdout', new_callable=io.StringIO))
                 try:
                     smoke.main()
@@ -186,6 +187,21 @@ class MainCustodyTests(unittest.TestCase):
                 result['cleanup'].assert_not_called()
                 result['launcher'].terminate.assert_called_once()
                 self.assertEqual(result['teardown_waits'], [5])
+
+    def test_failed_retention_notice_preserves_primary_failure_and_custody(self):
+        result = self.exercise(actor_error='mismatched actor ownership',
+                               stderr_error=BrokenPipeError('closed retention sink'))
+        self.assertIs(result['failure'], result['primary'])
+        self.assertIsInstance(result['failure'], subprocess.TimeoutExpired)
+        self.assertTrue(result['retained'])
+        self.assertTrue(result['engine_retained'])
+        self.assertTrue(result['saved_retained'])
+        self.assertTrue(result['profile_retained'])
+        result['launcher'].terminate.assert_called_once()
+        self.assertEqual(result['teardown_waits'], [5])
+        notes = '\n'.join(result['failure'].__notes__)
+        self.assertIn('retained app root', notes)
+        self.assertIn('closed retention sink', notes)
 
     def test_timeout_with_settled_actors_removes_only_owned_relocation(self):
         result = self.exercise()
