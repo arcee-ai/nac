@@ -91,6 +91,7 @@ final class AppQuit {
         smokeSheetPresentations += 1
         #endif
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         alert.beginSheetModal(for: window) { [weak self, weak alert] response in
             guard let self, self.confirmation === alert else { return }
             self.confirmation = nil
