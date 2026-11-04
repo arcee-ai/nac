@@ -16,6 +16,11 @@ import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 
+def cleanup_note(primary, stage, error):
+    """Keep secondary teardown diagnostics bounded and free of auth values."""
+    primary.add_note(f'{stage} failed ({type(error).__name__})')
+
+
 class AuthFixture(AbstractContextManager):
     def __init__(self, callback='http://localhost:1456/mcp_library/oauth/callback', clock=time.monotonic,
                  device_mode='success', device_timeout_seconds=3):
@@ -40,11 +45,23 @@ class AuthFixture(AbstractContextManager):
         self.thread.start()
         return self
 
-    def __exit__(self, *_):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=3)
-        assert not self.thread.is_alive(), 'Auth fixture listener failed to stop'
+    def __exit__(self, kind, primary, traceback):
+        failure = primary
+        def join():
+            self.thread.join(timeout=3)
+            if self.thread.is_alive():
+                raise RuntimeError('Auth fixture listener failed to stop')
+        for stage, close in [('Auth listener shutdown', self.server.shutdown),
+                             ('Auth listener close', self.server.server_close), ('Auth listener join', join)]:
+            try:
+                close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    cleanup_note(failure, stage, error)
+        if primary is None and failure is not None:
+            raise failure
 
     def snapshot(self):
         with self.lock:
