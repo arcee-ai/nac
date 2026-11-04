@@ -55,3 +55,36 @@ pub(super) fn backfill_run_counts(conn: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
+
+pub(super) fn autoincrement_sequence(conn: &Connection, table: &str) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+pub(super) fn restore_autoincrement_sequence(
+    conn: &Connection,
+    table: &str,
+    prior_sequence: Option<i64>,
+) -> Result<()> {
+    let Some(prior_sequence) = prior_sequence else {
+        return Ok(());
+    };
+    let updated = conn.execute(
+        "UPDATE sqlite_sequence
+         SET seq = MAX(seq, ?2)
+         WHERE name = ?1",
+        params![table, prior_sequence],
+    )?;
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO sqlite_sequence (name, seq) VALUES (?1, ?2)",
+            params![table, prior_sequence],
+        )?;
+    }
+    Ok(())
+}

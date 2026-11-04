@@ -18,7 +18,11 @@ fn previous_schema(path: &Path) {
     insert_test_session(path, "creator");
     let conn = open_runtime_connection(path).unwrap();
     conn.execute_batch(
-        "DROP TABLE heartbeat_fresh_destinations;
+        "DROP TABLE session_completion_marks;
+         DROP TABLE session_completion_bindings;
+         DROP TABLE session_completion_occurrences;
+         DROP TABLE session_completion_feed;
+         DROP TABLE heartbeat_fresh_destinations;
          DROP TABLE heartbeat_task_launches;
          DROP TABLE heartbeat_retained_commands;
          DROP TABLE heartbeat_retained_allowance;
