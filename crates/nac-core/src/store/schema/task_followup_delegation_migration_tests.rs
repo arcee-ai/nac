@@ -240,7 +240,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
-        assert_eq!(STORE_SCHEMA_VERSION, 49);
+        assert_eq!(STORE_SCHEMA_VERSION, 50);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,
