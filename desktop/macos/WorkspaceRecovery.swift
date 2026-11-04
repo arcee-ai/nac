@@ -170,6 +170,9 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
         hideActions()
     }
 
+    /// Called only at the app's stop dispatch for a live owned engine.
+    func ownedEngineWillStop() { engineStateLost = true }
+
     func engineExited(_ message: String) {
         guard !closed, app.failure == nil else { return }
         rememberRoute()
@@ -214,7 +217,6 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
 
     private func performRestart() {
         rememberRoute()
-        engineStateLost = true
         let expected = next()
         let retirement = app.beginWorkspaceRetirement()
         app.showShutdownStatus("Restarting the owned NAC engine…\n\nWaiting for its real cleanup. No commands or terminal input will be replayed.")
