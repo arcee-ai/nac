@@ -1,5 +1,66 @@
 use super::*;
 
+/// Factual output local to the connection that settled this exact occurrence.
+/// Private fields prevent callers from turning a provisional report into proof.
+pub(crate) struct FinalHeartbeat<'a> {
+    connection: &'a Connection,
+    session: String,
+    run: String,
+    occurrence: String,
+    generation: Option<String>,
+    outcome: HeartbeatOutcome,
+}
+
+impl FinalHeartbeat<'_> {
+    pub(crate) fn outcome_for(
+        &self,
+        connection: &Connection,
+        session: &str,
+        run: &str,
+    ) -> Result<HeartbeatOutcome> {
+        ensure!(
+            std::ptr::eq(self.connection, connection) && self.session == session && self.run == run,
+            "heartbeat settlement belongs to another connection or run"
+        );
+        let retained: Option<(String, Option<String>, String, String)> = connection.query_row(
+            "SELECT occurrence_id,generation,state,outcome FROM heartbeat_occurrences WHERE session_id=?1 AND run_id=?2",
+            params![session, run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?;
+        if let Some((occurrence, generation, state, outcome)) = retained {
+            ensure!(
+                occurrence == self.occurrence
+                    && generation == self.generation
+                    && state == "settled"
+                    && outcome == vocabulary(&self.outcome)?,
+                "heartbeat final settlement changed"
+            );
+        }
+        // This connection's settlement captured the fact before bounded pruning.
+        // A pruned row does not invalidate that local fact or recreate a binding.
+        Ok(self.outcome)
+    }
+}
+
+pub(crate) fn final_heartbeat_for_run<'a>(
+    connection: &'a Connection,
+    session: &str,
+    run: &str,
+) -> Result<Option<FinalHeartbeat<'a>>> {
+    let row: Option<(String, Option<String>, String)> = connection.query_row(
+        "SELECT occurrence_id,generation,outcome FROM heartbeat_occurrences WHERE session_id=?1 AND run_id=?2 AND state='settled'",
+        params![session, run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    row.map(|(occurrence, generation, outcome)| {
+        Ok(FinalHeartbeat {
+            connection,
+            session: session.into(),
+            run: run.into(),
+            occurrence,
+            generation,
+            outcome: serde_json::from_value(serde_json::Value::String(outcome))?,
+        })
+    })
+    .transpose()
+}
+
 fn occurrence(conn: &Connection, session: &str, id: &str) -> Result<HeartbeatOccurrence> {
     conn.query_row(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE session_id=?1 AND occurrence_id=?2"),params![session,id],occurrence_row).optional()?.context("heartbeat occurrence was not found")
 }
@@ -208,18 +269,18 @@ port internal;
 
 /// Canonical terminal settlement calls this in its own transaction, before
 /// terminal events or successor wake. It is idempotent by exact run identity.
-pub(crate) fn settle_heartbeat_with_connection(
-    conn: &Connection,
+pub(crate) fn settle_heartbeat_with_connection<'a>(
+    conn: &'a Connection,
     session: &str,
     run: &str,
     terminal: HeartbeatOutcome,
     tokens: Option<i64>,
     duration_ms: i64,
     now: i64,
-) -> Result<()> {
+) -> Result<Option<FinalHeartbeat<'a>>> {
     let active=conn.query_row(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE session_id=?1 AND run_id=?2 AND state='admitted'"),params![session,run],occurrence_row).optional()?;
     let Some(active) = active else {
-        return Ok(());
+        return final_heartbeat_for_run(conn, session, run);
     };
     let hard_terminal = matches!(
         terminal,
@@ -291,8 +352,9 @@ pub(crate) fn settle_heartbeat_with_connection(
         )?;
     }
     fresh_execution::retain_fresh_initial_outcome(conn, &active)?;
+    let settled = final_heartbeat_for_run(conn, session, run)?;
     prune_history(conn, &active.schedule_id)?;
-    Ok(())
+    Ok(settled)
 }
 
 coordinated_command! {

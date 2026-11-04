@@ -43,6 +43,7 @@ pub(crate) use execution::mark_heartbeat_action_denied;
 pub(crate) use execution::{
     admit_heartbeat, heartbeat_prompt_committed, settle_heartbeat_with_connection,
 };
+pub(crate) use execution::{final_heartbeat_for_run, FinalHeartbeat};
 pub use execution::{heartbeat_report, reconcile_heartbeat_occurrences};
 pub use model::*;
 

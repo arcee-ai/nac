@@ -279,7 +279,6 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
         let disposition = update
             .finished_run_disposition
             .ok_or_else(|| anyhow!("finished run is missing its validated disposition"))?;
-        crate::store::clear_active_run(&tx, &update.session_id, run_id, disposition)?;
         crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
@@ -303,12 +302,6 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
                 durable_failure = Some(failure);
             }
         }
-        crate::store::mark_active_run_failed(
-            &tx,
-            &update.session_id,
-            run_id,
-            durable_failure.as_ref(),
-        )?;
         crate::store::record_run_outcome_with_connection(
             &tx,
             &update.session_id,
@@ -318,7 +311,7 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             durable_failure.as_ref(),
         )?;
     }
-    if let Some(settlement) = &update.heartbeat_settlement {
+    let heartbeat = if let Some(settlement) = &update.heartbeat_settlement {
         let terminal = if update.failed_run_id.is_some() {
             crate::store::HeartbeatOutcome::Failed
         } else if update.finished_run_disposition
@@ -343,6 +336,26 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             settlement.tokens_used.and_then(|n| i64::try_from(n).ok()),
             i64::try_from(settlement.duration_ms).unwrap_or(i64::MAX),
             i64::try_from(settlement.terminal_at_epoch_ms).unwrap_or(i64::MAX),
+        )?
+    } else {
+        None
+    };
+    if let Some(run) = update.finished_run_id.as_deref() {
+        crate::store::clear_active_run(
+            &tx,
+            &update.session_id,
+            run,
+            update
+                .finished_run_disposition
+                .context("finished run disposition is unavailable")?,
+            heartbeat.as_ref(),
+        )?;
+    } else if let Some(run) = update.failed_run_id.as_deref() {
+        crate::store::mark_active_run_failed(
+            &tx,
+            &update.session_id,
+            run,
+            durable_failure.as_ref(),
         )?;
     }
     tx.commit()?;

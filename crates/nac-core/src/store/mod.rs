@@ -13,6 +13,11 @@ pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 pub(crate) mod coordinated_commands;
 mod heartbeats;
 pub use heartbeats::*;
+mod completion_occurrences;
+pub use completion_occurrences::{
+    read_completion_page, CompletionCursor, CompletionKind, CompletionOccurrence, CompletionPage,
+    COMPLETION_PAGE_BYTES, COMPLETION_PAGE_ROWS,
+};
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;
@@ -670,3 +675,6 @@ pub(crate) use transcript_selection::{
 
 #[cfg(test)]
 pub(crate) use transcript_selection::seed_selection_provenance_history_for_test;
+
+#[cfg(test)]
+mod completion_occurrences_tests;

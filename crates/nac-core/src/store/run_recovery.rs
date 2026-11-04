@@ -131,6 +131,7 @@ pub(crate) fn replace_with_active_run(
             "session '{session_id}' already has an active durable run"
         ));
     }
+    super::completion_occurrences::begin(transaction, session_id, run_id, submitted_message_id)?;
     Ok(())
 }
 
@@ -139,6 +140,7 @@ pub(crate) fn clear_active_run(
     session_id: &str,
     run_id: &str,
     disposition: RunTerminalDisposition,
+    heartbeat: Option<&super::heartbeats::FinalHeartbeat<'_>>,
 ) -> Result<()> {
     let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
         return Ok(());
@@ -149,7 +151,7 @@ pub(crate) fn clear_active_run(
     if disposition == RunTerminalDisposition::Cancelled {
         super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
     }
-    retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
+    retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition, heartbeat)?;
     Ok(())
 }
 
@@ -176,7 +178,21 @@ fn retain_or_clear_terminal_obligation(
     session_id: &str,
     run_id: &str,
     disposition: RunTerminalDisposition,
+    heartbeat: Option<&super::heartbeats::FinalHeartbeat<'_>>,
 ) -> Result<()> {
+    // Recovery consumes only a retained final fact, never a provisional report.
+    let retained = if heartbeat.is_none() {
+        super::heartbeats::final_heartbeat_for_run(transaction, session_id, run_id)?
+    } else {
+        None
+    };
+    super::completion_occurrences::settle(
+        transaction,
+        session_id,
+        run_id,
+        disposition == RunTerminalDisposition::Completed,
+        heartbeat.or(retained.as_ref()),
+    )?;
     if has_running_relationship(transaction, session_id, run_id)? {
         transaction.execute(
             "UPDATE session_run_recovery
@@ -245,6 +261,9 @@ pub(crate) fn mark_active_run_failed(
         && !failure.is_some_and(|f| f.kind == crate::run_failure::RunFailureKind::Interrupted)
     {
         super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    }
+    if changed == 1 {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false, None)?;
     }
     Ok(())
 }
@@ -382,12 +401,18 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                 RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
             },
         )?;
-        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
         record_reconciled_outcome(
             &transaction,
             session_id,
             &record.run_id,
             disposition.into(),
+            None,
+        )?;
+        retain_or_clear_terminal_obligation(
+            &transaction,
+            session_id,
+            &record.run_id,
+            disposition,
             None,
         )?;
         transaction.commit()?;
@@ -447,17 +472,18 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                         RecoveredRunTerminal::Failed => unreachable!(),
                     },
                 )?;
-                retain_or_clear_terminal_obligation(
-                    &transaction,
-                    session_id,
-                    &record.run_id,
-                    durable,
-                )?;
                 record_reconciled_outcome(
                     &transaction,
                     session_id,
                     &record.run_id,
                     durable.into(),
+                    None,
+                )?;
+                retain_or_clear_terminal_obligation(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    durable,
                     None,
                 )?;
                 transaction.commit()?;
@@ -541,6 +567,9 @@ fn record_reconciled_outcome(
     disposition: RunOutcomeDisposition,
     failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<()> {
+    if disposition != RunOutcomeDisposition::Completed {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false, None)?;
+    }
     super::task_evidence::record_run_outcome_with_connection(
         transaction,
         session_id,

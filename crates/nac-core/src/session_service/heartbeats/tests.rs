@@ -657,6 +657,7 @@ async fn heartbeat_question_deferral_releases_exact_service_lease_without_goal_a
             "session",
             &run,
             crate::store::RunTerminalDisposition::Completed,
+            None,
         )
         .unwrap();
         tx.commit().unwrap();

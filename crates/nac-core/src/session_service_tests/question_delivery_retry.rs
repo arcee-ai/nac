@@ -104,6 +104,7 @@ fn heartbeat_question_answer_distinguishes_idle_tail_lease_from_stale_binding() 
                 id,
                 &source,
                 crate::store::RunTerminalDisposition::Completed,
+                None,
             )
             .unwrap();
             tx.commit().unwrap();
