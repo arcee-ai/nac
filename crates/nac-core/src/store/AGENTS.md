@@ -42,6 +42,9 @@ workspace revisions, recovery markers, and cross-process coordination.
 ## Starting points
 
 - `schema.rs` / `schema_tests.rs` — migrations and complete schema contract.
+- `schema/transcript_tables.rs` owns transcript/recovery receipt DDL, historical
+  run-count backfill and AUTOINCREMENT retention during ledger rebuilds. The
+  ordered migration, version change and rollback remain in `schema.rs`.
 - `schema/permission_reviewer_tests.rs` — permission-mode, revision and reviewer
   migrations, including composition with the retained-task schema.
 - `managed_probe.rs` — committed store/maintenance readiness observations that
