@@ -227,7 +227,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             baseURL = url
             guard let receipt = engine.receipt else { return }
             recovery.seedRoute(String(route.dropFirst()))
-            recovery.engineReady(receipt)
+            guard recovery.engineReady(receipt) else { return }
             guard !recovery.isSuspended, !recovery.busy else { return }
             if webView == nil {
                 replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()))
