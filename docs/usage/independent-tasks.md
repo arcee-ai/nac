@@ -134,6 +134,91 @@ tool response is lost. Interrupted preparation is reported as failed and can be
 reconciled by an exact retry. A cancelled publication cannot insert a session
 or initial input. Published tasks retain their workspace under the existing
 retention contract; cancelling a run is independent of steering the caller.
+
+## Authorized follow-up
+
+`send_task_followup` submits guidance to an exact independent plain-direct Local
+task. Human authorization must cover the target and action. A peer asking for a
+reply does not authorize sending it; read access and broad coordination intent
+do not authorize arbitrary mutations. The tool uses ordinary agent permission
+evaluation with an invocation-only Ask default and the selected target resource
+`session:<id>`. Its action is `task_followup_queue`, `task_followup_steer` or
+`task_followup_auto`; configured Deny remains effective, and a headless Ask fails
+closed. An admitted peer message never becomes human review intent in the target.
+
+New admission also requires a retained delegation issued by the human product
+service for the exact caller session, target session and requested action.
+Wildcard Allow and Auto-approve cannot create this intent. The delegation
+survives an ended coordinator turn and server restart, while every native call
+still passes ordinary permission evaluation. A delegation never changes approval
+mode or creates a remembered permission grant.
+
+The human operator issues it through the existing trusted product ingress:
+
+```http
+POST /sessions/<caller-session-id>/task-followup-delegations
+Content-Type: application/json
+
+{"request_id":"human-delegation-1","target_session_id":"target-session-id","action":"auto","project_id":null}
+```
+
+Use `queue`, `steer` or `auto` explicitly. Use the target saved project's ID when
+crossing projects. Issuance needs the caller's current service open in this NAC
+instance; an unavailable owner returns conflict without attaching or waking
+either task. The route inherits the normal Host/Origin/Fetch Metadata and
+operator-controlled ingress boundary; it adds no model or public-MCP issuance
+surface. An agent must never call this human product route itself.
+
+Keep the returned delegation `id` and the human `request_id`. Retrying the same
+human request reconciles its record; changing its target, action or project
+conflicts. A new explicit human request replaces the prior delegation for that
+caller/target/action, retaining its audit record. `GET` or `DELETE` on
+`/sessions/<caller>/task-followup-delegations/<id>` passively reads or revokes
+that exact record, including after restart. Retrying an old revoked request
+does not reactivate it. Issuance and use revalidate topology, project scope and
+session incarnation; a record cannot transfer to a replacement session.
+
+Revocation and fresh inbox admission serialize in the same durable writer.
+Revocation blocks subsequent admissions; accepted input and its immutable
+delegation link remain inspectable and replayable. It does not cancel a target
+or erase delivered input. Historical receipts from before schema 47 retain a
+null delegation link, without inferred human authorization for new work.
+
+Supply the target `session_id`, a stable `request_id`, `action` and `prompt`.
+Crossing saved projects requires the target's `project_id` explicitly.
+
+- `queue` admits a task-bound FIFO successor. An optional `run_id` checks that
+  exact current run at admission, without changing queue delivery.
+- `steer` requires the exact active `run_id` and delivers at the next safe agent
+  boundary. Guidance admitted just before finishing stays pending for a successor.
+- `auto` resolves once against committed active-run state: steer when active,
+  otherwise queue a successor. An optional `run_id` is an exact binding and
+  conflicts if it is no longer active.
+
+The key is scoped to the caller's session, and binds target, project selector,
+action, exact prompt and supplied run. Repeating identical arguments returns the
+original admission and current delivery state, including after restart or a lost
+acknowledgement. Changing arguments with that key conflicts. A stale explicit run
+never silently targets a later run. Replays never recreate an item or blindly
+wake another turn, even after delivery or cancellation. If an initial wake fails,
+the input remains durable for the target's normal attachment/recovery path.
+
+The receipt includes `requested_action`, `resolved_delivery`, immutable
+`admitted_run_id`, `inbox_item_id`, eventual `delivered_run_id`, `delegation_id`, and task
+navigation. `accepted_pending` means the input is admitted but has not entered
+the model transcript; `delivered` means transcript delivery, not completed work
+or exactly-once provider execution. `cancelled` is terminal for that item.
+`unknown` means the commit or inbox evidence is unavailable and must not be
+treated as a fresh request. Receipts survive deletion of their inbox items and
+then report unknown rather than recreating work.
+
+Use `read_task_followup` with the original `request_id` and target `session_id`
+for passive inspection without repeating the prompt. It reads only this caller's
+receipts under `task_read` policy, and never attaches, wakes, consumes input,
+acquires execution leases or adds an approval subscription. Cancelling the
+coordinator or its tool wait does not cancel the independent target or erase an
+accepted input.
+
 ## Waiting on exact work
 
 `wait_tasks` observes one or more independent sessions without starting or

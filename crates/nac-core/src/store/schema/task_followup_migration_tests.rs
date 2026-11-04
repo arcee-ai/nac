@@ -48,7 +48,7 @@ fn schema_41_upgrades_40_atomically_and_preserves_existing_inbox() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, STORE_SCHEMA_VERSION);
+    assert_eq!(version, schema_version());
     let intent: String = conn
         .query_row(
             "SELECT review_intent FROM session_inbox WHERE id=?1",

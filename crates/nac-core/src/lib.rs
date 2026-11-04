@@ -15,6 +15,7 @@ mod mcp;
 pub mod model;
 pub mod orchestration_control;
 pub mod peer_goal_control;
+pub mod task_followups;
 pub mod task_launch_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
