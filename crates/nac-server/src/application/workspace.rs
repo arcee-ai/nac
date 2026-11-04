@@ -6,6 +6,8 @@ use nac_core::{
 
 use crate::{git_target_key, SessionManager, WorkspaceMutationAdmission};
 
+mod reveal;
+
 pub(crate) struct WorkspaceDiffRequest {
     pub(crate) path: String,
     pub(crate) stage: Option<String>,
