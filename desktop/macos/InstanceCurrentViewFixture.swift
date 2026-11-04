@@ -206,6 +206,7 @@ extension InstanceSmoke {
     @MainActor static func runControls(redOnly: Bool) async throws -> [[String: Any]] {
         #if I1_POST
         if CommandLine.arguments.contains("--failure-red-only") { return try await runFailureControls(redOnly: true) }
+        if CommandLine.arguments.contains("--snapshot-only") { return try await runSnapshotCallbackControls() }
         #endif
         var results: [[String: Any]] = []
         @MainActor func check(_ name: String, _ pass: Bool, _ detail: String = "") { results.append(["name": name, "pass": pass, "detail": detail]) }
@@ -408,6 +409,7 @@ extension InstanceSmoke {
         #endif
         #if I1_POST
         results += try await runFailureControls(redOnly: false)
+        results += try await runSnapshotCallbackControls()
         #endif
         return results
     }
@@ -523,6 +525,90 @@ extension InstanceSmoke {
     }
 }
 
+#endif
+
+#if I1_POST
+extension InstanceSmoke {
+    @MainActor static func runSnapshotCallbackControls() async throws -> [[String: Any]] {
+        var rows: [[String: Any]] = []
+        @MainActor func check(_ name: String, _ pass: Bool, _ detail: String = "") {
+            rows.append(["name": name, "pass": pass, "detail": detail])
+        }
+        I1Transport.reset()
+        do {
+            let app = I1App(), probe = fixture(app)
+            app.expose(); probe.publish("before-missing-snapshot")
+            let target = probe.output.deletingLastPathComponent().appendingPathComponent("missing-callback.png")
+            try? FileManager.default.removeItem(at: target)
+            I1Transport.holdSnapshot = true
+            var completions = 0, successes = 0
+            var failure = ""
+            let task = Task {
+                do { try await probe.capture("missing-callback"); successes += 1; probe.publish("snapshot-success") }
+                catch { failure = error.localizedDescription }
+                completions += 1
+            }
+            let entered = await eventually { !I1Transport.snapshots.isEmpty }
+            I1Dispatch.expire()
+            let bounded = await eventually { completions == 1 }
+            check("normal-snapshot-missing-callback-bounded-failure", entered && bounded && successes == 0 &&
+                failure == "Timed out: workspace snapshot" && !FileManager.default.fileExists(atPath: target.path) &&
+                probe.evidence["stage"] as? String == "before-missing-snapshot", failure)
+            // Release the old source's unbounded await after recording RED. Do
+            // not double-resume that baseline continuation. The fixed owner
+            // must ignore both late success and duplicate error callbacks.
+            let callback = I1Transport.snapshots.first?.callback
+            I1Transport.finishSnapshot()
+            if bounded {
+                callback?(nil, PreviewError.message("duplicate late snapshot error"))
+                callback?(NSImage(size: .zero), nil)
+            }
+            await task.value
+            check("normal-snapshot-late-duplicate-after-timeout-no-export", bounded && completions == 1 &&
+                successes == 0 && !FileManager.default.fileExists(atPath: target.path) &&
+                probe.evidence["stage"] as? String == "before-missing-snapshot")
+        }
+        for mode in ["success", "error", "view", "generation", "stop", "duplicate"] {
+            I1Transport.reset()
+            let app = I1App(), probe = fixture(app)
+            app.expose(); probe.publish("before-snapshot")
+            let name = "callback-" + mode
+            let target = probe.output.deletingLastPathComponent().appendingPathComponent(name + ".png")
+            try? FileManager.default.removeItem(at: target)
+            I1Transport.holdSnapshot = true
+            var completions = 0, successes = 0
+            let task = Task {
+                do { try await probe.capture(name); successes += 1; probe.publish("snapshot-success") }
+                catch {}
+                completions += 1
+            }
+            let entered = await eventually { !I1Transport.snapshots.isEmpty }
+            let callback = I1Transport.snapshots.first?.callback
+            let armed = !I1Dispatch.timers.isEmpty
+            if mode == "view" { app.replace(); app.expose() }
+            if mode == "generation" { app.recovery.documentGeneration += 1 }
+            if mode == "stop" { probe.prepareForStop() }
+            if mode == "error" {
+                var pending = I1Transport.snapshots.removeFirst()
+                pending.callback(nil, PreviewError.message("current snapshot error")); pending.owner = nil
+            } else { I1Transport.finishSnapshot() }
+            if mode == "duplicate" && armed {
+                callback?(NSImage(size: .zero), nil)
+                callback?(nil, PreviewError.message("duplicate error"))
+            }
+            await task.value
+            I1Dispatch.expire()
+            let shouldSucceed = mode == "success" || mode == "duplicate"
+            check("normal-snapshot-callback-" + mode, entered && completions == 1 &&
+                successes == (shouldSucceed ? 1 : 0) && (mode != "duplicate" || armed) &&
+                FileManager.default.fileExists(atPath: target.path) == shouldSucceed &&
+                (shouldSucceed ? probe.evidence["stage"] as? String == "snapshot-success" :
+                    probe.evidence["stage"] as? String == "before-snapshot"))
+        }
+        I1Transport.reset()
+        return rows
+    }
+}
 #endif
 
 @main enum InstanceCurrentViewFixture {
