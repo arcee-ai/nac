@@ -50,26 +50,80 @@ async fn settled(service: &SessionService, path: &Path, count: usize) {
     .unwrap();
 }
 
+// Local-only witness: no store/lease calls or panics while unwinding a failure.
+struct FifoPhaseWitness {
+    started: std::time::Instant,
+    phases: std::sync::Arc<std::sync::Mutex<Vec<(&'static str, u128)>>>,
+}
+
+impl FifoPhaseWitness {
+    fn mark(&self, label: &'static str) {
+        self.phases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((label, self.started.elapsed().as_micros()));
+    }
+}
+
+impl Drop for FifoPhaseWitness {
+    fn drop(&mut self) {
+        let phases = self
+            .phases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let value = serde_json::json!({ "phases_us": *phases });
+        // Ignore only unavailable diagnostic stderr; never replace the original
+        // assertion/timeout with a logging failure. No arbitrary payloads/paths.
+        if let Err(_unavailable) = std::io::Write::write_fmt(
+            &mut std::io::stderr().lock(),
+            format_args!("NAC_FIFO_PHASE_WITNESS {value}\n"),
+        ) {}
+    }
+}
+
 #[tokio::test]
 async fn followup_peer_lease_fifo_shutdown_and_replays_do_not_duplicate_turns() {
-    let server = ScriptedServer::start(vec![
-        ScriptedResponse::json("200 OK", compaction_response("first received")),
-        ScriptedResponse::json("200 OK", compaction_response("second received")),
-    ]);
+    let witness = FifoPhaseWitness {
+        started: std::time::Instant::now(),
+        phases: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+    };
+    witness.mark("serverStarting");
+    let observed_phases = witness.phases.clone();
+    let observed_started = witness.started;
+    let server = ScriptedServer::start_observed(
+        vec![
+            ScriptedResponse::json("200 OK", compaction_response("first received")),
+            ScriptedResponse::json("200 OK", compaction_response("second received")),
+        ],
+        move |index, _| {
+            observed_phases
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push((
+                    if index == 0 { "request1" } else { "request2" },
+                    observed_started.elapsed().as_micros(),
+                ));
+        },
+    );
     let (parts, path) = test_direct_active_service(
         "followup_fifo",
         "session",
         ModelClient::new_for_test_server(server.base_url.clone()),
     );
+    witness.mark("fixtureReady");
     let service = &parts.service;
     caller(&path);
+    witness.mark("callerReady");
     let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    witness.mark("leaseHeld");
     let first = request(Action::Auto, None, "one");
     let a = service.admit_task_followup(first.clone()).await.unwrap();
+    witness.mark("queue1");
     let b = service
         .admit_task_followup(request(Action::Queue, None, "two"))
         .await
         .unwrap();
+    witness.mark("queue2");
     assert_eq!(a.disposition, Some(InboxStatus::Pending));
     assert_eq!(a.resolved_delivery, crate::store::InboxDelivery::Queue);
     assert!(a.inbox_item_id < b.inbox_item_id);
@@ -81,9 +135,14 @@ async fn followup_peer_lease_fifo_shutdown_and_replays_do_not_duplicate_turns() 
             .unwrap()
             .replayed
     );
+    witness.mark("replayChecked");
     drop(lease);
+    witness.mark("leaseDropped");
     service.start_next_direct_inbox_item().await.unwrap();
+    witness.mark("wakeReturned");
+    witness.mark("settleStarting");
     settled(service, &path, 2).await;
+    witness.mark("settled2Inactive");
     let replay = service.admit_task_followup(first.clone()).await.unwrap();
     assert!(replay.replayed);
     assert_eq!(replay.disposition, Some(InboxStatus::Delivered));
@@ -99,7 +158,9 @@ async fn followup_peer_lease_fifo_shutdown_and_replays_do_not_duplicate_turns() 
             .downcast_ref(),
         Some(&Error::Stopping)
     );
+    witness.mark("shutdownChecked");
     let requests = server.finish();
+    witness.mark("serverFinished");
     assert_eq!(requests.len(), 2);
     assert_eq!(
         service
