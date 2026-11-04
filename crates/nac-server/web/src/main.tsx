@@ -1,3 +1,4 @@
+import { readNativeDirectoryPort } from "./app/features/setup/localFolder";
 import { readDesktopCommandPort } from "./app/features/desktop-commands/adapter";
 import { desktopReadFetch, installDesktopLifetime } from "./app/features/desktop-commands/lifetime";
 import { openDesktopStorage, safeStorage } from "./app/features/desktop-storage/adapter";
@@ -71,6 +72,7 @@ async function start() {
     requireTerminalAcknowledgement:
       !!desktopCommands && Reflect.get(window, "__nacRequireTerminalAcknowledgement") === true,
     queryRetry: 1,
+    nativeDirectory: readNativeDirectoryPort(Reflect.get(window, "__nacLocalPaths")),
   });
   const root = createRoot(document.getElementById("root")!);
   installDesktopLifetime(
