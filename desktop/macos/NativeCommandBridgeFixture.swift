@@ -4,7 +4,14 @@ import Foundation
 // explicit WebKit/receipt ports prove native disposal dispatch, not WK behavior.
 private enum World { case page }
 private enum NativeCommandScript { static let handler = "nacUIReceipt" }
+private enum WorkspaceStorageScript { static let handler = "nacStorageReceipt" }
 private enum Failure: Error { case unavailable }
+private final class Storage {
+    var retired = false
+    var completion: ((Bool) -> Void)?
+    func retire() { retired = true }
+    func flush(completion: @escaping (Bool) -> Void) { self.completion = completion }
+}
 private final class Controller {
     var removed: [String] = []
     func removeScriptMessageHandler(forName name: String, contentWorld: World) { removed.append(name) }
@@ -31,6 +38,7 @@ private final class State {
 @MainActor private final class Bridge {
     weak var webView: View?
     let state = State()
+    var storage: Storage?
     var installed = true
     var navigation: Int? = 1
     init(_ view: View?) { webView = view }
@@ -40,14 +48,18 @@ private final class State {
 @main private enum BridgeDisposalTests {
     @MainActor static func main() {
         for activated in [false, true] {
+          for storageMode in ["absent", "success", "failure"] {
             for result: Result<Any, Error> in [.success(true), .success(false), .failure(Failure.unavailable)] {
                 let view = View(), bridge = Bridge(nil)
                 bridge.webView = view
                 bridge.state.binding = activated ? "old-document" : nil
+                if storageMode != "absent" { bridge.storage = Storage() }
                 var answers: [Bool] = []
                 view.onCall = {
                     precondition(!bridge.installed && bridge.state.retired && bridge.navigation == nil)
-                    precondition(view.configuration.userContentController.removed == [NativeCommandScript.handler])
+                    precondition(view.configuration.userContentController.removed ==
+                        [NativeCommandScript.handler, WorkspaceStorageScript.handler])
+                    precondition(bridge.storage?.retired ?? true, "Storage admission must retire before page disposal")
                 }
                 bridge.retire { answers.append($0) }
                 precondition(view.scripts == ["return window.__nacDesktop?.retireView() === true"],
@@ -59,13 +71,20 @@ private final class State {
                 let expected: Bool
                 if case .success(let value) = result { expected = (value as? Bool) == true }
                 else { expected = false }
-                precondition(answers == [false, expected], "Missing/dead page must not claim disposal acknowledgement")
+                if let storage = bridge.storage {
+                    precondition(answers == [false] && storage.completion != nil,
+                        "Page disposal must await the existing storage flush")
+                    storage.completion?(storageMode == "success")
+                }
+                precondition(answers == [false, expected && storageMode != "failure"],
+                    "Missing/dead page or failed storage flush must not claim disposal acknowledgement")
             }
+          }
         }
         let absent = Bridge(nil)
         var answer: Bool?
         absent.retire { answer = $0 }
         precondition(answer == false && absent.state.retired && !absent.installed)
-        print("Verbatim native disposal: unactivated/bound view, retired admission, delayed success/failure, repeated/nil view passed (headless).")
+        print("Verbatim native/storage disposal: unactivated/bound view, retired admissions, delayed JS/flush success/failure, repeated/nil view passed (headless).")
     }
 }
