@@ -35,6 +35,17 @@ fn relevant_goal_hint(
     targets: &[Target],
 ) -> bool {
     match hint {
+        store::goal_changes::TaskChange::SessionDirty {
+            store_path,
+            session_id,
+        } => {
+            // Re-read the already-pinned target; this hint supplies no run,
+            // goal, terminal disposition or permission authority.
+            store_path == path
+                && targets
+                    .iter()
+                    .any(|target| target.session_id == *session_id)
+        }
         store::goal_changes::TaskChange::Goal(hint) => {
             hint.store_path == path
                 && hint.version >= 0
