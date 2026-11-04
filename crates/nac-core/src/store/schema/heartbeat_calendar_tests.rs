@@ -369,7 +369,7 @@ fn calendar_schema50_foreign_same_version_refuses_opens_before_effects() {
     assert_eq!(facts(&conn), before);
     assert_eq!(catalog(&conn), before_catalog);
     assert_eq!(
-        conn.pragma_query_value::<String, _, _>(None, "journal_mode", |row| row.get(0))
+        conn.pragma_query_value::<String, _>(None, "journal_mode", |row| row.get(0))
             .unwrap(),
         "delete"
     );
