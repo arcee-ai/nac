@@ -9,6 +9,7 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     private let receipt: () -> EngineReceipt?
     private let state: NativeCommandState
     private let connectionLost: (() -> Void)?
+    private var storage: WorkspaceStorageBridge?
     private var installed = true
     private var navigation: WKNavigation?
     #if PREVIEW_SMOKE
@@ -22,7 +23,8 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     }
     #endif
 
-    init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil) {
+    init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil,
+          workspaceStorage: WorkspaceStorage? = nil) {
         guard let current = receipt(), let state = NativeCommandState(receipt: current) else { return nil }
         self.webView = webView
         self.receipt = receipt
@@ -32,6 +34,14 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         let controller = webView.configuration.userContentController
         controller.add(self, contentWorld: .page, name: NativeCommandScript.handler)
         controller.addUserScript(NativeCommandScript.userScript)
+        if let workspaceStorage {
+            storage = WorkspaceStorageBridge(webView: webView, storage: workspaceStorage) { [weak self] in
+                guard let self else { return false }
+                return self.installed && self.state.matches(self.receipt())
+            }
+            controller.add(self, contentWorld: .page, name: WorkspaceStorageScript.handler)
+            controller.addUserScript(WorkspaceStorageScript.userScript)
+        }
     }
 
     var available: Bool {
@@ -54,12 +64,14 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         guard candidate === webView else { return }
         self.navigation = navigation
         state.endDocument()
+        storage?.endDocument()
     }
 
     func navigationFinished(in candidate: WKWebView, navigation: WKNavigation?) {
         guard installed, candidate === webView, let navigation, navigation === self.navigation, state.allows(candidate.url),
               let binding = state.beginDocument(receipt: receipt()) else { return }
         call("return window.__nacDesktop?.activate(binding) === true", arguments: ["binding": object(binding)], binding: binding)
+        storage?.activate(binding, endpoint: state.origin.absoluteString)
     }
 
     @discardableResult
@@ -78,15 +90,20 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         guard installed else { completion(false); return }
         installed = false
         navigation = nil
+        storage?.retire()
         state.retire()
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: WorkspaceStorageScript.handler, contentWorld: .page)
         guard let webView else { completion(false); return }
         // Disposal belongs to this exact view, including its unactivated page
         // or the old page during provisional navigation. It invokes no action.
         webView.callAsyncJavaScript("return window.__nacDesktop?.retireView() === true",
             arguments: [:], in: nil, in: .page) { result in
-            if case .success(let value) = result { completion((value as? Bool) == true) }
-            else { completion(false) }
+            let acknowledged: Bool
+            if case .success(let value) = result { acknowledged = (value as? Bool) == true }
+            else { acknowledged = false }
+            if let storage = self.storage { storage.flush { completion(acknowledged && $0) } }
+            else { completion(acknowledged) }
         }
         // This bridge must be installed before its view's first load. It does
         // not remove other owners' user scripts or reuse a retired WebView.
@@ -95,7 +112,8 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard installed, let webView, message.webView === webView,
               userContentController === webView.configuration.userContentController,
-              message.name == NativeCommandScript.handler, let body = message.body as? String else {
+              [NativeCommandScript.handler, WorkspaceStorageScript.handler].contains(message.name),
+              let body = message.body as? String else {
             #if PREVIEW_SMOKE
             rejectedReceipts += 1
             #endif
@@ -106,6 +124,12 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         components.scheme = source.protocol
         components.host = source.host
         components.port = source.port
+        if message.name == WorkspaceStorageScript.handler {
+            guard message.frameInfo.isMainFrame, state.matches(receipt()), state.allows(components.url),
+                  let binding = state.binding else { return }
+            _ = storage?.receive(body, expected: binding)
+            return
+        }
         let accepted = state.receive(body, origin: components.url, mainFrame: message.frameInfo.isMainFrame,
                                      currentView: message.webView === webView, receipt: receipt())
         if accepted, let binding = state.pendingConnectionLoss {

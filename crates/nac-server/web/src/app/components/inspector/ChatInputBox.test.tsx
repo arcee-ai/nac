@@ -1315,6 +1315,60 @@ describe("human command composer integration", () => {
 });
 
 describe("primary composer draft lifetime", () => {
+  it("shows the shared review owner while pending and clears only the accepted revision", async () => {
+    const response = Promise.withResolvers<unknown>();
+    fakes.submitRun.mockReturnValueOnce(response.promise);
+    const textarea = composer();
+    type(textarea, "original");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledOnce());
+    expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+      "Sending message",
+    );
+    type(textarea, "newer draft");
+    await act(async () =>
+      response.resolve({
+        status: "accepted",
+        requestId: "request",
+        response: { run_id: "run", client_id: null },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull(),
+    );
+    expect(textarea.value).toBe("newer draft");
+    expect(fakes.submitRun).toHaveBeenCalledOnce();
+  });
+
+  it("retains unconfirmed primary text for explicit review across remount without resending", async () => {
+    fakes.submitRun.mockResolvedValueOnce({
+      status: "uncertain",
+      requestId: "unknown",
+      error: new TypeError("response lost"),
+    });
+    const textarea = composer();
+    type(textarea, "review this message");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+        "delivery is unconfirmed",
+      ),
+    );
+    expect(textarea.value).toBe("review this message");
+    cleanup();
+    const returned = composer();
+    expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+      "review this message",
+    );
+    expect(
+      (screen.getByRole("button", { name: "Restore to composer" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    type(returned, "");
+    fireEvent.click(screen.getByRole("button", { name: "Restore to composer" }));
+    expect(returned.value).toBe("review this message");
+    expect(fakes.submitRun).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
+  });
   it("restores independent exact text across session remounts without sending", () => {
     const text = "  雪🙂\n\n!echo untouched  \n";
     type(composer(), text);

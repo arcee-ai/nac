@@ -101,6 +101,43 @@ default. Only standalone opts into existing localStorage keys. A consumer that
 supplies storage owns its namespace and must avoid sharing it across bindings.
 Provider API-key values are excluded from query keys.
 
+Text recovery uses the existing runtime-owned `promptDraftStore`. By default its
+optional `draftStorage` is keyed and validated against the complete live runtime
+binding. A caller may explicitly supply `draftPersistenceBinding` to recover
+text across serving lifetimes in its own durable profile: owner, profile,
+organization, host, canonical-store identity and track. This opt-in uses a
+separate versioned record namespace; it does not change `runtime.scope`, request
+admission, query/stream lifetimes or the requirement to replace a closed runtime.
+An invalid durable identity disables persistence rather than falling back to an
+unscoped store. Without an adapter, drafts remain in memory.
+
+Only draft/review text persists. Pending request claims do not, and interrupted
+text checkpoints restore as uncertain evidence requiring human review. Durable
+records are bounded to 100 drafts and 100 recovery entries, one million combined
+UTF-16 code units and 4 MiB encoded JSON. The desktop draft adapter explicitly
+marks cold imports as uncertain: an old valid file cannot prove that a later
+clear or accepted send was durable. Imported text stays behind explicit Restore
+or Dismiss in the existing review UI, with a separate empty, usable composer.
+Review metadata uses the same 100-draft bucket; each retained text counts once,
+including multiple review texts for one session. Submission recoveries retain
+their separate 100-entry bound. Fresh live revisions and pending acknowledgements
+remain independent of reviewing old text. Preferences keep their separate policy.
+
+The active in-memory prompt is never truncated. If protected review text leaves
+no retention capacity, its existing checkpoint is preserved, new typing remains
+usable in memory, and the composer reports that new edits may not restore.
+Failed review persistence cannot promise a durable disposition: another cold
+owner still presents retained old bytes as uncertain. The caller must provide
+document/owner fencing and ordered durable writes/clear barriers. These shared
+contracts alone do not establish native profile isolation or cross-Quit
+restoration. The standalone desktop entry consumes its injected storage
+capability before mounting the shared runtime; without that capability ordinary
+browser storage policy remains unchanged. Denied ambient storage acquisition
+falls back to memory. Native bootstrap/write failure also keeps typing/sending
+usable in isolated memory and reports unavailable recovery rather than using a
+different origin/profile. The desktop adapter still requires actual WKWebView,
+file-fault and separate-process Quit/relaunch qualification.
+
 ## Streams and operation coverage
 
 The existing SSE adapter receives fresh transport context on every connection.

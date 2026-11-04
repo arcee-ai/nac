@@ -22,7 +22,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private var navigationIncarnations: [WKNavigation: String] = [:]
     private var activeNavigation: WKNavigation?
     private var workspaceRetirement: WorkspaceRetirement?
-    private let workspaceDataStore = WKWebsiteDataStore.nonPersistent()
+    private let ephemeralDataStore = WKWebsiteDataStore.nonPersistent()
+    private var workspaceStorage: WorkspaceStorage?
+    #if LOCAL_APP
+    private var workspaceStorageSelection: (profile: String, task: Task<WorkspaceStorage?, Never>)?
+    #endif
+    private var workspaceDataStore: WKWebsiteDataStore { workspaceStorage?.websiteDataStore ?? ephemeralDataStore }
     private(set) lazy var recovery = WorkspaceRecovery(app: self)
     private var status: NSTextField!
     #if LOCAL_APP
@@ -206,6 +211,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     private func load(_ url: URL, incarnation: String) async {
         do {
+            var firstProfileDocument = false
             #if LOCAL_APP
             let route = "#/"
             #else
@@ -226,11 +232,34 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                   engine.receipt?.incarnation == incarnation else { return }
             baseURL = url
             guard let receipt = engine.receipt else { return }
+            #if LOCAL_APP
+            let documentGeneration = recovery.documentGeneration
+            let ownsInitialDocument = !recovery.isSuspended && !recovery.busy
+            let initialView = { [weak view = webView] in view }
+            let selectingProfile = workspaceStorage == nil
+            try await prepareWorkspaceStorage(receipt: receipt)
+            guard ownsInitialDocument, !stopping, !Task.isCancelled, failure == nil,
+                  recovery.documentGeneration == documentGeneration,
+                  webView === initialView(),
+                  engine.receipt?.incarnation == receipt.incarnation else { return }
+            if selectingProfile {
+                firstProfileDocument = true
+                // This is the still-blank bootstrap view, before any product
+                // document/bridge was loaded. Product recovery uses retirement.
+                commands?.retire()
+                webView?.navigationDelegate = nil
+                webView?.uiDelegate = nil
+                webView?.removeFromSuperview()
+                webView = nil
+                commands = nil
+            }
+            #endif
             recovery.seedRoute(String(route.dropFirst()))
             guard recovery.engineReady(receipt) else { return }
             guard !recovery.isSuspended, !recovery.busy else { return }
             if webView == nil {
-                replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()))
+                replaceWorkspace(receipt: receipt, fragment: recovery.restoredFragment ?? String(route.dropFirst()),
+                                 initial: firstProfileDocument)
                 return
             }
             workspaceIncarnation = incarnation
@@ -243,6 +272,57 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             if !stopping, !Task.isCancelled, engine.receipt?.incarnation == incarnation { fail(error.localizedDescription) }
         }
     }
+
+    /// Profile ownership outlives a canceled renderer load. Each current caller
+    /// still fences its own launch/document after awaiting this shared operation.
+    func prepareWorkspaceStorage(receipt: EngineReceipt) async throws {
+        #if LOCAL_APP
+        try Task.checkCancellation()
+        guard let configuration = launchConfiguration,
+              let profile = currentWorkspaceStorageProfile(receipt: receipt) else {
+            throw PreviewError.message("The selected workspace profile is unavailable.")
+        }
+        if let storage = workspaceStorage {
+            guard storage.profile.digest == profile.digest else {
+                throw PreviewError.message("The selected workspace profile changed. Reopen NAC explicitly.")
+            }
+            return
+        }
+        let pending: Task<WorkspaceStorage?, Never>
+        if let selection = workspaceStorageSelection {
+            guard selection.profile == profile.digest else {
+                throw PreviewError.message("The selected workspace profile changed. Reopen NAC explicitly.")
+            }
+            pending = selection.task
+        } else {
+            // App-owned unstructured work: retiring a renderer cancels its waiter,
+            // not this one bounded profile open or its exclusive checkpoint lease.
+            pending = Task { await WorkspaceStorage.open(receipt: receipt, configuration: configuration) }
+            workspaceStorageSelection = (profile.digest, pending)
+        }
+        let selected = await pending.value
+        try Task.checkCancellation()
+        guard currentWorkspaceStorageProfile(receipt: receipt)?.digest == profile.digest else {
+            throw PreviewError.message("Profile selection was retired by the current launch.")
+        }
+        guard let selected else {
+            throw PreviewError.message("The selected workspace profile is unavailable.")
+        }
+        workspaceStorage = selected
+        workspaceStorageSelection = nil
+        #endif
+    }
+
+    #if LOCAL_APP
+    private func currentWorkspaceStorageProfile(receipt: EngineReceipt) -> WorkspaceStorageProfile? {
+        guard !stopping, failure == nil, engine.pid > 0,
+              let current = engine.receipt, let configuration = launchConfiguration,
+              current.incarnation == receipt.incarnation, current.endpoint == receipt.endpoint,
+              current.identity == receipt.identity, current.store == receipt.store,
+              current.schema == receipt.schema else { return nil }
+        return WorkspaceStorageProfile(receipt: current, configuration: configuration)
+    }
+    #endif
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, !stopping, failure == nil else { return }
@@ -375,6 +455,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         failedViewRetainedEngine = retainingEngine
         #endif
         failure = message
+        #if LOCAL_APP
+        workspaceStorageSelection?.task.cancel()
+        workspaceStorageSelection = nil
+        #endif
         recovery.cancelPending()
         commands?.retire()
         webView?.stopLoading()
@@ -431,6 +515,22 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #endif
     }
 
+    #if PREVIEW_SMOKE
+    var smokeProfileSnapshot: [String: Any] {
+        #if LOCAL_APP
+        return ["selected": workspaceStorage != nil, "pending": workspaceStorageSelection != nil,
+                "retired": stopping || failure != nil,
+                "available": workspaceStorage?.available ?? false,
+                "profile": workspaceStorage?.profile.digest ?? "",
+                "website_store": workspaceStorage?.profile.identifier.uuidString ?? "",
+                "persistent": workspaceStorage?.websiteDataStore.isPersistent ?? false]
+        #else
+        return ["selected": false, "pending": false, "preview_ephemeral": true]
+        #endif
+    }
+    func smokeProfileFailure() { fail("The fixture retired pending profile initialization.") }
+    #endif
+
     func showShutdownStatus(_ message: String) {
         status.isHidden = false
         status.stringValue = message
@@ -448,6 +548,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #if LOCAL_APP
         storeConflictRetry.clear()
         storeRetryButton?.isEnabled = false
+        workspaceStorageSelection?.task.cancel()
+        workspaceStorageSelection = nil
         #endif
         startup?.cancel()
         loading?.cancel()
@@ -499,7 +601,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             else { self.smoke?.didCleanUp() }
             #endif
             #endif
-            completion()
+            if let storage = self.workspaceStorage {
+                storage.flush { durable in
+                    if !durable { fputs("NAC workspace storage did not confirm a durable checkpoint before Quit.\n", stderr) }
+                    completion()
+                }
+            } else { completion() }
         }
     }
 
@@ -514,10 +621,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     /// Synchronous native fences precede all asynchronous disposal/revalidation.
     func beginWorkspaceRetirement() -> WorkspaceRetirement {
-        if let workspaceRetirement { return workspaceRetirement }
-        // Engine construction is independent of renderer lifetime. Let initial
-        // bootstrap finish; cancel only an already-bound document's old load.
+        // Repeated retirement still fences a newly bound renderer waiter.
+        // Its app-owned profile open remains alive for the current successor.
         if baseURL != nil { loading?.cancel() }
+        if let workspaceRetirement { return workspaceRetirement }
         workspaceIncarnation = nil
         activeNavigation = nil
         navigationIncarnations.removeAll()
@@ -532,11 +639,18 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         return retirement
     }
 
-    func replaceWorkspace(receipt: EngineReceipt, fragment: String?,
+    func replaceWorkspace(receipt: EngineReceipt, fragment: String?, initial: Bool = false,
                           requireTerminalAcknowledgement: Bool = false) {
-        guard canRecoverWorkspace, let endpoint = receipt.endpoint, let base = URL(string: endpoint),
+        // Initial verified loading continues behind a Cancel-Quit confirmation,
+        // as it did before profile selection. Recovery keeps its stricter gate.
+        guard !stopping, failure == nil, initial || canRecoverWorkspace,
+              let endpoint = receipt.endpoint, let base = URL(string: endpoint),
               engine.receipt?.incarnation == receipt.incarnation,
               engine.receipt?.endpoint == receipt.endpoint else { return }
+        #if LOCAL_APP
+        guard let storage = workspaceStorage,
+              currentWorkspaceStorageProfile(receipt: receipt)?.digest == storage.profile.digest else { return }
+        #endif
         workspaceRetirement = nil
         baseURL = base
         var address = URLComponents(url: base, resolvingAgainstBaseURL: false)!
@@ -571,7 +685,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         webView = replacement
         window.contentView!.addSubview(replacement, positioned: .below, relativeTo: status)
         commands = NativeCommands(webView: replacement, receipt: { [weak self] in self?.engine.receipt },
-            connectionLost: { [weak self] in self?.recovery.connectionLost() })
+            connectionLost: { [weak self] in self?.recovery.connectionLost() }, workspaceStorage: workspaceStorage)
         commands.installMenus(applicationName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC")
         recovery.installMenus()
         recovery.showLossNotice()

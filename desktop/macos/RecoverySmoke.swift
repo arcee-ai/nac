@@ -19,6 +19,8 @@ final class RecoverySmoke {
     private var baselineLaunch: String?
     private var baselineBinding: [String: Any]?
     private var baselineResponses = 0
+    private var profileOpenWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var publicationSequence = 0
 
     init(app: PreviewApp) {
         self.app = app
@@ -28,6 +30,46 @@ final class RecoverySmoke {
         control = value("--recovery-control")
         originalView = app.webView
         app.webView.configuration.userContentController.addUserScript(Self.script)
+        #if LOCAL_APP
+        WorkspaceStorage.smokeBeforeOpen = { [weak self] profile in
+            guard let self else { return }
+            await self.holdProfileOpen(profile)
+        }
+        WorkspaceStorage.smokeDidOpen = { [weak self] _ in
+            guard let self else { return }
+            self.evidence["profile_open_completed_calls"] = (self.evidence["profile_open_completed_calls"] as? Int ?? 0) + 1
+            self.publish()
+        }
+        #endif
+    }
+
+    private func holdProfileOpen(_ profile: WorkspaceStorageProfile) async {
+        evidence["profile_open_calls"] = (evidence["profile_open_calls"] as? Int ?? 0) + 1
+        evidence["expected_profile"] = profile.digest
+        evidence["expected_website_store"] = profile.identifier.uuidString
+        guard FileManager.default.fileExists(atPath: control.appendingPathComponent("profile-open-hold").path) else { return }
+        let token = UUID()
+        await withCheckedContinuation { continuation in
+            profileOpenWaiters[token] = continuation
+            evidence["profile_open_pending"] = true
+            publish()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self, let waiting = self.profileOpenWaiters.removeValue(forKey: token) else { return }
+                self.evidence["profile_open_timeout"] = true
+                self.evidence["profile_open_pending"] = !self.profileOpenWaiters.isEmpty
+                waiting.resume()
+                self.publish()
+            }
+        }
+        evidence["profile_open_pending"] = !profileOpenWaiters.isEmpty
+        publish()
+    }
+
+    private func releaseProfileOpen() {
+        let waiters = profileOpenWaiters.values
+        profileOpenWaiters.removeAll()
+        evidence["profile_open_pending"] = false
+        waiters.forEach { $0.resume() }
     }
 
     static func launchArguments(_ arguments: [String]) -> [String] {
@@ -144,7 +186,10 @@ final class RecoverySmoke {
         if take("restart-request") { app.recovery.smokeRestartConfirmation() }
         if take("restart-cancel") { app.recovery.smokeAnswerRestart(stop: false) }
         if take("restart-confirm") { app.recovery.smokeAnswerRestart(stop: true) }
+        if take("profile-open-release") { releaseProfileOpen() }
+        if take("profile-open-common-failure") { app.smokeProfileFailure() }
         if take("sleep-notification") {
+            evidence["sleep_before_base_url"] = app.baseURL == nil
             evidence["wake_kind"] = "callback-injection"
             app.recovery.smokeSleep()
         }
@@ -194,7 +239,7 @@ final class RecoverySmoke {
     private func capture() {
         guard !capturing, let view = app.webView else { return }
         capturing = true
-        view.callAsyncJavaScript("return {requests: window.__nacRecoveryEvidence?.rows(), runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'), route: location.hash}",
+        view.callAsyncJavaScript("return {requests: window.__nacRecoveryEvidence?.rows(), runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'), route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'}",
             arguments: [:], in: nil, in: .page) { [weak self, weak view] result in
             guard let self else { return }
             self.capturing = false
@@ -210,6 +255,11 @@ final class RecoverySmoke {
     func didStop() {
         timer?.invalidate()
         timer = nil
+        releaseProfileOpen()
+        #if LOCAL_APP
+        WorkspaceStorage.smokeBeforeOpen = nil
+        WorkspaceStorage.smokeDidOpen = nil
+        #endif
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["identity_retired"] = app.engine.receipt == nil
         evidence["workspace_released"] = app.webView == nil
@@ -220,6 +270,9 @@ final class RecoverySmoke {
     }
 
     private func publish() {
+        publicationSequence += 1
+        evidence["publication_sequence"] = publicationSequence
+        evidence["profile_storage"] = app.smokeProfileSnapshot
         evidence["recovery"] = app.recovery.smokeSnapshot
         #if LOCAL_APP
         // Keep the old run's exact reap witness through the explicit successor.
