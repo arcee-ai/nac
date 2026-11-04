@@ -48,6 +48,9 @@ enum DesktopStartup {
 
     static func select(executable: URL, identity: EngineIdentity, options: Options,
                        inherited: [String: String]) async throws -> EngineLaunchConfiguration {
+        guard identity.matchesShellBuild else {
+            throw DesktopStartupError.message("The bundled engine does not match this app's normal or isolated auth-fixture build.")
+        }
         let home = inherited["HOME"] ?? NSHomeDirectory()
         guard home.hasPrefix("/") || options.directory?.hasPrefix("/") == true else {
             throw DesktopStartupError.message("HOME is not an absolute directory. Pass --directory with an existing absolute path and relaunch NAC.")

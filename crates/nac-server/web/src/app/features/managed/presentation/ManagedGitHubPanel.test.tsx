@@ -85,8 +85,17 @@ describe("ManagedGitHubPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reconnect GitHub" }));
     await screen.findByTestId("github-device-code");
     expect(start).toHaveBeenCalledOnce();
+    const link = screen.getByRole("link", { name: "Open GitHub" });
+    expect(link.getAttribute("href")).toBe("https://github.com/login/device");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")?.split(" ")).toEqual(
+      expect.arrayContaining(["noopener", "noreferrer"]),
+    );
+    link.focus();
+    expect(document.activeElement).toBe(link);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(cancel).toHaveBeenCalledWith("reconnect");
+    expect(start).toHaveBeenCalledOnce();
     expectConnected();
 
     vi.mocked(api.getManagedGitHub).mockResolvedValue(disconnected);

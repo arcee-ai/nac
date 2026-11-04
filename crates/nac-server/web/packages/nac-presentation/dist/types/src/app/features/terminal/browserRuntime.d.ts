@@ -1,5 +1,6 @@
 import { UserTerminalInputPump, type UserTerminalApi, type ExecutionApi, type ExecutionStatus, type InputControlStatus, type TerminalControlApi } from "../../../../packages/nac-client/src/index";
 import { createTerminalRenderer } from "./xtermAdapter";
+import type { TerminalLinkMode } from "./terminalLinkMode";
 type Adapter = Awaited<ReturnType<typeof createTerminalRenderer>>;
 export interface TerminalControls {
     adapter: Adapter;
@@ -12,6 +13,7 @@ interface TerminalPorts {
     api: UserTerminalApi & Partial<ExecutionApi & TerminalControlApi>;
     source?: ExecutionStatus;
     readonly?: boolean;
+    linkMode?: TerminalLinkMode;
     inputControl?: Pick<InputControlStatus, "controller" | "revision" | "frozen"> | null;
     inputPaused?: boolean;
     sessionId: string;

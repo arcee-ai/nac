@@ -27,6 +27,9 @@ mod mcp;
 mod mcp_api;
 mod mcp_catalog_api;
 mod mcp_runtime_api;
+#[cfg(feature = "native-auth-fixture")]
+#[doc(hidden)]
+pub mod native_auth_fixture;
 mod orchestration;
 mod revert;
 pub(crate) use managed_control::running_target as managed_running_target;
