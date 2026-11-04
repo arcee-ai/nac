@@ -1063,6 +1063,11 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         fell_back_to_parent: boolean;
         opened: string;
     }>;
+    /** Explicit existing Local target only; never opens a missing parent. */
+    revealWorkspacePath: (id: string, path: string, expectedWorkspaceRoot: string, signal?: AbortSignal) => Promise<{
+        fell_back_to_parent: boolean;
+        opened: string;
+    }>;
     getWorkspaceRevisions: (id: string, signal?: AbortSignal) => Promise<{
         additions: number;
         base_sha: string | null;
