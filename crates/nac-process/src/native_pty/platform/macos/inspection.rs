@@ -112,6 +112,13 @@ impl Probe for Native {
         }
         // SAFETY: exact-size success initializes the complete integer ABI record.
         let record = unsafe { record.assume_init_ref() };
+        #[cfg(test)]
+        super::signal_diagnostics::record(pid, || {
+            format!(
+                "stage=metadata.short target_uid={} target_ruid={} target_svuid={} status={} flags={}",
+                record.uid, record.ruid, record.svuid, record.status, record.flags,
+            )
+        });
         *output = Short {
             pid: record.pid as libc::pid_t,
             ppid: record.ppid as libc::pid_t,
