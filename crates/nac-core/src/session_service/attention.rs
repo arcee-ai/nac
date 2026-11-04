@@ -61,15 +61,28 @@ pub(super) struct ServiceAttention {
     _broker_observer: Option<Arc<dyn crate::permissions::attention::BrokerAttentionObserver>>,
 }
 
-impl Drop for ServiceAttention {
-    fn drop(&mut self) {
-        if let Some((broker, registration)) = &self.broker_registration {
+impl ServiceAttention {
+    // Remove only metadata registration while the service slot is still fenced.
+    // This performs no callback and drops no observer. A replacement cannot see
+    // an empty service slot while the failed broker registration still owns it.
+    fn detach_broker(&mut self) {
+        if let Some((broker, registration)) = self.broker_registration.take() {
             if let Some(broker) = broker.upgrade() {
-                broker.remove_attention_observer(*registration);
+                broker.remove_attention_observer(registration);
             }
         }
-        self.observer
-            .service_retired(&self.session_id, self.snapshot.epoch);
+    }
+}
+
+impl Drop for ServiceAttention {
+    fn drop(&mut self) {
+        self.detach_broker();
+        // A broken optional sink cannot unwind service teardown, including
+        // retirement after its service_changed callback has already panicked.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.observer
+                .service_retired(&self.session_id, self.snapshot.epoch);
+        }));
     }
 }
 
@@ -81,10 +94,10 @@ impl crate::permissions::attention::BrokerAttentionObserver for BrokerBridge {
         let Some(state) = self.state.upgrade() else {
             return;
         };
-        let mut state = state
+        let mut guard = state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(state) = state.as_mut().filter(|state| {
+        let Some(state) = guard.as_mut().filter(|state| {
             state
                 .broker_registration
                 .as_ref()
@@ -104,7 +117,15 @@ impl crate::permissions::attention::BrokerAttentionObserver for BrokerBridge {
         }
         state.snapshot.broker = Some(snapshot);
         let id = state.session_id.clone();
-        publish(state, &id);
+        let published = publish(state, &id);
+        let retired = if published {
+            None
+        } else {
+            state.detach_broker();
+            guard.take()
+        };
+        drop(guard);
+        drop(retired);
     }
 }
 
@@ -127,16 +148,16 @@ pub(super) fn operation_changed(
     attention: &StdMutex<Option<ServiceAttention>>,
     session_id: Option<&str>,
     operation: Option<&ActiveSessionOperationSnapshot>,
-) {
-    let mut state = attention
+) -> Option<ServiceAttention> {
+    let mut guard = attention
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (Some(state), Some(id)) = (state.as_mut(), session_id) else {
-        return;
+    let (Some(state), Some(id)) = (guard.as_mut(), session_id) else {
+        return None;
     };
     let operation = normalized(operation);
     if state.snapshot.operation == operation {
-        return;
+        return None;
     }
     if let AttentionOperation::Run(run) = &operation {
         state.last_operation_run = Some(run.clone());
@@ -146,10 +167,15 @@ pub(super) fn operation_changed(
         state.snapshot.settled = None;
     }
     state.snapshot.operation = operation;
-    publish(state, id);
+    if publish(state, id) {
+        None
+    } else {
+        state.detach_broker();
+        guard.take()
+    }
 }
 
-fn publish(state: &mut ServiceAttention, id: &str) {
+fn publish(state: &mut ServiceAttention, id: &str) -> bool {
     match state.snapshot.revision.checked_add(1) {
         Some(revision) => state.snapshot.revision = revision,
         None => {
@@ -157,7 +183,10 @@ fn publish(state: &mut ServiceAttention, id: &str) {
             state.snapshot.revision = 0;
         }
     }
-    state.observer.service_changed(id, state.snapshot.clone());
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        state.observer.service_changed(id, state.snapshot.clone());
+    }))
+    .is_ok()
 }
 
 impl SessionService {
@@ -283,11 +312,25 @@ impl SessionService {
             broker_registration,
             _broker_observer: broker_observer,
         });
-        observer.service_changed(id, snapshot);
+        let installed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            observer.service_changed(id, snapshot);
+        }))
+        .is_ok();
+        let failed = if installed {
+            None
+        } else {
+            if let Some(failed) = state.as_mut() {
+                failed.detach_broker();
+            }
+            state.take()
+        };
         drop(state);
         drop(operation);
+        // Both the replaced and failed registrations retire outside the
+        // publication/observation locks; compare-remove preserves a successor.
         drop(previous);
-        Some(registration)
+        drop(failed);
+        installed.then_some(registration)
     }
 
     pub fn remove_attention_observer(&self, registration: Uuid) {
@@ -324,11 +367,12 @@ impl SessionService {
         let Some(id) = self.metadata.session_id.as_deref() else {
             return;
         };
-        let mut state = self
+        let mut guard = self
             .attention
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(state) = state.as_mut() {
+        let mut retired = None;
+        if let Some(state) = guard.as_mut() {
             let current = match work.disposition {
                 SettledWorkDisposition::Continuing => match selected_successor {
                     Some(successor) => matches!(&state.snapshot.operation,
@@ -366,9 +410,14 @@ impl SessionService {
             }
             if state.snapshot.settled.as_ref() != Some(&work) {
                 state.snapshot.settled = Some(work);
-                publish(state, id);
+                if !publish(state, id) {
+                    state.detach_broker();
+                    retired = guard.take();
+                }
             }
         }
+        drop(guard);
+        drop(retired);
     }
 
     pub(super) fn publish_attention_completion(

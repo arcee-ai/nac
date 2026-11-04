@@ -561,6 +561,7 @@ fn prepare_recovery_effect(case: RecoveryEffectCase) -> PathBuf {
         RecoveryEffectCase::Cached(disposition) => {
             // Use ordinary terminal settlement to retain the actual relationship
             // obligation and canonical outcome, rather than inventing a receipt.
+            insert_test_session(&path, "creator");
             open_runtime_connection(&path).unwrap().execute(
                 "INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,run_id,execution_mode,created_at,updated_at) VALUES('session','creator','creator','general','child',1,'running',1,?1,'background','now','now')",
                 [&run],
