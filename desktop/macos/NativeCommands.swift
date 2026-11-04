@@ -7,16 +7,19 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     private weak var webView: WKWebView?
     private let receipt: () -> EngineReceipt?
     private let connectionLost: (() -> Void)?
+    private let workspaceStorage: WorkspaceStorage?
     private var bridge: NativeCommandBridge?
     private var bound = false
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] { bridge?.smokeSnapshot ?? ["installed": false] }
     #endif
 
-    init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil) {
+    init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil,
+         workspaceStorage: WorkspaceStorage? = nil) {
         self.webView = webView
         self.receipt = receipt
         self.connectionLost = connectionLost
+        self.workspaceStorage = workspaceStorage
         super.init()
         webView.uiDelegate = self
     }
@@ -25,7 +28,8 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     func bind() {
         guard !bound, let webView, receipt() != nil else { return }
         bound = true
-        bridge = NativeCommandBridge(webView: webView, receipt: receipt, connectionLost: connectionLost)
+        bridge = NativeCommandBridge(webView: webView, receipt: receipt, connectionLost: connectionLost,
+                                     workspaceStorage: workspaceStorage)
     }
 
     func navigationStarted(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationStarted(in: view, navigation: navigation) }

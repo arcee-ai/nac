@@ -66,6 +66,7 @@ private final class App {
 
     func beginWorkspaceRetirement() -> Retirement { retired = true; return Retirement() }
     func showShutdownStatus(_ message: String) { status = message }
+    func prepareWorkspaceStorage(receipt: EngineReceipt) async throws { try Task.checkCancellation() }
     func replaceWorkspace(receipt: EngineReceipt, fragment: String?, initial: Bool = false,
                           requireTerminalAcknowledgement: Bool = false) {
         precondition(requireTerminalAcknowledgement && !initial,
