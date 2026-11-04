@@ -49,7 +49,14 @@ JSON boolean `bypass_rules=true`. Default routing preserves merge queues.
 
 It polls the actual returned UUID for at most three minutes per member, with a
 30-second bound on each HTTP command. `merged` is confirmed against the PR's
-merged state and commit SHA before continuing. `enqueued` means **queued, not
+merged state and returned landed SHA before continuing. A read-only GraphQL
+receipt must independently match the repository, PR number, merged state,
+submitted head, `dev` base and actual landed `mergeCommit.oid`. The pinned REST
+API omits legacy `merge_commit_sha`; its merged/closed/head/base facts still
+corroborate the receipt. The synthetic test ref is never the landed commit.
+Missing/mismatched receipts or query errors stop with the active UUID and
+partial progress retained, without fallback or automatic retry.
+`enqueued` means **queued, not
 merged**: execution stops there. An existing-request 409 is inspected for the
 same SHA/options and polled without a second request for that member. A mismatch,
 failure, unknown state or timeout stops the command and prints landed members,
@@ -70,8 +77,30 @@ advances. No author code is automatically fixed, rebased or marked ready.
 - Every remaining member must be non-draft, conflict-free, and have known
   mergeability. Unresolved conversations and pending/failed check results stop
   execution. Required status contexts, `Required PR checks` and
-  `source-security / Full locked source scan` must report success. Optional
+  `source-security / Full locked source scan`, plus the existing mandatory
+  native process/credentials job, must report success. Optional
   completed neutral/skipped checks are allowed. No CI/security waiver is offered.
+- Check history stays in the plan, including original failure output and an
+  explicit superseding run/attempt/job map. Only the NAC Stable workflow's
+  historical GitHub Actions suites can be superseded: repository, app, workflow,
+  pull-request event, PR, head and current base must match. The workflow's
+  referenced test merge must be the current PR merge identity, with the exact
+  head as its second parent and the head's complete tree. For an upper native-stack
+  member, its prepared lower merge may supply the first parent only when its
+  complete tree equals the current declared base (including modes and blobs).
+  The ordinary linear authored comparison remains required; arbitrary ancestry
+  or partial file comparisons never establish this equivalence.
+  The newest run and its latest job executions are selected regardless of their
+  result; queued, running, failed or cancelled work cannot fall back to older
+  green checks. Partial reruns require exact old/new job-attempt proof.
+- Other apps and workflows retain their check-record veto; their latest
+  applicable workflow run must also finish acceptably. Names alone never
+  establish supersession. Missing/ambiguous provenance, a changing run inventory
+  or a changed PR head/base/current-merge stops validation. Positively associated
+  `pull_request_target` runs, including CLA, are checked even before a check row
+  exists; unfamiliar associated events remain a HOLD. Required integration IDs remain
+  effective, and matching commit statuses and checks must both pass. These
+  bounded rules may conservatively hold an unfamiliar workflow for inspection.
 - Full immutable comparisons must contain 1–299 files. Binary changes, quoted
   paths, incomplete diffs, non-linear ancestry and unexpected stack lifecycle
   changes stop for separate human handling. There is no resume/recovery engine.
