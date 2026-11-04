@@ -3,6 +3,9 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh";
     readonly "GET /product-context": "api.getProductContext";
     readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
+    readonly "POST /sessions/{session_id}/task-followup-delegations": "private:human task follow-up delegation issuance";
+    readonly "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}": "private:passive human delegation inspection";
+    readonly "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}": "private:human task follow-up delegation revocation";
     readonly "GET /sessions/{session_id}/questions": "private:standalone exact structured questions";
     readonly "GET /sessions/{session_id}/questions/{request_id}": "private:standalone exact structured question read";
     readonly "POST /sessions/{session_id}/questions/{request_id}/answer": "private:authenticated human question answer";

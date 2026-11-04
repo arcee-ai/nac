@@ -28,6 +28,32 @@ impl PermissionBroker {
             .effect
             == PermissionEffect::Allow
     }
+
+    /// Issuance honors canonical action/target Deny without entering agent Ask,
+    /// changing approval mode, or persisting a permission grant. This capability
+    /// is unavailable to native invocation and does not authorize a later send.
+    pub(crate) fn authorize_submitted_task_followup_delegation(
+        &self,
+        submission: &crate::session_service::SubmittedTaskFollowupDelegation,
+    ) -> anyhow::Result<()> {
+        if self.backend != "local"
+            || submission.caller() != self.session_id
+            || submission.store_path() != self.store_path
+        {
+            return Err(crate::store::TaskFollowupError::Unavailable.into());
+        }
+        let decision = self
+            .policy
+            .evaluate(&submission.permission_resources(), &[]);
+        if decision.effect == PermissionEffect::Deny {
+            return Err(anyhow::anyhow!(decision.hard_denial.unwrap_or_else(|| {
+                "configured permission rules deny task follow-up delegation".into()
+            }))
+            .context(crate::store::TaskFollowupError::Denied));
+        }
+        Ok(())
+    }
+
     /// Read-only fencing for the additive execution observation capability.
     /// This neither authorizes an operation nor changes ordinary broker policy.
     pub(crate) async fn validate_execution_observation_binding(
