@@ -4,6 +4,7 @@
 Requires the shared browser lease and the common builder's external-auth hook.
 Does not synthesize OS input or change the system browser, credentials, or TCC.
 """
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -13,9 +14,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
-from external_auth_fixture import AuthFixture
-from smoke import alive, cleanup_failed_case, session_lock_state
+from external_auth_fixture import AuthFixture, cleanup_note
+from smoke import session_lock_state
 
 
 def digest(path):
@@ -30,6 +32,124 @@ def require_isolated_host():
     if not console['observed'] or console['locked'] is not False:
         raise SystemExit('Real external-browser qualification requires an unlocked isolated Mac/browser profile; no launch attempted')
     return console
+
+
+def retire_client(process):
+    """Only the original LaunchServices client handle; never an app/browser PID."""
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+    else:
+        process.wait(timeout=0)
+
+
+def close_launch(process, log, primary):
+    failure = primary
+    actions = [] if process is None else [('Auth launch client retirement', lambda: retire_client(process))]
+    actions.append(('Auth launch log close', log.close))
+    for stage, close in actions:
+        try:
+            close()
+        except BaseException as error:
+            if failure is None:
+                failure = error
+            else:
+                cleanup_note(failure, stage, error)
+    if primary is None and failure is not None:
+        raise failure
+
+
+@contextmanager
+def relocated_app(source, evidence, prefix):
+    root = Path(tempfile.mkdtemp(prefix=prefix)).resolve()
+    inode = root.stat().st_ino
+    app = root / source.name
+    custody = {'launched': False, 'settled': True}
+    primary = None
+    try:
+        shutil.copytree(source, app)
+        yield app, custody
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        if custody['launched'] and (primary is not None or not custody['settled']):
+            notice = f'Auth custody unresolved; retained app root {root}; evidence {evidence}'
+            if primary is not None:
+                primary.add_note(notice)
+            try:
+                print(notice, file=sys.stderr)
+            except BaseException as error:
+                if primary is None:
+                    raise
+                cleanup_note(primary, 'Auth retention notice', error)
+            if primary is None:
+                raise RuntimeError(notice)
+        else:
+            try:
+                if root.is_symlink() or root.stat().st_ino != inode:
+                    raise AssertionError('Refusing removal of a replaced auth relocation root')
+                shutil.rmtree(root)
+            except BaseException as error:
+                if primary is None:
+                    raise
+                cleanup_note(primary, 'Auth relocation removal', error)
+
+
+def require_actor_exit(pid):
+    if type(pid) is not int or not 0 < pid < 2**31:
+        raise AssertionError('Incomplete auth actor identity; retirement unknown')
+    result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'pid=,stat='],
+                            capture_output=True, text=True, timeout=3)
+    # Darwin ps reports an absent selector with exit1 and no rows/diagnostic.
+    # Denial, failure, empty successful output and live/zombie rows are unknown.
+    if result.returncode != 1 or result.stdout.strip() or result.stderr.strip():
+        raise AssertionError('Auth actor retirement is unproven')
+
+
+def require_terminal(record, scenario, build, profile=None):
+    if not isinstance(record, dict) or record.get('scenario') != scenario:
+        raise AssertionError('Incomplete auth case binding')
+    for key in ['passed', 'commands_retired'] + (['stopped'] if profile is not None else
+            ['engine_reaped', 'profile_removed', 'identity_retired']):
+        if record.get(key) is not True:
+            raise AssertionError('Incomplete auth terminal facts')
+    source = build['source_revision']
+    if (not isinstance(source, str) or len(source) != 40 or any(c not in '0123456789abcdef' for c in source)
+            or not isinstance(build['build_id'], str) or not build['build_id']
+            or record.get('ready_source') != source or record.get('ready_build') != build['build_id']):
+        raise AssertionError('Auth terminal source identity differs')
+    incarnation = record.get('launch_incarnation')
+    if not isinstance(incarnation, str):
+        raise AssertionError('Incomplete auth launch incarnation')
+    if uuid.UUID(incarnation).int == 0:
+        raise AssertionError('Incomplete auth launch incarnation')
+    def same_store(value, expected):
+        # Foundation can omit Darwin's /private alias; bind the physical store.
+        return isinstance(value, str) and Path(value).is_absolute() and Path(value).resolve() == expected.resolve()
+    if profile is not None:
+        if not same_store(record.get('ready_store'), profile.store) or not same_store(record.get('selected_store'), profile.store):
+            raise AssertionError('Auth terminal store binding differs')
+        if incarnation == profile.last_incarnation:
+            raise AssertionError('Auth launch reused a retired incarnation')
+    else:
+        value = record.get('profile')
+        if not isinstance(value, str):
+            raise AssertionError('Incomplete auth profile binding')
+        root = Path(value)
+        if (not root.is_absolute() or root.is_symlink() or not root.name.startswith('nac-mac-preview-')
+                or root.resolve().parent != Path(tempfile.gettempdir()).resolve()
+                or not same_store(record.get('ready_store'), root / 'store.db') or root.exists()
+                or record.get('ready_track') != build['track']):
+            raise AssertionError('Auth preview profile retirement is unproven')
+    if record.get('app_pid') == record.get('engine_pid'):
+        raise AssertionError('Auth actor roles are not distinct')
+    require_actor_exit(record.get('app_pid'))
+    require_actor_exit(record.get('engine_pid'))
 
 
 def main():
@@ -55,36 +175,33 @@ def main():
                 'engine_sha256': digest(source_app / 'Contents/Resources/nac-web'),
                 'native_sha256': digest(source_app / 'Contents/MacOS/NACPreview')}
     (output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
-    with tempfile.TemporaryDirectory(prefix='nac-external-auth-app-') as directory:
-        app = Path(directory) / source_app.name
-        shutil.copytree(source_app, app)
-        with AuthFixture() as fixture, (output / 'launch.log').open('wb') as log:
-            launch = subprocess.Popen(['/usr/bin/open', '-n', '-W', str(app), '--args',
-                '--smoke-output', str(evidence), '--smoke-scenario', 'external-auth',
-                '--external-auth-origin', fixture.origin], stdout=log, stderr=subprocess.STDOUT)
+    with relocated_app(source_app, evidence, 'nac-external-auth-app-') as (app, custody):
+        with AuthFixture() as fixture:
+            log = (output / 'launch.log').open('wb')
+            launch = None
+            primary = None
             try:
+                custody.update(launched=True, settled=False)
+                launch = subprocess.Popen(['/usr/bin/open', '-n', '-W', str(app), '--args',
+                    '--smoke-output', str(evidence), '--smoke-scenario', 'external-auth',
+                    '--external-auth-origin', fixture.origin], stdout=log, stderr=subprocess.STDOUT)
                 deadline = time.monotonic() + 180
                 while launch.poll() is None and time.monotonic() < deadline:
                     time.sleep(.1)
                 if launch.poll() is None:
                     raise TimeoutError('Actual external-auth app did not finish within 180 seconds')
-                record = json.loads(evidence.read_text())
-                if launch.returncode or record.get('passed') is not True:
+                if launch.wait(timeout=0) != 0:
                     raise AssertionError('Actual external-auth scenario failed; inspect sanitized evidence')
-                assert not alive(record.get('engine_pid', 0)), 'Owned engine remains after app stop'
-                profile = Path(record['profile'])
-                assert not profile.exists(), 'Disposable preview profile remains after app stop'
+                record = json.loads(evidence.read_text())
+                require_terminal(record, 'external-auth', build)
                 snapshot = fixture.snapshot()
                 (output / 'browser-observations.json').write_text(json.dumps(snapshot, indent=2) + '\n')
-            except BaseException:
-                if evidence.exists():
-                    cleanup_failed_case(evidence, app)
+            except BaseException as error:
+                primary = error
                 raise
             finally:
-                # Only our LaunchServices wait client, never the external browser.
-                if launch.poll() is None:
-                    launch.terminate()
-                    launch.wait(timeout=5)
+                close_launch(launch, log, primary)
+            custody['settled'] = True
     print(f'Actual external auth evidence: {output}')
 
 
