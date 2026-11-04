@@ -54,8 +54,8 @@ resize requests, page offsets and geometry.
 With a 5 ms poll, a second base response could replace the initial `old` title before
 the test observed it. ALL-495 records this failure in test-server job
 [121975313411](https://github.com/arcee-ai/nac/actions/runs/40439042325/job/121975313411).
-That log has since been replaced by a retry, and none of the 23 failed `test-server` jobs
-scanned from October 25 to November 4 show it. The test now holds that response until
+That was an earlier attempt of its run, and it's the only occurrence found from October 25
+to November 4, across all attempts. The test now holds that response until
 `old` is observed. Delaying the assertion by 40 ms fails the previous test and passes the
 new one.
 
@@ -84,28 +84,36 @@ inferred from this timing, not documented by Apple. It never reproduced on macOS
 
 `signal_with` now retries a denial up to three times, one millisecond apart, re-checking
 the exact identity each time. A persistent denial still returns `EPERM`, and
-`terminate_members` still retains the identity. With the fix and the original `unwrap`,
-[run 41892520232](https://github.com/arcee-ai/nac/actions/runs/41892520232) completed
-3,369 package runs with no failures. About three denials would be expected at the probe's
-rate, so this is strong evidence rather than proof.
+`terminate_members` still retains the identity.
 
-Real CI fails more often than the probe predicts: 16 failures in 1,249 jobs, each running
-one first and one warm pass, is at most 0.64% per package run, against 0.10% in the probes.
-Of the 11 failures whose logs name a pass, 9 were in the first pass. The probes mostly
-repeated warm passes, so they under-represent that condition.
+Real CI fails mostly in the first pass: of 17 failures whose logs name a pass, 13 were first
+and 4 warm. Each job runs a first and then a warm pass, and a first-pass failure skips warm,
+so that's about 1% of jobs against 0.10% per package run in the probes above. To cover that
+condition, [run 41931815125](https://github.com/arcee-ai/nac/actions/runs/41931815125)
+cleared the file cache with `sudo purge` before each package run, with the original
+`unwrap` in both versions:
+
+| Signal path | Jobs | Package runs | Failed with this `EPERM` | Other failures |
+| --- | --- | --- | --- | --- |
+| Before this branch | 4 | 1,053 | 6 | 1 |
+| With this branch | 4 | 979 | 0 | 0 |
+
+An earlier warm run with the fix
+([41892520232](https://github.com/arcee-ai/nac/actions/runs/41892520232)) completed 3,369
+package runs with no failures.
 
 ## Rates
 
-All completed `stable-release.yml` runs from October 25 to November 4 (2,395 runs), before
-this branch's fixes. Jobs that were cancelled or skipped are not counted. #380 merged on
-October 31 at 00:36 UTC.
+Every attempt of every completed `stable-release.yml` run from October 25 to November 4,
+before this branch's fixes. Cancelled and skipped jobs aren't counted. #380 merged on
+October 31 at 00:36 UTC and #473 on October 31 at 00:52 UTC.
 
 | Failure | October 25 to 30 | October 31 to November 4 |
 | --- | --- | --- |
-| Noisy terminal: latency over 1,500 ms | 9 of 332 browser jobs | 0 of 696 |
-| Noisy terminal: marker erased | 1 of 332 | 0 of 696 |
-| macOS `EPERM` | 7 of 406 macOS jobs | 9 of 843 |
-| Manager-drop `WouldBlock` | 4 of 406 | 0 of 843 |
+| Noisy terminal: latency over 1,500 ms | 9 of 346 browser jobs | 0 of 716 |
+| Noisy terminal: marker erased | 1 of 346 | 0 of 716 |
+| macOS `EPERM` | 10 of 420 macOS jobs | 12 of 864 |
+| Manager-drop `WouldBlock` | 9 of 420 | 0 of 864 |
 
 The same noisy test also failed 8 times on November 4, all on PRs #565, #567, #568 and
 #580, at its history-panel steps rather than its latency or marker checks. Those are a
@@ -113,18 +121,18 @@ different failure, outside this record.
 
 After the fixes:
 
-- **macOS `EPERM`:** 0 failures in 3,369 package runs at the fix (run above), where about
-  3 denials would be expected.
+- **macOS `EPERM`:** 0 of 979 cold package runs and 0 of 3,369 warm ones, against 6 of 1,053
+  cold runs before.
 - **Noisy terminal latency:** not fixed. 11 of 600 repeats missed the limit with this
   branch, and 5 of 240 without it.
 - **Noisy terminal marker erase:** none in those 840 repeats, with or without this branch.
-- **Polling test:** one failure in those 11 days, and the order is now fixed by the test.
+- **Polling test:** no CI rate. It had one failure in 11 days, and the delay above shows the
+  new order holds.
 
 ## Residual unknowns
 
 - Why macOS denies the signal during exec, and why first passes fail more often.
-- Whether three attempts one millisecond apart are enough in a first pass. Probe denials
-  all cleared within 130 µs, but those were mostly warm.
+- How closely clearing the file cache matches a real first pass in CI.
 - Whether the short prompt reduces erased markers. One occurrence was recorded in 11 days,
   and it has never been reproduced locally.
 - Why regular CI shows no latency misses since October 31 while repeats do. #380, the
