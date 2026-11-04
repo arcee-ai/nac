@@ -2,6 +2,8 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::time::Duration;
 
 const MAX_EVENTS: usize = 32;
 const MAX_EVENT_BYTES: usize = 384;
@@ -83,6 +85,115 @@ pub(super) fn record(pid: libc::pid_t, event: impl FnOnce() -> String) {
         let mut event = event();
         event.truncate(MAX_EVENT_BYTES);
         trace.events.push_back(event);
+    });
+}
+
+/// Observation only: its result never participates in signaling or cleanup.
+#[derive(Default)]
+pub(super) struct FailureObservation {
+    observed: bool,
+}
+
+impl FailureObservation {
+    pub(super) fn observe(
+        &mut self,
+        pid: libc::pid_t,
+        retained_uniqueid: u64,
+        result: i32,
+        send_elapsed: Duration,
+        inspect: impl FnOnce() -> io::Result<Option<super::inspection::Snapshot>>,
+    ) {
+        if result == 0 || self.observed {
+            return;
+        }
+        let active = TRACE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .is_some_and(|trace| trace.target_pid == pid)
+        });
+        if !active {
+            return;
+        }
+        self.observed = true;
+        // Keep the original audit return code primary even if observation or
+        // formatting panics. No capability or token is created or retained.
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let started = std::time::Instant::now();
+            record(pid, || {
+                format!(
+                    "stage=post_audit.begin return_code={result} send_elapsed_ns={}",
+                    send_elapsed.as_nanos()
+                )
+            });
+            let snapshot = inspect();
+            record(pid, || {
+                match snapshot {
+                Ok(Some(snapshot)) => format!(
+                    "stage=post_audit.snapshot retained_uniqueid={retained_uniqueid} current_uniqueid={} version={} parent_uniqueid={} ppid={} sid={} status={} elapsed_ns={}",
+                    snapshot.unique.uniqueid, snapshot.unique.version,
+                    snapshot.unique.parent_uniqueid, snapshot.short.ppid,
+                    snapshot.sid, snapshot.short.status, started.elapsed().as_nanos(),
+                ),
+                Ok(None) => format!("stage=post_audit.absent elapsed_ns={}", started.elapsed().as_nanos()),
+                Err(error) => format!(
+                    "stage=post_audit.error error_kind={:?} raw_errno={:?} elapsed_ns={}",
+                    error.kind(), error.raw_os_error(), started.elapsed().as_nanos(),
+                ),
+            }
+            });
+        }));
+    }
+}
+
+#[test]
+fn post_error_observation_is_scoped_once_and_cannot_replace_primary_error() {
+    use std::cell::Cell;
+
+    let calls = Cell::new(0);
+    let mut observation = FailureObservation::default();
+    let probe = || {
+        calls.set(calls.get() + 1);
+        Err(io::Error::from_raw_os_error(libc::EACCES))
+    };
+    observation.observe(0, 1, libc::EPERM, Duration::ZERO, probe);
+    assert_eq!(calls.get(), 0, "inactive diagnostics must not inspect");
+    let _scope = Scope::new(0, 0, 0);
+    observation.observe(0, 1, 0, Duration::ZERO, probe);
+    assert_eq!(calls.get(), 0, "successful signals must not inspect");
+    let primary = io::Error::from_raw_os_error(libc::EPERM);
+    observation.observe(0, 1, libc::EPERM, Duration::ZERO, probe);
+    observation.observe(0, 1, libc::ESRCH, Duration::ZERO, probe);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(primary.raw_os_error(), Some(libc::EPERM));
+    TRACE.with(|slot| {
+        let trace = slot.borrow();
+        let events = &trace.as_ref().unwrap().events;
+        assert!(events
+            .iter()
+            .any(|event| event.contains("stage=post_audit.error")));
+    });
+
+    let mut panicking = FailureObservation::default();
+    panicking.observe(0, 1, libc::EPERM, Duration::ZERO, || panic!("inert probe"));
+    assert_eq!(primary.raw_os_error(), Some(libc::EPERM));
+    assert!(panicking.observed);
+}
+
+#[test]
+fn bounded_trace_reports_overflow_and_caps_each_event() {
+    let _scope = Scope::new(0, 0, 0);
+    for _ in 0..MAX_EVENTS + 3 {
+        record(0, || "x".repeat(MAX_EVENT_BYTES + 1));
+    }
+    TRACE.with(|slot| {
+        let trace = slot.borrow();
+        let trace = trace.as_ref().unwrap();
+        assert_eq!(trace.dropped, 3);
+        assert_eq!(trace.events.len(), MAX_EVENTS);
+        assert!(trace
+            .events
+            .iter()
+            .all(|event| event.len() == MAX_EVENT_BYTES));
     });
 }
 
