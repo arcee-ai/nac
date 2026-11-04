@@ -203,6 +203,69 @@ mod tests {
         std::fs::remove_dir_all(repo).unwrap();
     }
 
+    #[cfg(unix)]
+    fn assert_literal_git_root_reveal(suffix: &str) {
+        use std::os::unix::fs::symlink;
+
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+        let fixture = Fixture(
+            std::env::temp_dir().join(format!("nac-reveal-git-record-{}", uuid::Uuid::new_v4())),
+        );
+        let sibling = fixture.0.join("repo 日本語");
+        let repo = fixture.0.join(format!("repo 日本語{suffix}"));
+        let root = repo.join("packages/app");
+        std::fs::create_dir_all(sibling.join("packages/app/src")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("packages/app/src")).unwrap();
+        std::fs::write(sibling.join("packages/app/src/file"), "sibling decoy").unwrap();
+        std::fs::write(root.join("src/file"), "intended").unwrap();
+        std::fs::write(root.join("packages/app/src/file"), "nested decoy").unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(&repo)
+            .status()
+            .unwrap()
+            .success());
+        let sibling = sibling.canonicalize().unwrap();
+        let root = root.canonicalize().unwrap();
+        let target = GitTarget::local(root.clone());
+        let repo = target.local_repo_root_if_present().unwrap().unwrap();
+        let relative = reveal_relative_path(&repo, &root, "packages/app/src/file").unwrap();
+        assert_eq!(relative, "src/file");
+        assert_eq!(
+            std::fs::read_to_string(root.join(&relative)).unwrap(),
+            "intended"
+        );
+        assert!(resolve_reveal_target(&target, &root, "packages/app/src/file").is_ok());
+        // A wrong discovery root must remain fenced, never select its sibling.
+        assert!(reveal_relative_path(&sibling, &root, "packages/app/src/file").is_err());
+        symlink("file", root.join("src/link")).unwrap();
+        for path in ["../outside", "outside.txt", "packages/app/src/link"] {
+            assert!(resolve_reveal_target(&target, &root, path).is_err());
+        }
+        std::fs::remove_file(root.join("src/file")).unwrap();
+        assert!(root.join("packages/app/src/file").exists());
+        assert!(sibling.join("packages/app/src/file").exists());
+        assert!(resolve_reveal_target(&target, &root, "packages/app/src/file").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn actual_git_reveal_preserves_trailing_space_root() {
+        assert_literal_git_root_reveal(" ");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn actual_git_reveal_preserves_trailing_tab_root() {
+        assert_literal_git_root_reveal("\t");
+    }
+
     #[tokio::test]
     async fn reveal_rejects_stale_root_and_every_non_local_backend_before_os_handoff() {
         let root =
