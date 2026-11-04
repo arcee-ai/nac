@@ -25,6 +25,31 @@ fn openapi_31_responses_keep_required_descriptions_after_dependency_upgrades() {
     }
 }
 
+#[test]
+fn product_context_session_id_is_an_optional_query_parameter() {
+    let document = serde_json::to_value(openapi_document()).unwrap();
+    let operation = &document["paths"]["/product-context"]["get"];
+    assert_eq!(operation["operationId"], "get_product_context");
+    assert_eq!(
+        operation["parameters"],
+        serde_json::json!([
+            {
+                "name": "session_id",
+                "in": "query",
+                "required": false,
+                "schema": { "type": "string" }
+            },
+            {
+                "name": "X-NAC-Presentation-Incarnation",
+                "in": "header",
+                "description": "Optional standalone presentation lifetime fence; grants no authority",
+                "required": false,
+                "schema": { "type": ["string", "null"] }
+            }
+        ])
+    );
+}
+
 const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/product-context"),
     ("POST", "/product-destinations/resolve"),
