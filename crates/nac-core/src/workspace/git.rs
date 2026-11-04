@@ -334,7 +334,7 @@ impl GitTarget {
         self.repo_root_from_output(output).map(Some)
     }
 
-    // Strict discovery retains its existing failure diagnostics and parsing.
+    // Strict and optional discovery share failure diagnostics and path framing.
     fn repo_root_from_output(&self, output: Output) -> Result<PathBuf> {
         if !output.status.success() {
             if let Some(reason) = self.unavailable_reason(&output) {
@@ -349,7 +349,9 @@ impl GitTarget {
 
         let raw = String::from_utf8(output.stdout)
             .map_err(|_| anyhow!("git repository path is not valid UTF-8"))?;
-        let path = raw.trim_end();
+        // Git appends one LF; all preceding bytes belong to the path, including
+        // a literal trailing CR or LF on Unix. Do not trim path whitespace.
+        let path = raw.strip_suffix('\n').unwrap_or(&raw);
         if path.is_empty() {
             bail!("git repository not found in '{}'", self.describe());
         }
