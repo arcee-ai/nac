@@ -1,6 +1,7 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath",
   "GET /product-context": "api.getProductContext",
   "POST /product-destinations/resolve": "api.resolveProductDestination",
   "GET /sessions/{session_id}/questions": "private:standalone exact structured questions",

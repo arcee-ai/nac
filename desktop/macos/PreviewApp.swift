@@ -6,6 +6,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private(set) var window: NSWindow!
     private(set) var webView: WKWebView!
     private(set) var commands: NativeCommands!
+    private(set) var nativePaths: NativePathBridge?
     #if !LOCAL_APP
     private(set) var profile: PreviewProfile?
     let provider = FixtureProvider()
@@ -263,6 +264,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                 firstProfileDocument = true
                 // This is the still-blank bootstrap view, before any product
                 // document/bridge was loaded. Product recovery uses retirement.
+                nativePaths?.retire()
+                nativePaths = nil
                 commands?.retire()
                 webView?.navigationDelegate = nil
                 webView?.uiDelegate = nil
@@ -281,6 +284,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             }
             workspaceIncarnation = incarnation
             commands.bind()
+            nativePaths?.retire()
+            nativePaths = NativePathBridge(webView: webView, receipt: { [weak self] in self?.engine.receipt },
+                source: { [weak view = self.webView, weak commands = self.commands] in
+                    guard let view, let commands else { return nil }
+                    return commands.currentDocument(in: view)
+                })
             if let navigation = webView.load(URLRequest(url: URL(string: route, relativeTo: url)!.absoluteURL)) {
                 navigationIncarnations[navigation] = incarnation
                 activeNavigation = navigation
@@ -344,6 +353,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, !stopping, failure == nil else { return }
         commands.navigationStarted(in: webView, navigation: navigation)
+        nativePaths?.navigationStarted(in: webView, navigation: navigation)
         activeNavigation = navigation
         guard let navigation, navigationIncarnations[navigation] == nil,
               let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
@@ -359,6 +369,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
               let incarnation = navigationIncarnations.removeValue(forKey: navigation),
               !stopping, failure == nil, incarnation == engine.receipt?.incarnation else { return }
         commands.navigationFinished(in: webView, navigation: navigation)
+        nativePaths?.navigationFinished(in: webView, navigation: navigation)
         status.isHidden = true
         webView.isHidden = false
         recovery.documentLoaded()
@@ -450,6 +461,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         workspaceStorageSelection = nil
         #endif
         recovery.cancelPending()
+        nativePaths?.retire()
+        nativePaths = nil
         commands?.retire()
         webView?.stopLoading()
         webView?.isHidden = true
@@ -475,7 +488,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #endif
     }
 
+    func applicationWillHide(_ notification: Notification) { nativePaths?.cancelPending() }
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        nativePaths?.cancelPending()
         #if LOCAL_APP
         return quit.canCloseWindow
         #else
@@ -491,6 +507,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #endif
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Dismiss only this feature's sheet before the existing Quit confirmation.
+        // Cancel Quit retains the installed path and document bindings.
+        nativePaths?.cancelPending()
         recovery.applicationQuitRequested()
         #if LOCAL_APP
         return quit.shouldTerminate()
@@ -526,6 +545,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         guard !stopping else { return }
         stopping = true
         recovery.close()
+        nativePaths?.retire()
+        nativePaths = nil
         commands?.retire()
         #if LOCAL_APP
         storeConflictRetry.clear()
@@ -606,6 +627,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         // Repeated retirement still fences a newly bound renderer waiter.
         // Its app-owned profile open remains alive for the current successor.
         if baseURL != nil { loading?.cancel() }
+        nativePaths?.retire()
+        nativePaths = nil
         if let workspaceRetirement { return workspaceRetirement }
         workspaceIncarnation = nil
         activeNavigation = nil
@@ -678,6 +701,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         recovery.installMenus()
         recovery.showLossNotice()
         commands.bind()
+        nativePaths?.retire()
+        nativePaths = NativePathBridge(webView: replacement, receipt: { [weak self] in self?.engine.receipt },
+            source: { [weak view = replacement, weak commands = self.commands] in
+                guard let view, let commands else { return nil }
+                return commands.currentDocument(in: view)
+            })
         workspaceIncarnation = receipt.incarnation
         if let navigation = replacement.load(URLRequest(url: address.url!)) {
             navigationIncarnations[navigation] = receipt.incarnation

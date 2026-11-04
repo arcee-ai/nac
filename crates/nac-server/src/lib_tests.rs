@@ -1094,3 +1094,6 @@ mod task_launch_shutdown;
 mod desktop_lifecycle;
 #[path = "tests/native_task_launches.rs"]
 mod native_task_launches;
+
+#[path = "tests/workspace_reveal.rs"]
+mod workspace_reveal;
