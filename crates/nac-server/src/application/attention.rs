@@ -538,6 +538,14 @@ impl AttentionObserver for AttentionHub {
                         current.pending = pending;
                         (changed, false)
                     }
+                    Some(current)
+                        if pending && matches!(decision, AttentionDecision::Review { .. }) =>
+                    {
+                        // A failed retry enqueue can restore this exact broker
+                        // membership. It is current again, not a new notice.
+                        current.pending = true;
+                        (true, false)
+                    }
                     Some(_) => (false, false),
                     None => {
                         source.decisions.push(DecisionState {

@@ -687,3 +687,58 @@ fn engine_replacement_and_source_registration_provide_silent_current_state() {
     assert!(subscription.initial.replay.is_empty());
     assert_eq!(subscription.initial.baseline, vec![registered]);
 }
+
+#[tokio::test]
+async fn canonical_review_restoration_is_current_but_silent_and_stale_facts_cannot_reopen_permissions(
+) {
+    let source = source("session");
+    let hub = hub(AttentionLimits::default(), std::slice::from_ref(&source));
+    let mut subscription = hub.subscribe(None).unwrap();
+    let review = AttentionDecision::Review {
+        review_id: "review".into(),
+    };
+    for (revision, change) in [
+        (1, AttentionChange::DecisionPending(review.clone())),
+        (2, AttentionChange::DecisionResolved(review.clone())),
+        (3, AttentionChange::DecisionPending(review.clone())),
+    ] {
+        assert_eq!(
+            hub.observe(fact(&source, revision, change)),
+            AttentionApply::Applied
+        );
+        let record = next(&mut subscription).await;
+        assert_eq!(record.new_attention, revision == 1);
+    }
+    assert_eq!(
+        hub.observe(fact(
+            &source,
+            2,
+            AttentionChange::DecisionResolved(review.clone())
+        )),
+        AttentionApply::Duplicate
+    );
+    for (offset, decision) in [permission("terminal"), question(1)]
+        .into_iter()
+        .enumerate()
+    {
+        for (step, change) in [
+            AttentionChange::DecisionPending(decision.clone()),
+            AttentionChange::DecisionResolved(decision.clone()),
+            AttentionChange::DecisionPending(decision),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                hub.observe(fact(&source, 4 + offset as u64 * 3 + step as u64, change)),
+                AttentionApply::Applied
+            );
+            assert_eq!(next(&mut subscription).await.new_attention, step == 0);
+        }
+    }
+    let boundary = hub.boundary();
+    drop(subscription);
+    let current = hub.subscribe(Some(boundary)).unwrap();
+    assert_eq!(current.initial.baseline[0].pending, vec![review]);
+    assert!(current.initial.replay.is_empty());
+}

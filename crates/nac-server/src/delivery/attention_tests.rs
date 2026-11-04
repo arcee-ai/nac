@@ -68,7 +68,7 @@ async fn assembled_get_guards_precede_observer_and_bootstrap() {
         );
     }
     // There is still no subscription or canonical baseline; a valid request
-    // takes the one seat. Unsupported facets are explicit in the real DTO.
+    // takes the one seat. An absent direct broker is explicitly unknown.
     seed_direct_session(&root, "session");
     let response = app
         .clone()
@@ -84,7 +84,7 @@ async fn assembled_get_guards_precede_observer_and_bootstrap() {
     assert_eq!(baseline["kind"], "baseline");
     assert_eq!(
         baseline["sources"][0]["availability"]["permissions"],
-        "unsupported"
+        "unknown"
     );
     assert_eq!(
         app.clone().oneshot(request(&[])).await.unwrap().status(),

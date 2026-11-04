@@ -4,19 +4,57 @@ use super::*;
 pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSnapshot> {
     let stored = source.stored.as_ref()?;
     let supported = stored.primary && stored.direct;
+    let broker = source
+        .service
+        .as_ref()
+        .and_then(|service| service.broker.as_ref());
+    let mut pending: Vec<_> = stored.question.clone().into_iter().collect();
+    let broker_available = if supported {
+        if let Some(AttentionBrokerSnapshot {
+            state:
+                AttentionBrokerState::Current {
+                    permissions,
+                    authorizable_reviews,
+                },
+            ..
+        }) = broker
+        {
+            pending.extend(permissions.iter().map(|id| AttentionDecision::Permission {
+                request_id: id.to_string(),
+            }));
+            pending.extend(
+                authorizable_reviews
+                    .iter()
+                    .map(|id| AttentionDecision::Review {
+                        review_id: id.to_string(),
+                    }),
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    let decision_facet = if !supported {
+        AttentionFacet::Unsupported
+    } else if broker_available {
+        AttentionFacet::Available
+    } else {
+        AttentionFacet::Unknown
+    };
     let work = source.service.as_ref().and_then(|service| {
         let work = service.settled.as_ref()?;
-        if !supported
-            || stored.manual_unsettled
-            || stored.inbox_pending
-            || stored.question.is_some()
-        {
+        if !supported || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
             return None;
         }
         if work.goal.as_ref() != stored.goal.as_ref().map(|goal| &goal.identity) {
             return None;
         }
         if work.disposition == SettledWorkDisposition::Completed {
+            if !broker_available {
+                return None;
+            }
             let goal = stored.goal.as_ref()?;
             if service.operation != AttentionOperation::Idle
                 || work.goal.as_ref() != Some(&goal.identity)
@@ -50,8 +88,8 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
             } else {
                 AttentionFacet::Unsupported
             },
-            permissions: AttentionFacet::Unsupported,
-            reviews: AttentionFacet::Unsupported,
+            permissions: decision_facet,
+            reviews: decision_facet,
             topology: if supported {
                 AttentionFacet::Available
             } else {
@@ -59,7 +97,7 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
             },
         },
         work,
-        pending: stored.question.clone().into_iter().collect(),
+        pending,
     })
 }
 pub(super) fn emit(hub: &AttentionHub, source: &mut Source, change: AttentionChange) -> Result<()> {
@@ -118,9 +156,22 @@ pub(super) fn publish(
         // baseline cannot disappear into a later service replacement snapshot.
         let mut handoff = next.clone();
         handoff.work = None;
-        handoff.pending = old
+        let broker = source
+            .service
             .as_ref()
-            .map_or_else(Vec::new, |old| old.pending.clone());
+            .and_then(|service| service.broker.as_ref())
+            .map(|broker| broker.owner);
+        let same_broker = broker.is_some() && broker == source.published_broker;
+        handoff.pending = old.as_ref().map_or_else(Vec::new, |old| {
+            old.pending
+                .iter()
+                .filter(|decision| {
+                    matches!(decision, AttentionDecision::Question { .. }) || same_broker
+                })
+                .cloned()
+                .collect()
+        });
+        source.published_broker = broker;
         if handoff.availability.work != AttentionFacet::Unsupported {
             handoff.availability.work = AttentionFacet::Unknown;
         }
@@ -180,6 +231,11 @@ pub(super) fn publish(
             ))?
             .revision;
     }
+    source.published_broker = source
+        .service
+        .as_ref()
+        .and_then(|service| service.broker.as_ref())
+        .map(|broker| broker.owner);
     source.published = Some(next);
     Ok(())
 }

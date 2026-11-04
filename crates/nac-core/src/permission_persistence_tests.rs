@@ -28,6 +28,7 @@ async fn aborted_owned_approval_removes_authority_without_waiting_for_event_pers
     let _interactive = bus.subscribe_assistant_deltas();
     let mut events = bus.subscribe();
     broker.attach_event_bus(bus.clone());
+    let (attention, _) = crate::permissions::attention::tests::observe(&broker, true);
     let authorization = {
         let broker = Arc::clone(&broker);
         tokio::spawn(async move {
@@ -84,6 +85,11 @@ async fn aborted_owned_approval_removes_authority_without_waiting_for_event_pers
         .unwrap_err();
     assert!(error.is_cancelled());
     assert!(broker.pending().is_empty());
+    assert!(
+        matches!(&attention.snapshots.lock().unwrap().last().unwrap().state,
+        crate::events::AttentionBrokerState::Current { permissions, .. } if permissions.is_empty()),
+        "metadata resolves before blocked event persistence"
+    );
     assert!(broker.reply(&request.id, PermissionReply::Always).is_err());
     tokio::time::sleep(Duration::from_millis(5)).await;
     assert!(!publisher.is_finished());
