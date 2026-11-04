@@ -558,16 +558,18 @@ final class InstanceSmoke {
             image.addRepresentation(bitmap)
         } else {
             image = try await withCheckedThrowingContinuation { continuation in
+                let completion = InstanceWorkspaceCompletion<NSImage>(continuation, timeout: 2,
+                                                                     label: "workspace snapshot")
                 do {
                     try requireCurrentView(binding).takeSnapshot(with: nil) { [weak self] image, error in
                         do {
                             guard let self else { throw InstanceViewChanged() }
                             _ = try self.requireCurrentView(binding)
-                            if let image { continuation.resume(returning: image) }
-                            else { continuation.resume(throwing: error ?? InstanceFixtureError("Workspace snapshot unavailable")) }
-                        } catch { continuation.resume(throwing: error) }
+                            if let image { completion.finish(.success(image)) }
+                            else { completion.finish(.failure(error ?? InstanceFixtureError("Workspace snapshot unavailable"))) }
+                        } catch { completion.finish(.failure(error)) }
                     }
-                } catch { continuation.resume(throwing: error) }
+                } catch { completion.finish(.failure(error)) }
             }
         }
         _ = try requireCurrentView(binding)
