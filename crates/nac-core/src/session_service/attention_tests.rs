@@ -493,3 +493,237 @@ async fn real_review_retry_restores_only_before_enqueue_and_stays_removed_after_
     drop(owner);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[derive(Clone, Copy)]
+enum PanicAt {
+    Initial,
+    Run,
+    Settled,
+    Decision,
+    Never,
+}
+struct PanickingObserver {
+    when: PanicAt,
+    retired: std::sync::atomic::AtomicUsize,
+    retired_unlocked: std::sync::atomic::AtomicBool,
+    authority_released: Box<dyn Fn() -> bool + Send + Sync>,
+}
+impl AttentionServiceObserver for PanickingObserver {
+    fn service_changed(&self, _: &str, snapshot: AttentionServiceSnapshot) {
+        let panic = match self.when {
+            PanicAt::Initial => true,
+            PanicAt::Run => matches!(snapshot.operation, AttentionOperation::Run(_)),
+            PanicAt::Settled => snapshot.settled.is_some(),
+            PanicAt::Decision => snapshot.broker.as_ref().is_some_and(|broker| {
+                matches!(&broker.state, AttentionBrokerState::Current { permissions, authorizable_reviews }
+                    if !permissions.is_empty() || !authorizable_reviews.is_empty())
+            }),
+            PanicAt::Never => false,
+        };
+        assert!(!panic, "optional changed callback fixture panic");
+    }
+    fn service_retired(&self, _: &str, _: Uuid) {
+        self.retired_unlocked.store(
+            (self.authority_released)(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.retired
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        panic!("optional retirement callback fixture panic");
+    }
+}
+fn panicking(service: &SessionService, when: PanicAt) -> Arc<PanickingObserver> {
+    let operation = Arc::downgrade(&service.active_operation);
+    let published = Arc::downgrade(&service.published_operation);
+    let attention = Arc::downgrade(&service.attention);
+    Arc::new(PanickingObserver {
+        when,
+        retired: std::sync::atomic::AtomicUsize::new(0),
+        retired_unlocked: std::sync::atomic::AtomicBool::new(false),
+        authority_released: Box::new(move || {
+            operation
+                .upgrade()
+                .is_none_or(|lock| lock.try_lock().is_ok())
+                && published
+                    .upgrade()
+                    .is_none_or(|lock| lock.try_lock().is_ok())
+                && attention
+                    .upgrade()
+                    .is_none_or(|lock| lock.try_lock().is_ok())
+        }),
+    })
+}
+async fn callback_until(mut condition: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !condition() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn callback_panic_during_real_admission_and_settlement_never_strands_run_task_or_lease() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use std::sync::atomic::Ordering;
+    for when in [PanicAt::Run, PanicAt::Settled] {
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let seen = arrived.clone();
+        let (release, wait) = std::sync::mpsc::channel();
+        let response = ScriptedResponse::json("200 OK", serde_json::json!({
+            "status":"completed",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"actual owned result"}]}],
+            "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+        }).to_string());
+        let provider = ScriptedServer::start_observed(vec![response], move |_, _| {
+            seen.notify_one();
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        let (parts, path) = crate::session_service::tests::test_direct_active_service(
+            "attention-panic-actual-admission",
+            "session",
+            ModelClient::new_for_test_server(provider.base_url.clone()),
+        );
+        crate::store::create_session_inbox_item(
+            &path,
+            "session",
+            crate::store::InboxDelivery::Queue,
+            "execute the actual queued run",
+            None,
+            None,
+        )
+        .unwrap();
+        let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+        let observer = panicking(&parts.service, when);
+        parts
+            .service
+            .install_attention_observer(observer.clone())
+            .unwrap();
+        let run = parts
+            .service
+            .start_next_direct_inbox_item()
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), arrived.notified())
+            .await
+            .unwrap();
+        assert!(
+            matches!(parts.service.active_operation.lock().unwrap().as_ref(),
+            Some(ActiveSessionOperation::Run(state)) if state.snapshot.run_id == run.run_id && state.task.is_some()),
+            "the real admission must reach its task spawn after publication"
+        );
+        assert!(matches!(
+            sessions::SessionOperationLease::try_acquire(&path, "session"),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        release.send(()).unwrap();
+        callback_until(|| {
+            observer.retired.load(Ordering::SeqCst) == 1 && !parts.service.has_active_operation()
+        })
+        .await;
+        assert!(!parts.service.attention_enabled());
+        assert!(
+            observer.retired_unlocked.load(Ordering::SeqCst),
+            "retirement must follow all authority guards"
+        );
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        drop(lease);
+        owner.shutdown().await.unwrap();
+        drop(owner);
+        drop(parts);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn callback_initial_and_retirement_panics_preserve_healthy_replacement_and_stale_remove_fence() {
+    use std::sync::atomic::Ordering;
+    for when in [PanicAt::Initial, PanicAt::Never] {
+        let (parts, path) = crate::session_service::tests::test_direct_active_service(
+            "attention-panic-install-retire",
+            "session",
+            ModelClient::new_for_test(),
+        );
+        let bad = panicking(&parts.service, when);
+        let old = parts.service.install_attention_observer(bad.clone());
+        if matches!(when, PanicAt::Initial) {
+            assert!(old.is_none());
+            assert!(!parts.service.attention_enabled());
+        } else {
+            assert!(old.is_some());
+        }
+        let healthy = Arc::new(Observer::default());
+        let current = parts
+            .service
+            .install_attention_observer(healthy.clone())
+            .unwrap();
+        assert_eq!(bad.retired.load(Ordering::SeqCst), 1);
+        assert!(bad.retired_unlocked.load(Ordering::SeqCst));
+        assert!(
+            healthy.0.lock().unwrap().last().unwrap().broker.is_some(),
+            "failed sink must not retain the broker slot"
+        );
+        if let Some(old) = old {
+            parts.service.remove_attention_observer(old);
+        }
+        assert!(
+            parts.service.attention_enabled(),
+            "stale removal must preserve the replacement"
+        );
+        parts.service.remove_attention_observer(current);
+        assert_eq!(healthy.1.lock().unwrap().len(), 1);
+        drop(parts);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn callback_broker_change_panic_retires_only_observation_and_preserves_real_ask_reply() {
+    use std::sync::atomic::Ordering;
+    let (parts, path) = crate::session_service::tests::test_direct_active_service(
+        "attention-panic-broker",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    let observer = panicking(&parts.service, PanicAt::Decision);
+    parts
+        .service
+        .install_attention_observer(observer.clone())
+        .unwrap();
+    let interactive = parts.service.event_bus.subscribe_assistant_deltas();
+    let broker = parts.service.permission_broker.as_ref().unwrap().clone();
+    let request = {
+        let broker = broker.clone();
+        tokio::spawn(async move {
+            broker
+                .authorize(
+                    "exec_command",
+                    &[crate::tools::kernel::PermissionResource::new(
+                        "execute",
+                        "command:[curl][private.example]",
+                    )],
+                    &crate::tools::kernel::ToolCallContext::default(),
+                    &crate::tools::ThreadCancellation::default(),
+                )
+                .await
+        })
+    };
+    callback_until(|| !broker.pending().is_empty() && observer.retired.load(Ordering::SeqCst) == 1)
+        .await;
+    assert!(!parts.service.attention_enabled());
+    assert!(observer.retired_unlocked.load(Ordering::SeqCst));
+    let id = broker.pending()[0].id.clone();
+    broker
+        .reply(&id, crate::permissions::PermissionReply::Reject)
+        .unwrap();
+    assert!(matches!(
+        request.await.unwrap(),
+        crate::permissions::AuthorizationOutcome::Denied(_)
+    ));
+    assert!(broker.pending().is_empty());
+    drop(interactive);
+    drop(parts);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

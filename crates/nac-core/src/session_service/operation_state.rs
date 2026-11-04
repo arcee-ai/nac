@@ -10,6 +10,9 @@ pub(super) struct ActiveOperationGuard<'a> {
     published: &'a StdMutex<Option<ActiveSessionOperationSnapshot>>,
     attention: &'a StdMutex<Option<attention::ServiceAttention>>,
     session_id: Option<&'a str>,
+    // After Drop returns, fields drop in declaration order: operation releases
+    // its authority mutex before this retired optional sink is destroyed.
+    _retired_attention: Option<attention::ServiceAttention>,
 }
 impl<'a> ActiveOperationGuard<'a> {
     pub(super) fn new(service: &'a SessionService) -> Self {
@@ -21,6 +24,7 @@ impl<'a> ActiveOperationGuard<'a> {
             published: &service.published_operation,
             attention: &service.attention,
             session_id: service.metadata.session_id.as_deref(),
+            _retired_attention: None,
         }
     }
 }
@@ -45,7 +49,10 @@ impl Drop for ActiveOperationGuard<'_> {
             .operation
             .as_ref()
             .map(ActiveSessionOperation::snapshot);
-        attention::operation_changed(self.attention, self.session_id, published.as_ref());
+        self._retired_attention =
+            attention::operation_changed(self.attention, self.session_id, published.as_ref());
+        // published drops before field destruction; operation is the first
+        // field to drop, so retirement callbacks run outside both guards.
     }
 }
 
