@@ -1124,3 +1124,6 @@ mod attention_delivery;
 mod task_followup_delegations;
 #[path = "tests/task_followups.rs"]
 mod task_followups;
+
+#[path = "tests/workspace_reveal.rs"]
+mod workspace_reveal;
