@@ -63,11 +63,16 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
             : app.launchConfiguration != nil && restartAttempts < 2
     }
 
-    func engineReady(_ receipt: EngineReceipt) {
+    func engineReady(_ receipt: EngineReceipt) -> Bool {
         if launch != receipt.incarnation { reloadAttempts = 0; launch = receipt.incarnation }
-        if sleeping { return }
+        if sleeping { return false }
+        guard !needsRecovery || app.canRecoverWorkspace else {
+            unavailable("Finish the Quit confirmation, then choose Reload Workspace.")
+            return false
+        }
         needsRecovery = false
         hideActions()
+        return true
     }
 
     private func rememberRoute() {
@@ -218,7 +223,10 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
             defer { if self.generation == expected { self.busy = false; self.task = nil } }
             do {
                 try await retirement.wait()
-                guard self.current(expected), self.app.canRecoverWorkspace else { return }
+                guard self.current(expected) else { return }
+                guard self.app.canRecoverWorkspace else {
+                    throw PreviewError.message("Finish the Quit confirmation, then choose Reload Workspace.")
+                }
                 self.restartAttempts += 1
                 try await self.app.restartOwnedEngine()
             } catch {
