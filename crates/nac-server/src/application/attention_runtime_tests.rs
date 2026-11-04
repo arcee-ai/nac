@@ -34,6 +34,134 @@ fn row() -> AttentionStoredSession {
         recovery_pending: false,
     }
 }
+
+#[tokio::test]
+async fn broker_owner_handoff_does_not_reannounce_observed_completion() {
+    let live = live();
+    let token = Uuid::new_v4();
+    let mut stored = row();
+    let goal = AttentionGoal {
+        id: "goal".into(),
+        version: 1,
+    };
+    stored.goal = Some(nac_core::store::AttentionStoredGoal {
+        identity: goal.clone(),
+        status: nac_core::store::GoalStatus::Complete,
+        accounting_run: None,
+        continuation_run: None,
+        retry_scheduled: false,
+        last_run: Some("run-a".into()),
+    });
+    let snapshot = AttentionServiceSnapshot {
+        epoch: Uuid::new_v4(),
+        revision: 1,
+        operation: AttentionOperation::Idle,
+        settled: Some(SettledWork {
+            run_id: "run-a".into(),
+            goal: Some(goal),
+            disposition: SettledWorkDisposition::Completed,
+        }),
+        broker: Some(AttentionBrokerSnapshot {
+            owner: Uuid::new_v4(),
+            revision: 0,
+            state: AttentionBrokerState::Current {
+                permissions: vec![],
+                authorizable_reviews: vec![],
+            },
+        }),
+    };
+    let initial_epoch = {
+        let mut state = live.state.lock().unwrap();
+        let source = live.source(&mut state, "session").unwrap();
+        source.stored = Some(stored.clone());
+        source.service = Some(snapshot.clone());
+        source.binding = Some(Binding {
+            service: Weak::new(),
+            token,
+            registration: None,
+            config_version: Some(0),
+        });
+        let baseline = normalized("session", source).unwrap();
+        source.published = Some(baseline.clone());
+        source.published_broker = snapshot.broker.as_ref().map(|broker| broker.owner);
+        assert_eq!(
+            live.hub.rebaseline(live.hub.boundary(), vec![baseline]),
+            AttentionApply::Applied
+        );
+        source.epoch
+    };
+    let mut subscription = live.hub.subscribe(None).unwrap();
+    let sink = Sink {
+        live: Arc::downgrade(&live),
+        token,
+    };
+    let mut handoff = snapshot;
+    handoff.revision += 1;
+    let mut broker = handoff.broker.take().unwrap();
+    broker.owner = Uuid::new_v4();
+    // A new broker first rejects the previous broker's registration. Its
+    // unknown interval must not erase the already observed completion either.
+    sink.service_changed("session", handoff.clone());
+    let generation = live.state.lock().unwrap().sources["session"].generation;
+    live.apply("session", generation, vec![stored.clone()])
+        .unwrap();
+    let AttentionRead::Record(unknown) = subscription.next().await else {
+        panic!("unknown handoff")
+    };
+    assert!(!unknown.new_attention);
+    assert_eq!(
+        live.state.lock().unwrap().sources["session"]
+            .published
+            .as_ref()
+            .unwrap()
+            .availability
+            .permissions,
+        AttentionFacet::Unknown
+    );
+    handoff.revision += 1;
+    handoff.broker = Some(broker);
+    // Exercise the registered callback, its source-epoch transition, the
+    // canonical read generation and projection, rather than only the hub.
+    sink.service_changed("session", handoff.clone());
+    let generation = {
+        let state = live.state.lock().unwrap();
+        assert_ne!(state.sources["session"].epoch, initial_epoch);
+        state.sources["session"].generation
+    };
+    live.apply("session", generation, vec![stored.clone()])
+        .unwrap();
+    for _ in 0..3 {
+        let AttentionRead::Record(record) = subscription.next().await else {
+            panic!("handoff record")
+        };
+        assert!(
+            !record.new_attention,
+            "a source handoff cannot re-announce run-a: {record:?}"
+        );
+    }
+    // A stale registration cannot publish, while a genuinely new completion
+    // from the current broker remains eligible for attention.
+    let boundary = live.hub.boundary();
+    Sink {
+        live: Arc::downgrade(&live),
+        token: Uuid::new_v4(),
+    }
+    .service_changed("session", handoff.clone());
+    assert_eq!(live.hub.boundary(), boundary);
+    handoff.revision += 1;
+    handoff.settled.as_mut().unwrap().run_id = "run-b".into();
+    stored.goal.as_mut().unwrap().last_run = Some("run-b".into());
+    sink.service_changed("session", handoff);
+    let generation = live.state.lock().unwrap().sources["session"].generation;
+    live.apply("session", generation, vec![stored]).unwrap();
+    let AttentionRead::Record(record) = subscription.next().await else {
+        panic!("new completion")
+    };
+    assert!(record.new_attention);
+    assert!(
+        matches!(&record.change, AttentionRecordChange::Fact(AttentionChange::WorkSettled(work)) if work.run_id == "run-b")
+    );
+}
 #[test]
 fn stale_read_cannot_clear_question_after_newer_dirty_hint_or_owner_handoff() {
     let live = live();

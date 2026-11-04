@@ -68,6 +68,63 @@ fn fact(source: &AttentionSource, revision: u64, change: AttentionChange) -> Att
     }
 }
 
+#[tokio::test]
+async fn completion_dedup_survives_cleared_work_and_replacement_without_escaping_capacity() {
+    let old = source("s");
+    let current = source("s");
+    let hub = hub(
+        AttentionLimits {
+            identities: 2,
+            ..AttentionLimits::default()
+        },
+        &[old.clone()],
+    );
+    let mut subscription = hub.subscribe(None).unwrap();
+    assert_eq!(
+        hub.observe(fact(&old, 1, work(SettledWorkDisposition::Completed))),
+        AttentionApply::Applied
+    );
+    assert!(next(&mut subscription).await.new_attention);
+    assert_eq!(
+        hub.observe(fact(&old, 2, AttentionChange::WorkCleared)),
+        AttentionApply::Applied
+    );
+    assert!(!next(&mut subscription).await.new_attention);
+    assert_eq!(
+        hub.replace_source(Some(&old), snapshot(&current)),
+        AttentionApply::Applied
+    );
+    assert!(!next(&mut subscription).await.new_attention);
+    assert_eq!(
+        hub.retention().identities,
+        1,
+        "the completed identity survives an empty handoff"
+    );
+    assert_eq!(
+        hub.observe(fact(&old, 3, work(SettledWorkDisposition::Completed))),
+        AttentionApply::StaleSource
+    );
+    assert_eq!(
+        hub.observe(fact(&current, 1, work(SettledWorkDisposition::Completed))),
+        AttentionApply::Applied
+    );
+    assert!(
+        !next(&mut subscription).await.new_attention,
+        "old completion stays silent"
+    );
+    let mut new = match work(SettledWorkDisposition::Completed) {
+        AttentionChange::WorkSettled(work) => work,
+        _ => unreachable!(),
+    };
+    new.run_id = "new-run".into();
+    assert_eq!(
+        hub.observe(fact(&current, 2, AttentionChange::WorkSettled(new))),
+        AttentionApply::Unavailable(AttentionUnavailable::Capacity)
+    );
+    assert!(matches!(subscription.next().await, AttentionRead::Reset(_)));
+    assert_eq!(hub.retention().identities, 0);
+}
+
 async fn next(subscription: &mut AttentionSubscription) -> Arc<AttentionRecord> {
     match tokio::time::timeout(Duration::from_secs(2), subscription.next())
         .await

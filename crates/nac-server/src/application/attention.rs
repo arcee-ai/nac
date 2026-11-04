@@ -454,10 +454,18 @@ impl AttentionObserver for AttentionHub {
         if !valid_snapshot(&snapshot) {
             return self.invalidate(&mut state, AttentionUnavailable::InvalidMetadata);
         }
-        state.sources.insert(
-            snapshot.source.session_id.clone(),
-            SourceState::from_snapshot(snapshot.clone()),
-        );
+        let mut replacement = SourceState::from_snapshot(snapshot.clone());
+        if let Some(previous) = previous.filter(|source| !source.deleted) {
+            // Run identities survive service/broker epochs. Keep only the
+            // notification deduplication frontier; all current authority and
+            // decision state still comes from the fenced replacement snapshot.
+            replacement
+                .completed_runs
+                .extend(previous.completed_runs.iter().cloned());
+        }
+        state
+            .sources
+            .insert(snapshot.source.session_id.clone(), replacement);
         self.record(
             &mut state,
             snapshot.source.clone(),
