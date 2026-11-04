@@ -598,6 +598,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }
+            // Stop retires the live engine even if cleanup or relaunch later fails.
+            if engine.pid > 0 { recovery.ownedEngineWillStop() }
             engine.stop { [weak self] in
                 guard let self, self.engine.pid == 0 else {
                     finish(PreviewError.message("The original engine cleanup has not finished.")); return
