@@ -701,11 +701,45 @@ export interface components {
             scheduling_request?: string | null;
             seen_through_sequence?: number;
         };
+        HeartbeatCalendarDays: {
+            kind: "daily";
+        } | {
+            days: number[];
+            kind: "weekdays";
+        } | {
+            day: number;
+            kind: "weekly";
+        };
+        HeartbeatCalendarDraft: {
+            data_version?: string | null;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
+        HeartbeatCalendarPreview: {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            next_due?: components["schemas"]["HeartbeatCalendarPreviewPoint"] | null;
+            occurrences: components["schemas"]["HeartbeatCalendarPreviewPoint"][];
+        };
+        HeartbeatCalendarPreviewPoint: {
+            due_ms: number;
+            local: string;
+            utc: string;
+        };
+        HeartbeatCalendarRule: {
+            data_version: string;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
         HeartbeatControlRequest: {
             operation: components["schemas"]["HeartbeatAction"];
             request_id: string;
         };
         HeartbeatInspection: {
+            calendar_preview?: components["schemas"]["HeartbeatCalendarPreview"] | null;
             history: components["schemas"]["HeartbeatOccurrence"][];
             schedule: components["schemas"]["HeartbeatSchedule"];
         };
@@ -736,6 +770,10 @@ export interface components {
         };
         HeartbeatOccurrenceState: "pending" | "admitted" | "settled" | "withdrawn";
         HeartbeatOutcome: "unchanged" | "meaningful" | "finished" | "needs_human_action" | "failed" | "interrupted" | "unknown";
+        HeartbeatPreviewRequest: {
+            calendar: components["schemas"]["HeartbeatCalendarDraft"];
+            count?: number | null;
+        };
         HeartbeatReceipt: {
             active_occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
             occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
@@ -760,16 +798,23 @@ export interface components {
             version: number;
         };
         HeartbeatSpec: {
+            calendar?: components["schemas"]["HeartbeatCalendarRule"] | null;
             end_condition: string;
             execution_timeout_ms?: number;
             goal_id?: string | null;
             instructions: string;
-            interval_ms: number;
+            interval_ms?: number | null;
             max_occurrences?: number;
             name: string;
             skills?: string[];
             token_allowance?: number | null;
-        };
+        } & ({
+            calendar?: null;
+            interval_ms: number;
+        } | {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            interval_ms?: null;
+        });
         HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
         InboxDelivery: "steer" | "queue";
         InboxItemResponse: {

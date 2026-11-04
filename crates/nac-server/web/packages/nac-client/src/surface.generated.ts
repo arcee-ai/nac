@@ -23,6 +23,8 @@ export const NAC_API_SURFACE = {
   "GET /sessions/{session_id}/heartbeats/{schedule_id}":
     "private:standalone passive heartbeat history",
   "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control",
+  "POST /sessions/{session_id}/heartbeats/preview":
+    "private:passive existing-chat calendar preview",
   "POST /sessions/{session_id}/heartbeats/attention":
     "private:standalone human result acknowledgement",
   "GET /attention/events": "private:native opt-in metadata attention stream",

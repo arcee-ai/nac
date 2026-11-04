@@ -712,3 +712,81 @@ fn each_launch_reservation_freezes_destination_defaults_without_exposing_configu
             .contains("private-configuration-value")
     );
 }
+
+#[test]
+fn fresh_calendar_create_and_edit_refuse_without_durable_effects() {
+    use rusqlite::types::Value;
+    let f = Fixture::new();
+    let snapshot = || {
+        let conn = open_runtime_connection(&f.path).unwrap();
+        [
+            "heartbeat_schedules",
+            "heartbeat_commands",
+            "heartbeat_fresh_destinations",
+            "heartbeat_task_launches",
+            "heartbeat_occurrences",
+            "sqlite_sequence",
+        ]
+        .into_iter()
+        .map(|table| {
+            let mut q = conn
+                .prepare(&format!("SELECT rowid,* FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let columns = q.column_count();
+            q.query_map([], |row| {
+                (0..columns)
+                    .map(|i| row.get::<_, Value>(i))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        })
+        .collect::<Vec<_>>()
+    };
+    let mut calendar = super::tests::spec();
+    calendar.cadence = HeartbeatCadence::Calendar(HeartbeatCalendarRule {
+        zone: "UTC".into(),
+        data_version: "2026f".into(),
+        hour: 9,
+        minute: 0,
+        days: HeartbeatCalendarDays::Daily,
+    });
+    let before_create = snapshot();
+    let error = control_heartbeat(
+        &f.path,
+        "project:project",
+        &uuid::Uuid::new_v4().to_string(),
+        &HeartbeatAction::Create {
+            spec: calendar.clone(),
+        },
+        "Create the saved Local task.",
+        &f.binding,
+        1_000,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("interval cadence"));
+    assert_eq!(snapshot(), before_create);
+    let interval = f.create();
+    assert!(matches!(
+        &interval.spec.cadence,
+        HeartbeatCadence::Interval { .. }
+    ));
+    let before_edit = snapshot();
+    let error = control_heartbeat(
+        &f.path,
+        "project:project",
+        &uuid::Uuid::new_v4().to_string(),
+        &HeartbeatAction::Edit {
+            schedule_id: interval.schedule_id,
+            expected_version: interval.version,
+            spec: calendar,
+        },
+        "Edit the saved Local task.",
+        &f.binding,
+        2_000,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("interval cadence"));
+    assert_eq!(snapshot(), before_edit);
+}

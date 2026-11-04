@@ -13,6 +13,7 @@ export declare const NAC_API_SURFACE: {
     readonly "GET /heartbeats": "private:standalone Local heartbeat inventory";
     readonly "GET /sessions/{session_id}/heartbeats/{schedule_id}": "private:standalone passive heartbeat history";
     readonly "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control";
+    readonly "POST /sessions/{session_id}/heartbeats/preview": "private:passive existing-chat calendar preview";
     readonly "POST /sessions/{session_id}/heartbeats/attention": "private:standalone human result acknowledgement";
     readonly "GET /attention/events": "private:native opt-in metadata attention stream";
     readonly "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory";

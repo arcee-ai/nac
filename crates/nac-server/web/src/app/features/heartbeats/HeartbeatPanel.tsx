@@ -6,6 +6,7 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { routes } from "@/app/lib/routes";
 import type { HeartbeatAction, HeartbeatSpec } from "@/app/types/api";
 import { HeartbeatForm } from "./HeartbeatForm";
+import { CalendarPreview } from "./CalendarPreview";
 import { useHeartbeats } from "./queries";
 
 const time = (ms: number) => new Date(ms).toLocaleString();
@@ -120,7 +121,7 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
               <PanelRow
                 key={item.schedule_id}
                 label={item.spec.name}
-                title={`${item.state} · next ${time(item.next_due_ms)}`}
+                title={`${item.state} · next ${item.spec.calendar ? `${new Date(item.next_due_ms).toISOString()} · ${item.spec.calendar.zone}` : time(item.next_due_ms)}`}
                 active={selected === item.schedule_id}
                 onClick={() => choose(item.schedule_id)}
                 trailing={<span className="text-basic-muted">{item.state}</span>}
@@ -177,6 +178,7 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
         ) : null}
         {form ? (
           <HeartbeatForm
+            sessionId={sessionId}
             key={`${form}:${selected}`}
             initial={form === "edit" ? schedule?.spec : undefined}
             disabled={busy}
@@ -194,10 +196,36 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
             </div>
             <p className="whitespace-pre-wrap">{schedule.spec.instructions}</p>
             <dl className="grid grid-cols-2 gap-2">
-              <dt>Interval</dt>
-              <dd>{schedule.spec.interval_ms / 60000} minutes</dd>
+              <dt>Cadence</dt>
+              <dd>
+                {schedule.spec.calendar
+                  ? `${schedule.spec.calendar.days.kind} · ${String(schedule.spec.calendar.hour).padStart(2, "0")}:${String(schedule.spec.calendar.minute).padStart(2, "0")} · ${schedule.spec.calendar.zone}`
+                  : `${(schedule.spec.interval_ms ?? 0) / 60000} minutes`}
+              </dd>
               <dt>Next check</dt>
-              <dd>{schedule.state === "active" ? time(schedule.next_due_ms) : "Not scheduled"}</dd>
+              <dd>
+                {schedule.state === "active" ? (
+                  schedule.spec.calendar ? (
+                    <>
+                      <span>
+                        {heartbeat.inspection.data?.calendar_preview?.next_due?.local.replace(
+                          "T",
+                          " ",
+                        ) ?? "Local time loading"}{" "}
+                        · {schedule.spec.calendar.zone}
+                      </span>
+                      <br />
+                      <span className="text-basic-muted">
+                        UTC {new Date(schedule.next_due_ms).toISOString()}
+                      </span>
+                    </>
+                  ) : (
+                    time(schedule.next_due_ms)
+                  )
+                ) : (
+                  "Not scheduled"
+                )}
+              </dd>
               <dt>Finish condition</dt>
               <dd>{schedule.spec.end_condition}</dd>
               <dt>Skills</dt>
@@ -223,6 +251,9 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
               <dt>Goal</dt>
               <dd>{schedule.spec.goal_id || "Ordinary check"}</dd>
             </dl>
+            {heartbeat.inspection.data?.calendar_preview ? (
+              <CalendarPreview preview={heartbeat.inspection.data.calendar_preview} />
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button
                 disabled={busy || !editable}

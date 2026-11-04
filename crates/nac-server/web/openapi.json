@@ -6178,6 +6178,56 @@
         }
       }
     },
+    "/sessions/{session_id}/heartbeats/preview": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "preview",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatCalendarPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/heartbeats/{schedule_id}": {
       "get": {
         "tags": [
@@ -14818,6 +14868,184 @@
           }
         }
       },
+      "HeartbeatCalendarDays": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "daily"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "days",
+              "kind"
+            ],
+            "properties": {
+              "days": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekdays"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "day",
+              "kind"
+            ],
+            "properties": {
+              "day": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekly"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Selected weekdays use Monday=1 through Sunday=7. Encoding order is canonical\n(ascending); duplicate and unsupported days are rejected rather than lost."
+      },
+      "HeartbeatCalendarDraft": {
+        "type": "object",
+        "description": "Only an unsaved preview may select the currently supported data version.\nCreation saves its resolved rule; durable rules never default the version.",
+        "required": [
+          "zone",
+          "hour",
+          "minute",
+          "days"
+        ],
+        "properties": {
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "days": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDays"
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatCalendarPreview": {
+        "type": "object",
+        "description": "A passive projection from the pinned data, separate from retained control\nresponses. The owning rule always travels with its UTC/local instants.",
+        "required": [
+          "calendar",
+          "occurrences"
+        ],
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/HeartbeatCalendarRule"
+          },
+          "next_due": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatCalendarPreviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatCalendarPreviewPoint"
+            }
+          }
+        }
+      },
+      "HeartbeatCalendarPreviewPoint": {
+        "type": "object",
+        "required": [
+          "due_ms",
+          "utc",
+          "local"
+        ],
+        "properties": {
+          "due_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "local": {
+            "type": "string"
+          },
+          "utc": {
+            "type": "string"
+          }
+        }
+      },
+      "HeartbeatCalendarRule": {
+        "type": "object",
+        "required": [
+          "zone",
+          "data_version",
+          "hour",
+          "minute",
+          "days"
+        ],
+        "properties": {
+          "data_version": {
+            "type": "string"
+          },
+          "days": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDays"
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "HeartbeatControlRequest": {
         "type": "object",
         "required": [
@@ -14841,6 +15069,16 @@
           "history"
         ],
         "properties": {
+          "calendar_preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatCalendarPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "history": {
             "type": "array",
             "items": {
@@ -15014,6 +15252,26 @@
           "unknown"
         ]
       },
+      "HeartbeatPreviewRequest": {
+        "type": "object",
+        "required": [
+          "calendar"
+        ],
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDraft"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "maximum": 16,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
       "HeartbeatReceipt": {
         "type": "object",
         "required": [
@@ -15131,56 +15389,104 @@
         }
       },
       "HeartbeatSpec": {
-        "type": "object",
-        "required": [
-          "name",
-          "instructions",
-          "interval_ms",
-          "end_condition"
-        ],
-        "properties": {
-          "end_condition": {
-            "type": "string"
-          },
-          "execution_timeout_ms": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "goal_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "instructions": {
-            "type": "string"
-          },
-          "interval_ms": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "max_occurrences": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "name": {
-            "type": "string"
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "token_allowance": {
-            "type": [
-              "integer",
-              "null"
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "instructions",
+              "end_condition"
             ],
-            "format": "int64"
+            "properties": {
+              "calendar": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/HeartbeatCalendarRule"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "end_condition": {
+                "type": "string"
+              },
+              "execution_timeout_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "goal_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "interval_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "max_occurrences": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "name": {
+                "type": "string"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "token_allowance": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "interval_ms"
+                ],
+                "properties": {
+                  "calendar": {
+                    "type": "null"
+                  },
+                  "interval_ms": {
+                    "type": "integer"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "calendar"
+                ],
+                "properties": {
+                  "calendar": {
+                    "$ref": "#/components/schemas/HeartbeatCalendarRule"
+                  },
+                  "interval_ms": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "HeartbeatState": {
         "type": "string",

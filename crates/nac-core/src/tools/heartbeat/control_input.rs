@@ -1,7 +1,6 @@
 //! The advertised flat operation has nullable optional fields. Project only
 //! the selected action; strict providers may send every declared optional key.
 use super::*;
-use crate::store::HeartbeatSpec;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -15,7 +14,7 @@ struct WireOperation {
     action: Action,
     schedule_id: Option<String>,
     expected_version: Option<i64>,
-    spec: Option<HeartbeatSpec>,
+    spec: Option<Value>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,7 +33,7 @@ pub(super) fn project(value: Value) -> Result<ControlInput, ToolResult> {
     let selected = wire.operation;
     let operation = match selected.action {
         Action::Create => HeartbeatAction::Create {
-            spec: selected.spec.ok_or_else(|| error("create requires spec"))?,
+            spec: schema::spec(selected.spec.ok_or_else(|| error("create requires spec"))?)?,
         },
         action => {
             let schedule_id = selected
@@ -49,7 +48,7 @@ pub(super) fn project(value: Value) -> Result<ControlInput, ToolResult> {
                 Action::Edit => HeartbeatAction::Edit {
                     schedule_id,
                     expected_version,
-                    spec: selected.spec.ok_or_else(|| error("edit requires spec"))?,
+                    spec: schema::spec(selected.spec.ok_or_else(|| error("edit requires spec"))?)?,
                 },
                 Action::Pause => HeartbeatAction::Pause {
                     schedule_id,
@@ -134,6 +133,40 @@ mod tests {
                 json!({"request_id":uuid::Uuid::new_v4().to_string(),"operation":operation})
             )
             .is_err());
+        }
+    }
+
+    #[test]
+    fn heartbeat_native_calendar_projects_nullable_unused_days_and_rejects_mixed_or_unsupported_cadence(
+    ) {
+        for days in [
+            json!({"kind":"daily","days":null,"day":null}),
+            json!({"kind":"weekdays","days":[5,1,3],"day":null}),
+            json!({"kind":"weekly","days":null,"day":7}),
+        ] {
+            let mut calendar_spec = spec();
+            calendar_spec["interval_ms"] = Value::Null;
+            calendar_spec["calendar"] = json!({"zone":"America/Los_Angeles","data_version":"2026f","hour":9,"minute":0,"days":days});
+            let value = json!({"request_id":uuid::Uuid::new_v4().to_string(),"operation":{"action":"create","schedule_id":null,"expected_version":null,"spec":calendar_spec}});
+            let projected = project(value.clone()).unwrap();
+            let encoded = serde_json::to_value(projected.operation).unwrap();
+            assert!(encoded["spec"].get("interval_ms").is_none());
+            assert_eq!(encoded["spec"]["calendar"]["data_version"], "2026f");
+            for (field, invalid) in [
+                ("interval_ms", json!(60000)),
+                (
+                    "calendar",
+                    json!({"zone":"Mars/Base","data_version":"2026f","hour":9,"minute":0,"days":{"kind":"daily"}}),
+                ),
+            ] {
+                let mut invalid_value = value.clone();
+                invalid_value["operation"]["spec"][field] = invalid;
+                assert!(project(invalid_value).is_err());
+            }
+            let mut unsupported = value;
+            unsupported["operation"]["spec"]["calendar"]["days"] =
+                json!({"kind":"monthly","day":1});
+            assert!(project(unsupported).is_err());
         }
     }
 }

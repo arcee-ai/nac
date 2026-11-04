@@ -220,7 +220,9 @@ async fn observe() -> Result<()> {
                     name: "Submission Stop overlap".into(),
                     instructions: "Observe the local fixture.".into(),
                     skills: Vec::new(),
-                    interval_ms: 60_000,
+                    cadence: nac_core::store::HeartbeatCadence::Interval {
+                        interval_ms: 60_000,
+                    },
                     end_condition: "Finish after verification.".into(),
                     goal_id: None,
                     execution_timeout_ms: 30_000,

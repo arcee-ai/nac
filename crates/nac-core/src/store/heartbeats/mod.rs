@@ -5,6 +5,13 @@ use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest, Sha256};
 
 mod attention;
+mod cadence;
+mod calendar;
+mod spec_codec;
+pub use cadence::{
+    HeartbeatCadence, HeartbeatCalendarDays, HeartbeatCalendarDraft, HeartbeatCalendarPreview,
+    HeartbeatCalendarPreviewPoint, HeartbeatCalendarRule,
+};
 mod cancellation;
 mod control;
 pub(crate) use attention::heartbeat_attention_with_connection;

@@ -72,7 +72,9 @@ async fn heartbeat_native_stop_then_delete_before_tick_retains_exact_cancellatio
                         name: "Stop check".into(),
                         instructions: "Observe the job, then stop this heartbeat.".into(),
                         skills: Vec::new(),
-                        interval_ms: 60_000,
+                        cadence: nac_core::store::HeartbeatCadence::Interval {
+                            interval_ms: 60_000,
+                        },
                         end_condition: "Stop when checked.".into(),
                         goal_id: None,
                         execution_timeout_ms: 60_000,
