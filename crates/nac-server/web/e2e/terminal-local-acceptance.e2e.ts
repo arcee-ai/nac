@@ -21,11 +21,14 @@ declare class ClipboardEvent {
 interface RenderedMarkerTiming {
   domMs: number;
   renderedMs: number;
+  presentAtPaint: boolean;
 }
 declare const window: {
   open: (url?: string | URL) => null;
   terminalRenderedMarker?: {
     result: Promise<RenderedMarkerTiming>;
+    startedAtEpochMs: number;
+    rowsAtDeadline?: string | null;
     dispose: () => void;
   };
 };
@@ -86,6 +89,7 @@ async function armRenderedMarker(pane: Locator, marker: string) {
     let settled = false;
     let frame: number | undefined;
     let startedAt = 0;
+    const startedAtEpochMs = Date.now();
     const release = () => {
       observer.disconnect();
       clearTimeout(deadline);
@@ -106,17 +110,23 @@ async function armRenderedMarker(pane: Locator, marker: string) {
         const renderedAt = performance.now();
         settled = true;
         release();
-        resolve({ domMs: domAt - startedAt, renderedMs: renderedAt - startedAt });
+        resolve({
+          domMs: domAt - startedAt,
+          renderedMs: renderedAt - startedAt,
+          presentAtPaint: rows.textContent?.includes(marker) ?? false,
+        });
       });
     });
     observer.observe(rows, { childList: true, characterData: true, subtree: true });
     startedAt = performance.now();
-    const deadline = setTimeout(
-      () => fail("Terminal visual marker did not arrive within 10 seconds"),
-      10_000,
-    );
+    const deadline = setTimeout(() => {
+      if (window.terminalRenderedMarker)
+        window.terminalRenderedMarker.rowsAtDeadline = rows.textContent;
+      fail("Terminal visual marker did not arrive within 10 seconds");
+    }, 10_000);
     window.terminalRenderedMarker = {
       result,
+      startedAtEpochMs,
       dispose: () => fail("Terminal latency measurement disposed"),
     };
   }, marker);
@@ -606,9 +616,31 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
-  const pages: Array<{ bytes: number; gap: boolean; retained: number }> = [];
+  const pages: Array<{
+    bytes: number;
+    gap: boolean;
+    retained: number;
+    offset: string;
+    nextOffset: string;
+    atEpochMs: number;
+  }> = [];
   const pending = new Set<Promise<void>>();
+  const inputReceipts: Array<{ status: number; atEpochMs: number }> = [];
+  const resizes: Array<{ request: string | null; status: number; atEpochMs: number }> = [];
+  let markerReachedObserverAtEpochMs: number | undefined;
+  let observedTail = Buffer.alloc(0);
+  const marker = Buffer.from("NOISE-INTERRUPTED");
   page.on("response", (response) => {
+    if (response.request().method() === "POST" && response.url().includes("/input")) {
+      inputReceipts.push({ status: response.status(), atEpochMs: Date.now() });
+    }
+    if (response.request().method() === "POST" && response.url().includes("/resize")) {
+      resizes.push({
+        request: response.request().postData(),
+        status: response.status(),
+        atEpochMs: Date.now(),
+      });
+    }
     if (
       !response.url().includes("/observers/") ||
       response.request().method() !== "POST" ||
@@ -622,7 +654,16 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
           bytes: frame.bytes.length,
           gap: frame.gap,
           retained: Number(frame.retained_end) - Number(frame.retained_start),
+          offset: frame.offset,
+          nextOffset: frame.next_offset,
+          atEpochMs: Date.now(),
         });
+        // A page boundary can split the marker across two observer frames.
+        const observed = Buffer.concat([observedTail, Buffer.from(frame.bytes, "base64")]);
+        if (markerReachedObserverAtEpochMs === undefined && observed.includes(marker)) {
+          markerReachedObserverAtEpochMs = Date.now();
+        }
+        observedTail = observed.subarray(Math.max(0, observed.length - marker.length + 1));
       })
       .catch(() => {});
     pending.add(job);
@@ -642,6 +683,8 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   const measurements: Record<string, unknown> = {};
   try {
     await focus(pane);
+    // Redrawing CI's long wrapped prompt after a resize can erase the marker (ALL-495).
+    await command(page, "PS1='$ '");
     await command(page, "python3 noise.py");
     const accessible = pane.locator(".xterm-accessibility");
     await expect(accessible).toContainText("SELECT-WHILE-OUTPUT");
@@ -680,6 +723,8 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       })
       .toBe(true);
     measurements.resizeMs = performance.now() - resizedAt;
+    const resized = await api.getUserTerminal(session, terminal);
+    measurements.geometryAfterResize = `${resized.cols}x${resized.rows}`;
     // Copy and viewport resize preserve native input focus. Re-clicking the
     // moving toolbar adds automation backoff while noisy output accumulates.
     await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
@@ -693,6 +738,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     });
     measurements.interruptToDomMarkerMs = timing.domMs;
     measurements.interruptToRenderedMarkerMs = timing.renderedMs;
+    measurements.markerPresentAtPaint = timing.presentAtPaint;
     // Accessibility correctness remains required, with its own throttled update
     // lifetime. Its assertion polling never contributes to the recorded latency.
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
@@ -712,10 +758,21 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
-    await page.evaluate(() => {
-      window.terminalRenderedMarker?.dispose();
+    const armed = await page.evaluate(() => {
+      const current = window.terminalRenderedMarker;
+      current?.dispose();
       delete window.terminalRenderedMarker;
+      return {
+        startedAtEpochMs: current?.startedAtEpochMs,
+        rowsAtDeadline: current?.rowsAtDeadline,
+      };
     });
+    measurements.markerStartedAtEpochMs = armed.startedAtEpochMs;
+    measurements.rowsAtMarkerDeadline = armed.rowsAtDeadline;
+    await api.getUserTerminal(session, terminal).then(
+      (final) => (measurements.finalGeometry = `${final.cols}x${final.rows}`),
+      (error) => (measurements.finalGeometryError = String(error)),
+    );
     await api.terminateTerminal(session, terminal);
     await Promise.allSettled(pending);
     const heartbeat = await page.evaluate(() => {
@@ -724,26 +781,21 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       value.active = false;
       return value;
     });
+    const observations = {
+      measurements,
+      inputReceipts,
+      resizes,
+      markerReachedObserverAtEpochMs,
+      heartbeat,
+      pages,
+      maxFrameBytes: Math.max(0, ...pages.map((frame) => frame.bytes)),
+    };
     await fs.writeFile(
       info.outputPath("pressure-observations.json"),
-      JSON.stringify(
-        {
-          measurements,
-          heartbeat,
-          pages,
-          maxFrameBytes: Math.max(0, ...pages.map((frame) => frame.bytes)),
-        },
-        null,
-        2,
-      ),
+      JSON.stringify(observations, null, 2),
     );
     await info.attach("real renderer PTY pressure observations", {
-      body: JSON.stringify({
-        measurements,
-        heartbeat,
-        pages,
-        maxFrameBytes: Math.max(0, ...pages.map((frame) => frame.bytes)),
-      }),
+      body: JSON.stringify(observations),
       contentType: "application/json",
     });
   }
