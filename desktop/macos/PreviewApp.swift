@@ -216,6 +216,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             guard let profile else { return }
             var environment = profile.environment
             environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+            #if PREVIEW_SMOKE
+            environment = PreviewEngine.recordingEnvironment(environment, provider: provider.baseURL, arguments: CommandLine.arguments)
+            #endif
             let configuration = retryConfiguration ?? EngineLaunchConfiguration(cwd: profile.workspace, store: profile.store, environment: environment)
             launchConfiguration = configuration
             try engine.launch(executable: executable, configuration: configuration)
