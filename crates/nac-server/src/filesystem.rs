@@ -114,11 +114,7 @@ fn keeps_entry(kind: BrowseKind, is_directory: bool, path: &Path) -> bool {
 
 /// List `query.path`, falling back to `fallback` when the caller has no path yet.
 pub fn browse(query: &BrowseQuery, fallback: &Path) -> Result<BrowseListing, BrowseError> {
-    let requested = query
-        .path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty());
+    let requested = query.path.as_deref().filter(|path| !path.trim().is_empty());
     let target = match requested {
         Some(path) => expand_home(path, home_dir()),
         None => fallback.to_path_buf(),
