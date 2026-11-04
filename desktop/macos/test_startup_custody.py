@@ -18,7 +18,8 @@ class StartupCustody(unittest.TestCase):
 
     def exercise(self, receipt='complete', cleanup_error=None, success=False,
                  wrapper_error=False, provider_timeout=False, provider_error=False,
-                 relocation_error=False, catalog_error=None, stdin_error=False):
+                 relocation_error=False, catalog_error=None, stdin_error=False,
+                 stderr_failure=None):
         with tempfile.TemporaryDirectory(prefix='nac-custody-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -116,7 +117,30 @@ class StartupCustody(unittest.TestCase):
 
             real_cleanup = startup_smoke.cleanup_failed_case
             cleanup = Mock(side_effect=cleanup_error) if cleanup_error else Mock(wraps=real_cleanup)
-            captured = io.StringIO()
+
+            class DiagnosticStream(io.StringIO):
+                def __init__(self):
+                    super().__init__()
+                    self.attempts = []
+                    self.failed_writes = 0
+
+                def write(self, text):
+                    self.attempts.append(text)
+                    if stderr_failure and (stderr_failure == 'all' or text.startswith(stderr_failure)):
+                        self.failed_writes += 1
+                        raise OSError('injected stderr write failure')
+                    return super().write(text)
+
+            provider_logs = []
+            real_open = Path.open
+
+            def track_open(path, *args, **options):
+                handle = real_open(path, *args, **options)
+                if path.resolve() == (output / 'provider.log').resolve():
+                    provider_logs.append(handle)
+                return handle
+
+            captured = DiagnosticStream()
             with ExitStack() as stack:
                 stack.enter_context(patch.object(startup_smoke, 'tempfile', SimpleNamespace(
                     TemporaryDirectory=temporary_directory, mkdtemp=mkdtemp)))
@@ -135,6 +159,7 @@ class StartupCustody(unittest.TestCase):
                 stack.enter_context(patch('socket.socket', side_effect=AssertionError('network denied')))
                 stack.enter_context(patch.object(startup_smoke.time, 'sleep', side_effect=AssertionError('sleep denied')))
                 stack.enter_context(patch.object(startup_smoke.sys, 'stderr', captured))
+                stack.enter_context(patch.object(Path, 'open', track_open))
                 error = None
                 error_trace = None
                 try:
@@ -151,14 +176,23 @@ class StartupCustody(unittest.TestCase):
                 'caught_traceback': error_trace, 'original_failure_primary': error is primary,
                 'cleanup_calls': cleanup.call_count, 'provider_wait_calls': provider.wait.call_count,
                 'relocation_removals': relocation_removals,
-                'diagnostics': captured.getvalue(),
+                'diagnostics': captured.getvalue(), 'stderr_failure': stderr_failure,
+                'diagnostic_write_attempts': captured.attempts,
+                'diagnostic_write_failures': captured.failed_writes,
+                'exception_notes': getattr(error, '__notes__', []),
+                'catalog_shutdown_calls': catalog.shutdown.call_count,
+                'catalog_close_calls': catalog.server_close.call_count,
+                'provider_terminate_calls': provider.terminate.call_count,
+                'provider_logs_closed': [handle.closed for handle in provider_logs],
             })
             self.assertEqual(len(roots), 2)
             retained = receipt != 'complete' or cleanup_error is not None
             for index, root in enumerate(roots):
                 self.assertEqual(root.exists(), retained or (index == 0 and relocation_error), str(root))
                 if retained:
-                    self.assertIn(str(root), captured.getvalue())
+                    self.assertIn(str(root), ''.join(captured.attempts) if stderr_failure else captured.getvalue())
+                    if stderr_failure:
+                        self.assertIn(str(root), '\n'.join(error.__notes__))
             if retained:
                 self.assertEqual(relocation_removals, [])
             self.assertEqual(sentinel.read_bytes(), b'preserve')
@@ -166,8 +200,11 @@ class StartupCustody(unittest.TestCase):
             catalog.shutdown.assert_called_once()
             catalog.server_close.assert_called_once()
             self.assertTrue(provider.wait.called, 'provider shutdown must still be attempted')
+            self.assertEqual([handle.closed for handle in provider_logs], [True])
             if success:
-                if relocation_error or catalog_error:
+                if cleanup_error is not None:
+                    self.assertIs(error, cleanup_error)
+                elif relocation_error or catalog_error:
                     self.assertIsInstance(error, OSError)
                     self.assertIn('relocation removal failed' if relocation_error else f'{catalog_error} failed', str(error))
                 else:
@@ -182,6 +219,10 @@ class StartupCustody(unittest.TestCase):
                                          (stdin_error, 'stdin close failed')]:
                     if enabled:
                         self.assertIn(message, '\n'.join(error.__notes__))
+            if captured.failed_writes:
+                self.assertIn('injected stderr write failure', '\n'.join(error.__notes__))
+            if stderr_failure and not (success and not (cleanup_error or relocation_error)):
+                self.assertGreater(captured.failed_writes, 0)
             if receipt == 'complete':
                 cleanup.assert_called_once()
             else:
@@ -242,6 +283,30 @@ class StartupCustody(unittest.TestCase):
 
     def test_multiple_teardown_errors_preserve_scenario_failure(self):
         self.exercise(relocation_error=True, catalog_error='shutdown', provider_error=True)
+
+    def test_profile_diagnostic_write_failure_preserves_original(self):
+        self.exercise(receipt='missing', stderr_failure='Startup cleanup unproven')
+
+    def test_retained_bundle_diagnostic_write_failure_preserves_original(self):
+        self.exercise(receipt='missing', stderr_failure='Retained relocated bundle root')
+
+    def test_relocation_diagnostic_write_failure_preserves_original(self):
+        self.exercise(relocation_error=True, stderr_failure='Relocation cleanup failed')
+
+    def test_profile_diagnostic_write_failure_preserves_cleanup_error_after_success(self):
+        self.exercise(success=True, cleanup_error=OSError('exact cleanup failure'),
+                      stderr_failure='Startup cleanup unproven')
+
+    def test_relocation_diagnostic_write_failure_preserves_cleanup_error_after_success(self):
+        self.exercise(success=True, relocation_error=True, stderr_failure='Relocation cleanup failed')
+
+    def test_all_diagnostic_writes_fail_but_all_teardown_is_attempted(self):
+        self.exercise(receipt='missing', wrapper_error=True, catalog_error='shutdown',
+                      stdin_error=True, provider_timeout=True, provider_error=True,
+                      stderr_failure='all')
+
+    def test_success_with_broken_stderr_needs_no_diagnostic(self):
+        self.exercise(success=True, stderr_failure='all')
 
 
 if __name__ == '__main__':
