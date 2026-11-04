@@ -229,9 +229,23 @@ export function createHelper(transport = ghTransport, {
         }
         insist(result.status === 'merged', `${result.status === 'enqueued' ? 'Queued, not merged' : 'Merge stopped'}: ${JSON.stringify(result)}`);
         const merged = await get(`pulls/${lowest.number}`);
-        insist(merged.merged === true && merged.head.sha === lowest.head.sha && SHA.test(merged.merge_commit_sha) &&
-          merged.merge_commit_sha === result.details?.sha, 'Merge result is not confirmed by PR state');
-        previousMerge = merged.merge_commit_sha;
+        const landedSha = result.details?.sha;
+        insist(SHA.test(landedSha) && merged.number === lowest.number && merged.merged === true &&
+          merged.state === 'closed' && merged.head.sha === lowest.head.sha &&
+          merged.base.ref === 'dev' && merged.base.repo?.full_name === REPO,
+        'Merge result is not confirmed by PR state');
+        // The pinned REST version omits merge_commit_sha. Confirm the actual
+        // landed squash commit S; the pre-merge synthetic test ref M is not S.
+        const proof = await api('POST', 'graphql', { query: `query($number:Int!) {
+          repository(owner:"arcee-ai",name:"nac") { nameWithOwner pullRequest(number:$number) {
+            number merged headRefOid baseRefName mergeCommit { oid }
+          } }
+        }`, variables: { number: lowest.number } });
+        const repository = proof.data?.repository, receipt = repository?.pullRequest;
+        insist(!proof.errors && repository?.nameWithOwner === REPO && receipt?.number === lowest.number &&
+          receipt.merged === true && receipt.headRefOid === lowest.head.sha && receipt.baseRefName === 'dev' &&
+          receipt.mergeCommit?.oid === landedSha, 'Merge result is not confirmed by landed-commit receipt');
+        previousMerge = landedSha;
         landed.push(remaining.shift());
         active = null;
         log(`Landed #${lowest.number} at ${previousMerge}; remaining: ${remaining.join(', ') || 'none'}`);

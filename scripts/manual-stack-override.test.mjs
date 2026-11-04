@@ -42,6 +42,7 @@ function fixture() {
   f.stack = () => ({ number: 99, open: true, base: { ref: 'dev' }, pull_requests: clone(f.prs) });
   f.pr = number => {
     const pr = clone(f.prs.find(p => p.number === number));
+    if (f.omitLegacyMergeSha) delete pr.merge_commit_sha;
     pr.stack = { number: 99, size: f.prs.length, position: f.prs.findIndex(p => p.number === number) + 1 };
     return pr;
   };
@@ -75,7 +76,7 @@ function fixture() {
       f.offset = 17;
       f.afterLanding?.(f);
     }
-    return { status: 'merged', details: { sha: pr.merge_commit_sha } };
+    return { status: 'merged', details: { sha: pr.merge_commit_sha, ...f.landedDetailsOverrides } };
   };
   f.transport = async (method, endpoint, body, accept) => {
     f.calls.push({ method, endpoint, body: clone(body), accept });
@@ -89,6 +90,16 @@ function fixture() {
     if (endpoint.endsWith('/stacks/99')) return ok(f.stack());
     if (endpoint === 'graphql') {
       assert.match(body.query, /^query/);
+      if (body.query.includes('mergeCommit')) {
+        if (f.receiptError || f.receiptErrorNumber === body.variables.number) {
+          return { status: 503, body: { message: 'Receipt service unavailable' } };
+        }
+        const pr = f.prs.find(p => p.number === body.variables.number);
+        return ok({ data: { repository: f.receiptNullRepository ? null : { nameWithOwner: f.receiptRepo ?? 'arcee-ai/nac',
+          pullRequest: { number: pr.number, merged: pr.merged, headRefOid: pr.head.sha,
+            baseRefName: pr.base.ref, mergeCommit: { oid: pr.merge_commit_sha }, ...f.receiptOverrides } } },
+        ...(f.receiptQueryErrors ? { errors: [{ message: 'Receipt query failed' }] } : {}) });
+      }
       const pr = f.pr(body.variables.number);
       const data = { data: { repository: { pullRequest: { headRefOid: pr.head.sha,
         reviewThreads: { nodes: [{ isResolved: !f.unresolved }], pageInfo: { hasNextPage: false } } } } } };
@@ -182,6 +193,70 @@ test('preview saves exact ordered heads/base/check evidence and performs no merg
   assert.equal(plan.members[0].mergeable, true);
   assert.match(plan.members[0].blockers.join(), /Required PR checks: failure/);
   assert.equal(f.writes().length, 0);
+});
+
+test('confirmed landed commits use provider receipts when pinned REST omits legacy SHA', async () => {
+  for (const responseStatus of [200, 202, 409]) {
+    const f = fixture(); f.omitLegacyMergeSha = true; f.responseStatus = responseStatus;
+    const plan = await f.preview();
+    assert.deepEqual(await f.helper.execute(plan), { landed: [11, 12], remaining: [] });
+    assert.equal(f.writes().length, 2);
+    const receipts = f.calls.filter(c => c.endpoint === 'graphql' && c.body.query.includes('mergeCommit'));
+    assert.deepEqual(receipts.map(c => c.body.variables.number), [11, 12]);
+    assert.equal(f.calls.filter(c => c.method === 'PUT').length, 2);
+  }
+});
+
+test('uncertain landed receipts stop after one fake request and preserve its UUID/progress', async t => {
+  const changes = {
+    wrongCommit: f => { f.receiptOverrides = { mergeCommit: { oid: sha('7') } }; },
+    syntheticInsteadOfLanded: f => { f.receiptOverrides = { mergeCommit: { oid: sha('9') } }; },
+    nullCommit: f => { f.receiptOverrides = { mergeCommit: null }; },
+    wrongHead: f => { f.receiptOverrides = { headRefOid: sha('f') }; },
+    nullHead: f => { f.receiptOverrides = { headRefOid: null }; },
+    wrongPR: f => { f.receiptOverrides = { number: 999 }; },
+    wrongRepo: f => { f.receiptRepo = 'other/repository'; },
+    nullRepo: f => { f.receiptNullRepository = true; },
+    notMerged: f => { f.receiptOverrides = { merged: false }; },
+    unknownMerged: f => { f.receiptOverrides = { merged: null }; },
+    wrongBase: f => { f.receiptOverrides = { baseRefName: 'main' }; },
+    queryError: f => { f.receiptQueryErrors = true; },
+    transient503: f => { f.receiptError = true; },
+    changedRESTHead: f => { f.afterLanding = current => { current.prs[0].head.sha = sha('f'); }; },
+    contradictoryRESTState: f => { f.afterLanding = current => { current.prs[0].state = 'open'; }; },
+    wrongRESTBase: f => { f.afterLanding = current => { current.prs[0].base.ref = 'main'; }; },
+    nullRESTResult: f => { f.landedDetailsOverrides = { sha: null }; },
+    wrongResult: f => { f.landedDetailsOverrides = { sha: sha('7') }; },
+  };
+  for (const [name, change] of Object.entries(changes)) await t.test(name, async () => {
+    const f = fixture(); const plan = await f.preview(); change(f);
+    await assert.rejects(f.helper.execute(plan), error => {
+      assert.match(error.message, /not confirmed|503/);
+      assert.match(error.message, /"landed":\[\],"remaining":\[11,12\]/);
+      assert.match(error.message, new RegExp(`"active":\\{"number":11,"uuid":"${uuid}"\\}`));
+      return true;
+    });
+    assert.equal(f.writes().length, 1);
+    assert.equal(f.prs[0].merged, true, 'the simulated landing remains uncertain, never rolled back');
+    assert.equal(f.prs[1].merged, false, 'no next-member request after uncertain receipt');
+    assert.equal(f.calls.filter(c => c.endpoint === 'graphql' && c.body.query.includes('mergeCommit')).length,
+      name.includes('REST') ? 0 : 1);
+  });
+});
+
+test('receipt failure after a confirmed member retains exact partial progress without retry', async () => {
+  const f = fixture(); f.omitLegacyMergeSha = true; f.receiptErrorNumber = 12;
+  const plan = await f.preview();
+  await assert.rejects(f.helper.execute(plan), error => {
+    assert.match(error.message, /503/);
+    assert.match(error.message, /"landed":\[11\],"remaining":\[12\]/);
+    assert.match(error.message, new RegExp(`"active":\\{"number":12,"uuid":"${uuid}"\\}`));
+    return true;
+  });
+  assert.deepEqual(f.writes().map(c => c.endpoint), [
+    `${root}/pulls/11/merge-async`, `${root}/pulls/12/merge-async`,
+  ]);
+  assert.ok(f.prs.every(pr => pr.merged), 'the second simulated landing still requires reconciliation');
 });
 
 test('new applicable workflow supersedes historical failure while retaining its evidence', async () => {

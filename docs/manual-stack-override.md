@@ -49,7 +49,14 @@ JSON boolean `bypass_rules=true`. Default routing preserves merge queues.
 
 It polls the actual returned UUID for at most three minutes per member, with a
 30-second bound on each HTTP command. `merged` is confirmed against the PR's
-merged state and commit SHA before continuing. `enqueued` means **queued, not
+merged state and returned landed SHA before continuing. A read-only GraphQL
+receipt must independently match the repository, PR number, merged state,
+submitted head, `dev` base and actual landed `mergeCommit.oid`. The pinned REST
+API omits legacy `merge_commit_sha`; its merged/closed/head/base facts still
+corroborate the receipt. The synthetic test ref is never the landed commit.
+Missing/mismatched receipts or query errors stop with the active UUID and
+partial progress retained, without fallback or automatic retry.
+`enqueued` means **queued, not
 merged**: execution stops there. An existing-request 409 is inspected for the
 same SHA/options and polled without a second request for that member. A mismatch,
 failure, unknown state or timeout stops the command and prints landed members,
