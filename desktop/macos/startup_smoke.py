@@ -39,6 +39,17 @@ class Catalog(BaseHTTPRequestHandler):
         pass
 
 
+def _retention_notice(diagnostic, failure):
+    if failure is not None:
+        failure.add_note(diagnostic)
+    try:
+        print(diagnostic, file=sys.stderr)
+    except BaseException as error:
+        if failure is None:
+            raise
+        failure.add_note(f'Retention notice could not be written: {error}')
+
+
 @contextmanager
 def startup_profile(evidence, relocated, retained):
     """Keep private roots in custody until existing exact-owner cleanup settles."""
@@ -61,10 +72,9 @@ def startup_profile(evidence, relocated, retained):
         except BaseException as error:
             retained.append(root)
             diagnostic = f'Startup cleanup unproven; retained profile {root} and app {relocated}: {error}'
-            print(diagnostic, file=sys.stderr)
+            _retention_notice(diagnostic, failure if failure is not None else error)
             if failure is None:
                 raise
-            failure.add_note(diagnostic)
 
 
 def main():
@@ -213,16 +223,16 @@ def main():
         finally:
             failure = sys.exception()
             if retained_profiles:
-                print(f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', file=sys.stderr)
+                _retention_notice(
+                    f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', failure)
             else:
                 try:
                     shutil.rmtree(relocation)
                 except BaseException as error:
                     diagnostic = f'Relocation cleanup failed; retained root {relocation}: {error}'
-                    print(diagnostic, file=sys.stderr)
+                    _retention_notice(diagnostic, failure if failure is not None else error)
                     if failure is None:
                         raise
-                    failure.add_note(diagnostic)
         provider.stdin.write('{"kind":"finish"}\n')
         provider.stdin.flush()
         report = json.loads(provider.stdout.readline())
