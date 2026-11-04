@@ -171,6 +171,68 @@ fn atomic_signal_permission_failure_retains_exact_live_identity() {
     assert!(identity.live().unwrap());
 }
 
+#[test]
+fn atomic_signal_denied_mid_exec_retries_the_exact_identity_within_its_bound() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "C" fn denied_once(_: *const [u32; 8], _: i32) -> i32 {
+        if CALLS.fetch_add(1, Ordering::SeqCst) == 0 {
+            libc::EPERM
+        } else {
+            0
+        }
+    }
+    static DENIALS: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "C" fn always_denied(_: *const [u32; 8], _: i32) -> i32 {
+        DENIALS.fetch_add(1, Ordering::SeqCst);
+        libc::EPERM
+    }
+    let fixture = sleep_fixture();
+    let pid = fixture.0.id() as libc::pid_t;
+    let identity = Identity::capture(inspect(pid).unwrap().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(identity.signal_with(libc::SIGKILL, denied_once).unwrap());
+    assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+
+    assert_eq!(
+        identity
+            .signal_with(libc::SIGKILL, always_denied)
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EPERM)
+    );
+    assert_eq!(DENIALS.load(Ordering::SeqCst), 3);
+    assert!(identity.live().unwrap());
+}
+
+#[test]
+fn atomic_signal_retry_reinspects_and_never_signals_a_target_that_ended_while_denied() {
+    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+    static TARGET: AtomicI32 = AtomicI32::new(0);
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "C" fn denied_then_gone(_: *const [u32; 8], _: i32) -> i32 {
+        CALLS.fetch_add(1, Ordering::SeqCst);
+        let pid = TARGET.load(Ordering::SeqCst);
+        // SAFETY: pid is this test's own unreaped direct child.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+            libc::waitpid(pid, std::ptr::null_mut(), 0);
+        }
+        libc::EPERM
+    }
+    let fixture = sleep_fixture();
+    let pid = fixture.0.id() as libc::pid_t;
+    TARGET.store(pid, Ordering::SeqCst);
+    let identity = Identity::capture(inspect(pid).unwrap().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(!identity
+        .signal_with(libc::SIGKILL, denied_then_gone)
+        .unwrap());
+    assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+}
+
 struct CaptureProbe {
     child: std::cell::RefCell<Row>,
     denied: std::cell::Cell<bool>,
