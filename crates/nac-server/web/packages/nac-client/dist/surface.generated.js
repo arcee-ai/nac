@@ -16,6 +16,7 @@ export const NAC_API_SURFACE = {
     "GET /sessions/{session_id}/heartbeats/{schedule_id}": "private:standalone passive heartbeat history",
     "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control",
     "POST /sessions/{session_id}/heartbeats/attention": "private:standalone human result acknowledgement",
+    "GET /attention/events": "private:native opt-in metadata attention stream",
     "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory",
     "GET /projects/{project_id}/task-schedules/{schedule_id}": "private:standalone passive interval task history and retained resources",
     "POST /projects/{project_id}/task-schedules/control": "private:standalone human interval task control",

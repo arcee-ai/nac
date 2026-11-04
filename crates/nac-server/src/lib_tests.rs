@@ -1051,6 +1051,8 @@ mod managed_fault_fixture;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/resume_composition.rs"]
+mod resume_composition;
 
 #[path = "tests/goal_reads.rs"]
 mod goal_reads;
@@ -1114,6 +1116,10 @@ mod desktop_lifecycle;
 mod heartbeats;
 #[path = "tests/native_task_launches.rs"]
 mod native_task_launches;
+
+#[path = "tests/attention_delivery.rs"]
+mod attention_delivery;
+
 #[path = "tests/task_followup_delegations.rs"]
 mod task_followup_delegations;
 #[path = "tests/task_followups.rs"]
