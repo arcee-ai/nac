@@ -58,7 +58,7 @@ fn service_is_an_exact_loopback_origin_without_url_authority_or_path_tricks() {
 }
 
 #[tokio::test]
-async fn closed_fixture_refuses_current_and_future_effects_before_handlers() {
+async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before_handlers() {
     let effects = Arc::new(AtomicUsize::new(0));
     let handler = {
         let effects = effects.clone();
@@ -68,13 +68,29 @@ async fn closed_fixture_refuses_current_and_future_effects_before_handlers() {
         }
     };
     let app = Router::new()
+        .route(
+            "/sessions",
+            get(|| async { axum::Json(Vec::<serde_json::Value>::new()) })
+                .post(handler.clone())
+                .put(handler.clone())
+                .patch(handler.clone())
+                .delete(handler.clone()),
+        )
         .route("/{*route}", get(handler.clone()).post(handler))
         .layer(middleware::from_fn(fence));
     for (method, path) in [
         (Method::POST, "/sessions"),
+        (Method::POST, "/sessions?workspace_stats=true"),
+        (Method::PUT, "/sessions"),
+        (Method::PATCH, "/sessions"),
+        (Method::DELETE, "/sessions"),
         (Method::POST, "/model-configs"),
         (Method::POST, "/auth/codex/login"),
         (Method::GET, "/sessions/id"),
+        (Method::HEAD, "/sessions/id"),
+        (Method::GET, "/sessions/"),
+        (Method::GET, "/sessions-other"),
+        (Method::GET, "/sessions%2Fid"),
         (Method::GET, "/projects/id/sessions"),
         (Method::GET, "/future-effect"),
         (Method::POST, "/future-effect"),
@@ -89,6 +105,26 @@ async fn closed_fixture_refuses_current_and_future_effects_before_handlers() {
             app.clone().oneshot(request).await.unwrap().status(),
             StatusCode::FORBIDDEN
         );
+    }
+    assert_eq!(effects.load(Ordering::SeqCst), 0);
+    for (method, path) in [
+        (Method::GET, "/sessions"),
+        (Method::GET, "/sessions?workspace_stats=true"),
+        (Method::GET, "/sessions?project_id=fixture-project"),
+        (Method::HEAD, "/sessions"),
+    ] {
+        let expected_body: &[u8] = if method == Method::HEAD { b"" } else { b"[]" };
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 16)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], expected_body);
     }
     assert_eq!(effects.load(Ordering::SeqCst), 0);
     let request = axum::http::Request::builder()
