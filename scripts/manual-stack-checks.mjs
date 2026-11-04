@@ -54,6 +54,13 @@ function newest(runs) {
   return ordered[0];
 }
 
+export async function readCurrentMerge(pr, get) {
+  const ref = await get(`git/ref/pull/${pr.number}/merge`);
+  insist(ref.ref === `refs/pull/${pr.number}/merge` && ref.object?.type === 'commit' && SHA.test(ref.object.sha),
+    'Current PR merge ref is unavailable/ambiguous');
+  return ref.object.sha;
+}
+
 export async function inspectChecks(pr, rules, { get, pages }) {
   const checks = await pages(`commits/${pr.head.sha}/check-runs?filter=all`, 'check_runs');
   const statuses = await pages(`commits/${pr.head.sha}/status`, 'statuses');
@@ -130,8 +137,10 @@ export async function inspectChecks(pr, rules, { get, pages }) {
         ref.path.startsWith(`${REPO}/.github/workflows/`) && ref.path.endsWith(`@${ref.sha}`)) &&
         new Set(refs.map(ref => ref.sha)).size === 1, 'Tested merge identity is unavailable/ambiguous');
       const sha = refs[0].sha;
-      if (current) insist(SHA.test(pr.merge_commit_sha) && sha === pr.merge_commit_sha,
-        'Tested merge is not the current PR merge identity');
+      if (current) {
+        provenance.currentMerge = await readCurrentMerge(pr, get);
+        insist(sha === provenance.currentMerge, 'Tested merge is not the current PR merge identity');
+      }
       const merged = await commit(sha);
       insist(merged.parents?.length === 2 && merged.parents[1].sha === pr.head.sha,
         'Tested merge does not bind the exact current head');

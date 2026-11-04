@@ -122,6 +122,12 @@ function fixture() {
       assert.ok(f.oldJobs[id], 'Unknown old job fixture');
       return ok(f.oldJobs[id]);
     }
+    const mergeRef = endpoint.match(/\/git\/ref\/pull\/(\d+)\/merge$/);
+    if (mergeRef) {
+      const pr = f.prs.find(p => p.number === Number(mergeRef[1]));
+      return ok({ ref: `refs/pull/${pr.number}/merge`, object: {
+        type: 'commit', sha: pr.merge_commit_sha ?? sha(pr.number === 11 ? '9' : '8') }, ...f.mergeRefOverrides });
+    }
     if (endpoint.includes('/git/commits/')) {
       const id = endpoint.split('/').at(-1);
       const tree = s => f.trees?.[s] ?? sha(({ a: '1', b: '3', c: '2', d: '4', e: '5' })[s[0]] ?? '0');
@@ -422,7 +428,7 @@ test('native stack prepared bases qualify only by current merge and exact comple
 test('current-merge identity, exact head, known trees and API failures stay closed', async t => {
   const cases = {
     wrongM: f => { f.prs[0].merge_commit_sha = sha('f'); },
-    missingM: f => { delete f.prs[0].merge_commit_sha; },
+    missingM: f => { f.mergeRefOverrides = { object: null }; },
     wrongHeadParent: f => { f.commitOverrides = { parents: [{ sha: sha('b') }, { sha: sha('f') }] }; },
     extraParent: f => { f.commitOverrides = { parents: [{ sha: sha('b') }, { sha: sha('a') }, { sha: sha('f') }] }; },
     missingParent: f => { f.commitOverrides = { parents: [{ sha: sha('a') }] }; },
@@ -449,6 +455,17 @@ test('current-merge identity, exact head, known trees and API failures stay clos
   changed.onReviewRead = current => { current.prs[0].merge_commit_sha = sha('f'); };
   await assert.rejects(changed.preview(), /current merge changed/);
   assert.equal(changed.writes().length, 0);
+});
+
+test('pinned REST shape can omit legacy merge_commit_sha while canonical merge refs stay required', async () => {
+  const f = fixture();
+  for (const pr of f.prs) delete pr.merge_commit_sha;
+  assert.deepEqual((await f.preview()).members.map(m => m.blockers), [[], []]);
+  f.mergeRefOverrides = { ref: 'refs/pull/999/merge' };
+  const plan = await f.preview();
+  assert.match(plan.members[0].blockers.join(), /merge ref is unavailable/);
+  await assert.rejects(f.helper.execute(plan));
+  assert.equal(f.writes().length, 0);
 });
 
 test('complete base trees reject changed modes, blobs, extra and missing paths', async t => {

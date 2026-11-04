@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { inspectChecks } from './manual-stack-checks.mjs';
+import { inspectChecks, readCurrentMerge } from './manual-stack-checks.mjs';
 
 const REPO = 'arcee-ai/nac';
 const ROOT = `repos/${REPO}`;
@@ -118,9 +118,11 @@ export function createHelper(transport = ghTransport, {
       if (threads.nodes.some(t => t.isResolved !== true)) blockers.push('Unresolved review conversations');
       if (!threads.pageInfo.hasNextPage) {
         const after = await get(`pulls/${pr.number}`);
-        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha, after.merge_commit_sha],
-          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha, pr.merge_commit_sha]),
-        'PR head/base or current merge changed during validation');
+        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha],
+          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha]), 'PR head/base changed during validation');
+        if (evidence.checkProvenance.currentMerge) insist(
+          await readCurrentMerge(after, get) === evidence.checkProvenance.currentMerge,
+          'PR current merge changed during validation');
         return evidence;
       }
       insist(threads.pageInfo.endCursor && threads.pageInfo.endCursor !== cursor, 'Invalid review pagination');
