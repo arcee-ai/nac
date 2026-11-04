@@ -16,6 +16,207 @@ fn tool(name: &str, args: serde_json::Value) -> serde_json::Value {
     serde_json::json!([{"type":"function_call","call_id":name,"name":name,"arguments":args.to_string()}])
 }
 
+struct FixtureRelease(Arc<(Mutex<bool>, Condvar)>);
+
+impl FixtureRelease {
+    fn new() -> Self {
+        Self(Arc::new((Mutex::new(false), Condvar::new())))
+    }
+
+    fn release(&self) {
+        let (lock, cv) = &*self.0;
+        *lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        cv.notify_all();
+    }
+}
+
+impl Drop for FixtureRelease {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+fn hold_fixture_gate(gate: &Arc<(Mutex<bool>, Condvar)>) {
+    let released = gate.0.lock().unwrap();
+    let (released, timeout) = gate
+        .1
+        .wait_timeout_while(released, Duration::from_secs(5), |released| !*released)
+        .unwrap();
+    assert!(
+        *released && !timeout.timed_out(),
+        "fixture gate was not released"
+    );
+}
+
+#[test]
+fn heartbeat_question_answer_distinguishes_idle_tail_lease_from_stale_binding() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let id = "question-idle-tail";
+        let (parts, path) = test_direct_active_service(
+            "question_idle_tail",
+            id,
+            ModelClient::new_for_test_server("http://127.0.0.1:1".into()),
+        );
+        let service = parts.service.clone();
+        assert!(crate::store::coordinator::owner_for(&path)
+            .unwrap()
+            .is_none());
+        let source = Uuid::new_v4().to_string();
+        let before = sessions::load_session(&path, id).unwrap();
+        crate::store::TranscriptLogWriter::new(&path)
+            .unwrap()
+            .append_run_prompt(
+                id,
+                before.messages.len() as u64,
+                &crate::types::Message::User {
+                    content: "ask an exact question".into(),
+                },
+                &source,
+            )
+            .unwrap();
+        let question = crate::store::create_task_question(
+            &path,
+            &crate::store::QuestionRequest {
+                session_id: id.into(),
+                request_id: "exact-idle-tail".into(),
+                run_id: source.clone(),
+                generation: source.clone(),
+                text: "CSV?".into(),
+                choices: vec!["CSV".into()],
+                responder_class: crate::store::QuestionResponder::HumanDecision,
+            },
+            before.config_version,
+        )
+        .unwrap();
+        // Use the canonical terminal owner; never rewrite the question row.
+        {
+            let mut conn = crate::store::open_runtime_connection(&path).unwrap();
+            let tx = conn.transaction().unwrap();
+            crate::store::clear_active_run(
+                &tx,
+                id,
+                &source,
+                crate::store::RunTerminalDisposition::Completed,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let answer = QuestionAnswer {
+            request_id: question.request.request_id.clone(),
+            run_id: source.clone(),
+            generation: source.clone(),
+            expected_revision: question.revision,
+            answer: "CSV".into(),
+        };
+        let mut stale = answer.clone();
+        stale.expected_revision += 1;
+        let stale_error = crate::store::task_questions::answer_task_question(
+            &path,
+            id,
+            &stale,
+            None,
+            before.config_version,
+        )
+        .err()
+        .expect("stale revision must conflict");
+        assert_eq!(
+            stale_error.downcast_ref(),
+            Some(&crate::store::QuestionError::Conflict)
+        );
+        assert_eq!(
+            crate::store::load_task_question(&path, id, &answer.request_id).unwrap(),
+            Some(question.clone())
+        );
+
+        let release = FixtureRelease::new();
+        let held = release.0.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered.send(()).unwrap();
+            hold_fixture_gate(&held);
+        });
+        started.await.unwrap();
+        let predecessor = service.clone();
+        let lease = sessions::SessionOperationLease::try_acquire(&path, id).unwrap();
+        let mut tail = Box::pin(async move {
+            let _wake = predecessor.inbox_wake.lock().await;
+            predecessor
+                .start_next_direct_inbox_item_with_lease_async(lease)
+                .await
+        });
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(tail.as_mut(), &mut context).is_pending());
+        assert!(!service.has_active_operation());
+        assert!(matches!(
+            sessions::SessionOperationLease::try_acquire(&path, id),
+            Err(sessions::SessionOperationLeaseError::Busy(_))
+        ));
+        let mut response = Box::pin(service.answer_task_question(answer.clone()));
+        assert!(std::future::Future::poll(response.as_mut(), &mut context).is_pending());
+        // Keep the sole blocking worker occupied: the predecessor's queued
+        // REAL store caller owns the lease while the async answer proceeds.
+        let error = tokio::time::timeout(Duration::from_secs(5), response)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&crate::store::QuestionError::Conflict)
+        );
+        assert_eq!(error.to_string(), stale_error.to_string());
+        assert!(!service.has_active_operation());
+        assert_eq!(
+            crate::store::load_task_question(&path, id, &answer.request_id).unwrap(),
+            Some(question.clone())
+        );
+        assert_eq!(
+            sessions::load_session(&path, id).unwrap().config_version,
+            before.config_version
+        );
+        assert!(crate::store::load_run_recovery(&path, id)
+            .unwrap()
+            .is_none());
+        assert_eq!(question.request.run_id, source);
+        assert_eq!(question.request.generation, source);
+        assert_eq!(question.status, "pending");
+        assert!(question.goal_id.is_none());
+
+        release.release();
+        blocker.await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(5), tail)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_none());
+        let free = sessions::SessionOperationLease::try_acquire(&path, id).unwrap();
+        drop(free);
+        // Exact unchanged binding passes the real durable admission after the
+        // predecessor retires. This direct store control deliberately has no wake.
+        let admission = crate::store::task_questions::answer_task_question(
+            &path,
+            id,
+            &answer,
+            None,
+            before.config_version,
+        )
+        .unwrap();
+        assert_eq!(admission.receipt.run_id, question.request.run_id);
+        assert_eq!(admission.receipt.generation, question.request.generation);
+        assert_eq!(admission.receipt.revision, question.revision + 1);
+        service.stop_run_admission().await.unwrap();
+        drop(service);
+        drop(parts);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    });
+}
+
 #[tokio::test]
 async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_timer() {
     let root = std::env::temp_dir().join(format!("nac-delivered-retry-{}", Uuid::new_v4()));
@@ -48,6 +249,8 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
     .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
+    let source_release = FixtureRelease::new();
+    let source_gate = source_release.0.clone();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let held = gate.clone();
     let server = ScriptedServer::start_observed_with_timeout(
@@ -69,6 +272,9 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
         Duration::from_secs(20),
         move |index, _| {
             observed.fetch_add(1, Ordering::SeqCst);
+            if index == 1 {
+                hold_fixture_gate(&source_gate);
+            }
             if index == 2 {
                 let (lock, cv) = &*held;
                 let mut released = lock.lock().unwrap();
@@ -163,18 +369,33 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
         .occurrence
         .unwrap();
     let lease = sessions::SessionOperationLease::try_acquire(&path, id).unwrap();
-    assert!(service
+    let source_run = service
         .start_heartbeat_occurrence(pending, lease)
         .await
         .unwrap()
-        .is_some());
+        .expect("exact source heartbeat must start");
     tokio::time::timeout(Duration::from_secs(5), async {
-        while calls.load(Ordering::SeqCst) < 2 || service.has_active_operation() {
+        while calls.load(Ordering::SeqCst) < 2 {
             tokio::task::yield_now().await;
         }
+        let task = {
+            let mut guard = service.lock_active_operation();
+            let Some(ActiveSessionOperation::Run(run)) = guard.as_mut() else {
+                panic!("exact source heartbeat must still be owned at the provider barrier")
+            };
+            assert_eq!(run.snapshot.run_id, source_run.run_id);
+            assert!(!run.finishing);
+            assert!(run._operation_lease.is_some());
+            run.task.take().unwrap()
+        };
+        source_release.release();
+        // Join the actual source task through settlement and its final inbox
+        // wake: the published idle projection alone is not a completion fence.
+        task.await.unwrap();
     })
     .await
     .unwrap();
+    assert!(!service.has_active_operation());
     let q = crate::store::list_task_questions(&path, id)
         .unwrap()
         .remove(0);
