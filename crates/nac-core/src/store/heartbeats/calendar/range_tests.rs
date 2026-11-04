@@ -252,3 +252,36 @@ fn cross_date_fold_keeps_the_canonical_sunday_in_a_weekly_range() {
         }
     );
 }
+
+#[test]
+fn supported_timestamp_edges_keep_epoch_due_and_a_valid_upper_successor() {
+    // IANA Etc/GMT signs are reversed: these fixed offsets put the same
+    // epoch instant on January1 14:00 and December31 12:00 respectively.
+    for (zone, hour) in [("Etc/UTC", 0), ("Etc/GMT-14", 14), ("Etc/GMT+12", 12)] {
+        let range = daily(zone, hour, 0).missed(0, 0).unwrap();
+        assert_eq!(
+            range,
+            CalendarMissedRange {
+                due_last_ms: 0,
+                count: 1,
+                next_due_ms: 86_400_000
+            }
+        );
+    }
+    let cadence = daily("Etc/UTC", 9, 0);
+    let first = ms("9999-12-29T09:00:00Z");
+    let range = cadence.missed(first, ms("9999-12-29T23:00:00Z")).unwrap();
+    assert_eq!(
+        range,
+        CalendarMissedRange {
+            due_last_ms: first,
+            count: 1,
+            next_due_ms: ms("9999-12-30T09:00:00Z")
+        }
+    );
+    // No successor exists at the absolute maximum: keep the explicit error,
+    // rather than clamp or manufacture an unsupported future occurrence.
+    assert!(cadence
+        .missed(first, Timestamp::MAX.as_millisecond())
+        .is_err());
+}

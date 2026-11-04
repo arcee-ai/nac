@@ -68,7 +68,16 @@ impl CalendarCadence {
         }
         let local = date.to_datetime(self.time);
         let candidate = self.zone.to_ambiguous_timestamp(local);
-        if matches!(candidate.offset(), AmbiguousOffset::Gap { .. }) {
+        let offset = match candidate.offset() {
+            AmbiguousOffset::Gap { .. } => return Ok(None),
+            AmbiguousOffset::Unambiguous { offset } => offset,
+            AmbiguousOffset::Fold { before, .. } => before,
+        };
+        // The UTC-bounded date window can include future civil times outside
+        // Timestamp's domain. Skip only those proven unrepresentable with the
+        // exact offset earlier() uses; preserve any unexpected conversion error.
+        let supported = offset.to_datetime(Timestamp::MIN)..=offset.to_datetime(Timestamp::MAX);
+        if !supported.contains(&local) {
             return Ok(None);
         }
         Ok(Some(CalendarOccurrence {
