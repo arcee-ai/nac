@@ -18,7 +18,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from device_auth_profile import DeviceProfile, identity
 from engine_contract import record
-from external_auth_fixture import AuthFixture
+from external_auth_fixture import AuthFixture, cleanup_note
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -46,15 +46,21 @@ def http(url, method='GET', body=None, origin=None):
 
 class OwnedDesktop:
     def __init__(self, binary, build, profile, log):
-        self.parent, child = socket.socketpair()
+        self.profile = profile
+        self.process = self.parent = self.log = None
+        self.closed = False
         self.incarnation = str(uuid.uuid4())
-        self.log = log.open('wb')
-        environment = {**profile.environment, 'NAC_DESKTOP_CHANNEL_FD': str(child.fileno())}
-        self.process = subprocess.Popen([str(binary), '--bind', '127.0.0.1:0', '--directory', str(profile.workspace),
-            '--store-path', str(profile.store), '--no-open'], env=environment, pass_fds=(child.fileno(),),
-            cwd=profile.workspace, stdin=subprocess.DEVNULL, stdout=self.log, stderr=self.log, start_new_session=True)
-        child.close()
+        child = None
+        profile.begin_launch()
         try:
+            self.parent, child = socket.socketpair()
+            self.log = log.open('wb')
+            environment = {**profile.environment, 'NAC_DESKTOP_CHANNEL_FD': str(child.fileno())}
+            self.process = subprocess.Popen([str(binary), '--bind', '127.0.0.1:0', '--directory', str(profile.workspace),
+                '--store-path', str(profile.store), '--no-open'], env=environment, pass_fds=(child.fileno(),),
+                cwd=profile.workspace, stdin=subprocess.DEVNULL, stdout=self.log, stderr=self.log, start_new_session=True)
+            child.close()
+            child = None
             self.parent.sendall(json.dumps({'kind': 'hello', 'version': 1, 'incarnation': self.incarnation,
                 'identity': build, 'store': str(profile.store)}).encode() + b'\n')
             ready = record(self.parent, timeout=15)
@@ -62,29 +68,63 @@ class OwnedDesktop:
             assert ready['incarnation'] == self.incarnation and ready['store'] == str(profile.store)
             assert ready['endpoint'].startswith('http://127.0.0.1:')
             self.origin = ready['endpoint']
-        except BaseException:
-            self.close()
+        except BaseException as primary:
+            if child is not None:
+                try:
+                    child.close()
+                except BaseException as error:
+                    cleanup_note(primary, 'Auth child channel close', error)
+            try:
+                self.close()
+            except BaseException as error:
+                cleanup_note(primary, 'Auth direct owner construction cleanup', error)
             raise
 
     def close(self):
+        if self.closed:
+            return
+        failure = None
         try:
+            if self.process is None:
+                raise RuntimeError('Auth launch has no retained child handle; custody unknown')
             if self.process.poll() is None:
                 self.parent.sendall(json.dumps({'kind': 'stop', 'version': 1, 'incarnation': self.incarnation}).encode() + b'\n')
                 try:
                     self.process.wait(timeout=25)
                 except subprocess.TimeoutExpired:
+                    # Preserve the existing exact-Popen bound, never a raw PID/group fallback.
                     self.process.kill()
                     self.process.wait(timeout=3)
                     raise AssertionError('Owned fixture engine failed its shutdown bound')
-        finally:
-            self.parent.close()
-            self.log.close()
+            else:
+                self.process.wait(timeout=0)
+        except BaseException as error:
+            failure = error
+        for stage, resource in [('Auth direct channel close', self.parent), ('Auth direct log close', self.log)]:
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    cleanup_note(failure, stage, error)
+        if failure is not None:
+            raise failure
+        self.profile.finish_launch(self.incarnation)
+        self.closed = True
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *_):
-        self.close()
+    def __exit__(self, kind, primary, traceback):
+        try:
+            self.close()
+        except BaseException as error:
+            if primary is None:
+                raise
+            cleanup_note(primary, 'Auth direct owner teardown', error)
 
 
 def poll(engine, handle):
