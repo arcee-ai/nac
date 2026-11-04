@@ -27,12 +27,16 @@ class RestartLaunchFailureTests(unittest.TestCase):
             'private func showActions(', 'private func hideActions(',
         ])
         fixture = (OWNER / 'RestartLaunchFailureFixture.swift').read_text()
+        loss_recording = (member(recovery, 'func ownedEngineWillStop(')
+                          if 'func ownedEngineWillStop(' in recovery else '')
         for marker, text in [
             ('// APP_ADMISSION', member(app, 'var canRecoverWorkspace:')),
             ('// APP_RESTART', member(app, 'func restartOwnedEngine(')),
             ('// APP_FAILURE', member(app, 'private func engineFailed(')),
             ('// RECOVERY_METHODS', methods),
             ('// ACTUAL_SMOKE_RESTART', member(recovery, 'func smokeRestart(')),
+            ('// LOSS_PRESENTATION', member(recovery, 'var noticeHeight:') + member(recovery, 'func showLossNotice(')),
+            ('// LOSS_RECORDING', loss_recording),
         ]:
             self.assertEqual(fixture.count(marker), 1)
             fixture = fixture.replace(marker, text)
@@ -67,7 +71,12 @@ class RestartLaunchFailureTests(unittest.TestCase):
         self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
         for case in ['timeout', 'channel-loss', 'invalid-receipt', 'restart-store-conflict',
                      'ready-then-loss', 'quit-cancel', 'stop-late-failure',
-                     'first-start', 'first-store-conflict']:
+                     'first-start', 'first-store-conflict',
+                     'truth-retirement-timeout', 'truth-restart-admission', 'truth-zero-pid',
+                     'truth-quit-before-stop', 'truth-cancel-before-stop', 'truth-stale-before-stop',
+                     'truth-selection-before-stop', 'truth-cleanup-timeout', 'truth-cancel-after-stop',
+                     'truth-quit-after-stop', 'truth-stop-after-stop', 'truth-start-failure',
+                     'truth-success', 'truth-real-exit', 'truth-prior-exit-then-denied']:
             with self.subTest(case=case):
                 result = run([str(binary), case], 10)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
