@@ -91,8 +91,12 @@ function PathPicker({
   const isMobile = useIsMobile();
   // A directory is picked from an empty path so the server starts at its root,
   // or the host at the login home.
-  const [directory, setDirectory] = useState(initialPath.trim());
-  const [draft, setDraft] = useState(initialPath.trim());
+  // A nonblank local path identifies a literal filesystem entry. Preserve its
+  // whitespace; blank input still requests the fallback. SSH keeps its existing
+  // normalization contract.
+  const browsePath = (path: string) => (ssh || !path.trim() ? path.trim() : path);
+  const [directory, setDirectory] = useState(browsePath(initialPath));
+  const [draft, setDraft] = useState(browsePath(initialPath));
   const [file, setFile] = useState<string | null>(null);
   const [hidden, setHidden] = useState(showHidden);
   // Both hooks are called every render, as hooks must be; the one that is not
@@ -237,7 +241,7 @@ function PathPicker({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(browsePath(draft));
             }}
           />
           <Button
