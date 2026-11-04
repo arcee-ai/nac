@@ -1,7 +1,10 @@
 //! Desktop launch selection through the existing configuration/store owners.
 //! This does not open a database, construct a model or read credentials. Config
 //! reads retain the normal publication lock and crash-recovery semantics.
-use std::path::{Path, PathBuf};
+use std::{
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
 
 use nac_core::runtime::{resolve_store_path_for_track, NacConfig, StoreOptions};
 use serde::Serialize;
@@ -28,6 +31,13 @@ fn failed(code: &'static str, message: &'static str) -> Selection {
         code,
         message,
     }
+}
+
+fn process_directory_matches(root: &Path) -> bool {
+    let (Ok(current), Ok(selected)) = (std::fs::metadata("."), std::fs::metadata(root)) else {
+        return false;
+    };
+    current.dev() == selected.dev() && current.ino() == selected.ino()
 }
 
 /// Bounded nonsecret selection for the exact bundled executable's private
@@ -84,7 +94,8 @@ fn select(root: &Path, store_path: Option<PathBuf>) -> Selection {
     }
     // Both the preflight and serving child must use this same process cwd:
     // legacy relative store detection and credential owners also consult cwd.
-    if std::env::current_dir().ok().as_ref() != Some(&root_cwd) {
+    // Equivalent macOS firmlink paths need not have identical spellings.
+    if !process_directory_matches(&root_cwd) {
         return failed(
             "bootstrap_directory",
             "The engine bootstrap directory does not match its configuration directory. Relaunch NAC with a consistent --directory.",

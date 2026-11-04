@@ -8,6 +8,73 @@ import sys
 import tempfile
 import time
 import shutil
+import os
+import unicodedata
+
+
+def directory_identity_contract(engine):
+    """Exercise the actual config-only child, including APFS firmlinks when present."""
+    cases = []
+    with tempfile.TemporaryDirectory(prefix='nac-cwd-identity-', dir='/tmp') as temporary:
+        base = Path(temporary).resolve()
+        root, other, selected = base / 'bootstrap with spaces', base / 'different', base / 'config'
+        for directory in (root, other, selected):
+            directory.mkdir()
+        (selected / 'config.toml').write_text('[worker]\nthread_timeout_secs = 342\n')
+        environment = {'HOME': str(base), 'NAC_HOME': str(selected), 'PATH': '/usr/bin:/bin',
+                       'NAC_TELEMETRY': 'disabled'}
+
+        def invoke(name, cwd, directory, expected):
+            command = [str(engine), '__desktop-configuration', '--directory', str(directory)]
+            response = subprocess.run(command, cwd=cwd, env=environment, capture_output=True,
+                                      check=True, text=True, timeout=12)
+            assert not response.stderr and len(response.stdout.encode()) <= 16384
+            result = json.loads(response.stdout)
+            record = {'case': name, 'argv': command, 'cwd': str(cwd), 'directory': str(directory),
+                      'selection': result}
+            cases.append(record)
+            assert result['status'] == expected, record
+            if expected == 'selected':
+                assert Path(result['root_cwd']).samefile(cwd), record
+                assert Path(result['store']).parent.samefile(selected), record
+            else:
+                assert result['code'] == 'bootstrap_directory', record
+            assert not list(base.rglob('*.db')), 'Directory selection opened a database'
+
+        invoke('canonical', root, root, 'selected')
+        alias = base / 'directory alias'
+        alias.symlink_to(root, target_is_directory=True)
+        invoke('symlink directory', root, alias, 'selected')
+        invoke('symlink cwd', alias, root, 'selected')
+        invoke('different directory', other, root, 'failed')
+        invoke('missing directory', root, base / 'missing', 'failed')
+        blocked = base / 'uninspectable'
+        child = blocked / 'child'
+        child.mkdir(parents=True)
+        blocked.chmod(0)
+        try:
+            uninspectable_supported = not os.access(child, os.X_OK)
+            if uninspectable_supported:
+                invoke('uninspectable directory', root, child, 'failed')
+        finally:
+            blocked.chmod(0o700)
+        unicode_root = base / unicodedata.normalize('NFC', 'r\u00e9sum\u00e9')
+        unicode_root.mkdir()
+        decomposed = base / unicodedata.normalize('NFD', unicode_root.name)
+        unicode_alias_supported = decomposed.exists() and decomposed.samefile(unicode_root)
+        invoke('Unicode canonical', unicode_root, unicode_root, 'selected')
+        if unicode_alias_supported:
+            invoke('Unicode directory alias', unicode_root, decomposed, 'selected')
+            invoke('Unicode cwd alias', decomposed, unicode_root, 'selected')
+        firmlink = Path('/System/Volumes/Data') / root.relative_to('/')
+        firmlink_supported = firmlink.exists() and firmlink.samefile(root)
+        if firmlink_supported:
+            invoke('firmlink directory', root, firmlink, 'selected')
+            invoke('firmlink cwd', firmlink, root, 'selected')
+    return {'directory_identity_cases': cases, 'firmlink_supported': firmlink_supported,
+            'firmlink_gap': None if firmlink_supported else 'Equivalent APFS firmlink is unavailable on this host',
+            'unicode_alias_supported': unicode_alias_supported,
+            'uninspectable_supported': uninspectable_supported}
 
 
 def parent_loss_contract(engine):
@@ -127,6 +194,7 @@ def run_contract(engine, destination):
             assert not bounded.stdout and not (selected / 'dev.db').exists()
         results.append({'publication_lock_wait_bounded': True, 'helper_exit': bounded.returncode})
         results.append(parent_loss_contract(engine))
+        results.append(directory_identity_contract(engine))
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps({'engine_identity': identity, 'profiles': results}, indent=2) + '\n')
