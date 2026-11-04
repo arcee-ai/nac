@@ -148,10 +148,16 @@ canonical stored issuer/inference URLs and existing credential persistence.
 Only the service transport is local. Signed-in model enumeration is explicitly
 a deterministic read double; it qualifies neither inference nor vendor access.
 
-Feature builds require the dev track and force the existing build ID to start
-with `native-auth-fixture-v1-`, including when a build ID override is supplied.
+Feature builds require explicit dev track and a nonempty
+`native-auth-fixture-v1-` build ID. The auth producer supplies that ID once in
+its Cargo child's environment, so the existing shared identity writer gives
+contracts and server the same value. It clears inherited build-ID/source and
+fixture overrides; only the auth child selects the marker and dev track.
+Source revision still comes from the actual Git source. Feature build admission
+and the immutable runtime identity check both fail closed on a mismatch.
 The v1 identity keeps exactly its original four fields and launch equality.
-Normal builds retain their build ID behavior. Ordinary shells reject the marker
+Direct normal Cargo builds retain custom build IDs; ordinary producer rebuilds
+sanitize inherited metadata. Ordinary shells reject the marker
 before configuration/store discovery; only `NATIVE_AUTH_FIXTURE` accepts it.
 The single `preview.sh auth-build` producer requires that actual engine before
 replacing bundle files, compiles the explicit test flags and uses the distinct
