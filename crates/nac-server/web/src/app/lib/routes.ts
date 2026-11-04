@@ -53,6 +53,8 @@ export const routes = {
     `/session/${encodeURIComponent(sessionId)}/${panel}`,
   /** Redirects to the project's newest session, or offers to start one. */
   project: (projectId: string) => `/project/${encodeURIComponent(projectId)}`,
+  taskSchedules: (projectId?: string) =>
+    projectId ? `/project/${encodeURIComponent(projectId)}/task-schedules` : "/task-schedules",
   designPreview: () => "/design",
 };
 

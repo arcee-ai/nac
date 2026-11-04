@@ -169,7 +169,13 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
   assert.ok(aggregate.includes("name: " + protectedNames["required-pr-checks"]));
   assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
-  const dependencies = aggregate.match(/needs: \[(.*)\]/)[1].split(", ");
+  const needs = aggregate.match(/^    needs:\s*\[([\s\S]*?)\]/m);
+  assert.ok(needs, "required-pr-checks must declare its literal needs list");
+  const dependencies = needs[1]
+    .trim()
+    .replace(/,$/, "")
+    .split(",")
+    .map((job) => job.trim());
   assert.deepEqual(dependencies.sort(), [...requiredJobs, ...managedCallerJobs].sort());
   assert.match(aggregate, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
   assert.match(workflow, /run: make test-assets/);
@@ -209,10 +215,7 @@ test("overlapping caller runs cannot replace pending managed work and pushes hav
 });
 
 test("review request metadata operation verifies owners and excludes the author including bot PRs", () => {
-  assert.equal(
-    fs.readFileSync(".github/CODEOWNERS", "utf8"),
-    codeowners,
-  );
+  assert.equal(fs.readFileSync(".github/CODEOWNERS", "utf8"), codeowners);
   const workflow = fs.readFileSync(".github/workflows/pr-reviewers.yml", "utf8");
   assert.equal(
     workflow,
@@ -229,7 +232,10 @@ test("review request metadata operation verifies owners and excludes the author 
 test("owner generation refuses missing or ambiguous reviewer rosters", () => {
   const workflow = fs.readFileSync(".github/workflows/pr-reviewers.yml", "utf8");
   assert.throws(() => ownerArtifacts(""), /exactly one embedded owner roster/);
-  assert.throws(() => ownerArtifacts(workflow + "\n" + workflow), /exactly one embedded owner roster/);
+  assert.throws(
+    () => ownerArtifacts(workflow + "\n" + workflow),
+    /exactly one embedded owner roster/,
+  );
 });
 
 test("native macOS is candidate-bound and required even for docs-only PRs", () => {

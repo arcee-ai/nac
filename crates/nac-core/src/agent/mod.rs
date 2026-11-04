@@ -216,7 +216,7 @@ struct TranscriptLogSink {
 struct SessionRunPrompt<'a> {
     run_id: &'a SessionRunId,
     prompt_commit: watch::Sender<RunPromptCommitStatus>,
-    inbox_item_id: Option<i64>,
+    inbox_prompt: Option<crate::store::RunInboxPrompt>,
     /// What a person typed, for a prompt from a human-facing route.
     review_intent: Option<String>,
 }
@@ -480,6 +480,7 @@ impl Agent {
                 heartbeat_human_request: None,
                 heartbeat_execution: false,
                 heartbeat_goal_id: None,
+                heartbeat_schedule: None,
                 heartbeat_needs_human_action: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 command_environment: None,
                 web_credential: None,
@@ -726,11 +727,14 @@ impl Agent {
         prompt: &str,
         run_id: &SessionRunId,
         prompt_commit: watch::Sender<RunPromptCommitStatus>,
-        inbox_item_id: Option<i64>,
+        inbox_prompt: Option<crate::store::RunInboxPrompt>,
         review_intent: Option<String>,
     ) -> Result<String> {
-        self.capture_heartbeat_request(inbox_item_id, review_intent.as_deref())
-            .await;
+        self.capture_heartbeat_request(
+            inbox_prompt.as_ref().map(crate::store::RunInboxPrompt::id),
+            review_intent.as_deref(),
+        )
+        .await;
         if let Some(goals) = &self.tool_runtime.goal_runtime {
             goals.begin_run(run_id.as_str());
         }
@@ -739,7 +743,7 @@ impl Agent {
             Some(SessionRunPrompt {
                 run_id,
                 prompt_commit,
-                inbox_item_id,
+                inbox_prompt,
                 review_intent,
             }),
         )
@@ -788,7 +792,7 @@ impl Agent {
                 self.push_and_log_run_prompt(
                     prompt_message,
                     run.run_id,
-                    run.inbox_item_id,
+                    run.inbox_prompt.clone(),
                     run.review_intent.clone(),
                 )
                 .await

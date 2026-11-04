@@ -2,6 +2,7 @@ pub(crate) mod contracts;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod error;
+pub(crate) mod fresh_task_schedules;
 pub(crate) mod heartbeats;
 pub(crate) mod managed_secrets;
 pub(crate) mod model_configurations;

@@ -578,14 +578,20 @@ impl SessionService {
             .flatten()
     }
 
-    pub(super) fn run_inbox_item_id(&self, run_id: &SessionRunId) -> Option<i64> {
+    pub(super) fn run_inbox_prompt(&self, run_id: &SessionRunId) -> Option<RunInboxPrompt> {
         let guard = self.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
             return None;
         };
-        (&active_run.snapshot.run_id == run_id)
-            .then_some(active_run.inbox_item_id)
-            .flatten()
+        if &active_run.snapshot.run_id != run_id {
+            return None;
+        }
+        debug_assert_eq!(
+            active_run.inbox_item_id,
+            active_run.inbox_prompt.as_ref().map(RunInboxPrompt::id),
+            "admitted run must retain its exact inbox prompt identity"
+        );
+        active_run.inbox_prompt.clone()
     }
 
     pub(super) fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {

@@ -556,3 +556,115 @@ fn native_admission_clear_serializes_with_exact_delivery_and_late_failure() {
         }
     }
 }
+
+#[test]
+fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orders() {
+    for retained in [false, true] {
+        for native_first in [false, true] {
+            let (path, mut request) = fixture();
+            let binding = fresh_heartbeat_binding(
+                &path,
+                &FreshTaskDestination {
+                    project_id: "p".into(),
+                    pinned_commit: None,
+                    default_ref: None,
+                    model: None,
+                    reasoning_effort: None,
+                    retained_limit: 2,
+                },
+                Some("caller"),
+                cwd(&path).to_str().unwrap(),
+            )
+            .unwrap();
+            control_heartbeat(
+                &path,
+                "project:p",
+                &uuid::Uuid::new_v4().to_string(),
+                &HeartbeatAction::Create {
+                    spec: HeartbeatSpec {
+                        name: "Identity isolation".into(),
+                        instructions: "Inspect the fixture.".into(),
+                        skills: vec![],
+                        interval_ms: 60_000,
+                        end_condition: "Retain the result.".into(),
+                        goal_id: None,
+                        execution_timeout_ms: 30_000,
+                        max_occurrences: 2,
+                        token_allowance: None,
+                    },
+                },
+                "Create the isolated schedule.",
+                &binding,
+                1_000,
+            )
+            .unwrap();
+            let pending = materialize_heartbeats(&path, 61_000).unwrap().remove(0);
+            request.request_id = pending.receipt_id.clone();
+            if native_first {
+                let original = reserve_native_task_launch(
+                    &path,
+                    "caller",
+                    "p",
+                    &cwd(&path),
+                    retained,
+                    request,
+                )
+                .unwrap();
+                assert!(reserve_fresh_heartbeat_launch(
+                    &path,
+                    &pending.occurrence_id,
+                    pending.revision,
+                    61_000,
+                )
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("conflict"));
+                assert!(read_fresh_heartbeat_launch(&path, &pending.occurrence_id)
+                    .unwrap()
+                    .is_none());
+                assert_eq!(
+                    load_native_task_launch(&path, &original.request.request_id).unwrap(),
+                    Some(original)
+                );
+                assert_eq!(
+                    heartbeat_history(&path, "project:p", &pending.schedule_id).unwrap(),
+                    vec![pending]
+                );
+            } else {
+                let original = reserve_fresh_heartbeat_launch(
+                    &path,
+                    &pending.occurrence_id,
+                    pending.revision,
+                    61_000,
+                )
+                .unwrap()
+                .unwrap();
+                assert!(reserve_native_task_launch(
+                    &path,
+                    "caller",
+                    "p",
+                    &cwd(&path),
+                    retained,
+                    request.clone(),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("conflict"));
+                assert!(load_native_task_launch(&path, &request.request_id)
+                    .unwrap()
+                    .is_none());
+                assert_eq!(
+                    read_fresh_heartbeat_launch(&path, &pending.occurrence_id)
+                        .unwrap()
+                        .unwrap()
+                        .receipt(),
+                    original.receipt()
+                );
+            }
+            assert!(list_task_launches(&path, "p").unwrap().is_empty());
+            assert!(list_session_inbox(&path, "caller").unwrap().is_empty());
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+}

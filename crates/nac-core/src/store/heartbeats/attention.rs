@@ -50,7 +50,7 @@ pub(crate) fn heartbeat_attention_with_connection(
         }
     }
     {
-        let mut query=tx.prepare("SELECT o.session_id,o.occurrence_id,o.schedule_id,o.run_id,o.outcome,o.settlement_sequence,coalesce(json_extract(s.binding_json,'$.seen_through_sequence'),0) FROM heartbeat_occurrences o JOIN heartbeat_schedules s ON s.schedule_id=o.schedule_id WHERE o.outcome IS NOT NULL AND o.settlement_sequence IS NOT NULL ORDER BY o.settlement_sequence DESC LIMIT ?1")?;
+        let mut query=tx.prepare("SELECT o.session_id,o.occurrence_id,o.schedule_id,o.run_id,o.outcome,o.settlement_sequence,coalesce(json_extract(s.binding_json,'$.seen_through_sequence'),0) FROM heartbeat_occurrences o JOIN heartbeat_schedules s ON s.schedule_id=o.schedule_id WHERE s.session_id IS NOT NULL AND o.outcome IS NOT NULL AND o.settlement_sequence IS NOT NULL ORDER BY o.settlement_sequence DESC LIMIT ?1")?;
         let rows = query.query_map([MAX_HEARTBEAT_SCHEDULES * HEARTBEAT_HISTORY_LIMIT], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -89,6 +89,7 @@ pub(crate) fn heartbeat_attention_with_connection(
             snapshot.quiet_updated_at.insert(session, updated);
         }
     }
+    fresh_attention::append_results(tx, &mut snapshot)?;
     Ok(snapshot)
 }
 
@@ -100,9 +101,11 @@ pub fn acknowledge_heartbeat_attention(path:&Path,session_id:&str,through_sequen
     ensure!(through_sequence>=0,"invalid heartbeat attention sequence");
     let mut conn=open_runtime_connection(path)?;
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let latest:i64=tx.query_row("SELECT coalesce(max(settlement_sequence),0) FROM heartbeat_occurrences WHERE session_id=?1",[session_id],|row|row.get(0))?;
+    let live:i64=tx.query_row("SELECT coalesce(max(settlement_sequence),0) FROM heartbeat_occurrences WHERE session_id=?1",[session_id],|row|row.get(0))?;
+    let latest=live.max(fresh_attention::latest_sequence(&tx,session_id)?);
     ensure!(through_sequence<=latest,"heartbeat attention acknowledgement cannot cover future results");
     tx.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$.seen_through_sequence',max(coalesce(json_extract(binding_json,'$.seen_through_sequence'),0),?2)) WHERE session_id=?1",params![session_id,through_sequence])?;
+    fresh_attention::acknowledge(&tx,session_id,through_sequence)?;
     tx.commit()?;
     Ok(())
 }

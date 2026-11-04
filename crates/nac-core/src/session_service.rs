@@ -25,6 +25,7 @@ use crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC as FAILED_RUN_WARNING;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
+use crate::store::RunInboxPrompt;
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -745,6 +746,7 @@ struct ActiveRunState {
     transcript_baseline: Option<usize>,
     command_cancellation: crate::tools::ThreadCancellation,
     inbox_item_id: Option<i64>,
+    inbox_prompt: Option<RunInboxPrompt>,
     review_intent: Option<String>,
     _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
     _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
@@ -755,6 +757,7 @@ struct RunAdmissionKind {
     heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
+    inbox_prompt: Option<crate::store::AdmittedInboxPrompt>,
     /// What a person typed for a prompt submitted on a human-facing route.
     review_intent: Option<String>,
     goal_continuation: bool,

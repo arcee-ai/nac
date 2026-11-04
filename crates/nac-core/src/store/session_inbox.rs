@@ -91,6 +91,46 @@ pub struct SessionInboxRecord {
     pub version: i64,
 }
 
+/// Immutable delivery identity captured before model-only prompt expansion.
+/// The transcript transaction still compares the original pending bytes and
+/// revision; expanded skill instructions never replace that durable authority.
+#[derive(Debug, Clone)]
+pub(crate) struct AdmittedInboxPrompt {
+    pub(crate) id: i64,
+    pub(crate) session_id: String,
+    pub(crate) content: String,
+    pub(crate) version: i64,
+}
+
+impl From<SessionInboxRecord> for AdmittedInboxPrompt {
+    fn from(record: SessionInboxRecord) -> Self {
+        Self {
+            id: record.id,
+            session_id: record.session_id,
+            content: record.content,
+            version: record.version,
+        }
+    }
+}
+
+/// Existing queued input retains captured raw authority. A same-chat heartbeat
+/// instead creates its already-expanded input inside its own admission; only
+/// that transaction's identified result may use the established literal path.
+#[derive(Debug, Clone)]
+pub(crate) enum RunInboxPrompt {
+    CapturedRaw(AdmittedInboxPrompt),
+    AdmissionCreatedHeartbeat(i64),
+}
+
+impl RunInboxPrompt {
+    pub(crate) fn id(&self) -> i64 {
+        match self {
+            Self::CapturedRaw(input) => input.id,
+            Self::AdmissionCreatedHeartbeat(id) => *id,
+        }
+    }
+}
+
 pub(crate) const INBOX_RECORD_COLUMNS: &str =
     "id, session_id, delivery, status, content, target_run_id, client_id, \
      delivered_run_id, created_at, updated_at, delivered_at, cancelled_at, version, admission_id, admission_digest, child_execution_mode, child_wait_id";

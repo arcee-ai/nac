@@ -162,7 +162,7 @@ impl<'a> HeartbeatApplication<'a> {
     }
 }
 
-pub(super) fn epoch_ms() -> i64 {
+pub(crate) fn epoch_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

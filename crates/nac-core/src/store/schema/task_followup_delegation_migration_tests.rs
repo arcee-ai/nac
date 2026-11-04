@@ -44,6 +44,22 @@ fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
         .collect()
 }
 
+fn heartbeat_layout(conn: &Connection) -> Vec<(String, String)> {
+    let mut query = conn
+        .prepare(
+            "SELECT name,sql FROM sqlite_master WHERE name IN (
+            'heartbeat_schedules','heartbeat_occurrences','heartbeat_commands',
+            'idx_heartbeat_due','idx_heartbeat_session','idx_heartbeat_pending',
+            'idx_heartbeat_active','idx_heartbeat_history','idx_heartbeat_run') ORDER BY name",
+        )
+        .unwrap();
+    query
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
 fn seed(conn: &Connection, version: i64) {
     if version >= 42 {
         conn.execute_batch("INSERT INTO native_task_launches VALUES('launch-key','caller','project','{}','/repo','launched',0,'failed','retained failure',NULL,'created','updated');").unwrap();
@@ -95,8 +111,23 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         )
         .unwrap();
         let conn = open_runtime_connection(&path).unwrap();
+        let current_heartbeat_layout = heartbeat_layout(&conn);
+        assert_eq!(current_heartbeat_layout.len(), 9);
         conn.execute("INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at) VALUES('caller','historical','target',?1,'queue',?2,'retained')",params![input,inbox.id]).unwrap();
         conn.execute_batch("ALTER TABLE task_followups DROP COLUMN delegation_id; DROP TABLE task_followup_delegations;").unwrap();
+        // Reconstruct allocated historical ownership, not a latest-schema
+        // hybrid carrying a stale physical48 marker into predecessors41..46.
+        conn.execute_batch(
+            "DROP TABLE heartbeat_fresh_destinations;
+             DROP TABLE heartbeat_task_launches;
+             DROP TABLE heartbeat_retained_commands;
+             DROP TABLE heartbeat_retained_allowance;
+             DROP TABLE heartbeat_commands;
+             DROP TABLE heartbeat_occurrences;
+             DROP TABLE heartbeat_schedules;",
+        )
+        .unwrap();
+        heartbeat_tables::create_heartbeat_tables(&conn).unwrap();
         for (allocation, tables) in ALLOCATIONS.iter().rev() {
             if *allocation > version {
                 for table in *tables {
@@ -132,9 +163,20 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
             })
             .collect::<Vec<_>>();
         drop(conn);
+        let reached_commit = std::cell::Cell::new(false);
+        assert!(initialize_with_hooks(
+            &path,
+            || {},
+            || {},
+            || {
+                reached_commit.set(true);
+                Err(anyhow!("rollback schema47"))
+            }
+        )
+        .is_err());
         assert!(
-            initialize_with_hooks(&path, || {}, || {}, || Err(anyhow!("rollback schema47")))
-                .is_err()
+            reached_commit.get(),
+            "predecessor {version} must reach the real rollback boundary"
         );
         let conn = Connection::open(&path).unwrap();
         assert_eq!(
@@ -152,6 +194,34 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
             .unwrap(),
             0
         );
+        for (table, old) in &before {
+            assert_eq!(
+                rows(&conn, table),
+                *old,
+                "rollback schema {version}: {table}"
+            );
+        }
+        for (table, definition) in &definitions {
+            assert_eq!(
+                conn.query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap(),
+                *definition,
+                "rollback schema {version}: {table}"
+            );
+        }
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM sqlite_master WHERE name='heartbeat_fresh_destinations'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap(),
+            0
+        );
         drop(conn);
         initialize(&path).unwrap();
         initialize(&path).unwrap();
@@ -159,12 +229,39 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            47
+            STORE_SCHEMA_VERSION
+        );
+        assert_eq!(STORE_SCHEMA_VERSION, 48);
+        assert_eq!(
+            heartbeat_layout(&conn),
+            current_heartbeat_layout,
+            "upgrade must install current48 heartbeat table/FK/index definitions"
+        );
+        for table in ["heartbeat_schedules", "heartbeat_occurrences"] {
+            assert_eq!(conn.query_row::<i64,_,_>(
+                &format!("SELECT \"notnull\" FROM pragma_table_info('{table}') WHERE name='session_id'"),
+                [], |r| r.get(0),
+            ).unwrap(), 0, "current48 nullable ownership: {table}");
+        }
+        assert_eq!(
+            conn.query_row::<i64, _, _>("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get(0),)
+                .unwrap(),
+            0
         );
         for (table, old) in before {
             assert_eq!(rows(&conn, table), old, "schema {version}: {table}");
         }
         for (table, definition) in definitions {
+            let expected = if table.starts_with("heartbeat_") {
+                &current_heartbeat_layout
+                    .iter()
+                    .find(|(name, _)| name == table)
+                    .unwrap()
+                    .1
+            } else {
+                &definition
+            };
             assert_eq!(
                 conn.query_row(
                     "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
@@ -172,7 +269,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                     |r| r.get::<_, String>(0)
                 )
                 .unwrap(),
-                definition
+                *expected
             );
         }
         for (_, tables) in ALLOCATIONS {

@@ -9,7 +9,7 @@ export declare function useHeartbeats(sessionId: string, scheduleId: string | nu
         next_due_ms: number;
         reason?: string | null;
         schedule_id: string;
-        session_id: string;
+        session_id?: string | null;
         spec: import("../../types/openapi.generated").components["schemas"]["HeartbeatSpec"];
         starts: number;
         state: import("../../types/openapi.generated").components["schemas"]["HeartbeatState"];

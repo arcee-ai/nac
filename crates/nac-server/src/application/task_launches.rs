@@ -6,6 +6,7 @@ use nac_core::{
     store::{self, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest},
     workspace::task_worktree,
 };
+mod scheduled;
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub(crate) struct TaskLaunchSourceInfo {
@@ -62,6 +63,31 @@ impl<'a> TaskLaunchApplication<'a> {
         admission: tokio::sync::OwnedRwLockReadGuard<()>,
         authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
     ) -> Result<TaskLaunchRecord> {
+        self.start_prepared(request, admission, authorization, None)
+            .await
+    }
+
+    async fn start_with_scheduled(
+        &self,
+        request: TaskLaunchRequest,
+        scheduled: Option<store::PreparedFreshTaskLaunch>,
+    ) -> Result<TaskLaunchRecord> {
+        let admission = self.manager.inner.task_preparations.admit().await?;
+        self.start_prepared(request, admission, None, scheduled)
+            .await
+    }
+
+    async fn start_prepared(
+        &self,
+        request: TaskLaunchRequest,
+        admission: tokio::sync::OwnedRwLockReadGuard<()>,
+        authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
+        scheduled: Option<store::PreparedFreshTaskLaunch>,
+    ) -> Result<TaskLaunchRecord> {
+        anyhow::ensure!(
+            authorization.is_none() || scheduled.is_none(),
+            "conflict: native and scheduled preparation ownership are mutually exclusive"
+        );
         request.validate()?;
         anyhow::ensure!(
             self.manager.managed_host().is_none(),
@@ -69,9 +95,10 @@ impl<'a> TaskLaunchApplication<'a> {
         );
         let manager = self.manager.clone();
         let (reply, response) = tokio::sync::oneshot::channel();
+        let wait_for_preparation = scheduled.is_some();
         // Register before source resolution. HTTP cancellation cannot detach
         // blocking store calls, Git, or publication from the serving lifetime.
-        tokio::spawn(async move {
+        let preparation = tokio::spawn(async move {
             let _admission = admission;
             let prepared = Self::resolve_and_reserve(&manager, request).await;
             let (mut record, lease) = match prepared {
@@ -121,7 +148,12 @@ impl<'a> TaskLaunchApplication<'a> {
                     record.phase,
                     TaskLaunchPhase::Ready | TaskLaunchPhase::Cancelled
                 ) {
-                    if let Err(error) = Self::prepare(&manager, record.clone()).await {
+                    let scheduled_occurrence = scheduled
+                        .as_ref()
+                        .map(|launch| launch.receipt().occurrence_id.clone());
+                    if let Err(error) = Self::prepare(&manager, record.clone(), scheduled).await {
+                        let needs_human =
+                            error.is::<nac_core::permissions::ScheduledProjectAdmissionRequired>();
                         let path = manager.inner.store_path.clone();
                         let id = record.request.request_id;
                         let _ = store::spawn_blocking_store_caller(move || -> Result<()> {
@@ -145,11 +177,24 @@ impl<'a> TaskLaunchApplication<'a> {
                             Ok(())
                         })
                         .await;
+                        if let Some(occurrence) = scheduled_occurrence.filter(|_| needs_human) {
+                            let path = manager.inner.store_path.clone();
+                            let _=store::spawn_blocking_store_caller(move||store::fail_fresh_heartbeat_before_run(&path,&occurrence,store::HeartbeatOutcome::NeedsHumanAction,"Scheduled workspace preparation requires human action under ordinary Local policy.",super::heartbeats::epoch_ms())).await;
+                        }
                     }
                 }
             }
         });
-        response.await.context("task launch response stopped")?
+        let response = response.await.context("task launch response stopped");
+        // Human calls return their durable reservation immediately. The fresh
+        // scheduler's preparation port awaits this same accepted operation, so
+        // its stop boundary cannot detach Git/runtime/publication or error ack.
+        if wait_for_preparation {
+            preparation
+                .await
+                .context("scheduled task preparation stopped")?;
+        }
+        response?
     }
 
     async fn resolve_and_reserve(
@@ -238,7 +283,11 @@ impl<'a> TaskLaunchApplication<'a> {
         .await?
     }
 
-    async fn prepare(manager: &SessionManager, launch: TaskLaunchRecord) -> Result<()> {
+    async fn prepare(
+        manager: &SessionManager,
+        launch: TaskLaunchRecord,
+        scheduled: Option<store::PreparedFreshTaskLaunch>,
+    ) -> Result<()> {
         let launch = Self::phase(manager, &launch, TaskLaunchPhase::PreparingWorkspace).await?;
         if launch.phase == TaskLaunchPhase::Cancelled {
             return Ok(());
@@ -246,9 +295,14 @@ impl<'a> TaskLaunchApplication<'a> {
         manager.inner.task_preparations.git.check_running()?;
         let path = manager.inner.store_path.clone();
         let work = launch.clone();
+        let unattended = scheduled.is_some();
         store::spawn_blocking_store_caller(move || -> Result<()> {
             let config = nac_core::runtime::NacConfig::load_from_cwd(&work.source.project_cwd)?;
-            task_worktree::authorize_human_preparation(&work, &config, &path)
+            if unattended {
+                task_worktree::authorize_scheduled_preparation(&work, &config, &path)
+            } else {
+                task_worktree::authorize_human_preparation(&work, &config, &path)
+            }
         })
         .await??;
         manager
@@ -261,10 +315,17 @@ impl<'a> TaskLaunchApplication<'a> {
         if launch.phase == TaskLaunchPhase::Cancelled {
             return Ok(());
         }
-        let snapshot = manager
-            .session_creation()
-            .create_retained_task_session(launch)
-            .await?;
+        let snapshot = if let Some(scheduled) = scheduled {
+            manager
+                .session_creation()
+                .create_scheduled_task_session(Some(launch), scheduled)
+                .await?
+        } else {
+            manager
+                .session_creation()
+                .create_retained_task_session(launch)
+                .await?
+        };
         let id = snapshot
             .metadata
             .session_id

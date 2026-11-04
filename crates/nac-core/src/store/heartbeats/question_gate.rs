@@ -39,26 +39,29 @@ pub(super) fn answered(
     schedule: &HeartbeatSchedule,
     goal_id: &str,
 ) -> Result<bool> {
+    let Some(session_id) = schedule.session_id.as_deref() else {
+        return Ok(false);
+    };
     let raw: Option<String> = conn.query_row(
         "SELECT json_extract(binding_json,'$._goal_question_gate') FROM heartbeat_schedules WHERE schedule_id=?1 AND session_id=?2",
-        params![schedule.schedule_id, schedule.session_id], |row| row.get(0),
+        params![schedule.schedule_id, session_id], |row| row.get(0),
     )?;
     let Some(raw) = raw else { return Ok(false) };
     let gate: QuestionGate = serde_json::from_str(&raw)?;
     if gate.schedule_version != schedule.version
         || gate.goal_id != goal_id
-        || !current_binding(conn, &schedule.session_id)?.same_target(&schedule.binding)
+        || !current_binding(conn, session_id)?.same_target(&schedule.binding)
     {
         return Ok(false);
     }
     let exact_source: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM heartbeat_occurrences WHERE session_id=?1 AND schedule_id=?2 AND occurrence_id=?3 AND schedule_version=?4 AND run_id=?5 AND state='settled' AND outcome='needs_human_action' AND coalesce(provisional_outcome,'')!='needs_human_action')",
-        params![schedule.session_id,schedule.schedule_id,gate.occurrence_id,gate.schedule_version,gate.source_run_id], |row| row.get(0),
+        params![session_id,schedule.schedule_id,gate.occurrence_id,gate.schedule_version,gate.source_run_id], |row| row.get(0),
     )?;
     Ok(exact_source
         && super::super::task_questions::delivered_answer_for_source(
             conn,
-            &schedule.session_id,
+            session_id,
             &gate.request_id,
             &gate.source_run_id,
             goal_id,

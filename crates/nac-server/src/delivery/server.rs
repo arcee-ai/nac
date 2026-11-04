@@ -804,6 +804,12 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::heartbeats::inspect))
         .routes(routes!(delivery::heartbeats::control))
         .routes(routes!(delivery::heartbeats::acknowledge))
+        .routes(routes!(delivery::fresh_task_schedules::inventory))
+        .routes(routes!(delivery::fresh_task_schedules::inspect))
+        .routes(routes!(delivery::fresh_task_schedules::control))
+        .routes(routes!(
+            delivery::fresh_task_schedules::change_retained_allowance
+        ))
         .routes(routes!(delivery::task_launches::status))
         .routes(routes!(delivery::task_launches::cancel))
         .routes(routes!(delivery::task_launches::inventory))

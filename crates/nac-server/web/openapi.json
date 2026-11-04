@@ -3240,6 +3240,217 @@
         }
       }
     },
+    "/projects/{project_id}/task-schedules": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "get_project_task_schedules",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeartbeatSchedule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/control": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "control_project_task_schedule",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreshTaskScheduleControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/retained-allowance": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "change_project_task_retained_allowance",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreshTaskRetainedAllowanceChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshTaskRetainedAllowanceReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/{schedule_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "get_project_task_schedule",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshTaskScheduleInspection"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/providers/models": {
       "post": {
         "tags": [
@@ -13139,6 +13350,245 @@
           }
         }
       },
+      "FreshTaskDestination": {
+        "type": "object",
+        "description": "Explicit choices are retained; absent model/reasoning choices inherit the\ndestination's defaults when a new occurrence is prepared.",
+        "required": [
+          "project_id",
+          "retained_limit"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Used only to establish an unbound project's saved default branch.\nAn existing binding cannot be silently replaced by this value."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskLaunchReceipt": {
+        "type": "object",
+        "description": "Durable reservation data. The host allowance counts this row before any\nmaterialization and keeps it after occurrence-history or task deletion.",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "request",
+          "destination",
+          "binding",
+          "session_id",
+          "stop_requested",
+          "created_at_ms"
+        ],
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/HeartbeatBinding"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/FreshTaskDestination"
+          },
+          "first_input_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "initial_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initial_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskLaunchRequest"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "shared_directory": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "stop_requested": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FreshTaskRetainedAllowance": {
+        "type": "object",
+        "required": [
+          "revision",
+          "retained_limit",
+          "retained_count"
+        ],
+        "properties": {
+          "retained_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Includes partial preparations and deleted tasks, across all projects."
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FreshTaskRetainedAllowanceChange": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_revision",
+          "retained_limit"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskRetainedAllowanceReceipt": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "allowance"
+        ],
+        "properties": {
+          "allowance": {
+            "$ref": "#/components/schemas/FreshTaskRetainedAllowance"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FreshTaskScheduleControlRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "operation"
+        ],
+        "properties": {
+          "creator_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshTaskDestination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "$ref": "#/components/schemas/HeartbeatAction"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskScheduleInspection": {
+        "type": "object",
+        "required": [
+          "heartbeat",
+          "inventory",
+          "host_retained_limit",
+          "host_allowance",
+          "launches"
+        ],
+        "properties": {
+          "heartbeat": {
+            "$ref": "#/components/schemas/HeartbeatInspection"
+          },
+          "host_allowance": {
+            "$ref": "#/components/schemas/FreshTaskRetainedAllowance"
+          },
+          "host_retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FreshTaskLaunchReceipt"
+            }
+          },
+          "launches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskLaunchRecord"
+            }
+          }
+        }
+      },
       "FunctionCall": {
         "type": "object",
         "required": [
@@ -13644,6 +14094,12 @@
             "type": "integer",
             "format": "int64"
           },
+          "creator_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cwd": {
             "type": "string"
           },
@@ -13653,6 +14109,22 @@
               "null"
             ],
             "description": "Construction-time canonical Local workspace, checked again after\nrestore. Persisted display/relative paths alone are not an identity."
+          },
+          "fresh_task": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshTaskDestination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_configuration_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "type": [
@@ -13713,7 +14185,6 @@
         "required": [
           "occurrence_id",
           "schedule_id",
-          "session_id",
           "schedule_version",
           "due_first_ms",
           "due_last_ms",
@@ -13808,7 +14279,11 @@
             "format": "int64"
           },
           "session_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A fresh occurrence acquires its exact execution session at publication."
           },
           "settled_at_ms": {
             "type": [
@@ -13907,7 +14382,6 @@
         "type": "object",
         "required": [
           "schedule_id",
-          "session_id",
           "version",
           "state",
           "binding",
@@ -13947,7 +14421,11 @@
             "type": "string"
           },
           "session_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Existing-chat schedules bind a session. Standalone project schedules\nhave no owning execution session; the creator is separate provenance."
           },
           "spec": {
             "$ref": "#/components/schemas/HeartbeatSpec"

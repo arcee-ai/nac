@@ -101,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 169);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 173);
 for (const resource of [
   "POST /sessions/{session_id}/task-followup-delegations",
   "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}",
@@ -146,11 +146,17 @@ assert.equal("refreshSessionIntegrations" in api, false);
 assert.equal(NAC_API_SURFACE["GET /sessions/{session_id}/integrations"], "private:standalone session integration status");
 assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/integrations/refresh"], "private:standalone explicit session integration refresh");
 assert.equal("controlHeartbeat" in api, false);
+assert.equal("controlFreshTaskSchedule" in api, false);
+assert.equal("changeFreshTaskRetainedAllowance" in api, false);
 for (const [operation, owner] of [
   ["GET /heartbeats", "private:standalone Local heartbeat inventory"],
   ["GET /sessions/{session_id}/heartbeats/{schedule_id}", "private:standalone passive heartbeat history"],
   ["POST /sessions/{session_id}/heartbeats/control", "private:standalone human heartbeat control"],
   ["POST /sessions/{session_id}/heartbeats/attention", "private:standalone human result acknowledgement"],
+  ["GET /projects/{project_id}/task-schedules", "private:standalone Local interval task inventory"],
+  ["GET /projects/{project_id}/task-schedules/{schedule_id}", "private:standalone passive interval task history and retained resources"],
+  ["POST /projects/{project_id}/task-schedules/control", "private:standalone human interval task control"],
+  ["POST /projects/{project_id}/task-schedules/retained-allowance", "private:standalone human host retained allowance control"],
 ]) assert.equal(NAC_API_SURFACE[operation], owner);
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");
 const context = await client.transport.streamContext();
