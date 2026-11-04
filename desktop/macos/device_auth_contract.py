@@ -161,84 +161,93 @@ def main():
     assert all(marker not in normal_bytes for marker in [b'NAC_NATIVE_AUTH_FIXTURE_ROOT',
         b'NAC_NATIVE_AUTH_FIXTURE_ORIGIN', b'native-auth-fixture-model'])
     results = []
-    with AuthFixture() as service, DeviceProfile(build, service.origin) as profile:
-        arguments = ['__desktop-configuration', '--directory', str(profile.workspace), '--store-path', str(profile.store)]
-        preflight = subprocess.run([str(fixture_binary), *arguments], env=profile.environment,
-                                   cwd=profile.workspace, capture_output=True, timeout=15)
-        assert preflight.returncode == 0 and json.loads(preflight.stdout)['status'] == 'selected'
-        assert not profile.store.exists(), 'Configuration preflight opened the serving store'
-        without_channel = subprocess.run([str(fixture_binary), '--bind', '127.0.0.1:0',
-            '--directory', str(profile.workspace), '--store-path', str(profile.store), '--no-open'],
-            cwd=profile.workspace, env=profile.environment, capture_output=True, timeout=15)
-        assert without_channel.returncode != 0 and not profile.store.exists()
-        assert b'requires an owned ephemeral desktop launch' in without_channel.stderr
-        results.append({'scenario': 'serving-without-owned-channel', 'rejected_before_store': True})
-        pure_identity = subprocess.run([str(fixture_binary), '__desktop-identity'], env={'PATH': '/usr/bin:/bin',
-            'NAC_NATIVE_AUTH_FIXTURE_ROOT': '/invalid-not-owned', 'ARCEE_API_KEY': 'unused-canary'},
-            capture_output=True, timeout=10)
-        assert pure_identity.returncode == 0 and json.loads(pure_identity.stdout) == build
-        for scenario, environment, options in [
-            ('wrong-home', {**profile.environment, 'HOME': str(profile.root / 'other')}, arguments),
-            ('implicit-store', profile.environment, arguments[:-2]),
-            ('wrong-service', {**profile.environment, 'NAC_NATIVE_AUTH_FIXTURE_ORIGIN': 'https://provider.example.test'}, arguments),
-        ]:
-            refused = subprocess.run([str(fixture_binary), *options], env=environment,
-                                     cwd=profile.workspace, capture_output=True, timeout=15)
-            assert refused.returncode != 0 and not profile.store.exists(), 'Invalid preflight caused store effects'
-            results.append({'scenario': scenario, 'rejected_before_store': True})
+    profile = None
+    try:
+        with AuthFixture() as service:
+            profile = DeviceProfile(build, service.origin)
+            arguments = ['__desktop-configuration', '--directory', str(profile.workspace), '--store-path', str(profile.store)]
+            preflight = subprocess.run([str(fixture_binary), *arguments], env=profile.environment,
+                                       cwd=profile.workspace, capture_output=True, timeout=15)
+            assert preflight.returncode == 0 and json.loads(preflight.stdout)['status'] == 'selected'
+            assert not profile.store.exists(), 'Configuration preflight opened the serving store'
+            without_channel = subprocess.run([str(fixture_binary), '--bind', '127.0.0.1:0',
+                '--directory', str(profile.workspace), '--store-path', str(profile.store), '--no-open'],
+                cwd=profile.workspace, env=profile.environment, capture_output=True, timeout=15)
+            assert without_channel.returncode != 0 and not profile.store.exists()
+            assert b'requires an owned ephemeral desktop launch' in without_channel.stderr
+            results.append({'scenario': 'serving-without-owned-channel', 'rejected_before_store': True})
+            pure_identity = subprocess.run([str(fixture_binary), '__desktop-identity'], env={'PATH': '/usr/bin:/bin',
+                'NAC_NATIVE_AUTH_FIXTURE_ROOT': '/invalid-not-owned', 'ARCEE_API_KEY': 'unused-canary'},
+                capture_output=True, timeout=10)
+            assert pure_identity.returncode == 0 and json.loads(pure_identity.stdout) == build
+            for scenario, environment, options in [
+                ('wrong-home', {**profile.environment, 'HOME': str(profile.root / 'other')}, arguments),
+                ('implicit-store', profile.environment, arguments[:-2]),
+                ('wrong-service', {**profile.environment, 'NAC_NATIVE_AUTH_FIXTURE_ORIGIN': 'https://provider.example.test'}, arguments),
+            ]:
+                refused = subprocess.run([str(fixture_binary), *options], env=environment,
+                                         cwd=profile.workspace, capture_output=True, timeout=15)
+                assert refused.returncode != 0 and not profile.store.exists(), 'Invalid preflight caused store effects'
+                results.append({'scenario': scenario, 'rejected_before_store': True})
 
-        with OwnedDesktop(fixture_binary, build, profile, output / 'engine-first.log') as engine:
-            before = len(service.snapshot()['events'])
-            for origin in ['https://foreign.example.test', engine.origin.replace('127.0.0.1', 'localhost')]:
-                assert http(engine.origin + '/auth/arcee/login', 'POST', {}, origin)[0] == 403
-            assert len(service.snapshot()['events']) == before
-            assert http(engine.origin + '/sessions', 'POST', {}, engine.origin)[0] == 403
-            assert http(engine.origin + '/future-effect', 'POST', {}, engine.origin)[0] == 403
-            assert http(engine.origin + '/providers/models', 'POST', {'backend': 'openai-responses',
-                'api_key': 'local-never-send', 'base_url': 'https://never-call.example.test'}, engine.origin)[0] == 400
-            assert http(engine.origin + '/providers/models', 'POST', {'backend': 'arcee-auth',
-                'api_key': 'local-never-send'}, engine.origin)[0] == 400
-            prompt = start(engine, service)
-            approve(prompt)
-            assert poll(engine, prompt['login_id'])['state'] == 'complete'
-            credential = profile.root / 'nac-home/arcee_auth.json'
-            retained = credential.read_bytes()
-            state = json.loads(retained)
-            assert state['client_id'] == 'nac-cli' and state['auth_issuer'] == 'https://api.arcee.ai'
-            assert state.get('managed_bootstrap') is None
-            models_status, models = http(engine.origin + '/providers/models', 'POST', {'backend': 'arcee-auth'}, engine.origin)
-            assert models_status == 200 and models['models'][0]['id'] == 'native-auth-fixture-model'
-            for mode, error in [('denied', 'denied'), ('expired', 'expired'), ('timeout', 'expired')]:
-                with service.lock:
-                    service.device_mode = mode
+            with OwnedDesktop(fixture_binary, build, profile, output / 'engine-first.log') as engine:
+                before = len(service.snapshot()['events'])
+                for origin in ['https://foreign.example.test', engine.origin.replace('127.0.0.1', 'localhost')]:
+                    assert http(engine.origin + '/auth/arcee/login', 'POST', {}, origin)[0] == 403
+                assert len(service.snapshot()['events']) == before
+                assert http(engine.origin + '/sessions', 'POST', {}, engine.origin)[0] == 403
+                assert http(engine.origin + '/future-effect', 'POST', {}, engine.origin)[0] == 403
+                assert http(engine.origin + '/providers/models', 'POST', {'backend': 'openai-responses',
+                    'api_key': 'local-never-send', 'base_url': 'https://never-call.example.test'}, engine.origin)[0] == 400
+                assert http(engine.origin + '/providers/models', 'POST', {'backend': 'arcee-auth',
+                    'api_key': 'local-never-send'}, engine.origin)[0] == 400
                 prompt = start(engine, service)
                 approve(prompt)
-                failed = poll(engine, prompt['login_id'])
-                assert failed['state'] == 'failed' and error in failed['error'].lower()
-                assert credential.read_bytes() == retained, 'Failed login changed the old credential'
-                results.append({'scenario': mode, 'actual_owner_failed': True, 'old_credential_preserved': True})
-            with service.lock:
-                service.device_mode = 'hold'
-            canceled = start(engine, service)
-            approve(canceled)
-            assert http(engine.origin + '/auth/arcee/login/' + canceled['login_id'], 'DELETE', origin=engine.origin)[0] == 204
-            assert http(engine.origin + '/auth/arcee/login/' + canceled['login_id'])[0] == 404
-            assert credential.read_bytes() == retained
-        starts = sum(event['kind'] == 'device_started' for event in service.snapshot()['events'])
-        with OwnedDesktop(fixture_binary, build, profile, output / 'engine-restart.log') as restarted:
-            status, auth = http(restarted.origin + '/auth')
-            assert status == 200 and any(value['provider'] == 'arcee' and value['signed_in'] for value in auth['providers'])
-            assert http(restarted.origin + '/auth/arcee/login/' + canceled['login_id'])[0] == 404
-            assert credential.read_bytes() == retained
-            assert starts == sum(event['kind'] == 'device_started' for event in service.snapshot()['events'])
-        for command in [('arcee-auth', 'logout'), ('upgrade',)]:
-            refused = subprocess.run([str(fixture_binary), *command], env=profile.environment, capture_output=True, timeout=10)
-            assert refused.returncode != 0 and b'does not admit effectful CLI commands' in refused.stderr
-            assert credential.read_bytes() == retained
-        profile_root = profile.root
-        results.extend([{'scenario': 'success', 'actual_owner_complete': True},
-                        {'scenario': 'cancel-restart', 'old_handle_404': True, 'no_start_replay': True},
-                        {'scenario': 'closed-effects-and-origins', 'rejected': True}])
+                assert poll(engine, prompt['login_id'])['state'] == 'complete'
+                credential = profile.root / 'nac-home/arcee_auth.json'
+                retained = credential.read_bytes()
+                state = json.loads(retained)
+                assert state['client_id'] == 'nac-cli' and state['auth_issuer'] == 'https://api.arcee.ai'
+                assert state.get('managed_bootstrap') is None
+                models_status, models = http(engine.origin + '/providers/models', 'POST', {'backend': 'arcee-auth'}, engine.origin)
+                assert models_status == 200 and models['models'][0]['id'] == 'native-auth-fixture-model'
+                for mode, error in [('denied', 'denied'), ('expired', 'expired'), ('timeout', 'expired')]:
+                    with service.lock:
+                        service.device_mode = mode
+                    prompt = start(engine, service)
+                    approve(prompt)
+                    failed = poll(engine, prompt['login_id'])
+                    assert failed['state'] == 'failed' and error in failed['error'].lower()
+                    assert credential.read_bytes() == retained, 'Failed login changed the old credential'
+                    results.append({'scenario': mode, 'actual_owner_failed': True, 'old_credential_preserved': True})
+                with service.lock:
+                    service.device_mode = 'hold'
+                canceled = start(engine, service)
+                approve(canceled)
+                assert http(engine.origin + '/auth/arcee/login/' + canceled['login_id'], 'DELETE', origin=engine.origin)[0] == 204
+                assert http(engine.origin + '/auth/arcee/login/' + canceled['login_id'])[0] == 404
+                assert credential.read_bytes() == retained
+            starts = sum(event['kind'] == 'device_started' for event in service.snapshot()['events'])
+            with OwnedDesktop(fixture_binary, build, profile, output / 'engine-restart.log') as restarted:
+                status, auth = http(restarted.origin + '/auth')
+                assert status == 200 and any(value['provider'] == 'arcee' and value['signed_in'] for value in auth['providers'])
+                assert http(restarted.origin + '/auth/arcee/login/' + canceled['login_id'])[0] == 404
+                assert credential.read_bytes() == retained
+                assert starts == sum(event['kind'] == 'device_started' for event in service.snapshot()['events'])
+            for command in [('arcee-auth', 'logout'), ('upgrade',)]:
+                refused = subprocess.run([str(fixture_binary), *command], env=profile.environment, capture_output=True, timeout=10)
+                assert refused.returncode != 0 and b'does not admit effectful CLI commands' in refused.stderr
+                assert credential.read_bytes() == retained
+            profile_root = profile.root
+            results.extend([{'scenario': 'success', 'actual_owner_complete': True},
+                            {'scenario': 'cancel-restart', 'old_handle_404': True, 'no_start_replay': True},
+                            {'scenario': 'closed-effects-and-origins', 'rejected': True}])
+    except BaseException:
+        if profile is not None:
+            profile.__exit__(*sys.exc_info())
+        raise
+    else:
+        profile.__exit__(None, None, None)
     assert not profile_root.exists()
     report = {'source': build['source_revision'], 'engine_identity': build,
         'fixture_engine_sha256': hashlib.file_digest(fixture_binary.open('rb'), 'sha256').hexdigest(),
