@@ -76,7 +76,18 @@ Credentialed publication does not execute untrusted cached builds or candidate c
 
 Ordinary `pull_request` runs share a concurrency group only with the same PR
 number and cancel superseded runs on synchronize or base-ref edits. Title/body
-edits, ready transitions and reopen events queue without cancelling active work. Push/tag/manual runs have unique run groups
+edits, ready transitions and reopen events queue without cancelling active work.
+A title or body edit skips the test jobs only when a full run of the same PR
+passed on the same head and merge commit, found through its
+`qualified-<merge sha>` artifact. The merge commit's parents must match the
+event's head and base, and every later run on that head must have succeeded,
+apart from a pending edit run that was replaced before any job started. A rerun
+never reuses: re-running all jobs runs full qualification, and re-running failed
+jobs of a reuse run fails until all jobs are rerun.
+`Required PR checks` then requires that bound run, a fresh source-security
+result and every other job skipped. Reuse runs never create the artifact. Any
+other result, or an API or artifact failure, runs full qualification. A failed
+artifact upload only costs a later reuse, never the required check. Push/tag/manual runs have unique run groups
 and `cancel-in-progress=false`, so their pending slots cannot replace one another.
 The separate release-preparation/publication workflow remains non-cancellable.
 The reusable managed workflow retains unique run/attempt groups; a superseded PR's

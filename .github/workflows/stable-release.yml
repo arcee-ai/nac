@@ -18,7 +18,11 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     outputs:
+      reused_run: ${{ steps.metadata.outputs.reused_run }}
       run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
       sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
       version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
@@ -50,6 +54,17 @@ jobs:
             echo "tag=$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Reuse a qualified run for a title or body edit
+        id: metadata
+        if: github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node .github/scripts/pr-checks.mjs metadata-reuse >> "$GITHUB_OUTPUT"
+
       - name: Capture CI source identity
         id: ci
         if: >-
@@ -58,10 +73,11 @@ jobs:
           github.event_name == 'workflow_dispatch'
         env:
           SOURCE_SHA: ${{ github.sha }}
+          REUSED_RUN: ${{ steps.metadata.outputs.reused_run }}
         run: |
           version="$(tr -d '[:space:]' < version.txt)"
           {
-            echo "run=true"
+            if [ -n "$REUSED_RUN" ]; then echo "run=false"; else echo "run=true"; fi
             echo "sha=$SOURCE_SHA"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
@@ -581,6 +597,17 @@ jobs:
           MANAGED_APPLICABLE: ${{ needs.prepare.outputs.managed_applicable }}
           EXPECTED_SHA: ${{ github.sha }}
         run: node .github/scripts/pr-checks.mjs aggregate
+      - name: Record this merge candidate as qualified
+        if: github.event_name == 'pull_request' && needs.prepare.outputs.reused_run == ''
+        run: git rev-parse HEAD > "$RUNNER_TEMP/qualified"
+      - name: Upload the qualified candidate marker
+        if: github.event_name == 'pull_request' && needs.prepare.outputs.reused_run == ''
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qualified-${{ github.sha }}
+          path: ${{ runner.temp }}/qualified
+          retention-days: 14
 
   publish:
     if: >-

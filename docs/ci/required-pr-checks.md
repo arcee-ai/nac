@@ -75,6 +75,14 @@ non-applicable managed work may skip. Missing, failed, pending, cancelled and
 unexpectedly skipped expected work fail closed. Tests live in
 `.github/scripts/pr-checks.test.mjs` and adjacent workflow/security contracts.
 
+A cancelled run stays red, and its aggregate carries a `Cancelled run with no failed
+job` warning when no job failed. That usually means a newer run superseded
+it, but the aggregate cannot prove this and a job timeout also reports as
+cancelled, so check for a newer run of the same head. Any failed job takes
+precedence and is named, alongside the jobs that were cancelled. `quality` and
+`test` only summarize their dependencies, so they don't count as failed when a
+dependency was cancelled. Cancellation is not evidence of a flaky test.
+
 Docs-only changes still emit the complete aggregate, with managed explicitly
 non-applicable. Rust, web, API, Docker, workflow and script changes run managed
 coverage. No merge queue or `merge_group` contract is introduced. Nested reusable
