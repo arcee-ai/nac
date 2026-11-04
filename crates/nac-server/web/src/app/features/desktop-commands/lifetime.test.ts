@@ -21,6 +21,46 @@ describe("desktop document retirement and connection loss", () => {
     expect(unmount).not.toHaveBeenCalled();
   });
 
+  it("keeps successful engine reads and the live runtime through an offline hint", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const report = vi.fn();
+    const port: DesktopCommandPort = {
+      connect: () => () => {},
+      connectLifetime: () => () => {},
+      reportConnectionLost: report,
+    };
+    const response = { messages: [] };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>(async () => Response.json(response))
+      .mockImplementationOnce(() => pending.promise);
+    const runtime = createNativeRuntime({
+      scope: {
+        owner: "o",
+        profile: "p",
+        organization: "g",
+        host: "h",
+        incarnation: "i",
+        endpoint: "/engine",
+        release: "r",
+      },
+      client: createNacClient({ endpoint: "/engine", fetch: desktopReadFetch(port, fetch) }),
+    });
+    const close = vi.spyOn(runtime, "close");
+    const unmount = vi.fn();
+    closers.push(installDesktopLifetime(port, runtime, unmount, window));
+    const read = runtime.api.getSession("same");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    window.dispatchEvent(new Event("offline"));
+    pending.resolve(Response.json(response));
+    await expect(read).resolves.toEqual(response);
+    await expect(runtime.api.getSession("same")).resolves.toEqual(response);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(report).not.toHaveBeenCalled();
+    expect(runtime.isClosed()).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(unmount).not.toHaveBeenCalled();
+  });
+
   it("aborts the real runtime before unmount and disconnect, and fences late reads", async () => {
     const pending = Promise.withResolvers<Response>();
     const fetch = vi.fn<typeof globalThis.fetch>(() => pending.promise);
@@ -58,7 +98,7 @@ describe("desktop document retirement and connection loss", () => {
     const retired = expect(read).rejects.toMatchObject({ name: "AbortError" });
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     window.dispatchEvent(new Event("offline"));
-    expect(connectionLost).toHaveBeenCalledOnce();
+    expect(connectionLost).not.toHaveBeenCalled();
     dispose();
     dispose();
     await retired;
@@ -66,7 +106,7 @@ describe("desktop document retirement and connection loss", () => {
     pending.resolve(Response.json({ messages: [] }));
     await Promise.resolve();
     window.dispatchEvent(new Event("offline"));
-    expect(connectionLost).toHaveBeenCalledOnce();
+    expect(connectionLost).not.toHaveBeenCalled();
     expect(unmount).toHaveBeenCalledOnce();
   });
 
