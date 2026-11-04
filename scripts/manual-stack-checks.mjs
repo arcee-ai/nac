@@ -78,7 +78,7 @@ export async function inspectChecks(pr, rules, { get, pages }) {
       } else if (!required.has(check.context)) required.set(check.context, positive(app) ? app : null);
     }
   }
-  const provenance = { workflow: WORKFLOW, selected: null, jobs: [], superseded: [] };
+  const provenance = { workflow: WORKFLOW, selected: null, jobs: [], merges: [], superseded: [] };
   const authoritative = new Set();
   try {
     const workflow = await get('actions/workflows/stable-release.yml');
@@ -88,8 +88,9 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     // Observe new pending/failing pipelines even before they have check rows.
     // Do not use their names to supersede records from any other pipeline.
     const other = new Map();
-    for (const run of runs.filter(r => r.workflow_id !== workflow.id && r.event === 'pull_request' &&
+    for (const run of runs.filter(r => r.workflow_id !== workflow.id &&
       r.pull_requests?.some(p => p.number === pr.number))) {
+      insist(['pull_request', 'pull_request_target'].includes(run.event), 'Other workflow event is unproven');
       insist(positive(run.id) && positive(run.workflow_id) && positive(run.run_number) && positive(run.run_attempt) &&
         typeof run.path === 'string' && sameRepo(run.repository) && sameRepo(run.head_repository) &&
         run.head_sha === pr.head.sha && run.head_branch === pr.head.ref &&
@@ -114,7 +115,14 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     insist(selected.status === 'completed' && selected.conclusion === 'success',
       `Latest Stable run ${selected.id} attempt ${selected.run_attempt}: ${state(selected)}`);
     const commits = new Map();
-    async function testedMerge(run) {
+    async function commit(sha) {
+      insist(SHA.test(sha), 'Git commit identity is unavailable');
+      if (!commits.has(sha)) commits.set(sha, await get(`git/commits/${sha}`));
+      const value = commits.get(sha);
+      insist(value.sha === sha && SHA.test(value.tree?.sha), 'Git commit/tree identity is unavailable');
+      return value;
+    }
+    async function testedMerge(run, current = false) {
       context(run, pr, workflow);
       const refs = run.referenced_workflows;
       insist(refs?.length > 0 && refs.every(ref => SHA.test(ref.sha) &&
@@ -122,13 +130,28 @@ export async function inspectChecks(pr, rules, { get, pages }) {
         ref.path.startsWith(`${REPO}/.github/workflows/`) && ref.path.endsWith(`@${ref.sha}`)) &&
         new Set(refs.map(ref => ref.sha)).size === 1, 'Tested merge identity is unavailable/ambiguous');
       const sha = refs[0].sha;
-      if (!commits.has(sha)) commits.set(sha, await get(`git/commits/${sha}`));
-      const commit = commits.get(sha);
-      insist(commit.sha === sha && JSON.stringify(commit.parents?.map(p => p.sha)) ===
-        JSON.stringify([pr.base.sha, pr.head.sha]), 'Tested merge does not bind the current base/head');
+      if (current) insist(SHA.test(pr.merge_commit_sha) && sha === pr.merge_commit_sha,
+        'Tested merge is not the current PR merge identity');
+      const merged = await commit(sha);
+      insist(merged.parents?.length === 2 && merged.parents[1].sha === pr.head.sha,
+        'Tested merge does not bind the exact current head');
+      const parent = merged.parents[0].sha;
+      if (parent !== pr.base.sha) insist(positive(pr.stack?.number) && pr.stack.position > 1,
+        'Prepared base is not an upper native-stack member');
+      // The caller already proved B is H's ancestor in its complete authored
+      // comparison. Native stacks prepare B through a lower test merge: qualify
+      // its complete tree, including modes/blobs, never arbitrary ancestry.
+      const base = await commit(pr.base.sha), head = await commit(pr.head.sha);
+      const prepared = await commit(parent);
+      insist(prepared.tree.sha === base.tree.sha, 'Prepared base tree differs from current declared base');
+      insist(merged.tree.sha === head.tree.sha, 'Tested merge tree differs from the current head');
+      if (!provenance.merges.some(m => m.sha === sha)) provenance.merges.push({ sha,
+        parents: [parent, pr.head.sha], baseTree: base.tree.sha, preparedBaseTree: prepared.tree.sha,
+        headTree: head.tree.sha, mergeTree: merged.tree.sha,
+        kind: parent === pr.base.sha ? 'direct' : 'native-stack' });
       return sha;
     }
-    provenance.selected.testedMerge = await testedMerge(selected);
+    provenance.selected.testedMerge = await testedMerge(selected, true);
     const jobs = await pages(`actions/runs/${selected.id}/jobs?filter=latest`, 'jobs');
     insist(jobs.length > 0 && new Set(jobs.map(j => j.name)).size === jobs.length &&
       new Set(jobs.map(j => j.id)).size === jobs.length,
@@ -157,6 +180,7 @@ export async function inspectChecks(pr, rules, { get, pages }) {
       const historical = matches[0];
       if (!historical) continue; // Never clear another app/workflow/event by name.
       const merge = await testedMerge(historical);
+      let oldAttempt = historical.run_attempt;
       if (historical.id === selected.id) {
         // Partial reruns reuse the suite. Prove this exact old execution was
         // replaced by the job returned by the API's latest-executions view.
@@ -171,13 +195,14 @@ export async function inspectChecks(pr, rules, { get, pages }) {
           replacement && old.run_attempt < replacement.run_attempt &&
           replacement.run_attempt <= selected.run_attempt,
         'Partial-rerun supersession is ambiguous');
+        oldAttempt = old.run_attempt;
       } else {
         insist(historical.run_number < selected.run_number, 'Historical run is not older');
       }
       record.disposition = 'superseded';
       record.supersededBy = { ...provenance.selected, jobs: provenance.jobs.map(j => j.id) };
       provenance.superseded.push({ check: check.id, run: historical.id,
-        attempt: historical.run_attempt, testedMerge: merge, by: record.supersededBy });
+        attempt: oldAttempt, testedMerge: merge, by: record.supersededBy });
     }
     const after = await get(`actions/runs/${selected.id}`);
     insist(stamp(after) === stamp(selected), 'Latest workflow attempt changed during validation');

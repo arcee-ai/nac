@@ -118,8 +118,9 @@ export function createHelper(transport = ghTransport, {
       if (threads.nodes.some(t => t.isResolved !== true)) blockers.push('Unresolved review conversations');
       if (!threads.pageInfo.hasNextPage) {
         const after = await get(`pulls/${pr.number}`);
-        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha],
-          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha]), 'PR head/base changed during validation');
+        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha, after.merge_commit_sha],
+          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha, pr.merge_commit_sha]),
+        'PR head/base or current merge changed during validation');
         return evidence;
       }
       insist(threads.pageInfo.endCursor && threads.pageInfo.endCursor !== cursor, 'Invalid review pagination');

@@ -3,6 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { authoredDelta, createHelper, ghTransport, main } from './manual-stack-override.mjs';
 
 const sha = letter => letter.repeat(40);
@@ -17,7 +18,8 @@ function diff(offset = 1, text = 'new', blob = '2222222') {
 function fixture() {
   const repo = { full_name: 'arcee-ai/nac' };
   const make = (number, head, base, baseRef) => ({ number, title: `Layer ${number}`, state: 'open',
-    merged: false, merged_at: null, draft: false, mergeable: true, mergeable_state: 'blocked', changed_files: 1,
+    merged: false, merged_at: null, merge_commit_sha: sha(number === 11 ? '9' : '8'),
+    draft: false, mergeable: true, mergeable_state: 'blocked', changed_files: 1,
     head: { ref: `codex/${number}`, sha: sha(head), repo }, base: { ref: baseRef, sha: sha(base), repo } });
   const f = { prs: [make(11, 'a', 'b', 'dev'), make(12, 'c', 'a', 'codex/11')],
     viewer: { login: 'allisoneer', id: 20910163, type: 'User' }, calls: [],
@@ -121,8 +123,16 @@ function fixture() {
       return ok(f.oldJobs[id]);
     }
     if (endpoint.includes('/git/commits/')) {
-      const pr = f.prs.find(p => endpoint.endsWith(sha(p.number === 11 ? '9' : '8')));
-      return ok({ sha: sha(pr.number === 11 ? '9' : '8'), parents: [{ sha: pr.base.sha }, { sha: pr.head.sha }], ...f.commitOverrides });
+      const id = endpoint.split('/').at(-1);
+      const tree = s => f.trees?.[s] ?? sha(({ a: '1', b: '3', c: '2', d: '4', e: '5' })[s[0]] ?? '0');
+      if (id === f.unavailableCommit) throw new Error('Git commit API unavailable');
+      const pr = f.prs.find(p => id === sha(p.number === 11 ? '9' : '8'));
+      if (pr) return ok({ sha: id, tree: { sha: tree(pr.head.sha) }, parents: [
+        { sha: f.syntheticBase && pr.number === 12 ? sha('6') : pr.base.sha },
+        { sha: pr.head.sha }], ...f.commitOverrides });
+      const prepared = f.prs.find(p => f.syntheticBase && p.number === 12 && id === sha('6'));
+      if (prepared) return ok({ sha: id, tree: { sha: f.preparedBaseTree ?? tree(prepared.base.sha) }, parents: [] });
+      return ok({ sha: id, tree: { sha: id === f.prs[0].base.sha ? f.baseTree ?? tree(id) : tree(id) }, parents: [] });
     }
     if (endpoint.includes('/compare/')) {
       if (accept === 'application/vnd.github.diff') return ok(diff(f.offset, f.text));
@@ -324,6 +334,7 @@ test('matrix jobs and partial reruns bind exact latest executions and retain fai
   assert.equal(old.disposition, 'superseded');
   assert.equal(old.output.summary, 'old matrix failure');
   assert.equal(old.supersededBy.attempt, 2);
+  assert.equal(plan.members[0].checkProvenance.superseded.find(s => s.check === old.id).attempt, 1);
   assert.ok(plan.members[0].checkProvenance.jobs.some(j => j.attempt === 1), 'untouched jobs are explicitly carried');
   f.oldJobs[1100000].run_attempt = 2;
   assert.match((await f.preview()).members[0].blockers.join(), /Partial-rerun supersession is ambiguous/);
@@ -360,7 +371,7 @@ test('changed workflow attempt and PR head/base bookends cannot authorize a requ
   for (const field of ['head', 'base']) {
     const g = fixture();
     g.onReviewRead = current => { current.prs[0][field].sha = sha('f'); };
-    await assert.rejects(g.preview(), /head\/base changed/);
+    await assert.rejects(g.preview(), /head\/base.*changed/);
     assert.equal(g.writes().length, 0);
   }
 });
@@ -378,6 +389,88 @@ test('a newly changed check/status inventory cannot reuse a prior green snapshot
     assert.match(plan.members[0].blockers.join(), /Check\/status inventory changed/);
     assert.equal(f.writes().length, 0);
   }
+});
+
+test('positively associated PRtarget pipelines are gates before any check row exists', async t => {
+  for (const [status, conclusion] of [['queued', null], ['in_progress', null],
+    ['completed', 'failure'], ['completed', 'cancelled']]) await t.test(`${status}/${conclusion}`, async () => {
+    const f = fixture();
+    f.extraRuns = pr => [{ ...f.run(pr), id: 9000, workflow_id: 200,
+      path: '.github/workflows/cla.yml', event: 'pull_request_target', status, conclusion }];
+    const plan = await f.preview();
+    assert.match(plan.members[0].blockers.join(), /Workflow 9000 attempt 1/);
+    await assert.rejects(f.helper.execute(plan));
+    assert.equal(f.writes().length, 0);
+  });
+  const good = fixture();
+  good.extraRuns = pr => [{ ...good.run(pr), id: 9000, workflow_id: 200,
+    path: '.github/workflows/cla.yml', event: 'pull_request_target' }];
+  assert.deepEqual((await good.preview()).members[0].blockers, []);
+  good.extraRuns = pr => [{ ...good.run(pr), id: 9000, workflow_id: 200,
+    path: '.github/workflows/cla.yml', event: 'unknown_event' }];
+  assert.match((await good.preview()).members[0].blockers.join(), /event.*unproven/);
+});
+
+test('native stack prepared bases qualify only by current merge and exact complete trees', async () => {
+  const f = fixture(); f.syntheticBase = true;
+  const plan = await f.preview();
+  assert.ok(plan.members.every(m => m.blockers.length === 0));
+  assert.equal(plan.members[1].checkProvenance.selected.testedMerge, sha('8'));
+  assert.equal(f.writes().length, 0);
+});
+
+test('current-merge identity, exact head, known trees and API failures stay closed', async t => {
+  const cases = {
+    wrongM: f => { f.prs[0].merge_commit_sha = sha('f'); },
+    missingM: f => { delete f.prs[0].merge_commit_sha; },
+    wrongHeadParent: f => { f.commitOverrides = { parents: [{ sha: sha('b') }, { sha: sha('f') }] }; },
+    extraParent: f => { f.commitOverrides = { parents: [{ sha: sha('b') }, { sha: sha('a') }, { sha: sha('f') }] }; },
+    missingParent: f => { f.commitOverrides = { parents: [{ sha: sha('a') }] }; },
+    wrongMergeTree: f => { f.commitOverrides = { tree: { sha: sha('f') } }; },
+    missingTree: f => { f.commitOverrides = { tree: null }; },
+    wrongCommitResponse: f => { f.commitOverrides = { sha: sha('f') }; },
+    unavailableAPI: f => { f.unavailableCommit = sha('9'); },
+    unknownAssociatedHead: f => { f.extraRuns = pr => [{ ...f.run(pr), id: 9000, workflow_id: 200,
+      path: '.github/workflows/cla.yml', event: 'pull_request_target', head_sha: sha('f') }]; },
+    unknownAssociatedRepo: f => { f.extraRuns = pr => [{ ...f.run(pr), id: 9000, workflow_id: 200,
+      path: '.github/workflows/cla.yml', event: 'pull_request_target', repository: { full_name: 'other/repo' } }]; },
+    unknownAssociatedBase: f => { f.extraRuns = pr => { const p = clone(pr); p.base.sha = sha('f'); return [{
+      ...f.run(pr), id: 9000, workflow_id: 200, path: '.github/workflows/cla.yml',
+      event: 'pull_request_target', pull_requests: [p] }]; }; },
+  };
+  for (const [label, change] of Object.entries(cases)) await t.test(label, async () => {
+    const f = fixture(); change(f);
+    const plan = await f.preview();
+    assert.ok(plan.members[0].blockers.length, label);
+    await assert.rejects(f.helper.execute(plan));
+    assert.equal(f.writes().length, 0);
+  });
+  const changed = fixture();
+  changed.onReviewRead = current => { current.prs[0].merge_commit_sha = sha('f'); };
+  await assert.rejects(changed.preview(), /current merge changed/);
+  assert.equal(changed.writes().length, 0);
+});
+
+test('complete base trees reject changed modes, blobs, extra and missing paths', async t => {
+  const object = (type, bytes) => createHash('sha1').update(Buffer.concat([
+    Buffer.from(`${type} ${bytes.length}\0`), bytes,
+  ])).digest('hex');
+  const blob = value => object('blob', Buffer.from(value));
+  const tree = entries => object('tree', Buffer.concat(entries.map(([mode, name, value]) =>
+    Buffer.concat([Buffer.from(`${mode} ${name}\0`), Buffer.from(value, 'hex')]))));
+  const original = [['100644', 'file.txt', blob('original')]];
+  const variants = { mode: [['100755', 'file.txt', blob('original')]],
+    blob: [['100644', 'file.txt', blob('changed')]], missing: [],
+    extra: [...original, ['100644', 'z-extra.txt', blob('extra')]] };
+  for (const [label, entries] of Object.entries(variants)) await t.test(label, async () => {
+    const f = fixture(); f.syntheticBase = true;
+    f.trees = { [sha('a')]: tree(original) };
+    f.preparedBaseTree = tree(entries);
+    const plan = await f.preview();
+    assert.match(plan.members[1].blockers.join(), /Prepared base tree differs/);
+    await assert.rejects(f.helper.execute(plan));
+    assert.equal(f.writes().length, 0);
+  });
 });
 
 test('wrong login, numeric identity, type and expanded bypass each cause zero mutations', async () => {

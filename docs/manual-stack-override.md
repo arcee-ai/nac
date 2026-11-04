@@ -77,14 +77,21 @@ advances. No author code is automatically fixed, rebased or marked ready.
   explicit superseding run/attempt/job map. Only the NAC Stable workflow's
   historical GitHub Actions suites can be superseded: repository, app, workflow,
   pull-request event, PR, head and current base must match. The workflow's
-  referenced test-merge commit must have that exact base/head as its parents.
+  referenced test merge must be the current PR merge identity, with the exact
+  head as its second parent and the head's complete tree. For an upper native-stack
+  member, its prepared lower merge may supply the first parent only when its
+  complete tree equals the current declared base (including modes and blobs).
+  The ordinary linear authored comparison remains required; arbitrary ancestry
+  or partial file comparisons never establish this equivalence.
   The newest run and its latest job executions are selected regardless of their
   result; queued, running, failed or cancelled work cannot fall back to older
   green checks. Partial reruns require exact old/new job-attempt proof.
 - Other apps and workflows retain their check-record veto; their latest
   applicable workflow run must also finish acceptably. Names alone never
   establish supersession. Missing/ambiguous provenance, a changing run inventory
-  or a changed PR head/base stops validation. Required integration IDs remain
+  or a changed PR head/base/current-merge stops validation. Positively associated
+  `pull_request_target` runs, including CLA, are checked even before a check row
+  exists; unfamiliar associated events remain a HOLD. Required integration IDs remain
   effective, and matching commit statuses and checks must both pass. These
   bounded rules may conservatively hold an unfamiliar workflow for inspection.
 - Full immutable comparisons must contain 1–299 files. Binary changes, quoted
