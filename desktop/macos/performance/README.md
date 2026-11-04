@@ -1,0 +1,564 @@
+# Mac release performance protocol v1 (ALL-353)
+
+This directory defines a matched measurement, not a passing benchmark. Read
+[the investigation report](REPORT.md) before using results. Workload sizes and
+sample counts in [workloads.json](workloads.json) are experimental inputs, not
+accepted performance budgets. No optimized artifact has been measured here.
+
+## Allocated executable calibration
+
+The manually dispatched `macos-performance.yml` and `run.py` implement a bounded
+calibration stage. The workflow exposes calibration only. The allocated sources
+also contain a finite workload controller; collection admission is closed as
+described below, and no full-matrix execution has occurred.
+The stored allocation has null target/harness nomination and dispatch fields;
+`--calibrate` fails before launching commands until a separately approved,
+committed allocation matches all three. Manual workflow default is validation
+only. No workflow has been dispatched by this work.
+
+## Finite controller source milestone (unexecuted)
+
+`workloads.json` defines ten executable cells: fresh-profile/warm-cache launch,
+warm-store launch, four idle combinations (1/8 direct sessions with one PTY
+each, active/hidden), long transcript, streaming, noisy terminal and hide/reshow.
+`fixture.py` constructs20 AB/BA pairs for each, plus one proposed diagnostic
+observer-off pair per cell:400 principal arms and20 control arms. Off controls
+are retained separately and never substituted into the20-pair distributions.
+First useful workspace is an endpoint of the launch cells; its current AX
+milestone is not a paint measurement. Cold boot, ALL-344 consumer close/reopen,
+ALL-350 notifications, physical energy and the supported-OS/hardware matrix
+remain explicitly unavailable required evidence.
+
+The default validation command writes `finite-plan.json` with `executed=false`.
+The finite controller records a start receipt before each dispatch and a terminal
+receipt afterward, binding trial/pair/arm/control/phase, source and engine/assets
+identity, monotonic clock and phase/core deadline. A failed ownership, fixture,
+driver or deadline check stops dispatch and retains the remaining planned arms
+as censored. It never replaces failed pairs or summarizes only successful arms.
+Execution completion alone remains unqualified; raw signal loss stays unknown
+and performance distributions stay null.
+
+The seed builder uses existing model-config/project/direct-session/presentation
+and run APIs to create closed1-session,8-session and64-turn transcript stores.
+Every transcript turn must yield its exact completed assistant content before
+the next submission. The writer stops and its WAL must drain before byte-identical
+per-arm copies are admitted. The suite provider allows precisely those64 seed
+turns followed by42 streaming requests; additional/wrong requests fail closed.
+Streaming remains256 deltas at50ms, and terminal output remains600 batches of
+4096 bytes over30s. Producer receipts establish source bytes, not rendered bytes.
+The terminal command is submitted before its UI workload timer starts. After
+all600 full batches and the final scheduled interval, the producer appends a
+completion row to its existing exclusive JSONL file. The UI driver waits for
+that positive receipt inside the owned app operation, before trial completion
+and cleanup; Python then independently verifies every batch and completion row.
+Missing, partial or late completion fails within the existing deadlines, with
+failure cleanup retained. There is no post-cleanup grace period. Actual XCTest
+access to this file and app/PTY lifetime remain SDK/runtime preflight requirements;
+these source changes do not establish load/input overlap or collection admission.
+
+`PerformanceJourneys/testFiniteTrial` drives the normal UI, retains exact app
+launch ownership, supports launch-only warmup and active/hidden intervals, and
+requests100 characters on each input surface. Its observations explicitly leave
+trusted-event counts, load/input overlap, actual CSS/PTY dimensions, engine
+incarnation and frame samples unknown. Public typing API duration is not input
+latency. The source neither shortens the stream nor reduces the input count to
+fit the currently observed driver cadence.
+
+`--collect` refuses before any build/process/API/UI call, even if a caller invents
+nomination fields. `require_collection_admission()` names the missing calls:
+actual full-Xcode build/selection proof for `testFiniteTrial`; an independently bound
+native engine receipt enabling the existing user-terminal APIs to open/verify
+all session PTYs at120×36; equal actual CSS viewports; approved passive raw
+queue/frame/trusted-input observation and loss receipts; clock correlation and
+observer-off proof; exact H/P/T calibration and coordinator-confirmed quiet VM
+allocation. The browser adapter already uses version1 human terminal admission
+through its owned backend endpoint; the native adapter has only UI shell creation
+until that receipt exists. UI shell creation alone cannot prove cardinality or
+dimensions, so this asymmetry is an admission blocker. No shared hook or native
+endpoint discovery fallback was added.
+
+The added source adapter builds the driver once and invokes the real XCTest case
+per arm, retaining actual unskipped test summaries and cleanup receipts. Whether
+that invocation cadence fits the phase caps requires calibration; a cap overrun
+censors the run. Full SDK compilation and real H/P/T execution remain unverified.
+Current observer-on source uses the existing process sampler; product diagnostic
+export remains disabled pending the approved owner sink. Off disables that
+sampler while retaining controller/provider receipts. This is not yet complete
+observer overhead evidence. Sanitized nested trial receipts join the existing
+bounded export; profiles, databases and raw XCTest bundles remain private.
+
+Cleanup observation failures retain unresolved identities and a separate
+`cleanup_error`; they do not replace the original attempted-operation error or
+skip evidence export. If export fails, `export-failure.json` retains the attempt
+privately, and a sanitized attempt receipt is written when the output destination
+is available, marked `evidence_export_complete: false`. An unwritable output stays
+unavailable. An attempted calibration is never relabeled as admission refusal,
+and an observation failure never verifies recorded or whole-process cleanup.
+
+Validate the schema, full scope, 100-input requirement and phase accounting:
+
+```sh
+python3 -B desktop/macos/performance/run.py --output /tmp/mac-perf-contract-validation
+python3 -B -m unittest discover -s desktop/macos/performance -p 'test_*.py'
+```
+
+The evidence directory must be new. Calibration admission refusal also retains
+an explicit attempt receipt; it never becomes an empty successful run. The
+`process_usage.c` helper reads one same-user PID, brackets process identity,
+and emits fixed SDK-declared resource fields. Failed reads/identity uncertainty
+retain null metrics. CPU counters are retained raw with timebase metadata;
+CPU percentages require runtime unit calibration. No signaling or undocumented
+coalition API is added to this helper. PPID discovery is explicitly incomplete
+for XPC helpers and cannot establish whole-set totals or cleanup.
+
+Admission now requires immutable expected launch evidence before the first
+sample: an unreaped live `Popen` child plus its launch-time window/executable,
+the current observer process, or an actual XCTest launch receipt containing
+PID, executable and launch date. The first probe never supplies its own expected
+identity. Each observed result must match that evidence; exited handles,
+replacement births, mismatched executables and unknown identities retain null
+unattributed fields. Descendants seen only through PPID/name are candidates,
+not admitted resource samples. XCTest cleanup is registered before launch and
+before any fallible provenance/recording operation. Unknown ownership records
+failed cleanup without broadly terminating a bundle; failed cleanup or failed
+receipt retention cannot return successful calibration.
+
+Both Python paths consume ALL-354's actual `materialize_project` API, using
+explicit clean H and tools roots/full SHAs and the exact unchanged
+`PerformanceJourneys.swift` SHA256. The materializer writes only an absent
+canonical private destination outside those checkouts. Its returned project,
+`NACPerformanceUITests` scheme and selection receipt drive both builds; the
+validator receives that expected target and actual selection receipt. Calibration
+selects `NACPerformanceUITests/PerformanceJourneys/testCalibration`; finite arms
+select `NACPerformanceUITests/PerformanceJourneys/testFiniteTrial`. There is no
+ordinary-project/default-target fallback or copied H helper. ALL-354 retains
+ownership of the maintained Xcode project and its helper implementations.
+The runner checks actual generated
+`.xctestrun` metadata and an actual one-test passed/unskipped xcresult; a zero-test
+exit 0 is not qualification. Existing preconfigured Helper/no-auth policy is
+observed before and after; no permission changes or prompts are requested.
+
+Calibration also requires explicit `--tools-root` (the clean executing checkout),
+`--tools-sha` and `--performance-source-sha256`. The manual workflow supplies its
+existing `performance-tools` checkout path and the pinned unchanged Swift hash;
+the consumer checks the actual executing root and source bytes. Nomination and
+collection admission remain closed. Project/runner
+binding fixes neither foreign XCTest output writeability nor attachment transport,
+live PID ownership, raw observations or measurement acceptance. H's ALL-352
+terminal attachment collector is not a performance collector.
+
+Focused source/component controls can run with an explicitly supplied
+`NAC353_BINDING_FIXTURES` JSON containing `harness_root`, `harness_sha`,
+`tools_root`, `tools_sha` and `performance_source_sha256`:
+
+```sh
+NAC353_BINDING_FIXTURES=/absolute/path/to/exact-inputs.json python3 -B -m unittest discover -s desktop/macos/performance -p test_fixture.py -k HarnessBindingContract
+```
+
+Those controls use the real pinned H materializer/validator and caller-owned
+temporary projects. Their runner plists are labeled synthetic fixtures; no Xcode,
+application, provider or workload runs. They cover matching target/scheme/source
+and case identifiers, wrong target/configuration/source/selection, dirty identity,
+duplicate bundles, private cleanup and unchanged input hashes. The original wrong
+default-target calls failed against H's performance fixture before this repair;
+the same fixture bytes pass the repaired consumer. These controls do not establish
+actual SDK compilation, genuine generated-runner acceptance or native performance.
+`WorkflowCallerContract` separately parses the actual workflow's Python arguments
+in both modes and checks matching/mismatched root/hash metadata with a stubbed
+calibration lifecycle. It executes neither the workflow shell nor a calibration.
+
+The calibration creates one empty direct-session seed through real APIs,
+orderly stops/checkpoints it, clones identical stores, and uses one dummy local
+provider and the same private release engine bytes. This seed is for calibrating
+public UI access, not a substitute for the 64-turn benchmark. The native arm is
+an ordinary `app-build` with `LOCAL_APP`, Swift `-O`, no smoke definitions and
+Rust `--release --locked`. Safari is ordinary installed Safari with a private
+owned window; no WebDriver/AppleEvents preference or global setting is enabled.
+Only exact newly launched app/active-window identities receive public input.
+
+Both surfaces request 100 ASCII typing characters. Actual event receipts and
+event-to-paint/frame observations are unavailable in the normal target until
+separately approved observation sources exist. API scheduling, AX readiness,
+and AX WebContent point dimensions remain labelled calibration observations.
+They are not raw input latency, rendered frame distributions or verified CSS
+viewport dimensions. Any batching/timing revision requires actual calibration
+and identical versioned changes between arms; current batching remains one.
+
+The calibration deliberately reports `measurement_ready=false` and exits 2
+while required observations/full trials remain missing. It retains sanitized
+JSON/JSONL/logs, a hash index, failed attempts, capped-export omissions and known
+unsupported rows. Raw xcresult diagnostics, private binaries and profiles are
+not uploaded. Failed profiles are preserved; success of a test runner never
+proves missing XPC/process cleanup. No numerical product budget is generated.
+
+The v2 core cap is 12,600 seconds including first-step checkout/setup, builds,
+all planned phases, cleanup and export. The workflow adds a 600-second outer
+upload/final-cleanup envelope and a 220-minute timeout. Per-phase values are
+experiment guards. The 20 paired blocks and full required matrix remain future
+measurement obligations; cold/reopen/notifications/physical energy/OS gaps are
+explicit in `allocation-v2.json`. This calibration is a preparation milestone,
+not ALL-353 completion or release acceptance.
+
+Precise separate owner requests remain: complete bounded native telemetry
+retention instead of the engine's 64 KiB stderr tail, and an opt-in read-only
+document/paint observation source with clock/loss/overhead receipts. Any such
+target amendment needs ALL-344/common-owner agreement and a new exact nominated
+target, plus matching uninstrumented controls. None of those shared files or
+hooks is changed or assumed by this implementation.
+
+## Source-only observation schema and precise owner requests
+
+This is an interface proposal, **not implemented hooks or collected evidence**.
+Current `Calibration.environment()` explicitly sets `NAC_TELEMETRY=disabled`.
+No queue observations or zero-loss claim can be inferred from that state. Use
+the existing Rust `NAC_TELEMETRY=stderr` exporter when an approved fixture enables
+it in both arms; retain its actual `nac-telemetry ` records and
+`nac-telemetry-export ` receipts unchanged. Do not add another Rust queue,
+replacement exporter, metric vocabulary or core/HTTP DTO for this investigation.
+
+The fixture envelope would use `nac-mac-observation-v1` with these closed fields:
+
+| Field | Contract |
+| --- | --- |
+| `experiment`, `trial`, `arm`, `workload`, `window_state` | Versioned fixture IDs; native/browser and active/hidden remain separate |
+| `source_revision`, `binary_sha256`, `asset_tree` | Exact approved identity; instrumented/control artifact and enabled probes recorded separately |
+| `owner` | PID plus independently captured executable/launch identity; engine incarnation, document generation or terminal/controller/observer generation when applicable. Missing binding means unavailable |
+| `clock` | Actual clock name/value, time origin/synchronization receipt and uncertainty; decimal strings for wide integers. Unknown synchronization never becomes zero |
+| `sequence`, `kind` | Fixture-local decimal sequence and one of the bounded event kinds below; wrapper sequence is not a Rust producer sequence |
+| `observation` | Only the selected numeric/boolean fields, units, status and unavailable reason. Never prompt/transcript text, keystroke bytes, SQL, commands, environment or secrets |
+| `loss` | This source's capacity/accepted/dropped/exported/failures/truncation and terminal receipt, or explicit unknown/disabled; source layers have independent loss accounting |
+
+Proposed observation buffers are capped at 4,096 rows **and** 4 MiB, whichever
+comes first; an individual framed line is capped at 16 KiB. Oversized/newly
+dropped observations increment diagnostic loss counters; they never block the
+app/model loop or alter terminal ACK/retry/input behavior. Export chunks are at
+most 64 KiB. These are proposed instrumentation limits, not product budgets.
+Final source receipts are mandatory for a complete trace. Missing receipts,
+disabled probes, frame buffers that never emitted, queue overload, clock
+uncertainty and observed dropped rows remain explicit incomplete evidence.
+
+Exact requested owners/seams, before any implementation outside this directory:
+
+1. **Common App/Engine owner (ALL-344; startup builder remains its single writer):**
+   approve opt-in, content-free milestones at launch invocation, configuration
+   selected, exact engine receipt accepted, navigation start/finish, workspace
+   ready, window active/hidden and orderly stop. Bind each to the retained engine
+   receipt/document generation; navigation finish and UI readiness are not paint.
+   In `PreviewEngine.swift`'s existing diagnostic-read branch, propose a bounded
+   fixture sink that forwards only complete existing Rust telemetry/export-receipt
+   lines before the 64 KiB UI log tail truncates. Use the existing recorder and
+   its `recorder_id`, process ID, capacity, accepted/dropped/exported/failures,
+   receipt failures and `final_receipt`. Current exporter default capacity is
+   1,024, maximum 4,096. Preserve actual periodic/final accounting; do not invent
+   a zero-filled final receipt. Retain the record's existing clock/duration
+   semantics; a framer's arrival timestamp is not an operation-start timestamp.
+   Native framing/file failures need separate loss
+   counts. The sink must be off by default, generation-bound, nonblocking and
+   write only a precreated private fixture destination with no-follow handling.
+   No existing launch, app bridge, backend, approval or shutdown behavior changes.
+
+2. **Shared web input/render owner (coordinate ALL-351/352 and shared web ownership):**
+   propose the same read-only opt-in observation source on the same optimized
+   assets for both browser and WKWebView. Record trusted/untrusted event counts,
+   opaque event index, event timestamp/time-origin, processing start/end and
+   actual supported Event Timing entries, plus document/visibility generations.
+   Do not log typed characters or synthesize input. Feature-probe and retain
+   actual clock resolution/support: a missing Event Timing source stays missing.
+   Name rAF records `raf_callback`, never `frame_present`; rAF, AX values and
+   screenshot completion are not raw presentation proof. A supported compositor
+   or frame-presentation source with matching clocks must qualify any claimed
+   per-frame/presentation latency. If unavailable on the VM, keep that required
+   row unavailable; hitch aggregates do not fill it. Retire observation on the
+   existing document/runtime lifecycle, preserving transport and mutation policy.
+
+3. **Terminal SDK/runtime/renderer owners (ALL-352 and their shared owners):**
+   expose passive content-free snapshots of existing `UserTerminalInputPump`
+   `pendingBytes`, `hasActiveInput`, failure/uncertainty and its existing 16 KiB
+   pending limit. In `userTerminalConnection.ts`, observe pull receipt, retained
+   cursor bounds, gap/reset, renderer submission/completion and ACK advancement;
+   preserve decimal cursor strings. In `xtermAdapter.ts`, time the existing
+   public `terminal.write` parser callback. Parser completion and ACK are distinct
+   from frame presentation. Compute output backlog only from actual matching
+   retained/acknowledged offsets, with their clock/window status. Never retain
+   bytes or change the existing one-frame pull/ACK backpressure, revision fence,
+   no-replay rule, input admission, selected backend or generation ownership.
+
+ALL-354 continues to own the actual Xcode project/selection, public driver and
+supported platform collection. It must preserve ordinary baseline builds when
+the performance source is absent. Any approved target amendment requires a new
+exact source/binary identity, disabled/enabled probe controls and measured probe
+overhead before budget recommendations. This request does not allocate those
+shared files, assume a hook exists or authorize a job.
+
+## Prerequisites and reproducible preparation
+
+From the repository root, on the allocated Mac:
+
+```sh
+python3 desktop/macos/performance/preflight.py --output /tmp/mac-perf-preflight.json
+```
+
+The output path must be new and its parent must exist. Exit 2 means NO-GO.
+Only allowlisted hardware/display/console fields are retained; serial numbers,
+user names, device UUIDs and the raw system profiler/ioreg payloads are discarded.
+An exit 0 is prerequisite capture only. It never establishes an active renderer,
+trusted input, exclusive workload conditions or acceptance. If console status
+is unknown, fail closed. Do not unlock the console, enable automation, grant TCC
+permissions, change accessibility/input sources, or change global settings.
+
+Obtain an explicit immutable source nomination and exclusive run allocation
+from the coordinator. On this shared host, notify the coordinator *before*
+requesting `gate.py exclusive`; it reserves all three Rust slots and the browser
+slot, but cannot prevent unrelated npm/compiler work outside those leases.
+Record coordinator allocation plus start/end observations of competing load.
+Do not kill another job. Reject contaminated blocks; retain them as failures.
+
+Run fresh-worktree setup through the setup lease. Build within a Rust lease:
+
+```sh
+python3 /tmp/nac-35-01a18fbf/gate.py setup make setup
+python3 /tmp/nac-35-01a18fbf/gate.py rust /absolute/path/to/private-build-command
+```
+
+The private build command must use `cargo build --release --locked -p nac-server
+--bin nac-web`, then copy the resulting executable from the leased
+`CARGO_TARGET_DIR/release/nac-web` into a private artifact directory before
+releasing the lease. Do not copy or reuse a shared binary outside its lease.
+Record Git head, base, clean status/diff, `Cargo.lock` digest, `rustc -Vv`, Cargo
+version, selected SDK, Swift version, target, all flags, build stdout/stderr,
+engine `--version` and SHA-256. Record the committed embedded asset tree with
+`git rev-parse HEAD:crates/nac-server/assets/dist` and hash the asset files.
+No Vite server or second frontend. Asset drift checks use the existing writer.
+
+For the accepted preview revision, its existing overrides can bundle that
+private release engine; the default `preview.sh` engine is debug:
+
+```sh
+NAC_MAC_SKIP_ENGINE_BUILD=1 NAC_MAC_ENGINE=/absolute/private/nac-web \
+  NAC_MAC_OUTPUT=/absolute/private/bundle \
+  python3 /tmp/nac-35-01a18fbf/gate.py browser ./desktop/macos/preview.sh build
+```
+
+Swift already uses `-O -target arm64-apple-macosx14.0`. Hash both bundle
+executables, Info.plist, source list and actual linked framework/SDK identities.
+Retain `codesign -dvv` output and actual signing mode; ad-hoc development is not
+distribution qualification. A future nomination may change build commands;
+record them exactly rather than applying moving branches to this worktree.
+
+Builds finish before timed trials. Measurement runs only private binaries:
+
+```sh
+python3 /tmp/nac-35-01a18fbf/gate.py exclusive /absolute/path/to/pinned-run-command
+```
+
+`private-build-command` and `pinned-run-command` above are allocation-specific
+inputs, **not provided full benchmark drivers**. The source baseline lacks the
+raw observation hooks required below. Preflight captures system prerequisites;
+`fixture.py` supplies versioned provider input. The allocated public native/browser
+calibration source still needs actual SDK/runner verification and a separate runtime
+decision. It does not execute the complete matched measurement matrix. Do not
+report this protocol or calibration as an executed full benchmark.
+
+## Matching contract and fixture construction
+
+Use ordinary installed Safari as baseline A, AppKit/system WKWebView as B.
+Record Safari version/build and WebKit framework versions independently; same
+OS alone does not prove identical engine configuration. An optional Chromium
+series is a separate comparison. Never label Playwright WebKit as WKWebView.
+Use separate disposable browser data and no personal tabs/extensions. If
+ordinary-browser process isolation cannot be established without changing the
+user's environment, request a dedicated host/profile rather than killing apps.
+
+Both arms use the **same engine bytes and embedded assets**, model
+configuration, local provider script, immutable seed recipe and viewport.
+Construct a disposable local Git workspace, dummy-only model configuration and
+project using existing APIs, then direct sessions via ordinary UI/API contracts.
+Generate 64 user/assistant pairs from the literal templates in workloads.json,
+indexes 0..63; repeat each formatted assistant block 16 times. Seed by running
+the local scripted provider through real session operations, then orderly stop
+and checkpoint the store. Hash the closed store and fixture files. Never write
+SQLite internals or share one live serving-store lease across arms.
+
+Each trial gets its own restore from that closed seed, isolated HOME/NAC_HOME,
+workspace and browser storage, with identical approved path mapping and no
+real model credentials/network. Record a normalized logical seed digest when
+paths or generated session IDs differ, plus each actual store digest and ID
+mapping. Browser and native must navigate to the same logical workspace state.
+Do not compare the browser New Chat dialog with an already populated native
+conversation. Measure fixture preparation separately from product startup.
+
+Run the owned external provider in a disposable fixture directory:
+
+```sh
+python3 desktop/macos/performance/fixture.py --mode transcript --evidence /tmp/mac-perf-seed-provider.jsonl
+python3 desktop/macos/performance/fixture.py --mode stream --evidence /tmp/mac-perf-stream-provider.jsonl
+```
+
+These are alternative long-running processes; each binds an ephemeral loopback
+port and prints its `base_url`. Point only the disposable NAC model configuration
+at that URL with model `gpt-5.6-sol` and a dummy key. Transcript mode admits
+exactly 64 sequential prompts from the manifest; streaming mode admits one
+`MAC_PERF_V1_STREAM` prompt. Wrong sequence or exhausted plan returns 409 without
+replay. Stop only the provider PID created for the trial after completion or a
+recorded failure. These commands alone neither seed a NAC store nor measure UI.
+
+The scripted provider emits the 256 specified deltas at 50 ms scheduled
+intervals followed by the tail, existing Responses completion events and fixed
+usage. Record actual send times, received SSE order/count/bytes and completion;
+late timers are observations, not exact pacing by assertion. The current
+FixtureProvider's two small deltas separated by 1.5 seconds do not implement
+this workload. Its provider runs on the AppKit main queue; retain that attribution
+or use the same external provider process in both arms so provider timing does
+not masquerade as shell cost. Model dollars/tokens/remote latency are separate
+and unmeasured; synthetic usage is never a model-cost estimate.
+
+Launch 1 or 8 direct idle sessions, each with one actual Local PTY through the
+existing human terminal workflow. Record session, terminal and process identities,
+shell argv/environment and observed counts. Do not grant agent input or replay
+uncertain input. For noisy output, an explicit fixture shell command writes
+20 batches/s for 30 s, 32 lines/batch, 128 ASCII bytes/line including LF, with
+monotonic line numbers and padding; record requested and actual emitted bytes,
+terminal ONLCR translation, retained tail, gaps and last sequence. Nominal source
+load is 81,920 bytes/s and 2,457,600 bytes total, before terminal translation.
+The generator must be pinned and its source/digest retained before trial one.
+Copy `terminal.py` and workloads.json together into the disposable workspace,
+then explicitly run in the owned human PTY (no model/tool input replay):
+
+```sh
+python3 /absolute/fixture/terminal.py --evidence /absolute/fixture/noisy-producer.jsonl
+```
+
+It emits 19,200 numbered padded lines. Its evidence reports producer bytes and
+write completion timestamps, not renderer drain or visible paint. A blocked
+write can extend the nominal duration; retain the lateness and final total.
+
+## Trial sequence and clocks
+
+Fix both content viewports at 1280×800 points; record CSS viewport, device scale,
+physical display mode, actual refresh, HDR, power source, low-power/thermal state
+and brightness setting without modifying global settings. Require unlocked
+console, visible active window, progressing rAF and an independent visible
+paint witness. A DOM mutation, snapshot or double-rAF is insufficient to prove
+pixels reached the display. Record active/focused/occluded state continuously.
+
+Collect 20 paired blocks per workload, alternating A/B then B/A. Retain order,
+all attempted repetitions, exclusions and causes. Fresh-profile warm-cache
+launch, existing-store warm launch, and first launch after reboot are distinct.
+Only call a trial **cold after reboot** after an operator-authorized reboot of
+the dedicated host; rebooting shared hosts/cache purges are not authorized.
+If 20 independent cold pairs are unavailable, report that cell incomplete; do
+not combine them with warm trials or claim a reliable cold p95 from one sample.
+
+In each launch trial, record monotonic timestamps for invocation, process start,
+Rust bind/readiness, seeded-data ready, navigation, first useful workspace paint
+and successful fresh composer interaction. First useful workspace means loaded
+fixture session list, selected transcript, fonts and enabled composer with no
+blocking overlay. Network ready and navigation finished are separate milestones.
+Use one monotonic host clock for process/signpost timing; preserve JS timeOrigin
+and clock synchronization uncertainty for cross-process comparisons.
+
+For each arm/block, cover these cells separately:
+
+| Cell | Procedure and required observation |
+| --- | --- |
+| Launch | Cold-after-reboot, fresh profile/warm caches, existing-store warm; first useful paint and interaction |
+| Reopen | Close then Dock reopen without engine restart; engine identity and useful paint. Unsupported preview lifecycle is unavailable |
+| Idle 1 / 8 | Settle each session/PTy configuration, then observe 120 s active and 120 s hidden; no streams/model runs |
+| Long transcript | Load all 64 pairs, scroll top→bottom→top over 10 s each way with pinned driver; collect frame gaps, input and resource data |
+| Streaming | Empty conversation then prescribed 256-delta response; time provider→transport→visible text, queue peaks and final drain |
+| Terminal | Prescribed noisy output with 120×36 terminal; record parser/ACK backlog, retention and input echo alongside resources |
+| Notifications | Hide window, complete one local run, record native delivery and presentation, click to reopen; retain permission/delivery failures |
+
+Perform 100 trusted OS input events per block during long transcript, streaming
+and noisy terminal. Measure composer event→visible glyph and terminal key→echo
+separately; record event source and dropped/timeout counts (5 s observation
+deadline, not a budget). Never dispatch synthetic events to qualify trusted
+input. Existing denied/unavailable CGEvent/XCTest paths remain unavailable until
+an authorized route exists. Do not change permissions. Hidden-window rAF suspension
+is expected to differ; do not compare hidden gaps against active frame latency.
+
+Close/terminate only owned fixtures using normal lifecycle, wait for model/PTy
+settlement, store drain, child reaping and helper exit. Keep cleanup failures in
+the denominator and preserve the owned profile for diagnosis if cleanup fails.
+
+## Process accounting and supported instrumentation
+
+Retain a PID **and process start identity** census before launch, during startup,
+every second, on lifecycle changes and after cleanup. Classify: native/Safari
+shell, every WebContent renderer, GPU, networking/helper, nac-web, workers,
+provider, each PTY shell and descendants. Include startup and short-lived children
+using process-lifecycle tracing. PPID traversal alone misses LaunchServices/XPC
+helpers and reparenting. Bind helpers using process/coalition trace attribution
+to this dedicated app/profile; do not guess ownership from a global executable
+name. A shared/unattributed helper makes whole-set accounting incomplete.
+Exclude driver/collector from the app sum but record their CPU/memory overhead.
+
+| Signal | Existing seam/tool and limit |
+| --- | --- |
+| CPU / memory | Instruments Time Profiler/Allocations or macOS process tools with explicit PID identities; telemetry/resource.rs samples only the current Rust process |
+| Physical footprint | Instruments/VM Tracker or footprint for every attributed process; retain private/shared/compressed detail. Sum RSS only as sum-RSS, not unique physical footprint |
+| Wakeups / energy | Instruments System Trace/Energy instruments where supported; powermetrics may require privileges, which this task cannot acquire. Never substitute CPU for wakeups or VM energy for physical power |
+| Startup/native paint | Proposed opt-in native signposts for invocation/readiness/navigation/paint/window state; absent at baseline. OS paint/input trace must validate the witness |
+| Rendering | Bounded document-start rAF/resource/visibility/input observations on optimized assets, with capped buffer/loss count; observer affects results and needs matched disabled controls |
+| Transport | Network instrument and existing HTTP-duration telemetry, SSE connection/count/bytes; retain clock bounds and delivered sequence |
+| Backend queues | `NAC_TELEMETRY=stderr`, bounded exporter and final export receipts in nac-core telemetry/export.rs; persistence wait/execution/admission/capacity from telemetry.rs |
+| Terminal queue | Existing pull/ACK protocol, retained-output gaps, input uncertainty and bounded admission; no browser receipt-as-render-completion shortcut (ADR 0006) |
+| Dev counters | `perfDebug.ts` is DEV-gated; absent production counters are **not zero renders** |
+
+The baseline PreviewProfile explicitly forces telemetry disabled, so inherited
+`NAC_TELEMETRY=stderr` does not enable it. Coordinate any profiling-only profile
+override with its single writer. Do not enable it silently or change production
+defaults. No new HTTP/profile endpoint or generic profiler framework is needed.
+Before shared edits, nominate a source list and agree the bounded opt-in hook
+locations with their owners. ALL-342 owns normal startup/Profile/preview.sh;
+ALL-354 owns the AppKit driver. None are modified by this package.
+
+One-second CPU samples use delta cumulative user+system CPU time / delta wall
+time, expressed as core-percent (100%=one busy core); publish both per-process
+and group totals. Do not sum unrelated percent conventions or lifetime averages.
+Wakeups distinguish timer and interrupt wakeups; unavailable counters stay null.
+Record queue peak/capacity/rejections, overflow/loss and wait distributions.
+Event-triggered depth gauges are not uniform time samples; use event-weighted
+distributions or time-weight only when holding intervals are known. Existing
+capacity limits are correctness constraints, not newly accepted speed budgets.
+
+## Raw results, analysis and budget decision
+
+Retain `identity.json`, preflight, workload manifest/hash, closed-seed recipe/hash,
+source/build logs, exact run command, per-trial `processes.jsonl`, timing/input/
+frame/SSE/terminal/telemetry JSONL, native trace, collector version/flags, cleanup
+receipt and `attempts.jsonl`. Each row needs schema, trial/block/arm/workload,
+window state, monotonic time/clock, PID/start identity, metric/unit/value or null
+plus unavailable reason. Bound raw buffers and record loss; missing export final
+receipt does not establish losslessness. Retain failed/partial trials.
+
+Keep raw instrument traces in the task's controlled evidence directory: they
+can contain local paths or content even with dummy data. Publish only reviewed
+sanitized exports and reproducible source. No authenticated traffic, full process
+environments, personal store, credentials or device serials in Git/PR. Generate
+an SHA-256 evidence index and state raw retention location/access separately.
+
+For each complete cell report n attempted/valid/failed, duration, unit, p50/p95,
+min/max and paired B−A deltas with spread. Use nearest-rank percentile
+`sorted(x)[ceil(p*n)-1]` (p=.5 or .95); never substitute zeros for failures.
+Report timeout rate and censored observations separately; a p95 over survivors
+alone must say so. Per-frame events are correlated: first summarize each trial,
+then report the distribution across trials; do not inflate n by pooling frames.
+Retain raw event distributions as well. No unsupported cross-hardware pooling.
+
+Attribute a hotspot only with converging evidence: native signpost/time profile
+for shell, JS/render/compositor traces for rendering, HTTP/SSE phases for
+transport, Rust telemetry/profile for backend. A paired resource delta without
+such attribution is whole-system overhead with uncertainty. Distinguish the
+AppKit-hosted fixture provider from actual application shell work. Disable
+profiling in paired controls to quantify observer overhead before setting budgets.
+
+For Allison's decision, produce one row per hardware/OS/display/power class and
+workload with measured browser/native distributions, observation uncertainty,
+proposed startup/idle/core-CPU/footprint/wakeups/input/stream drain ceiling,
+observed headroom and user tradeoff. Explain the numeric choice from observed
+tails, baseline cost and controlled repeat variability; do not choose arbitrary
+constants or automatically approve a regression. Until these measurements
+exist, numeric recommendation is **withheld**. Human acceptance, candidate
+passing those accepted budgets and ALL-358 release qualification are separate
+obligations. Only measured failures against accepted budgets can scope ALL-357.
