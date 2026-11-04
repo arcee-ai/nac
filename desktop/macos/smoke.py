@@ -154,7 +154,11 @@ def main():
     thread.start()
     results = []
     try:
-        with tempfile.TemporaryDirectory(prefix='nac-mac-relocation-') as temporary:
+        temporary = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-'))
+        actors_settled = True
+        process = None
+        evidence = None
+        try:
             relocated = Path(temporary) / 'Moved folder with spaces' / app.name
             shutil.copytree(app, relocated)
             engine = relocated / 'Contents/Resources/nac-web'
@@ -187,6 +191,8 @@ def main():
                     started = time.monotonic()
                     session_before = session_lock_state()
                     with (output / f'{scenario}.log').open('w') as log:
+                        actors_settled = False
+                        process = None
                         process = subprocess.Popen(['/usr/bin/open', '-n', '-W', '-a', str(relocated),
                             '--stdout', str(output / f'{scenario}-app.log'),
                             '--stderr', str(output / f'{scenario}-app.log'),
@@ -198,13 +204,7 @@ def main():
                             env={**os.environ, 'NAC_HOME': '/DO-NOT-USE-PERSONAL-NAC',
                                  'NAC_MANAGED_CONFIG': '/DO-NOT-INHERIT',
                                  'OPENAI_API_KEY': 'must-not-reach-engine'})
-                        try:
-                            code = process.wait(timeout=115)
-                        except subprocess.TimeoutExpired:
-                            cleanup_failed_case(evidence, relocated)
-                            process.terminate()
-                            process.wait(timeout=5)
-                            raise RuntimeError(f'{scenario}: app exceeded bounded smoke timeout; inspect {output}')
+                        code = process.wait(timeout=115)
                     control_result = control.finish()
                     result = json.loads(evidence.read_text())
                     result['session_before'] = session_before
@@ -233,6 +233,7 @@ def main():
                     assert not Path(result['profile']).exists(), result
                     assert all(result.get('profile') != prior.get('profile') for prior in results), result
                     assert not contacted, 'Preview contacted the unrelated default-port server'
+                    actors_settled = True
                     results.append({'scenario': scenario, 'passed': True,
                                     'profile': result['profile'],
                                     'visible_paint_qualified': result['visible_paint_qualified'],
@@ -240,9 +241,51 @@ def main():
                     print(json.dumps(results[-1]), flush=True)
                     if scenario != 'missing':
                         engine.unlink()
+            except BaseException as failure:
+                if not actors_settled:
+                    try:
+                        record = json.loads(evidence.read_text())
+                        # A partial receipt cannot establish actor settlement.
+                        # A failed episode with no engine identity stays in custody.
+                        if (not isinstance(record, dict)
+                                or type(record.get('app_pid')) is not int or record['app_pid'] <= 0
+                                or type(record.get('engine_pid')) is not int or record['engine_pid'] <= 0):
+                            raise RuntimeError('Incomplete smoke actor ownership; settlement is unproven')
+                        cleanup_failed_case(evidence, relocated)
+                        actors_settled = True
+                    except BaseException as error:
+                        failure.add_note(f'Smoke actor cleanup unproven: {error}')
+                raise
             finally:
-                engine.unlink(missing_ok=True)
-                saved.rename(engine)
+                failure = sys.exception()
+                try:
+                    # This handle is ours even when app/engine authority is unknown.
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                except BaseException as error:
+                    actors_settled = False
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Owned LaunchServices wrapper cleanup failed: {error}')
+        finally:
+            failure = sys.exception()
+            if not actors_settled:
+                diagnostic = f'Smoke cleanup unproven; retained app root {temporary}; evidence {evidence}'
+                print(diagnostic, file=sys.stderr)
+                if failure is not None:
+                    failure.add_note(diagnostic)
+            else:
+                try:
+                    shutil.rmtree(temporary)
+                except BaseException as error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Relocation cleanup failed; retained root {temporary}: {error}')
     finally:
         done.set()
         thread.join(timeout=1)
