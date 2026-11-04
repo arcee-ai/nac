@@ -92,6 +92,7 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
     --spacing: .25rem;
+    --container-5xl: 64rem;
     --text-xs: .75rem;
     --text-xs--line-height: calc(1 / .75);
     --text-sm: .875rem;
@@ -1599,6 +1600,10 @@
 
 [data-nac-runtime]:is(.w-px), [data-nac-runtime] .w-px {
     width: 1px;
+  }
+
+[data-nac-runtime]:is(.max-w-5xl), [data-nac-runtime] .max-w-5xl {
+    max-width: var(--container-5xl);
   }
 
 [data-nac-runtime]:is(.max-w-6), [data-nac-runtime] .max-w-6 {
@@ -4856,6 +4861,10 @@
 
     [data-nac-runtime]:is(.md\:grid-cols-3), [data-nac-runtime] .md\:grid-cols-3 {
       grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    [data-nac-runtime]:is(.md\:grid-cols-\[240px_minmax\(0\,1fr\)\]),[data-nac-runtime] .md\:grid-cols-\[240px_minmax\(0\,1fr\)\] {
+      grid-template-columns: 240px minmax(0, 1fr);
     }
 
     [data-nac-runtime]:is(.md\:flex-col), [data-nac-runtime] .md\:flex-col {

@@ -279,3 +279,6 @@ mod review_tests;
 #[cfg(test)]
 #[path = "permission_persistence_tests.rs"]
 mod persistence_tests;
+mod scheduled_tasks;
+pub(crate) use scheduled_tasks::authorize_human_retained_allowance;
+pub use scheduled_tasks::{authorize_local_scheduled_project, ScheduledProjectAdmissionRequired};

@@ -68,6 +68,13 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/task-launches/{request_id}/cancel"),
     ("GET", "/projects/{project_id}/task-launches"),
     ("GET", "/projects/{project_id}/task-launch-source"),
+    ("GET", "/projects/{project_id}/task-schedules"),
+    ("GET", "/projects/{project_id}/task-schedules/{schedule_id}"),
+    ("POST", "/projects/{project_id}/task-schedules/control"),
+    (
+        "POST",
+        "/projects/{project_id}/task-schedules/retained-allowance",
+    ),
     (
         "GET",
         "/sessions/{session_id}/executions/{execution_id}/input-control",

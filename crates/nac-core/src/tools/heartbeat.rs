@@ -36,7 +36,7 @@ pub(crate) struct ReportInput {
     evidence: String,
 }
 
-fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinition {
+pub(super) fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinition {
     ToolDefinition {
         def_type: "function".into(),
         function: FunctionDef {
@@ -46,19 +46,19 @@ fn definition(name: &str, description: &str, parameters: Value) -> ToolDefinitio
         },
     }
 }
-fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ToolResult> {
+pub(super) fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ToolResult> {
     serde_json::from_value(value).map_err(|e| error(format!("invalid heartbeat arguments: {e}")))
 }
-fn error(message: impl std::fmt::Display) -> ToolResult {
+pub(super) fn error(message: impl std::fmt::Display) -> ToolResult {
     ToolResult::text(format!("Error: {message}"), true)
 }
-fn result(value: impl serde::Serialize) -> ToolResult {
+pub(super) fn result(value: impl serde::Serialize) -> ToolResult {
     match serde_json::to_string(&value) {
         Ok(value) => ToolResult::text(value, false),
         Err(e) => error(e),
     }
 }
-async fn store_call<R: Send + 'static>(
+pub(super) async fn store_call<R: Send + 'static>(
     services: ToolServices<'_>,
     operation: impl FnOnce(&std::path::Path) -> anyhow::Result<R> + Send + 'static,
 ) -> Result<R, ToolResult> {
@@ -68,7 +68,7 @@ async fn store_call<R: Send + 'static>(
         .map_err(error)?
         .map_err(|e| error(format!("{e:#}")))
 }
-fn resource(services: ToolServices<'_>, action: &str) -> Vec<PermissionResource> {
+pub(super) fn resource(services: ToolServices<'_>, action: &str) -> Vec<PermissionResource> {
     let runtime = services.runtime;
     let mut resource = PermissionResource::new(
         action,
@@ -91,7 +91,7 @@ fn resource(services: ToolServices<'_>, action: &str) -> Vec<PermissionResource>
     }
     vec![resource]
 }
-async fn session(services: ToolServices<'_>) -> Result<String, ToolResult> {
+pub(super) async fn session(services: ToolServices<'_>) -> Result<String, ToolResult> {
     let runtime = services.runtime;
     let id = runtime
         .session_id

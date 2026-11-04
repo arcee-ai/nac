@@ -99,11 +99,29 @@ pub struct HeartbeatBinding {
     /// Human attention metadata only; excluded from canonical target binding.
     #[serde(default)]
     pub seen_through_sequence: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fresh_task: Option<super::FreshTaskDestination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_configuration_id: Option<String>,
 }
 
 impl HeartbeatBinding {
     pub(super) fn same_target(&self, other: &Self) -> bool {
         self.config_version == other.config_version
+            && self.cwd == other.cwd
+            && self.project_id == other.project_id
+            && self.backend == other.backend
+            && self.model_configuration_id == other.model_configuration_id
+    }
+
+    /// A fresh task inherits model defaults per occurrence. Changing those
+    /// defaults does not change its saved Local project execution target.
+    pub(super) fn same_fresh_project_target(&self, other: &Self) -> bool {
+        self.backend == "local"
+            && self.project_id.is_some()
+            && self.config_version == other.config_version
             && self.cwd == other.cwd
             && self.project_id == other.project_id
             && self.backend == other.backend
@@ -146,7 +164,9 @@ vocabulary!(HeartbeatOutcome {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HeartbeatSchedule {
     pub schedule_id: String,
-    pub session_id: String,
+    /// Existing-chat schedules bind a session. Standalone project schedules
+    /// have no owning execution session; the creator is separate provenance.
+    pub session_id: Option<String>,
     pub version: i64,
     pub state: HeartbeatState,
     pub binding: HeartbeatBinding,
@@ -167,7 +187,8 @@ pub struct HeartbeatSchedule {
 pub struct HeartbeatOccurrence {
     pub occurrence_id: String,
     pub schedule_id: String,
-    pub session_id: String,
+    /// A fresh occurrence acquires its exact execution session at publication.
+    pub session_id: Option<String>,
     pub schedule_version: i64,
     pub due_first_ms: i64,
     pub due_last_ms: i64,
@@ -188,6 +209,14 @@ pub struct HeartbeatOccurrence {
     pub settled_at_ms: Option<i64>,
     pub attempt_count: i64,
     pub settlement_sequence: Option<i64>,
+}
+
+impl HeartbeatOccurrence {
+    pub fn execution_session_id(&self) -> Result<&str> {
+        self.session_id
+            .as_deref()
+            .context("heartbeat occurrence has no published execution session")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

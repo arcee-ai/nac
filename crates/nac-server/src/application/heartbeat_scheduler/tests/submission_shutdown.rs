@@ -1,4 +1,5 @@
 //! Real registered core submission held at its owned-store preflight.
+mod fresh;
 use super::*;
 use nac_core::permissions::PermissionApprovalMode;
 use std::{

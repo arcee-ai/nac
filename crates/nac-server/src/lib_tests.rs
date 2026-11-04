@@ -1092,6 +1092,10 @@ mod terminal_selection;
 #[path = "tests/terminal_control.rs"]
 mod terminal_control;
 
+#[path = "tests/fresh_allowance.rs"]
+mod fresh_allowance;
+#[path = "tests/fresh_interval_tasks.rs"]
+mod fresh_interval_tasks;
 #[path = "tests/http_transport.rs"]
 mod http_transport;
 #[path = "tests/task_launches.rs"]

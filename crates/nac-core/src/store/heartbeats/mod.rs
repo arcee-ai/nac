@@ -12,6 +12,27 @@ pub use attention::*;
 pub use cancellation::heartbeat_stop_requested;
 pub use control::control_heartbeat;
 mod execution;
+mod fresh_admission;
+mod fresh_allowance;
+pub use fresh_allowance::*;
+mod fresh_attention;
+mod fresh_execution;
+mod fresh_launches;
+pub use fresh_execution::fail_fresh_heartbeat_before_run;
+pub(crate) use fresh_execution::fresh_heartbeat_for_inbox;
+pub(crate) use fresh_launches::{
+    fresh_launch_for_request_with_connection, link_fresh_launch_input_with_connection,
+    publish_shared_fresh_launch_with_connection,
+};
+pub use fresh_launches::{
+    pin_fresh_heartbeat_model_defaults, pin_fresh_heartbeat_workspace_mode,
+    read_fresh_heartbeat_launch,
+};
+mod fresh_model;
+pub use fresh_admission::*;
+pub use fresh_model::{
+    FreshTaskDestination, FreshTaskLaunchReceipt, FreshTaskPreparationPort, PreparedFreshTaskLaunch,
+};
 mod materialize;
 pub use materialize::materialize_heartbeats;
 mod model;
@@ -25,6 +46,14 @@ pub(crate) use execution::{
 pub use execution::{heartbeat_report, reconcile_heartbeat_occurrences};
 pub use model::*;
 
+#[cfg(test)]
+mod fresh_allowance_tests;
+#[cfg(test)]
+mod fresh_attention_tests;
+#[cfg(test)]
+mod fresh_prompt_tests;
+#[cfg(test)]
+mod fresh_tests;
 #[cfg(test)]
 mod tests;
 
@@ -108,7 +137,18 @@ fn occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HeartbeatOccurren
     })
 }
 fn load_schedule(conn: &Connection, session_id: &str, id: &str) -> Result<HeartbeatSchedule> {
-    conn.query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE session_id=?1 AND schedule_id=?2"),params![session_id,id],schedule_row).optional()?.context("heartbeat schedule was not found")
+    let project_id = session_id.strip_prefix("project:");
+    conn.query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE schedule_id=?2 AND (session_id=?1 OR (session_id IS NULL AND json_extract(binding_json,'$.project_id')=?3))"),params![session_id,id,project_id],schedule_row).optional()?.context("heartbeat schedule was not found")
+}
+
+fn load_schedule_by_id(conn: &Connection, id: &str) -> Result<HeartbeatSchedule> {
+    conn.query_row(
+        &format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE schedule_id=?1"),
+        [id],
+        schedule_row,
+    )
+    .optional()?
+    .context("heartbeat schedule was not found")
 }
 fn active_occurrence(conn: &Connection, id: &str) -> Result<Option<HeartbeatOccurrence>> {
     Ok(conn.query_row(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE schedule_id=?1 AND state='admitted'"),[id],occurrence_row).optional()?)
@@ -158,7 +198,11 @@ fn prune_history(conn: &Connection, schedule_id: &str) -> Result<()> {
 
 fn next_settlement_sequence(conn: &Connection) -> Result<i64> {
     let last: i64 = conn.query_row(
-        "SELECT coalesce(max(settlement_sequence),0) FROM heartbeat_occurrences",
+        "SELECT coalesce(max(sequence),0) FROM (
+            SELECT max(settlement_sequence) AS sequence FROM heartbeat_occurrences
+            UNION ALL
+            SELECT max(cast(json_extract(initial_outcome_json,'$.settlement_sequence') AS INTEGER)) FROM heartbeat_task_launches
+        )",
         [],
         |row| row.get(0),
     )?;
@@ -221,8 +265,28 @@ fn current_binding(conn: &Connection, session_id: &str) -> Result<HeartbeatBindi
     // sessions.backend names the model provider, not the execution backend.
     // Durable SSH/Podman bindings are host_id/sandbox_json; the live prepared
     // boundary independently checks the constructed ExecutionBackend::Local.
-    let binding = conn.query_row("SELECT config_version,cwd,(SELECT project_id FROM session_projects WHERE session_id=?1),'local' FROM sessions WHERE session_id=?1 AND behavior='direct' AND host_id IS NULL AND sandbox_json IS NULL AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=?1) AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=?1)", [session_id], |row| Ok(HeartbeatBinding{config_version:row.get(0)?,cwd:row.get(1)?,project_id:row.get(2)?,backend:row.get(3)?,execution_cwd:None,scheduling_request:None,seen_through_sequence:0})).optional()?;
+    let binding = conn.query_row("SELECT config_version,cwd,(SELECT project_id FROM session_projects WHERE session_id=?1),'local' FROM sessions WHERE session_id=?1 AND behavior='direct' AND host_id IS NULL AND sandbox_json IS NULL AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=?1) AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=?1)", [session_id], |row| Ok(HeartbeatBinding{config_version:row.get(0)?,cwd:row.get(1)?,project_id:row.get(2)?,backend:row.get(3)?,execution_cwd:None,scheduling_request:None,seen_through_sequence:0,fresh_task:None,creator_session_id:None,model_configuration_id:None})).optional()?;
     binding.context("heartbeats require an existing independent direct Local chat")
+}
+
+fn current_project_binding(conn: &Connection, project_id: &str) -> Result<HeartbeatBinding> {
+    let project = super::projects::load_project_with_connection(conn, project_id)?;
+    ensure!(
+        project.ssh_host.is_none(),
+        "fresh schedules require a saved Local project"
+    );
+    Ok(HeartbeatBinding {
+        config_version: 0,
+        cwd: project.cwd.to_string_lossy().into_owned(),
+        project_id: Some(project.project_id),
+        backend: "local".into(),
+        execution_cwd: None,
+        scheduling_request: None,
+        seen_through_sequence: 0,
+        fresh_task: None,
+        creator_session_id: None,
+        model_configuration_id: project.default_model_config_id,
+    })
 }
 
 coordinated_command! {
@@ -265,7 +329,7 @@ coordinated_command! {
 pub fn heartbeat_history(path:&Path,session_id:&str,schedule_id:&str) -> Result<Vec<HeartbeatOccurrence>> {
     let conn=open_runtime_connection(path)?;
     load_schedule(&conn,session_id,schedule_id)?;
-    let mut query=conn.prepare(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE session_id=?1 AND schedule_id=?2 ORDER BY coalesce(settlement_sequence,9223372036854775807) DESC,occurrence_id DESC LIMIT ?3"))?;
+    let mut query=conn.prepare(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE schedule_id=?2 ORDER BY coalesce(settlement_sequence,9223372036854775807) DESC,occurrence_id DESC LIMIT ?3"))?;
     let rows=query.query_map(params![session_id,schedule_id,HEARTBEAT_HISTORY_LIMIT+2],occurrence_row)?.collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }

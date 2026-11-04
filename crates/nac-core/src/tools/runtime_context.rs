@@ -53,6 +53,7 @@ pub struct ToolRuntime {
     pub(crate) heartbeat_human_request: Option<String>,
     pub(crate) heartbeat_execution: bool,
     pub(crate) heartbeat_goal_id: Option<String>,
+    pub(crate) heartbeat_schedule: Option<(String, i64)>,
     pub(crate) heartbeat_needs_human_action: Arc<std::sync::atomic::AtomicBool>,
     /// Optional process-environment capability, read immediately before each
     /// command spawn so replacements affect new processes while existing

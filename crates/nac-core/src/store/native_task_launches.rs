@@ -98,7 +98,7 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
             "conflict: native launch identity reused with different caller, arguments or source binding");
         return Ok(existing);
     }
-    let occupied:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM task_launches WHERE request_id=?1)",params![request.request_id],|r|r.get(0))?;
+    let occupied:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM task_launches WHERE request_id=?1 UNION ALL SELECT 1 FROM heartbeat_task_launches WHERE request_id=?1)",params![request.request_id],|r|r.get(0))?;
     anyhow::ensure!(!occupied,"conflict: launch identity already belongs to another launch request");
     let project = projects::load_project_with_connection(&tx, project_id)?;
     anyhow::ensure!(project.ssh_host.is_none() && std::fs::canonicalize(&project.cwd)? == source_cwd,

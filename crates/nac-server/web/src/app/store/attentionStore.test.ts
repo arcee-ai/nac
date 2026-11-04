@@ -64,4 +64,26 @@ describe("durable heartbeat attention", () => {
     owner.acknowledgeSucceeded("chat", 3);
     expect(owner.attentionStore.getState().acknowledgements).toEqual({});
   });
+  it("accepts the opened task's canonical watermark without global observation", () => {
+    const owner = createAttentionStore();
+    owner.clearAttention("opened", 1);
+    expect(owner.attentionStore.getState().acknowledgements).toEqual({ opened: 1 });
+    owner.clearAttention("opened", 3);
+    owner.clearAttention("opened", 1);
+    owner.acknowledgeSucceeded("opened", 1);
+    expect(owner.attentionStore.getState().acknowledgements).toEqual({ opened: 3 });
+    owner.acknowledgeSucceeded("opened", 3);
+    owner.clearAttention("opened", 1);
+    expect(owner.attentionStore.getState().acknowledgements).toEqual({});
+  });
+  it("preserves sibling observation and quiet-result classification when a task opens", () => {
+    const owner = createAttentionStore();
+    owner.trackAttention([summary("sibling", 1, "human-run")], null);
+    owner.clearAttention("opened", 2);
+    owner.trackAttention([summary("sibling", 2, null)], null);
+    expect(owner.attentionStore.getState().flagged).toEqual({ sibling: true });
+    expect(owner.attentionStore.getState().acknowledgements).toEqual({ opened: 2 });
+    owner.clearAttention("empty", 0);
+    expect(owner.attentionStore.getState().acknowledgements).toEqual({ opened: 2 });
+  });
 });

@@ -258,7 +258,14 @@ pub fn reserve_task_launch(path: &Path, request: TaskLaunchRequest, source: Task
             params![request.project_id,serde_json::to_string(&source)?])?;
     }
     let native = super::native_task_launches::reserved_identity(&tx, &request, &source)?;
-    let session_id = native.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let scheduled = super::heartbeats::fresh_launch_for_request_with_connection(&tx, &request.request_id)?;
+    anyhow::ensure!(native.is_none() || scheduled.is_none(), "conflict: native and scheduled launch ownership are mutually exclusive");
+    let session_id = if let Some(scheduled) = scheduled {
+        let reserved = scheduled.receipt();
+        anyhow::ensure!(reserved.request == request, "conflict: scheduled launch identity reused with different arguments");
+        anyhow::ensure!(!reserved.stop_requested && reserved.first_input_id.is_none(), "scheduled launch is cancelled or already published");
+        reserved.session_id.clone()
+    } else {native.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())};
     let canonical_store = std::fs::canonicalize(path)?;
     let workspace_path = canonical_store.parent().ok_or_else(|| anyhow!("store has no parent"))?
         .join("task-worktrees").join(&session_id);
@@ -342,7 +349,11 @@ pub(crate) fn publish_in_transaction(
     request_id: &str,
     snapshot: &crate::sessions::SessionSnapshot,
 ) -> Result<()> {
-    let launch = load(tx, request_id)?.ok_or_else(|| anyhow!("launch not found"))?;
+    let Some(launch) = load(tx, request_id)? else {
+        return super::heartbeats::publish_shared_fresh_launch_with_connection(
+            tx, request_id, snapshot,
+        );
+    };
     launch.request.validate()?;
     anyhow::ensure!(
         launch.phase == TaskLaunchPhase::PreparingRuntime,
@@ -367,6 +378,7 @@ pub(crate) fn publish_in_transaction(
     )?;
     let input_id = tx.last_insert_rowid();
     super::native_task_launches::publish_retained_in_transaction(tx, &launch, input_id)?;
+    super::heartbeats::link_fresh_launch_input_with_connection(tx, request_id, snapshot, input_id)?;
     tx.execute("UPDATE task_launches SET phase='ready',first_input_id=?2,error=NULL,updated_at=?3 WHERE request_id=?1",
         params![request_id,input_id,now])?;
     Ok(())
