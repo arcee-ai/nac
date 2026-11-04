@@ -243,6 +243,7 @@ test("only a full run of this exact candidate with nothing newer failed can be r
   const run = (id, change = {}) => ({
     id,
     run_number: id,
+    run_attempt: 1,
     updated_at: `2026-11-04T10:00:${String(id % 60).padStart(2, "0")}Z`,
     status: "completed",
     conclusion: "success",
@@ -277,6 +278,8 @@ test("only a full run of this exact candidate with nothing newer failed can be r
   assert.equal((await lookup({ currentAttempt: "2" })).found, null);
   assert.equal((await lookup({ runs: [run(42), run(50, { conclusion: "cancelled" })], startedJobs: 0 })).found, "42");
   assert.equal((await lookup({ runs: [run(42), run(50, { conclusion: "failure" })], startedJobs: 0 })).found, null);
+  const cancelledRerun = run(50, { conclusion: "cancelled", run_attempt: 2 });
+  assert.equal((await lookup({ runs: [run(42), cancelledRerun], startedJobs: 0 })).found, null);
   // A failed rerun of an older run counts, because it finished after the marker run.
   const rerunFailed = run(40, { conclusion: "failure", updated_at: "2026-11-04T11:00:00Z" });
   assert.equal((await lookup({ runs: [run(42), rerunFailed] })).found, null);

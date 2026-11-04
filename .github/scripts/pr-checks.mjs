@@ -180,7 +180,10 @@ export async function findQualifiedRun(
       const later = run.run_number > marked.run_number || run.updated_at > marked.updated_at;
       if (!later || succeeded(run)) continue;
       // A newer edit replaces a pending edit run, which cancels it before any job starts.
-      const replaced = run.conclusion === "cancelled" && (await read(`runs/${run.id}/jobs`)).total_count === 0;
+      const replaced =
+        run.conclusion === "cancelled" &&
+        run.run_attempt === 1 &&
+        (await read(`runs/${run.id}/jobs`)).total_count === 0;
       if (!replaced) return null;
     }
     return String(marked.id);

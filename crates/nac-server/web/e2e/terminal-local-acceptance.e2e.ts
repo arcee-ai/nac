@@ -758,34 +758,44 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
-    const armed = await page.evaluate(() => {
-      const current = window.terminalRenderedMarker;
-      current?.dispose();
-      delete window.terminalRenderedMarker;
-      return {
-        startedAtEpochMs: current?.startedAtEpochMs,
-        rowsAtDeadline: current?.rowsAtDeadline,
-      };
+    const cleanupErrors: string[] = [];
+    const attempt = async (step: string, work: () => Promise<void>) => {
+      await work().catch((error) => cleanupErrors.push(`${step}: ${String(error)}`));
+    };
+    let heartbeat: unknown;
+    await attempt("marker", async () => {
+      const armed = await page.evaluate(() => {
+        const current = window.terminalRenderedMarker;
+        current?.dispose();
+        delete window.terminalRenderedMarker;
+        return {
+          startedAtEpochMs: current?.startedAtEpochMs,
+          rowsAtDeadline: current?.rowsAtDeadline,
+        };
+      });
+      measurements.markerStartedAtEpochMs = armed.startedAtEpochMs;
+      measurements.rowsAtMarkerDeadline = armed.rowsAtDeadline;
     });
-    measurements.markerStartedAtEpochMs = armed.startedAtEpochMs;
-    measurements.rowsAtMarkerDeadline = armed.rowsAtDeadline;
-    await api.getUserTerminal(session, terminal).then(
-      (final) => (measurements.finalGeometry = `${final.cols}x${final.rows}`),
-      (error) => (measurements.finalGeometryError = String(error)),
-    );
-    await api.terminateTerminal(session, terminal);
+    await attempt("geometry", async () => {
+      const final = await api.getUserTerminal(session, terminal);
+      measurements.finalGeometry = `${final.cols}x${final.rows}`;
+    });
+    await attempt("terminate", () => api.terminateTerminal(session, terminal).then(() => {}));
     await Promise.allSettled(pending);
-    const heartbeat = await page.evaluate(() => {
-      const value = (window as unknown as { terminalHeartbeat: { active: boolean } })
-        .terminalHeartbeat;
-      value.active = false;
-      return value;
+    await attempt("heartbeat", async () => {
+      heartbeat = await page.evaluate(() => {
+        const value = (window as unknown as { terminalHeartbeat: { active: boolean } })
+          .terminalHeartbeat;
+        value.active = false;
+        return value;
+      });
     });
     const observations = {
       measurements,
       inputReceipts,
       resizes,
       markerReachedObserverAtEpochMs,
+      cleanupErrors,
       heartbeat,
       pages,
       maxFrameBytes: Math.max(0, ...pages.map((frame) => frame.bytes)),

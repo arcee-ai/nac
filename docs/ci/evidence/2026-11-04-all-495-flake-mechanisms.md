@@ -14,7 +14,8 @@ lines to redraw its wrapped prompt. Input keeps succeeding for the remaining 10 
 and no marker ever renders. The CI working directory makes that prompt long, and the
 terminal is narrow while resizing. The test now sets a short prompt before starting its
 noise, so nothing wraps, and the measurement clock is unchanged. We did not reproduce
-this failure locally: runs with the prompt fix removed also passed.
+this failure locally: runs with the prompt fix removed also passed, and resizing around
+the marker in a scratch test either lost focus or closed the page before giving a result.
 
 **Real slow rendering.** [Run 40577481249](https://github.com/arcee-ai/nac/actions/runs/40577481249)
 (artifact `12768897663`) recorded 1,582.8 ms with the marker present, 203 animation
@@ -24,6 +25,26 @@ local runs reached 1,300 ms. The 1,500 ms limit is unchanged. Waiting for the re
 settle was tried and rejected: noise kept accumulating and latency rose to between 1,173
 and 1,491 ms.
 
+Repeating this test on `ubuntu-latest` still misses the limit. In
+[run 41925939853](https://github.com/arcee-ai/nac/actions/runs/41925939853), 60 repeats per
+job:
+
+| Test version | Jobs | Runs | Over 1,500 ms | Typical (p50) by job | Slowest |
+| --- | --- | --- | --- | --- | --- |
+| Before this branch | 4 | 240 | 5 | 403 to 667 ms | 2,851 ms |
+| With this branch | 4 | 240 | 4 | 281 to 711 ms | 2,620 ms |
+
+So this branch neither causes nor fixes these misses. An earlier run with this branch
+([41923980106](https://github.com/arcee-ai/nac/actions/runs/41923980106), six jobs) missed 7
+of 360. In the side-by-side run:
+
+- All 9 misses were in the first 10 repeats of a job, when the runner had just started.
+  Regular CI reaches this test partway through its browser suite.
+- With the marker timing added, the observer received the marker at about the same time it
+  rendered in the slowest runs, so most of the delay comes before the browser renders.
+- The slowest run carried 1,694 KiB of output against about 1,100 KiB for the fastest
+  runs, which fits a backlog draining in 32 KiB pages. That cause is inferred.
+
 `pressure-observations.json` now separates the two cases, including on timeout: marker
 arrival at the observer, rows at the deadline, presence at paint, input receipts,
 resize requests, page offsets and geometry.
@@ -31,9 +52,19 @@ resize requests, page offsets and geometry.
 ## Session-list polling test
 
 With a 5 ms poll, a second base response could replace the initial `old` title before
-the test observed it ([run 41483846984](https://github.com/arcee-ai/nac/actions/runs/41483846984)).
-The test now holds that response until `old` is observed. Delaying the assertion by 40 ms
-fails the previous test and passes the new one.
+the test observed it. ALL-495 records this failure in test-server job
+[121975313411](https://github.com/arcee-ai/nac/actions/runs/40439042325/job/121975313411).
+That log has since been replaced by a retry, and none of the 23 failed `test-server` jobs
+scanned from October 25 to November 4 show it. The test now holds that response until
+`old` is observed. Delaying the assertion by 40 ms fails the previous test and passes the
+new one.
+
+## Manager-drop `WouldBlock`
+
+The fixture unwrapped a retryable "identity changed during inspection" result inside its
+5 second polling loop. #473 made the fixture keep those observations pending and still
+require proof that every job died. It merged about 16 minutes after #380, so the rate
+split below can't separate the two. This branch doesn't change that fixture.
 
 ## macOS signal denial
 
@@ -55,8 +86,13 @@ inferred from this timing, not documented by Apple. It never reproduced on macOS
 the exact identity each time. A persistent denial still returns `EPERM`, and
 `terminate_members` still retains the identity. With the fix and the original `unwrap`,
 [run 41892520232](https://github.com/arcee-ai/nac/actions/runs/41892520232) completed
-3,369 package runs with no failures. About three denials would be expected in that
-volume, so this is strong evidence rather than proof.
+3,369 package runs with no failures. About three denials would be expected at the probe's
+rate, so this is strong evidence rather than proof.
+
+Real CI fails more often than the probe predicts: 16 failures in 1,249 jobs, each running
+one first and one warm pass, is at most 0.64% per package run, against 0.10% in the probes.
+Of the 11 failures whose logs name a pass, 9 were in the first pass. The probes mostly
+repeated warm passes, so they under-represent that condition.
 
 ## Rates
 
@@ -79,14 +115,20 @@ After the fixes:
 
 - **macOS `EPERM`:** 0 failures in 3,369 package runs at the fix (run above), where about
   3 denials would be expected.
-- **Noisy terminal:** no CI rate yet, and 12 of 12 local runs passed, as they also did
-  before the change.
+- **Noisy terminal latency:** not fixed. 11 of 600 repeats missed the limit with this
+  branch, and 5 of 240 without it.
+- **Noisy terminal marker erase:** none in those 840 repeats, with or without this branch.
 - **Polling test:** one failure in those 11 days, and the order is now fixed by the test.
 
 ## Residual unknowns
 
-- Why macOS denies the signal during exec.
+- Why macOS denies the signal during exec, and why first passes fail more often.
+- Whether three attempts one millisecond apart are enough in a first pass. Probe denials
+  all cleared within 130 µs, but those were mostly warm.
 - Whether the short prompt reduces erased markers. One occurrence was recorded in 11 days,
   and it has never been reproduced locally.
-- Whether #380 caused latency misses to stop. The timing fits, but nothing isolates it, and
-  misses could recur under CI load.
+- Why regular CI shows no latency misses since October 31 while repeats do. #380, the
+  test's position in the suite and runner speed could each contribute, and nothing isolates
+  them. Misses could return.
+- Whether the output backlog is the cause, and whether draining it faster is worth a product
+  change. This branch doesn't change terminal output handling, and the limit stays at 1,500 ms.
