@@ -359,6 +359,9 @@ pub(super) fn create_with_connection(
     )?;
     let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("inserted session goal could not be reloaded"))?;
+    if let Some(run) = goal.accounting_run_id.as_deref() {
+        super::completion_occurrences::goal_participated(connection, session_id, run)?;
+    }
     Ok((goal, retired))
 }
 coordinated_command! {
@@ -462,6 +465,9 @@ pub(super) fn update_with_connection(
     )?;
     let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("updated session goal could not be reloaded"))?;
+    if current.status != GoalStatus::Complete && goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(connection, &goal)?;
+    }
     Ok(goal)
 }
 coordinated_command! {
@@ -491,6 +497,9 @@ pub fn update_session_goal_by_model(
     }
     let goal = load_with_connection(&transaction, session_id)?
         .ok_or_else(|| anyhow!("goal disappeared"))?;
+    if goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(&transaction, &goal)?;
+    }
     transaction.commit()?;
     committed(path, &goal, GoalChangeKind::Current);
     Ok(goal)
@@ -598,6 +607,7 @@ pub(crate) fn bind_session_goal_run_with_connection(
     if changed == 0 {
         return Ok(None);
     }
+    super::completion_occurrences::goal_participated(connection, session_id, &baseline.run_id)?;
     load_with_connection(connection, session_id)
 }
 

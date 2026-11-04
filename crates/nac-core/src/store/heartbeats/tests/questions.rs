@@ -37,7 +37,7 @@ fn pending_question(f: &Fixture) -> QuestionRecord {
 fn end_run(f: &Fixture, run: &str) {
     let mut conn = open_runtime_connection(&f.path).unwrap();
     let tx = conn.transaction().unwrap();
-    clear_active_run(&tx, "direct", run, RunTerminalDisposition::Completed).unwrap();
+    clear_active_run(&tx, "direct", run, RunTerminalDisposition::Completed, None).unwrap();
     tx.commit().unwrap();
 }
 

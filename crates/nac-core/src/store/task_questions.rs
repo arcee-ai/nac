@@ -264,6 +264,7 @@ pub(crate) fn create_task_question_bound(path:&Path,request:&QuestionRequest,exp
     tx.execute("INSERT INTO task_questions(session_id,request_id,request_json,config_version,project_id,goal_id,revision,status,created_at,creation_digest)
         VALUES(?1,?2,?3,?4,?5,?6,1,'pending',?7,?8)",params![request.session_id,request.request_id,serde_json::to_string(request)?,expected_config,project(&tx,&request.session_id)?,goal_id,now_utc(),argument_digest])?;
     let question=load(&tx,&request.session_id,&request.request_id)?.ok_or(QuestionError::NotFound)?;
+    super::completion_occurrences::question_yield(&tx,&request.session_id,&request.run_id)?;
     tx.commit()?;
     super::goal_changes::question_committed(path,&question);
     Ok(question)

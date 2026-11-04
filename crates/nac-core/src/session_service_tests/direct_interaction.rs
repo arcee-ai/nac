@@ -1039,6 +1039,7 @@ async fn child_terminal_crash_window_recovers_report_and_delivers_once() {
         session_id,
         "run-terminal",
         crate::store::RunTerminalDisposition::Completed,
+        None,
     )
     .unwrap();
     transaction.commit().unwrap();
