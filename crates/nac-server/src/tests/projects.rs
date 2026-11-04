@@ -236,14 +236,12 @@ async fn literal_local_path_browse_and_project_never_fall_back_to_a_sibling() {
     .await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     assert!(manager.projects().list().unwrap().is_empty());
-    assert!(
-        manager
-            .session_catalog()
-            .list(false)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(manager
+        .session_catalog()
+        .list(false)
+        .await
+        .unwrap()
+        .is_empty());
     std::fs::create_dir(&selected).unwrap();
     std::fs::create_dir(selected.join("selected-only")).unwrap();
     for path in [&selected, &sibling] {
