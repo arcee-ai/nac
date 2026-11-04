@@ -211,10 +211,18 @@ def main():
                                 failure.add_note(f'LaunchServices wrapper cleanup failed: {error}')
                             raise
         finally:
+            failure = sys.exception()
             if retained_profiles:
                 print(f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', file=sys.stderr)
             else:
-                shutil.rmtree(relocation)
+                try:
+                    shutil.rmtree(relocation)
+                except BaseException as error:
+                    diagnostic = f'Relocation cleanup failed; retained root {relocation}: {error}'
+                    print(diagnostic, file=sys.stderr)
+                    if failure is None:
+                        raise
+                    failure.add_note(diagnostic)
         provider.stdin.write('{"kind":"finish"}\n')
         provider.stdin.flush()
         report = json.loads(provider.stdout.readline())
@@ -225,22 +233,37 @@ def main():
         (destination / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     finally:
         failure = sys.exception()
-        try:
-            catalog.shutdown()
-            catalog.server_close()
-            if provider.poll() is None:
+        errors = []
+        for name, operation in [('Catalog shutdown', catalog.shutdown), ('Catalog close', catalog.server_close)]:
+            try:
+                operation()
+            except BaseException as error:
+                errors.append((name, error))
+        if provider.poll() is None:
+            try:
                 provider.stdin.close()
+            except BaseException as error:
+                errors.append(('Provider stdin close', error))
+            try:
                 try:
                     provider.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     provider.terminate()
                     provider.wait(timeout=5)
-        except BaseException as error:
-            if failure is None:
-                raise
-            failure.add_note(f'Provider teardown failed: {error}')
-        finally:
+            except BaseException as error:
+                errors.append(('Provider teardown', error))
+        try:
             provider_log.close()
+        except BaseException as error:
+            errors.append(('Provider log close', error))
+        primary = failure
+        for name, error in errors:
+            if primary is None:
+                primary = error
+            else:
+                primary.add_note(f'{name} failed: {error}')
+        if failure is None and primary is not None:
+            raise primary
 
 
 if __name__ == '__main__':
