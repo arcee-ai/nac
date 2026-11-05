@@ -124,7 +124,8 @@ class TimingControls(unittest.TestCase):
 
     def test_capture_pins_attempt_and_pagination_preserves_commands_and_logs(self):
         run, jobs, logs = fixture()
-        responses = [json.dumps(run), json.dumps(run), json.dumps([{'jobs': jobs}]), logs['1'], logs['3']]
+        usage = {'billable': {'UBUNTU': {'total_ms': 0}}}
+        responses = [json.dumps(run['repository']), json.dumps(run), json.dumps(usage), json.dumps(run), json.dumps([{'jobs': jobs}]), logs['1'], logs['3']]
         def response(command, **kwargs):
             return subprocess.CompletedProcess(command, 0, responses.pop(0), '')
         with tempfile.TemporaryDirectory() as directory:
@@ -133,12 +134,15 @@ class TimingControls(unittest.TestCase):
                 report = runner.capture('arcee-ai/nac', ['123:1'], output)[0]
             self.assertTrue(report['ordinary_first_attempt_metric'])
             commands = json.loads((output / 'commands.json').read_text())
-            self.assertEqual(len(commands), 5)
-            self.assertIn('/attempts/1/jobs?per_page=100', commands[2]['command'][-1])
-            self.assertIn('--paginate', commands[2]['command'])
-            self.assertIn('--slurp', commands[2]['command'])
+            self.assertEqual(len(commands), 7)
+            self.assertIn('/attempts/1/jobs?per_page=100', commands[4]['command'][-1])
+            self.assertIn('--paginate', commands[4]['command'])
+            self.assertIn('--slurp', commands[4]['command'])
             self.assertIn('--allow-escape-sequences', commands[-1]['command'])
             self.assertEqual((output / 'run-123-attempt-1/job-1.log').read_text(), logs['1'])
+            self.assertEqual(json.loads((output / 'repository.json').read_text()), run['repository'])
+            self.assertEqual(json.loads((output / '123-run-usage.json').read_text()), usage)
+            self.assertIn('not estimated', report['cost'])
             self.assertEqual(request.call_args.kwargs, {'capture_output': True, 'text': True, 'check': False})
 
     def test_capture_failure_stays_in_selection_and_retains_error(self):

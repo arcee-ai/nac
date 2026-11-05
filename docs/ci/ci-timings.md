@@ -20,7 +20,9 @@ snapshot, including pending or failed observations.
 
 Each snapshot retains raw run and paginated job responses, preparation and final
 aggregate logs, commands with fetch timestamps and stdout digests, fetch failures,
-and a summary. Failed, cancelled, missing and pending observations stay visible;
+repository metadata, run-scoped usage (all attempts), and a summary. Usage is
+retained separately from exact-attempt job duration; unavailable billing data
+remains a fetch error rather than a guessed cost. Failed, cancelled, missing and pending observations stay visible;
 they never become successful timing samples. A retry may have diagnostic timing
 but cannot become an ordinary first-attempt sample.
 

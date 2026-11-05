@@ -56,6 +56,36 @@ selects full `make ci` in the current attempt; it is never reused. Future attemp
 foreign identities, malformed or incomplete results still fail closed. Browser/native/build/source-security are separately
 required by the final aggregate, rather than falsely described as receipt contents.
 
+## Parallel server acceptance and compatible symbol profiles (ALL-582)
+
+`test-server` retains full backend tests and stable binary identity. The separate
+`test-server-web` runs the unchanged frontend unit suite and full API/assets
+checks. Both begin after exact candidate preparation; both are explicitly required
+by the complete quality receipt and final aggregate. Neither lane can substitute
+for the other on failures, missing results, skips or reruns. Backend Node remains
+pinned for runtime capabilities; only the web lane installs web npm dependencies.
+
+Mixed dev/test and browser build jobs set both test and dev debug-symbol levels
+to zero. Optimization, assertions and overflow checks retain their existing
+settings; shipping features and release builds do not change. Actual local NAC
+exporter-then-test compilation reused 370 artifact units instead of recompiling
+all 376, reducing that single compile comparison from 142.11s to 85.96s.
+This used separate cold targets with a fetched registry and compiled tests
+without running them. Feature mismatches still require compilation. Splitting
+server jobs changes overlap, so these savings cannot be added to the parallel
+lane model. Hosted cold/warm comparisons remain required; new roles/profiles
+can miss existing trusted caches. Local defaults in the Makefile stay unchanged.
+
+The refreshed baseline completed in 2,516s processing, 2,519s event-to-green,
+with 3s initial wait and 6,467 executed job-seconds. Portable
+[job](evidence/all-582/baseline-jobs.csv) and
+[step](evidence/all-582/baseline-steps.csv) timestamps accompany the
+[summary](evidence/all-582/baseline-summary.json). The run-scoped usage API
+reported zero billable milliseconds for this public repository's standard
+Ubuntu/macOS runners. GitHub documents standard public-runner compute as free
+([billing documentation](https://docs.github.com/en/actions/concepts/billing-and-usage));
+this is not a storage, larger-runner, local-host or future-plan cost estimate.
+
 ## Complete production browser partition (ALL-582)
 
 Four ordinary machines each run one native Playwright file shard, one worker,
