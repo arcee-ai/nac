@@ -84,12 +84,12 @@ test("browser binds the same committed bundle and independent drift gate without
   assert.equal(steps.filter(s => s.run === "make test-assets").length, 1);
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
   const stable = workflow("stable-release");
-  const browserJob = stable.jobs.browser;
+  const browserJob = stable.jobs["browser-shards"];
   assert.equal(browserJob.needs, "prepare");
   assert.equal(browserJob.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   assert.ok(requiredJobs.includes("browser"));
   assert.deepEqual(stable.jobs.test.needs, ["prepare", "quality", "browser"]);
-  const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser tests");
+  const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser shard");
   assert.match(browser.run, /cargo build --locked -p nac-server --bin nac-web/);
   assert.match(browser.run, /NAC_E2E_BINARY="\$GITHUB_WORKSPACE\/target\/debug\/nac-web" npm --prefix crates\/nac-server\/web run test:e2e/);
   const makefile = readFileSync("Makefile", "utf8");
