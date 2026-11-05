@@ -1,0 +1,166 @@
+{
+  "qualification": "Unassigned private APT transport mechanism trial; no hosted or production quality verdict; overall 14 measured / 0 of 10 unchanged.",
+  "nac_source": "57f08f8442bdb1186b99958a178edc1c9e104368",
+  "probe_sha256": "97adbed2266967a26634b4d595b20b10df3bf8866ba6e3b14f15b9d72673c36a",
+  "image": "docker.io/library/ubuntu@sha256:157dc3d6e4a3e4f2c68d12df9df9ed6e808b59af6d4c3757b432b4f519916725",
+  "platform": "Mac Docker Desktop ARM64 host, emulated linux/amd64 Ubuntu 26.04.1 container; not the complete GitHub runner image or Azure network.",
+  "source_identity": "Hosted source 57f08f8; retained run42078117303 attempt1 job127423786449, Ubuntu26.04.1 image20261101.186.1 westus2. No NAC source changes or execution in this trial.",
+  "historical_timing": {
+    "install_seconds": 672,
+    "apt_reported_seconds": 654,
+    "apt_need_bytes_label": "21.9 MB",
+    "apt_fetched_bytes_label": "16.6 MB",
+    "browser_cdn_seconds": 10.1,
+    "interpretation": "These are actual log labels; the difference between Needed and Fetched is not explained or normalized."
+  },
+  "started_at": "2026-11-05T18:43:56.261026+00:00",
+  "ended_at": "2026-11-05T18:44:40.120463+00:00",
+  "elapsed_seconds": 43.859149541007355,
+  "total_archive_bytes_each_arm": 21857278,
+  "arms": [
+    {
+      "name": "azure",
+      "route": "http://azure.archive.ubuntu.com/ubuntu",
+      "archive_transfer_seconds": 18.145465334004257,
+      "index_update_seconds": 3.3644330409588292,
+      "release_sha256": "45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c",
+      "release_date_fields": {
+        "Suite": "resolute",
+        "Codename": "resolute",
+        "Date": "Thu, 23 Apr 2026 17:07:15 UTC"
+      },
+      "after_index_writable_bytes": 36331520,
+      "after_download_writable_bytes": 58204160
+    },
+    {
+      "name": "official",
+      "route": "http://archive.ubuntu.com/ubuntu",
+      "archive_transfer_seconds": 2.2327692080289125,
+      "index_update_seconds": 3.0090104999835603,
+      "release_sha256": "45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c",
+      "release_date_fields": {
+        "Suite": "resolute",
+        "Codename": "resolute",
+        "Date": "Thu, 23 Apr 2026 17:07:15 UTC"
+      },
+      "after_index_writable_bytes": 36331520,
+      "after_download_writable_bytes": 58204160
+    }
+  ],
+  "packages": [
+    {
+      "Package": "fonts-ipafont-gothic",
+      "Version": "00303-23ubuntu1",
+      "Architecture": "all",
+      "Size": "3703002",
+      "SHA256": "357e3b66847d7f906d50044e977077b81d6c5453c4a3beda06a1fd5621952cf7",
+      "Filename": "pool/universe/f/fonts-ipafont/fonts-ipafont-gothic_00303-23ubuntu1_all.deb"
+    },
+    {
+      "Package": "fonts-freefont-ttf",
+      "Version": "20211204+svn4273-4build1",
+      "Architecture": "all",
+      "Size": "5655806",
+      "SHA256": "54b125be2f498461de5fb7b03d5cd295de7734f2ca5c2506c04ccb6f0d055f23",
+      "Filename": "pool/main/f/fonts-freefont/fonts-freefont-ttf_20211204+svn4273-4build1_all.deb"
+    },
+    {
+      "Package": "fonts-tlwg-loma-otf",
+      "Version": "1:0.7.3-1build1",
+      "Architecture": "all",
+      "Size": "106042",
+      "SHA256": "8e9013154bba1d0d329556b8126af87aa88e87d6825a8e2762f388876bdf0920",
+      "Filename": "pool/universe/f/fonts-tlwg/fonts-tlwg-loma-otf_0.7.3-1build1_all.deb"
+    },
+    {
+      "Package": "fonts-unifont",
+      "Version": "1:16.0.04-1build1",
+      "Architecture": "all",
+      "Size": "3168746",
+      "SHA256": "f27b9f858353bd331d0b79783316d4706ea6c7282c6b77c1f80736318f2afa51",
+      "Filename": "pool/universe/u/unifont/fonts-unifont_16.0.04-1build1_all.deb"
+    },
+    {
+      "Package": "fonts-wqy-zenhei",
+      "Version": "0.9.45-8build1",
+      "Architecture": "all",
+      "Size": "7862570",
+      "SHA256": "7b44a781b0560a49d5bcfe2e5cf9a6f90e4863a8ad12794113e962bab38f030b",
+      "Filename": "pool/universe/f/fonts-wqy-zenhei/fonts-wqy-zenhei_0.9.45-8build1_all.deb"
+    },
+    {
+      "Package": "xfonts-encodings",
+      "Version": "1:1.0.5-0ubuntu3",
+      "Architecture": "all",
+      "Size": "575772",
+      "SHA256": "1d0610635e1fe757c8df0ec2c2cef511203c7e7bf81bbff332031c8bf87b1847",
+      "Filename": "pool/main/x/xfonts-encodings/xfonts-encodings_1.0.5-0ubuntu3_all.deb"
+    },
+    {
+      "Package": "xfonts-utils",
+      "Version": "1:7.7+7build1",
+      "Architecture": "amd64",
+      "Size": "97318",
+      "SHA256": "1615a3471599cc5a62d14e145183bad83939b17dc8561a8e2261d829e0551889",
+      "Filename": "pool/main/x/xfonts-utils/xfonts-utils_7.7+7build1_amd64v3.deb"
+    },
+    {
+      "Package": "xfonts-cyrillic",
+      "Version": "1:1.0.5+nmu1build1",
+      "Architecture": "all",
+      "Size": "384254",
+      "SHA256": "b90c7224e931e6060eb4fa9a5d0c9c45bacd19f24f39a0ed27a8bc85107be21b",
+      "Filename": "pool/universe/x/xfonts-cyrillic/xfonts-cyrillic_1.0.5+nmu1build1_all.deb"
+    },
+    {
+      "Package": "xfonts-scalable",
+      "Version": "1:1.0.3-1.3build1",
+      "Architecture": "all",
+      "Size": "303768",
+      "SHA256": "da5b0c9b9044f35517855bb655dbe3ad45a20ad4daff08f478c524ab81587844",
+      "Filename": "pool/universe/x/xfonts-scalable/xfonts-scalable_1.0.3-1.3build1_all.deb"
+    }
+  ],
+  "controls": {
+    "actual_archive_wrong_expected_hash_rejected": true,
+    "signed_release_positive_both_arms": true,
+    "tampered_release_gpgv_exit": 1,
+    "missing_package_apt_exit": 100,
+    "offline_regressions": 6
+  },
+  "freshness": "Fresh lists; apt-get update --error-on=any with Check-Date and Check-Valid-Until enabled. Immutable base Release may omit Valid-Until; no arbitrary maximum-age claim or disabled expiry check.",
+  "initial_pair_retained": {
+    "path": "pair-first",
+    "qualification": "Not accepted as exact historical package selection: generic amd64 xfonts-utils archive instead of amd64v3 filename; no result hidden.",
+    "script_sha256": "ceb9c01aedc435bfc62b851c888ef664c6f9c1204453faeac018d633559e7e5b"
+  },
+  "resources": {
+    "cpus": 2,
+    "memory": "768m",
+    "pids": 128,
+    "added_owned_bytes": 1073741824,
+    "host_free_stop": 13958643712,
+    "container_writable_bound": 805306368,
+    "container_lifetime_seconds": 1800,
+    "host_disk_after_available_KiB": 20946128,
+    "all_owned_containers_removed": true,
+    "running_containers_after": 0,
+    "new_official_image_logical_bytes": 42146079
+  },
+  "historical_hash_limit": "Historical log has no authenticated archive hashes; new signed-index hashes are prospective pair pins, not historical byte attestation.",
+  "order_limit": "Single fixed-order Azure then official pair, separate fresh container lists/archive directories; host/network/Docker layer caches not cold or reset. Initial disqualified pair preceded this one.",
+  "not_measured": [
+    "Azure hosted latency",
+    "repeated paired order effect",
+    "package install correctness",
+    "Chromium installation",
+    "production journeys",
+    "whole-CI improvement",
+    "runner image parity",
+    "CPU cost or dollars"
+  ],
+  "local_raw_only": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/apt-transport-probe",
+  "raw_report_sha256": "10e2e622a015dab8a38aa7236082c94be0cb9f3715c4ae5e327da9981ec839c4",
+  "raw_commands_sha256": "24046a0479a206c04ebfeaf72d317b13ddca73c699ebb29ded3315976de0d3ce",
+  "historical_packet_local_only": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/landing-integration-20261105/browser-install-42078117303"
+}
