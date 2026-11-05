@@ -19,11 +19,14 @@ const mainPrefix = prefix.replace(predicate, mainPredicate);
 const imageImport = "${{ !(" + predicate + ") && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}";
 const normalImport = "type=gha,scope=nac-managed-linux-amd64-v1";
 const trust = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
-// Canonical parsed workflow hashes at 85f12eadfbf43cb585fe5a0f0231d479069ec26d.
-// Removing only this additive cache control must reproduce every original field:
-// job graph, permissions, profiles, commands, conditions, receipts and identities.
+const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "browser-shards"]);
+// Canonical cold-normalized hashes originated at 85f12eadfbf43cb585fe5a0f0231d479069ec26d.
+// S17 on parent 004492fc300b296e6245a0f0768a892f98c8a42d intentionally changes
+// only stable-release's four shared-key inputs and three read-only save inputs.
+// Its old digest is independently checked after reversing exactly those inputs.
+// The other four workflow hashes, graph, profiles, commands and identities stay fixed.
 const baseline = {
-  "stable-release": "eeafa4d914c1a2dc3fc6a63b91a29bff3b212adda1e04bd45f4e6804c3a8a79f",
+  "stable-release": "1bd0b4b2236140f0b5e56e30daa28345ec948a5f06299e486c97811a5f1ed6a9",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
   "managed-image-build": "c82a05b0089599969dc17e4d0bf0e57aee293dcf8439b3cb4c325a3b2ec0bcb8",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
@@ -84,9 +87,9 @@ function verify(values) {
     assert.equal(declaration.required, false);
     delete normalized[name].on.workflow_call.inputs.cold_caches;
   }
-  for (const { name, step } of cacheSteps(normalized)) {
+  for (const { name, job, step } of cacheSteps(normalized)) {
     assert.equal(step.with["prefix-key"], name === "stable-release" ? mainPrefix : prefix);
-    assert.equal(step.with["save-if"], trust);
+    assert.equal(step.with["save-if"], name === "stable-release" && readonlyBrowserCaches.has(job) ? "false" : trust);
     step.with["prefix-key"] = "nac-ci-v1";
   }
   assert.deepEqual(cacheSteps(values).map(({ name, job }) => `${name}/${job}`).sort(), [
@@ -106,6 +109,17 @@ function verify(values) {
     }
   }
   assert.equal(images, 1);
+  const beforeShared = structuredClone(top);
+  for (const role of ["test-server", ...readonlyBrowserCaches]) {
+    const cache = beforeShared.jobs[role].steps.find(rust);
+    assert.equal(cache.with["shared-key"], "server-browser-linux-gnu-debug0-v1");
+    assert.equal(cache.with.key, undefined);
+    delete cache.with["shared-key"];
+    cache.with.key = "${{ github.job }}";
+    cache.with["save-if"] = trust;
+  }
+  assert.equal(digest(beforeShared), "eeafa4d914c1a2dc3fc6a63b91a29bff3b212adda1e04bd45f4e6804c3a8a79f",
+    "reversing only S17 must recover the exact pre-shared workflow");
   for (const [name, expected] of Object.entries(baseline)) assert.equal(digest(normalized[name]), expected, `${name}: acceptance behavior changed outside cache control`);
   // No flag is allowed to affect a command, if/needs, receipt, privilege or role.
   assert.ok(!JSON.stringify(normalized).includes("cold_caches"));
@@ -200,9 +214,10 @@ test("parsed expressions consume real selector outputs; defaults, trust and cold
     assert.equal(flag, cold);
     for (const ref of ["refs/heads/dev", "refs/heads/main", "refs/heads/topic", "refs/tags/v0.1.4"]) {
       const trusted = event === "push" && ["refs/heads/dev", "refs/heads/main"].includes(ref);
-      for (const { step } of cacheSteps(values)) {
+      for (const { name, job, step } of cacheSteps(values)) {
         assert.equal(evaluate(step.with["prefix-key"], event, flag, "101", "1", ref, "false", selected), cold ? "nac-ci-cold-101-1" : "nac-ci-v1");
-        assert.equal(evaluate(step.with["save-if"], event, flag, "101", "1", ref), trusted);
+        const readonly = name === "stable-release" && readonlyBrowserCaches.has(job);
+        assert.equal(evaluate(step.with["save-if"], event, flag, "101", "1", ref), trusted && !readonly);
       }
       assert.equal(evaluate(build.with["cache-from"], event, flag), cold ? "" : normalImport);
       assert.equal(evaluate(build.with["no-cache"], event, flag), cold);
@@ -238,6 +253,8 @@ test("mutations cannot miss a cache role or change setup, quality, identity, pri
     v => { v["stable-release"].jobs.prepare.steps.find(s => s.id === "cache-mode").if = "github.event_name == 'workflow_dispatch'"; },
     v => { cacheSteps(v)[0].step.with["prefix-key"] = prefix.replace("github.run_attempt", "'1'"); },
     v => { cacheSteps(v)[0].step.with["save-if"] = "true"; },
+    v => { v["stable-release"].jobs["browser-binary"].steps.find(rust).with["save-if"] = trust; },
+    v => { v["stable-release"].jobs["test-server"].steps.find(rust).with["save-if"] = "false"; },
     v => { cacheSteps(v)[0].step.if = "!inputs.cold_caches"; },
     v => { v["managed-quality"].jobs.quality.steps.find(s => s.run === "make ci").if += " && !inputs.cold_caches"; },
     v => { v["managed-fault"].jobs.fault.steps.find(s => s.run === "make test-managed-fault-fixture").if = "!inputs.cold_caches"; },

@@ -176,7 +176,7 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
+          shared-key: server-browser-linux-gnu-debug0-v1
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
       - name: Install Node
@@ -258,8 +258,8 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+          shared-key: server-browser-linux-gnu-debug0-v1
+          save-if: "false"
       - name: Build and package the exact browser executable
         id: pack
         run: |
@@ -340,8 +340,8 @@ jobs:
         if: steps.binary.outputs.mode == 'source'
         with:
           prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+          shared-key: server-browser-linux-gnu-debug0-v1
+          save-if: "false"
       - name: Rebuild current-attempt source after a valid older producer
         if: steps.binary.outputs.mode == 'source'
         run: cargo build --locked -p nac-server --bin nac-web
@@ -435,8 +435,8 @@ jobs:
         if: steps.binary.outputs.mode == 'source'
         with:
           prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+          shared-key: server-browser-linux-gnu-debug0-v1
+          save-if: "false"
       - name: Rebuild current-attempt source after a valid older producer
         if: steps.binary.outputs.mode == 'source'
         run: cargo build --locked -p nac-server --bin nac-web

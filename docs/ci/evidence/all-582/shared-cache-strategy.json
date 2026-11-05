@@ -1,0 +1,1727 @@
+{
+  "schema_version": 1,
+  "strategy": "S17",
+  "status": "Measured local mechanism; broad group rejected, narrow server/browser candidate justified; no hosted shared-cache implementation or acceptance",
+  "source": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+  "source_lockfile_sha256": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+  "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)\nrelease: 1.98.0\ncommit-hash: 797e8a9bca276c1c9f9f738d2a20f484fa4eea9d\ncommit-date: 2026-08-05\nhost: aarch64-apple-darwin\nlibgit2: 1.9.4 (sys:0.21.0 vendored)\nlibcurl: 8.7.1 (sys:0.4.90+curl-8.21.0 system ssl:(SecureTransport) LibreSSL/3.3.6)\nssl: OpenSSL 3.6.3 9 Jun 2026\nos: Mac OS 27.0.1 [64-bit]\n",
+  "resources": {
+    "logical_cpus": 18,
+    "ram_bytes": 38654705664,
+    "jobs": 6,
+    "registry": "warm, locked offline; no registry copies/cleanup",
+    "target": "cold for writer and each cold reader; exact same absolute active path for all arms",
+    "active_target": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target",
+    "snapshots": "private APFS clones, distinct inodes, immutable snapshot hash checks; mtime control in clone-metadata-control.json",
+    "maximum_added_logical_target_snapshot_bytes_observed_at_phase_boundaries": 3591756871,
+    "minimum_host_free_bytes_observed_at_phase_boundaries": 40510799872,
+    "monitor": "3-second checks enforce<=12GiB added and>=12GiB host free; no bound violations",
+    "all_new_target_snapshot_copies_removed_after_receipts": true,
+    "old_owned_target_and_global_caches": "No direct cleanup/manipulation. Normal Cargo registry lock/access bookkeeping only."
+  },
+  "environment_allowlist": {
+    "PATH": "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "CARGO_HOME": "/Users/allison/.cargo",
+    "RUSTUP_HOME": "/Users/allison/.rustup",
+    "RUSTC": "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/rustc",
+    "CARGO_TARGET_DIR": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target",
+    "CARGO_BUILD_JOBS": "6",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_TERM_COLOR": "never",
+    "CARGO_NET_OFFLINE": "true",
+    "NAC_SOURCE_REVISION": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+    "NAC_BUILD_TRACK": "dev",
+    "NAC_BUILD_ID": "dev-41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+    "NAC_HOME": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/isolated-nac-home",
+    "TMPDIR": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/build-tmp",
+    "SDKROOT": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    "LANG": "en_US.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "TERM": "dumb"
+  },
+  "started_at": "2026-11-05T04:13:25.866126+00:00",
+  "completed_at": "2026-11-05T04:17:29.915861+00:00",
+  "cache_state": "Registry-warm, target-cold initial arms; no dependency downloads (CARGO_NET_OFFLINE=true); restore arms use private APFS-cloned frozen target snapshots.",
+  "profile_invariants": {
+    "dev_debug": 0,
+    "test_debug": 0,
+    "incremental": 0,
+    "jobs": 6,
+    "all_reported_artifacts_debug_assertions": true,
+    "all_reported_artifacts_overflow_checks": true,
+    "same_default_reader_feature_profile_target_sets_in_each_three_arm_comparison": true
+  },
+  "samples": [
+    {
+      "label": "writer-target-cold",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "test",
+        "--locked",
+        "-p",
+        "nac-server",
+        "--no-run",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:13:26.038959+00:00",
+      "completed_at": "2026-11-05T04:14:34.110623+00:00",
+      "wall_seconds": 68.0709,
+      "cpu_user_seconds": 178.78,
+      "cpu_system_seconds": 20.5,
+      "native_max_rss_bytes": 4060250112,
+      "compiled_artifact_events": 376,
+      "fresh_artifact_events": 0,
+      "compiled_external_events": 361,
+      "compiled_workspace_events": 15
+    },
+    {
+      "label": "browser-target-cold",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "build",
+        "--locked",
+        "-p",
+        "nac-server",
+        "--bin",
+        "nac-web",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:14:36.517500+00:00",
+      "completed_at": "2026-11-05T04:15:33.574958+00:00",
+      "wall_seconds": 57.055841,
+      "cpu_user_seconds": 144.56,
+      "cpu_system_seconds": 18.16,
+      "native_max_rss_bytes": 2992160768,
+      "compiled_artifact_events": 370,
+      "fresh_artifact_events": 0,
+      "compiled_external_events": 361,
+      "compiled_workspace_events": 9
+    },
+    {
+      "label": "browser-role-warm",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "build",
+        "--locked",
+        "-p",
+        "nac-server",
+        "--bin",
+        "nac-web",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:15:39.169936+00:00",
+      "completed_at": "2026-11-05T04:16:09.751685+00:00",
+      "wall_seconds": 30.579555,
+      "cpu_user_seconds": 48.86,
+      "cpu_system_seconds": 2.14,
+      "native_max_rss_bytes": 2971566080,
+      "compiled_artifact_events": 9,
+      "fresh_artifact_events": 361,
+      "compiled_external_events": 0,
+      "compiled_workspace_events": 9
+    },
+    {
+      "label": "browser-shared-warm",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "build",
+        "--locked",
+        "-p",
+        "nac-server",
+        "--bin",
+        "nac-web",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:16:13.399143+00:00",
+      "completed_at": "2026-11-05T04:16:43.888467+00:00",
+      "wall_seconds": 30.486229,
+      "cpu_user_seconds": 48.39,
+      "cpu_system_seconds": 2.26,
+      "native_max_rss_bytes": 2968666112,
+      "compiled_artifact_events": 9,
+      "fresh_artifact_events": 361,
+      "compiled_external_events": 0,
+      "compiled_workspace_events": 9
+    },
+    {
+      "label": "workspace4-target-cold",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "test",
+        "--locked",
+        "-p",
+        "nac-contracts",
+        "-p",
+        "nac-credential-store",
+        "-p",
+        "nac-managed",
+        "-p",
+        "nac-process",
+        "--no-run",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:16:48.924959+00:00",
+      "completed_at": "2026-11-05T04:17:06.930671+00:00",
+      "wall_seconds": 18.001882,
+      "cpu_user_seconds": 43.01,
+      "cpu_system_seconds": 10.97,
+      "native_max_rss_bytes": 428015616,
+      "compiled_artifact_events": 150,
+      "fresh_artifact_events": 0,
+      "compiled_external_events": 141,
+      "compiled_workspace_events": 9
+    },
+    {
+      "label": "workspace4-role-warm",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "test",
+        "--locked",
+        "-p",
+        "nac-contracts",
+        "-p",
+        "nac-credential-store",
+        "-p",
+        "nac-managed",
+        "-p",
+        "nac-process",
+        "--no-run",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:17:08.998447+00:00",
+      "completed_at": "2026-11-05T04:17:10.838568+00:00",
+      "wall_seconds": 1.836137,
+      "cpu_user_seconds": 4.4,
+      "cpu_system_seconds": 0.62,
+      "native_max_rss_bytes": 386072576,
+      "compiled_artifact_events": 9,
+      "fresh_artifact_events": 141,
+      "compiled_external_events": 0,
+      "compiled_workspace_events": 9
+    },
+    {
+      "label": "workspace4-shared-warm",
+      "command": [
+        "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/cargo",
+        "test",
+        "--locked",
+        "-p",
+        "nac-contracts",
+        "-p",
+        "nac-credential-store",
+        "-p",
+        "nac-managed",
+        "-p",
+        "nac-process",
+        "--no-run",
+        "--message-format=json"
+      ],
+      "started_at": "2026-11-05T04:17:11.946262+00:00",
+      "completed_at": "2026-11-05T04:17:27.806962+00:00",
+      "wall_seconds": 15.855803,
+      "cpu_user_seconds": 36.55,
+      "cpu_system_seconds": 8.9,
+      "native_max_rss_bytes": 427589632,
+      "compiled_artifact_events": 82,
+      "fresh_artifact_events": 68,
+      "compiled_external_events": 73,
+      "compiled_workspace_events": 9
+    }
+  ],
+  "compile_cpu_seconds_sum": 568.1,
+  "snapshots": {
+    "writer": {
+      "path": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/snapshots/writer",
+      "bytes": 887496276,
+      "files": 3304,
+      "manifest": "writer-snapshot.manifest.json",
+      "removed_after_receipts": true
+    },
+    "browser": {
+      "path": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/snapshots/browser",
+      "bytes": 887496276,
+      "files": 3304,
+      "manifest": "browser-snapshot.manifest.json",
+      "removed_after_receipts": true
+    },
+    "workspace4": {
+      "path": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/snapshots/workspace4",
+      "bytes": 289577247,
+      "files": 1586,
+      "manifest": "workspace4-snapshot.manifest.json",
+      "removed_after_receipts": true
+    }
+  },
+  "readers": {
+    "browser": {
+      "same_reader_artifact_feature_profile_set_across_all_three_arms": true,
+      "role_restore_seconds": 0.40339,
+      "shared_restore_seconds": 0.447964,
+      "role_restore_plus_build_seconds": 30.982945,
+      "shared_restore_plus_build_seconds": 30.934193,
+      "shared_minus_role_build_seconds": -0.09332599999999758,
+      "direct_reported_feature_or_profile_mismatch_units": 0,
+      "same_reported_feature_profile_but_different_fingerprint_units": 0,
+      "writer_to_role_snapshot_overlap": {
+        "matching_path_and_content_files": 3301,
+        "matching_bytes": 887219861,
+        "left_files": 3304,
+        "right_files": 3304,
+        "left_bytes": 887496276,
+        "right_bytes": 887496276,
+        "missing_or_different_right_bytes": 276415
+      }
+    },
+    "workspace4": {
+      "same_reader_artifact_feature_profile_set_across_all_three_arms": true,
+      "role_restore_seconds": 0.203642,
+      "shared_restore_seconds": 0.432873,
+      "role_restore_plus_build_seconds": 2.039779,
+      "shared_restore_plus_build_seconds": 16.288676,
+      "shared_minus_role_build_seconds": 14.019666,
+      "direct_reported_feature_or_profile_mismatch_units": 25,
+      "same_reported_feature_profile_but_different_fingerprint_units": 48,
+      "writer_to_role_snapshot_overlap": {
+        "matching_path_and_content_files": 535,
+        "matching_bytes": 61841829,
+        "left_files": 3304,
+        "right_files": 1586,
+        "left_bytes": 887496276,
+        "right_bytes": 289577247,
+        "missing_or_different_right_bytes": 227735418
+      },
+      "extra_external_artifact_events": [
+        {
+          "package": "futures-task@0.3.32",
+          "target": "futures_task",
+          "kind": "lib",
+          "reader_features": "alloc",
+          "writer_feature_variants": [
+            "alloc,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "getrandom@0.4.3",
+          "target": "build-script-build",
+          "kind": "custom-build",
+          "reader_features": "",
+          "writer_feature_variants": [
+            "std,sys_rng"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "serde_core@1.0.228",
+          "target": "build-script-build",
+          "kind": "custom-build",
+          "reader_features": "result,std",
+          "writer_feature_variants": [
+            "alloc,default,rc,result,std",
+            "std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "serde@1.0.228",
+          "target": "build-script-build",
+          "kind": "custom-build",
+          "reader_features": "default,derive,serde_derive,std",
+          "writer_feature_variants": [
+            "alloc,default,derive,rc,serde_derive,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "slab@0.4.12",
+          "target": "slab",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            "std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "libc@0.2.186",
+          "target": "build-script-build",
+          "kind": "custom-build",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "default,extra_traits,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "futures-channel@0.3.32",
+          "target": "futures_channel",
+          "kind": "lib",
+          "reader_features": "alloc,default,std",
+          "writer_feature_variants": [
+            "alloc,default,futures-sink,sink,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "tracing@0.1.44",
+          "target": "tracing",
+          "kind": "lib",
+          "reader_features": "std",
+          "writer_feature_variants": [
+            "attributes,default,log,std,tracing-attributes"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "libc@0.2.186",
+          "target": "libc",
+          "kind": "lib",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "default,extra_traits,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "errno@0.3.14",
+          "target": "errno",
+          "kind": "lib",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "default,std"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "jobserver@0.1.34",
+          "target": "jobserver",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "memchr@2.8.2",
+          "target": "memchr",
+          "kind": "lib",
+          "reader_features": "alloc,std",
+          "writer_feature_variants": [
+            "alloc,default,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "signal-hook-registry@1.4.8",
+          "target": "signal_hook_registry",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "socket2@0.6.4",
+          "target": "socket2",
+          "kind": "lib",
+          "reader_features": "all",
+          "writer_feature_variants": [
+            "all"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "futures-util@0.3.32",
+          "target": "futures_util",
+          "kind": "lib",
+          "reader_features": "alloc,slab",
+          "writer_feature_variants": [
+            "alloc,async-await,async-await-macro,channel,default,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "mio@1.2.1",
+          "target": "mio",
+          "kind": "lib",
+          "reader_features": "net,os-ext,os-poll",
+          "writer_feature_variants": [
+            "net,os-ext,os-poll"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "getrandom@0.4.3",
+          "target": "getrandom",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            "std,sys_rng"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "security-framework-sys@2.17.0",
+          "target": "security_framework_sys",
+          "kind": "lib",
+          "reader_features": "OSX_10_13,default",
+          "writer_feature_variants": [
+            "OSX_10_13,default"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "fs2@0.4.3",
+          "target": "fs2",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "core-foundation@0.10.1",
+          "target": "core_foundation",
+          "kind": "lib",
+          "reader_features": "default,link",
+          "writer_feature_variants": [
+            "default,link"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "uuid@1.23.4",
+          "target": "uuid",
+          "kind": "lib",
+          "reader_features": "default,rng,std,v4",
+          "writer_feature_variants": [
+            "default,serde,std",
+            "default,rng,serde,std,v4"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "cmake@0.1.58",
+          "target": "cmake",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde_core@1.0.228",
+          "target": "serde_core",
+          "kind": "lib",
+          "reader_features": "result,std",
+          "writer_feature_variants": [
+            "alloc,default,rc,result,std",
+            "std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "getrandom@0.2.17",
+          "target": "getrandom",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            "std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "cpufeatures@0.2.17",
+          "target": "cpufeatures",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "cc@1.2.65",
+          "target": "cc",
+          "kind": "lib",
+          "reader_features": "parallel",
+          "writer_feature_variants": [
+            "parallel"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "sha2@0.10.9",
+          "target": "sha2",
+          "kind": "lib",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "default,std"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "synstructure@0.13.2",
+          "target": "synstructure",
+          "kind": "lib",
+          "reader_features": "default,proc-macro",
+          "writer_feature_variants": [
+            "default,proc-macro"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde_json@1.0.150",
+          "target": "serde_json",
+          "kind": "lib",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "alloc,default,raw_value,std",
+            "default,std"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "security-framework@3.7.0",
+          "target": "security_framework",
+          "kind": "lib",
+          "reader_features": "OSX_10_14,alpn,default,session-tickets",
+          "writer_feature_variants": [
+            "OSX_10_14,alpn,default,session-tickets"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "ring@0.17.14",
+          "target": "build-script-build",
+          "kind": "custom-build",
+          "reader_features": "alloc,default,dev_urandom_fallback",
+          "writer_feature_variants": [
+            "alloc,default,dev_urandom_fallback"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "aws-lc-sys@0.46.0",
+          "target": "build-script-main",
+          "kind": "custom-build",
+          "reader_features": "prebuilt-nasm",
+          "writer_feature_variants": [
+            "prebuilt-nasm"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "syn@2.0.118",
+          "target": "syn",
+          "kind": "lib",
+          "reader_features": "clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit",
+          "writer_feature_variants": [
+            "clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "zerovec-derive@0.11.3",
+          "target": "zerovec_derive",
+          "kind": "proc-macro",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "yoke-derive@0.8.2",
+          "target": "yoke_derive",
+          "kind": "proc-macro",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "zerofrom-derive@0.1.7",
+          "target": "zerofrom_derive",
+          "kind": "proc-macro",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "displaydoc@0.2.6",
+          "target": "displaydoc",
+          "kind": "proc-macro",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "zerofrom@0.1.8",
+          "target": "zerofrom",
+          "kind": "lib",
+          "reader_features": "derive",
+          "writer_feature_variants": [
+            "derive"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "tokio-macros@2.7.0",
+          "target": "tokio_macros",
+          "kind": "proc-macro",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "yoke@0.8.3",
+          "target": "yoke",
+          "kind": "lib",
+          "reader_features": "derive,zerofrom",
+          "writer_feature_variants": [
+            "derive,zerofrom"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "zerotrie@0.2.4",
+          "target": "zerotrie",
+          "kind": "lib",
+          "reader_features": "yoke,zerofrom",
+          "writer_feature_variants": [
+            "yoke,zerofrom"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "zerovec@0.11.6",
+          "target": "zerovec",
+          "kind": "lib",
+          "reader_features": "derive,yoke",
+          "writer_feature_variants": [
+            "derive,yoke"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "tinystr@0.8.3",
+          "target": "tinystr",
+          "kind": "lib",
+          "reader_features": "zerovec",
+          "writer_feature_variants": [
+            "zerovec"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "potential_utf@0.1.5",
+          "target": "potential_utf",
+          "kind": "lib",
+          "reader_features": "zerovec",
+          "writer_feature_variants": [
+            "zerovec"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "icu_collections@2.2.0",
+          "target": "icu_collections",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde_derive@1.0.228",
+          "target": "serde_derive",
+          "kind": "proc-macro",
+          "reader_features": "default",
+          "writer_feature_variants": [
+            "default"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "icu_locale_core@2.2.0",
+          "target": "icu_locale_core",
+          "kind": "lib",
+          "reader_features": "zerovec",
+          "writer_feature_variants": [
+            "zerovec"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "icu_provider@2.2.0",
+          "target": "icu_provider",
+          "kind": "lib",
+          "reader_features": "baked",
+          "writer_feature_variants": [
+            "baked"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde@1.0.228",
+          "target": "serde",
+          "kind": "lib",
+          "reader_features": "default,derive,serde_derive,std",
+          "writer_feature_variants": [
+            "alloc,default,derive,rc,serde_derive,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "icu_normalizer@2.2.0",
+          "target": "icu_normalizer",
+          "kind": "lib",
+          "reader_features": "compiled_data",
+          "writer_feature_variants": [
+            "compiled_data"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "toml_datetime@0.6.11",
+          "target": "toml_datetime",
+          "kind": "lib",
+          "reader_features": "serde",
+          "writer_feature_variants": [
+            "serde"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde_spanned@0.6.9",
+          "target": "serde_spanned",
+          "kind": "lib",
+          "reader_features": "serde",
+          "writer_feature_variants": [
+            "serde"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "serde_urlencoded@0.7.1",
+          "target": "serde_urlencoded",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "icu_properties@2.2.0",
+          "target": "icu_properties",
+          "kind": "lib",
+          "reader_features": "compiled_data",
+          "writer_feature_variants": [
+            "compiled_data"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "idna_adapter@1.2.2",
+          "target": "idna_adapter",
+          "kind": "lib",
+          "reader_features": "compiled_data",
+          "writer_feature_variants": [
+            "compiled_data"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "idna@1.1.0",
+          "target": "idna",
+          "kind": "lib",
+          "reader_features": "alloc,compiled_data,std",
+          "writer_feature_variants": [
+            "alloc,compiled_data,std"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "tokio@1.53.3",
+          "target": "tokio",
+          "kind": "lib",
+          "reader_features": "bytes,default,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal-hook-registry,socket2,sync,time,tokio-macros",
+          "writer_feature_variants": [
+            "bytes,default,fs,io-std,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,time,tokio-macros"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "hyper@1.10.1",
+          "target": "hyper",
+          "kind": "lib",
+          "reader_features": "client,default,http1",
+          "writer_feature_variants": [
+            "client,default,http1,server"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "tower@0.5.3",
+          "target": "tower",
+          "kind": "lib",
+          "reader_features": "futures-core,futures-util,pin-project-lite,retry,sync_wrapper,timeout,tokio,util",
+          "writer_feature_variants": [
+            "futures-core,futures-util,log,make,pin-project-lite,retry,sync_wrapper,timeout,tokio,tracing,util"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "ring@0.17.14",
+          "target": "ring",
+          "kind": "lib",
+          "reader_features": "alloc,default,dev_urandom_fallback",
+          "writer_feature_variants": [
+            "alloc,default,dev_urandom_fallback"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "url@2.5.8",
+          "target": "url",
+          "kind": "lib",
+          "reader_features": "default,std",
+          "writer_feature_variants": [
+            "default,serde,std"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "tower-http@0.6.11",
+          "target": "tower_http",
+          "kind": "lib",
+          "reader_features": "follow-redirect,futures-util,tower",
+          "writer_feature_variants": [
+            "compression-gzip,cors,default,follow-redirect,futures-core,futures-util,tokio-util,tower"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "toml@0.8.23",
+          "target": "toml",
+          "kind": "lib",
+          "reader_features": "default,display,parse",
+          "writer_feature_variants": [
+            "default,display,parse"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "toml_edit@0.22.27",
+          "target": "toml_edit",
+          "kind": "lib",
+          "reader_features": "display,parse,serde",
+          "writer_feature_variants": [
+            "default,display,parse,serde"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "hyper-util@0.1.20",
+          "target": "hyper_util",
+          "kind": "lib",
+          "reader_features": "client,client-legacy,client-proxy,default,http1,tokio",
+          "writer_feature_variants": [
+            "client,client-legacy,client-proxy,default,http1,server,service,tokio"
+          ],
+          "same_reported_features_and_profile": false
+        },
+        {
+          "package": "aws-lc-sys@0.46.0",
+          "target": "aws_lc_sys",
+          "kind": "lib",
+          "reader_features": "prebuilt-nasm",
+          "writer_feature_variants": [
+            "prebuilt-nasm"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "aws-lc-rs@1.18.2",
+          "target": "aws_lc_rs",
+          "kind": "lib",
+          "reader_features": "aws-lc-sys,prebuilt-nasm",
+          "writer_feature_variants": [
+            "aws-lc-sys,prebuilt-nasm"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "rustls-webpki@0.103.16",
+          "target": "webpki",
+          "kind": "lib",
+          "reader_features": "alloc,aws-lc-rs,std",
+          "writer_feature_variants": [
+            "alloc,aws-lc-rs,std"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "rustls-platform-verifier@0.7.0",
+          "target": "rustls_platform_verifier",
+          "kind": "lib",
+          "reader_features": "",
+          "writer_feature_variants": [
+            ""
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "tokio-rustls@0.26.4",
+          "target": "tokio_rustls",
+          "kind": "lib",
+          "reader_features": "aws-lc-rs,aws_lc_rs,tls12",
+          "writer_feature_variants": [
+            "aws-lc-rs,aws_lc_rs,tls12"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "hyper-rustls@0.27.9",
+          "target": "hyper_rustls",
+          "kind": "lib",
+          "reader_features": "aws-lc-rs,http1,tls12",
+          "writer_feature_variants": [
+            "aws-lc-rs,http1,tls12"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "rustls@0.23.46",
+          "target": "rustls",
+          "kind": "lib",
+          "reader_features": "aws-lc-rs,aws_lc_rs,std,tls12",
+          "writer_feature_variants": [
+            "aws-lc-rs,aws_lc_rs,std,tls12"
+          ],
+          "same_reported_features_and_profile": true
+        },
+        {
+          "package": "reqwest@0.13.4",
+          "target": "reqwest",
+          "kind": "lib",
+          "reader_features": "__rustls,__rustls-aws-lc-rs,__tls,form,json,rustls",
+          "writer_feature_variants": [
+            "__rustls,__rustls-aws-lc-rs,__tls,form,json,rustls,stream"
+          ],
+          "same_reported_features_and_profile": false
+        }
+      ]
+    }
+  },
+  "capacity_model": {
+    "selected_three_role_snapshots_raw_bytes": 2064569799,
+    "single_writer_raw_bytes": 887496276,
+    "raw_target_bytes_saved_broad_three_role_group": 1177073523,
+    "raw_target_fraction_saved_broad_three_role_group": 0.5701301663766127,
+    "writer_browser_only_separate_raw_bytes": 1774992552,
+    "writer_browser_only_shared_raw_bytes": 887496276,
+    "writer_browser_only_fraction_saved": 0.5,
+    "writer_browser_all_paths_content_equal": false,
+    "limits": "Uncompressed target-only byte sums, not GitHub compressed archive occupancy, network transfer, total registry/git bundles or actual billed cost.",
+    "writer_browser_different_content_files": [
+      ".rustc_info.json",
+      "debug/.fingerprint/utoipa-swagger-ui-47cebf1d7392d470/dep-lib-utoipa_swagger_ui",
+      "debug/build/aws-lc-sys-0e388172439d6bb7/output"
+    ],
+    "writer_browser_matching_bytes_fraction": 0.9996885451719912
+  },
+  "browser_binary_verification": {
+    "version_and_offline_guide_passed_all_three_arms": true,
+    "same_binary_sha256_all_three": "5e77612c8455c3095795714a1282e221ec4c3c61cacef7b9b6a08e4cf445215e",
+    "binary_bytes": 237229208,
+    "guide_build_identity": {
+      "build_id": "dev-41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+      "product_version": "0.1.4",
+      "source_revision": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+      "track": "dev"
+    },
+    "outside_compile_measurement": true
+  },
+  "pruning_model": {
+    "actual_command": [
+      "cargo",
+      "clean",
+      "--locked",
+      "--workspace",
+      "--target-dir",
+      "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target"
+    ],
+    "workspace_source_outputs_or_quality_verdicts_reused": false,
+    "observed_no_workspace_named_artifacts_in_snapshot": true,
+    "differences_from_pinned_action": [
+      "Pinned action uses all-features Cargo metadata only to derive an external package/name allowlist; Cargo clean uses workspace package ownership. Neither populates absent feature variants.",
+      "Pinned action removes root .rustc_info.json and non-build/.fingerprint/deps profile entries; Cargo clean model leaves .rustc_info.json and three zero-byte Cargo lock files.",
+      "Pinned action also prunes and archives registry/git and may cargo/bin. This trial uses one unchanged registry-warm root and compares target snapshots only.",
+      "Pinned action restore exact/prefix behavior, timestamp fallback cleanup, immutability and one successful trusted-writer publication are not executed locally.",
+      "APFS clone restore is local and mtime-preserving; GitHub archive extraction/compression/network and Linux native dependencies are unmeasured."
+    ],
+    "primary_sources": [
+      "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/cleanup.ts",
+      "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/workspace.ts",
+      "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/save.ts"
+    ]
+  },
+  "ordering_and_limitations": [
+    "Local macOS ARM != hosted Linux; registry warm, target cold.",
+    "Compile-only --no-run is not test execution or CI acceptance.",
+    "Every reader arm uses the exact same absolute active target path.",
+    "Cargo workspace clean models source-output pruning; it is not the pinned action filesystem cleanup algorithm.",
+    "APFS private clones model local copy overhead, not Actions compression/network/archive transfer.",
+    "HOME and provider credentials are absent from the explicit allowlist; shared Cargo registry is read for locked offline dependencies.",
+    "Role warm precedes shared warm, so page-cache/order effects remain; all comparisons disclosed, not a hosted speedup claim."
+  ],
+  "decision": {
+    "broad_debug0_group": "Reject as proposed for workspace4:73 additional external units rebuild,+14.019666s compilation and+40.43s CPU versus its own role snapshot, while restoring a3.0648x larger raw target snapshot.25units directly differ in reported features/profile;48 have the same reported features/profile but different dependency/fingerprint context. The frozen writer does not learn reader-added variants.",
+    "narrow_adjustment": "Only server-default writer/browser-default reader closure is supported locally: equal887496276-byte snapshot sizes,3301/3304 files and99.96885% of bytes hash-identical,0 extra external recompiles, and identical actually produced browser binaries. Preserve a separate workspace4 namespace; other roles untested. No YAML implementation authorized here.",
+    "next_evidence": "Before rollout, a bounded Linux comparison must verify actual pinned-action keys/profile/feature artifacts, default-reader snapshot parity and compressed restore/whole-pipeline effects. Managed-fault/private-feature and other roles remain untested.",
+    "acceptance": "Compile mechanism only. No test, whole-pipeline latency, hosted cache capacity/cost or ALL582 qualification acceptance."
+  },
+  "narrow_adaptation": {
+    "strategy": "S17 refinement, not another strategy",
+    "status": "read-only narrow adaptation assessment; no implementation",
+    "source": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+    "captured_at": "2026-11-05T04:31:46.494462+00:00",
+    "proposed_group": {
+      "authoritative_writer": "test-server",
+      "readers": [
+        "browser-binary",
+        "browser-proof",
+        "browser-shards"
+      ],
+      "reader_execution": "browser-binary always uses Rust cache; proof/shards keep existing condition steps.binary.outputs.mode == source. Current artifact consumers never restore compiler cache.",
+      "independent": [
+        "test-workspace initial4crate",
+        "test-core/catalog",
+        "lint",
+        "test-server-web",
+        "managed quality/fault",
+        "release/compiler staging",
+        "native/macOS",
+        "container image caches"
+      ],
+      "shared_key_candidate": "server-browser-linux-gnu-debug0-v1",
+      "prefix_key": "Preserve existing prepared cold_caches ternary exactly, including run/attempt nonce on controlled cold runs; otherwise nac-ci-v1.",
+      "manual_key": "shared-key replaces both key and automatic GITHUB_JOB suffix; key does not provide a role suffix alongside shared-key. Remove the redundant key field only in participating jobs if implemented.",
+      "writer_save_if": "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}",
+      "reader_save_if": "false",
+      "preserved": [
+        "cache-workspace-crates false",
+        "cache-on-failure false/default",
+        "add-rust-environment-hash-key true/default",
+        "add-job-id-key default; superseded by shared-key for group only",
+        "pinned Rust runtime and all source/build/feature/test/proof behavior",
+        "same original parallel dependency graph; no reader waits for writer cache publication",
+        "no cache-hit test/build skipping or verdict reuse",
+        "all original permissions and untrusted PR/tag/manual write exclusions"
+      ]
+    },
+    "pinned_semantics": {
+      "pin": "c19371144df3bb44fab255c43d04cbc2ab54d1c4",
+      "key": "prefix-key + shared-key (or manual key + job) + OS/architecture + default environment hash + manifest/lock/config hash",
+      "environment": "Restore exports CARGO_INCREMENTAL=0 before deriving keys. Sorted installed Rust release/host/commit identities and nonempty env prefixes CARGO,CC,CFLAGS,CXX,CMAKE,RUST are hashed. NAC_* source identity is outside that default prefix set; workspace outputs are pruned and rebuilt.",
+      "command_flags": "CLI features/profile/target are not independently hashed; keep this group limited to measured default server/browser command family and encode family in namespace. Do not normalize unrelated roles or disable default hashes.",
+      "restore": "Exact key first, then environment-prefix key; old-manifest fallback uses pinned timestamp cleanup, not a complete dependency union.",
+      "save": "Only nonexact/miss eligible writer saves. Exact hit is frozen and readers cannot augment it. Missing variants safely rebuild every time until key/namespace/expiry changes.",
+      "failure": "Action post-if permits success or CACHE_ON_FAILURE=true; restore forces CACHE_ON_FAILURE=false unless explicitly opted in. Keep default failure behavior unchanged.",
+      "primary_sources": [
+        "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/config.ts",
+        "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/restore.ts",
+        "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/src/save.ts",
+        "https://github.com/Swatinem/rust-cache/blob/c19371144df3bb44fab255c43d04cbc2ab54d1c4/action.yml"
+      ]
+    },
+    "observed_hosted_role_keys": {
+      "run": 41958708860,
+      "attempt": 1,
+      "source": "5f97368afcda82bd664c900f56fa90fd409de353",
+      "test-server": {
+        "job": 127019824981,
+        "key": "nac-ci-v1-test-server-test-server-Linux-x64-a7860c54-055f132a"
+      },
+      "browser-binary": {
+        "job": 127019824900,
+        "key": "nac-ci-v1-browser-binary-browser-binary-Linux-x64-a7860c54-055f132a"
+      },
+      "browser-proof": {
+        "job": 127020977270,
+        "key": "nac-ci-v1-browser-proof-browser-proof-Linux-x64-a7860c54-055f132a"
+      },
+      "browser-shards": {
+        "job": 127020977325,
+        "key": "nac-ci-v1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a"
+      },
+      "finding": "All four observed role hashes already match a7860c54-055f132a. Namespace sharing need not weaken profile/env hashing. These were misses; no trusted seed with that profile currently exists in the cache inventory."
+    },
+    "capacity": {
+      "local_target_raw": {
+        "selected_three_role_snapshots_raw_bytes": 2064569799,
+        "single_writer_raw_bytes": 887496276,
+        "raw_target_bytes_saved_broad_three_role_group": 1177073523,
+        "raw_target_fraction_saved_broad_three_role_group": 0.5701301663766127,
+        "writer_browser_only_separate_raw_bytes": 1774992552,
+        "writer_browser_only_shared_raw_bytes": 887496276,
+        "writer_browser_only_fraction_saved": 0.5,
+        "writer_browser_all_paths_content_equal": false,
+        "limits": "Uncompressed target-only byte sums, not GitHub compressed archive occupancy, network transfer, total registry/git bundles or actual billed cost.",
+        "writer_browser_different_content_files": [
+          ".rustc_info.json",
+          "debug/.fingerprint/utoipa-swagger-ui-47cebf1d7392d470/dep-lib-utoipa_swagger_ui",
+          "debug/build/aws-lc-sys-0e388172439d6bb7/output"
+        ],
+        "writer_browser_matching_bytes_fraction": 0.9996885451719912
+      },
+      "live_stored_cache_metadata": [
+        {
+          "id": 9778912990,
+          "key": "nac-ci-v1-test-server-test-server-Linux-x64-8c9843e5-055f132a",
+          "ref": "refs/heads/dev",
+          "size_in_bytes": 754407126,
+          "created_at": "2026-10-30T21:22:56.920714Z",
+          "last_accessed_at": "2026-11-05T04:23:05.500011Z"
+        },
+        {
+          "id": 9779129327,
+          "key": "nac-ci-v1-browser-browser-Linux-x64-8c9843e5-055f132a",
+          "ref": "refs/heads/dev",
+          "size_in_bytes": 497590057,
+          "created_at": "2026-10-30T21:28:59.744815Z",
+          "last_accessed_at": "2026-11-05T04:23:05.440416Z"
+        }
+      ],
+      "legacy_server_browser_stored_size_in_bytes_sum": 1251997183,
+      "new_profile_group_stored_cache_entries": 0,
+      "compressed_savings": "UNKNOWN: no new-profile shared/role archive exists; the local snapshots were target-only APFS copies, not GHA zstd archives. Legacy stored metadata includes registry/git/bin and different profile graphs. Do not claim 50% compressed capacity saving from raw target equality.",
+      "current_usage": {
+        "full_name": "arcee-ai/nac",
+        "active_caches_size_in_bytes": 10717790847,
+        "active_caches_count": 63
+      },
+      "headroom_if_prior_10GiB_cap_still_applies": 19627393,
+      "cap_limit_caveat": "Usage endpoint does not return the configured storage limit; historical10GiB cap is not revalidated here. No setting changes.",
+      "role_keys": "Four logical roles can become one shared namespace, at most3 eliminated role keys per matching env/manifest tuple, not9 matrix caches. In artifact-dominant runs only server+producer cache use is common; proof/shards cache use occurs on source fallback.",
+      "migration": "A new namespace begins cold and overlaps old entries until natural eviction; current usage is near the previously observed10GiB cap. Do not delete old caches, raise limits or assume immediate occupied-storage reduction."
+    },
+    "hazards": [
+      "The first trusted push has parallel readers before the writer post-save; retain the normal cold commands rather than adding a seed dependency.",
+      "An incomplete exact writer entry is immutable. The local browser had0 extra external recompiles; workspace4 had73 and remains excluded. Namespace-version or graph change is needed if future measured browser coverage proves incomplete.",
+      "Runner image rollout can change installed Rust/environment hashes, forcing cold entries. Even unchanged hashes can encounter ordinary Cargo/native fingerprint rebuilds; do not disable identity hashing to force hits.",
+      "S09 runtime executable admission and its image/attempt/source fallback stay mandatory and separate from dependency caching.",
+      "Linux native graph, actual archive transfer/compression, initial occupancy/eviction and whole-path compute remain unmeasured for this adaptation."
+    ],
+    "decision": "A narrow server/browser Linux validation candidate is justified by actual local coverage and observed compatible hosted hashes. Root agreement is still required before implementation; this task creates no workflow edits, caches, publication or new strategy credit."
+  },
+  "raw_evidence": {
+    "local_only_base": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local",
+    "locators_are_not_portable_build_inputs": true,
+    "notes": "Raw Cargo JSON retains exact package IDs, targets, feature lists, profiles, Fresh flags, output filenames and build-script events. Snapshot manifests retain per-file hashes/bytes/inodes; logs retain native time/RSS. Copies were removed only after receipt and immutability checks. No quality verdict or workspace compiled output is reused.",
+    "files": {
+      "analyze.py": {
+        "bytes": 10078,
+        "sha256": "7e45b07a99998cc34c3a35c1aad0a49694125779f6199247ed2fd005c53a4bd2"
+      },
+      "browser-cold-guide.stderr": {
+        "bytes": 777,
+        "sha256": "a47bd4f0dc5b1b67723eacc1bdd0716385befa1b839fbabd34f2abc5c7a98f0b"
+      },
+      "browser-cold-guide.stdout": {
+        "bytes": 11672,
+        "sha256": "352058da2fc5273216e7d147d41505fae17717527e214f3013606367fe673d3f"
+      },
+      "browser-cold-prune-workspace.stderr": {
+        "bytes": 815,
+        "sha256": "f44bfab1a12654abe2e2786f33a8fa2c7be6b2c110ee3cf2d5e6438e06c95c30"
+      },
+      "browser-cold-prune-workspace.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "browser-cold-version.stderr": {
+        "bytes": 777,
+        "sha256": "3b4a556bd00668377b996b30ca4de228ad1d72a545e09e8c64e0a4d83b7ddd8e"
+      },
+      "browser-cold-version.stdout": {
+        "bytes": 29,
+        "sha256": "8b8b0c5d2c27a651e77eaafcea6debe862a12cec3252794c422e840f6581f7de"
+      },
+      "browser-final-browser.manifest.json": {
+        "bytes": 731468,
+        "sha256": "e37c0b70b02324dcdfc43d15b53da664188da12ce90e694458af864eaa6df6b1"
+      },
+      "browser-final-writer.manifest.json": {
+        "bytes": 731467,
+        "sha256": "461c651e607cf4dbcf4deab4aa33e8cfb36b144885b5652d8be9aa4aa8fb97c8"
+      },
+      "browser-pruned-active.manifest.json": {
+        "bytes": 731464,
+        "sha256": "5f01eda34e418eb6119bdbaeffaef51e971555b0724bbc17af75c8a9d7c1761e"
+      },
+      "browser-role-restore.stderr": {
+        "bytes": 777,
+        "sha256": "dab6a651aea582e02bc11a27b671ac663085c916406be37de95f1ea830dcc7e8"
+      },
+      "browser-role-restore.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "browser-role-warm-guide.stderr": {
+        "bytes": 777,
+        "sha256": "0ec949cb40b66f03310a56cdd9738d1479d64b63f0ea6fb3421045704410add5"
+      },
+      "browser-role-warm-guide.stdout": {
+        "bytes": 11672,
+        "sha256": "352058da2fc5273216e7d147d41505fae17717527e214f3013606367fe673d3f"
+      },
+      "browser-role-warm-version.stderr": {
+        "bytes": 777,
+        "sha256": "ed4988972630c7b82fa3e11e5802e006661374b48c876c62283a0d8ee09cdffb"
+      },
+      "browser-role-warm-version.stdout": {
+        "bytes": 29,
+        "sha256": "8b8b0c5d2c27a651e77eaafcea6debe862a12cec3252794c422e840f6581f7de"
+      },
+      "browser-role-warm.jsonl": {
+        "bytes": 378774,
+        "sha256": "c19206321510db64ed9282df5180198d453309abe8bc3b458d95c5e9dcb95f24"
+      },
+      "browser-role-warm.stderr": {
+        "bytes": 1536,
+        "sha256": "9dd7e7cb856f5fcf6418b76bf44711bf9e3a6cfcb0c63c44475b639d475f3ffc"
+      },
+      "browser-shared-restore.stderr": {
+        "bytes": 777,
+        "sha256": "9e27ec891ed4ad557b56ddbbfcf9f798e4e4d1dd0d23bc358e3dd4b8329b21f3"
+      },
+      "browser-shared-restore.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "browser-shared-result.manifest.json": {
+        "bytes": 749026,
+        "sha256": "92ee0a2933b5bdfcb9656b92e5211571201a408b8ed0638ff642d84fdc81a336"
+      },
+      "browser-shared-warm-guide.stderr": {
+        "bytes": 777,
+        "sha256": "44e6fc167d184edc65b4e2b59b438661236c82f067456d105ebf2914f1fefcfd"
+      },
+      "browser-shared-warm-guide.stdout": {
+        "bytes": 11672,
+        "sha256": "352058da2fc5273216e7d147d41505fae17717527e214f3013606367fe673d3f"
+      },
+      "browser-shared-warm-version.stderr": {
+        "bytes": 777,
+        "sha256": "9f66db6d82814f56a21bd753f38a6540887d7391989d9e57fb73258ba9d0dc27"
+      },
+      "browser-shared-warm-version.stdout": {
+        "bytes": 29,
+        "sha256": "8b8b0c5d2c27a651e77eaafcea6debe862a12cec3252794c422e840f6581f7de"
+      },
+      "browser-shared-warm.jsonl": {
+        "bytes": 378776,
+        "sha256": "b745c5fc43dd1181b83279600ea891fb898aeaea6da8f90c39b0adbfe6f29b5b"
+      },
+      "browser-shared-warm.stderr": {
+        "bytes": 1536,
+        "sha256": "92a4dd130f30ffc8e796d6917114a96522e4d8990424226819db9104ecd35a3f"
+      },
+      "browser-snapshot-clone.stderr": {
+        "bytes": 777,
+        "sha256": "e60d421e2e43f5656ef29fc915998a68625bcd137e5a019470b7a56637ac8221"
+      },
+      "browser-snapshot-clone.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "browser-snapshot.manifest.json": {
+        "bytes": 731468,
+        "sha256": "a906449ec42b0f09d79139abc72de729e753349635764f66c5e2bf12ee0b3d1a"
+      },
+      "browser-target-cold.jsonl": {
+        "bytes": 379143,
+        "sha256": "fc1c978aaec74753b7af3582fb7c6e760d01f4818a7be469488fc89187f7575f"
+      },
+      "browser-target-cold.stderr": {
+        "bytes": 11168,
+        "sha256": "72c876a6376004c665e241114d6a588767e7d93859bb74709e018db285fffe0f"
+      },
+      "clone-metadata-control.json": {
+        "bytes": 163,
+        "sha256": "106f08b110489a1f2250d477e0d3aa78471c24fdb5ae11b56b49832f511c9991"
+      },
+      "live-cache-usage.json": {
+        "bytes": 95,
+        "sha256": "3bb0cf4e151c70be54001b2138fff67faaeab7dfa735b4e70f4464f3fde08a0e"
+      },
+      "result.json": {
+        "bytes": 2886088,
+        "sha256": "1f0880745e5e121aefaa80a8f7d7de9feca51851cf95bffea7017a4860208509"
+      },
+      "trial.py": {
+        "bytes": 12423,
+        "sha256": "07ea78f3f9cae3d2f8da39ab00cda1ea5a262821e8a64e1056290e525a1b5d70"
+      },
+      "workspace4-cold-prune-workspace.stderr": {
+        "bytes": 814,
+        "sha256": "385fe0aa6ac601766fc7ed84af38501e933f7b548ffc2ce70a17370f532450a1"
+      },
+      "workspace4-cold-prune-workspace.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "workspace4-final-workspace4.manifest.json": {
+        "bytes": 354012,
+        "sha256": "3b60e5438d9778491ef5cefcddccf282f2956400f3b6e12473db1680a734b97d"
+      },
+      "workspace4-final-writer.manifest.json": {
+        "bytes": 731466,
+        "sha256": "319cf5bbd14238af0f791cafdbcd18280d5bb4b3a40110805e44fb5e4a734334"
+      },
+      "workspace4-pruned-active.manifest.json": {
+        "bytes": 354004,
+        "sha256": "9832e160f92a6df41e4703f724632027a27a1dd9b2776d1fb439c422f218f7ff"
+      },
+      "workspace4-role-restore.stderr": {
+        "bytes": 777,
+        "sha256": "f52f72b59c391a3be8eb9708cc7563c59a587ffea72ecec83451e9feb3f044a2"
+      },
+      "workspace4-role-restore.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "workspace4-role-warm.jsonl": {
+        "bytes": 162052,
+        "sha256": "84dcae8b3ee1523ef7c69c96941461756be130aadb036ec3a7da4f91a6d9a235"
+      },
+      "workspace4-role-warm.stderr": {
+        "bytes": 1316,
+        "sha256": "b686cfe043d3adfdf3c732c45e24105854fa519fa550905650bf24916d72e177"
+      },
+      "workspace4-shared-restore.stderr": {
+        "bytes": 777,
+        "sha256": "678bd4fc34a4b8e84e2ee8f4bab660a85d466ff4c482279ac43292ceb66a3e0d"
+      },
+      "workspace4-shared-restore.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "workspace4-shared-result.manifest.json": {
+        "bytes": 984212,
+        "sha256": "5e1e44c231f045e7ec0ecb601f77f40b96dcd40d33f39f4f5cc6956894219c14"
+      },
+      "workspace4-shared-warm.jsonl": {
+        "bytes": 162125,
+        "sha256": "98994e23825af9a95236ad1c9c465aac062887dc62dd17b7e5d8061f3468f4c2"
+      },
+      "workspace4-shared-warm.stderr": {
+        "bytes": 3417,
+        "sha256": "3fdc01ee0db434cade584c3dd7b3195d1b6a73818ff4257ebcedb46a2e3fbf1d"
+      },
+      "workspace4-snapshot-clone.stderr": {
+        "bytes": 777,
+        "sha256": "5642ba213a66c581e8755dc84d2638228e0d356d2f378222636cefa1cf92351a"
+      },
+      "workspace4-snapshot-clone.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "workspace4-snapshot.manifest.json": {
+        "bytes": 354012,
+        "sha256": "8b7ba1263bc200efe6b084f821c880bd33cc872cb5bb2a44bcf6095c4b0c911e"
+      },
+      "workspace4-target-cold.jsonl": {
+        "bytes": 162193,
+        "sha256": "70c0330a07717f58805ae919f606b1e463fcba48a711b1d9b8cae39f36a00e44"
+      },
+      "workspace4-target-cold.stderr": {
+        "bytes": 5193,
+        "sha256": "cd3b182aed2311c3abd6d63707ab620c94f4d9d1785f86bd013fc5150c9bc97c"
+      },
+      "writer-prune-workspace.stderr": {
+        "bytes": 814,
+        "sha256": "a3658543bce7502e6daf40a6938ae73b04c9622ebfff4acbf83831f218a8bbd6"
+      },
+      "writer-prune-workspace.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "writer-pruned-active.manifest.json": {
+        "bytes": 731464,
+        "sha256": "045640bb593f4ead5c179024cdb6c53dc9f301ba37493ff3137236e78b8459cd"
+      },
+      "writer-snapshot-clone.stderr": {
+        "bytes": 777,
+        "sha256": "882cbffb68c592ceb724830c421f9412b9d4aa329003101514c38429af18a209"
+      },
+      "writer-snapshot-clone.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "writer-snapshot.manifest.json": {
+        "bytes": 731466,
+        "sha256": "7b74e5f9b29fc070f39ae59a6ed7556655220532512695e816864e9a583a75fb"
+      },
+      "writer-target-cold.jsonl": {
+        "bytes": 401040,
+        "sha256": "6c3080d011e65b08ba5b655131befe714915d997da214b469fa164f63e8392b4"
+      },
+      "writer-target-cold.stderr": {
+        "bytes": 11169,
+        "sha256": "10065f3fc1f7cfa007e1ede77b0e5076457856913c09d51bffb7927d4d47e253"
+      }
+    }
+  },
+  "publication": "The local trial made no source/workflow/cache/settings edits. This delivery adds the subsequently authorized narrow workflow candidate, focused parsed controls and portable evidence. No hosted cache was written, no workflow run dispatched, no settings changed and no push/PR made by this worker.",
+  "implementation": {
+    "base": "004492fc300b296e6245a0f0768a892f98c8a42d",
+    "workflow": "stable-release.yml",
+    "shared_key": "server-browser-linux-gnu-debug0-v1",
+    "jobs": [
+      "test-server",
+      "browser-binary",
+      "browser-proof",
+      "browser-shards"
+    ],
+    "sole_writer": "test-server",
+    "writer_save_if": "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}",
+    "reader_save_if": "false",
+    "runtime_change": "Only four key-to-shared-key replacements and three reader save-if changes; no graph/env/profile/command/feature/pruning change.",
+    "cold_fingerprint": {
+      "parent": "004492fc300b296e6245a0f0768a892f98c8a42d",
+      "old_stable_normalized_sha256": "eeafa4d914c1a2dc3fc6a63b91a29bff3b212adda1e04bd45f4e6804c3a8a79f",
+      "new_stable_normalized_sha256": "1bd0b4b2236140f0b5e56e30daa28345ec948a5f06299e486c97811a5f1ed6a9",
+      "guard": "Reversing only these S17 inputs must recover old hash; other4 workflow hashes unchanged."
+    },
+    "campaign_accounting": "S17 is the twelfth measured mechanism recorded by the parent campaign. Broad rejection and narrow adaptation remain one S17 mechanism. No hosted/compression/cohort acceptance."
+  },
+  "raw_native_resource_receipts": [
+    {
+      "label": "writer-target-cold",
+      "raw_time_stderr_tail": "       68.06 real       178.78 user        20.50 sys\n          4060250112  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n             8343293  page reclaims\n               95920  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                 383  signals received\n               17613  voluntary context switches\n              188091  involuntary context switches\n         13841991074  instructions retired\n          6893557317  cycles elapsed\n           108577536  peak memory footprint\n",
+      "full_stderr_sha256": "10065f3fc1f7cfa007e1ede77b0e5076457856913c09d51bffb7927d4d47e253"
+    },
+    {
+      "label": "browser-target-cold",
+      "raw_time_stderr_tail": "       57.05 real       144.56 user        18.16 sys\n          2992160768  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n             7652837  page reclaims\n               81951  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                 377  signals received\n                3082  voluntary context switches\n              143677  involuntary context switches\n         13215975385  instructions retired\n          6519271900  cycles elapsed\n           107365120  peak memory footprint\n",
+      "full_stderr_sha256": "72c876a6376004c665e241114d6a588767e7d93859bb74709e018db285fffe0f"
+    },
+    {
+      "label": "browser-role-warm",
+      "raw_time_stderr_tail": "       30.57 real        48.86 user         2.14 sys\n          2971566080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              759807  page reclaims\n               20481  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                  10  signals received\n                1174  voluntary context switches\n               41188  involuntary context switches\n          4111764408  instructions retired\n          1218706198  cycles elapsed\n           101204736  peak memory footprint\n",
+      "full_stderr_sha256": "9dd7e7cb856f5fcf6418b76bf44711bf9e3a6cfcb0c63c44475b639d475f3ffc"
+    },
+    {
+      "label": "browser-shared-warm",
+      "raw_time_stderr_tail": "       30.48 real        48.39 user         2.26 sys\n          2968666112  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              756878  page reclaims\n               20381  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                  10  signals received\n                1173  voluntary context switches\n               39846  involuntary context switches\n          4148233306  instructions retired\n          1334290656  cycles elapsed\n           100811496  peak memory footprint\n",
+      "full_stderr_sha256": "92a4dd130f30ffc8e796d6917114a96522e4d8990424226819db9104ecd35a3f"
+    },
+    {
+      "label": "workspace4-target-cold",
+      "raw_time_stderr_tail": "       17.99 real        43.01 user        10.97 sys\n           428015616  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n             3977868  page reclaims\n               78115  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                 155  signals received\n                5443  voluntary context switches\n              117584  involuntary context switches\n          4484724414  instructions retired\n          2401212109  cycles elapsed\n            79119104  peak memory footprint\n",
+      "full_stderr_sha256": "cd3b182aed2311c3abd6d63707ab620c94f4d9d1785f86bd013fc5150c9bc97c"
+    },
+    {
+      "label": "workspace4-role-warm",
+      "raw_time_stderr_tail": "        1.83 real         4.40 user         0.62 sys\n           386072576  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              195843  page reclaims\n                7756  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                  10  signals received\n                 888  voluntary context switches\n               13377  involuntary context switches\n          1513358320  instructions retired\n           571706682  cycles elapsed\n            76858088  peak memory footprint\n",
+      "full_stderr_sha256": "b686cfe043d3adfdf3c732c45e24105854fa519fa550905650bf24916d72e177"
+    },
+    {
+      "label": "workspace4-shared-warm",
+      "raw_time_stderr_tail": "       15.85 real        36.55 user         8.90 sys\n           427589632  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n             3256142  page reclaims\n               77915  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                  87  signals received\n                2300  voluntary context switches\n               78989  involuntary context switches\n          3093256407  instructions retired\n          1520622870  cycles elapsed\n            79151872  peak memory footprint\n",
+      "full_stderr_sha256": "3fdc01ee0db434cade584c3dd7b3195d1b6a73818ff4257ebcedb46a2e3fbf1d"
+    }
+  ],
+  "raw_cargo_artifact_examples": [
+    {
+      "label": "writer-target-cold",
+      "raw_compiler_artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.186",
+        "manifest_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "libc",
+          "src_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "0",
+          "debuginfo": 0,
+          "debug_assertions": true,
+          "overflow_checks": true,
+          "test": false
+        },
+        "features": [
+          "default",
+          "extra_traits",
+          "std"
+        ],
+        "filenames": [
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-807b51279b2c47a9.rlib",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-807b51279b2c47a9.rmeta"
+        ],
+        "executable": null,
+        "fresh": false
+      }
+    },
+    {
+      "label": "browser-role-warm",
+      "raw_compiler_artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.186",
+        "manifest_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "libc",
+          "src_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "0",
+          "debuginfo": 0,
+          "debug_assertions": true,
+          "overflow_checks": true,
+          "test": false
+        },
+        "features": [
+          "default",
+          "extra_traits",
+          "std"
+        ],
+        "filenames": [
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-807b51279b2c47a9.rlib",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-807b51279b2c47a9.rmeta"
+        ],
+        "executable": null,
+        "fresh": true
+      }
+    },
+    {
+      "label": "workspace4-shared-warm",
+      "raw_compiler_artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.186",
+        "manifest_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "libc",
+          "src_path": "/Users/allison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.186/src/lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "0",
+          "debuginfo": 0,
+          "debug_assertions": true,
+          "overflow_checks": true,
+          "test": false
+        },
+        "features": [
+          "default",
+          "std"
+        ],
+        "filenames": [
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-bfbddd9faf4b5a8b.rlib",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s17-local/active-target/debug/deps/liblibc-bfbddd9faf4b5a8b.rmeta"
+        ],
+        "executable": null,
+        "fresh": false
+      }
+    }
+  ],
+  "implementation_validation": {
+    "base": "004492fc300b296e6245a0f0768a892f98c8a42d",
+    "js": {
+      "command": "node --test .github/scripts/pr-browser-binary.test.mjs .github/scripts/pr-ci-efficiency.test.mjs .github/scripts/pr-cold-cache.test.mjs .github/scripts/pr-browser-sharding.test.mjs .github/scripts/pr-checks.test.mjs",
+      "passed": 35,
+      "seconds": 1.579552,
+      "new_group_negative_controls": 17,
+      "cold_event_semantics": "read-only browser inputs evaluated false on every event/ref; trusted server guard unchanged",
+      "workflow_fingerprint": "new stable normalized hash verified; reversing onlyS17 yields old exact hash; other4workflow hashes unchanged"
+    },
+    "python": [
+      {
+        "command": "python3 .github/scripts/browser-proof.test.py",
+        "passed": 15,
+        "seconds": 0.07
+      },
+      {
+        "command": "python3 .github/scripts/browser-inventory.test.py",
+        "passed": 9,
+        "seconds": 0.001
+      },
+      {
+        "command": "python3 .github/scripts/browser-binary.test.py",
+        "passed": 38,
+        "seconds": 6.078
+      }
+    ],
+    "workflow_lint": {
+      "command": "make lint-workflows test-workflow-lint",
+      "passed": true,
+      "negative_controls": 10,
+      "actionlint": "1.7.12",
+      "shellcheck": "0.11.0",
+      "negative_controls_seconds": 3.021857459,
+      "raw_log_local": "candidate-workflow-lint.log"
+    },
+    "unchanged": "All Rust source, lockfiles, Makefile, proof/binary/inventory helpers, four other normalized workflows, profiles, runtime source/quality/receipts/conditions/DAG/pruning remain unchanged.",
+    "hosted": "Pending; no new workflow dispatch or push by worker.",
+    "source_size": {
+      "command": "make test-source-size",
+      "passed": true,
+      "files": 1775,
+      "maximum_physical_lines": 2000
+    },
+    "diff_check": {
+      "command": "git diff --cached --check",
+      "passed": true
+    }
+  }
+}
