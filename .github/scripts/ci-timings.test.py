@@ -54,6 +54,29 @@ class TimingControls(unittest.TestCase):
         self.assertNotEqual(report['branch_head_sha'], report['candidate_sha'])
         self.assertFalse(report['cohort_qualified'])
 
+    def test_admission_start_is_included_in_processing_not_hidden_as_queue(self):
+        evidence = fixture()
+        evidence[1].append({'id':4,'name':'ci-admission / NAC admission identity','run_id':123,'run_attempt':1,
+                            'status':'completed','conclusion':'success','labels':['ubuntu-latest'],
+                            'started_at':'2026-11-04T00:00:20Z','completed_at':'2026-11-04T00:00:40Z'})
+        report = self.report(evidence)
+        self.assertTrue(report['metric_eligible'])
+        self.assertEqual(report['processing_seconds'],595)
+        self.assertEqual(report['observed_prepare_to_result_seconds'],555)
+        self.assertEqual(report['initial_wait_seconds'],20)
+        self.assertEqual(report['event_to_green_seconds'],615)
+        self.assertEqual(report['completed_job_seconds'],175)
+        for start in [None,'2026-11-03T23:59:59Z','2026-11-04T00:02:00Z']:
+            bad = copy.deepcopy(evidence)
+            bad[1][-1]['started_at']=start
+            self.assertFalse(self.report(bad)['metric_eligible'])
+        bad = copy.deepcopy(evidence);bad[1].append(bad[1][-1].copy())
+        self.assertFalse(self.report(bad)['metric_eligible'])
+        bad = fixture();bad[0]['referenced_workflows']=[{'path':'arcee-ai/nac/.github/workflows/ci-admission.yml@'+SHA}]
+        self.assertFalse(self.report(bad)['metric_eligible'])
+        bad = fixture();bad[1].append({'id':4,'name':'ci-admission','run_id':123,'run_attempt':1,'status':'completed','conclusion':'skipped'})
+        self.assertFalse(self.report(bad)['metric_eligible'])
+
     def test_candidate_environment_log_identity_is_mandatory(self):
         for log in ['', 'echo "sha=$SOURCE_SHA"', f'SOURCE_SHA: {SHA}\nSOURCE_SHA: ' + 'c' * 40]:
             evidence = fixture()

@@ -1,3 +1,4 @@
+import { protectedNames } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -166,7 +167,8 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.doesNotMatch(triggers, /paths(?:-ignore)?:/);
   assert.doesNotMatch(workflow, /pull_request_target:|workflow_run:/);
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
-  assert.match(aggregate, /name: Required PR checks\n    if: \$\{\{ always\(\) \}\}/);
+  assert.ok(aggregate.includes("name: " + protectedNames["required-pr-checks"]));
+  assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
   const dependencies = aggregate.match(/needs: \[(.*)\]/)[1].split(", ");
   assert.deepEqual(dependencies.sort(), [...requiredJobs, ...managedCallerJobs].sort());
   assert.match(aggregate, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);

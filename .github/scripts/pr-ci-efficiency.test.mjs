@@ -1,3 +1,4 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -7,7 +8,7 @@ import { managedCallerJobs, imageJobs, managedJobs, qualityJobs, qualityReceipt,
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
-const workflow = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
 const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };
 const quality = () => ({

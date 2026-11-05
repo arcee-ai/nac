@@ -1,3 +1,4 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -9,7 +10,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml"); // Existing locked release-tooling dependency.
-const stable = () => YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
+const stable = () => { const value = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8")); reverseAdmission(value); return value; };
 const roles = ["test-server", "test-server-web"];
 const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };

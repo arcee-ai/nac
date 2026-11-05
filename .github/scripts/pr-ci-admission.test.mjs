@@ -1,0 +1,106 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
+import test from 'node:test';
+import YAML from 'yaml';
+import {reverseAdmission,purePredicate,sourceJobs,sourceGroup,forwardedMode} from './ci-admission-wiring.mjs';
+const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
+const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
+const sealedPins={
+  ".github/scripts/ci-admission.py": "c0c4759af67d407d76b733c1ee0324dcc079da09890f8981ab976d60a5e9ed91",
+  ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
+  ".github/scripts/ci-admission-contract.json": "d3f4dfffe12024b54ad5ade8023ee9ec3b4cf9867dec01c442b58b19a1593cb9",
+  ".github/scripts/ci-admission-applicability.json": "c1cb0840cd9d05be44064aa8653ff8b6d9aecb62dcbc52ee08cb4a24eb9e765c",
+  ".github/scripts/cold-caches.py": "2b2ea35fd7fa77f036ab6d7e9e1d7fbf974f5c33a070c13b55356664d626f07b",
+  ".github/scripts/pr-checks.mjs": "4317326809755287fbe5f5c4a3aa7f280b5b1d9442953139ca767be61be19a93",
+  ".github/scripts/publication-policy.mjs": "c62bba4c71700fc57c48605b5b7209415513b8a7b2bce33b391595e8952a8018",
+  ".github/workflows/ci-admission.yml": "d6979c9db4619f87a1321ff3f1e18d30a0004eb6e03035752b08997c16c25c27"
+};
+const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
+const digest=value=>createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
+function expression(source,context={}){
+ const code=source.replace(/^\$\{\{\s*|\s*\}\}$/g,'').replace(/needs\.([\w-]+)/g,(_,name)=>`needs[${JSON.stringify(name)}]`);
+ return runInNewContext(code,{always:()=>true,cancelled:()=>false,startsWith:(a,b)=>a.startsWith(b),
+  format:(s,...args)=>s.replace(/\{(\d+)\}/g,(_,i)=>args[i]),...context},{timeout:50,contextCodeGeneration:{strings:false,wasm:false}});
+}
+function github(action='edited',changed=false,run=30,event='pull_request'){
+ return {workflow:'Stable release',event_name:event,run_id:run,run_attempt:1,ref:'refs/heads/dev',
+  event:{action,changes:changed?{base:{from:{ref:'old'}}}:{},pull_request:{number:621}}};
+}
+function state(mode='full'){
+ const needs=Object.fromEntries(['prepare','ci-admission',...Object.keys(sourceJobs)].map(id=>[id,{result:'success',outputs:{}}]));
+ needs.prepare.outputs={admission_mode:mode,run:'true',managed_applicable:'true'};
+ needs['ci-admission'].outputs.mode=mode;
+ return {github:github(),needs};
+}
+function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
+
+test('FULL projection equals entire landed APT graph; all eight sealed authority pins unchanged',()=>{
+ const normalized=structuredClone(stable);reverseAdmission(normalized);assert.equal(digest(normalized),parentHash);
+ for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
+});
+test('actual pre-prepare routing isolates edits and ready before pending-source replacement',()=>{
+ const source=group(stable.concurrency.group,github('synchronize',false,1));
+ const running=new Map([[source,{running:'source-R',pending:'source-P'}]]);
+ function enqueue(g,id){const key=group(stable.concurrency.group,g);const slot=running.get(key)??{};slot.pending=id;running.set(key,slot);return key;}
+ for(const [action,run]of [['edited',2],['ready_for_review',3],['edited',4]]){
+  const key=enqueue(github(action,false,run),'metadata-'+run);assert.notEqual(key,source);
+  assert.equal(running.get(source).pending,'source-P');
+ }
+ assert.equal(enqueue(github('edited',true,5),'base-change'),source);
+ assert.equal(running.get(source).pending,'base-change');
+ // Documented queue semantics negative: false running-cancellation cannot save pending.
+ const old=group(sourceGroup,github('edited',false,6));assert.equal(old,source);
+ for(const event of ['push','workflow_dispatch'])assert.notEqual(group(stable.concurrency.group,github('',false,7,event)),source);
+ assert.equal(stable.concurrency['cancel-in-progress'],"${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}");
+});
+test('actual forwarding only accepts typed successful edited/basefalse PURE; all source/failure cases FULL',()=>{
+ for(const action of ['opened','synchronize','reopened','ready_for_review','edited'])
+  for(const changed of [false,true])
+   for(const result of ['success','failure','cancelled','skipped',undefined])
+    for(const mode of ['pure','full','true',true,'',undefined]){
+     const ctx=state();ctx.github=github(action,changed);ctx.needs['ci-admission']={result,outputs:{mode}};
+     const actual=expression(stable.jobs.prepare.outputs.admission_mode,ctx);
+     assert.equal(actual,action==='edited'&&!changed&&result==='success'&&mode==='pure'?'pure':'full');
+    }
+ for(const event of ['push','workflow_dispatch']){const ctx=state('pure');ctx.github=github('edited',false,30,event);assert.equal(expression(forwardedMode,ctx),'full');}
+ assert.equal(stable.jobs.prepare.needs,'ci-admission');assert.equal(stable.jobs.prepare.if,'${{ always() }}');
+});
+test('real FULL conditions retain original direct-dependency failure semantics, even after unit failure',()=>{
+ for(const [id,config]of Object.entries(sourceJobs)){
+  if(id==='required-pr-checks')continue;
+  const deps=Array.isArray(config.needs)?config.needs:[config.needs];
+  for(const failed of [null,...deps])for(const status of ['success','failure','cancelled','skipped']){
+   const ctx=state();ctx.needs['ci-admission'].result='failure';if(failed)ctx.needs[failed].result=status;
+   const old=config.if??'true';const hasAlways=old.includes('always()');
+   const expected=Boolean(expression(old,ctx))&&(hasAlways||deps.every(dep=>ctx.needs[dep].result==='success'));
+   assert.equal(expression(stable.jobs[id].if,ctx),expected,id+'/'+failed+'/'+status);
+  }
+ }
+});
+test('PURE emits no protected source context; failed prepare cannot claim PURE names or bypass aggregate',()=>{
+ const ctx=state('pure');
+ for(const [id,job]of Object.entries(stable.jobs)){
+  if(['prepare','ci-admission','required-pr-checks'].includes(id))continue;
+  assert.equal(expression(job.if,ctx),false,id);
+ }
+ const protectedIds=['required-pr-checks','source-security','macos-native'];
+ const originalNames=['Required PR checks','source-security','macos-native'];
+ for(const [i,id]of protectedIds.entries())assert.notEqual(expression(stable.jobs[id].name,ctx),originalNames[i]);
+ for(const step of stable.jobs['required-pr-checks'].steps)assert.equal(expression(step.if,ctx),false);
+ ctx.needs.prepare.result='failure';
+ for(const [i,id]of protectedIds.entries())assert.equal(expression(stable.jobs[id].name,ctx),originalNames[i]);
+ for(const step of stable.jobs['required-pr-checks'].steps)assert.equal(expression(step.if,ctx),true);
+ assert.equal(expression(stable.jobs['required-pr-checks'].if,ctx),true);
+});
+test('normalization rejects changed trust, defaults, coverage, APT or extra work instead of deleting it',()=>{
+ for(const mutate of [w=>w.concurrency.group=sourceGroup,w=>w.jobs.prepare.outputs.admission_mode="${{ 'pure' }}",
+  w=>w.jobs['source-security'].name='source-security',w=>w.jobs['ci-admission'].if='false',
+  w=>w.jobs.lint.if='false',w=>w.jobs['required-pr-checks'].steps.at(-1).if='false',
+  w=>w.jobs['browser-binary'].steps.find(s=>s.id==='apt-upload').with['retention-days']=1,
+  w=>w.permissions.actions='write',w=>w.jobs.extra={steps:[]}]){
+  const value=structuredClone(stable);mutate(value);
+  assert.throws(()=>{reverseAdmission(value);assert.equal(digest(value),parentHash);});
+ }
+});

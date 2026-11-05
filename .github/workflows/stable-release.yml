@@ -18,13 +18,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && (github.event.action == 'ready_for_review' || (github.event.action == 'edited' && github.event.changes.base == null)) && format('metadata-{0}-{1}', github.run_id, github.run_attempt) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id)) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}
 
 jobs:
+  ci-admission:
+    name: ci-admission
+    uses: ./.github/workflows/ci-admission.yml
+
   prepare:
+    needs: ci-admission
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     outputs:
+      admission_mode: ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && needs.ci-admission.result == 'success' && needs.ci-admission.outputs.mode == 'pure' && 'pure' || 'full' }}
       cold_caches: ${{ steps.cache-mode.outputs.cold_caches }}
       run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
       sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
@@ -103,7 +110,7 @@ jobs:
           fi
 
   workflow-lint:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -121,7 +128,7 @@ jobs:
         run: make lint-workflows test-workflow-lint test-manual-stack-override
 
   lint:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
 
@@ -159,7 +166,7 @@ jobs:
         run: make format-check
 
   test-server:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     env:
@@ -195,7 +202,7 @@ jobs:
 
 
   test-server-web:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     env:
@@ -239,7 +246,7 @@ jobs:
 
 
   browser-binary:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     outputs:
@@ -335,7 +342,7 @@ jobs:
           if-no-files-found: error
 
   browser-shards:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.browser-binary.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, browser-binary]
     runs-on: ubuntu-latest
     strategy:
@@ -505,7 +512,7 @@ jobs:
           if-no-files-found: error
 
   browser-proof:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.browser-binary.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, browser-binary]
     runs-on: ubuntu-latest
     env:
@@ -703,7 +710,7 @@ jobs:
           if-no-files-found: error
 
   browser:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ (always() && needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, browser-binary, browser-shards, browser-proof]
     runs-on: ubuntu-latest
     steps:
@@ -718,7 +725,7 @@ jobs:
           test "$PROOF_RESULT" = success
 
   test-core:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     env:
@@ -775,7 +782,7 @@ jobs:
           sh .github/scripts/install.test.sh
 
   test-workspace:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     runs-on: ubuntu-latest
     env:
@@ -801,7 +808,7 @@ jobs:
           make test-durability test-managed-load test-managed-image-contract
 
   quality:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ (always() && needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, lint, workflow-lint, test-server, test-server-web, test-core, test-workspace]
     runs-on: ubuntu-latest
     outputs:
@@ -823,7 +830,7 @@ jobs:
         run: node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
 
   test:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ (always() && needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, quality, browser]
     runs-on: ubuntu-latest
     steps:
@@ -836,7 +843,7 @@ jobs:
           test "$BROWSER_RESULT" = success
 
   build:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     strategy:
       fail-fast: false
@@ -941,8 +948,9 @@ jobs:
           path: dist/nac-${{ matrix.target }}.tar.gz
 
   macos-native:
+    name: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure' && 'NAC metadata native omitted' || 'macos-native' }}
     needs: prepare
-    if: ${{ needs.prepare.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     uses: ./.github/workflows/macos-native.yml
     with:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
@@ -950,7 +958,7 @@ jobs:
 
   managed-image:
     needs: prepare
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     uses: ./.github/workflows/managed-image-build.yml
     with:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
@@ -960,7 +968,7 @@ jobs:
 
   managed-fault:
     needs: prepare
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     uses: ./.github/workflows/managed-fault.yml
     with:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
@@ -968,7 +976,7 @@ jobs:
 
   managed-quality:
     needs: [prepare, quality, managed-fault]
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.quality.result == 'success' && needs.managed-fault.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     uses: ./.github/workflows/managed-quality.yml
     with:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
@@ -977,7 +985,7 @@ jobs:
       fault_receipt: ${{ needs.managed-fault.outputs.fault_receipt }}
 
   managed:
-    if: ${{ always() && needs.prepare.outputs.managed_applicable == 'true' }}
+    if: ${{ (always() && needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, managed-image, managed-fault, managed-quality]
     runs-on: ubuntu-latest
     steps:
@@ -995,6 +1003,8 @@ jobs:
         run: node .github/scripts/pr-checks.mjs managed-caller-aggregate
 
   source-security:
+    name: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure' && 'NAC metadata source security omitted' || 'source-security' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && (true) && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: prepare
     uses: ./.github/workflows/source-security.yml
     with:
@@ -1003,19 +1013,22 @@ jobs:
       trusted-policy-sha: ${{ needs.prepare.outputs.source_policy_sha }}
 
   required-pr-checks:
-    name: Required PR checks
+    name: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure' && 'NAC metadata checks omitted' || 'Required PR checks' }}
     if: ${{ always() }}
     needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-binary, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - if: ${{ !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - if: ${{ !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-      - name: Require every applicable job from this run
+      - if: ${{ !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
+        name: Require every applicable job from this run
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           MANAGED_APPLICABLE: ${{ needs.prepare.outputs.managed_applicable }}
@@ -1023,10 +1036,7 @@ jobs:
         run: node .github/scripts/pr-checks.mjs aggregate
 
   publish:
-    if: >-
-      needs.prepare.outputs.run == 'true' &&
-      github.event_name == 'push' &&
-      startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.test.result == 'success' && needs.build.result == 'success' && needs.required-pr-checks.result == 'success' && needs.source-security.result == 'success' && (needs.prepare.outputs.run == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
     needs: [prepare, test, build, required-pr-checks, source-security]
     runs-on: ubuntu-latest
     permissions:
