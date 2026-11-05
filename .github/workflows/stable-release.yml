@@ -377,7 +377,7 @@ jobs:
           NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
           BROWSER_SHARD: ${{ matrix.shard }}
-        run: npm --prefix crates/nac-server/web run test:e2e -- --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/8"
+        run: npm --prefix crates/nac-server/web run test:e2e -- --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/8"
       - name: Upload browser shard failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -474,7 +474,7 @@ jobs:
           npx playwright test --list --reporter=json > browser-inventory/complete.json
           npx playwright test exact-goal-wait.e2e.ts --list --reporter=json > browser-inventory/proof.json
           for shard in 1 2 3 4 5 6 7 8; do
-            npx playwright test --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/8" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
+            npx playwright test --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/8" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
           done
           python3 ../../../.github/scripts/browser-inventory.py \
             --complete browser-inventory/complete.json --part browser-inventory/proof.json \

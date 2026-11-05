@@ -32,6 +32,15 @@ function verify(workflow) {
   for (const step of job.steps) assert.equal(step["continue-on-error"], undefined);
   assert.ok(job.steps.some(s => s.uses === "dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0"));
   const reversed = structuredClone(workflow);
+  // S02 changes only ordinary execution/list granularity, never the proof CLI.
+  for (const step of [
+    reversed.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard"),
+    reversed.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection"),
+  ]) {
+    assert.equal(step.run.split("--fully-parallel").length, 2);
+    assert.ok(step.run.includes("--fully-parallel --grep-invert='exact-goal-wait.e2e.ts'"));
+    step.run = step.run.replace("--fully-parallel ", "");
+  }
   reversed.jobs["test-server"].steps.find(s => s.name === "Run nac-server tests").run = "cargo test -p nac-server --locked";
   // Canonical full parsed workflow from ad3400565aad89834742893ad36183254b5098af.
   // Reverse ONLY S12's server input: all three provenance fields stay present.
