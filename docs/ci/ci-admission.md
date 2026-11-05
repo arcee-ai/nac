@@ -1,10 +1,12 @@
-# Metadata admission owner: unwired production draft
+# Metadata admission: wired production candidate
 
-This draft adds a strict standard-library owner and offline controls. It does
-not change Stable, nightly, cache privileges, test scope or production behavior.
-Its NEW nonprotected reusable unit is not yet called by Stable. It starts from origin/dev914782659; neither private
-DIAG branch nor the nightly override is an ancestor. Parent owns workflow wiring
-and external check-consumer adaptation after the APT producer is sealed.
+[PR624](https://github.com/arcee-ai/nac/pull/624) wires Stable to the nonprotected
+admission unit. Its integration source at
+`51df694dbe4fe2d84477fb93f7769d4921c46581` is based on landed dev
+`8c5c340714611a40589c86a6b578298bb7f271a4`, including the completed APT handoff
+and historical-guard repair. Neither private DIAG branch nor the nightly override
+is an ancestor. Production acceptance review and live eligible-run qualification
+remain pending; this is not a claim of adopted PURE coalescing.
 
 ## Authority before a PURE decision
 
@@ -165,9 +167,14 @@ verdict. Unknown newer work blocks. The installed extension is not patched here.
 
 The private provider screen proved manual dynamic names/public reads only. It
 proved neither PR current-source semantics nor production bootstrap/queue rules.
-Production is blocked on root's APT handoff, trusted-base bootstrap, exact graph
-and naming wiring, M3 consumer integration and ONE code acceptance review. No
-coalescing is published; no new strategy/cohort credit. The goal remains open.
+The APT handoff, trusted-base bootstrap and graph/name wiring are complete in
+this candidate. The external M3 consumer source is accepted, with all eight
+sealed program pins unchanged. The adjacent frozen JSON contract remains the
+accepted protocol snapshot; its historical draft status is not a current
+readiness claim. Remaining gates are the production acceptance review and live
+eligible-source/provider qualification. Actual PURE adoption requires trusted
+landing and the prescribed evidence; no timing gain, new strategy or cohort
+acceptance is claimed. The goal remains open.
 
 Local controls: the adjacent owner/bootstrap Python tests and unit parsed/actual
 applicability Node controls exercise real tiny
