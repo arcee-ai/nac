@@ -51,9 +51,12 @@ export function PanelEmptyState({
   const isMobile = useIsMobile();
   const message = (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 min-h-0 w-full p-8 text-center">
-      <p className="header-md w-full truncate text-basic-primary">{title}</p>
+      <p className="header-md w-full break-words text-basic-primary">{title}</p>
       {description ? (
-        <p className="text-small w-full truncate text-basic-tertiary" title={description}>
+        <p
+          className="text-sm leading-[22px] w-full break-words text-basic-tertiary"
+          title={description}
+        >
           {description}
         </p>
       ) : null}

@@ -23,7 +23,11 @@ function SessionNameHint({
   const available = !mobile && !disabled;
   if (open && !available) setOpen(false);
   return (
-    <Tooltip open={open} onOpenChange={(next) => setOpen(next && available)}>
+    <Tooltip
+      open={open}
+      onOpenChange={(next) => setOpen(next && available)}
+      disableHoverableContent
+    >
       <TooltipTrigger
         asChild
         onMouseEnter={() => setOpen(available)}
@@ -34,10 +38,11 @@ function SessionNameHint({
         {children}
       </TooltipTrigger>
       <TooltipContent
+        nonInteractive
         side="bottom"
         align="start"
         collisionPadding={8}
-        className="label-micro w-max max-w-[min(360px,calc(100vw-16px))] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-interaction bg-elevation-ground-inverse p-2 text-primary-inverse shadow-xl whitespace-pre-wrap [overflow-wrap:anywhere]"
+        className="pointer-events-none label-micro w-max max-w-[min(360px,calc(100vw-16px))] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-interaction bg-elevation-ground-inverse p-2 text-primary-inverse shadow-xl whitespace-pre-wrap [overflow-wrap:anywhere]"
       >
         {name}
         {description ? <div className="mt-1 text-secondary-inverse">{description}</div> : null}

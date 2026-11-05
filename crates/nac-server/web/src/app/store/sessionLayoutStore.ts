@@ -10,7 +10,41 @@ export type InsightSelection =
   | { kind: "group"; groupId: string; segmentKey: string | null }
   | { kind: "thread" };
 
+/** A reader-owned origin. Streaming data never writes these saved pointers. */
+interface InsightsReturnContext {
+  insightSelectionEpoch: number;
+  insightFocusNonce: number;
+  selectedInsight: InsightSelection | null;
+  selectedThread: string | null;
+  selectedThreadEpisode: string | null;
+  expandedInsightGroups: ReadonlySet<string>;
+  insightsFilter: InsightsFilter;
+  panelList: boolean;
+}
+
+interface SubagentPageReturn {
+  parentSessionId: string;
+  context: InsightsReturnContext;
+  expanded: boolean;
+  collapsed: boolean;
+}
+
 interface SessionLayoutState {
+  activeSessionId: string | null;
+  insightsReturns: ReadonlyMap<string, InsightsReturnContext>;
+  subagentPageReturns: ReadonlyMap<string, SubagentPageReturn>;
+  insightListPositions: ReadonlyMap<
+    string,
+    {
+      top: number;
+      focusNonce: number;
+      sourceEpoch: number;
+      anchor: { key: string; offset: number } | null;
+    }
+  >;
+
+  /** Unique fresh-visit source; exact child returns restore the saved parent source. */
+  insightSelectionEpoch: number;
   /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
   collapsed: boolean;
   /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
@@ -68,6 +102,11 @@ export type FileListing = "tree" | "changed";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "setItem">) {
   const sessionLayoutStore = createStore<SessionLayoutState>({
+    insightSelectionEpoch: 0,
+    activeSessionId: null,
+    insightsReturns: new Map(),
+    subagentPageReturns: new Map(),
+    insightListPositions: new Map(),
     collapsed: true,
     sidePanelAnimate: true,
     sidePanelProjectId: null,
@@ -87,6 +126,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     fileListing: "tree",
   });
   const initial_sessionLayoutStore = sessionLayoutStore.getState();
+  // Restoring an older parent source must never rewind the allocator.
+  let nextInsightSelectionEpoch = 0;
 
   const { getState, setState, useStore } = sessionLayoutStore;
 
@@ -246,6 +287,88 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     if (getState().insightsFilter !== insightsFilter) setState({ insightsFilter });
   }
 
+  function insightsContext(): InsightsReturnContext {
+    const state = getState();
+    return {
+      insightSelectionEpoch: state.insightSelectionEpoch,
+      insightFocusNonce: state.insightFocusNonce,
+      selectedInsight: state.selectedInsight,
+      selectedThread: state.selectedThread,
+      selectedThreadEpisode: state.selectedThreadEpisode,
+      expandedInsightGroups: state.expandedInsightGroups,
+      insightsFilter: state.insightsFilter,
+      panelList: state.panelList,
+    };
+  }
+
+  /** Capture only on an intentional jump, never on refetch or a stream delta. */
+  function rememberInsightsReturn(
+    parentSessionId: string,
+    shown: InsightSelection | null,
+    thread?: { name: string; episode: string | null },
+  ): void {
+    const context = {
+      ...insightsContext(),
+      selectedInsight: shown,
+      ...(thread ? { selectedThread: thread.name, selectedThreadEpisode: thread.episode } : {}),
+    };
+    setState((state) => ({
+      insightsReturns: new Map(state.insightsReturns).set(parentSessionId, context),
+    }));
+  }
+
+  function restoreInsightsReturn(parentSessionId: string): boolean {
+    const context = getState().insightsReturns.get(parentSessionId);
+    if (!context) return false;
+    const remaining = new Map(getState().insightsReturns);
+    remaining.delete(parentSessionId);
+    setState({ ...context, insightsReturns: remaining });
+    return true;
+  }
+
+  function rememberInsightListPosition(
+    sessionId: string,
+    top: number,
+    anchor: { key: string; offset: number } | null = null,
+    source?: { focusNonce: number; sourceEpoch: number },
+  ): void {
+    setState((state) => ({
+      insightListPositions: new Map(state.insightListPositions).set(sessionId, {
+        top,
+        focusNonce: source?.focusNonce ?? state.insightFocusNonce,
+        sourceEpoch: source?.sourceEpoch ?? state.insightSelectionEpoch,
+        anchor,
+      }),
+    }));
+  }
+
+  /** Save the panel before Open leaves for the child's own Insights/Files. */
+  function rememberSubagentPage(parentSessionId: string, childSessionId: string): void {
+    const { expanded, collapsed } = getState();
+    setState((state) => ({
+      subagentPageReturns: new Map(state.subagentPageReturns).set(childSessionId, {
+        parentSessionId,
+        context: insightsContext(),
+        expanded,
+        collapsed,
+      }),
+    }));
+  }
+
+  /** Only the exact child→parent round trip may restore a saved parent panel. */
+  function activateSessionSelection(sessionId: string | null): void {
+    const state = getState();
+    if (state.activeSessionId === sessionId) return;
+    const back = state.activeSessionId
+      ? state.subagentPageReturns.get(state.activeSessionId)
+      : null;
+    resetSessionSelection();
+    setState({ activeSessionId: sessionId });
+    if (back && back.parentSessionId === sessionId) {
+      setState({ ...back.context, expanded: back.expanded, collapsed: back.collapsed });
+    }
+  }
+
   function selectWorkset(selectedWorkset: string | null): void {
     setState({ selectedWorkset });
     if (selectedWorkset) showSidePanelList(false);
@@ -302,6 +425,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
       });
     }
     setState({
+      insightSelectionEpoch: ++nextInsightSelectionEpoch,
       selectedThread: null,
       selectedThreadEpisode: null,
       selectedInsight: null,
@@ -362,6 +486,12 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     selectFileListing,
     setSidePanelAnimate,
     resetSessionSelection,
+    activateSessionSelection,
+    rememberInsightsReturn,
+    restoreInsightsReturn,
+    rememberInsightListPosition,
+    rememberSubagentPage,
+    useInsightsReturn: (sessionId: string) => useStore((s) => s.insightsReturns.has(sessionId)),
     useSidePanelCollapsed,
     useSidePanelAnimate,
     useSidePanelExpanded,
@@ -404,6 +534,12 @@ export const {
   selectFileListing,
   setSidePanelAnimate,
   resetSessionSelection,
+  activateSessionSelection,
+  rememberInsightsReturn,
+  restoreInsightsReturn,
+  rememberInsightListPosition,
+  rememberSubagentPage,
+  useInsightsReturn,
   useSidePanelCollapsed,
   useSidePanelAnimate,
   useSidePanelExpanded,

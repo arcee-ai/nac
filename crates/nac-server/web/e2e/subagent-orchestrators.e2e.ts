@@ -85,9 +85,16 @@ for (const [name, viewport, mobile] of [
     if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
     await page.getByRole("button", { name: "Parent chat" }).click();
-    await showSubagents(page, mobile);
-    // A phone reopens the panel on its list; the row brings back its composer.
-    if (mobile) await list.getByRole("button", { name: "Older coordinator", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+    if (mobile) {
+      // Parent return restores this exact phone panel and selected coordinator.
+      await expect(list).toBeVisible();
+      await expect(
+        list
+          .getByRole("heading", { level: 2 })
+          .getByRole("button", { name: "View full name: Older coordinator", exact: true }),
+      ).toBeVisible();
+    } else await showSubagents(page, mobile);
     const screenshot = testInfo.outputPath("subagent-running.png");
     await page.screenshot({ path: screenshot, animations: "disabled" });
     await testInfo.attach("Existing managed orchestrator during a foreground continuation", {
