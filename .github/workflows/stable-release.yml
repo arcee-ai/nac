@@ -7,6 +7,12 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
+    inputs:
+      cold_caches:
+        description: Measure required Rust and image cache misses while running all acceptance work
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -19,6 +25,7 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
+      cold_caches: ${{ steps.cache-mode.outputs.cold_caches }}
       run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
       sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
       version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
@@ -65,6 +72,12 @@ jobs:
             echo "sha=$SOURCE_SHA"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Select explicit cache-read measurement mode
+        id: cache-mode
+        env:
+          DISPATCH_COLD_CACHES: ${{ toJSON(inputs.cold_caches) }}
+        run: python3 .github/scripts/cold-caches.py >> "$GITHUB_OUTPUT"
 
       - name: Select ordinary base policy or publication-only resolution
         id: source-policy
@@ -123,7 +136,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
@@ -162,7 +175,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
@@ -198,7 +211,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
@@ -244,7 +257,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Build and package the exact browser executable
@@ -326,7 +339,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         if: steps.binary.outputs.mode == 'source'
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Rebuild current-attempt source after a valid older producer
@@ -421,7 +434,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         if: steps.binary.outputs.mode == 'source'
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Rebuild current-attempt source after a valid older producer
@@ -531,7 +544,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
 
@@ -584,7 +597,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Test the other four workspace crates
@@ -667,7 +680,7 @@ jobs:
         id: release-cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: ${{ github.job }}-${{ matrix.target }}-incremental16-v1
           cache-directories: ${{ github.workspace }}/.nac-ci-incremental-cache/${{ matrix.target }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
@@ -740,6 +753,7 @@ jobs:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     uses: ./.github/workflows/macos-native.yml
     with:
+      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source-sha: ${{ needs.prepare.outputs.sha }}
 
   managed-image:
@@ -747,6 +761,7 @@ jobs:
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-image-build.yml
     with:
+      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source_sha: ${{ needs.prepare.outputs.sha }}
       policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
       trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
@@ -756,6 +771,7 @@ jobs:
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-fault.yml
     with:
+      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source_sha: ${{ needs.prepare.outputs.sha }}
 
   managed-quality:
@@ -763,6 +779,7 @@ jobs:
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-quality.yml
     with:
+      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source_sha: ${{ needs.prepare.outputs.sha }}
       quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
       fault_receipt: ${{ needs.managed-fault.outputs.fault_receipt }}

@@ -38,7 +38,7 @@ function verify(actual, gitignore, dockerignore) {
   const cache = step(actual, names[0]);
   assert.equal(cache.id, "release-cache");
   assert.equal(cache.uses, "Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4");
-  assert.equal(cache.with["prefix-key"], "nac-ci-v1");
+  assert.equal(cache.with["prefix-key"], "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");
   assert.equal(cache.with.key, "${{ github.job }}-${{ matrix.target }}-incremental16-v1");
   assert.equal(cache.with["cache-directories"], "${{ github.workspace }}/.nac-ci-incremental-cache/${{ matrix.target }}");
   assert.equal(cache.with["save-if"], trust);

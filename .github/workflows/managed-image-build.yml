@@ -7,6 +7,11 @@ on:
         description: Exact candidate built and verified by this invocation
         value: ${{ jobs.prepare.outputs.sha }}
     inputs:
+      cold_caches:
+        description: Explicit PR/manual cache-miss measurement; acceptance work is unchanged
+        type: boolean
+        required: false
+        default: false
       source_sha:
         description: Immutable candidate from the caller's preparation job
         required: true
@@ -129,7 +134,8 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          cache-from: type=gha,scope=nac-managed-linux-amd64-v1
+          cache-from: ${{ !((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true) && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}
+          no-cache: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true }}
           cache-to: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}
           tags: nac-managed-smoke:${{ needs.prepare.outputs.short_sha }}
           build-args: |
