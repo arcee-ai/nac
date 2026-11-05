@@ -506,8 +506,9 @@
       "run_id": 41948701848,
       "job_id": 126992666520,
       "first_failure": "e2e/task-questions.e2e.ts:357 native coordinator authorized-information journey expected delivered but received pending",
-      "disposition": "retained same-source metadata failure; browser worker investigating trace/provider race; no timeout/assertion/retry change",
-      "url": "https://github.com/arcee-ai/nac/actions/runs/41948701848/job/126992666520"
+      "disposition": "Verified predecessor-idle gap: exact continuation request arrived56ms after assertion; durable delivery later completed. Test-only provider acceptance barrier applied in599 at0fc5a9e1312792c90088f0ddbcbe3e0b2b79f754; assertions/budgets/retries unchanged. Original run remains failed; hosted repaired-source acceptance pending.",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41948701848/job/126992666520",
+      "evidence": "GitHub failure artifact13380633233 nac-web-playwright-4-1; trace/provider journal/read-only fixture SQLite retained locally; production/test/provider/settlement source hashes match baseline and failed candidate."
     },
     {
       "run_id": 41954973930,
