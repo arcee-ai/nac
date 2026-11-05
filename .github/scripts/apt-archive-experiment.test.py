@@ -27,6 +27,16 @@ class Resolution(unittest.TestCase):
         self.assertIn('APT::Architecture "amd64";',config)
         self.assertIn('APT::Architecture-Variants "amd64v3";',config)
         self.assertNotIn('APT::Architecture "amd64v3";',config)
+        sources=next(x[2]['input_data'].decode() for x in calls if x[0]=='control-sources')
+        self.assertNotIn('arch=',sources)
+
+    def test_uri_escape_is_decoded_before_signed_filename_comparison(self):
+        text=("'http://azure.archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/"
+            "libxml2-16_2.15.2%2bdfsg-0.1ubuntu0.3_amd64.deb' "
+            "libxml2-16_2.15.2+dfsg-0.1ubuntu0.3_amd64.deb 606694 MD5Sum:unused\n")
+        result=experiment.archive_offers(text)
+        self.assertEqual(next(iter(result.values())),
+            ('pool/main/libx/libxml2/libxml2-16_2.15.2+dfsg-0.1ubuntu0.3_amd64.deb',606694))
 
     def test_solver_requires_complete_supported_closure(self):
         self.assertEqual(experiment.selected('Inst font (1:2 Ubuntu:26.04 [all])\n'),[('font','1:2')])

@@ -13,6 +13,7 @@ import re
 import shlex
 import sys
 import time
+from urllib.parse import unquote
 
 sys.dont_write_bytecode = True
 
@@ -72,8 +73,21 @@ def package_pin(text, name, version, offers):
             and store.offer_name(r) in offers
             and offers[store.offer_name(r)] == (r['Filename'], int(r['Size']))}
     if len(pins) != 1:
-        raise ValueError('exact current package metadata ambiguous/missing')
+        raise ValueError(f'exact current package metadata ambiguous/missing: {name}={version}')
     return json.loads(pins.pop())
+
+
+def archive_offers(text):
+    offers={}
+    for line in text.splitlines():
+        if not line.startswith("'http"):
+            continue
+        parts=shlex.split(line)
+        prefix='http://azure.archive.ubuntu.com/ubuntu/'
+        if len(parts)!=4 or not parts[0].startswith(prefix) or parts[1] in offers:
+            raise ValueError('unexpected selected archive URI')
+        offers[parts[1]]=(unquote(parts[0][len(prefix):],errors='strict'),int(parts[2]))
+    return offers
 
 
 class Experiment(base.Probe):
@@ -113,7 +127,8 @@ Acquire::AllowDowngradeToInsecureRepositories "false";
 Debug::NoLocking "true";
 '''
         self.execute(label+'-config', ['tee',root+'/apt.conf'], input_data=config.encode())
-        sources = ''.join(f'deb [arch=amd64 signed-by={base.KEYRING}] '
+        # Explicit arch=amd64 would override APT's default expanded variant set.
+        sources = ''.join(f'deb [signed-by={base.KEYRING}] '
             f'http://azure.archive.ubuntu.com/ubuntu {suite} main restricted universe multiverse\n'
             for suite in ('resolute','resolute-updates','resolute-security','resolute-backports'))
         self.execute(label+'-sources', ['tee',root+'/sources.list'],input_data=sources.encode())
@@ -139,15 +154,7 @@ Debug::NoLocking "true";
         simulation=self.apt(label+'-solver',root,['apt-get','-s','install','--no-install-recommends',*names]).decode()
         uri_text=self.apt(label+'-uris',root,['apt-get','--print-uris','--download-only','--yes',
             'install','--no-install-recommends',*names]).decode()
-        offers={}
-        for line in uri_text.splitlines():
-            if not line.startswith("'http"):
-                continue
-            parts=shlex.split(line)
-            prefix='http://azure.archive.ubuntu.com/ubuntu/'
-            if len(parts)!=4 or not parts[0].startswith(prefix) or parts[1] in offers:
-                raise ValueError('unexpected selected archive URI')
-            offers[parts[1]]=(parts[0][len(prefix):],int(parts[2]))
+        offers=archive_offers(uri_text)
         pins=[]
         for i,(name,version) in enumerate(selected(simulation)):
             raw=self.apt(f'{label}-metadata-{i}',root,['apt-cache','show',name+'='+version]).decode()
