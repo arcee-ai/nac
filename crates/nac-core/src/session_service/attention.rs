@@ -385,12 +385,10 @@ impl SessionService {
                             && state.last_operation_run.as_deref() == Some(work.run_id.as_str())
                     }
                 },
-                SettledWorkDisposition::Completed | SettledWorkDisposition::WaitingForDecision
-                    if work.goal.is_none() =>
-                {
+                // Goal provenance does not make an older run current again.
+                SettledWorkDisposition::Completed | SettledWorkDisposition::WaitingForDecision => {
                     state.last_operation_run.as_deref() == Some(work.run_id.as_str())
                 }
-                _ => true,
             };
             if !current {
                 return;
