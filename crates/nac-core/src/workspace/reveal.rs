@@ -17,6 +17,37 @@ pub struct LocalRevealTarget {
 }
 
 impl LocalRevealTarget {
+    /// Compare the retained no-follow target with a selected directory. The
+    /// target's mutable pathname never supplies its identity for this check.
+    pub fn matches_directory(&self, directory: &Path) -> Result<bool> {
+        self.revalidate()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            let selected = std::fs::symlink_metadata(directory)
+                .context("selected reveal directory is missing")?;
+            let pinned = self
+                .pinned
+                .last()
+                .context("reveal target identity is unavailable")?
+                .1
+                .metadata()?;
+            let matches = selected.is_dir()
+                && !selected.file_type().is_symlink()
+                && pinned.is_dir()
+                && selected.dev() == pinned.dev()
+                && selected.ino() == pinned.ino();
+            self.revalidate()?;
+            Ok(matches)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = directory;
+            bail!("workspace Finder reveal is only supported on macOS")
+        }
+    }
+
     pub async fn reveal(self) -> Result<PathBuf> {
         self.revalidate()?;
         crate::browser::reveal_path(&self.path).await?;
