@@ -1,0 +1,52 @@
+name: Private image incremental proof
+
+on:
+  push:
+    branches: [codex/all-582-image-incremental-proof]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-incremental-proof-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  four-arms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Admit only the existing supported native Engine driver
+        id: driver
+        run: |
+          python3 .github/scripts/image-build-driver.py > "$RUNNER_TEMP/image-proof-driver"
+          cat "$RUNNER_TEMP/image-proof-driver" >> "$GITHUB_OUTPUT"
+          grep -Fx 'driver=docker' "$RUNNER_TEMP/image-proof-driver"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        id: builder
+        with:
+          driver: docker
+      - name: Four serialized actual-source builds and full image controls
+        uses: ./.github/actions/image-incremental-proof
+        env:
+          EXPECTED_CONTROLLER_SHA: ${{ github.sha }}
+          PROOF_BUILDER: ${{ steps.builder.outputs.name }}
+      - name: Retain all completed, failed and unexecuted-arm evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-incremental-proof-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/image-incremental-proof-evidence/
+            !${{ runner.temp }}/image-incremental-proof-evidence/**/root/**
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error

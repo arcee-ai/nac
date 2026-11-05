@@ -1,0 +1,5 @@
+name: Private image compiler proof
+description: Own four bounded Docker CLI invocations using existing runtime cache-read credentials
+runs:
+  using: node24
+  main: run.mjs
