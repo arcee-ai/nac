@@ -1,0 +1,232 @@
+name: Private native APT artifact parity
+
+on:
+  push:
+    branches: [codex/all-582-apt-runtime-parity]
+
+permissions:
+  contents: read
+
+jobs:
+  producer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      package_id: ${{ steps.packages.outputs.artifact-id }}
+      package_receipt: ${{ steps.snapshot.outputs.receipt }}
+      binary_id: ${{ steps.binary-upload.outputs.artifact-id }}
+      binary_receipt: ${{ steps.binary.outputs.receipt }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      NAC_SOURCE_REVISION: ${{ github.sha }}
+      NAC_BUILD_TRACK: dev
+      NAC_BUILD_ID: dev-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          shared-key: server-browser-linux-gnu-debug0-v1
+          save-if: "false"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Preserve the real pager and locked browser dependency setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes less
+          npm --prefix crates/nac-server/web ci
+      - name: Resolve current native signed package authority
+        run: python3 .github/scripts/apt-runtime-parity.py prepare --state "$RUNNER_TEMP/apt-parity" --source "$NAC_SOURCE_REVISION" --lane producer
+      - name: Prefetch and export only the current signed archive closure
+        id: snapshot
+        run: python3 .github/scripts/apt-runtime-parity.py snapshot --state "$RUNNER_TEMP/apt-parity" --github-output "$GITHUB_OUTPUT"
+      - name: Retain one copy of OS archive bytes through the real artifact service
+        id: packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-native-packages-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/apt-parity/package-artifact/
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - name: Build the exact new-source GNU browser binary once
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
+          python3 .github/scripts/apt-runtime-parity.py execute --state "$RUNNER_TEMP/apt-parity" --label binary-build --timeout 1800 -- cargo build --locked -p nac-server --bin nac-web
+      - name: Package the existing strict S09 identity and digest contract
+        id: binary
+        run: |
+          python3 .github/scripts/browser-binary.py pack \
+            --binary "$GITHUB_WORKSPACE/target/debug/nac-web" --output-dir "$GITHUB_WORKSPACE/browser-binary-upload" \
+            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
+            --runner-image "${ImageOS:?}@${ImageVersion:?}" --github-output "$GITHUB_OUTPUT"
+      - name: Retain the exact same-run executable for both arms
+        id: binary-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-native-binary-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.binary.outputs.archive }}
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - name: Preserve producer timing and failure evidence without duplicate payloads
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-native-text-producer-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/apt-parity/
+            !${{ runner.temp }}/apt-parity/**/*.deb
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  consumer:
+    needs: producer
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [cold, hit]
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      NAC_SOURCE_REVISION: ${{ github.sha }}
+      NAC_BUILD_TRACK: dev
+      NAC_BUILD_ID: dev-${{ github.sha }}
+      KEEP_E2E: "1"
+      APT_ARTIFACT_RECEIPT: ${{ needs.producer.outputs.package_receipt }}
+      BROWSER_BINARY_RECEIPT: ${{ needs.producer.outputs.binary_receipt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Preserve the same real pager and locked browser dependency setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes less
+          npm --prefix crates/nac-server/web ci
+      - name: Resolve fresh native authority and reject warmed baseline archives
+        env:
+          LANE: ${{ matrix.lane }}
+        run: python3 .github/scripts/apt-runtime-parity.py prepare --state "$RUNNER_TEMP/apt-parity" --source "$NAC_SOURCE_REVISION" --lane "$LANE"
+      - name: Validate positive IDs and create only fresh download leaves
+        env:
+          PACKAGE_ID: ${{ needs.producer.outputs.package_id }}
+          BINARY_ID: ${{ needs.producer.outputs.binary_id }}
+          LANE: ${{ matrix.lane }}
+        run: |
+          [[ "$PACKAGE_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BINARY_ID" =~ ^[1-9][0-9]*$ ]]
+          test -n "$APT_ARTIFACT_RECEIPT"
+          test -n "$BROWSER_BINARY_RECEIPT"
+          mkdir "$GITHUB_WORKSPACE/browser-binary-download"
+          if [ "$LANE" = hit ]; then mkdir "$RUNNER_TEMP/apt-package-download"; fi
+      - name: Read package artifact only in the hit arm
+        if: matrix.lane == 'hit'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.producer.outputs.package_id }}
+          path: ${{ runner.temp }}/apt-package-download
+          merge-multiple: true
+      - name: Admit current baseline and exact artifact bytes before any offer
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          if [ "$LANE" = hit ]; then
+            python3 .github/scripts/apt-runtime-parity.py admit --state "$RUNNER_TEMP/apt-parity" --download "$RUNNER_TEMP/apt-package-download"
+          else
+            python3 .github/scripts/apt-runtime-parity.py admit --state "$RUNNER_TEMP/apt-parity"
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.producer.outputs.binary_id }}
+          path: browser-binary-download
+          merge-multiple: true
+      - name: Admit the current executable using unchanged S09 validation
+        id: binary
+        run: |
+          python3 .github/scripts/browser-binary.py consume \
+            --archive "$GITHUB_WORKSPACE/browser-binary-download/browser-binary.tar.gz" --output-dir "$GITHUB_WORKSPACE/browser-binary-runtime" \
+            --receipt-env BROWSER_BINARY_RECEIPT --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --target x86_64-unknown-linux-gnu \
+            --rustc "$(rustc --version)" --runner-image "${ImageOS:?}@${ImageVersion:?}" --github-output "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.binary.outputs.mode == 'source'
+        with:
+          prefix-key: nac-ci-v1
+          shared-key: server-browser-linux-gnu-debug0-v1
+          save-if: "false"
+      - name: Preserve fresh current-source fallback when S09 requires it
+        if: steps.binary.outputs.mode == 'source'
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: python3 .github/scripts/apt-runtime-parity.py execute --state "$RUNNER_TEMP/apt-parity" --label binary-fallback --timeout 1800 -- cargo build --locked -p nac-server --bin nac-web
+      - name: Select the admitted or freshly rebuilt current executable
+        env:
+          MODE: ${{ steps.binary.outputs.mode }}
+          VERIFIED: ${{ steps.binary.outputs.binary }}
+          FALLBACK_REASON: ${{ steps.binary.outputs.fallback_reason }}
+        run: |
+          case "$MODE" in
+            artifact) test -n "$VERIFIED"; binary="$VERIFIED" ;;
+            source) binary="$GITHUB_WORKSPACE/target/debug/nac-web" ;;
+            *) exit 1 ;;
+          esac
+          test -x "$binary"
+          python3 -c 'import json,os,pathlib; pathlib.Path(os.environ["RUNNER_TEMP"],"apt-parity","binary-admission.json").write_text(json.dumps({k:os.environ[k] for k in ("MODE","VERIFIED","FALLBACK_REASON")}))'
+          printf 'NAC_E2E_BINARY=%s\n' "$binary" >> "$GITHUB_ENV"
+      - name: Offer only verified hit bytes to the existing root APT cache
+        if: matrix.lane == 'hit'
+        run: sudo python3 .github/scripts/apt-runtime-parity.py offer-root --state "$RUNNER_TEMP/apt-parity"
+      - name: Execute unchanged normal native installation and Chromium download
+        run: python3 .github/scripts/apt-runtime-parity.py execute --state "$RUNNER_TEMP/apt-parity" --label normal-playwright --timeout 1200 -- node crates/nac-server/web/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Verify configured packages and the complete installed native font inventory
+        run: python3 .github/scripts/apt-runtime-parity.py installed --state "$RUNNER_TEMP/apt-parity"
+      - name: Launch pinned Chromium and verify exact offline binary identity
+        run: python3 .github/scripts/apt-runtime-parity.py execute --state "$RUNNER_TEMP/apt-parity" --label browser-check --timeout 120 -- node .github/scripts/apt-runtime-browser.mjs --state "$RUNNER_TEMP/apt-parity"
+      - name: Execute the same three unmodified representative journeys
+        run: >-
+          python3 .github/scripts/apt-runtime-parity.py execute --state "$RUNNER_TEMP/apt-parity" --label journeys --timeout 360 --
+          node crates/nac-server/web/node_modules/playwright/cli.js test
+          --config crates/nac-server/web/playwright.config.ts hosted-surfaces.e2e.ts nac-guide-context.e2e.ts
+          --grep '(injected outgoing MCP CRUD, test and runtime status (desktop|mobile)|joined installed guide and scoped navigation on desktop)$'
+          --workers=1 --retries=0 --reporter=json
+      - name: Settle only this invocation's marked detached fixtures
+        if: always()
+        run: python3 .github/scripts/apt-runtime-parity.py cleanup-journeys --state "$RUNNER_TEMP/apt-parity"
+      - name: Remove only exact offered cache inodes if normal APT retained them
+        if: always() && matrix.lane == 'hit'
+        run: sudo python3 .github/scripts/apt-runtime-parity.py cleanup-root --state "$RUNNER_TEMP/apt-parity"
+      - name: Require exact native API, representative results and all cleanup receipts
+        if: ${{ success() }}
+        run: python3 .github/scripts/apt-runtime-parity.py finish --state "$RUNNER_TEMP/apt-parity"
+      - name: Preserve result, failures and full cost without duplicate archive bytes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-native-text-${{ matrix.lane }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/apt-parity/
+            !${{ runner.temp }}/apt-parity/**/*.deb
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
