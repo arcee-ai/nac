@@ -49,6 +49,8 @@ test("injected UI capability opens shared owners once without submitting a sessi
   await page.goto(`${harness.baseUrl}/#/session/${id}`);
   const composer = page.getByRole("combobox", { name: "Message" });
   await expect(composer).toBeVisible();
+  // New Session needs this route's project from the hydrated global list.
+  await expect(page.locator('[data-sidebar="true"] button[aria-current="page"]')).toHaveCount(1);
   await composer.focus();
   const mutations: string[] = [];
   page.on("request", (event) => {
