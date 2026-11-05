@@ -188,7 +188,7 @@ jobs:
           node-version: 24.22.1
 
       - name: Run nac-server tests
-        run: cargo test -p nac-server --locked
+        run: python3 .github/scripts/server-tests.py
 
       - name: Exercise stable binary readiness and status identity
         run: make test-stable-binary

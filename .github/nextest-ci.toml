@@ -1,0 +1,10 @@
+# CI-only: server-tests.py adds a private absolute store outside compiler caches.
+[profile.ci]
+retries = 0
+fail-fast = false
+test-threads = 4
+leak-timeout = { period = "200ms", result = "fail" }
+
+[profile.ci.junit]
+path = "junit.xml"
+report-skipped = "all"

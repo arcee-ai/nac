@@ -55,7 +55,7 @@ test("frontend unit and full API/assets acceptance remain mandatory while backen
   mandatory(web.find(step => step.run === "npm test" && step["working-directory"] === "crates/nac-server/web"));
   mandatory(web.find(step => step.run === "make test-assets"));
   const backend = jobs["test-server"].steps;
-  mandatory(backend.find(step => step.run === "cargo test -p nac-server --locked"));
+  mandatory(backend.find(step => step.run === "python3 .github/scripts/server-tests.py"));
   mandatory(backend.find(step => step.run === "make test-stable-binary"));
   assert.ok(!backend.some(step => /npm (?:ci|test)/.test(step.run ?? "")), "web dependencies and tests have one owner");
   const makefile = readFileSync("Makefile", "utf8");

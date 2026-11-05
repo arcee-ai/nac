@@ -69,6 +69,12 @@ function verify(values) {
     assert.equal(identity.env[name], value);
     delete identity.env[name];
   }
+  // S12 on ad3400565aad89834742893ad36183254b5098af changes only this
+  // server runner input. Reversing it must recover the exact pre-S12 workflow,
+  // retaining the independently checked provenance bindings and S17 policy.
+  const server = top.jobs["test-server"].steps.find(step => step.name === "Run nac-server tests");
+  assert.deepEqual(server, { name: "Run nac-server tests", run: "python3 .github/scripts/server-tests.py" });
+  server.run = "cargo test -p nac-server --locked";
   const input = top.on.workflow_dispatch.inputs.cold_caches;
   assert.equal(input.type, "boolean");
   assert.equal(input.default, false);
