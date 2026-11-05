@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { requiredJobs, managedCallerJobs, requireComplete } from "./pr-checks.mjs";
+import { reverseBrowserApt } from "./browser-apt-wiring.mjs";
 
 const YAML = createRequire(import.meta.url)("yaml");
 const workflow = YAML.parse(fs.readFileSync(".github/workflows/stable-release.yml", "utf8"));
@@ -46,6 +47,8 @@ test("ordinary test-granularity shards execute the inventoried exclusion while p
 
 function verifyGranularity(value) {
   const before = structuredClone(value);
+  // Authenticate and reverse the later relay before the historical S02 guard.
+  reverseBrowserApt(before);
   for (const step of [
     before.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard"),
     before.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection"),
@@ -70,6 +73,7 @@ test("granularity cannot drift between collection/execution or spread to proof, 
     w => { w.jobs["browser-proof"].steps.find(s => s.name === "Run production-embedded goal proof journeys").run += " --fully-parallel"; },
     w => { w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run += " --workers=2"; },
     w => { w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run += " --retries=1"; },
+    w => { w.jobs["browser-shards"].steps.find(s => s.id === "apt-consume").run = "true"; },
   ]) {
     const changed = structuredClone(workflow); mutate(changed); assert.throws(() => verifyGranularity(changed));
   }
