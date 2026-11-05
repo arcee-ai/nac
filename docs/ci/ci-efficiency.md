@@ -85,6 +85,33 @@ support remains separate (ALL-460); this change enables no queue.
 
 ## Evidence procedure
 
+### Avoiding unchanged-source rebuilds (ALL-582)
+
+The shared build identity adapter watches this worktree's HEAD and the existing
+loose refs used to resolve it. A packed or unborn ref watches its nearest
+existing loose-ref parent and the existing packed-refs file (or parent). This
+detects ref creation, packing, unpacking and shared-worktree updates without
+handing Cargo a nonexistent watched path, which would rebuild on every command.
+Explicit `NAC_SOURCE_REVISION` builds instead track the supplied environment
+identity. Product version, track and build ID remain fingerprint inputs.
+
+`node --test .github/scripts/pr-build-identity.test.mjs` exercises actual Cargo
+fingerprints and embedded identity using dependency-free repositories, including
+detached/symbolic/nested/unborn HEAD, linked worktrees, loose/packed transitions,
+and environment/version changes. These tiny probes establish the mechanism;
+their timings do not establish full-CI savings.
+
+Managed Docker candidate arguments are scoped after source COPY and immediately
+before compilation. Changing the candidate still rebuilds its exact binary but
+does not invalidate preceding toolchain installation layers. Existing trusted
+push-only layer-cache writes, Wolfi runtime, smoke and live scanner controls are
+unchanged. A local warm BuildKit mechanism probe demonstrates layer reuse; full
+linux/amd64 image and end-to-end measurements remain required.
+
+ALL-582 remains open until its repeated ordinary-PR timing and coverage gates
+qualify. See [the initial strategy receipts](evidence/all-582/initial-strategies.json)
+for scoped measurements and limitations.
+
 Use the same immutable source and runner classes for each before/after comparison.
 Retain run/head/event/attempt, every job/step start/end, cache-hit logs, toolchain,
 image/build identity and conclusions. Compute event-to-required-result time and
