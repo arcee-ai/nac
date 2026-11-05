@@ -19,8 +19,8 @@ the marker in a scratch test either lost focus or closed the page before giving 
 
 **Real slow rendering.** [Run 40577481249](https://github.com/arcee-ai/nac/actions/runs/40577481249)
 (artifact `12768897663`) recorded 1,582.8 ms with the marker present, 203 animation
-frames in about 8 seconds and a longest frame gap of 166.7 ms. Nine misses from 1,541 to
-3,132 ms were recorded on October 26 and 27. Under 6x CPU throttling and 14 busy loops,
+frames in about 8 seconds and a longest frame gap of 166.7 ms. Eleven misses from 1,541 to
+3,132 ms were recorded from October 26 to 28. Under 6x CPU throttling and 14 busy loops,
 local runs reached 1,300 ms. The 1,500 ms limit is unchanged. Waiting for the resize to
 settle was tried and rejected: noise kept accumulating and latency rose to between 1,173
 and 1,491 ms.
@@ -82,20 +82,21 @@ and each succeeded on the first retry within 35 to 130 µs. The kernel's reason 
 inferred from this timing, not documented by Apple. It never reproduced on macOS 27.2 in
 2,282 local runs.
 
-`signal_with` now retries a denial up to three times, one millisecond apart, re-checking
-the exact identity each time. A persistent denial still returns `EPERM`, and
+`signal_with` now makes up to three attempts after a denial, one millisecond apart,
+re-checking the exact identity each time. A persistent denial still returns `EPERM`, and
 `terminate_members` still retains the identity.
 
-Real CI fails mostly in the first pass: of 17 failures whose logs name a pass, 13 were first
-and 4 warm. Each job runs a first and then a warm pass, and a first-pass failure skips warm,
-so that's about 1% of jobs against 0.10% per package run in the probes above. To cover that
+Real CI fails mostly in the first pass: of the 22 failures below, 16 were first and 6 warm.
+Each job runs a first and then a warm pass, and a first-pass failure skips warm. That's about
+1.3% of jobs for the first pass and 0.5% for warm, against 0.10% per package run in the probes
+above. To cover that
 condition, [run 41931815125](https://github.com/arcee-ai/nac/actions/runs/41931815125)
 cleared the file cache with `sudo purge` before each package run, with the original
 `unwrap` in both versions:
 
 | Signal path | Jobs | Package runs | Failed with this `EPERM` | Other failures |
 | --- | --- | --- | --- | --- |
-| Before this branch | 4 | 1,053 | 6 | 1 |
+| Before this branch | 4 | 1,053 | 6 | 1 (`checked_finish_reaches_observed_escape_after_reaped_leader`) |
 | With this branch | 4 | 979 | 0 | 0 |
 
 An earlier warm run with the fix
@@ -104,16 +105,18 @@ package runs with no failures.
 
 ## Rates
 
-Every attempt of every completed `stable-release.yml` run from October 25 to November 4,
-before this branch's fixes. Cancelled and skipped jobs aren't counted. #380 merged on
-October 31 at 00:36 UTC and #473 on October 31 at 00:52 UTC.
+Every attempt of every completed `stable-release.yml` run created from October 25 until
+November 4 at 20:00 UTC: 2,398 runs and 2,433 attempts. This is before this branch's fixes.
+Only passed and failed jobs are counted, using the `browser` job and the
+`ARM macOS process and credentials` job. #380 merged on October 31 at 00:36 UTC and #473 at
+00:52 UTC. Windows split by run creation time at the end of October 30 UTC.
 
-| Failure | October 25 to 30 | October 31 to November 4 |
+| Failure | Through October 30 | From October 31 |
 | --- | --- | --- |
-| Noisy terminal: latency over 1,500 ms | 9 of 346 browser jobs | 0 of 716 |
-| Noisy terminal: marker erased | 1 of 346 | 0 of 716 |
-| macOS `EPERM` | 10 of 420 macOS jobs | 12 of 864 |
-| Manager-drop `WouldBlock` | 9 of 420 | 0 of 864 |
+| Noisy terminal: latency over 1,500 ms | 11 of 352 browser jobs | 0 of 724 |
+| Noisy terminal: marker erased | 1 of 352 | 0 of 724 |
+| macOS `EPERM` | 10 of 428 macOS jobs | 12 of 811 |
+| Manager-drop `WouldBlock` | 10 of 428 | 0 of 811 |
 
 The same noisy test also failed 8 times on November 4, all on PRs #565, #567, #568 and
 #580, at its history-panel steps rather than its latency or marker checks. Those are a
@@ -131,7 +134,9 @@ After the fixes:
 
 ## Residual unknowns
 
-- Why macOS denies the signal during exec, and why first passes fail more often.
+- Why macOS denies the signal during exec, and why real CI fails more often than the probes.
+- Whether `checked_finish_reaches_observed_escape_after_reaped_leader` is related. It failed once
+  in the cold run without this branch, and this branch doesn't touch it.
 - How closely clearing the file cache matches a real first pass in CI.
 - Whether the short prompt reduces erased markers. One occurrence was recorded in 11 days,
   and it has never been reproduced locally.
