@@ -2,6 +2,7 @@
 .agents
 .codex
 target
+/.nac-ci-incremental-cache/
 **/node_modules
 **/test-results
 **/playwright-report

@@ -34,9 +34,9 @@ The only source is
 `target/<target>/release/incremental`. The only staging location is
 `.nac-ci-incremental-cache/<target>` outside the cleaned target directory. The
 helper expects physical paths without symlink ancestors and refuses to replace
-an existing incremental output directory during restore. Parent integration
-must first add `/.nac-ci-incremental-cache/` to both root `.gitignore` and
-`.dockerignore`; neither file is changed by this helper-only candidate.
+an existing incremental output directory during restore. Both root `.gitignore`
+and `.dockerignore` exclude `/.nac-ci-incremental-cache/` so these compiler-only
+files stay out of source commits and image contexts.
 
 The manifest binds repository, release role, host OS/architecture, target,
 workspace path, complete rustc/Cargo version identity, all workspace manifests
@@ -68,18 +68,18 @@ cache scope and trusted-push-only save condition remain the cache's write
 authority; the manifest hashes/provenance are integrity/context controls, not
 an independent signature or an extra permission grant.
 
-## Parent-owned workflow integration
+## Release workflow integration
 
-Apply only to the existing `build` matrix, leaving its runners, target matrix,
-permissions, source preparation and required aggregation unchanged. Set the
-codegen environment at job level so the cache key sees the configuration:
+The workflow applies this only to the existing `build` matrix. Its runners,
+target matrix, permissions, source preparation and required aggregation remain
+unchanged. The job-level environment makes the configuration visible to the key:
 
 ```yaml
 env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 ```
 
-Replace only the release build's cache step inputs and give it an output ID:
+The release build's cache step has an output ID and these inputs:
 
 ```yaml
 - name: Cache Rust build
@@ -97,12 +97,12 @@ Replace only the release build's cache step inputs and give it an output ID:
   run: python3 scripts/ci-incremental.py restore --workspace "$(pwd -P)" --target "$RELEASE_TARGET"
 ```
 
-The pinned action unconditionally exports `CARGO_INCREMENTAL=0`, so explicitly
-add `CARGO_INCREMENTAL: "1"` to the existing **Build nac-web binary** step's env.
-Keep all its `NAC_BUILD_TRACK`, `NAC_BUILD_ID`, `NAC_SOURCE_REVISION`, `--release`,
-`--locked`, package/bin and target arguments unchanged. Do not enable test-only
-features, change release assertions, skip the build on cache hits, or remove
-archive execution checks.
+The pinned action unconditionally exports `CARGO_INCREMENTAL=0`. The existing
+**Build nac-web binary** step explicitly sets `CARGO_INCREMENTAL: "1"` afterward.
+Its `NAC_BUILD_TRACK`, `NAC_BUILD_ID`, `NAC_SOURCE_REVISION`, `--release`, `--locked`,
+package/bin and target arguments remain unchanged. Shipping features, release
+assertions, the mandatory build on cache hits and archive execution checks stay
+in effect.
 
 After successful packaging and archive identity verification, stage only an
 eligible new snapshot before the action's existing post-save cleanup:
@@ -172,11 +172,14 @@ limits, cold paths, protected existing outputs and atomic failure handling.
 The tool responses are fixture stubs; these tests run no real Cargo/compiler
 and copy only small data. They do not contend with image timing trials.
 
-Before calling this delivered, verify parent workflow/ignore wiring, actual
-helper stage/restore on retained real compiler data, cross-target macOS/musl
-compiler acceptance, corrupt/unusable cache behavior, complete current-head CI,
-the existing source/stable/Guide/native/image controls and the ALL-582 timing
-cohort. Linux/Wolfi/image integration and Docker cache behavior remain separate;
+Parsed `pr-release-incremental.test.mjs` controls require the exact workflow and
+ignore wiring, trusted writer/key boundaries, unchanged profile and binary
+checks, cold restore-before-build ordering and frozen-hit staging condition.
+Negative mutations exercise each boundary. Actual helper stage/restore on
+retained real compiler data, cross-target macOS/musl compiler acceptance,
+corrupt/unusable cache behavior, complete current-head CI, the existing
+source/stable/Guide/native/image controls and the ALL-582 timing cohort remain
+required. Linux/Wolfi/image integration and Docker cache behavior remain separate;
 this candidate adds no Docker path or API change. No cached quality is reused.
 
 Pinned behavior is readable in

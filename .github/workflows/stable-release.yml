@@ -643,6 +643,8 @@ jobs:
             target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -662,14 +664,23 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust build
+        id: release-cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           prefix-key: nac-ci-v1
-          key: ${{ github.job }}
+          key: ${{ github.job }}-${{ matrix.target }}-incremental16-v1
+          cache-directories: ${{ github.workspace }}/.nac-ci-incremental-cache/${{ matrix.target }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+
+      - name: Restore verified compiler incremental data
+        env:
+          CARGO_INCREMENTAL: "1"
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci-incremental.py restore --workspace "$(pwd -P)" --target "$RELEASE_TARGET"
 
       - name: Build nac-web binary
         env:
+          CARGO_INCREMENTAL: "1"
           NAC_BUILD_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
           NAC_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
           NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
@@ -694,6 +705,16 @@ jobs:
           test "$(dist/pkg/nac-web -V)" = "nac-web $RELEASE_VERSION"
           test "$(dist/pkg/nac-web --version)" = "nac-web $RELEASE_VERSION ($short_revision)"
           test "$(tar -tzf "dist/nac-${{ matrix.target }}.tar.gz" | sort)" = "$(printf 'LICENSE\nnac-web')"
+
+      - name: Stage trusted compiler incremental snapshot
+        if: >-
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') &&
+          steps.release-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_INCREMENTAL: "1"
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci-incremental.py stage --workspace "$(pwd -P)" --target "$RELEASE_TARGET"
 
       - name: Upload archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
