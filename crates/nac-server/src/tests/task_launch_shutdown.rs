@@ -4,7 +4,7 @@ use nac_core::store::TaskLaunchPhase;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-const GIT_READY_PUBLICATION: &str = r#"echo $$ > "$NAC_TEST_TASK_GIT_READY""#;
+const GIT_READY_PUBLICATION: &str = r#"echo $$ > "$NAC_TEST_TASK_GIT_READY.pending"; /bin/mv "$NAC_TEST_TASK_GIT_READY.pending" "$NAC_TEST_TASK_GIT_READY""#;
 
 struct GitGate {
     ready: PathBuf,
