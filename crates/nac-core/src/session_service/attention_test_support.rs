@@ -94,14 +94,19 @@ fn register(key: Key) -> Result<AttentionPublicationBarrier> {
     let mut entries = BARRIERS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let state = register_entry(&mut entries, &key)?;
+    Ok(AttentionPublicationBarrier { key, state })
+}
+
+fn register_entry(entries: &mut HashMap<Key, Weak<State>>, key: &Key) -> Result<Arc<State>> {
     entries.retain(|_, value| value.strong_count() != 0);
     anyhow::ensure!(
-        entries.len() < 64 && !entries.contains_key(&key),
+        entries.len() < 64 && !entries.contains_key(key),
         "attention test barrier already registered or full"
     );
     let state = Arc::new(State::default());
     entries.insert(key.clone(), Arc::downgrade(&state));
-    Ok(AttentionPublicationBarrier { key, state })
+    Ok(state)
 }
 pub(super) struct AttentionPublicationWitness(Arc<State>);
 impl AttentionPublicationWitness {
@@ -339,10 +344,22 @@ mod tests {
             guard.publication_attempted().await.unwrap();
             drop(guard);
         }
-        let guards = (0..64)
-            .map(|_| register(key()).unwrap())
+        // Other real-service fixtures use the global registry concurrently.
+        // Exercise its exact registration logic without consuming their slots.
+        let unrelated_key = key();
+        let unrelated = register(unrelated_key.clone()).unwrap();
+        let mut entries = HashMap::new();
+        let states = (0..64)
+            .map(|_| register_entry(&mut entries, &key()).unwrap())
             .collect::<Vec<_>>();
-        assert!(register(key()).is_err());
-        drop(guards);
+        assert!(register_entry(&mut entries, &key()).is_err());
+        assert!(BARRIERS
+            .lock()
+            .unwrap()
+            .get(&unrelated_key)
+            .is_some_and(|state| state.ptr_eq(&Arc::downgrade(&unrelated.state))));
+        drop(states);
+        assert!(register_entry(&mut entries, &key()).is_ok());
+        drop(unrelated);
     }
 }
