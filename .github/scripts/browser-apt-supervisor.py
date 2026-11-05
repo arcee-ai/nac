@@ -44,20 +44,22 @@ def children(pid):
 
 
 def owned():
-    found={};pending=list(children(os.getpid()))
-    while pending:
-        pid=pending.pop()
-        if pid in found:continue
+    # Only this single-threaded process reaps its direct children/adoptees.
+    # Never infer ownership from a nested parent's transient numeric PID list.
+    # SIGCHLD is defaulted before spawning, so these PIDs cannot be reused
+    # until our own waitpid. Subreaping exposes deeper descendants afterward.
+    parent=os.getpid();found={}
+    for pid in children(parent):
         value=process(pid)
-        if value:
-            found[pid]=value;pending.extend(children(pid))
-        require(len(found)<=4096,'owned descendant bound')
+        if value and value['ppid']==parent:found[pid]=value
+    require(len(found)<=4096,'owned direct-child bound')
     return found
 
 
 def subreaper():
     require(sys.platform=='linux'and hasattr(os,'pidfd_open')and hasattr(signal,'pidfd_send_signal'),
             'Linux pidfd and child subreaper required')
+    signal.signal(signal.SIGCHLD,signal.SIG_DFL)
     libc=ctypes.CDLL(None,use_errno=True)
     if libc.prctl(36,1,0,0,0)!=0:raise OSError(ctypes.get_errno(),'PR_SET_CHILD_SUBREAPER')
 
@@ -75,8 +77,8 @@ def reaped(child):
 
 def settle(child):
     signals=[];rows=[];sent=set()
-    # Each pass rediscovers only this subreaper's children/adoptees, including
-    # setsid descendants. Revalidate start ticks immediately before signalling.
+    # Signal only actual direct children/adoptees. Killing an ancestor exposes
+    # escaped/deeper descendants to this subreaper on subsequent passes.
     for sig,seconds in ((signal.SIGTERM,1.0),(signal.SIGKILL,2.0)):
         end=time.monotonic()+seconds
         while True:
@@ -84,13 +86,14 @@ def settle(child):
             if not values:return {'signals':signals,'reaped':rows,'remaining':[]}
             for value in values.values():
                 current=same(value)
-                if not current or current['state']=='Z':continue
+                if not current or current['ppid']!=os.getpid()or current['state']=='Z':continue
                 key=(value['pid'],value['start'],int(sig))
                 if key in sent:continue
                 handle=None
                 try:
                     handle=os.pidfd_open(value['pid'])
-                    if not same(value):continue
+                    anchored=same(value)
+                    if not anchored or anchored['ppid']!=os.getpid():continue
                     signal.pidfd_send_signal(handle,sig)
                     sent.add(key);signals.append({'pid':value['pid'],'start':value['start'],'signal':int(sig)})
                     if sig==signal.SIGTERM:signal.pidfd_send_signal(handle,signal.SIGCONT)

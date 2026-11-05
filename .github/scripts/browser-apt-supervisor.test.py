@@ -55,12 +55,24 @@ class PrivilegedLifecycle(unittest.TestCase):
         with patch.object(supervisor,'process',return_value={'pid':123,'start':43}):
             self.assertIsNone(supervisor.same({'pid':123,'start':42}))
 
-    def test_only_owned_children_are_traversed_not_unrelated_processes(self):
+    def test_nested_or_foreign_replacement_never_establishes_ownership(self):
         parent=os.getpid()
-        def direct(pid):return {11}if pid==parent else{12}if pid==11 else set()
-        def process(pid):return {'pid':pid,'start':pid,'ppid':parent if pid==11 else 11}
-        with patch.object(supervisor,'children',side_effect=direct),patch.object(supervisor,'process',side_effect=process):
-            self.assertEqual(set(supervisor.owned()),{11,12})
+        def direct(pid):return {11}if pid==parent else {12}
+        def process(pid):return {'pid':pid,'start':pid,'ppid':parent if pid==11 else 999}
+        with patch.object(supervisor,'children',side_effect=direct)as listing,\
+             patch.object(supervisor,'process',side_effect=process)as inspected:
+            self.assertEqual(set(supervisor.owned()),{11})
+            listing.assert_called_once_with(parent)
+            self.assertEqual([call.args[0]for call in inspected.call_args_list],[11])
+        with patch.object(supervisor,'children',return_value={12}),patch.object(supervisor,'process',side_effect=process):
+            self.assertEqual(supervisor.owned(),{})
+
+    def test_adopted_descendant_is_eligible_only_after_actual_direct_parent_edge(self):
+        parent=os.getpid()
+        with patch.object(supervisor,'children',side_effect=[{11},{12}]),\
+             patch.object(supervisor,'process',side_effect=lambda p:{'pid':p,'start':p,'ppid':parent}):
+            self.assertEqual(set(supervisor.owned()),{11})
+            self.assertEqual(set(supervisor.owned()),{12})
 
     def test_fresh_control_and_stop_refuse_links_foreign_nonce_and_reuse(self):
         control=self.root/'control';control.mkdir(mode=0o700)
