@@ -8,6 +8,7 @@ export const requiredJobs = [
   "lint",
   "workflow-lint",
   "test-server",
+  "test-server-web",
   "test-core",
   "test-workspace",
   "quality",
@@ -21,7 +22,7 @@ export const requiredJobs = [
 ];
 // A receipt is only an optimization within this run, never reusable evidence
 // from another run, attempt, repository, candidate or partial result set.
-export const qualityJobs = ["prepare", "lint", "workflow-lint", "test-server", "test-core", "test-workspace"];
+export const qualityJobs = ["prepare", "lint", "workflow-lint", "test-server", "test-server-web", "test-core", "test-workspace"];
 
 function qualityIdentity(sha, context) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? "") ||

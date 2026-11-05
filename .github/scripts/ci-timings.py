@@ -159,6 +159,8 @@ def capture(repository, selection, output):
             return None
         return response.stdout
 
+    # Usage is run-scoped (all attempts), separate from exact-attempt job time.
+    fetch(f"repos/{repository}", "repository.json")
     summaries = []
     for value in selection:
         match = re.fullmatch(r"([1-9][0-9]*)(?::([1-9][0-9]*))?", value)
@@ -170,6 +172,7 @@ def capture(repository, selection, output):
         if latest is None:
             summaries.append({"run_id": int(run_id), "metric_eligible": False, "capture_error": "run unavailable"})
             continue
+        fetch(f"{prefix}/timing", f"{run_id}-run-usage.json")
         attempt = int(requested or json.loads(latest)["run_attempt"])
         folder = output / f"run-{run_id}-attempt-{attempt}"
         folder.mkdir()

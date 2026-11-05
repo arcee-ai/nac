@@ -148,6 +148,43 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+
+      - name: Run nac-server tests
+        run: cargo test -p nac-server --locked
+
+      - name: Exercise stable binary readiness and status identity
+        run: make test-stable-binary
+
+
+  test-server-web:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -184,12 +221,6 @@ jobs:
       - name: Check generated API and every committed browser/client bundle
         run: make test-assets
 
-      - name: Run nac-server tests
-        run: cargo test -p nac-server --locked
-
-      - name: Exercise stable binary readiness and status identity
-        run: make test-stable-binary
-
 
   browser-shards:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -201,6 +232,7 @@ jobs:
         shard: [1, 2, 3, 4]
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -246,6 +278,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -386,6 +419,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -407,7 +441,7 @@ jobs:
 
   quality:
     if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint, workflow-lint, test-server, test-core, test-workspace]
+    needs: [prepare, lint, workflow-lint, test-server, test-server-web, test-core, test-workspace]
     runs-on: ubuntu-latest
     outputs:
       quality_receipt: ${{ steps.receipt.outputs.quality_receipt }}
@@ -564,7 +598,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

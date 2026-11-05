@@ -80,7 +80,7 @@ test("caller supplies observed complete quality needs; standalone always runs fu
 });
 
 test("browser binds the same committed bundle and independent drift gate without a second web build", () => {
-  const steps = workflow("stable-release").jobs["test-server"].steps;
+  const steps = workflow("stable-release").jobs["test-server-web"].steps;
   assert.equal(steps.filter(s => s.run === "make test-assets").length, 1);
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
   const stable = workflow("stable-release");
