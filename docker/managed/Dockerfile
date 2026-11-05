@@ -9,9 +9,6 @@ ARG RUST_VERSION=1.98.0
 ARG CARGO_BUILD_JOBS=5
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-ARG NAC_BUILD_TRACK=dev
-ARG NAC_BUILD_ID
-ARG NAC_SOURCE_REVISION
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
@@ -34,6 +31,11 @@ RUN test "$(apk --print-arch)" = x86_64 \
 
 WORKDIR /src/nac
 COPY . .
+# Candidate identity belongs only to the source build. Declaring these earlier
+# also invalidates unrelated RUN layers when a PR candidate changes.
+ARG NAC_BUILD_TRACK=dev
+ARG NAC_BUILD_ID
+ARG NAC_SOURCE_REVISION
 RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" \
     NAC_BUILD_ID="${NAC_BUILD_ID}" \
