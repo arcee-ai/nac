@@ -65,6 +65,9 @@ jobs:
           github.event_name == 'workflow_dispatch'
         env:
           SOURCE_SHA: ${{ github.sha }}
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_EVENT_ACTION: ${{ github.event.action }}
+          CI_EVENT_BASE_CHANGED: ${{ toJSON(github.event.changes.base != null) }}
         run: |
           version="$(tr -d '[:space:]' < version.txt)"
           {

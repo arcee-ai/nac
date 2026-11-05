@@ -19,6 +19,11 @@ const mainPrefix = prefix.replace(predicate, mainPredicate);
 const imageImport = "${{ !(" + predicate + ") && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}";
 const normalImport = "type=gha,scope=nac-managed-linux-amd64-v1";
 const trust = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
+const provenanceEnv = {
+  CI_EVENT_NAME: "${{ github.event_name }}",
+  CI_EVENT_ACTION: "${{ github.event.action }}",
+  CI_EVENT_BASE_CHANGED: "${{ toJSON(github.event.changes.base != null) }}",
+};
 const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "browser-shards"]);
 // Canonical cold-normalized hashes originated at 85f12eadfbf43cb585fe5a0f0231d479069ec26d.
 // S17 on parent 004492fc300b296e6245a0f0768a892f98c8a42d intentionally changes
@@ -57,6 +62,13 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 function verify(values) {
   const normalized = structuredClone(values);
   const top = normalized["stable-release"];
+  const identity = top.jobs.prepare.steps.find(step => step.id === "ci");
+  // Reverse only the three observational bindings to recover S17's exact
+  // 1bd0... workflow; commands, graph, caches and every other field stay bound.
+  for (const [name, value] of Object.entries(provenanceEnv)) {
+    assert.equal(identity.env[name], value);
+    delete identity.env[name];
+  }
   const input = top.on.workflow_dispatch.inputs.cold_caches;
   assert.equal(input.type, "boolean");
   assert.equal(input.default, false);
@@ -130,11 +142,12 @@ function verify(values) {
 // and equality behavior for our canonical event strings and boolean contexts;
 // actionlint separately validates Actions grammar. This is not a general
 // Actions evaluator (e.g. arbitrary case-insensitive/numeric comparisons).
-function evaluate(expression, event, flag, run = "101", attempt = "1", ref = "refs/heads/dev", hit = "false", selected = "false") {
+function evaluate(expression, event, flag, run = "101", attempt = "1", ref = "refs/heads/dev", hit = "false", selected = "false", payload = {}) {
   const source = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, "")
     .replace(/\.([a-zA-Z_][a-zA-Z0-9_]*-[a-zA-Z0-9_-]+)/g, (_, key) => `[${JSON.stringify(key)}]`);
   return runInNewContext(`(${source})`, {
-    github: { event_name: event, ref, run_id: run, run_attempt: attempt }, inputs: { cold_caches: flag },
+    github: { event_name: event, event: payload, ref, run_id: run, run_attempt: attempt }, inputs: { cold_caches: flag },
+    toJSON: JSON.stringify,
     steps: { "release-cache": { outputs: { "cache-hit": hit } } },
     needs: { prepare: { outputs: { cold_caches: selected } } },
     format: (template, ...args) => template.replace(/\{(\d+)\}/g, (_, index) => String(args[Number(index)])),
@@ -142,6 +155,29 @@ function evaluate(expression, event, flag, run = "101", attempt = "1", ref = "re
 }
 
 test("all reachable required caches isolate cold dispatch while every other parsed field stays identical", () => verify(graph()));
+
+test("prepare records original event fields and a canonical boolean without changing execution", () => {
+  const identity = read("stable-release").jobs.prepare.steps.find(step => step.id === "ci");
+  for (const [event, payload, changed] of [
+    ["pull_request", { action: "opened" }, "false"],
+    ["pull_request", { action: "synchronize" }, "false"],
+    ["pull_request", { action: "edited", changes: { body: { from: "data" } } }, "false"],
+    ["pull_request", { action: "edited", changes: { base: { ref: { from: "old" } } } }, "true"],
+    ["push", {}, "false"], ["workflow_dispatch", {}, "false"],
+  ]) {
+    const args = [event, false, "101", "1", "refs/heads/dev", "false", "false", { changes: {}, ...payload }];
+    assert.equal(evaluate(identity.env.CI_EVENT_NAME, ...args), event);
+    assert.equal(evaluate(identity.env.CI_EVENT_ACTION, ...args) ?? "", payload.action ?? "");
+    assert.equal(evaluate(identity.env.CI_EVENT_BASE_CHANGED, ...args), changed);
+  }
+  for (const name of Object.keys(provenanceEnv)) {
+    const missing = graph(); delete missing["stable-release"].jobs.prepare.steps.find(s => s.id === "ci").env[name];
+    assert.throws(() => verify(missing));
+  }
+  const extra = graph();
+  extra["stable-release"].jobs.prepare.steps.find(s => s.id === "ci").env.UNREVIEWED = "value";
+  assert.throws(() => verify(extra), "normalization must not discard other environment fields");
+});
 
 const marker = "<!-- nac-ci-cold-caches -->";
 function selector(event, payload, dispatch = "false", raw = false) {
@@ -243,6 +279,9 @@ test("mutations cannot miss a cache role or change setup, quality, identity, pri
     assert.throws(() => verify(values), undefined, `uncontrolled cache role ${i}`);
   }
   const mutations = [
+    v => { v["stable-release"].jobs.prepare.steps.find(s => s.id === "ci").env.CI_EVENT_ACTION = "${{ github.actor }}"; },
+    v => { v["stable-release"].jobs.prepare.steps.find(s => s.id === "ci").env.CI_EVENT_BASE_CHANGED = "false"; },
+    v => { v["stable-release"].jobs.prepare.steps.find(s => s.id === "ci").env.CI_EVENT_BASE_CHANGED = "${{ toJSON(github.event.action == 'edited') }}"; },
     v => { v["stable-release"].on.workflow_dispatch.inputs.cold_caches.type = "string"; },
     v => { v["stable-release"].on.workflow_dispatch.inputs.cold_caches.default = "false"; },
     v => { v["stable-release"].on.workflow_dispatch.inputs.cold_caches.default = true; },

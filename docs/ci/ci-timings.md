@@ -55,7 +55,33 @@ proof artifacts provide diagnostic acceptance evidence, never an ordinary sample
 
 `metric_eligible` certifies the collector's timestamp/identity/status conditions,
 not the workflow's coverage semantics. `ordinary_first_attempt_metric` additionally
-requires a PR event and attempt 1. **Neither qualifies ALL-582's cohort.** Review the
+requires attempt 1 and proven original PR event provenance. The preparation step
+prints only `CI_EVENT_NAME`, `CI_EVENT_ACTION` and `CI_EVENT_BASE_CHANGED`, using
+the original GitHub event name/action and a canonical `true`/`false` expression
+for `github.event.changes.base != null`. It adds no commands or execution decisions.
+The collector requires exactly one canonical printed value per field and exact
+event-name agreement with the run API. `event_provenance` classifies `opened`,
+`synchronize`, `reopened`, or `edited` with a proven base change as `source`;
+an `edited` event without that change is `metadata-only`. `ready_for_review` is
+`non-source`; push/manual events are `non-pr`. Missing, duplicated, conflicting,
+malformed or noncanonical values remain `unknown`, never inferred from actors,
+head repetition, edit timestamps or a later success. Unknown provenance leaves
+otherwise valid diagnostic timestamp metrics available, but cannot set the
+ordinary flag. Retries never set that flag, even with proven source provenance.
+
+Historical snapshots used a weaker ordinary flag: successful PR event plus
+attempt 1, without the original action. Those flags were potential indicators,
+not cohort acceptance, and every `cohort_qualified` value remained false.
+Keep their raw evidence and historical summaries intact; a new summary from
+old logs will conservatively report unknown provenance. The bounded
+[provenance audit](evidence/all-582/provenance-audit.json) records why the retained
+observations do not prove a qualifying consecutive window. The workflow-run API
+does not retain this action; public activity/timeline history only partially
+corroborates it. Capturing the actual preparation environment closes this gap
+for future runs that reach preparation. Runs cancelled before preparation still
+have unknown provenance and must remain in the sequence ledger.
+
+**Neither metric flag qualifies ALL-582's cohort.** Review the
 complete consecutive run sequence, at least five meaningful candidates,
 backend/managed/frontend/docs representation, controlled cold-cache case, full
 coverage/failure matrix, resources/cache state and cost evidence separately.
