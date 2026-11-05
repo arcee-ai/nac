@@ -206,3 +206,15 @@ still execute full ordinary quality plus the private fixture. New job sets,
 combined retry/failure controls, and the receipt table in `managed-fault.md`
 supplement the original matrix; hosted execution remains a separate receipt.
 S09 is not yet incorporated into this source snapshot.
+
+The later nightly inventory repair classifies all twenty names from the actual
+retained native discovery. The original thirteen classifications and four
+included cases remain unchanged, as do exact-name admission, full workspace
+execution, Rust test ignores, deadlines and cleanup. Four credentialed reviewer
+tests and explicit-input replay/timing cases keep their documented opt-in
+boundaries; exact catalog qualification is an explicit unprovisioned coverage
+gap. The retained twenty-name control rejects every removal/rename and an
+unreviewed addition. This repairs admission, not execution acceptance: the
+historical schedule stays failed, and current-candidate full native execution
+and an actual postlanding schedule remain pending. Catalog and both Podman gaps
+remain unexecuted. See `nightly-portability.md` for per-case source evidence.
