@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-OWNERS = ("krb5", "curl", "sasl", "gcc_headers")
+OWNERS = ("krb5", "curl", "sasl", "gcc_headers", "libssh2")
 
 
 def verify_predecessors(lock, database):
