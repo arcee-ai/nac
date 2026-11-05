@@ -45,7 +45,8 @@ pub struct OpenWorkspacePathRequest {
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RevealWorkspacePathRequest {
-    /// Existing path relative to the current Local workspace.
+    /// Existing Files path: repository-relative for Git workspaces, or relative
+    /// to the selected workspace root for nongit workspaces.
     pub path: String,
     /// Root observed in the initiating session snapshot; never a target override.
     pub expected_workspace_root: String,
