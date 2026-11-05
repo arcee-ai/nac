@@ -120,6 +120,11 @@ eligible new snapshot before the action's existing post-save cleanup:
 ```
 
 The original save condition and success-only post action remain unchanged.
+Before staging, both release targets also execute the packaged binary's offline
+Guide with an empty environment except PATH. Its full source revision, product
+version, track and build ID must match preparation. This supplements the existing
+short-version and archive-content checks; a stale identity sharing the same
+twelve-character revision prefix still fails.
 PR/tag/manual jobs may restore but never stage or save this additional path.
 Default workspace-output pruning remains enabled; `cache-workspace-crates`
 must remain unset/false. The helper's compiler-only staging location survives

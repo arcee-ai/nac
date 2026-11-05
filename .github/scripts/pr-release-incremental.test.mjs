@@ -64,6 +64,16 @@ function verify(actual, gitignore, dockerignore) {
   for (const check of ['short_revision="$(git rev-parse --short=12 "$SOURCE_SHA")"', 'test "$(dist/pkg/nac-web -V)" = "nac-web $RELEASE_VERSION"', 'test "$(dist/pkg/nac-web --version)" = "nac-web $RELEASE_VERSION ($short_revision)"', 'test "$(tar -tzf "dist/nac-${{ matrix.target }}.tar.gz" | sort)" = "$(printf \'LICENSE\\nnac-web\')"']) {
     assert.ok(archive.run.includes(check), `missing archive execution/content check: ${check}`);
   }
+  const guide = step(actual, "Verify full release-local Guide identity");
+  assert.equal(guide.if, undefined);
+  assert.deepEqual(guide.env, {
+    RELEASE_VERSION: "${{ needs.prepare.outputs.version }}", SOURCE_SHA: "${{ needs.prepare.outputs.sha }}",
+    EXPECTED_TRACK: build.env.NAC_BUILD_TRACK, EXPECTED_BUILD_ID: build.env.NAC_BUILD_ID,
+  });
+  assert.ok(job.steps.indexOf(guide) > positions[3] && job.steps.indexOf(guide) < positions[4]);
+  for (const check of ['set -euo pipefail', 'env -i PATH="$PATH" dist/pkg/nac-web guide skills discovery |',
+    'python3 .github/scripts/release-identity.py', '--version "$RELEASE_VERSION" --source "$SOURCE_SHA"',
+    '--track "$EXPECTED_TRACK" --build-id "$EXPECTED_BUILD_ID"']) assert.ok(guide.run.includes(check), check);
   const stage = step(actual, names[4]);
   assert.equal(normalize(stage.if), staging);
   assert.deepEqual(stage.env, compilerEnv);
@@ -109,6 +119,9 @@ test("parsed release cache contract rejects trust, key, profile, cold-path, orde
     value => { step(value, "Stage trusted compiler incremental snapshot").if = staging.replace(" && steps.release-cache.outputs.cache-hit != 'true'", ""); },
     value => { step(value, "Stage trusted compiler incremental snapshot")["continue-on-error"] = true; },
     value => { step(value, "Package and verify archive").run = "echo unchecked"; },
+    value => { step(value, "Verify full release-local Guide identity").if = "false"; },
+    value => { step(value, "Verify full release-local Guide identity").env.SOURCE_SHA = "old"; },
+    value => { step(value, "Verify full release-local Guide identity").run = "true"; },
     value => { const items = value.jobs.build.steps; const item = items.splice(items.findIndex(item => item.name === "Stage trusted compiler incremental snapshot"), 1)[0]; items.splice(items.findIndex(item => item.name === "Package and verify archive"), 0, item); },
     value => { const items = value.jobs.build.steps; const item = items.splice(items.findIndex(item => item.name === "Restore verified compiler incremental data"), 1)[0]; items.splice(items.findIndex(item => item.name === "Build nac-web binary") + 1, 0, item); },
     value => { value.jobs["required-pr-checks"].needs = value.jobs["required-pr-checks"].needs.filter(name => name !== "build"); },
@@ -121,4 +134,20 @@ test("parsed release cache contract rejects trust, key, profile, cold-path, orde
   const [gitignore, dockerignore] = ignores();
   assert.throws(() => verify(workflow(), gitignore.replace("/.nac-ci-incremental-cache/", ""), dockerignore));
   assert.throws(() => verify(workflow(), gitignore, dockerignore + "\n!/.nac-ci-incremental-cache/secret\n"));
+});
+
+test("actual release Guide CLI rejects stale full identity including a matching short revision", () => {
+  const source = "a".repeat(40);
+  const identity = { product_version: "0.1.4", source_revision: source, track: "dev", build_id: `dev-${source}` };
+  const good = { provenance: "first-party bundled NAC Guide", build_identity: identity };
+  const run = input => spawnSync("python3", [".github/scripts/release-identity.py", "--version", "0.1.4",
+    "--source", source, "--track", "dev", "--build-id", `dev-${source}`], { input, encoding: "utf8" });
+  assert.equal(run(JSON.stringify(good)).status, 0);
+  for (const [field, value] of [["product_version", "0.1.3"], ["source_revision", "a".repeat(12) + "b".repeat(28)],
+    ["track", "stable"], ["build_id", "old"], ["extra", "unexpected"]]) {
+    assert.notEqual(run(JSON.stringify({ ...good, build_identity: { ...identity, [field]: value } })).status, 0, field);
+  }
+  for (const input of ["not JSON", "{}", JSON.stringify({ ...good, provenance: "external guide" }), "x".repeat(1024 * 1024 + 1)]) {
+    assert.notEqual(run(input).status, 0);
+  }
 });

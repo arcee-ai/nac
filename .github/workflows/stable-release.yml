@@ -706,6 +706,19 @@ jobs:
           test "$(dist/pkg/nac-web --version)" = "nac-web $RELEASE_VERSION ($short_revision)"
           test "$(tar -tzf "dist/nac-${{ matrix.target }}.tar.gz" | sort)" = "$(printf 'LICENSE\nnac-web')"
 
+      - name: Verify full release-local Guide identity
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          EXPECTED_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
+          EXPECTED_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
+        run: |
+          set -euo pipefail
+          env -i PATH="$PATH" dist/pkg/nac-web guide skills discovery |
+            python3 .github/scripts/release-identity.py \
+              --version "$RELEASE_VERSION" --source "$SOURCE_SHA" \
+              --track "$EXPECTED_TRACK" --build-id "$EXPECTED_BUILD_ID"
+
       - name: Stage trusted compiler incremental snapshot
         if: >-
           github.event_name == 'push' &&
