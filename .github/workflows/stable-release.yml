@@ -7,6 +7,15 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
+    inputs:
+      canonical_generation:
+        description: Isolated canonical output generation; never a CI or release receipt
+        type: boolean
+        default: false
+      expected_control_sha:
+        description: Exact reviewed control commit (required in generation mode)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -16,7 +25,67 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}
 
 jobs:
+  canonical-generation:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout reviewed control only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Checkout immutable product source separately
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: 9e9dd5f357c920f827dd7c9d5e4470fe9f4a7ad6
+          path: product
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Check pure control guards
+        run: python3 -B control/.github/scripts/canonical-generation.test.py
+      - name: Generate and seal allowed canonical outputs
+        id: generate
+        env:
+          EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: >-
+          python3 -B control/.github/scripts/canonical-generation.py
+          --control control --source product --out "$RUNNER_TEMP/canonical-evidence"
+      - name: Verify the exact upload allowlist and custody hashes
+        id: upload-guard
+        if: ${{ always() }}
+        env:
+          EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          OWNERSHIP_NONCE: ${{ steps.generate.outputs.ownership_nonce }}
+        run: >-
+          python3 -B control/.github/scripts/canonical-generation.py
+          --verify-upload --out "$RUNNER_TEMP/canonical-evidence"
+      - name: Retain generation evidence even on failure
+        if: ${{ always() && steps.upload-guard.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: canonical-${{ github.sha }}-9e9dd5f-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/canonical-evidence/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+
   prepare:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true) }}
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
@@ -465,7 +534,7 @@ jobs:
           make test-durability test-managed-load test-managed-image-contract
 
   quality:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true) && needs.prepare.outputs.run == 'true' }}
     needs: [prepare, lint, workflow-lint, test-server, test-core, test-workspace]
     runs-on: ubuntu-latest
     outputs:
@@ -487,7 +556,7 @@ jobs:
         run: node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
 
   test:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true) && needs.prepare.outputs.run == 'true' }}
     needs: [prepare, quality, browser]
     runs-on: ubuntu-latest
     steps:
@@ -597,7 +666,7 @@ jobs:
 
   required-pr-checks:
     name: Required PR checks
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true) }}
     needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
@@ -617,6 +686,7 @@ jobs:
 
   publish:
     if: >-
+      !(github.event_name == 'workflow_dispatch' && inputs.canonical_generation == true) &&
       needs.prepare.outputs.run == 'true' &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
