@@ -61,6 +61,13 @@ class CacheBoundary(unittest.TestCase):
         self.export();payload=next(self.snapshot.glob('*.deb'));payload.write_bytes(b'corrupt')
         self.reject()
 
+    def test_partial_prefetch_cannot_publish_cache_entry(self):
+        self.input.write_bytes(self.input.read_bytes()[:20])
+        with self.assertRaisesRegex(ValueError,'hash/size'):
+            self.export()
+        self.assertFalse(self.snapshot.exists())
+        self.assertFalse(any(self.root.glob('.apt-stage-*')))
+
     def test_partial_and_extra_inventory_rejected(self):
         self.export();next(self.snapshot.glob('*.deb')).unlink();self.reject()
         (self.snapshot/'unexpected').write_text('extra');self.reject()
@@ -80,6 +87,12 @@ class CacheBoundary(unittest.TestCase):
     def test_malformed_producer_provenance_rejected(self):
         self.export();path=self.snapshot/'manifest.json';manifest=json.loads(path.read_bytes())
         manifest['producer']={'source':'unbound','origin':'owned-fixture'}
+        path.write_text(json.dumps(manifest));self.reject()
+
+    def test_self_consistent_snapshot_cannot_replace_fresh_authority(self):
+        self.export();path=self.snapshot/'manifest.json';manifest=json.loads(path.read_bytes())
+        manifest['plan']['packages'][0]['SHA256']='a'*64
+        manifest['key']=store.key(manifest['plan'])
         path.write_text(json.dumps(manifest));self.reject()
 
     def test_foreign_stale_platform_rejected(self):

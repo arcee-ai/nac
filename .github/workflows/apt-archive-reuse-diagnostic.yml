@@ -1,0 +1,44 @@
+name: Private APT archive reuse diagnostic
+
+on:
+  push:
+    branches: [codex/all-582-apt-archive-reuse]
+
+permissions:
+  contents: read
+
+jobs:
+  archive-mechanism:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Read the current locked Playwright dependency data
+        run: npm --prefix crates/nac-server/web ci --ignore-scripts
+      - name: Acquire only the pinned official diagnostic image
+        run: timeout 180s docker pull docker.io/library/ubuntu@sha256:157dc3d6e4a3e4f2c68d12df9df9ed6e808b59af6d4c3757b432b4f519916725
+      - name: Compare full current APT closure miss and verified byte reuse
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/codex/all-582-apt-archive-reuse
+          test "$GITHUB_EVENT_NAME" = push
+          printf 'Diagnostic host image: %s@%s\n' "${ImageOS:?}" "${ImageVersion:?}"
+          python3 .github/scripts/apt-archive-experiment.py \
+            --source "$SOURCE_SHA" \
+            --output "$RUNNER_TEMP/apt-archive-evidence"
+      - name: Preserve bytes, failures and all operation timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: apt-archive-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/apt-archive-evidence/*
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
