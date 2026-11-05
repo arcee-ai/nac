@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "review_url": "https://github.com/arcee-ai/nac/pull/605#discussion_r4475855685",
+  "decision": "No production change: both reported current-workflow mechanisms contradicted by pinned implementation and retained macOS1.98 artifact inventory.",
+  "helper_sha256": "928aa7b416aa947d7d7456e9f77107caf4d762d805c6d4436f4f35ff47a736dd",
+  "reviewed_helper_equals_parent_current": true,
+  "rustc_identity": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+  "cargo_identity": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+  "cargo_full_source_commit": "797e8a9bca276c1c9f9f738d2a20f484fa4eea9d",
+  "inventories": [
+    {
+      "label": "retained-A",
+      "files": 433,
+      "logical_bytes": 1484480503,
+      "inventory_accepts_actual_tree": true,
+      "unit_count": 9,
+      "finalized_session_count": 9,
+      "registry_unit_count": 0,
+      "units": [
+        {
+          "unit": "build_script_build-0bsihw0gjmazw",
+          "sessions": [
+            "s-hnv3dvcsj8-01u5x0s-6ghpzjo6lgxhxgo6iyf4l5lit"
+          ],
+          "locks": [
+            "s-hnv3dvcsj8-01u5x0s.lock"
+          ]
+        },
+        {
+          "unit": "build_script_build-1mg8xt2luah0n",
+          "sessions": [
+            "s-hnv3e8pcyi-1l608e1-drzw07bx6734vk1gu8frq4zhh"
+          ],
+          "locks": [
+            "s-hnv3e8pcyi-1l608e1.lock"
+          ]
+        },
+        {
+          "unit": "nac_contracts-0nakdhq6bvue8",
+          "sessions": [
+            "s-hnv3e3xivw-1ppzgfr-5neocj0nz83tz9yx210ymycht"
+          ],
+          "locks": [
+            "s-hnv3e3xivw-1ppzgfr.lock"
+          ]
+        },
+        {
+          "unit": "nac_core-2ar4181jha9me",
+          "sessions": [
+            "s-hnv3ehz7rf-14umo3p-1htnwmz3vxmoq7jvnuq50r5y5"
+          ],
+          "locks": [
+            "s-hnv3ehz7rf-14umo3p.lock"
+          ]
+        },
+        {
+          "unit": "nac_credential_store-3hvvlm4gy4hvo",
+          "sessions": [
+            "s-hnv3e2ntwt-14djltn-0hz9ahu21246j3a6d7iq5eruf"
+          ],
+          "locks": [
+            "s-hnv3e2ntwt-14djltn.lock"
+          ]
+        },
+        {
+          "unit": "nac_managed-01tvmdzbze4sn",
+          "sessions": [
+            "s-hnv3ee370s-0gd3q3n-c4lt85n7upyc65evl6mgocoky"
+          ],
+          "locks": [
+            "s-hnv3ee370s-0gd3q3n.lock"
+          ]
+        },
+        {
+          "unit": "nac_process-0jvnpnid29n15",
+          "sessions": [
+            "s-hnv3e440k2-0ez3b25-2mlup96t5zo8f0nky4r1b89z6"
+          ],
+          "locks": [
+            "s-hnv3e440k2-0ez3b25.lock"
+          ]
+        },
+        {
+          "unit": "nac_server-1hhdf3ykvcfik",
+          "sessions": [
+            "s-hnv3ess26y-0fgcezt-5hk8u3kz2n9lztreke681u401"
+          ],
+          "locks": [
+            "s-hnv3ess26y-0fgcezt.lock"
+          ]
+        },
+        {
+          "unit": "nac_web-39rjqlxlly8a3",
+          "sessions": [
+            "s-hnv3fww231-1mp2n77-f3njvcnq5vnjh9ngqd6u78344"
+          ],
+          "locks": [
+            "s-hnv3fww231-1mp2n77.lock"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "retained-B",
+      "files": 866,
+      "logical_bytes": 2961750103,
+      "inventory_accepts_actual_tree": true,
+      "unit_count": 9,
+      "finalized_session_count": 18,
+      "registry_unit_count": 0,
+      "units": [
+        {
+          "unit": "build_script_build-0bsihw0gjmazw",
+          "sessions": [
+            "s-hnv3dvcsj8-01u5x0s-6ghpzjo6lgxhxgo6iyf4l5lit",
+            "s-hnv3gki3t0-0jdny0n-6ghpzjo6lgxhxgo6iyf4l5lit"
+          ],
+          "locks": [
+            "s-hnv3dvcsj8-01u5x0s.lock",
+            "s-hnv3gki3t0-0jdny0n.lock"
+          ]
+        },
+        {
+          "unit": "build_script_build-1mg8xt2luah0n",
+          "sessions": [
+            "s-hnv3e8pcyi-1l608e1-drzw07bx6734vk1gu8frq4zhh",
+            "s-hnv3gkim6y-0n9meh4-drzw07bx6734vk1gu8frq4zhh"
+          ],
+          "locks": [
+            "s-hnv3e8pcyi-1l608e1.lock",
+            "s-hnv3gkim6y-0n9meh4.lock"
+          ]
+        },
+        {
+          "unit": "nac_contracts-0nakdhq6bvue8",
+          "sessions": [
+            "s-hnv3e3xivw-1ppzgfr-5neocj0nz83tz9yx210ymycht",
+            "s-hnv3gkqhlu-0b85e32-ckaf6f8krpjn6v9qkp9i3rtwj"
+          ],
+          "locks": [
+            "s-hnv3e3xivw-1ppzgfr.lock",
+            "s-hnv3gkqhlu-0b85e32.lock"
+          ]
+        },
+        {
+          "unit": "nac_core-2ar4181jha9me",
+          "sessions": [
+            "s-hnv3ehz7rf-14umo3p-1htnwmz3vxmoq7jvnuq50r5y5",
+            "s-hnv3gkt6bo-11bhokr-ci8t3gamn3q1gvrklh3vq9sr4"
+          ],
+          "locks": [
+            "s-hnv3ehz7rf-14umo3p.lock",
+            "s-hnv3gkt6bo-11bhokr.lock"
+          ]
+        },
+        {
+          "unit": "nac_credential_store-3hvvlm4gy4hvo",
+          "sessions": [
+            "s-hnv3e2ntwt-14djltn-0hz9ahu21246j3a6d7iq5eruf",
+            "s-hnv3gki5x8-0vtepz4-0hz9ahu21246j3a6d7iq5eruf"
+          ],
+          "locks": [
+            "s-hnv3e2ntwt-14djltn.lock",
+            "s-hnv3gki5x8-0vtepz4.lock"
+          ]
+        },
+        {
+          "unit": "nac_managed-01tvmdzbze4sn",
+          "sessions": [
+            "s-hnv3ee370s-0gd3q3n-c4lt85n7upyc65evl6mgocoky",
+            "s-hnv3gkt6a2-15f9ll3-086dhmlf0ugp79srw8swnvpnk"
+          ],
+          "locks": [
+            "s-hnv3ee370s-0gd3q3n.lock",
+            "s-hnv3gkt6a2-15f9ll3.lock"
+          ]
+        },
+        {
+          "unit": "nac_process-0jvnpnid29n15",
+          "sessions": [
+            "s-hnv3e440k2-0ez3b25-2mlup96t5zo8f0nky4r1b89z6",
+            "s-hnv3gkikh4-05rxbiq-2mlup96t5zo8f0nky4r1b89z6"
+          ],
+          "locks": [
+            "s-hnv3e440k2-0ez3b25.lock",
+            "s-hnv3gkikh4-05rxbiq.lock"
+          ]
+        },
+        {
+          "unit": "nac_server-1hhdf3ykvcfik",
+          "sessions": [
+            "s-hnv3ess26y-0fgcezt-5hk8u3kz2n9lztreke681u401",
+            "s-hnv3gmil6a-1bvuqd4-2akgtjlginv11uf7pc65v284i"
+          ],
+          "locks": [
+            "s-hnv3ess26y-0fgcezt.lock",
+            "s-hnv3gmil6a-1bvuqd4.lock"
+          ]
+        },
+        {
+          "unit": "nac_web-39rjqlxlly8a3",
+          "sessions": [
+            "s-hnv3fww231-1mp2n77-f3njvcnq5vnjh9ngqd6u78344",
+            "s-hnv3go8lnk-0l3bhh1-8057hs2s7t1p4pav6g0h7cgtl"
+          ],
+          "locks": [
+            "s-hnv3fww231-1mp2n77.lock",
+            "s-hnv3go8lnk-0l3bhh1.lock"
+          ]
+        }
+      ]
+    }
+  ],
+  "local_path_packages": [
+    "nac-catalog-gen",
+    "nac-contracts",
+    "nac-core",
+    "nac-credential-store",
+    "nac-managed",
+    "nac-process",
+    "nac-server"
+  ],
+  "primary_sources": [
+    {
+      "url": "https://github.com/rust-lang/rust/blob/88d9e12ae178fab0fb5cc050a94da85685d449ea/compiler/rustc_incremental/src/persist/fs.rs#L337-L344",
+      "fact": "finalize keeps timestamp/random prefix, asserts three dashes, appends SVH; finalized form has three tokens after s"
+    },
+    {
+      "url": "https://github.com/rust-lang/rust/blob/88d9e12ae178fab0fb5cc050a94da85685d449ea/compiler/rustc_incremental/src/persist/fs.rs#L155-L172",
+      "fact": "lock_file_path requires three dashes in session name"
+    },
+    {
+      "url": "https://github.com/rust-lang/rust/blob/88d9e12ae178fab0fb5cc050a94da85685d449ea/compiler/rustc_incremental/src/persist/fs.rs#L35-L36",
+      "fact": "introductory comment describes two-token finalized name, contradicting implementation; not adopted as grammar"
+    },
+    {
+      "url": "https://github.com/rust-lang/cargo/blob/797e8a9bca276c1c9f9f738d2a20f484fa4eea9d/src/cargo/core/profiles.rs#L303-L315",
+      "fact": "global incremental override applied, then !is_local unconditionally disables incremental"
+    },
+    {
+      "url": "https://github.com/rust-lang/cargo/blob/797e8a9bca276c1c9f9f738d2a20f484fa4eea9d/src/cargo/core/compiler/unit_dependencies.rs#L869-L875",
+      "fact": "is_local means path source and non-stdlib; registry/git dependencies excluded independent of target"
+    }
+  ],
+  "scope": {
+    "macos_actual_inventory": true,
+    "linux_musl_actual_inventory": false,
+    "explicit_cross_target_runtime_test": false,
+    "platform_source_analysis": "relevant finalization and incremental-disabling branches have no macOS/musl cfg or target condition",
+    "tiny_cargo_probe_run": false,
+    "tiny_probe_reason": "image timed solve active; exact pinned implementations and retained real1.98 trees sufficient to decide no broadening",
+    "no_source_policy_broadening": true,
+    "remaining": "actual hosted/macOS explicit-target and Linux/musl acceptance remain required; custom path-patched dependencies would be local, unlike registry dependencies, and unknown units continue to fail closed"
+  },
+  "source_snapshot_sha256": {
+    "rustc-fs.rs": "6d7bf397f1c9186cb55b983d06568569f94aa4f20e48324dda6e1188c8f54136",
+    "cargo-unit-dependencies.rs": "59ffc23fef8adc506b38eb0f6a7647983af31983e744dd82b6a07368123da04c",
+    "cargo-profiles.rs": "f0ab026542b1fd5c50c61cce3b8aabb02f71e57b6813374a6429756d8946af5b",
+    "cargo-compiler.rs": "a709d6f3acdb848c9c8b06747f1a048a3d3d8acd843a9bad72a4100e515899a9"
+  }
+}
