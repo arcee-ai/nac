@@ -95,7 +95,8 @@ advances. No author code is automatically fixed, rebased or marked ready.
   green checks. Partial reruns require exact old/new job-attempt proof.
 - A title or body edit can select a run that reused earlier qualification and
   skipped the native job. That run holds with a rerun instruction: re-running all
-  of its jobs runs full qualification, and the older green run is never used.
+  of its jobs runs full qualification, and the older green run is never used. The
+  skipped rows clear only when every latest job belongs to the rerun attempt.
 - Other apps and workflows retain their check-record veto; their latest
   applicable workflow run must also finish acceptably. Names alone never
   establish supersession. Missing/ambiguous provenance, a changing run inventory

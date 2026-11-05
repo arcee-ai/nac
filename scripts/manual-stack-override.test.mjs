@@ -407,6 +407,36 @@ test('a run that reused earlier qualification holds with the rerun that clears i
   assert.equal(f.writes().length, 0);
 });
 
+test('re-running all jobs of a reused run clears its skipped rows, and nothing weaker does', async t => {
+  const reran = ({ conclusion = 'skipped', attempts = () => 2 } = {}) => {
+    const f = fixture();
+    f.currentRun.run_attempt = 2;
+    f.jobOverrides = c => ({ run_attempt: attempts(c) });
+    f.extraChecks = pr => [{ id: pr.number * 100000, name: 'macos-native', head_sha: pr.head.sha,
+      app: { id: 15368, slug: 'github-actions' }, check_suite: { id: f.run(pr).check_suite_id },
+      details_url: `https://github.com/arcee-ai/nac/actions/runs/${f.run(pr).id}/job/${pr.number * 100000}`,
+      status: 'completed', conclusion, output: {} }];
+    for (const pr of f.prs) f.oldJobs[pr.number * 100000] = { id: pr.number * 100000,
+      name: 'macos-native', status: 'completed', conclusion, run_id: f.run(pr).id,
+      head_sha: pr.head.sha, run_attempt: 1,
+      check_run_url: `https://api.github.com/${root}/check-runs/${pr.number * 100000}` };
+    return f;
+  };
+  await t.test('full rerun clears', async () => {
+    const member = (await reran().preview()).members[0];
+    assert.deepEqual(member.blockers, []);
+    assert.equal(member.records.find(r => r.name === 'macos-native').disposition, 'superseded');
+  });
+  for (const [name, options] of [['failed old row', { conclusion: 'failure' }],
+    ['job carried from the earlier attempt', { attempts: c => c.name.startsWith('macos') ? 1 : 2 }]]) {
+    await t.test(`${name} holds`, async () => {
+      const f = reran(options);
+      assert.match((await f.preview()).members[0].blockers.join(), /Partial-rerun supersession is ambiguous/);
+      assert.equal(f.writes().length, 0);
+    });
+  }
+});
+
 test('matrix jobs and partial reruns bind exact latest executions and retain failed attempts', async () => {
   const f = fixture();
   f.checks.push({ name: 'build (macos, arm64)', status: 'completed', conclusion: 'success' },
