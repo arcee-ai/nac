@@ -114,6 +114,13 @@ cache writes retain the existing trusted-push condition. Actual goal proofs bind
 to the selected executable's path, full source and hash. See the
 [binary transport and retry contract](browser-binary.md).
 
+The same producer also relays current signed OS archive bytes to the eight
+ordinary consumers and proof job. Normal `playwright install --with-deps chromium`
+remains mandatory; validated compatibility mismatches use normal APT, while
+corrupt/foreign/future evidence fails. Cold mode bypasses that relay without
+skipping installation or tests. This adds no shared-cache writer or quality
+receipt. See [native archive relay and qualification boundaries](browser-apt.md).
+
 Static inventory metadata never supplies execution success. The aggregate uses
 actual same-run job results, preserving successful siblings across GitHub's
 failed-job rerun behavior without looking up prior green runs or caching verdicts.

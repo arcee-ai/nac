@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import { reverseBrowserApt } from "./browser-apt-wiring.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
@@ -61,6 +62,9 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  // Undo only exact authenticated relay additions; original four child hashes
+  // and all prior source/provenance/profile/quality fingerprints remain fixed.
+  reverseBrowserApt(normalized["stable-release"]);
   // Reverse only S19's guarded selection and explicit selected-builder binding.
   // Every prior cold/cache/security field remains covered by the original hashes.
   const imageSteps = normalized['managed-image-build'].jobs['build-smoke'].steps;
