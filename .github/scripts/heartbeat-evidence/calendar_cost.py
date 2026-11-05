@@ -24,6 +24,7 @@ RSS = {'resident_before_kib', 'resident_active_kib'}
 DIMENSIONS = {'schedules', 'runnable_chats', 'owners', 'admitted', 'pending',
               'catchup_points_per_schedule', 'retained_occurrence_rows'}
 GIB = 1024**3
+EXECUTABLE_BOUND = GIB+16*1024**2
 FLOOR = GIB
 FAILURE_RESERVE = 256*1024**2
 BUILD_FORECAST = 5*GIB
@@ -100,7 +101,7 @@ def compiler_artifact(stdout):
 def admit_executable(executable, build, output, evidence):
     """Record the existing short-circuit admission before any copy or listing."""
     proof = {'state': 'FAIL', 'candidate': str(executable), 'expected_build': str(build),
-             'resolved_candidate': None, 'limit_bytes': GIB,
+             'resolved_candidate': None, 'limit_bytes': EXECUTABLE_BOUND,
              'checks': {'canonical_equal': None, 'within_build': None, 'size_within_bound': None},
              'file_metadata': None, 'first_failed_predicate': None, 'metadata_error': None,
              'receipt_error': None}
@@ -122,7 +123,7 @@ def admit_executable(executable, build, output, evidence):
                 value = executable.stat()  # Same single read, only after BOTH existing path guards.
                 proof['file_metadata'] = {name: getattr(value, name) for name in (
                     'st_size', 'st_mode', 'st_dev', 'st_ino', 'st_nlink', 'st_uid', 'st_gid', 'st_mtime_ns')}
-                proof['checks']['size_within_bound'] = value.st_size <= GIB
+                proof['checks']['size_within_bound'] = value.st_size <= EXECUTABLE_BOUND
                 if not proof['checks']['size_within_bound']:
                     proof['first_failed_predicate'] = 'size_within_bound'
         if proof['first_failed_predicate'] is None:

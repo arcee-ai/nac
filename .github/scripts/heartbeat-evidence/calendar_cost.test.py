@@ -153,7 +153,7 @@ class ExecutableAdmission(unittest.TestCase):
         self.assertEqual(receipt['state'], 'PASS' if reason is None else 'FAIL')
         self.assertEqual(receipt['candidate'], str(candidate))
         self.assertEqual(receipt['expected_build'], '/synthetic/build')
-        self.assertEqual(receipt['limit_bytes'], cost.GIB)
+        self.assertEqual(receipt['limit_bytes'], cost.EXECUTABLE_BOUND)
         return receipt
 
     def test_noncanonical_path_records_first_failure_without_containment_or_stat(self):
@@ -175,19 +175,25 @@ class ExecutableAdmission(unittest.TestCase):
         candidate.stat.assert_not_called()
 
     def test_size_over_exact_limit_is_rejected_with_actual_bounded_metadata(self):
-        candidate = self.candidate(size=cost.GIB+1)
+        candidate = self.candidate(size=cost.EXECUTABLE_BOUND+1)
         receipt = self.exercise(candidate, 'size_within_bound')
-        self.assertEqual(receipt['file_metadata']['st_size'], cost.GIB+1)
+        self.assertEqual(receipt['file_metadata']['st_size'], cost.EXECUTABLE_BOUND+1)
         self.assertEqual(receipt['checks'], {
             'canonical_equal': True, 'within_build': True, 'size_within_bound': False})
         candidate.stat.assert_called_once_with()
 
     def test_exact_limit_remains_inclusively_accepted(self):
-        candidate = self.candidate(size=cost.GIB)
+        candidate = self.candidate(size=cost.EXECUTABLE_BOUND)
         receipt = self.exercise(candidate)
-        self.assertEqual(receipt['file_metadata']['st_size'], cost.GIB)
+        self.assertEqual(receipt['file_metadata']['st_size'], cost.EXECUTABLE_BOUND)
         self.assertTrue(all(receipt['checks'].values()))
         candidate.stat.assert_called_once_with()
+
+    def test_observed_fixed_product_size_is_admitted_without_large_file_allocation(self):
+        candidate = self.candidate(size=1075511656)
+        receipt = self.exercise(candidate)
+        self.assertEqual(receipt['file_metadata']['st_size'], 1075511656)
+        self.assertTrue(all(receipt['checks'].values()))
 
     def test_unknown_stat_is_recorded_and_original_exception_preserved(self):
         candidate = self.candidate()

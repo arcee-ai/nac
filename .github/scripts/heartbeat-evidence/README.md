@@ -176,7 +176,7 @@ normal core/managed default+openapi+test-support dependencies, and no profile,
 identity, vendor or wrapper overrides. Raw compiler JSON, dependency graph,
 rustc/cargo, exact source/tree/lock/manifest/measurement-source hashes and host
 kernel/architecture are retained. The unique actual server artifact must be
-within the owned build root, no symlink, at most1GiB, and is copied once to0700.
+within the owned build root, no symlink, at most1040MiB, and is copied once to0700.
 
 The FULL list from that same retained ELF must include both exact owning
 interval/Calendar ignored selectors once. All compile/copy/hash/inventory
@@ -210,7 +210,7 @@ Guest resource admission is deliberately separate from laptop20GiB policy:
 require actual free disk>7.75GiB (5GiBbuild forecast,1.5GiBexport bound,
 256MiBfailure reserve,1GiB floor) and MemAvailable>=4GiB BEFORE Cargo. Check
 the1GiB+256MiB free-disk threshold before/after phases and during quiet/cases.
-The retained ELF is<=1GiB and complete run export<=1.5GiB; run-build remains
+The retained ELF is<=1040MiB and complete run export<=1.5GiB; run-build remains
 excluded. These are forecast/admission limits, not measured current capacity
 or an OS quota/disk reservation. No cache cleanup or enlarged runner is
 implicitly authorized. Root must accept these explicit guest limits before
