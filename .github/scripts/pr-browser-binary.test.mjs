@@ -79,6 +79,7 @@ function validate(config, required = requiredJobs) {
     assert.match(guard.run, /\$\{ImageOS:\?missing runner OS\}.*\$\{ImageVersion:\?missing runner image version\}/);
     assert.ok(guard.run.includes('[[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]'));
     assert.ok(guard.run.includes('test -n "$BROWSER_BINARY_RECEIPT"'));
+    assert.ok(guard.run.includes('printf \'Browser consumer runner image: %s@%s\\n\' "$ImageOS" "$ImageVersion"'));
     assert.ok(guard.run.includes('mkdir "$GITHUB_WORKSPACE/browser-binary-download"'));
     const fetch = consumer.steps.find(s => s.uses === download);
     assert.ok(consumer.steps.indexOf(guard) < consumer.steps.indexOf(fetch));
@@ -201,7 +202,9 @@ test("actual pre-download guard rejects empty image identity, wrong source/host 
       FAKE_RUST_HOST: "x86_64-unknown-linux-gnu", GITHUB_WORKSPACE: root,
       BROWSER_BINARY_RECEIPT: "authenticated producer receipt" };
     const run = overrides => spawnSync("bash", ["-e", "-c", guard], { encoding: "utf8", env: { ...env, ...overrides } });
-    assert.equal(run({}).status, 0);
+    const valid = run({});
+    assert.equal(valid.status, 0);
+    assert.equal(valid.stdout, "Browser consumer runner image: ubuntu24@20261101.1\n");
     for (const overrides of [
       { ImageOS: "" }, { ImageVersion: "" }, { NAC_SOURCE_REVISION: "b".repeat(40) },
       { BROWSER_BINARY_RECEIPT: "" },

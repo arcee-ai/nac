@@ -302,6 +302,7 @@ jobs:
           test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
           [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
           test -n "$BROWSER_BINARY_RECEIPT"
+          printf 'Browser consumer runner image: %s@%s\n' "$ImageOS" "$ImageVersion"
           mkdir "$GITHUB_WORKSPACE/browser-binary-download"
       - name: Download only this producer's browser executable artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -396,6 +397,7 @@ jobs:
           test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
           [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
           test -n "$BROWSER_BINARY_RECEIPT"
+          printf 'Browser consumer runner image: %s@%s\n' "$ImageOS" "$ImageVersion"
           mkdir "$GITHUB_WORKSPACE/browser-binary-download"
       - name: Download only this producer's browser executable artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

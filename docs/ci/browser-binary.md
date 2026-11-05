@@ -19,7 +19,8 @@ Both commands print structured JSON and can append their fields to `--github-out
 Use the same prepared candidate, pinned Rust installation and dev/test profile
 settings as the current browser lanes. This example runs from the repository
 root after checking out `CANDIDATE_SHA`. `ImageOS` and `ImageVersion` are the
-hosted runner's image identity; every consumer must expect the same image.
+hosted runner's actual image identity. Every consumer supplies its own current
+identity; a different image selects a fresh source build after full validation.
 
 ```sh
 export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
@@ -76,29 +77,42 @@ python3 .github/scripts/browser-binary.py consume \
 
 The command returns one of two successful modes:
 
-- `artifact`: the same-attempt archive validated completely. `binary` is the
+- `artifact`: the same-attempt, same-image archive validated completely. `binary` is the
   absolute executable path; `binary_sha256` is its validated digest. Use that
   exact path for `NAC_E2E_BINARY` in all ordinary and proof selections.
-- `source`: a completely valid producer artifact belongs to an earlier attempt
-  of this same run/repository/candidate/profile/compiler/target. No old executable
+  `fallback_reason` is empty.
+- `source`: a completely valid producer artifact belongs to an earlier attempt,
+  or its runner image differs from the current consumer within this same attempt.
+  Run/repository/candidate/profile/compiler/target still match. No transported executable
   or hash is exposed. Restore the compatible compiler cache if desired, using
   the unchanged trusted write condition, then run the original locked source
   build with the explicit dev/debug-0/source/build-ID environment shown above.
   Use the newly built `$GITHUB_WORKSPACE/target/debug/nac-web` for the current
   attempt. Tests and proofs run again normally; no earlier quality verdict is
   reused. Recompute this binary's hash rather than using the old receipt's hash.
-  The producer's recorded runner image may be older after an image rollout;
+  `fallback_reason` is the bounded value `older-attempt` or
+  `runner-image-change` in JSON and GitHub outputs for timing disclosure. If both
+  differ, `older-attempt` takes precedence. The producer's image can differ
+  during a hosted rollout even within the same workflow attempt;
   its manifest still must match its authenticated receipt. Since these bytes
   are discarded, the fresh build uses the current runner instead.
 
-An older attempt is a fallback reason only **after** archive existence, full
+Both modes emit bounded `producer_runner_image` and `consumer_runner_image`
+fields from the validated receipt and current caller identity. Retain these
+actual `ImageOS@ImageVersion` values alongside the fallback reason; setup's
+Runner Image metadata need not equal the shell environment's version string.
+The pre-download consumer guard also prints only these two public runner values
+after its nonempty checks, so even a later admission failure retains them.
+
+An older attempt or different valid image is a fallback reason only **after** archive existence, full
 identity, digests, sizes, safe members, payloads, padding/trailer and gzip integrity
-validate. Missing or corrupt old artifacts, malformed/foreign metadata and future
+validate. Missing or corrupt artifacts, malformed/foreign metadata and future
 attempts fail. Do not use `continue-on-error`, broad error-to-source fallback,
 an empty receipt, arbitrary artifact lookup or a previous green run. Rerun the
 producer when an artifact has expired; an expired artifact is not silently valid.
-A current-attempt runner-image mismatch also fails rather than executing a
-foreign binary. The older-attempt source path never executes transported bytes.
+The source path never exposes or executes transported bytes. A different image
+does not waive any other identity or integrity requirement, and malformed image
+identities still fail. Only a same-image current artifact can become executable.
 
 The output directory must be new. Existing directories, symlinked leaves or an
 immediate symlinked parent are rejected and preserved. Archive inputs must be
@@ -135,8 +149,9 @@ remain required.
 `browser-binary` is required by both browser consumers, the browser join and the
 explicit final required-job contract. Consumers select the producer's actual
 artifact ID, validate its anchored receipt and full bytes, then run the unchanged
-selections. A current artifact avoids compilation/cache duplication; a valid old
-attempt runs the original locked source build. Parsed workflow negative controls
+selections. A matching current artifact avoids compilation/cache duplication;
+a fully validated older attempt or different runner image runs the original
+locked source build. Parsed workflow negative controls
 cover these edges, exact identity/profile inputs, trusted cache writes and proof
 binding. The native eight-shard inventory is a refinement of S02, not another
 strategy: all eight ordinary selections are nonempty and their union with the
@@ -150,9 +165,11 @@ python3 .github/scripts/browser-binary.test.py
 node --test .github/scripts/pr-browser-binary.test.mjs .github/scripts/pr-browser-sharding.test.mjs
 ```
 
-The real CLI controls exercise valid current transport and older-attempt source
-selection, malformed/foreign/future receipts, archive/payload corruption in both
-attempt modes, safe member and size rules, input/output symlinks and FIFOs,
+The real CLI controls exercise valid current transport and source selection for
+older attempts and same-attempt image changes. Negative admission controls are
+also exercised with a valid different consumer image: malformed,
+foreign and future receipts, archive/payload corruption, safe member and size
+rules, input/output symlinks and FIFOs,
 multi-chunk streams, preserved existing output and actual binary/proof binding.
 
 Workflow controls must separately require the producer and every browser result,
@@ -162,3 +179,13 @@ unchanged cache write boundaries. Never describe helper success as CI acceptance
 Hosted build/setup/artifact/queue/aggregation timing and cold/partial-retry runs
 remain required measurements; the earlier local Darwin transfer probe does not
 qualify Linux artifact transfer or the full pipeline's latency.
+
+The first hosted S09 run [41954973930](https://github.com/arcee-ai/nac/actions/runs/41954973930)
+failed closed on an actual same-attempt hosted-image rollout. Its producer built
+successfully; consumers on a different image rejected the receipt before tests
+could run. [The retained failure receipt](evidence/all-582/browser-binary-image-rollout.json)
+records exact prepared source, producer/consumer images and per-job outcomes.
+This repair validates and discards those bytes before choosing the existing
+source-build path. The failed run remains failed, and a full successful hosted
+transport/fallback pipeline remains unqualified. This is an S09 refinement,
+not a separate optimization strategy or a latency-success claim.

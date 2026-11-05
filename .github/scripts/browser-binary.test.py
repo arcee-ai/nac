@@ -23,6 +23,7 @@ BASE = {
     "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
     "runner-image": "ubuntu24@20261101.1",
 }
+OTHER_IMAGE = "ubuntu26@20261026.180.1"
 
 
 class BrowserBinaryCliTests(unittest.TestCase):
@@ -55,9 +56,17 @@ class BrowserBinaryCliTests(unittest.TestCase):
         return self.cli("consume", "--archive", self.archive, "--output-dir", self.output, **kwargs)
 
     def reject(self, **kwargs):
-        result = self.consume(**kwargs)
-        self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertFalse(self.output.exists(), result.stderr)
+        # Every negative admission control must also fail during an image
+        # rollout. A different valid image is not an error-to-source escape.
+        contexts = [kwargs]
+        if "runner-image" not in kwargs.get("identity", {}):
+            contexts.append({**kwargs, "identity": {**kwargs.get("identity", {}),
+                                                    "runner-image": OTHER_IMAGE}})
+        for context in contexts:
+            result = self.consume(**context)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(result.stdout, "", result.stdout)
+            self.assertFalse(self.output.exists(), result.stderr)
         return result
 
     def mutate_receipt(self, change):
@@ -92,6 +101,9 @@ class BrowserBinaryCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         accepted = json.loads(result.stdout)
         self.assertEqual(accepted["mode"], "artifact")
+        self.assertEqual(accepted["fallback_reason"], "")
+        self.assertEqual(accepted["producer_runner_image"], BASE["runner-image"])
+        self.assertEqual(accepted["consumer_runner_image"], BASE["runner-image"])
         binary = Path(accepted["binary"])
         self.assertEqual(binary.read_bytes(), self.binary.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
@@ -152,7 +164,8 @@ class BrowserBinaryCliTests(unittest.TestCase):
 
     def test_profile_track_build_id_and_schema_must_match(self):
         for field, wrong in {"dev_debug": 2, "profile": "release", "build_track": "stable",
-                             "build_id": "some-other-build", "schema": True}.items():
+                             "build_id": "some-other-build", "schema": True,
+                             "runner_image": "invalid-image"}.items():
             with self.subTest(field=field):
                 self.reject(receipt={**self.receipt, field: wrong})
 
@@ -171,14 +184,36 @@ class BrowserBinaryCliTests(unittest.TestCase):
         result = self.consume(identity={"attempt": "2"})
         self.assertEqual(result.returncode, 0, result.stderr)
         accepted = json.loads(result.stdout)
-        self.assertEqual(accepted, {"mode": "source", "binary": "", "binary_sha256": "", "producer_attempt": 1})
+        self.assertEqual(accepted, {"mode": "source", "binary": "", "binary_sha256": "",
+                                    "producer_attempt": 1, "fallback_reason": "older-attempt",
+                                    "producer_runner_image": BASE["runner-image"],
+                                    "consumer_runner_image": BASE["runner-image"]})
         self.assertFalse(self.output.exists())
 
     def test_image_rollout_between_attempts_still_builds_current_source(self):
         result = self.consume(identity={"attempt": "2", "runner-image": "ubuntu24@new-image"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["mode"], "source")
+        self.assertEqual(json.loads(result.stdout)["fallback_reason"], "older-attempt")
         self.assertFalse(self.output.exists())
+
+    def test_current_attempt_image_change_validates_then_discards_all_bytes(self):
+        output = self.root / "github-output"
+        result = self.cli("consume", "--archive", self.archive, "--output-dir", self.output,
+                          "--github-output", output, identity={"runner-image": OTHER_IMAGE})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            "mode": "source", "binary": "", "binary_sha256": "", "producer_attempt": 1,
+            "fallback_reason": "runner-image-change",
+            "producer_runner_image": BASE["runner-image"], "consumer_runner_image": OTHER_IMAGE,
+        })
+        self.assertFalse(self.output.exists())
+        fields = dict(line.split("=", 1) for line in output.read_text().splitlines())
+        self.assertEqual(fields["fallback_reason"], "runner-image-change")
+        self.assertEqual(fields["producer_runner_image"], BASE["runner-image"])
+        self.assertEqual(fields["consumer_runner_image"], OTHER_IMAGE)
+        self.assertEqual(fields["binary"], "")
+        self.assertEqual(fields["binary_sha256"], "")
 
     def test_old_attempt_malformed_or_foreign_receipt_still_fails(self):
         self.reject(identity={"attempt": "2"}, receipt={**self.receipt, "run_id": "999"})
@@ -206,6 +241,11 @@ class BrowserBinaryCliTests(unittest.TestCase):
 
     def test_foreign_manifest_even_with_valid_transport_digests(self):
         self.rewrite_manifest(lambda value: value.update(source_revision="b" * 40))
+        self.reject()
+        self.reject(identity={"attempt": "2"})
+
+    def test_manifest_must_match_producer_image_even_during_source_fallback(self):
+        self.rewrite_manifest(lambda value: value.update(runner_image=OTHER_IMAGE))
         self.reject()
         self.reject(identity={"attempt": "2"})
 

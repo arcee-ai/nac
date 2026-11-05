@@ -181,10 +181,8 @@ def receipt_identity(receipt, value):
     for key in IDENTITY - {"run_attempt", "runner_image"}:
         require(receipt[key] == value[key], f"wrong producer {key}")
     require(receipt["run_attempt"] <= value["run_attempt"], "future producer attempt")
-    # A runner image can roll forward between partial retries. The older
-    # artifact is still validated completely, then discarded for a source build.
-    require(receipt["run_attempt"] < value["run_attempt"]
-            or receipt["runner_image"] == value["runner_image"], "wrong producer runner_image")
+    # Images can differ even within one attempt during a hosted rollout.
+    # Such bytes must still validate completely before source fallback below.
     for name in ("archive", "manifest", "binary"):
         require(sha(receipt[f"{name}_sha256"]), f"invalid {name} digest")
     require(integer(receipt["archive_bytes"], MAX_ARCHIVE), "invalid archive size")
@@ -264,14 +262,18 @@ def consume(archive, output, receipt, value):
         root = new_directory(output)
         try:
             extract(handle, root, receipt)
-            if receipt["run_attempt"] < value["run_attempt"]:
+            reason = ("older-attempt" if receipt["run_attempt"] < value["run_attempt"] else
+                      "runner-image-change" if receipt["runner_image"] != value["runner_image"] else "")
+            provenance = {"producer_attempt": receipt["run_attempt"], "fallback_reason": reason,
+                          "producer_runner_image": receipt["runner_image"],
+                          "consumer_runner_image": value["runner_image"]}
+            if reason:
                 shutil.rmtree(root)
-                return {"mode": "source", "binary": "", "binary_sha256": "",
-                        "producer_attempt": receipt["run_attempt"]}
+                return {"mode": "source", "binary": "", "binary_sha256": "", **provenance}
             binary = root / BINARY
             binary.chmod(0o755)
             return {"mode": "artifact", "binary": str(binary),
-                    "binary_sha256": receipt["binary_sha256"], "producer_attempt": receipt["run_attempt"]}
+                    "binary_sha256": receipt["binary_sha256"], **provenance}
         except BaseException:
             shutil.rmtree(root)
             raise
