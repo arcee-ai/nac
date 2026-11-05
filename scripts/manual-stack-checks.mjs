@@ -241,7 +241,11 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     const status = matching.filter(r => r.kind === 'status');
     if (!eligible.length && (mandatory.includes(name) ||
       !status.some(r => r.state === 'success' && (app == null || r.app?.id === app)))) {
-      blockers.push(`${name}: missing successful result from the expected owner`);
+      const reused = name === mandatory[2] &&
+        provenance.jobs.some(j => j.name === 'macos-native' && j.conclusion === 'skipped');
+      blockers.push(reused
+        ? `${name}: skipped by reused run ${provenance.selected?.run}; re-run all jobs for full qualification`
+        : `${name}: missing successful result from the expected owner`);
     }
     if (mandatory.includes(name) && matching.some(r => r.kind === 'check' && !authoritative.has(r.id))) {
       blockers.push(`${name}: current check is not bound to the selected workflow jobs`);

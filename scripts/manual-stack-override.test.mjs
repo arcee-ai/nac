@@ -395,6 +395,18 @@ test('mandatory security/native owners cannot be missing, skipped or replaced by
   }
 });
 
+test('a run that reused earlier qualification holds with the rerun that clears it', async () => {
+  const f = fixture();
+  const native = 'macos-native / ARM macOS process and credentials';
+  f.checks = f.checks.filter(c => c.name !== native);
+  f.checks.push({ name: 'macos-native', status: 'completed', conclusion: 'skipped' });
+  const plan = await f.preview();
+  assert.ok(plan.members[0].blockers.some(b => b.startsWith(`${native}: skipped by reused run`) &&
+    b.includes('re-run all jobs')));
+  await assert.rejects(f.helper.execute(plan));
+  assert.equal(f.writes().length, 0);
+});
+
 test('matrix jobs and partial reruns bind exact latest executions and retain failed attempts', async () => {
   const f = fixture();
   f.checks.push({ name: 'build (macos, arm64)', status: 'completed', conclusion: 'success' },

@@ -19,7 +19,7 @@ the marker in a scratch test either lost focus or closed the page before giving 
 
 **Real slow rendering.** [Run 40577481249](https://github.com/arcee-ai/nac/actions/runs/40577481249)
 (artifact `12768897663`) recorded 1,582.8 ms with the marker present, 203 animation
-frames in about 8 seconds and a longest frame gap of 166.7 ms. Eleven misses from 1,541 to
+frames in about 8 seconds and a longest frame gap of 166.7 ms. Twelve misses from 1,541 to
 3,132 ms were recorded from October 26 to 28. Under 6x CPU throttling and 14 busy loops,
 local runs reached 1,300 ms. The 1,500 ms limit is unchanged. Waiting for the resize to
 settle was tried and rejected: noise kept accumulating and latency rose to between 1,173
@@ -82,7 +82,7 @@ and each succeeded on the first retry within 35 to 130 µs. The kernel's reason 
 inferred from this timing, not documented by Apple. It never reproduced on macOS 27.2 in
 2,282 local runs.
 
-`signal_with` now makes up to three attempts after a denial, one millisecond apart,
+`signal_with` now makes up to three signal attempts in total, one millisecond apart after a denial,
 re-checking the exact identity each time. A persistent denial still returns `EPERM`, and
 `terminate_members` still retains the identity.
 
@@ -109,12 +109,13 @@ Every attempt of every completed `stable-release.yml` run created from October 2
 November 4 at 20:00 UTC: 2,398 runs and 2,433 attempts. This is before this branch's fixes.
 Only passed and failed jobs are counted, using the `browser` job and the
 `ARM macOS process and credentials` job. #380 merged on October 31 at 00:36 UTC and #473 at
-00:52 UTC. Windows split by run creation time at the end of October 30 UTC. One failed browser job from
-November 1 (`125012412385`) has no retrievable log, so it's counted in the total but not classified.
+00:52 UTC. Windows split by run creation time at the end of October 30 UTC. Each failed job is
+classified from its own attempt's log. One failed browser job from November 1 (`125012412385`)
+has no retrievable log, so it's counted in the total but not classified.
 
 | Failure | Through October 30 | From October 31 |
 | --- | --- | --- |
-| Noisy terminal: latency over 1,500 ms | 11 of 352 browser jobs | 0 of 724 |
+| Noisy terminal: latency over 1,500 ms | 12 of 352 browser jobs | 0 of 724 |
 | Noisy terminal: marker erased | 1 of 352 | 0 of 724 |
 | macOS `EPERM` | 10 of 428 macOS jobs | 12 of 811 |
 | Manager-drop `WouldBlock` | 10 of 428 | 0 of 811 |
