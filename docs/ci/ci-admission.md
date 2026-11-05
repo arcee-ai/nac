@@ -1,8 +1,8 @@
 # Metadata admission owner: unwired production draft
 
 This draft adds a strict standard-library owner and offline controls. It does
-not change Stable, any trigger/job/check name, nightly, cache privileges, test
-scope or production behavior. It starts from origin/dev914782659; neither private
+not change Stable, nightly, cache privileges, test scope or production behavior.
+Its NEW nonprotected reusable unit is not yet called by Stable. It starts from origin/dev914782659; neither private
 DIAG branch nor the nightly override is an ancestor. Parent owns workflow wiring
 and external check-consumer adaptation after the APT producer is sealed.
 
@@ -16,7 +16,7 @@ fetch an alternative owner on failure. The default workflow must fail to FULL
 without invoking untrusted candidate code for admission.
 
 The owner verifies its executing bytes equal the base owner blob. All workflows
-and the cold/applicability/publication selectors must have exactly the same
+and the bootstrap/cold/applicability/publication selectors and policy must have exactly the same
 bytes in original base, PR head and prepared candidate. New/modified/missing
 workflow or program is FULL. Hashes summarize bytes only after comparisons;
 a candidate-declared hash never authorizes itself. The repository is a fresh
@@ -34,10 +34,11 @@ to this admission owner therefore receive FULL coverage until trusted landing.
 The original GitHub event file is data. A bounded context JSON contains exactly
 the documented keys in `.github/scripts/ci-admission-contract.json`: event_name,
 run_id/run_attempt as integers, candidate_sha, original ordinary policy_sha,
-executing workflow_sha and the trusted existing applicability result as a boolean.
+executing workflow_sha. There is NO caller-provided applicability or cold boolean.
 No body/title or credentials are emitted. Original head/base repository IDs,
 PR number, exact prepared SHA/TREE/parents, base policy, workflow, complete
-workflow/program content digest, current cold and applicability enter the tuple.
+workflow/program content digest, original-event cold and derived applicability enter
+the v2 tuple. Current cold is not substituted for an original event during selection.
 
 `python3 <immutable-base-copy>/ci-admission.py --event <original-event> --context
 <context-json> --repository <fresh-prepared-checkout>` emits one JSON object.
@@ -88,11 +89,74 @@ actors are not admission inputs. Failed, cancelled, pending and success cases
 with the same valid started marker give the same selector classification. The
 external consumer must still evaluate the actual full run's current checks.
 
+## Always-invoked unit and independently bound PURE pointer
+
+The always-invoked tiny `.github/workflows/ci-admission.yml` has a trusted-base
+identity job followed by a nonprotected marker job. Its caller ID/name MUST be
+`ci-admission`. PURE still invokes this unit; it never invokes a quality child.
+The unit has no caller inputs. It reads the ORIGINAL event/GitHub run context,
+checks out github.sha, obtains the bootstrap with `git show <original-base>:...`,
+and executes only that base copy. The base bootstrap validates repository/base
+identity, compares its bytes to BASE, then executes a temporary BASE owner copy.
+Missing programs produce unchanged FULL/no marker. No candidate script supplies
+an authority boolean. The unit/bootstrap bytes are part of the authority set.
+
+Provider Jobs AND Checks names, INCLUDING caller prefix, are exactly:
+
+- FULL: `ci-admission / NAC full admission v2 <tuple_digest>`
+- PURE: `ci-admission / NAC metadata observation v2 <observation_digest>`
+- Other nonmarkers: `ci-admission / NAC admission identity` and unavailable marker
+  `ci-admission / NAC admission unavailable`; neither authorizes coalescing.
+
+The observation digest is lowercase SHA256 over UTF-8 compact ensure_ascii JSON
+`[2,tuple_digest,FULL_run_id,1]`, separators comma/colon with NO whitespace. The
+run ID is a positive safe JSON integer (<=9007199254740991), attempt is integer1.
+The tuple itself begins integer2. The external consumer independently walks the
+complete interval to the FIRST matching FULL, then computes this digest and
+checks every intervening and final PURE marker against it. It never trusts a
+stdout pointer, and a PURE hash pointing behind a newer FULL cannot pass.
+
+Every historical marker and externally accepted final PURE must have exactly
+ONE provider referenced_workflows entry for this unit, with exact fields:
+`path=arcee-ai/nac/.github/workflows/ci-admission.yml@<prepared_sha>`,
+`sha=<prepared_sha>`, `ref=refs/pull/<PRnumber>/merge`. Read immutable Git objects
+at that provider-attested SHA and compare unit/bootstrap/program/policy/all
+workflow bytes against original BASE and PR head. Missing/duplicate/mismatched/
+unknown attestation is FULL or hold. Self-declared digests are insufficient.
+Current selector need not assume the reference appears while its own unit starts;
+the external consumer MUST verify the final run's provider attestation.
+
+The retained621 FULL provider metadata proves this referenced_workflows shape;
+the closed DIAG screen proves caller prefixes/dynamic names/anonymous Jobs and
+Checks primitives. No new run was made to test this unit. Its early-attestation
+visibility is not a correctness dependency; final unit-specific provider evidence
+and normal source validation remain pending publication, with unknowns held.
+
+## Managed and cold derivation by the external owner
+
+Managed applicability is derived from COMPLETE `git diff --no-renames --name-only
+-z <original-base> <prepared> --` paths. Decode/size/truncation errors are FULL.
+Read `.github/scripts/ci-admission-applicability.json` from immutable BASE; its
+version1 prefixes/exact names match BASE `managedApplicable`, and its
+pr_checks_sha256 MUST equal SHA256 of the complete BASE pr-checks.mjs bytes.
+The policy itself must match head/prepared. The Python owner uses this policy;
+controls compare it to the existing actual Node function. External owner computes
+the same complete paths/policy, never accepts selector/prepare booleans as authority.
+
+For current applicability/freshness, external owner uses current PR head/base/
+repositories/ref, provider-attested prepared parents/TREE/source and current
+body's exact cold-marker flag to recompute the same tuple. Historic tuple inputs
+came from immutable original GITHUB_EVENT_PATH; current mutable body cannot
+reconstruct `changes.body.from` or replace historic input. The trusted attested
+program enforces both original transition directions. Unknown/missing original
+provenance or intervening work holds/FULL, never a backwards green search.
+
 ## M3 machine contract and remaining gates
 
 The adjacent JSON contract defines names, output fields, read bounds and consumer
-requirements. A PURE result contains no required source contexts and identifies
-the latest matching FULL run/attempt and tuple for the consumer to validate. It
+requirements. A PURE result contains no required source contexts and names
+a compact independent binding to the latest matching FULL run/attempt and tuple.
+The stdout pointer is diagnostic only. It
 is not a passed quality receipt. Full required contexts are the existing aggregate,
 source-security scan and ARM native context. The parent-owned tool must verify
 owner/run/attempt/tuple and absence of all three names in BOTH pure Jobs/Checks,
@@ -105,6 +169,7 @@ Production is blocked on root's APT handoff, trusted-base bootstrap, exact graph
 and naming wiring, M3 consumer integration and ONE code acceptance review. No
 coalescing is published; no new strategy/cohort credit. The goal remains open.
 
-Local controls: `python3 .github/scripts/ci-admission.test.py` exercises real tiny
+Local controls: the adjacent owner/bootstrap Python tests and unit parsed/actual
+applicability Node controls exercise real tiny
 Git objects plus offline identity, authority, cold, partial-history and no-auth
 negatives; no Cargo, server, browser, image, API traffic or CI execution.

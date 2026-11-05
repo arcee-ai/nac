@@ -17,15 +17,22 @@ class FixtureGit:
     def __init__(self):
         self.parents = [BASE, HEAD]
         self.tree = TREE
+        self.changed_paths = ["crates/nac-server/src/app.rs"]
         self.files = {revision: {path: EXECUTED if path == A.OWNER else path.encode()
-                                for path in A.AUTHORITY + [A.WORKFLOW]}
+                                for path in A.AUTHORITY + [A.WORKFLOW, A.UNIT]}
                       for revision in [BASE, HEAD, CANDIDATE]}
+        for revision in self.files:
+            for path in [".github/scripts/pr-checks.mjs", ".github/scripts/ci-admission-applicability.json"]:
+                self.files[revision][path] = Path(path).read_bytes()
 
     def workflows(self, revision):
         return sorted(p for p in self.files[revision] if p.startswith(".github/workflows/"))
 
     def blob(self, revision, path):
         return self.files[revision][path]
+
+    def paths(self, base, prepared):
+        return self.changed_paths
 
     def current(self):
         return CANDIDATE
@@ -40,8 +47,7 @@ def inputs():
              "pull_request": {"number": 5, "body": "description", "head": {"sha": HEAD, "ref": "codex/real-work", "repo": {"id": A.REPOSITORY_ID}},
                               "base": {"sha": BASE, "ref": "dev", "repo": {"id": A.REPOSITORY_ID, "full_name": A.REPOSITORY}}}}
     context = {"event_name": "pull_request", "run_id": 20, "run_attempt": 1,
-               "candidate_sha": CANDIDATE, "policy_sha": BASE, "workflow_sha": CANDIDATE,
-               "managed_applicable": True}
+               "candidate_sha": CANDIDATE, "policy_sha": BASE, "workflow_sha": CANDIDATE}
     return event, context
 
 
@@ -49,7 +55,9 @@ def run(run_id, second):
     return {"id": run_id, "run_attempt": 1, "created_at": f"2026-11-05T00:00:{second:02d}Z",
             "repository": {"id": A.REPOSITORY_ID}, "path": A.WORKFLOW, "event": "pull_request",
             "head_branch": "codex/real-work", "head_repository": {"id": A.REPOSITORY_ID},
-            "head_sha": HEAD, "workflow_id": 42}
+            "head_sha": HEAD, "workflow_id": 42,
+            "referenced_workflows": [{"path": A.REPOSITORY+"/"+A.UNIT+"@"+CANDIDATE,
+                                      "sha": CANDIDATE, "ref": "refs/pull/5/merge"}]}
 
 
 class History:
@@ -108,7 +116,7 @@ class Admission(unittest.TestCase):
     def test_recent_pure_observations_preserve_latest_full_identity(self):
         observation = run(15, 15)
         self.history.runs.insert(1, observation)
-        self.history.jobs[15] = History.marker(observation, A.PURE + self.identity["digest"])
+        self.history.jobs[15] = History.marker(observation, A.PURE + A.observation_digest(self.identity["digest"], 10))
         self.assertEqual(self.select()["admission"]["run_id"], 10)
         self.history.jobs[15]["jobs"][0]["name"] = A.FULL + "0"*64
         self.assert_full()
@@ -143,7 +151,7 @@ class Admission(unittest.TestCase):
             self.assertEqual(self.assert_full()["reason"], "unsupported_prepared_identity")
         self.git.parents = [BASE, HEAD]
         for revision in [BASE, HEAD, CANDIDATE]:
-            for path in A.AUTHORITY + [A.WORKFLOW]:
+            for path in A.AUTHORITY + [A.WORKFLOW, A.UNIT]:
                 git = copy.deepcopy(self.git)
                 git.files[revision][path] = b"forged candidate program"
                 self.assert_full(git=git)
@@ -243,18 +251,56 @@ class Admission(unittest.TestCase):
         history = History(self.identity)
         history.runs = [history.current] + [run(i,i) for i in reversed(range(10,19))]
         for record in history.runs[1:]:
-            history.jobs[record["id"]] = History.marker(record, A.PURE+self.identity["digest"])
+            history.jobs[record["id"]] = History.marker(record, A.PURE+A.observation_digest(self.identity["digest"], 10))
         self.assertEqual(self.assert_full(read=history)["reason"], "history_marker_budget")
         self.assertEqual(len(history.requests), 10)
 
     def test_machine_contract_matches_owner_constants(self):
         contract = json.loads(Path(__file__).with_name("ci-admission-contract.json").read_text())
         self.assertEqual(set(contract["selector"]["context_keys"]), A.CONTEXT_KEYS)
+        self.assertEqual(set(contract["selector"]["authority_paths"]),set(A.AUTHORITY))
+        self.assertEqual(len(contract["producer"]["tuple_fields"]),len(self.identity["values"]))
         self.assertEqual(contract["producer"]["full_required_source_contexts"], A.CONTEXTS)
         self.assertFalse(contract["selector"]["quality_reused"])
         self.assertEqual(contract["public_history"]["max_requests"], 11)
         self.assertEqual(contract["public_history"]["max_total_bytes"], A.MAX_BYTES)
         self.assertFalse(contract["check_consumer"]["cross_run_quality_receipt_or_result_copy"])
+
+    def test_provider_attestation_and_compact_pointer_are_required(self):
+        for change in [lambda r:r.pop("referenced_workflows"),
+                       lambda r:r.update(referenced_workflows=[]),
+                       lambda r:r["referenced_workflows"].append(r["referenced_workflows"][0].copy()),
+                       lambda r:r["referenced_workflows"][0].update(sha="e"*40),
+                       lambda r:r["referenced_workflows"][0].update(ref="refs/pull/6/merge"),
+                       lambda r:r["referenced_workflows"][0].update(path="foreign/ci-admission.yml@"+CANDIDATE)]:
+            history = History(self.identity)
+            change(history.prior)
+            self.assert_full(read=history)
+        # Early current-unit visibility is not assumed. External must check final PURE.
+        self.history.current.pop("referenced_workflows")
+        self.assertEqual(self.select()["mode"], "pure")
+        middle = run(15,15)
+        self.history.runs.insert(1,middle)
+        self.history.jobs[15] = History.marker(middle,A.PURE+A.observation_digest(self.identity["digest"],9))
+        self.assertEqual(self.assert_full()["reason"], "observation_points_behind_latest_full")
+        self.history.jobs[15] = History.marker(middle,A.PURE+A.observation_digest(self.identity["digest"],10))
+        result = self.select()
+        self.assertEqual(result["observation_digest"], A.observation_digest(self.identity["digest"],10))
+        expected = __import__("hashlib").sha256(json.dumps([2,self.identity["digest"],10,1],separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
+        self.assertEqual(expected,result["observation_digest"])
+
+    def test_managed_derivation_never_accepts_a_caller_boolean(self):
+        for paths, expected in [([],False),(["docs/help.md"],False),(["crates/x.rs"],True),
+                                ([".github/other"],True),(["Cargo.lock"],True),
+                                (["docker/managed/Dockerfile"],True),(["tools/README"],False)]:
+            self.git.changed_paths = paths
+            identity = A.tuple_for(self.event,self.context,self.git,EXECUTED)
+            self.assertEqual(identity["managed_applicable"],expected)
+        self.assert_full(context=dict(self.context,managed_applicable=False))
+        policy = json.loads(Path(".github/scripts/ci-admission-applicability.json").read_text())
+        policy["pr_checks_sha256"] = "0"*64
+        self.git.files[BASE][".github/scripts/ci-admission-applicability.json"] = json.dumps(policy).encode()
+        self.assert_full()
 
     def test_real_git_merge_objects_and_trusted_base_program(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -262,10 +308,12 @@ class Admission(unittest.TestCase):
             def git(*args):
                 return subprocess.check_output(["git", "-C", temp, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", *args], stderr=subprocess.DEVNULL).decode().strip()
             git("init", "--quiet")
-            for path in A.AUTHORITY + [A.WORKFLOW]:
+            for path in A.AUTHORITY + [A.WORKFLOW, A.UNIT]:
                 file = root/path
                 file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_bytes(EXECUTED if path == A.OWNER else path.encode())
+                file.write_bytes(EXECUTED if path == A.OWNER else
+                                 Path(path).read_bytes() if path in [".github/scripts/pr-checks.mjs", ".github/scripts/ci-admission-applicability.json"]
+                                 else path.encode())
             git("add", ".")
             git("commit", "-qm", "trusted base")
             base = git("rev-parse", "HEAD")

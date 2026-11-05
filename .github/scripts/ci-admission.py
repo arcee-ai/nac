@@ -18,15 +18,17 @@ from pathlib import Path
 REPOSITORY = "arcee-ai/nac"
 REPOSITORY_ID = 1194218201
 WORKFLOW = ".github/workflows/stable-release.yml"
+UNIT = ".github/workflows/ci-admission.yml"
+CALLER = "ci-admission"
 OWNER = ".github/scripts/ci-admission.py"
-CONTEXT_KEYS = {"event_name", "run_id", "run_attempt", "candidate_sha", "policy_sha", "workflow_sha", "managed_applicable"}
-AUTHORITY = [OWNER, ".github/scripts/ci-admission-contract.json", ".github/scripts/cold-caches.py", ".github/scripts/pr-checks.mjs",
+CONTEXT_KEYS = {"event_name", "run_id", "run_attempt", "candidate_sha", "policy_sha", "workflow_sha"}
+AUTHORITY = [OWNER, ".github/scripts/ci-admission-bootstrap.py", ".github/scripts/ci-admission-applicability.json", ".github/scripts/ci-admission-contract.json", ".github/scripts/cold-caches.py", ".github/scripts/pr-checks.mjs",
              ".github/scripts/publication-policy.mjs"]
 MARKER = "<!-- nac-ci-cold-caches -->"
 CONTEXTS = ["Required PR checks", "source-security / Full locked source scan",
             "macos-native / ARM macOS process and credentials"]
-FULL = "NAC full admission v1 "
-PURE = "NAC metadata observation v1 "
+FULL = CALLER + " / NAC full admission v2 "
+PURE = CALLER + " / NAC metadata observation v2 "
 MAX_BYTES = 4 * 1024**2
 
 
@@ -45,7 +47,7 @@ def sha(value):
 
 
 def integer(value):
-    require(type(value) is int and value > 0, "noncanonical_integer")
+    require(type(value) is int and 0 < value <= 2**53 - 1, "noncanonical_integer")
     return value
 
 
@@ -90,6 +92,11 @@ class Git:
                              for p in rows), "unsupported_workflow_path")
         return sorted(rows)
 
+    def paths(self, base, prepared):
+        raw = self.call("diff", "--no-renames", "--name-only", "-z", sha(base), sha(prepared), "--")
+        require(not raw or raw.endswith(b"\0"), "incomplete_compared_paths")
+        return raw.decode("utf8").split("\0")[:-1] if raw else []
+
     def current(self):
         return sha(self.call("rev-parse", "HEAD").decode().strip())
 
@@ -123,9 +130,8 @@ def tuple_for(event, context, git, executed_owner):
     require(git.current() == prepared, "checkout_candidate_mismatch")
     require(context.get("policy_sha") == base_sha and context.get("workflow_sha") == prepared,
             "policy_or_workflow_identity")
-    require(type(context.get("managed_applicable")) is bool, "missing_applicability")
     workflows = git.workflows(base_sha)
-    require(WORKFLOW in workflows and workflows == git.workflows(head_sha)
+    require(WORKFLOW in workflows and UNIT in workflows and workflows == git.workflows(head_sha)
             and workflows == git.workflows(prepared), "workflow_inventory_changed")
     paths = sorted(workflows + AUTHORITY)
     hashes = []
@@ -137,12 +143,47 @@ def tuple_for(event, context, git, executed_owner):
             require(executed_owner == trusted, "owner_not_executed_from_trusted_base")
         hashes.append([path, hashlib.sha256(trusted).hexdigest()])
     authority = hashlib.sha256(json.dumps(hashes, separators=(",", ":")).encode()).hexdigest()
-    values = [1, REPOSITORY_ID, REPOSITORY, number, head_id, head_sha, REPOSITORY_ID,
+    managed = applicability(git.paths(base_sha, prepared), git.blob(base_sha, ".github/scripts/ci-admission-applicability.json"),
+                            git.blob(base_sha, ".github/scripts/pr-checks.mjs"))
+    values = [2, REPOSITORY_ID, REPOSITORY, number, head_id, head_sha, REPOSITORY_ID,
               base["ref"], base_sha, prepared, tree, base_sha, WORKFLOW, prepared, authority,
-              cold(request.get("body")), context["managed_applicable"]]
+              cold(request.get("body")), managed]
     digest = hashlib.sha256(json.dumps(values, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
     return {"values": values, "digest": digest, "head_ref": head["ref"], "head_id": head_id,
-            "head_sha": head_sha, "candidate_sha": prepared}
+            "head_sha": head_sha, "candidate_sha": prepared, "pr_number": number, "managed_applicable": managed,
+            "cold_caches": cold(request.get("body"))}
+
+
+def applicability(paths, policy_bytes, pr_checks_bytes):
+    """Complete compared paths under a versioned immutable-base policy; no caller boolean."""
+    policy = json.loads(policy_bytes, object_pairs_hook=unique)
+    require(isinstance(policy, dict) and set(policy) == {"schema_version", "pr_checks_sha256", "prefixes", "exact_paths"}
+            and policy["schema_version"] == 1, "unknown_applicability_policy")
+    require(policy["pr_checks_sha256"] == hashlib.sha256(pr_checks_bytes).hexdigest(), "applicability_policy_drift")
+    require(policy["prefixes"] == [".github/", "crates/", "docker/managed/", "scripts/"]
+            and policy["exact_paths"] == ["Cargo.toml", "Cargo.lock", "Makefile", ".dockerignore", "version.txt"],
+            "unsupported_applicability_policy")
+    require(isinstance(paths, list) and all(isinstance(path, str) and path and "\0" not in path for path in paths),
+            "malformed_compared_paths")
+    return any(path.startswith(tuple(policy["prefixes"])) or path in policy["exact_paths"] for path in paths)
+
+
+def observation_digest(tuple_digest, full_run_id, attempt=1):
+    require(isinstance(tuple_digest, str) and re.fullmatch(r"[a-f0-9]{64}", tuple_digest), "noncanonical_tuple_digest")
+    integer(full_run_id)
+    require(type(attempt) is int and attempt == 1, "unsupported_full_attempt")
+    return hashlib.sha256(json.dumps([2, tuple_digest, full_run_id, attempt], separators=(",", ":")).encode()).hexdigest()
+
+
+def attest(run, identity):
+    refs = run.get("referenced_workflows")
+    require(isinstance(refs, list), "missing_provider_workflow_attestation")
+    prefix = REPOSITORY + "/" + UNIT + "@"
+    units = [ref for ref in refs if isinstance(ref, dict) and isinstance(ref.get("path"), str)
+             and ref["path"].startswith(prefix)]
+    require(len(units) == 1, "missing_or_duplicate_provider_unit")
+    require(units[0] == {"path": prefix + identity["candidate_sha"], "sha": identity["candidate_sha"],
+                         "ref": f"refs/pull/{identity['pr_number']}/merge"}, "foreign_provider_unit_source")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -194,6 +235,7 @@ def run_identity(run, identity):
 
 def marker_for(run, identity, read):
     run_identity(run, identity)
+    attest(run, identity)
     require(run.get("head_sha") == identity["head_sha"], "intervening_head_change")
     run_id = run["id"]
     jobs, count = rows(read(f"repos/{REPOSITORY}/actions/runs/{run_id}/attempts/1/jobs",
@@ -208,9 +250,13 @@ def marker_for(run, identity, read):
     stamp(marker["started_at"])
     integer(marker.get("id"))
     name = marker["name"]
-    require(name in [FULL + identity["digest"], PURE + identity["digest"]], "changed_admission_tuple")
-    # No status/conclusion, quality receipt, actor or output is read as authority.
-    return "full" if name.startswith(FULL) else "pure"
+    if name.startswith(FULL):
+        require(name == FULL + identity["digest"], "changed_admission_tuple")
+        return "full", None
+    binding = name.removeprefix(PURE)
+    require(re.fullmatch(r"[a-f0-9]{64}", binding), "malformed_observation_binding")
+    # Check the selected FULL pointer only after independently finding the latest FULL.
+    return "pure", binding
 
 
 def latest_admission(context, identity, read):
@@ -222,6 +268,7 @@ def latest_admission(context, identity, read):
     current_time = stamp(current.get("created_at"))
     seen_ids, seen_current, previous_time, checked = set(), False, None, 0
     first_total = None
+    observations = []
     for page in [1, 2]:
         runs, total = rows(read(f"repos/{REPOSITORY}/actions/workflows/{workflow}/runs",
                                {"branch": identity["head_ref"], "event": "pull_request",
@@ -254,8 +301,12 @@ def latest_admission(context, identity, read):
             run_identity(run, identity)
             checked += 1
             require(checked <= 8, "history_marker_budget")
-            kind = marker_for(run, identity, read)
-            if kind == "full":
+            kind, binding = marker_for(run, identity, read)
+            if kind == "pure":
+                observations.append(binding)
+            else:
+                expected = observation_digest(identity["digest"], run_id)
+                require(all(value == expected for value in observations), "observation_points_behind_latest_full")
                 return {"run_id": run_id, "attempt": 1, "tuple_digest": identity["digest"]}
         if page * 100 >= total:
             break
@@ -265,7 +316,7 @@ def latest_admission(context, identity, read):
 
 def full(reason, context):
     candidate = context.get("candidate_sha")
-    return {"schema_version": 1, "mode": "full", "reason": reason,
+    return {"schema_version": 2, "mode": "full", "reason": reason,
             "candidate_sha": candidate if isinstance(candidate, str) and re.fullmatch(r"[a-f0-9]{40}", candidate) else None,
             "quality_reused": False, "required_source_contexts": CONTEXTS,
             "consumer": {"selection": "current_full_run", "cross_run_quality_reuse": False}}
@@ -289,9 +340,11 @@ def select(event, context, git, read, executed_owner):
                 require(cold(old) == cold(event.get("pull_request", {}).get("body")), "cold_transition")
         identity = tuple_for(event, context, git, executed_owner)
         admission = latest_admission(context, identity, read)
-        return {"schema_version": 1, "mode": "pure", "reason": "proven_metadata_only",
+        return {"schema_version": 2, "mode": "pure", "reason": "proven_metadata_only",
                 "candidate_sha": identity["candidate_sha"], "tuple_digest": identity["digest"],
                 "quality_reused": False, "required_source_contexts": [], "admission": admission,
+                "observation_digest": observation_digest(identity["digest"], admission["run_id"]),
+                "managed_applicable": identity["managed_applicable"], "cold_caches": identity["cold_caches"],
                 "consumer": {"selection": "bound_latest_full_run", "run_id": admission["run_id"],
                              "attempt": 1, "tuple_digest": identity["digest"],
                              "cross_run_quality_reuse": False}}
@@ -311,6 +364,8 @@ def select(event, context, git, read, executed_owner):
                 pass
         if identity is not None:
             result["tuple_digest"] = identity["digest"]
+            result["managed_applicable"] = identity["managed_applicable"]
+            result["cold_caches"] = identity["cold_caches"]
         return result
 
 

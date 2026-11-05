@@ -1,20 +1,44 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "unwired-production-draft",
   "selector": {
     "owner": ".github/scripts/ci-admission.py",
     "execution_authority": "immutable-original-pr-base-copy",
-    "context_keys": ["event_name", "run_id", "run_attempt", "candidate_sha", "policy_sha", "workflow_sha", "managed_applicable"],
-    "mode_values": ["full", "pure"],
+    "context_keys": [
+      "event_name",
+      "run_id",
+      "run_attempt",
+      "candidate_sha",
+      "policy_sha",
+      "workflow_sha"
+    ],
+    "mode_values": [
+      "full",
+      "pure"
+    ],
     "only_skip_when": "mode is exact string pure from successful trusted selector",
     "unknown_or_unavailable": "full",
     "quality_reused": false,
     "supported_preparation": "two-parent merge with parents exactly original base SHA then original head SHA",
-    "unsupported_squash_direct_head_or_unknown": "full with unchanged current-attempt coverage"
+    "unsupported_squash_direct_head_or_unknown": "full with unchanged current-attempt coverage",
+    "derived_inputs": {
+      "managed_applicable": "complete git diff --no-renames --name-only -z <original_base_sha> <prepared_sha> --; immutable BASE applicability policy",
+      "cold_caches": "original GITHUB_EVENT_PATH pull_request.body exact first-line marker; body edit compares original changes.body.from both directions",
+      "caller_boolean_authority": false
+    },
+    "authority_paths": [
+      ".github/scripts/ci-admission.py",
+      ".github/scripts/ci-admission-bootstrap.py",
+      ".github/scripts/ci-admission-applicability.json",
+      ".github/scripts/ci-admission-contract.json",
+      ".github/scripts/cold-caches.py",
+      ".github/scripts/pr-checks.mjs",
+      ".github/scripts/publication-policy.mjs"
+    ]
   },
   "producer": {
-    "full_admission_name": "NAC full admission v1 <tuple_digest>",
-    "pure_observation_name": "NAC metadata observation v1 <tuple_digest>",
+    "full_admission_name": "ci-admission / NAC full admission v2 <tuple_digest>",
+    "pure_observation_name": "ci-admission / NAC metadata observation v2 <observation_digest>",
     "tuple_digest": "64 lowercase hexadecimal SHA256 of versioned canonical tuple",
     "full_without_canonical_trusted_tuple": "full work without admission marker",
     "marker_dependencies": "successful trusted identity preparation only; never quality",
@@ -24,7 +48,37 @@
       "Required PR checks",
       "source-security / Full locked source scan",
       "macos-native / ARM macOS process and credentials"
-    ]
+    ],
+    "tuple_schema_version": 2,
+    "observation_digest_encoding": "lowercase SHA256 of UTF-8 compact ensure_ascii JSON [2,tuple_digest,FULL_run_id,1]; no whitespace; FULL_run_id positive integer <=9007199254740991",
+    "observation_pointer_authority": "independently find latest FULL from complete interval, compute binding and compare; stdout pointer is not authority",
+    "full_marker_child_name": "NAC full admission v2 <tuple_digest>",
+    "pure_marker_child_name": "NAC metadata observation v2 <observation_digest>",
+    "always_invoked_unit": ".github/workflows/ci-admission.yml",
+    "caller_id_and_name": "ci-admission",
+    "non_marker_child_name": "NAC admission identity",
+    "unavailable_child_name": "NAC admission unavailable",
+    "tuple_fields": [
+      "schema_version",
+      "repository_id",
+      "repository_full_name",
+      "pr_number",
+      "head_repository_id",
+      "head_sha",
+      "base_repository_id",
+      "base_ref",
+      "base_sha",
+      "prepared_sha",
+      "prepared_tree",
+      "ordinary_policy_sha",
+      "executing_workflow_path",
+      "executing_workflow_sha",
+      "authority_digest",
+      "cold_caches",
+      "managed_applicable"
+    ],
+    "tuple_digest_encoding": "lowercase SHA256 of UTF-8 compact ensure_ascii JSON array in tuple_fields order; integers/booleans typed, no whitespace",
+    "authority_digest_encoding": "lowercase SHA256 of UTF-8 compact ensure_ascii JSON sorted [[path,SHA256(BASE bytes)],...]; complete BASE workflow inventory plus selector authority_paths; same paths/bytes required in head/prepared"
   },
   "public_history": {
     "authentication": "none",
@@ -46,6 +100,7 @@
     "owner": "parent-owned external manual-tool integration; installed extension unchanged",
     "pure_is_quality_verdict": false,
     "ignore_later_pure_only_when": [
+      "unique provider referenced_workflows unit path/ref/sha attests exact prepared source; unit/bootstrap/program/policy/workflow bytes match trusted immutable base",
       "selector observation has exact current immutable tuple and trusted program authority",
       "public attempt Jobs and Checks have none of the three required source context names, including skipped",
       "selected run/attempt is the latest applicable FULL admitted by the complete interval",
@@ -55,7 +110,13 @@
     "failed_pending_absent_cancelled_full": "remain failed pending absent or cancelled; never replaced by pure success",
     "newer_unknown_or_changed_input": "block or require full; never latest-green search",
     "cross_run_quality_receipt_or_result_copy": false,
-    "permissions_or_ruleset_changes": false
+    "permissions_or_ruleset_changes": false,
+    "original_vs_current_inputs": {
+      "historic_tuple": "provider-attested prepared merge parents/tree and original trusted program executed against immutable GITHUB_EVENT_PATH, never later mutable PR payload",
+      "current_tuple": "current PR head/base/repositories/ref plus attested prepared tree/parents/workflow and current body exact-marker flag; independently derive applicability using BASE policy",
+      "body_transition_rule": "trusted owner enforces original changes.body.from both directions; current body cannot reconstruct historical transitions or replace original event. Missing provenance/unknown intervening work->hold/FULL",
+      "admission_pointer": "derive first FULL, then verify SHA256([2,tuple_digest,FULL_run_id,1]) for each intervening and final PURE marker. Ignore stdout result claims"
+    }
   },
   "workflow_integration_gate": {
     "stable_writes": "blocked until root hands sealed APT producer source",
@@ -63,6 +124,39 @@
     "source_queue": "edited basefalse and ready unique run/attempt group before prepare; ready always full",
     "pure_names": "dynamic aggregate plus renamed skipped source-security/native callers; emit none of the protected context names",
     "default_failure_names": "original source names and full/fail-closed coverage",
-    "publication": "blocked until M3 owner integration and one code acceptance review"
+    "publication": "blocked until M3 owner integration and one code acceptance review",
+    "always_invoked_unit": "ci-admission caller always invokes tiny source-attested identity+marker reusable unit even for PURE; no quality child invoked by PURE"
+  },
+  "provider_attestation": {
+    "required_for": "every historical FULL/PURE and every final PURE accepted by external consumer",
+    "unique_entry": {
+      "path": "arcee-ai/nac/.github/workflows/ci-admission.yml@<prepared_sha>",
+      "sha": "<prepared_sha>",
+      "ref": "refs/pull/<PRnumber>/merge"
+    },
+    "source_authority": "read attested prepared commit and original base/head objects; compare unit/bootstrap/owner/contract/policy/all workflow bytes to immutable original base",
+    "missing_mismatch_duplicate_unknown": "FULL or hold; never trust marker self-declaration",
+    "current_early_visibility": "selector does not depend on referenced_workflows while current unit is starting; external must validate final run attestation"
+  },
+  "applicability_policy": {
+    "path": ".github/scripts/ci-admission-applicability.json",
+    "authority": "immutable original BASE bytes, identical in head/prepared",
+    "schema_version": 1,
+    "pr_checks_sha256": "must equal SHA256 of complete immutable BASE .github/scripts/pr-checks.mjs bytes",
+    "prefixes": [
+      ".github/",
+      "crates/",
+      "docker/managed/",
+      "scripts/"
+    ],
+    "exact_paths": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "Makefile",
+      ".dockerignore",
+      "version.txt"
+    ],
+    "complete_paths": "full no-renames NUL Git diff original base\u2192prepared, no caller/path truncation; decode/size error->FULL",
+    "external_derivation": "compute exact same complete Git paths and BASE policy; do not consume selector managed bool as authority"
   }
 }
