@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { inspectChecks, readCurrentMerge } from './manual-stack-checks.mjs';
 
 const REPO = 'arcee-ai/nac';
@@ -73,16 +74,38 @@ export function createHelper(transport = ghTransport, {
     const review = await get('rulesets/26484091');
     const universal = await get('rulesets/25983949');
     const rules = await get('rules/branches/dev');
+    const hardPull = {
+      required_approving_review_count: 0, dismiss_stale_reviews_on_push: false,
+      required_reviewers: [], require_code_owner_review: false,
+      dismissal_restriction: { enabled: false, allowed_actors: [] },
+      require_last_push_approval: false, required_review_thread_resolution: false,
+      require_extra_approval_for_unattributed_changes: false,
+      allowed_merge_methods: ['merge', 'squash', 'rebase'],
+    };
+    const personalPull = { ...hardPull, required_approving_review_count: 1,
+      require_code_owner_review: true, require_last_push_approval: true,
+      required_review_thread_resolution: true, require_extra_approval_for_unattributed_changes: true };
+    const checks = { strict_required_status_checks_policy: true, do_not_enforce_on_create: false,
+      required_status_checks: [{ context: 'Required PR checks', integration_id: 15368 }] };
+    const conditions = { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } };
     insist(review.enforcement === 'active' && review.current_user_can_bypass === 'pull_requests_only' &&
       same(review.bypass_actors, [{ actor_id: 20910163, actor_type: 'User', bypass_mode: 'pull_request' }]) &&
-      review.rules.length === 1 && review.rules[0].type === 'pull_request', 'Review-only bypass policy differs');
+      isDeepStrictEqual(review.conditions, conditions) &&
+      same(review.rules.map(rule => rule.type).sort(), ['pull_request', 'required_status_checks']) &&
+      isDeepStrictEqual(review.rules.find(rule => rule.type === 'pull_request')?.parameters, personalPull) &&
+      isDeepStrictEqual(review.rules.find(rule => rule.type === 'required_status_checks')?.parameters, checks),
+    'Personal PR bypass policy differs');
     insist(universal.enforcement === 'active' && universal.current_user_can_bypass === 'never' &&
-      universal.bypass_actors.length === 0 && universal.rules.some(r => r.type === 'pull_request' &&
-        r.parameters.required_review_thread_resolution === true) &&
-      ['deletion', 'non_fast_forward'].every(type => universal.rules.some(r => r.type === type)),
+      universal.bypass_actors.length === 0 && isDeepStrictEqual(universal.conditions, conditions) &&
+      same(universal.rules.map(rule => rule.type).sort(), ['deletion', 'non_fast_forward', 'pull_request']) &&
+      isDeepStrictEqual(universal.rules.find(rule => rule.type === 'pull_request')?.parameters, hardPull),
     'Universal protections differ');
-    insist(rules.some(r => r.ruleset_id === 26484091) && rules.some(r => r.ruleset_id === 25983949),
-      'Expected dev policies are not effective');
+    // Match the actual dev placement, including parameters. Inherited policies
+    // remain in the fingerprint and check inventory; they are never bypassed.
+    const effective = id => rules.filter(rule => rule.ruleset_id === id)
+      .map(({ type, parameters }) => parameters === undefined ? { type } : { type, parameters });
+    insist(isDeepStrictEqual(effective(26484091), review.rules) &&
+      isDeepStrictEqual(effective(25983949), universal.rules), 'Expected dev policies are not effective');
     return { fingerprint: digest(JSON.stringify({ review: {
       enforcement: review.enforcement, bypass_actors: review.bypass_actors, rules: review.rules,
       conditions: review.conditions,
@@ -269,7 +292,7 @@ export async function main(args, { helper = createHelper(), out = console.log } 
   insist(Number.isSafeInteger(stack) && stack > 0 && members.every(n => Number.isSafeInteger(n) && n > 0) &&
     new Set(members).size === members.length, 'Invalid stack/member numbers');
   const plan = await helper.preview(stack, members);
-  out(`PREVIEW ONLY: ${REPO} stack ${stack}; exact merge set (bottom to top): ${members.join(', ')}\nSequential squash/default routing; review-only bypass. Partial landing is possible; queued is not merged.`);
+  out(`PREVIEW ONLY: ${REPO} stack ${stack}; exact merge set (bottom to top): ${members.join(', ')}\nSequential squash/default routing; personal PR exception, strict helper quality gates. Partial landing is possible; queued is not merged.`);
   out(`Full stack membership (including retained merged members): ${plan.membership.join(', ')}`);
   for (const member of plan.members) out(JSON.stringify(member, null, 2));
   fs.writeFileSync(args[5], `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
