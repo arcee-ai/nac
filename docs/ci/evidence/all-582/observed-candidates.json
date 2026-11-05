@@ -796,7 +796,8 @@
     "S11": "design-only; const API compatibility decision, not measured",
     "S13": "main redundancy hypothesis falsified by font-download trace; no claimed latency gain",
     "S18": "Actual NAC local release identity-change 97.96 s nonincremental vs 17.71 s modeled retained incremental; exact binary/Guide identity verified. Hosted 41958735079 and controlled-cold41963985617 completed both unchanged release targets and full identities; cold S18 restores absent, PR staging skipped. Trusted dev/main seed publication, actual hosted restored-seed reuse and capacity/whole-path qualification remain pending.",
-    "S17": "Twelfth measured mechanism: bounded local compile-only cache-sharing comparison rejects broad workspace4 sharing (73 extra external units, +14.019666 s compile, +40.43 s CPU, 3.0648x raw snapshot). Narrow server/browser reader rebuilt 0 extra external units and exact identical browser binary, but pinned-action Linux transfer/seed/capacity and whole-pipeline behavior remain pending hosted. Narrow namespace adaptation is this same strategy; parameter tuning and this docs rollup add no strategies."
+    "S17": "Twelfth measured mechanism: bounded local compile-only cache-sharing comparison rejects broad workspace4 sharing (73 extra external units, +14.019666 s compile, +40.43 s CPU, 3.0648x raw snapshot). Narrow server/browser reader rebuilt 0 extra external units and exact identical browser binary, but pinned-action Linux transfer/seed/capacity and whole-pipeline behavior remain pending hosted. Narrow namespace adaptation is this same strategy; parameter tuning and this docs rollup add no strategies.",
+    "S12": "Single ordered Mac pair: same server-library binary,4threads libtest177.54s versus4processes nextest87.47s;379passed/same3ignored/0retry/0leak, CPU13.5% higher. Full-package413-name/410pass/3ignore parity, actual doctests0, strict native leak-failure and bounded controller-cancellation controls passed. Intended Linux candidate preserves full compilation/examples, full targets and doctests with private runtime state; hosted GNU/cold/whole-path qualification pending."
   },
   "measured_strategy_ids": [
     "S01",
@@ -809,10 +810,11 @@
     "S08",
     "S09",
     "S10",
+    "S12",
     "S17",
     "S18"
   ],
-  "strategy_count_boundary": "12 distinct measured mechanisms, including actual rejected broad S17 and original S09 failure. Local compile models, parameter refinements and combined hosted results are not independent whole-pipeline acceptance; docs and cache tuning add no strategy. No infeasibility claim.",
+  "strategy_count_boundary": "13 distinct measured mechanisms; S12 library process model is distinct, its full-target/leak/cancellation follow-ups add no count. Combined hosted effects overlap; local results are not hosted acceptance. All cohort flags remain false; no infeasibility claim.",
   "failure_dispositions": [
     {
       "run_id": 41947952992,

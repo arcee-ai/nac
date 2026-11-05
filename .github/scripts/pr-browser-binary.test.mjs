@@ -46,7 +46,7 @@ function compilerCacheGroup(config) {
     assert.ok(value.steps.some(s => s.uses === rust));
   }
   assert.equal(named(config.jobs["test-server"], "Run nac-server tests").run,
-    "cargo test -p nac-server --locked");
+    "python3 .github/scripts/server-tests.py");
   assert.match(step(config.jobs["browser-binary"], "pack").run,
     /^cargo build --locked -p nac-server --bin nac-web$/m);
   for (const role of ["browser-proof", "browser-shards"]) {
