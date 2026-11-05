@@ -32,7 +32,7 @@ OS/browser matrix. Default ignored cases remain ignored during that phase.
 ## Reviewed ignored inventory
 
 The exact names, package, disposition, reason and required capabilities live in
-[the inventory](../../.github/scripts/nightly-portability.json). All thirteen
+[the inventory](../../.github/scripts/nightly-portability.json). All twenty
 ignored tests discovered by the native workspace harness must match that file;
 new, renamed or removed entries fail before any selected execution. Review the
 owning test and its nearest AGENTS guide before changing that inventory.
@@ -43,9 +43,44 @@ owning test and its nearest AGENTS guide before changing that inventory.
 | Included: server `tests::persistence_load` owned-store multi-thread and current-thread variants | 2 | Built `nac-web` worker, scripted local provider, SQLite and local processes. These exercise serving-store ownership and executor variants omitted by legacy managed-load. |
 | Already covered: server `tests::managed_load::managed_load_scenario` | 1 | Required `test-workspace` invokes `make test-managed-load`; managed quality also runs it. Not duplicated as a nightly ignored selection. |
 | Excluded: core `agent::live_tests` | 2 | Paid/live provider API key and network calls. |
-| Excluded: process admission, core projection and Responses SSE latency benchmarks | 3 | Manual quiet-host timing qualification. |
+| Excluded: process admission, core projection, Responses SSE latency and task-wait maximum timeout measurements | 4 | Manual quiet-host/exclusive-window timing qualification. Task-wait measures the real 60-second maximum with less than two seconds of scheduling allowance. |
+| Excluded: live reviewer calibration, corpus and two smokes | 4 | Authorized Arcee credentials, network and potentially paid reviewer requests; the default-profile smoke and calibration require the approved dev2 origin. |
+| Excluded: manually selected frozen reviewer replay | 1 | Explicit absolute `NAC_REVIEW_REPLAY_FILE` matching the compiled profile. Offline; no model calls. The separate committed Clef holdout remains a default workspace test. |
+| Explicit coverage gap: exact catalog/installed-skill source qualification | 1 | Explicit reviewed read-only catalog, installed symlink set and immutable catalog/repository source revisions, not provisioned by this hosted lane. Local synthetic skill fixtures remain default tests. |
 | Excluded: terminal external OpenSSH | 1 | External host/key/port; distinct from included local fake-SSH discovery fixture. |
 | Explicit coverage gap: discovery Podman parity and terminal Podman output | 2 | Running Podman machine and configured sandbox image are not provisioned on this native hosted runner. Not executed or passed; managed Docker smoke does not establish these backend contracts. |
+
+The seven later additions were recovered from the actual ignored discovery in
+[scheduled run 41814252560, job 126520880813](https://github.com/arcee-ai/nac/actions/runs/41814252560/job/126520880813),
+attempt 1, candidate `481ee248f755461c6bee9c274963cb30ccd6b0aa`.
+Its retained `nightly-portability-481ee248f755461c6bee9c274963cb30ccd6b0aa-41814252560-1`
+artifact reports a failed inventory after 488.237 seconds building and 257.539
+seconds discovering tests. The default suite and four selected cases had not
+started. Adding reviewed classifications repairs that admission failure; the
+old failed run remains failed and supplies no portability pass or timing baseline.
+
+These exact `nac-core` names retain their owning tests' explicit opt-in limits:
+
+| Exact ignored name | Source evidence and selection boundary |
+|---|---|
+| `model::jev::calibration::live_reviewer_calibration` | [Calibration owner](../../crates/nac-core/src/model/reviewer_calibration_tests.rs#L82) requires absolute `NAC_CALIBRATION_CASES`, a new `NAC_CALIBRATION_REPORT`, and explicit `NAC_CALIBRATION_MODELS`. Live mode resolves isolated credentials and rejects other endpoints. `NAC_CALIBRATION_PREPARE=1` only prepares synthetic projections offline; it is not live calibration acceptance. |
+| `model::jev::corpus_tests::live_jev_corpus` | [Corpus owner](../../crates/nac-core/src/model/jev_corpus_tests.rs#L196) sends eligible requests through `review_inner` and records provider usage/cost; credentials and network are required. Its ordinary `corpus_fixtures_route_as_labeled` test stays enabled. |
+| `model::jev::tests::live_default_clef_scope_profile_smoke` | [Default-profile smoke](../../crates/nac-core/src/model/jev_tests.rs#L284) requires isolated dev2 credentials and an unset `NAC_PERMISSION_REVIEW_PROFILE`, then calls the factory-selected reviewer with the existing deadline. |
+| `model::jev::tests::live_jev_smoke` | [Configured reviewer smoke](../../crates/nac-core/src/model/jev_tests.rs#L254) resolves stored Arcee login/API-key authentication and performs a real synthetic reviewer request. |
+| `model::reviewer_policy::tests::replay_frozen_responses_through_production_policy` | [Replay owner](../../crates/nac-core/src/model/reviewer_policy_tests.rs#L170) requires an explicitly selected absolute replay file. The adjacent default `committed_clef_holdout_has_no_false_approvals_and_preserves_frozen_decisions` invokes the same parser on checked-in immutable responses. That deterministic regression coverage remains; it does not select or certify another external replay. |
+| `skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read` | [Source qualification](../../crates/nac-core/src/skills/qualification/sources.rs#L51) requires all five `NAC_QUALIFY_*` path/revision inputs, checks clean catalog HEAD and selected immutable repository bytes, and rejects foreign installed links. [Its reproduction guide](../qualification/linked-skills.md#reproduce) explicitly excludes personal paths from CI inputs. No real catalog is silently replaced with synthetic data. |
+| `tools::task_wait::tests::maximum_timeout_measurement` | [Timing owner](../../crates/nac-core/src/tools/task_wait_tests.rs#L1010) explicitly reserves an exclusive performance window, waits eight active targets for `MAX_TIMEOUT_MS = 60000`, and asserts elapsed time below 62000 ms. Shared hosted execution does not establish that window. |
+
+None of these seven is a newly provisioned unattended selection. The two offline
+input-driven entrypoints require an owner to select and retain the intended
+replay or catalog/installed-set revisions before adding a separate invocation;
+no provider credential is needed for those two. The calibration prepare mode
+similarly needs selected corpus/report inputs and cannot replace live review.
+The three declared capability gaps (two Podman cases and exact catalog sources)
+remain unexecuted, never counted as passing. This inventory repair moves no
+mandatory PR coverage and changes no Rust test, ignore attribute, assertion,
+retry, timeout, runner guard or cleanup path. A new hosted full run is still
+required to establish that execution proceeds beyond inventory and passes.
 
 Each included ignored case runs in its own harness process, with exact filter,
 `--ignored --exact --test-threads=1`; commands run sequentially after the default
@@ -82,12 +117,16 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Eleven controls cover stale evidence rejection, inventory drift, exact-selection
+Twelve controls cover stale evidence rejection, inventory drift, exact-selection
 failure, the full serialized command plan, long-argv fixture process visibility,
 allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
 process behind a readiness barrier. They also cover a real zombie-only group,
 fail-closed EPERM with live/stopped members or failed/malformed observation,
-and retained timing/summary when cleanup fails. On Darwin, EPERM is normalized
+and retained timing/summary when cleanup fails. The captured twenty-name native
+discovery also reproduces the old seven-name rejection, accepts the repaired
+inventory, and rejects every individual removal/rename plus an unreviewed
+addition. The allowlist control pins the original four selected names exactly.
+On Darwin, EPERM is normalized
 only after a fresh PID/PGID/state listing proves no live members of the exact
 owned group; other permission failures remain errors. The Rust fixture lives in its own temporary
 directory, mutates no repository source and never overlaps the workspace suite.

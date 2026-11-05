@@ -17,6 +17,32 @@ spec = importlib.util.spec_from_file_location('portability', SCRIPT)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+# Actual ignored-list.log from schedule 41814252560, attempt 1, job 126520880813;
+# candidate 481ee248f755461c6bee9c274963cb30ccd6b0aa. This is a discovery receipt,
+# not a test-pass receipt. Keep independent of the reviewed inventory.
+RETAINED_IGNORED = '''\
+agent::live_tests::test_simple_prompt
+agent::live_tests::test_tool_usage
+model::jev::calibration::live_reviewer_calibration
+model::jev::corpus_tests::live_jev_corpus
+model::jev::tests::live_default_clef_scope_profile_smoke
+model::jev::tests::live_jev_smoke
+model::reviewer_policy::tests::replay_frozen_responses_through_production_policy
+model::sse::tests::benchmark_responses_terminal_event_latency
+session_service::tests::projection::benchmark_frontend_snapshot_latency
+skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read
+terminal::manager::tests::openssh_backend_preserves_output_contract
+terminal::manager::tests::podman_backend_preserves_output_contract
+tools::discovery::tests::podman_and_local_backends_return_identical_discovery_pages
+tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages
+tools::discovery::tests::tools_work_without_external_search_binaries_on_path
+tools::task_wait::tests::maximum_timeout_measurement
+native_pty::tests::latency::native_admission_latency_and_independent_root_cleanup
+tests::managed_load::managed_load_scenario
+tests::persistence_load::owned_persistence_current_thread_load_scenario
+tests::persistence_load::owned_persistence_load_scenario
+'''.splitlines()
+
 
 class Controls(unittest.TestCase):
     def test_signal_permission_failure_remains_closed_for_live_group(self):
@@ -97,6 +123,28 @@ class Controls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate'):
             runner.verify_inventory(listing, inventory + inventory[:1])
 
+    def test_retained_native_discovery_requires_all_reviewed_names(self):
+        inventory = json.loads(runner.INVENTORY.read_text())
+        listing = '\n'.join(name + ': test' for name in RETAINED_IGNORED)
+        self.assertEqual(len(RETAINED_IGNORED), 20)
+        runner.verify_inventory(listing, inventory)
+        # Every removal/rename, including an excluded case, still fails closed.
+        for name in RETAINED_IGNORED:
+            for changed in (listing.replace(name + ': test', ''),
+                            listing.replace(name + ': test', name + '_renamed: test')):
+                with self.subTest(name=name, changed=changed):
+                    with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
+                        runner.verify_inventory(changed, inventory)
+        # Reproduce the original thirteen-entry inventory's seven-name failure.
+        legacy = inventory[:13]
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as failure:
+            runner.verify_inventory(listing, legacy)
+        for case in inventory[13:]:
+            self.assertIn(case['name'], str(failure.exception))
+            self.assertNotEqual(case['disposition'], 'included')
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
+            runner.verify_inventory(listing + '\nnew::unreviewed: test', inventory)
+
     def test_zero_selected_or_ignored_does_not_pass(self):
         for log in ('running 0 tests', 'test exact::case ... ignored'):
             with self.assertRaisesRegex(RuntimeError, 'exact test did not pass'):
@@ -109,7 +157,12 @@ class Controls(unittest.TestCase):
         self.assertNotIn('--include-ignored', source)
         self.assertIn("'--test-threads=1'", source)
         included = [c for c in json.loads(runner.INVENTORY.read_text()) if c['disposition'] == 'included']
-        self.assertEqual(len(included), 4)
+        self.assertEqual({c['name'] for c in included}, {
+            'tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages',
+            'tools::discovery::tests::tools_work_without_external_search_binaries_on_path',
+            'tests::persistence_load::owned_persistence_load_scenario',
+            'tests::persistence_load::owned_persistence_current_thread_load_scenario',
+        })
         self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
         self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
 

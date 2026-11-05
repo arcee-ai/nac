@@ -131,5 +131,83 @@
       "NAC_TEST_SSH_KEY"
     ],
     "reason": "External SSH credentials and host excluded; local fake-SSH discovery selection is distinct."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::calibration::live_reviewer_calibration",
+    "disposition": "excluded",
+    "capabilities": [
+      "authorized isolated dev2 Arcee credential",
+      "paid live reviewer network calls",
+      "NAC_CALIBRATION_CASES absolute path",
+      "NAC_CALIBRATION_REPORT new absolute path",
+      "NAC_CALIBRATION_MODELS explicit selection"
+    ],
+    "reason": "Manual synthetic reviewer calibration against the approved dev2 endpoint; commands are projected, never executed. NAC_CALIBRATION_PREPARE=1 is an offline projection-only mode requiring explicitly selected inputs and is not live calibration acceptance."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::corpus_tests::live_jev_corpus",
+    "disposition": "excluded",
+    "capabilities": [
+      "Arcee credential with reviewer access",
+      "paid live reviewer network calls"
+    ],
+    "reason": "Live corpus evaluation sends eligible projected requests to the reviewer and reports usage/cost. Unattended native coverage has no authorized provider credential; deterministic corpus routing tests remain in the default suite."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::tests::live_default_clef_scope_profile_smoke",
+    "disposition": "excluded",
+    "capabilities": [
+      "authorized isolated dev2 Arcee credential",
+      "paid live reviewer network calls",
+      "NAC_PERMISSION_REVIEW_PROFILE unset"
+    ],
+    "reason": "Exercises the factory-selected production default through an actual reviewer request, requiring all credentials to resolve to the approved dev2 origin. Synthetic shell input is projected, never executed; offline policy tests do not establish live availability."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::tests::live_jev_smoke",
+    "disposition": "excluded",
+    "capabilities": [
+      "Arcee stored login or ARCEE_API_KEY",
+      "paid live reviewer network calls"
+    ],
+    "reason": "Sends a synthetic request through the configured reviewer authentication path. No live provider credential or paid request is authorized for unattended nightly coverage."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::reviewer_policy::tests::replay_frozen_responses_through_production_policy",
+    "disposition": "excluded",
+    "capabilities": [
+      "NAC_REVIEW_REPLAY_FILE explicitly selected absolute path",
+      "reviewed frozen replay matching compiled profile metadata"
+    ],
+    "reason": "Offline manual replay entrypoint requires an explicitly selected frozen response file; it makes no model calls. The committed Clef holdout uses the same replay helper in a separate default test, which remains in the full workspace suite; that does not certify arbitrary external replay inputs."
+  },
+  {
+    "package": "nac-core",
+    "name": "skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read",
+    "disposition": "coverage-gap",
+    "capabilities": [
+      "NAC_QUALIFY_CATALOG clean read-only checkout",
+      "NAC_QUALIFY_INSTALLED explicitly selected installed symlinks",
+      "NAC_QUALIFY_SOURCE read-only checkout",
+      "NAC_QUALIFY_CATALOG_REV immutable full revision",
+      "NAC_QUALIFY_SOURCE_REV immutable full revision"
+    ],
+    "reason": "Opt-in qualification of an actual reviewed catalog and installed package set; hosted nightly provisions neither. No credentials or remote calls are needed, but personal installed paths and moving catalog heads are not portable CI inputs. Local synthetic discovery/permission fixtures remain in the default suite; this exact-source qualification is not executed or counted as passing."
+  },
+  {
+    "package": "nac-core",
+    "name": "tools::task_wait::tests::maximum_timeout_measurement",
+    "disposition": "excluded",
+    "capabilities": [
+      "exclusive performance window",
+      "real 60-second timeout measurement",
+      "less than 2-second upper-bound scheduling allowance"
+    ],
+    "reason": "Explicit exclusive-window measurement waits the real MAX_TIMEOUT_MS with eight active targets and requires elapsed time below MAX_TIMEOUT_MS + 2000. Shared hosted scheduling is not this timing qualification; shorter default task-wait correctness tests remain enabled."
   }
 ]
