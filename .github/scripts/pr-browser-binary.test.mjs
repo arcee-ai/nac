@@ -98,7 +98,7 @@ function validate(config, required = requiredJobs) {
     const rebuild = named(consumer, "Rebuild current-attempt source after a valid older producer");
     assert.equal(cache.if, sourceMode);
     assert.equal(cache.with["save-if"], trustedWrite);
-    assert.equal(cache.with["prefix-key"], "nac-ci-v1");
+    assert.equal(cache.with["prefix-key"], "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");
     assert.equal(rebuild.if, sourceMode);
     assert.equal(rebuild.run, "cargo build --locked -p nac-server --bin nac-web");
     assert.ok(consumer.steps.indexOf(admit) < consumer.steps.indexOf(cache));

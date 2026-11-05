@@ -93,7 +93,11 @@ test("real fault CLI fails closed and never interprets nonblank corrupt input as
 test("early reusable fault job runs the complete unchanged fixture before emitting candidate-bound evidence", () => {
   const workflow = YAML.parse(fs.readFileSync(".github/workflows/managed-fault.yml", "utf8"));
   assert.deepEqual(Object.keys(workflow.on), ["workflow_call"]);
-  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs), ["source_sha"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs), ["cold_caches", "source_sha"]);
+  assert.deepEqual(workflow.on.workflow_call.inputs.cold_caches, {
+    description: "Explicit PR/manual cache-miss measurement; acceptance work is unchanged",
+    type: "boolean", required: false, default: false,
+  });
   assert.equal(workflow.on.workflow_call.inputs.source_sha.required, true);
   assert.equal(workflow.on.workflow_call.outputs.fault_receipt.value, "${{ jobs.fault.outputs.fault_receipt }}");
   assert.deepEqual(workflow.permissions, { contents: "read" });

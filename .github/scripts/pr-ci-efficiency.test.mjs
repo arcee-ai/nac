@@ -121,7 +121,9 @@ test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Carg
       for (const step of job.steps ?? []) {
         if (step.uses?.startsWith("Swatinem/rust-cache@")) {
           assert.equal(step.with["save-if"], trustedWrite, file);
-          assert.equal(step.with["prefix-key"], "nac-ci-v1");
+          assert.equal(step.with["prefix-key"], file === "stable-release"
+            ? "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}"
+            : "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");
           assert.ok(step.with.key || step.with["shared-key"], file);
         }
         if (step.uses?.startsWith("actions/setup-node@")) assert.equal(step.with.cache, undefined, "implicit npm cache post-save is forbidden");
@@ -130,7 +132,8 @@ test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Carg
     }
   }
   const build = workflow("managed-image-build").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
-  assert.equal(build.with["cache-from"], "type=gha,scope=nac-managed-linux-amd64-v1");
+  assert.equal(build.with["cache-from"], "${{ !((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true) && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}");
+  assert.equal(build.with["no-cache"], "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true }}");
   assert.equal(build.with["cache-to"], "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}");
   assert.equal(build.with.push, false);
   assert.equal(workflow("stable-release").jobs.publish.permissions.contents, "write");
