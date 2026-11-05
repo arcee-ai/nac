@@ -74,13 +74,36 @@ fn resolve_reveal_target(
 // Files uses Git's repository-relative identity, even for a selected subfolder.
 fn reveal_relative_path(repo: &Path, root: &Path, path: &str) -> Result<String> {
     let path = view::validate_workspace_relpath(path)?;
+    let repo = repo
+        .canonicalize()
+        .context("workspace reveal repository is missing")?;
     let root = root
         .canonicalize()
         .context("workspace reveal root is missing")?;
-    let file = repo.join(path);
-    let relative = file
-        .strip_prefix(&root)
-        .context("invalid path: file is outside the selected workspace")?;
+    let depth = root
+        .strip_prefix(&repo)
+        .context("invalid path: workspace is outside the repository")?
+        .components()
+        .count();
+    let mut components = Path::new(&path).components();
+    let prefix: PathBuf = components.by_ref().take(depth).collect();
+    if prefix.components().count() != depth {
+        anyhow::bail!("invalid path: file is outside the selected workspace");
+    }
+    if depth > 0 {
+        // Git can precompose Unicode while macOS canonical paths retain the
+        // stored spelling. Compare only the selected directory's identity.
+        // The existing no-follow resolver rejects links in that prefix; the
+        // renderer's remaining target is never canonicalized or widened.
+        let prefix_text = prefix
+            .to_str()
+            .ok_or_else(|| anyhow!("invalid path: file is not UTF-8"))?;
+        let _pinned_prefix = workspace::resolve_local_reveal(&repo, prefix_text)?;
+        if repo.join(&prefix).canonicalize()? != root {
+            anyhow::bail!("invalid path: file is outside the selected workspace");
+        }
+    }
+    let relative: PathBuf = components.collect();
     let relative = relative
         .to_str()
         .ok_or_else(|| anyhow!("invalid path: file is not UTF-8"))?;
@@ -126,6 +149,89 @@ mod tests {
             assert!(reveal_relative_path(&repo, &root, path).is_err(), "{path}");
         }
         std::fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_directory_prefix_rejects_symlink_aliases_and_sibling_decoys() {
+        use std::os::unix::fs::symlink;
+
+        let repo = std::env::temp_dir().join(format!("nac-reveal-prefix-{}", uuid::Uuid::new_v4()));
+        let root = repo.join("packages/app");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(repo.join("packages/other")).unwrap();
+        std::fs::write(root.join("file"), "intended").unwrap();
+        std::fs::write(repo.join("packages/other/file"), "sibling decoy").unwrap();
+        symlink("app", repo.join("packages/alias")).unwrap();
+        symlink("packages", repo.join("alias-parent")).unwrap();
+        let repo = repo.canonicalize().unwrap();
+        let root = root.canonicalize().unwrap();
+        assert_eq!(
+            reveal_relative_path(&repo, &root, "packages/app/file").unwrap(),
+            "file"
+        );
+        for path in [
+            "packages/alias/file",
+            "alias-parent/app/file",
+            "packages/other/file",
+            "packages/app",
+            "packages",
+        ] {
+            assert!(reveal_relative_path(&repo, &root, path).is_err(), "{path}");
+        }
+        std::fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn actual_git_reveal_maps_precomposed_paths_to_decomposed_subdirectories() {
+        use std::os::unix::fs::symlink;
+
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let fixture = Fixture(
+            std::env::temp_dir().join(format!("nac-reveal-unicode-{}", uuid::Uuid::new_v4())),
+        );
+        let root = fixture.0.join("packages/cafe\u{301}");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("packages/cafe\u{301}/src")).unwrap();
+        std::fs::write(root.join("src/file"), "intended").unwrap();
+        std::fs::write(root.join("packages/cafe\u{301}/src/file"), "nested decoy").unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(["-c", "core.precomposeunicode=true", "-C"])
+                .arg(&fixture.0)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{:?}", output.stderr);
+            output.stdout
+        };
+        git(&["init", "--quiet"]);
+        git(&["add", "--all"]);
+        let listed = String::from_utf8(git(&["ls-files", "-z"])).unwrap();
+        let path = listed
+            .split('\0')
+            .find(|path| *path == "packages/caf\u{e9}/src/file")
+            .expect("Git precomposes the tracked Files identity");
+        let root = root.canonicalize().unwrap();
+        let target = GitTarget::local(root.clone());
+        let repo = target.local_repo_root_if_present().unwrap().unwrap();
+        assert!(repo.join(path).strip_prefix(&root).is_err());
+        assert_eq!(
+            reveal_relative_path(&repo, &root, path).unwrap(),
+            "src/file"
+        );
+        assert!(resolve_reveal_target(&target, &root, path).is_ok());
+        symlink("file", root.join("src/link")).unwrap();
+        assert!(resolve_reveal_target(&target, &root, "packages/caf\u{e9}/src/link").is_err());
+        std::fs::remove_file(root.join("src/file")).unwrap();
+        assert!(root.join("packages/cafe\u{301}/src/file").exists());
+        assert!(resolve_reveal_target(&target, &root, path).is_err());
     }
 
     #[cfg(unix)]
