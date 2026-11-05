@@ -4,6 +4,8 @@ use nac_core::store::TaskLaunchPhase;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+const GIT_READY_PUBLICATION: &str = r#"echo $$ > "$NAC_TEST_TASK_GIT_READY""#;
+
 struct GitGate {
     ready: PathBuf,
     release: PathBuf,
@@ -24,7 +26,7 @@ impl GitGate {
             "worktree add"
         };
         let shim = bin.join("git");
-        std::fs::write(&shim, format!("#!/bin/sh\ncase \"$*\" in *'{selector}'*) trap '' TERM; /bin/sleep 1000 & echo $! > \"$NAC_TEST_TASK_GIT_READY.child\"; echo $$ > \"$NAC_TEST_TASK_GIT_READY\"; while [ ! -f \"$NAC_TEST_TASK_GIT_RELEASE\" ]; do /bin/sleep 0.01; done ;; esac\nexec \"$NAC_TEST_TASK_REAL_GIT\" \"$@\"\n")).unwrap();
+        std::fs::write(&shim, format!("#!/bin/sh\ncase \"$*\" in *'{selector}'*) trap '' TERM; /bin/sleep 1000 & echo $! > \"$NAC_TEST_TASK_GIT_READY.child\"; {GIT_READY_PUBLICATION}; while [ ! -f \"$NAC_TEST_TASK_GIT_RELEASE\" ]; do /bin/sleep 0.01; done ;; esac\nexec \"$NAC_TEST_TASK_REAL_GIT\" \"$@\"\n")).unwrap();
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o700)).unwrap();
         let ready = root.join("git-ready");
         let release = root.join("git-release");
@@ -77,6 +79,72 @@ async fn until(mut predicate: impl FnMut() -> bool) {
     .await
     .unwrap();
 }
+
+async fn observe_paused_pid_publication(publisher: &str) -> (bool, Option<String>) {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt as _;
+
+    let root = temp_root("git_pid_publication");
+    let ready = root.join("ready");
+    let entered = root.join("entered");
+    // The redirection has opened its destination before this echo function runs.
+    // Piped stdin holds the exact incomplete-write interval without a timing guess.
+    let echo_gate = r#"echo() {
+    : > "$NAC_TEST_TASK_GIT_ENTERED"
+    IFS= read -r permit
+    printf '%s\n' "$@"
+}"#;
+    let mut child = tokio::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!("{echo_gate}\n{publisher}\n"))
+        .env_clear()
+        .env("NAC_TEST_TASK_GIT_READY", &ready)
+        .env("NAC_TEST_TASK_GIT_ENTERED", &entered)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let pid = i32::try_from(child.id().unwrap()).unwrap();
+    let mut permit = child.stdin.take().unwrap();
+    until(|| entered.exists()).await;
+    let visible = ready.exists();
+    let contents = visible.then(|| std::fs::read_to_string(&ready).unwrap());
+    permit.write_all(b"publish\n").await.unwrap();
+    drop(permit);
+    let output = tokio::time::timeout(Duration::from_secs(5), child.wait_with_output())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(
+        std::fs::read_to_string(&ready)
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap(),
+        pid
+    );
+    std::fs::remove_dir_all(root).unwrap();
+    (visible, contents)
+}
+
+#[tokio::test]
+async fn git_gate_readiness_excludes_incomplete_parent_pid() {
+    let (visible, contents) =
+        observe_paused_pid_publication(r#"echo $$ > "$NAC_TEST_TASK_GIT_READY""#).await;
+    assert!(visible, "negative control must expose the original race");
+    assert_eq!(
+        contents.unwrap().trim().parse::<i32>().unwrap_err().kind(),
+        &std::num::IntErrorKind::Empty
+    );
+
+    let (visible, contents) = observe_paused_pid_publication(GIT_READY_PUBLICATION).await;
+    assert!(!visible, "readiness must not precede complete PID contents");
+    assert!(contents.is_none());
+}
+
 fn process_live(pid: i32) -> bool {
     // These PIDs come only from this fixture's owned, unreleased Git gate.
     unsafe { libc::kill(pid, 0) == 0 }
@@ -193,12 +261,11 @@ async fn shutdown_git(source_resolution: bool) {
         0
     );
     std::fs::write(&gate.release, "release after shutdown").unwrap();
-    assert!(!root
-        .join("task-worktrees")
-        .read_dir()
-        .is_ok_and(|paths| paths
+    assert!(!root.join("task-worktrees").read_dir().is_ok_and(|paths| {
+        paths
             .flatten()
-            .any(|p| p.path().join("nested/file").exists())));
+            .any(|p| p.path().join("nested/file").exists())
+    }));
     drop(connection);
     drop(gate);
     drop(app);
