@@ -13,6 +13,7 @@ import type {
   QuestionRecord,
   QuestionAnswer,
   QuestionAnswerReceipt,
+  SessionMcpRefreshStatus,
 } from "@/app/types/api";
 import { nacClient } from "@/app/services/nacClient";
 export * from "../../../packages/nac-client/src/api.js";
@@ -24,6 +25,11 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     requestId: string,
     expectedRevision: number,
   ): Promise<QuestionRecord>;
+  sessionIntegrations(id: string, signal?: AbortSignal): Promise<SessionMcpRefreshStatus>;
+  refreshSessionIntegrations(
+    id: string,
+    expectedRevision: number,
+  ): Promise<SessionMcpRefreshStatus>;
   heartbeatInventory(sessionId?: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
   heartbeatInspection(
     sessionId: string,
@@ -61,6 +67,16 @@ export function createNativeApi(
         "POST",
         `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(questionId)}/cancel`,
         { body: { expected_revision: revision } },
+      ),
+    sessionIntegrations: (id, signal) =>
+      request<SessionMcpRefreshStatus>("GET", `/sessions/${encodeURIComponent(id)}/integrations`, {
+        signal,
+      }),
+    refreshSessionIntegrations: (id, expectedRevision) =>
+      request<SessionMcpRefreshStatus>(
+        "POST",
+        `/sessions/${encodeURIComponent(id)}/integrations/refresh`,
+        { body: { expected_revision: expectedRevision } },
       ),
     heartbeatInventory: (sessionId, signal) =>
       request<HeartbeatSchedule[]>(

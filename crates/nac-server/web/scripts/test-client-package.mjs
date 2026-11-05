@@ -101,7 +101,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 164);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 166);
 for (const resource of [
   "GET /sessions/{session_id}/questions",
   "GET /sessions/{session_id}/questions/{request_id}",
@@ -138,6 +138,10 @@ assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
+assert.equal("sessionIntegrations" in api, false);
+assert.equal("refreshSessionIntegrations" in api, false);
+assert.equal(NAC_API_SURFACE["GET /sessions/{session_id}/integrations"], "private:standalone session integration status");
+assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/integrations/refresh"], "private:standalone explicit session integration refresh");
 assert.equal("controlHeartbeat" in api, false);
 for (const [operation, owner] of [
   ["GET /heartbeats", "private:standalone Local heartbeat inventory"],
