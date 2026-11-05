@@ -281,6 +281,180 @@
         "workflow is not a completed success",
         "failed/cancelled/pending/incomplete job evidence"
       ]
+    },
+    {
+      "run_id": 41954954507,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954954507",
+      "event": "pull_request",
+      "branch_head_sha": "0fc5a9e1312792c90088f0ddbcbe3e0b2b79f754",
+      "candidate_sha": "aae0b0634b39833ddb4ef39ad679e41a012277cd",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 987.0,
+      "event_to_green_seconds": 989.0,
+      "observed_prepare_to_result_seconds": 987.0,
+      "observed_event_to_result_seconds": 989.0,
+      "initial_wait_seconds": 2.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5429.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 588.0
+      },
+      "completed_job_seconds": 6017.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41954954165,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954954165",
+      "event": "pull_request",
+      "branch_head_sha": "1a7fa20ee718b982267c9efaaac87b79f70fc807",
+      "candidate_sha": "6026dfb1782f1441a66424b430f9ddd0804321f7",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 1026.0,
+      "event_to_green_seconds": 1040.0,
+      "observed_prepare_to_result_seconds": 1026.0,
+      "observed_event_to_result_seconds": 1040.0,
+      "initial_wait_seconds": 14.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5375.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 743.0
+      },
+      "completed_job_seconds": 6118.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41954952970,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954952970",
+      "event": "pull_request",
+      "branch_head_sha": "668944703e714e6f801a7cc514c77ac875d37660",
+      "candidate_sha": "86a1474d3a0621a0af9669bb9d97c4eae8f9d61e",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 950.0,
+      "event_to_green_seconds": 963.0,
+      "observed_prepare_to_result_seconds": 950.0,
+      "observed_event_to_result_seconds": 963.0,
+      "initial_wait_seconds": 13.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5689.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 583.0
+      },
+      "completed_job_seconds": 6272.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41954976390,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954976390",
+      "event": "pull_request",
+      "branch_head_sha": "31d46797c1219d7e86e393d3ad9c59827436fafe",
+      "candidate_sha": "c74fb7851805992c5aaaa338afa3e08c80840b85",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 891.0,
+      "event_to_green_seconds": 894.0,
+      "observed_prepare_to_result_seconds": 891.0,
+      "observed_event_to_result_seconds": 894.0,
+      "initial_wait_seconds": 3.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5672.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 667.0
+      },
+      "completed_job_seconds": 6339.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41954973930,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930",
+      "event": "pull_request",
+      "branch_head_sha": "837c2e9d3e277b50cac872c91a78a9d5fa86d14a",
+      "candidate_sha": "8ba38bbd8ef64e08fec27fb104260fc3b52768ca",
+      "status": "completed",
+      "conclusion": "failure",
+      "processing_seconds": null,
+      "event_to_green_seconds": null,
+      "observed_prepare_to_result_seconds": 763.0,
+      "observed_event_to_result_seconds": 786.0,
+      "initial_wait_seconds": 23.0,
+      "metric_eligible": false,
+      "ordinary_first_attempt_metric": false,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 4623.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 854.0
+      },
+      "completed_job_seconds": 5477.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": [
+        "preparation or required aggregate did not succeed",
+        "workflow is not a completed success",
+        "failed/cancelled/pending/incomplete job evidence"
+      ]
     }
   ],
   "limitations": [
@@ -298,7 +472,7 @@
     "S06": "local four-worker comparison measured; production keeps one worker per machine",
     "S07": "cold actual image passed; dependency-layer cross-source warm benefit not yet hosted-qualified",
     "S08": "actual NAC compile-only artifact reuse measured; combined rollout observed separately",
-    "S09": "binary distribution helper/prototype measured; hosted rollout pending",
+    "S09": "Hosted producer and matching-image consumer execution measured; whole run failed strict runner-image equality during mixed hosted images. Fully validated mismatches now discard bytes and build current source; corrupt/foreign/future evidence still fails. Repaired whole-run and partial-retry qualification pending.",
     "S10": "earlier whole candidate passed; current601 first attempt failed desktop ready-read deadline and poisoned shared lock; retained, investigation pending",
     "S11": "design-only; const API compatibility decision, not measured",
     "S13": "main redundancy hypothesis falsified by font-download trace; no claimed latency gain",
@@ -313,10 +487,11 @@
     "S06",
     "S07",
     "S08",
+    "S09",
     "S10",
     "S18"
   ],
-  "strategy_count_boundary": "10 distinct measured mechanisms; combined hosted effects overlap, local mechanisms are not hosted acceptance; no infeasibility claim",
+  "strategy_count_boundary": "11 distinct measured mechanisms, including S09 actual hosted failure; combined hosted effects overlap and local mechanisms are not hosted acceptance. No infeasibility claim.",
   "failure_dispositions": [
     {
       "run_id": 41947952992,
@@ -333,6 +508,15 @@
       "first_failure": "e2e/task-questions.e2e.ts:357 native coordinator authorized-information journey expected delivered but received pending",
       "disposition": "retained same-source metadata failure; browser worker investigating trace/provider race; no timeout/assertion/retry change",
       "url": "https://github.com/arcee-ai/nac/actions/runs/41948701848/job/126992666520"
+    },
+    {
+      "run_id": 41954973930,
+      "candidate_sha": "8ba38bbd8ef64e08fec27fb104260fc3b52768ca",
+      "branch_head_sha": "837c2e9d3e277b50cac872c91a78a9d5fa86d14a",
+      "first_failure": "Browser proof and ordinary shards5/7/8 rejected differing producer runner_image; producer and matching-image consumers succeeded. No full browser acceptance or faster successful metric claimed.",
+      "disposition": "Valid artifact image mismatch now selects fresh source after complete validation; mismatch bytes are discarded. Corrupt/missing/foreign/future evidence remains fail closed. Actual image environment diagnostics added; repaired hosted run pending.",
+      "portable_evidence": "browser-binary-image-rollout.json",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930"
     }
   ]
 }
