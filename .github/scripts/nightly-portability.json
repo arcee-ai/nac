@@ -209,5 +209,18 @@
       "less than 2-second upper-bound scheduling allowance"
     ],
     "reason": "Explicit exclusive-window measurement waits the real MAX_TIMEOUT_MS with eight active targets and requires elapsed time below MAX_TIMEOUT_MS + 2000. Shared hosted scheduling is not this timing qualification; shorter default task-wait correctness tests remain enabled."
+  },
+  {
+    "package": "nac-server",
+    "name": "application::heartbeat_scheduler::tests::heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention",
+    "disposition": "excluded",
+    "capabilities": [
+      "shared exclusive Rust/browser/setup measurement lease",
+      "loopback hanging HTTP fixture and real Local admission",
+      "isolated SQLite store and non-Git workspace",
+      "process-wide model environment lock",
+      "manual 1/10/100-schedule timing/RSS/database-size measurement"
+    ],
+    "reason": "Manual measurement requires the owner's shared exclusive lease. It also asserts bounded admission, pending accounting and unique occurrences at 1/10/100 schedules. The enabled two-schedule owner/shutdown test is distinct; this scale measurement is not executed or counted as passing by nightly."
   }
 ]

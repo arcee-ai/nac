@@ -32,7 +32,7 @@ OS/browser matrix. Default ignored cases remain ignored during that phase.
 ## Reviewed ignored inventory
 
 The exact names, package, disposition, reason and required capabilities live in
-[the inventory](../../.github/scripts/nightly-portability.json). All twenty
+[the inventory](../../.github/scripts/nightly-portability.json). All twenty-one
 ignored tests discovered by the native workspace harness must match that file;
 new, renamed or removed entries fail before any selected execution. Review the
 owning test and its nearest AGENTS guide before changing that inventory.
@@ -43,12 +43,39 @@ owning test and its nearest AGENTS guide before changing that inventory.
 | Included: server `tests::persistence_load` owned-store multi-thread and current-thread variants | 2 | Built `nac-web` worker, scripted local provider, SQLite and local processes. These exercise serving-store ownership and executor variants omitted by legacy managed-load. |
 | Already covered: server `tests::managed_load::managed_load_scenario` | 1 | Required `test-workspace` invokes `make test-managed-load`; managed quality also runs it. Not duplicated as a nightly ignored selection. |
 | Excluded: core `agent::live_tests` | 2 | Paid/live provider API key and network calls. |
-| Excluded: process admission, core projection, Responses SSE latency and task-wait maximum timeout measurements | 4 | Manual quiet-host/exclusive-window timing qualification. Task-wait measures the real 60-second maximum with less than two seconds of scheduling allowance. |
+| Excluded: process admission, core projection, Responses SSE latency, task-wait maximum timeout and server heartbeat measurements | 5 | Manual quiet-host/exclusive-window timing or resource qualification. Task-wait measures the real 60-second maximum; heartbeat measures two real scheduler owners at 1/10/100 schedules. |
 | Excluded: live reviewer calibration, corpus and two smokes | 4 | Authorized Arcee credentials, network and potentially paid reviewer requests; the default-profile smoke and calibration require the approved dev2 origin. |
 | Excluded: manually selected frozen reviewer replay | 1 | Explicit absolute `NAC_REVIEW_REPLAY_FILE` matching the compiled profile. Offline; no model calls. The separate committed Clef holdout remains a default workspace test. |
 | Explicit coverage gap: exact catalog/installed-skill source qualification | 1 | Explicit reviewed read-only catalog, installed symlink set and immutable catalog/repository source revisions, not provisioned by this hosted lane. Local synthetic skill fixtures remain default tests. |
 | Excluded: terminal external OpenSSH | 1 | External host/key/port; distinct from included local fake-SSH discovery fixture. |
 | Explicit coverage gap: discovery Podman parity and terminal Podman output | 2 | Running Podman machine and configured sandbox image are not provisioned on this native hosted runner. Not executed or passed; managed Docker smoke does not establish these backend contracts. |
+
+The heartbeat measurement was added by the incoming human change
+[PR #492](https://github.com/arcee-ai/nac/pull/492), commit
+`17c83f5d77c08c3fba3da1952873f497ff1d7a9d`. Its
+[owner](../../crates/nac-server/src/application/heartbeat_scheduler/tests.rs#L218)
+explicitly requires the shared exclusive measurement lease and `--nocapture`.
+It uses real Local admission and SQLite with two independent scheduler owners
+and a hanging loopback HTTP model, not a paid provider or external credential.
+Besides reporting scan latency, admission lateness, RSS and database bytes over
+24 warm scans, it asserts bounded admission, pending accounting and unique
+active occurrence IDs for 1/10/100 schedules. No timing threshold is asserted.
+The enabled two-owner/shutdown test uses the shared fixture at two schedules;
+it does not establish those larger scale assertions. The ignored measurement
+remains manual-only, unexecuted and not counted as passing by nightly. Historical
+numbers in [the heartbeat guide](../heartbeats.md#historical-measurements) are
+not a current-head or hosted execution receipt.
+
+The actual native run
+[42069280786, job 127392326437](https://github.com/arcee-ai/nac/actions/runs/42069280786/job/127392326437)
+at prepared `171850fa47ee2f527d2d18dd669c6c697fb8a90c` stopped on this single
+added name, with no removed names, after build 346.553 s and inventory 12.393 s.
+The default suite and all four selected ignored cases had not started. That
+failed receipt remains failed; classifying this one name supplies no test pass.
+The historical twenty-name discovery fixture below is preserved separately
+from the current twenty-one-name reviewed inventory. All old included cases,
+strict new/renamed/removed-name rejection, commands and one-attempt behavior
+remain unchanged; fresh native execution is still required after the repair.
 
 The seven later additions were recovered from the actual ignored discovery in
 [scheduled run 41814252560, job 126520880813](https://github.com/arcee-ai/nac/actions/runs/41814252560/job/126520880813),

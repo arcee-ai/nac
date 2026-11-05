@@ -127,11 +127,27 @@ class Controls(unittest.TestCase):
 
     def test_retained_native_discovery_requires_all_reviewed_names(self):
         inventory = json.loads(runner.INVENTORY.read_text())
-        listing = '\n'.join(name + ': test' for name in RETAINED_IGNORED)
+        # Keep the actual historical twenty-name discovery receipt unchanged.
+        historical = '\n'.join(name + ': test' for name in RETAINED_IGNORED)
         self.assertEqual(len(RETAINED_IGNORED), 20)
+        runner.verify_inventory(historical, [c for c in inventory if c['name'] in RETAINED_IGNORED])
+        heartbeat = ('application::heartbeat_scheduler::tests::'
+                     'heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention')
+        case = next(c for c in inventory if c['name'] == heartbeat)
+        self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
+        self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
+        owner = runner.ROOT / 'crates/nac-server/src/application/heartbeat_scheduler/tests.rs'
+        self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]',
+                      owner.read_text())
+        self.assertIn('for n in [1, 10, 100]', owner.read_text())
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_new:
+            runner.verify_inventory(historical, inventory)
+        self.assertIn(heartbeat, str(missing_new.exception))
+        reviewed_names = [*RETAINED_IGNORED, heartbeat]
+        listing = '\n'.join(name + ': test' for name in reviewed_names)
         runner.verify_inventory(listing, inventory)
-        # Every removal/rename, including an excluded case, still fails closed.
-        for name in RETAINED_IGNORED:
+        # Every removal/rename, including the new manual case, still fails closed.
+        for name in reviewed_names:
             for changed in (listing.replace(name + ': test', ''),
                             listing.replace(name + ': test', name + '_renamed: test')):
                 with self.subTest(name=name, changed=changed):
