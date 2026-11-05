@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "status": "unwired-production-draft",
+  "selector": {
+    "owner": ".github/scripts/ci-admission.py",
+    "execution_authority": "immutable-original-pr-base-copy",
+    "context_keys": ["event_name", "run_id", "run_attempt", "candidate_sha", "policy_sha", "workflow_sha", "managed_applicable"],
+    "mode_values": ["full", "pure"],
+    "only_skip_when": "mode is exact string pure from successful trusted selector",
+    "unknown_or_unavailable": "full",
+    "quality_reused": false,
+    "supported_preparation": "two-parent merge with parents exactly original base SHA then original head SHA",
+    "unsupported_squash_direct_head_or_unknown": "full with unchanged current-attempt coverage"
+  },
+  "producer": {
+    "full_admission_name": "NAC full admission v1 <tuple_digest>",
+    "pure_observation_name": "NAC metadata observation v1 <tuple_digest>",
+    "tuple_digest": "64 lowercase hexadecimal SHA256 of versioned canonical tuple",
+    "full_without_canonical_trusted_tuple": "full work without admission marker",
+    "marker_dependencies": "successful trusted identity preparation only; never quality",
+    "marker_quality_meaning": "none",
+    "pure_required_source_contexts": [],
+    "full_required_source_contexts": [
+      "Required PR checks",
+      "source-security / Full locked source scan",
+      "macos-native / ARM macOS process and credentials"
+    ]
+  },
+  "public_history": {
+    "authentication": "none",
+    "max_requests": 11,
+    "max_run_pages": 2,
+    "max_attempt_job_lists": 8,
+    "max_response_bytes": 524288,
+    "max_total_bytes": 4194304,
+    "wall_deadline_seconds": 30,
+    "max_request_timeout_seconds": 8,
+    "redirects": false,
+    "proxies": false,
+    "retries": 0,
+    "selection": "latest matching FULL after only matching PURE observations in a complete bounded interval",
+    "empty_or_unknown_intervening_run": "full",
+    "conclusions_or_actors_as_authority": false
+  },
+  "check_consumer": {
+    "owner": "parent-owned external manual-tool integration; installed extension unchanged",
+    "pure_is_quality_verdict": false,
+    "ignore_later_pure_only_when": [
+      "selector observation has exact current immutable tuple and trusted program authority",
+      "public attempt Jobs and Checks have none of the three required source context names, including skipped",
+      "selected run/attempt is the latest applicable FULL admitted by the complete interval",
+      "selected FULL original head/base/prepared/policy/workflow/cold tuple still matches current inputs"
+    ],
+    "then": "evaluate actual selected FULL run Jobs and all three Actions-owned Checks exactly as before",
+    "failed_pending_absent_cancelled_full": "remain failed pending absent or cancelled; never replaced by pure success",
+    "newer_unknown_or_changed_input": "block or require full; never latest-green search",
+    "cross_run_quality_receipt_or_result_copy": false,
+    "permissions_or_ruleset_changes": false
+  },
+  "workflow_integration_gate": {
+    "stable_writes": "blocked until root hands sealed APT producer source",
+    "trusted_bootstrap": "read/copy owner from immutable original base before running any candidate program; missing owner -> full",
+    "source_queue": "edited basefalse and ready unique run/attempt group before prepare; ready always full",
+    "pure_names": "dynamic aggregate plus renamed skipped source-security/native callers; emit none of the protected context names",
+    "default_failure_names": "original source names and full/fail-closed coverage",
+    "publication": "blocked until M3 owner integration and one code acceptance review"
+  }
+}
