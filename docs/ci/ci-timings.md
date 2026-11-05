@@ -40,6 +40,19 @@ CPU time nor a billable dollar estimate. Pending jobs make compute totals partia
 Failed-result elapsed intervals remain diagnostic fields, separate from successful
 processing and event-to-green metrics.
 
+For partial retries, GitHub can assign new job IDs and the new `run_attempt` to
+carried-forward results while preserving their original execution timestamps.
+The collector separates completed jobs before the retry's `run_started_at` from
+new execution. `completed_job_seconds` counts only new execution;
+`carried_forward_job_seconds` and `job_view_completed_seconds` retain the prior
+durations and complete returned view separately. Missing boundaries or jobs
+straddling a boundary leave compute explicitly incomplete, with known but
+unclassified durations retained. Carried-forward results make elapsed pipeline
+metrics ineligible. The controlled [partial-retry evidence](evidence/all-582/browser-partial-retry.json)
+records 249 new job-seconds versus 6,391 seconds in GitHub's returned job view;
+neither is CPU or billable time. Its successful source fallback and separate
+proof artifacts provide diagnostic acceptance evidence, never an ordinary sample.
+
 `metric_eligible` certifies the collector's timestamp/identity/status conditions,
 not the workflow's coverage semantics. `ordinary_first_attempt_metric` additionally
 requires a PR event and attempt 1. **Neither qualifies ALL-582's cohort.** Review the

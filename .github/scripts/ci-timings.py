@@ -65,8 +65,16 @@ def summarize(run, jobs, logs, repository):
             reasons.append(f"expected exactly one {name} job")
         else:
             selected[name] = matches[0]
-    compute = defaultdict(float)
+    compute, carried_compute = defaultdict(float), defaultdict(float)
     incomplete_compute = []
+    carried_ids = []
+    view_compute = 0.0
+    attempt_start = None
+    if isinstance(attempt, int) and attempt > 1:
+        try:
+            attempt_start = timestamp(run.get("run_started_at"))
+        except (ValueError, TypeError):
+            reasons.append("retry execution boundary unavailable")
     for job in jobs:
         if job.get("conclusion") == "skipped":
             continue
@@ -75,12 +83,33 @@ def summarize(run, jobs, logs, repository):
             if end < start or job.get("status") != "completed":
                 raise ValueError("incomplete or invalid duration")
             runner = json.dumps({"labels": job.get("labels", []), "runner_group": job.get("runner_group_name")}, sort_keys=True)
+            view_compute += (end - start).total_seconds()
+            # GitHub clones carried-forward jobs into the retry's job list,
+            # assigning new IDs/run_attempt while retaining original timestamps.
+            # Their prior execution must not become new retry compute.
+            if isinstance(attempt, int) and attempt > 1:
+                if attempt_start is None:
+                    raise ValueError("retry execution boundary unavailable")
+                if start < attempt_start:
+                    if end > attempt_start:
+                        raise ValueError("job straddles retry execution boundary")
+                    carried_compute[runner] += (end - start).total_seconds()
+                    carried_ids.append(job.get("id"))
+                    continue
             compute[runner] += (end - start).total_seconds()
         except (ValueError, TypeError):
             incomplete_compute.append(job.get("id"))
     result["completed_job_seconds_by_runner"] = dict(compute)
     result["completed_job_seconds"] = sum(compute.values())
+    result["carried_forward_job_ids"] = carried_ids
+    result["carried_forward_job_seconds_by_runner"] = dict(carried_compute)
+    result["carried_forward_job_seconds"] = sum(carried_compute.values())
+    result["job_view_completed_seconds"] = view_compute
+    result["unclassified_completed_job_seconds"] = view_compute - sum(compute.values()) - sum(carried_compute.values())
+    result["compute_scope"] = "new execution only; carried-forward job-view durations reported separately"
     result["incomplete_compute_job_ids"] = incomplete_compute
+    if carried_ids:
+        reasons.append("partial retry carries forward prior job results")
     if incomplete_compute:
         reasons.append("missing or invalid executed-job duration evidence")
     result["cost"] = "not estimated; runner-seconds are not billable cost or CPU time"
