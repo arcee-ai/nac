@@ -544,15 +544,40 @@ jobs:
     with:
       source-sha: ${{ needs.prepare.outputs.sha }}
 
-  managed:
+  managed-image:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    uses: ./.github/workflows/managed-image-build.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
+      trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
+
+  managed-quality:
     needs: [prepare, quality]
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
-    uses: ./.github/workflows/managed-image.yml
+    uses: ./.github/workflows/managed-quality.yml
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
       quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
-      policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
-      trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
+
+  managed:
+    if: ${{ always() && needs.prepare.outputs.managed_applicable == 'true' }}
+    needs: [prepare, managed-image, managed-quality]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Require exact-candidate image and complete managed fault quality
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node .github/scripts/pr-checks.mjs managed-caller-aggregate
 
   source-security:
     needs: prepare
@@ -565,7 +590,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

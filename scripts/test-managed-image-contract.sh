@@ -4,7 +4,8 @@ set -eu
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 dockerfile="$repo_root/docker/managed/Dockerfile"
 entrypoint="$repo_root/docker/managed/entrypoint.sh"
-workflow="$repo_root/.github/workflows/managed-image.yml"
+workflow="$repo_root/.github/workflows/managed-image-build.yml"
+quality_workflow="$repo_root/.github/workflows/managed-quality.yml"
 lfs_smoke="$repo_root/scripts/smoke-managed-git-lfs.sh"
 terminal_smoke="$repo_root/scripts/smoke-managed-terminal.py"
 managed_status="$repo_root/crates/nac-server/src/managed_status.rs"
@@ -142,13 +143,13 @@ require_literal "$workflow" 'platforms: linux/amd64'
 require_literal "$workflow" 'push: false'
 require_literal "$workflow" 'provenance: false'
 require_literal "$workflow" 'sbom: false'
-require_literal "$workflow" 'run: make ci'
-require_literal "$workflow" 'npm --prefix .github/scripts ci'
+require_literal "$quality_workflow" 'run: make ci'
+require_literal "$quality_workflow" 'npm --prefix .github/scripts ci'
 require_literal "$workflow" 'NAC_BUILD_TRACK=dev'
 # Assert the literal shell/Actions template, without expanding it here.
 # shellcheck disable=SC2016
 require_literal "$workflow" 'NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}'
-if grep -Eq '(id-token:[[:space:]]*write|aws-actions/|amazon-ecr|ECR_|push:[[:space:]]*true|environment:[[:space:]]*dev)' "$workflow"; then
+if grep -Eq '(id-token:[[:space:]]*write|aws-actions/|amazon-ecr|ECR_|push:[[:space:]]*true|environment:[[:space:]]*dev)' "$workflow" "$quality_workflow" "$repo_root/.github/workflows/managed-image.yml"; then
     fail 'public repository workflow must remain build-and-smoke only'
 fi
 
