@@ -162,6 +162,16 @@ arithmetic estimates, not observed hosted transfer speeds; compression, hashing,
 archiving, runner setup and cache quota/eviction can change the result. Include
 all overhead and executed compute/storage in actual PR processing measurements.
 
+The repository capacity snapshot at 02:00:43 UTC recorded 74 caches totaling
+11,466,115,493 bytes; the REST cache storage-limit endpoint (API version
+2026-03-10) reported `max_cache_size_gb: 10`. No limit or settings changed.
+An additional 1.5–2.5 GB raw incremental snapshot per target may evict other
+useful caches; raw compiler bytes do not establish compressed cache occupancy.
+Measure whole-pipeline hit rates, transfer time, storage and eviction before
+claiming an operating-cost improvement. Zero public-runner compute charges do
+not make cache storage free. Retain the portable `cache-resource-snapshot.json`
+receipt with the campaign evidence.
+
 ## Verification and remaining gates
 
 `python3 scripts/test_ci_incremental.py` and the automatic
