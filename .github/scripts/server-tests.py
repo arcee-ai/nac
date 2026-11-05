@@ -17,10 +17,18 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / ".github/nextest-ci.toml"
 SHUTDOWN_TERM_SECONDS = 15
 SHUTDOWN_KILL_SECONDS = 5
-POLICY = {"profile": {"ci": {
+CONTROL_LISTENER_TESTS = (
+    "failed_listener_bind_keeps_accepted_candidate_in_maintenance",
+    "every_replacement_readiness_failure_keeps_maintenance_and_diagnostics",
+    "fully_ready_replacement_accepts_only_after_both_listeners_bind",
+)
+CONTROL_LISTENER_FILTER = ("package(=nac-server) & test(/^managed_control::tests::("
+                           + "|".join(CONTROL_LISTENER_TESTS) + ")$/)")
+POLICY = {"test-groups": {"managed-control-port3211": {"max-threads": 1}}, "profile": {"ci": {
     "retries": 0, "fail-fast": False, "test-threads": 4,
     "leak-timeout": {"period": "200ms", "result": "fail"},
     "junit": {"path": "junit.xml", "report-skipped": "all"},
+    "overrides": [{"filter": CONTROL_LISTENER_FILTER, "test-group": "managed-control-port3211"}],
 }}}
 
 

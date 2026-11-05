@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import shutil
 import subprocess
@@ -203,11 +204,49 @@ class Controls(unittest.TestCase):
                            original.replace("retries = 0", "retries = 1"),
                            original + '\n[store]\ndir="target/nextest"\n',
                            original.replace("test-threads = 4", 'slow-timeout = "2s"'),
+                           original.replace("test-threads = 4", "test-threads = 1"),
+                           original.replace("max-threads = 1", "max-threads = 2"),
+                           original.replace(runner.CONTROL_LISTENER_FILTER, "all()"),
+                           original.replace("failed_listener_bind_keeps_accepted_candidate_in_maintenance|", ""),
+                           original.replace(")$/)", "|unrelated_test)$/)"),
+                           original.replace('test-group = "managed-control-port3211"', 'test-group = "@global"'),
+                           original.split("[[profile.ci.overrides]]")[0],
                            original + '\n[[profile.ci.overrides]]\nfilter="all()"\nretries=1\n']:
                 candidate = runtime / "bad.toml"
                 candidate.write_text(change)
                 with self.assertRaises(ValueError):
                     runner.private_config(runtime, candidate)
+
+    def test_group_matches_only_source_owners_of_the_fixed_control_listener(self):
+        source = (runner.ROOT / "crates/nac-server/src/managed_control_tests.rs").read_text()
+        self.assertIn('managed_control_bind: Some("127.0.0.1:3211".to_string())', source)
+        self.assertIn('SERVER_MODEL_ENV_LOCK.lock().unwrap()', source)
+        functions = {part.split('(', 1)[0]: part for part in re.split(r'(?m)^(?:async )?fn ', source)[1:]}
+        startup = {name for name, body in functions.items() if
+                   'crate::serve_with_policy(' in body or
+                   'crate::delivery::server::serve_with_policy_and_readiness(' in body}
+        recovery = 'managed_v2_future_and_invalid_stores_serve_immutable_recovery_diagnostics'
+        self.assertIn('assert!(recovery.is_recovery_only())', functions[recovery])
+        self.assertEqual(startup - {recovery}, set(runner.CONTROL_LISTENER_TESTS))
+        self.assertEqual(len(runner.CONTROL_LISTENER_TESTS), 3)
+        self.assertEqual(runner.CONTROL_LISTENER_FILTER,
+                         'package(=nac-server) & test(/^managed_control::tests::('
+                         + '|'.join(runner.CONTROL_LISTENER_TESTS) + ')$/)')
+        self.assertEqual(runner.POLICY['test-groups'], {'managed-control-port3211': {'max-threads': 1}})
+        self.assertEqual(runner.POLICY['profile']['ci']['test-threads'], 4)
+        self.assertEqual(runner.POLICY['profile']['ci']['overrides'],
+                         [{'filter': runner.CONTROL_LISTENER_FILTER, 'test-group': 'managed-control-port3211'}])
+        fixed_config_files = {str(path.relative_to(runner.ROOT)) for path in
+                              (runner.ROOT / 'crates/nac-server/src').rglob('*.rs')
+                              if re.search(r'managed_control_bind:.*3211', path.read_text())}
+        self.assertEqual(fixed_config_files, {'crates/nac-server/src/managed_control_tests.rs',
+                                             'crates/nac-server/src/lib_tests.rs'})
+        delivery = (runner.ROOT / 'crates/nac-server/src/tests/managed_delivery.rs').read_text()
+        self.assertEqual(delivery.count('test_managed_bootstrap_control_manager_with_auth('), 1)
+        delivery_functions = {part.split('(', 1)[0]: part for part in
+                              re.split(r'(?m)^(?:async )?fn ', delivery)[1:]}
+        control_consumer = delivery_functions['version_two_managed_repair_holds_upgrade_admission_until_completion']
+        self.assertNotIn('serve_with_policy(', control_consumer)
 
     def test_runtime_rejects_every_compiler_or_workspace_root(self):
         with tempfile.TemporaryDirectory() as d:
@@ -322,8 +361,117 @@ std::fs::write(std::env::var_os("CONTROL_PID").unwrap(),child.id().to_string()).
                                                        "owned_child_removed": True}, indent=2)+"\n")
 
 
+def listener_resource_control(binary, output):
+    """Tiny real scheduler proof; no NAC dependency compilation or test substitution."""
+    import hashlib
+    output.mkdir(mode=0o700)
+    # Official universal-apple-darwin 0.9.151 binary retained by the S12 trial.
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    if digest != "3237e5aac4329859cf9ff8bd4e07a53cffa6b30815f57059b3fa7411f9f2cf02":
+        raise ValueError("resource proof requires the verified pinned Mac nextest")
+    version = subprocess.check_output([binary, "--version", "--verbose"], text=True)
+    (output / "nextest-version.txt").write_text(version)
+    fixture = output / "fixture"
+    (fixture / "src").mkdir(parents=True)
+    (fixture / "Cargo.toml").write_text('[package]\nname="nac-server"\nversion="0.0.0"\nedition="2021"\n[workspace]\n')
+    source = r'''use std::{fs, path::PathBuf, time::{Duration, Instant}};
+fn root() -> PathBuf { std::env::var_os("RESOURCE_ROOT").unwrap().into() }
+fn wait(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !path.exists() {
+        assert!(Instant::now() < deadline, "bounded fixture barrier: {}", path.display());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+fn shared_listener(name: &str) {
+    let root = root();
+    let leader = fs::OpenOptions::new().write(true).create_new(true).open(root.join("leader")).is_ok();
+    let listener = if leader {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        fs::write(root.join("address.pending"), listener.local_addr().unwrap().to_string()).unwrap();
+        fs::rename(root.join("address.pending"), root.join("address")).unwrap();
+        listener
+    } else {
+        wait(&root.join("address"));
+        std::net::TcpListener::bind(fs::read_to_string(root.join("address")).unwrap())
+            .expect("shared listener collision")
+    };
+    if leader {
+        fs::write(root.join("active"), b"").unwrap();
+        for name in ["unrelated_a", "unrelated_b", "unrelated_c"] { wait(&root.join(name)); }
+        fs::write(root.join("four_concurrent"), b"").unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    if leader { fs::write(root.join("release"), b"").unwrap(); }
+    fs::write(root.join(format!("group-{name}")), std::env::var("NEXTEST_TEST_GROUP").unwrap()).unwrap();
+    drop(listener);
+}
+fn unrelated(name: &str) {
+    let root = root(); wait(&root.join("active"));
+    fs::write(root.join(name), b"").unwrap(); wait(&root.join("release"));
+    assert_eq!(std::env::var("NEXTEST_TEST_GROUP").unwrap(), "@global");
+}
+#[cfg(test)] mod managed_control { mod tests {
+REPLACE_GROUPED_TESTS
+}}
+#[test] fn unrelated_a() { unrelated("unrelated_a"); }
+#[test] fn unrelated_b() { unrelated("unrelated_b"); }
+#[test] fn unrelated_c() { unrelated("unrelated_c"); }
+'''.replace('REPLACE_GROUPED_TESTS', '\n'.join(
+        f'#[test] fn {name}() {{ crate::shared_listener("{name}"); }}' for name in runner.CONTROL_LISTENER_TESTS))
+    (fixture / "src/lib.rs").write_text(source)
+    cargo = subprocess.check_output(["rustup", "which", "cargo", "--toolchain", "1.98.0"], text=True).strip()
+    rustc = subprocess.check_output(["rustup", "which", "rustc", "--toolchain", "1.98.0"], text=True).strip()
+    env = {**os.environ, "CARGO": cargo, "RUSTC": rustc, "RUSTUP_TOOLCHAIN": "1.98.0",
+           "CARGO_TARGET_DIR": str(output / "target"), "CARGO_NET_OFFLINE": "true", "CARGO_BUILD_JOBS": "6",
+           "CARGO_INCREMENTAL": "0", "CARGO_PROFILE_DEV_DEBUG": "0", "CARGO_PROFILE_TEST_DEBUG": "0"}
+    if shutil.disk_usage(output).free < 12 * 1024**3:
+        raise ValueError("resource proof requires12GiB host reserve")
+    subprocess.run([cargo, "generate-lockfile", "--offline"], cwd=fixture, env=env, check=True, capture_output=True)
+    receipts = []
+    for label in ["grouped", "ungrouped-negative", "max2-negative"]:
+        runtime = output / label
+        runtime.mkdir(mode=0o700)
+        config = runner.private_config(runtime)
+        if label == "ungrouped-negative":
+            original = config.read_text()
+            a = original.index('[[profile.ci.overrides]]')
+            b = original.index('[profile.ci.junit]')
+            config.write_text(original[:a] + original[b:])
+        elif label == "max2-negative":
+            config.write_text(config.read_text().replace("max-threads = 1", "max-threads = 2"))
+        environment = {**env, "RESOURCE_ROOT": str(runtime)}
+        command = [str(binary), "nextest", "run", "--locked", "--config-file", str(config), "--profile", "ci",
+                   "--user-config-file", "none", "--test-threads", "4", "--retries", "0", "--no-fail-fast"]
+        started = time.monotonic()
+        result = subprocess.run(command, cwd=fixture, env=environment, capture_output=True, text=True, timeout=25)
+        (runtime / "stdout").write_text(result.stdout)
+        (runtime / "stderr").write_text(result.stderr)
+        junit = ET.parse(runtime / "store/ci/junit.xml").getroot()
+        assert junit.attrib['tests'] == '6' and junit.attrib['errors'] == '0'
+        assert (runtime / "four_concurrent").exists(), "global four-slot scheduling was lost"
+        failures = int(junit.attrib['failures'])
+        if label == "grouped":
+            assert result.returncode == 0 and failures == 0
+            assert all((runtime / f"group-{name}").read_text() == 'managed-control-port3211'
+                       for name in runner.CONTROL_LISTENER_TESTS)
+        else:
+            assert result.returncode == 100 and failures >= 1
+            assert 'shared listener collision' in result.stderr
+        receipts.append({"case": label, "command": command, "exit": result.returncode,
+                         "wall_seconds": time.monotonic() - started, "tests": 6, "failures": failures,
+                         "four_simultaneously_active": True, "actual_address": (runtime / "address").read_text()})
+    (output / "receipt.json").write_text(json.dumps({"tool_sha256": digest, "tool_version": version,
+        "source_fixture_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "cargo": subprocess.check_output([cargo, "--version"], text=True).strip(),
+        "rustc": subprocess.check_output([rustc, "-vV"], text=True).strip(),
+        "cases": receipts, "scope": "tiny independent fixture only; actual NAC/GNU requalification pending"}, indent=2) + "\n")
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--native-tool":
         native_control(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve())
+    elif len(sys.argv) == 4 and sys.argv[1] == "--listener-resource-control":
+        listener_resource_control(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve())
     else:
         unittest.main()

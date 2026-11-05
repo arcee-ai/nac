@@ -1,9 +1,18 @@
 # CI-only: server-tests.py adds a private absolute store outside compiler caches.
+[test-groups.managed-control-port3211]
+max-threads = 1
+
 [profile.ci]
 retries = 0
 fail-fast = false
 test-threads = 4
 leak-timeout = { period = "200ms", result = "fail" }
+
+# These fixtures share a fixed listener; their in-process Mutex is not shared
+# across nextest processes. All other tests retain the global four slots.
+[[profile.ci.overrides]]
+filter = 'package(=nac-server) & test(/^managed_control::tests::(failed_listener_bind_keeps_accepted_candidate_in_maintenance|every_replacement_readiness_failure_keeps_maintenance_and_diagnostics|fully_ready_replacement_accepts_only_after_both_listeners_bind)$/)'
+test-group = "managed-control-port3211"
 
 [profile.ci.junit]
 path = "junit.xml"

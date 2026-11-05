@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "kind": "S12 fixed-listener resource repair, no new strategy or cohort credit",
+  "base": "3769e2aa11d2c36de75305355f167c921b2b81e8",
+  "original_failure": {
+    "snapshot_utc": "2026-11-05T07:35:56.792122+00:00",
+    "run": 41987133206,
+    "attempt": 1,
+    "job": 127110532496,
+    "head": "f27c43f17c31c7b1add3fe265a89b715d98e88bc",
+    "prepared_checkout_from_log": "28d23106d64237cc1512fb72d639f768a0e1e7f2",
+    "baseline": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+    "sources": [
+      {
+        "path": "crates/nac-server/src/managed_control_tests.rs",
+        "sha256": "4c01c63ae16fc74dea9fc3cd4a99df37868f7b17ee326b65b3827b81585df49b",
+        "baseline_identical": true
+      },
+      {
+        "path": "crates/nac-server/src/managed_terminals_tests.rs",
+        "sha256": "9df164d8fadc3ed560a601f0f52071ebb8064591ee470206b542d30f07782861",
+        "baseline_identical": true
+      },
+      {
+        "path": "crates/nac-server/src/lib_tests.rs",
+        "sha256": "44d370ac19f51995962570025e7aca21092710a13361aac2e1e51edb68ea9258",
+        "baseline_identical": true
+      },
+      {
+        "path": "crates/nac-server/src/delivery/server.rs",
+        "sha256": "a3f3ae4a7bc7ab86dd1acf126e0728b85a19ce2a299f1668ac0cc26c89f7a8f3",
+        "baseline_identical": true
+      },
+      {
+        "path": "crates/nac-managed/src/configuration.rs",
+        "sha256": "931d5ab5ab497a7eeae3691a807519b060f022b597f8a4d00efe005dc4522706",
+        "baseline_identical": true
+      }
+    ],
+    "raw_log": {
+      "path": "ci-hillclimb/browser-refinement-publication/first-source-server.log",
+      "sha256": "463a5ae03c7c7ab9ade38633d703503c022fb312c51b8f478ef6ac749feee098",
+      "bytes": 174264
+    },
+    "outcome": {
+      "tests_run": 412,
+      "passed": 411,
+      "failed": 1,
+      "ignored": 3,
+      "nextest_seconds": 93.328,
+      "nextest_exit": 100,
+      "doctests_exit": 0
+    },
+    "no_source_build_rerun": true
+  },
+  "diagnosis": {
+    "mechanism": "Fixture::new holds process-local SERVER_MODEL_ENV_LOCK and hardcodes127.0.0.1:3211. Nextest process-per-test gives each test a separate lock, so three tests can enter production fixed-port binding concurrently.",
+    "limit": "Actual EADDRINUSE is proved; source and overlapping reported test intervals strongly support concurrent fixed-port ownership. The owning socket PID/precise failing loop case is not recorded; no artificial causal certainty or local reproduction claimed.",
+    "fixed_resource": "127.0.0.1:3211",
+    "affected_tests": [
+      "managed_control::tests::failed_listener_bind_keeps_accepted_candidate_in_maintenance",
+      "managed_control::tests::every_replacement_readiness_failure_keeps_maintenance_and_diagnostics",
+      "managed_control::tests::fully_ready_replacement_accepts_only_after_both_listeners_bind"
+    ],
+    "excluded_neighbors": [
+      {
+        "test": "managed_control::tests::managed_v2_future_and_invalid_stores_serve_immutable_recovery_diagnostics",
+        "reason": "Calls serve but manager is recovery-only; production filter skips control bind."
+      },
+      {
+        "test": "managed_control::tests::real_listeners_enforce_private_block_settle_retry_and_public_maintenance",
+        "reason": "Explicitly reserves and passes separate127.0.0.1:0 public/private listeners directly to axum; bypasses fixed config binder."
+      },
+      {
+        "test": "tests::managed_delivery::version_two_managed_repair_holds_upgrade_admission_until_completion",
+        "reason": "Only consumer of lib_tests fixed3211 bootstrap control config; exercises auth/admission/router state, no listener startup."
+      },
+      {
+        "scope": "other managed_control/terminals Fixture consumers",
+        "reason": "Config creation/router/leases alone do not bind; no need serialize all fixture tests."
+      }
+    ],
+    "baseline_identical": true,
+    "reported_overlap": {
+      "failed_test_reported_seconds": 0.602,
+      "failed_result_log_utc": "2026-11-05T07:29:14.8176806Z",
+      "fully_ready_reported_seconds": 0.358,
+      "fully_ready_result_log_utc": "2026-11-05T07:29:14.8409935Z",
+      "approximate_interval_overlap_seconds": 0.335,
+      "precision": "Inferred from rounded nextest durations and result log timestamps, not socket trace or exact test start timestamps."
+    }
+  },
+  "repair": {
+    "group": "managed-control-port3211",
+    "max_threads": 1,
+    "global_test_threads": 4,
+    "selection_changed": false,
+    "production_Rust_changed": false,
+    "assertions_deadlines_clocks_retries_leak_policy_changed": false,
+    "policy": "Exact group and anchored three-name membership override only; arbitrary drift rejected.",
+    "ephemeral_port_shortcut": "Not used: production managed config rejects port0; reserve/drop/rebind would race."
+  },
+  "native_proof": {
+    "scope": "Dependency-free fixture only, package nac-server with exact three production test names plus three unrelated tests; not actual NAC/GNU acceptance.",
+    "tool_sha256": "3237e5aac4329859cf9ff8bd4e07a53cffa6b30815f57059b3fa7411f9f2cf02",
+    "tool_version": "cargo-nextest 0.9.151 (6b3f99457 2026-11-02)\nrelease: 0.9.151\ncommit-hash: 6b3f994577a98874a2e0ea5bef77fbbab3434044\ncommit-date: 2026-11-02\nhost: aarch64-apple-darwin\n",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+    "fixture_sha256": "5d1be225dfa15fbcc3f6c0b8e0a2a014d9a84cae0f01c3636b91224325e90349",
+    "actual_cases": [
+      {
+        "case": "grouped",
+        "exit": 0,
+        "wall_seconds": 1.6092196669778787,
+        "tests": 6,
+        "failures": 0,
+        "four_simultaneously_active": true
+      },
+      {
+        "case": "ungrouped-negative",
+        "exit": 100,
+        "wall_seconds": 0.324024667032063,
+        "tests": 6,
+        "failures": 2,
+        "four_simultaneously_active": true
+      },
+      {
+        "case": "max2-negative",
+        "exit": 100,
+        "wall_seconds": 0.3062824999797158,
+        "tests": 6,
+        "failures": 2,
+        "four_simultaneously_active": true
+      }
+    ],
+    "negative_failure": "Both ungrouped and max2 test-only policy bypasses failed on shared listener collision; production policy rejects these configurations.",
+    "port_scope": "Tiny fixture atomically publishes one owned ephemeral listener address to demonstrate native resource contention without touching host3211. Production tests/config remain fixed3211.",
+    "full_global_concurrency": "Leader waits for all three unrelated controls, which remain active until leader release; four actual tests overlap. Group identities are checked from NEXTEST_TEST_GROUP.",
+    "resource": "About1.3MiB allocated owned proof payload including compiler output; hostfree23,257,346,048B after probe, above12GiB floor.",
+    "reproduce": "python3 .github/scripts/server-tests.test.py --listener-resource-control /path/to/verified/pinned-Mac/cargo-nextest /new/owned/evidence-directory"
+  },
+  "raw_evidence": {
+    "relative_artifact_root": "native/managed-control-port-41987133206",
+    "files": [
+      "source-log.json",
+      "selected-log-lines.txt",
+      "diagnosis.json",
+      "resource-control/receipt.json",
+      "resource-control/fixture/src/lib.rs",
+      "resource-control/grouped/store/ci/junit.xml",
+      "resource-control/ungrouped-negative/store/ci/junit.xml",
+      "resource-control/max2-negative/store/ci/junit.xml"
+    ],
+    "receipt_sha256": "11695221b72c31b034626e46c3728ee91a474ff5f706cae65e41d701c59b2ab6"
+  },
+  "remaining": "Actual fixed current-source NAC server run and hosted GNU/full current-head acceptance required; original source failure remains failed. No retry masking or broad source/runner changes.",
+  "primary_reference": "https://nexte.st/docs/configuration/test-groups/"
+}

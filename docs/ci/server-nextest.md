@@ -2,7 +2,7 @@
 
 The Linux `test-server` job uses checksum-pinned cargo-nextest0.9.151 to run
 individual tests in separate processes. This S12 candidate changes only that
-job's runner command. The stable identity step, specialized native/mutation
+job's runner command and resource scheduling. The stable identity step, specialized native/mutation
 libtest consumers, other jobs, receipts and S17 compiler-cache trust stay intact.
 
 `.github/scripts/server-tests.py` performs these fresh obligations:
@@ -51,6 +51,43 @@ pinned embedded default; only its verdict changes. No terminating test deadline
 is added. Detected leaks fail even when the test itself exits0. Nextest cannot
 detect all redirected-output descendants; existing cleanup assertions remain
 mandatory. See the [official leak policy](https://nexte.st/docs/features/leaky-tests/).
+
+## Fixed managed-control listener
+
+Three managed-control tests start the production listener at `127.0.0.1:3211`:
+`failed_listener_bind_keeps_accepted_candidate_in_maintenance`,
+`every_replacement_readiness_failure_keeps_maintenance_and_diagnostics`, and
+`fully_ready_replacement_accepts_only_after_both_listeners_bind`.
+Their existing fixture holds a process-local mutex, which does not coordinate
+separate nextest processes. The first source run of #615 retained an actual
+address-in-use failure, with overlapping reported intervals for the failing
+readiness test and successful listener test. The socket-owning PID was not traced.
+
+The exact three full names belong to `managed-control-port3211`, with
+`max-threads = 1`. Other tests retain the global four slots. This is a resource
+assignment, never a selection filter: every test still runs. The private config
+validator admits only this exact group and anchored membership override; generic
+overrides, altered membership/concurrency and retry/leak/deadline changes fail.
+Source-backed controls check the listener owners and distinguish recovery-only
+and explicitly reserved ephemeral-listener neighbors. Production Rust, port,
+assertions, real clock and deadlines stay unchanged. Port zero would violate the
+managed configuration contract; reserve/drop/rebind would introduce a race.
+
+The [failure and scheduler proof](evidence/all-582/server-listener-resource.json)
+preserves the original result: 411 passed, one failed, three ignored, 93.328s;
+doctests still ran. A tiny dependency-free Mac fixture with the same three names
+passed all six tests under the actual pinned group. Ungrouped and max-two
+test-only negatives each failed two tests with listener collisions. Three
+unrelated tests overlapped the resource owner, proving four active tests remain
+possible. This proves scheduler semantics, not actual NAC/GNU requalification.
+It is an S12 repair and earns no additional strategy credit.
+
+The native proof is explicit and never replaces NAC tests:
+
+```sh
+python3 .github/scripts/server-tests.test.py --listener-resource-control \
+  /path/to/verified/pinned-Mac/cargo-nextest /new/owned/evidence-directory
+```
 
 ## Evidence and limits
 
