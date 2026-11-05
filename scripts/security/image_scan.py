@@ -18,6 +18,9 @@ from image_inventory import (database, grype_findings, inventory, managed_go_pin
                              osv_findings, require, sha256, write_json, write_report)
 from image_packages import PACKAGE_PROBE, package_integrity, source_package_pins
 from image_upstreams import upstream_findings, upstream_targets, wolfi_upstream_targets
+from image_rust import (RUST_PROBE, RUST_FILES, source_rust_pins,
+                        collect_distribution, rust_inventory)
+from image_rust_advisories import query_rust
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -54,7 +57,7 @@ if Path("/usr/lib/apk/db/installed").is_file():
 else:
     evidence["dpkg"] = subprocess.check_output(
         ["dpkg-query", "-W", "-f=${binary:Package}\t${Version}\n"], text=True).strip()
-""" + PACKAGE_PROBE + "\nprint(json.dumps(evidence))\n"
+""" + PACKAGE_PROBE + RUST_PROBE + "\nprint(json.dumps(evidence))\n"
 
 
 def command(args, *, env=None, output=None, timeout=600):
@@ -220,16 +223,17 @@ def evaluate(findings, trusted_policy, candidate_policy, output, *, publication_
 
 def bundle_manifest(output, identity):
     # All evidence is bound to one image. Daily rescans verify these retained bytes.
-    files = ["sbom.syft.json", "runtime.json", "identity.json", "coverage.json"]
-    write_json(output / "bundle.json", {"schema_version": 1, "image": identity,
+    files = ["sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *sorted(RUST_FILES)]
+    write_json(output / "bundle.json", {"schema_version": 2, "image": identity,
                "files": {name: sha256(output / name) for name in files}})
 
 
 def load_bundle(bundle, output):
     manifest = json.loads((bundle / "bundle.json").read_text())
-    require(manifest.get("schema_version") == 1, "unknown evidence bundle")
+    require(manifest.get("schema_version") == 2,
+            "unsupported evidence bundle; reinventory exact image for Rust coverage")
     require(set(manifest.get("files", {})) ==
-            {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json"}, "incomplete bundle")
+            {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}, "incomplete bundle")
     for name, digest in manifest["files"].items():
         require(sha256(bundle / name) == digest, f"retained evidence hash mismatch: {name}")
         (output / name).write_bytes((bundle / name).read_bytes())
@@ -264,6 +268,7 @@ def run(args):
             identity = {"image": args.image, "repo_digests": details[0].get("RepoDigests", []),
                         "source_revision": args.source_revision, "inspected": details[0],
                         "go_application_pins": managed_go_pins(dockerfile),
+                        "rust_pins": source_rust_pins(dockerfile),
                         "runtime_package_pins": source_package_pins(dockerfile, read_source)}
             write_json(output / "identity.json", identity)
             raw = command(["docker", "run", "--rm", "--network=none", "--read-only",
@@ -271,6 +276,7 @@ def run(args):
                            "--entrypoint=/usr/bin/python3", args.image, "-c", PROBE],
                           output=output / "runtime.json", timeout=120)
             json.loads(raw)
+            collect_distribution(identity["rust_pins"], output, download)
         tools, pins = {}, {}
         if not args.bundle:
             tools, pins = install_tools(args.tool_cache.resolve(), names={"syft"})
@@ -291,6 +297,7 @@ def run(args):
                 "NAC binary source revision does not match candidate")
         coverage = inventory(sbom, raw_runtime, args.image,
                              expected_pins=identity.get("go_application_pins"))
+        coverage["rust"] = rust_inventory(raw_runtime.get("rust"), identity.get("rust_pins"), output)
         if coverage["os_release"]["ID"] == "wolfi":
             coverage["owned_runtime_packages"] = package_integrity(
                 raw_runtime.get("owned_packages"), identity.get("runtime_package_pins"), sbom["artifacts"])
@@ -306,7 +313,7 @@ def run(args):
         write_json(output / "tools.json", pins)
         report = scan_sbom(tools, output / "sbom.syft.json", output, env)
         findings = (grype_findings(report, sbom) + query_runtimes(coverage, output) +
-                    scan_owned_upstreams(tools, coverage, output, env))
+                    scan_owned_upstreams(tools, coverage, output, env) + query_rust(coverage["rust"], output))
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output,
                           publication_policy=getattr(args, "publication_policy", None),
                           source_revision=args.source_revision)
