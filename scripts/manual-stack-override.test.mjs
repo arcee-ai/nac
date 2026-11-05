@@ -29,15 +29,112 @@ function fixture() {
       ({ name, status: 'completed', conclusion: 'success' })), unresolved: false, time: 0,
     historicalChecks: [], statuses: [], currentRun: {}, historicalRun: {},
     extraChecks: () => [], extraRuns: () => [], oldJobs: {},
-    review: { enforcement: 'active', current_user_can_bypass: 'pull_requests_only',
-      bypass_actors: [{ actor_id: 20910163, actor_type: 'User', bypass_mode: 'pull_request' }],
-      rules: [{ type: 'pull_request' }] },
-    universal: { enforcement: 'active', current_user_can_bypass: 'never', bypass_actors: [], rules: [
-      { type: 'deletion' }, { type: 'non_fast_forward' },
-      { type: 'pull_request', parameters: { required_review_thread_resolution: true } },
-    ] },
-    rules: [{ ruleset_id: 26484091, type: 'pull_request' }, { ruleset_id: 25983949, type: 'non_fast_forward' }],
+    review: {
+      "enforcement": "active",
+      "current_user_can_bypass": "pull_requests_only",
+      "bypass_actors": [
+        {
+          "actor_id": 20910163,
+          "actor_type": "User",
+          "bypass_mode": "pull_request"
+        }
+      ],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "~DEFAULT_BRANCH"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 1,
+            "dismiss_stale_reviews_on_push": false,
+            "required_reviewers": [],
+            "require_code_owner_review": true,
+            "dismissal_restriction": {
+              "enabled": false,
+              "allowed_actors": []
+            },
+            "require_last_push_approval": true,
+            "required_review_thread_resolution": true,
+            "require_extra_approval_for_unattributed_changes": true,
+            "allowed_merge_methods": [
+              "merge",
+              "squash",
+              "rebase"
+            ]
+          }
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": true,
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "Required PR checks",
+                "integration_id": 15368
+              }
+            ]
+          }
+        }
+      ]
+    },
+    universal: {
+      "enforcement": "active",
+      "current_user_can_bypass": "never",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "~DEFAULT_BRANCH"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": false,
+            "required_reviewers": [],
+            "require_code_owner_review": false,
+            "dismissal_restriction": {
+              "enabled": false,
+              "allowed_actors": []
+            },
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false,
+            "require_extra_approval_for_unattributed_changes": false,
+            "allowed_merge_methods": [
+              "merge",
+              "squash",
+              "rebase"
+            ]
+          }
+        }
+      ]
+    },
+    rules: [],
   };
+  f.rules = [
+    { ruleset_id: 2955537, type: 'deletion' },
+    { ruleset_id: 2955537, type: 'non_fast_forward' },
+    { ruleset_id: 2955527, type: 'repository_transfer' },
+    ...f.review.rules.map(rule => ({ ruleset_id: 26484091, ...clone(rule) })),
+    ...f.universal.rules.map(rule => ({ ruleset_id: 25983949, ...clone(rule) })),
+  ];
   f.open = () => f.prs.filter(pr => !pr.merged);
   f.stack = () => ({ number: 99, open: true, base: { ref: 'dev' }, pull_requests: clone(f.prs) });
   f.pr = number => {
@@ -745,4 +842,53 @@ test('fake gh transport fixes host/API version and serializes boolean/options, i
     assert.equal(response.status, 409);
     assert.equal(response.body.details.uuid, uuid);
   } finally { process.env.PATH = oldPath; fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test('current personal PR policy previews while retaining strict quality', async () => {
+  const f = fixture();
+  const plan = await f.preview();
+  assert.deepEqual(plan.members.map(member => member.number), [11, 12]);
+  assert.ok(plan.members.every(member => member.blockers.length === 0));
+  assert.equal(f.writes().length, 0);
+});
+
+test('personal PR capability never relaxes hard boundaries or quality gates', async () => {
+  const cases = [
+    ['missing personal checks', f => f.review.rules.pop()],
+    ['wrong Actions owner', f => { f.review.rules[1].parameters.required_status_checks[0].integration_id = 200; }],
+    ['wrong required context', f => { f.review.rules[1].parameters.required_status_checks[0].context = 'other'; }],
+    ['non-strict checks', f => { f.review.rules[1].parameters.strict_required_status_checks_policy = false; }],
+    ['create enforcement waived', f => { f.review.rules[1].parameters.do_not_enforce_on_create = true; }],
+    ['extra personal actor', f => f.review.bypass_actors.push({ actor_id: 1, actor_type: 'User', bypass_mode: 'pull_request' })],
+    ['wrong personal actor', f => { f.review.bypass_actors[0].actor_id = 1; }],
+    ['always personal bypass', f => { f.review.bypass_actors[0].bypass_mode = 'always'; }],
+    ['personal review weakened', f => { f.review.rules[0].parameters.require_code_owner_review = false; }],
+    ['personal threads weakened', f => { f.review.rules[0].parameters.required_review_thread_resolution = false; }],
+    ['unexpected personal rule', f => f.review.rules.push({ type: 'required_signatures' })],
+    ['universal bypass', f => f.universal.bypass_actors.push({ actor_id: 20910163, actor_type: 'User', bypass_mode: 'pull_request' })],
+    ['hard PR boundary absent', f => { f.universal.rules = f.universal.rules.filter(rule => rule.type !== 'pull_request'); }],
+    ['hard deletion absent', f => { f.universal.rules = f.universal.rules.filter(rule => rule.type !== 'deletion'); }],
+    ['hard force-push boundary absent', f => { f.universal.rules = f.universal.rules.filter(rule => rule.type !== 'non_fast_forward'); }],
+    ['personal policy not effective', f => { f.rules = f.rules.filter(rule => rule.ruleset_id !== 26484091); }],
+    ['hard policy not effective', f => { f.rules = f.rules.filter(rule => rule.ruleset_id !== 25983949); }],
+    ['effective checks misplaced', f => { f.rules.find(rule => rule.type === 'required_status_checks').ruleset_id = 25983949; }],
+    ['pending Required gate', f => { f.checks[0].status = 'in_progress'; }],
+    ['failed source-security gate', f => { f.checks[1].conclusion = 'failure'; }],
+    ['failed native gate', f => { f.checks[2].conclusion = 'failure'; }],
+    ['unresolved conversation', f => { f.unresolved = true; }],
+  ];
+  for (const [name, change] of cases) {
+    const f = fixture(), plan = await f.preview();
+    change(f);
+    await assert.rejects(f.helper.execute(plan), undefined, name);
+    assert.equal(f.writes().length, 0, name);
+    // Policy failures reject preview; quality findings remain visible blockers.
+    if (!name.startsWith('pending ') && !name.startsWith('failed ') && name !== 'unresolved conversation') {
+      await assert.rejects(f.preview(), undefined, name);
+    } else {
+      const held = await f.preview();
+      assert.ok(held.members.some(member => member.blockers.length > 0), name);
+    }
+  }
 });

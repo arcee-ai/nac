@@ -1,7 +1,9 @@
 # Manual review override for NAC stacks
 
 `scripts/manual-stack-override.mjs` lets Allison explicitly process a reviewed
-stack from bottom to top using her existing review-only bypass permission.
+stack from bottom to top using her existing personal PR bypass permission. The helper independently
+requires green checks and resolved conversations, even when her account can
+manually bypass those requirements.
 This is a **human-invoked maintenance command**, never an agent tool or CI job.
 An agent authenticated as Allison is not authorized to execute it merely because
 the identity check passes. Preparing this utility does not authorize any merge.
@@ -71,9 +73,18 @@ advances. No author code is automatically fixed, rebased or marked ready.
 
 ## Safeguards and limits
 
-- Only the existing singleton review exception (ruleset 26484091) is accepted.
-  Universal protections (25983949), including conversation resolution, retain
-  no bypass. Policy drift requires a new preview, not an automatic relaxation.
+- Only the existing singleton Allison PR exception (ruleset 26484091) is
+  accepted: User20910163 in pull-request-only mode. Its review and strict
+  `Required PR checks` requirements must match the current policy and be
+  effective on `dev`. The hard PR/direct-push, deletion and force-push
+  protections (25983949) retain no bypass. Inherited protections remain in the
+  full policy fingerprint and check inventory. Policy drift requires a new
+  preview, not an automatic relaxation.
+- The account's manual CI/conversation bypass is not a quality waiver for this
+  helper. Pending, failed, missing or unproven current checks and unresolved
+  conversations still stop automated execution. No bypass permission grants an
+  agent merge authority; explicit human authorization for the exact set is
+  separate from identity, capability and a saved plan.
 - Every remaining member must be non-draft, conflict-free, and have known
   mergeability. Unresolved conversations and pending/failed check results stop
   execution. Required status contexts, `Required PR checks` and
