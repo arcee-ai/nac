@@ -21,6 +21,7 @@ import {
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
 import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
@@ -125,6 +126,9 @@ function SettingsShell({
   titleExtra?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const isMobile = useIsMobile();
+
+  // Reserve the phone footer's rendered height when its actions wrap.
   return (
     <Modal
       open={open}
@@ -141,7 +145,8 @@ function SettingsShell({
       }
       size={ModalSize.Wide}
       flush
-      className="h-[700px]"
+      className="h-[700px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11 [&>.modal-footer-mobile]:relative [&>.modal-footer-mobile]:shrink-0 [&>.modal-footer-mobile]:flex-wrap"
+      bodyClassName={isMobile && footer ? "pb-4" : undefined}
       footer={footer}
     >
       {children}
@@ -176,7 +181,7 @@ export function SettingsModal({
   if (!initial || !entry || isLoading) {
     return (
       <SettingsShell open={open} onClose={onClose}>
-        <p className="text-basic-muted text-micro">
+        <p className="p-6 text-small !leading-[22px] text-basic-secondary">
           {isLoading || isSummaryLoading
             ? "Loading session configuration…"
             : "Session configuration unavailable."}
@@ -548,6 +553,8 @@ function SettingsForm({
     <>
       {isMobile ? (
         <StickyButton
+          className="min-h-11"
+          buttonClassName="min-h-11 min-w-11"
           variant={ButtonVariant.Tertiary}
           content={ButtonContent.Text}
           onClick={onClose}
@@ -568,6 +575,8 @@ function SettingsForm({
       )}
       {isMobile ? (
         <StickyButton
+          className="min-h-11"
+          buttonClassName="min-h-11 min-w-11"
           variant={ButtonVariant.Primary}
           aria-label="Save"
           content={ButtonContent.Text}
@@ -604,13 +613,13 @@ function SettingsForm({
         ) : null
       }
     >
-      <div className="flex flex-col gap-6 [&>*]:shrink-0">
-        <p className="text-micro text-basic-muted">
+      <div className="flex min-w-0 flex-col gap-8 [&>*]:shrink-0">
+        <p className="text-small !leading-[22px] text-basic-secondary">
           Changes apply to this inactive primary chat. Project defaults and existing children keep
           their settings.
         </p>
         {diagnostics.length > 0 ? (
-          <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-3 text-micro text-error-primary">
+          <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-4 text-small !leading-[22px] text-error-primary">
             <div className="label-small mb-1">Repair required</div>
             {diagnostics.map((diagnostic) => (
               <div key={diagnostic}>• {diagnostic}</div>
@@ -630,15 +639,17 @@ function SettingsForm({
           </>
         ) : null}
 
-        <Input
-          label="Session title"
-          aria-label="Session title"
-          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-          placeholder={sessionTitle(openingSummary) || "Session name"}
-          hintText="Leave empty to restore the automatic title (the last prompt)."
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-        />
+        <FormSection title="Chat details" description="Name this chat so it is easy to find again.">
+          <Input
+            label="Session title"
+            aria-label="Session title"
+            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+            placeholder={sessionTitle(openingSummary) || "Session name"}
+            hintText="Leave empty to restore the automatic title (the last prompt)."
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </FormSection>
 
         <ModelSetupSection
           existingSession
@@ -660,7 +671,7 @@ function SettingsForm({
           }}
           onChange={onConfigurationChange}
         >
-          <div className="flex flex-col gap-2">
+          <div className="flex min-w-0 flex-col gap-4">
             {policy.orchestrationEnabled ? (
               <LightModelSection
                 key={JSON.stringify(lightSeed)}
@@ -670,7 +681,7 @@ function SettingsForm({
               />
             ) : null}
             {openingSummary.project_id ? (
-              <label className="flex items-start gap-2 text-micro">
+              <label className="flex min-h-11 items-start gap-3 text-small !leading-[22px]">
                 <input
                   type="checkbox"
                   checked={updateProjectDefault}
@@ -688,7 +699,7 @@ function SettingsForm({
             <Separator />
             <button
               type="button"
-              className="btn-ghost flex w-full items-center gap-1.5 rounded-[4px] p-2 text-btn-secondary"
+              className="btn-ghost flex min-h-11 w-full items-center gap-2 rounded-[4px] p-3 text-btn-secondary"
               aria-expanded={advanced}
               onClick={() => setAdvanced((value) => !value)}
             >
@@ -697,7 +708,10 @@ function SettingsForm({
               <Icon iconName={advanced ? IconName.Down : IconName.Right} size={20} />
             </button>
             {advanced ? (
-              <>
+              <FormSection
+                title="Runtime preferences"
+                description="Optional reasoning, context and request headers for this chat."
+              >
                 {lightNeedsRepair && !policy.orchestrationEnabled ? (
                   <label className="text-micro">
                     <input
@@ -710,10 +724,12 @@ function SettingsForm({
                 ) : null}
                 <Separator />
                 <ConfigRow
+                  presentation="form"
                   label="Reasoning Effort"
                   hint="Higher effort for deeper reasoning and lower effort for faster responses."
                   control={
                     <SmallSelect
+                      presentation="form"
                       items={reasoningItems}
                       value={reasoning}
                       onValueChange={setReasoning}
@@ -722,10 +738,11 @@ function SettingsForm({
                 />
                 <Separator />
                 <ConfigRow
+                  presentation="form"
                   label="Context Limit"
                   hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
                   control={
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       <Input
                         inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                         className={CONTROL_WIDTH}
@@ -755,7 +772,7 @@ function SettingsForm({
                   onChange={(event) => setHeaders(event.target.value)}
                   textAreaClassName="h-[160px] resize-none font-mono"
                 />
-              </>
+              </FormSection>
             ) : null}
           </div>
         </ModelSetupSection>

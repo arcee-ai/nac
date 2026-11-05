@@ -1274,6 +1274,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 size={ButtonSize.Small}
                 variant={ButtonVariant.Ghost}
                 content={ButtonContent.Icon}
+                className={isMobile ? "!size-11 !min-h-11 !min-w-11" : undefined}
                 aria-label="Session settings"
                 onClick={() => actions.settings(sessionId)}
               >
