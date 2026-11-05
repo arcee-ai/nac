@@ -67,7 +67,7 @@ def selected(text):
 
 
 def package_pin(text, name, version, offers):
-    rows = [base.fields(x) for x in text.strip().split('\n\n')]
+    rows = text if isinstance(text,list) else [base.fields(x) for x in text.strip().split('\n\n')]
     pins = {store.canonical({k:r[k] for k in store.FIELDS}) for r in rows
             if r.get('Package')==name and r.get('Version')==version
             and store.offer_name(r) in offers
@@ -155,10 +155,11 @@ Debug::NoLocking "true";
         uri_text=self.apt(label+'-uris',root,['apt-get','--print-uris','--download-only','--yes',
             'install','--no-install-recommends',*names]).decode()
         offers=archive_offers(uri_text)
-        pins=[]
-        for i,(name,version) in enumerate(selected(simulation)):
-            raw=self.apt(f'{label}-metadata-{i}',root,['apt-cache','show',name+'='+version]).decode()
-            pins.append(package_pin(raw,name,version,offers))
+        closure=selected(simulation)
+        raw=self.apt(label+'-metadata-batch',root,['apt-cache','show',
+            *[name+'='+version for name,version in closure]]).decode()
+        records=[base.fields(x) for x in raw.strip().split('\n\n')]
+        pins=[package_pin(records,name,version,offers) for name,version in closure]
         if {store.offer_name(p) for p in pins} != set(offers):
             raise ValueError('selected URI inventory differs from full closure')
         plan={'schema':1,'repository':self.args.repository,'platform':'ubuntu26.04-amd64-amd64v3',

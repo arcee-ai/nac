@@ -41,7 +41,8 @@ class CacheBoundary(unittest.TestCase):
         self.snapshot=self.root/'snapshot'
 
     def export(self):
-        return store.export(self.plan,{'fixture-font':self.input},self.snapshot,{'source':'0'*40})
+        return store.export(self.plan,{'fixture-font':self.input},self.snapshot,
+                            {'source':'0'*40,'origin':'owned-fixture'})
 
     def reject(self):
         with self.assertRaises((ValueError,OSError)):
@@ -75,6 +76,11 @@ class CacheBoundary(unittest.TestCase):
     def test_duplicate_manifest_fields_rejected(self):
         self.export();manifest=self.snapshot/'manifest.json';raw=manifest.read_bytes()
         manifest.write_bytes(b'{"schema":1,'+raw[1:]);self.reject()
+
+    def test_malformed_producer_provenance_rejected(self):
+        self.export();path=self.snapshot/'manifest.json';manifest=json.loads(path.read_bytes())
+        manifest['producer']={'source':'unbound','origin':'owned-fixture'}
+        path.write_text(json.dumps(manifest));self.reject()
 
     def test_foreign_stale_platform_rejected(self):
         self.export()

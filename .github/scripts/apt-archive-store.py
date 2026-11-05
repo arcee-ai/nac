@@ -82,6 +82,16 @@ def key(plan):
     return hashlib.sha256(canonical(plan)).hexdigest()
 
 
+def validate_producer(value):
+    # Audit provenance never grants cache-write authority or reuses a verdict.
+    if not isinstance(value,dict) or set(value)!={'source','origin'}:
+        raise ValueError('malformed producer provenance')
+    if not isinstance(value['source'],str) or not re.fullmatch(r'[0-9a-f]{40}',value['source']):
+        raise ValueError('invalid producer source')
+    if not isinstance(value['origin'],str) or not re.fullmatch(r'[a-z0-9-]{1,100}',value['origin']):
+        raise ValueError('invalid producer origin')
+
+
 def control(source):
     """Read only the control record; never extract or execute maintainer scripts."""
     source.seek(0)
@@ -177,6 +187,7 @@ def publish(output, callback):
 def export(plan, inputs, output, producer):
     started = time.monotonic()
     identity = key(plan)
+    validate_producer(producer)
     if set(inputs) != {x['Package'] for x in plan['packages']}:
         raise ValueError('download inventory differs from signed plan')
     def write(staging):
@@ -208,6 +219,7 @@ def restore(plan, snapshot, output, *, cold=False):
     manifest = json.loads(raw, object_pairs_hook=unique)
     if set(manifest) != {'schema','key','plan','producer'} or manifest['schema']!=1:
         raise ValueError('wrong snapshot schema')
+    validate_producer(manifest['producer'])
     if manifest['key'] != identity or manifest['plan'] != plan:
         raise ValueError('stale/foreign/platform package plan mismatch')
     expected = {x['SHA256']+'.deb' for x in plan['packages']}|{'manifest.json'}
