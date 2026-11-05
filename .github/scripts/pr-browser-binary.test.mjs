@@ -91,6 +91,9 @@ function validate(config, required = requiredJobs) {
   assert.deepEqual(producer.outputs, {
     receipt: "${{ steps.pack.outputs.receipt }}",
     artifact_id: "${{ steps.upload.outputs.artifact-id }}",
+    apt_mode: "${{ steps.apt-plan.outputs.mode || steps.apt-preflight.outputs.mode }}",
+    apt_receipt: "${{ steps.apt-export.outputs.receipt }}",
+    apt_artifact_id: "${{ steps.apt-upload.outputs.artifact-id }}",
   });
   const pack = step(producer, "pack");
   assert.equal(pack.if, undefined);
