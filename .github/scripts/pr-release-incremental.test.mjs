@@ -1,3 +1,4 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -16,6 +17,7 @@ const step = (value, name) => value.jobs.build.steps.find(item => item.name === 
 const ignores = () => [fs.readFileSync(".gitignore", "utf8"), fs.readFileSync(".dockerignore", "utf8")];
 
 function verify(actual, gitignore, dockerignore) {
+  actual = structuredClone(actual); reverseAdmission(actual);
   const job = actual.jobs.build;
   assert.equal(job.needs, "prepare");
   assert.equal(job.if, "${{ needs.prepare.outputs.run == 'true' }}");

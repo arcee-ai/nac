@@ -1,3 +1,4 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -82,6 +83,7 @@ function identityArguments(run) {
 }
 
 function validate(config, required = requiredJobs) {
+  config = structuredClone(config); reverseAdmission(config);
   compilerCacheGroup(config);
   assert.equal(config.permissions.contents, "read");
   const producer = config.jobs["browser-binary"];

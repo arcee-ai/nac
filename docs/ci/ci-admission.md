@@ -173,3 +173,26 @@ Local controls: the adjacent owner/bootstrap Python tests and unit parsed/actual
 applicability Node controls exercise real tiny
 Git objects plus offline identity, authority, cold, partial-history and no-auth
 negatives; no Cargo, server, browser, image, API traffic or CI execution.
+
+## Production integration candidate
+
+Stable always invokes `ci-admission` before prepare. Prepare always runs even
+after unit failure and forwards PURE only for original edited/basefalse plus
+successful exact unit mode; source/ready/base changes/push/tag/manual and unknown
+unit output remain FULL. The original quality DAG depends on prepare as before.
+Explicit status guards preserve original direct dependency semantics while
+allowing FULL coverage after an admission infrastructure failure. Every original
+quality command, profile, cache/receipt/trust field and APT relay field projects
+back to the landed FULL workflow.
+
+Pre-prepare workflow concurrency routes edited/basefalse and ready to unique
+run/attempt slots; only the former may ever prove PURE. Source synchronize/base
+cancellation semantics remain unchanged. Required/source-security/native choose
+nonprotected names only after successful prepare+PURE. The metadata aggregate
+executes no quality verifier; failed prepare chooses original names and the
+original fail-closed aggregate. There is no replacement quality verdict.
+
+The collector includes admission identity start in processing and resource
+accounting. Historical timing snapshots remain frozen. All eight sealed v2
+owner/bootstrap/unit/contract/policy pins remain unchanged; the external consumer
+still requires final provider/unit proof and latest FULL original verdict.

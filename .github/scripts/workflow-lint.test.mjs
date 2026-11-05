@@ -1,3 +1,4 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -208,6 +209,7 @@ test("tool failure cannot be reported as lint success", () => {
 
 test("fast lane is exact-candidate, unprivileged and explicitly required on every PR", () => {
   const stable = YAML.parse(fs.readFileSync(".github/workflows/stable-release.yml", "utf8"));
+  reverseAdmission(stable);
   const job = stable.jobs["workflow-lint"];
   assert.equal(job.needs, "prepare");
   assert.equal(job.if, "${{ needs.prepare.outputs.run == 'true' }}");

@@ -88,3 +88,16 @@ coverage/failure matrix, resources/cache state and cost evidence separately.
 No representative source changes, cold cache state, coverage parity or dollars
 are guessed from a green aggregate. The tool never reruns workflows, writes
 quality receipts, changes settings, or edits existing evidence snapshots.
+
+## Admission processing boundary
+
+For workflows with the source-admission unit before prepare, processing begins
+at `ci-admission / NAC admission identity`, not the later prepare job. The
+collector includes admission execution, subsequent waits and all remaining work
+in processing_seconds; prepare-to-result remains a separate diagnostic field.
+Initial wait ends at that earliest admission execution. Missing, duplicate,
+skipped or improperly ordered admission evidence cannot yield eligible timing.
+Legacy runs without the unit retain their original prepare boundary and numbers;
+no historical snapshot is rewritten. PURE observations lack Required PR checks
+and cannot become ordinary timing/cohort samples. All their resource jobs remain
+recorded. This change neither qualifies a cohort nor selects successful windows.

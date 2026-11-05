@@ -160,7 +160,9 @@ def summarize(run, jobs, logs, repository):
         except ValueError as error:
             reasons.append(str(error))
         try:
-            event, start = timestamp(run.get("created_at")), timestamp(prepare.get("started_at"))
+            event = timestamp(run.get("created_at"))
+            start, origin = processing_start(run, jobs, prepare)
+            result["processing_start_job"] = origin
             if start < event:
                 raise ValueError("preparation predates event")
             result["initial_wait_seconds"] = (start-event).total_seconds()
@@ -174,11 +176,15 @@ def summarize(run, jobs, logs, repository):
         except ValueError as error:
             reasons.append(str(error))
         try:
-            event, start, end = timestamp(run.get("created_at")), timestamp(prepare.get("started_at")), timestamp(required.get("completed_at"))
+            event, end = timestamp(run.get("created_at")), timestamp(required.get("completed_at"))
+            start, origin = processing_start(run, jobs, prepare)
+            result["processing_start_job"] = origin
+            preparation_start = timestamp(prepare.get("started_at"))
             if not event <= start <= end:
                 raise ValueError("invalid event/preparation/aggregate ordering")
             # Observed elapsed time includes all inter-job waits, setup, artifacts and aggregation.
-            result.update(observed_prepare_to_result_seconds=(end-start).total_seconds(),
+            result.update(observed_prepare_to_result_seconds=(end-preparation_start).total_seconds(),
+                          observed_processing_to_result_seconds=(end-start).total_seconds(),
                           observed_event_to_result_seconds=(end-event).total_seconds(),
                           initial_wait_seconds=(start-event).total_seconds())
         except (ValueError, TypeError) as error:
@@ -194,9 +200,26 @@ def summarize(run, jobs, logs, repository):
     result["ordinary_first_attempt_metric"] = (not reasons and attempt == 1
                                               and result["event_provenance"]["classification"] == "source")
     if not reasons:
-        result["processing_seconds"] = result["observed_prepare_to_result_seconds"]
+        result["processing_seconds"] = result["observed_processing_to_result_seconds"]
         result["event_to_green_seconds"] = result["observed_event_to_result_seconds"]
     return result
+
+
+def processing_start(run, jobs, prepare):
+    """Include admission execution before prepare; retain legacy start unchanged."""
+    name = "ci-admission / NAC admission identity"
+    matches = [job for job in jobs if job.get("name") == name]
+    refs = run.get("referenced_workflows", [])
+    has_unit = any(isinstance(ref, dict) and "/.github/workflows/ci-admission.yml@" in ref.get("path", "")
+                   for ref in refs)
+    if not matches and not has_unit and not any(str(job.get("name", "")).startswith("ci-admission /") for job in jobs):
+        return timestamp(prepare.get("started_at")), "prepare"
+    if len(matches) != 1:
+        raise ValueError("expected exactly one admission identity processing start")
+    start = timestamp(matches[0].get("started_at"))
+    if matches[0].get("conclusion") == "skipped" or not timestamp(run.get("created_at")) <= start <= timestamp(prepare.get("started_at")):
+        raise ValueError("invalid admission/preparation ordering")
+    return start, name
 
 
 def write_json(path, value):
