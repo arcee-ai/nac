@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
 
 // Exercise Cargo's actual fingerprint decisions, rather than only inspecting
 // build-script output. The probe has no dependencies and never builds NAC.
@@ -32,7 +33,7 @@ function fixture(t) {
   git("config", "user.name", "Identity Test");
   git("add", ".");
   git("commit", "-m", "probe");
-  const build = (cwd = crate, extra = {}) => run(process.env.CARGO || "cargo", ["build", "--locked", "--offline", "-vv"], cwd, extra).stderr;
+  const build = (cwd = crate, extra = {}) => stripVTControlCharacters(run(process.env.CARGO || "cargo", ["build", "--locked", "--offline", "-vv"], cwd, extra).stderr);
   const identity = (cwd = crate) => run(path.join(cwd, "target/debug/nac-identity-probe"), []).stdout.trim().split("|");
   return { root, crate, git, run, build, identity };
 }
