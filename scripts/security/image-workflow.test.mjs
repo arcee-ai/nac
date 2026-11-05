@@ -165,3 +165,18 @@ test('quality reusable retains full fallback, current-attempt validation and man
   assert.equal(fault['continue-on-error'], undefined);
   assert.equal(quality.permissions.contents, 'read');
 });
+
+// Keep daily unchanged-image selection synchronized with the actual reusable DAG.
+test('daily rescan recognizes the canonical producer emitted by the stable graph', () => {
+  const calls = Object.entries(workflow('stable-release').jobs)
+    .filter(([, job]) => job.uses === './.github/workflows/managed-image-build.yml');
+  assert.equal(calls.length, 1);
+  const producers = Object.entries(workflow('managed-image-build').jobs)
+    .filter(([, job]) => job.steps?.some(step => step.uses?.startsWith('docker/build-push-action@')));
+  assert.equal(producers.length, 1);
+  const [callerId, caller] = calls[0];
+  const [producerId, producer] = producers[0];
+  const name = `${caller.name ?? callerId} / ${producer.name ?? producerId}`;
+  const source = readFileSync('scripts/security/image_rescan.py', 'utf8');
+  assert.equal(source.match(/^INVENTORY_JOB = "([^"]+)"$/m)?.[1], name);
+});
