@@ -170,7 +170,20 @@ build scripts, product code and embedded assets are compiled from real source.
 Wolfi tooling/runtime and all image smoke/security obligations are unchanged.
 `scripts/test-managed-dependency-layer.py` checks manifest bytes, workspace/target
 coverage and cleanup ordering. First prelanding builds can miss the new layer;
-PRs still cannot export it. Full cold/warm linux/amd64 measurements are pending.
+PRs still cannot export it. The completed local
+[S07 full-image comparison](evidence/all-582/S07-full-image/README.md) records
+four exact linux/amd64 Wolfi images under ARM-host emulation, with fixed
+four-CPU/6 GiB builders and Cargo two jobs. Warm wall time decreased 60.65% and
+builder CPU 62.11%; external compile events fell from 305 to zero while all six
+selected local crates rebuilt. Cold wall time increased 5.72%, without an
+isolated cold-cost conclusion. Two guard-aborted attempts and the before-warm
+retry's cached COPY remain explicit. Every exact-image smoke/inventory passed;
+every fresh strict scan exited 1 with 32 blockers, so there is no security
+clearance. These local observations do not qualify hosted/current-head coverage,
+an ordinary cohort or additive whole-CI savings. Hosted warm evidence still
+requires cache population by a human-approved dev/main push; unprivileged PRs
+retain no shared-cache export. The portable evidence delivery itself adds no
+optimization or cohort sample and leaves docs-only managed applicability false.
 
 ## Cache and cancellation boundary
 
