@@ -49,6 +49,10 @@ struct RuntimeState {
     history_reads: usize,
     #[cfg(test)]
     history_waits: usize,
+    #[cfg(test)]
+    metadata_read_error: Option<rusqlite::Error>,
+    #[cfg(test)]
+    history_read_error: Option<rusqlite::Error>,
 }
 #[cfg(test)]
 struct HistoryWaitGate {
@@ -308,6 +312,11 @@ impl NativeAttentionSubscription {
                     state.history_read_gate.take()
                 };
                 let result = nac_core::store::read_completion_page(&path, after.as_ref());
+                #[cfg(test)]
+                let result = match _permit.runtime.lock().unwrap().history_read_error.take() {
+                    Some(error) => Err(anyhow::Error::new(error).context("injected history read")),
+                    None => result,
+                };
                 #[cfg(test)]
                 if let Some(gate) = gate {
                     gate.reached.notify_one();
@@ -618,6 +627,10 @@ async fn read(
             }
             #[cfg(test)]
             let _after_read = AfterReadGate(after_read_gate);
+            #[cfg(test)]
+            if let Some(error) = _permit.runtime.lock().unwrap().metadata_read_error.take() {
+                return Err(anyhow::Error::new(error).context("injected metadata read"));
+            }
             nac_core::store::read_attention_metadata(&path, id.as_deref())
         })
         .await

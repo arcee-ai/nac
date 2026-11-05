@@ -42,18 +42,21 @@ impl Fixture {
             _env: env,
         }
     }
-    async fn body(manager: SessionManager) -> Feed {
-        let response = crate::router(manager)
+    async fn response(manager: SessionManager, cursor: &str) -> axum::response::Response {
+        crate::router(manager)
             .oneshot(
                 Request::builder()
                     .uri("/attention/events")
                     .header("host", "127.0.0.1:12345")
-                    .header("x-nac-completion-cursor", "new")
+                    .header("x-nac-completion-cursor", cursor)
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
-            .unwrap();
+            .unwrap()
+    }
+    async fn body(manager: SessionManager) -> Feed {
+        let response = Self::response(manager, "new").await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         Box::pin(response.into_body().into_data_stream())
     }
@@ -224,6 +227,100 @@ fn exact(value: Option<serde_json::Value>, run: &str, marker: &str) {
     let value = value.unwrap();
     assert_eq!(value["kind"], "completions");
     assert_eq!(value["page"]["items"][0]["run_id"], run);
+}
+
+// Typed error injection exercises the real accepted caller/mapping, not a
+// claim that a SQLite connection actually encountered contention.
+fn sqlite_read_error(code: i32) -> rusqlite::Error {
+    let error = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+    let chained = anyhow::Error::new(error).context("typed read characterization");
+    assert!(store::is_sqlite_busy(&chained));
+    let actual = chained
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<rusqlite::Error>())
+        .unwrap();
+    match actual {
+        rusqlite::Error::SqliteFailure(actual, _) => assert_eq!(actual.extended_code, code),
+        _ => unreachable!(),
+    }
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None)
+}
+async fn seat_returned(f: &Fixture) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.manager.inner.attention.0.lock().unwrap().seat.is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typed_initial_busy_returns_503_then_a_fresh_observation_recovers() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let f = Fixture::new().await;
+    f.manager
+        .inner
+        .attention
+        .0
+        .lock()
+        .unwrap()
+        .metadata_read_error = Some(sqlite_read_error(rusqlite::ffi::SQLITE_BUSY));
+    let response = Fixture::response(f.manager.clone(), "new").await;
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
+    drop(response);
+    seat_returned(&f).await;
+    assert!(!f.manager.inner.attention.0.lock().unwrap().stopped);
+    let successor = f.open().await;
+    drop(successor);
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typed_established_history_locked_emits_replay_gap_and_same_cursor_catches_up() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let f = Fixture::new().await;
+    let mut feed = Fixture::body(f.manager.clone()).await;
+    let cutoff = frame(&mut feed).await;
+    assert_eq!(cutoff["kind"], "completions");
+    let cursor = format!(
+        "{}:{}",
+        cutoff["page"]["store_id"].as_str().unwrap(),
+        cutoff["page"]["cursor"].as_i64().unwrap()
+    );
+    assert_eq!(frame(&mut feed).await["kind"], "baseline");
+    f.manager
+        .inner
+        .attention
+        .0
+        .lock()
+        .unwrap()
+        .history_read_error = Some(sqlite_read_error(rusqlite::ffi::SQLITE_LOCKED));
+    let reset = tokio::time::timeout(Duration::from_secs(5), frame(&mut feed))
+        .await
+        .unwrap();
+    assert_eq!(reset["kind"], "reset");
+    assert_eq!(reset["reason"], "replay_gap");
+    assert!(std::future::poll_fn(|cx| feed.as_mut().poll_next(cx))
+        .await
+        .is_none());
+    drop(feed);
+    seat_returned(&f).await;
+    f.commit("after-locked", 0).await;
+    let response = Fixture::response(f.manager.clone(), &cursor).await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let mut recovered: Feed = Box::pin(response.into_body().into_data_stream());
+    let page = frame(&mut recovered).await;
+    assert_eq!(page["kind"], "completions");
+    let items = page["page"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["run_id"], "after-locked");
+    assert!(page["page"]["cursor"].as_i64().unwrap() > cutoff["page"]["cursor"].as_i64().unwrap());
+    drop(recovered);
+    f.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -425,6 +522,13 @@ async fn history_wake_cancelled_accepted_read_retains_seat_until_actual_return()
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let f = Fixture::new().await;
     let feed = f.open().await;
+    f.manager
+        .inner
+        .attention
+        .0
+        .lock()
+        .unwrap()
+        .history_read_error = Some(sqlite_read_error(rusqlite::ffi::SQLITE_LOCKED));
     let (gate, release) = f.read_gate();
     let task = reading(feed);
     reached(&gate.reached).await;
@@ -439,6 +543,9 @@ async fn history_wake_cancelled_accepted_read_retains_seat_until_actual_return()
             .await,
         Err(AttentionSubscribeError::Busy)
     ));
+    let held = Fixture::response(f.manager.clone(), "new").await;
+    assert_eq!(held.status(), axum::http::StatusCode::CONFLICT);
+    drop(held);
     release.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(1), async {
         while f.manager.inner.attention.0.lock().unwrap().seat.is_some() {
