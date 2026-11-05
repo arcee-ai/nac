@@ -61,6 +61,25 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  // Reverse only S19's guarded selection and explicit selected-builder binding.
+  // Every prior cold/cache/security field remains covered by the original hashes.
+  const imageSteps = normalized['managed-image-build'].jobs['build-smoke'].steps;
+  const driver = imageSteps.find(s => s.id === 'image-driver');
+  assert.deepEqual(driver, {
+    name: 'Select supported image build driver', id: 'image-driver',
+    run: 'python3 .github/scripts/image-build-driver.py >> "$GITHUB_OUTPUT"',
+  });
+  const setup = imageSteps.find(s => s.uses?.startsWith('docker/setup-buildx-action@'));
+  assert.deepEqual(setup, {
+    uses: 'docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f', id: 'buildx',
+    with: { driver: '${{ steps.image-driver.outputs.driver }}' },
+  });
+  const imageBuild = imageSteps.find(image);
+  assert.equal(imageBuild.with.builder, '${{ steps.buildx.outputs.name }}');
+  normalized['managed-image-build'].jobs['build-smoke'].steps = imageSteps.filter(s => s !== driver);
+  delete setup.id;
+  delete setup.with;
+  delete imageBuild.with.builder;
   const top = normalized["stable-release"];
   // Reverse only S02's ordinary execution/list granularity; proof remains serial.
   for (const step of [
