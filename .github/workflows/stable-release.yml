@@ -191,7 +191,56 @@ jobs:
         run: make test-stable-binary
 
 
-  browser:
+  browser-shards:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Provision real terminal pager
+        run: sudo apt-get update && sudo apt-get install --yes less
+      - name: Install locked browser dependencies
+        run: npm --prefix crates/nac-server/web ci
+      # This candidate's committed bundles are checked by test-server/test-assets.
+      # The final aggregate requires BOTH that drift gate and these real journeys.
+      - name: Install Playwright Chromium
+        working-directory: crates/nac-server/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run production-embedded browser shard
+        env:
+          NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
+          BROWSER_SHARD: ${{ matrix.shard }}
+        run: |
+          cargo build --locked -p nac-server --bin nac-web
+          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e -- --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/4"
+      - name: Upload browser shard failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nac-web-playwright-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: crates/nac-server/web/test-results
+          if-no-files-found: ignore
+
+  browser-proof:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
@@ -221,122 +270,30 @@ jobs:
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
 
-      - name: Run production-embedded browser tests
+      - name: Verify complete disjoint current browser selection
+        working-directory: crates/nac-server/web
+        run: |
+          mkdir -p browser-inventory
+          npx playwright test --list --reporter=json > browser-inventory/complete.json
+          npx playwright test exact-goal-wait.e2e.ts --list --reporter=json > browser-inventory/proof.json
+          for shard in 1 2 3 4; do
+            npx playwright test --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/4" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
+          done
+          python3 ../../../.github/scripts/browser-inventory.py \
+            --complete browser-inventory/complete.json --part browser-inventory/proof.json \
+            --part browser-inventory/ordinary-1.json --part browser-inventory/ordinary-2.json \
+            --part browser-inventory/ordinary-3.json --part browser-inventory/ordinary-4.json
+      - name: Run production-embedded goal proof journeys
         env:
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
         run: |
           cargo build --locked -p nac-server --bin nac-web
-          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e
-
+          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e -- exact-goal-wait.e2e.ts
       - name: Stage only the two bounded ALL471 goal receipts
         if: always()
         env:
           GOAL_PROOF_SOURCE: ${{ needs.prepare.outputs.sha }}
-        run: |
-          python3 - <<'PYPROOF'
-          import hashlib,json,os,pathlib,re,stat,uuid
-
-          root=pathlib.Path("crates/nac-server/web/test-results")
-          dest=root/"all471-goal-proof-artifact"
-          source=os.environ["GOAL_PROOF_SOURCE"]
-          assert re.fullmatch(r"[0-9a-f]{40}",source)
-          calls={
-            "g1":{"g1-snapshot","g1-completion-wake","g1-quiet-settlement","g1-quiet-clear","g1-restart-cursor","g1-retained-proof"},
-            "g2":{"g2-passive-before","g2-snapshot","g2-input-wait","g2-passive-after-input","g2-pause-wait","g2-quiet-settlement","g2-fresh-proof","g2-passive-final"},
-          }
-          fields={
-            "g1":{"identity","initial","calls","settled","restarted","verified_read","native_complete"},
-            "g2":{"identity","initial","calls","settled","human_pause","verified_read"},
-          }
-
-          def nonempty(value):
-            assert isinstance(value,str) and value.strip()
-            return value
-
-          def canonical_id(value):
-            assert str(uuid.UUID(nonempty(value)))==value and uuid.UUID(value).int
-            return value
-
-          def identity(value):
-            assert set(value)=={"source","binary","binary_sha256","owner","profile","organization","host","incarnation","release"}
-            assert value["source"]==source and re.fullmatch(r"[0-9a-f]{64}",value["binary_sha256"])
-            for field in value:
-              nonempty(value[field])
-            assert json.loads(value["release"])[3]==source
-
-          def proof(value,case):
-            assert set(value)==fields[case]
-            identity(value["identity"])
-            initial=value["initial"]
-            for field in ("target","caller","project"):
-              nonempty(initial[field])
-            goal=canonical_id(initial["goal"]["goal_id"])
-            run=canonical_id(initial["goal"]["accounting_run_id"])
-            settled=value["settled"]
-            assert settled["goal_id"]==goal and isinstance(settled["version"],int)
-            assert {"status","accounting_run_id","last_failure"}<=set(settled)
-            assert set(value["calls"])==calls[case]
-            for name,result in value["calls"].items():
-              nonempty(result["status"])
-              if name in {"g2-passive-before","g2-passive-after-input","g2-passive-final"}:
-                task=result["task"]
-                assert task["session_id"]==initial["target"] and task["project_id"]==initial["project"]
-                assert isinstance(task["durable"],dict) and isinstance(task["ephemeral"],dict)
-                assert task["durable"]["goal"]["goal_id"]==goal
-              else:
-                assert len(result["targets"])==1
-                target=result["targets"][0]
-                assert target["session_id"]==initial["target"] and target["mode"]=="goal" and target["resolved_identity"]==goal
-                nonempty(target["status"])
-                nonempty(target["after_cursor"])
-                if "proof" in target:
-                  assert target["proof"]["goal_id"]==goal and target["proof"]["last_run_id"]==run
-            fresh="g1-retained-proof" if case=="g1" else "g2-fresh-proof"
-            assert {"goal_id","last_run_id","version","retained"}<=set(value["calls"][fresh]["targets"][0]["proof"])
-            nonempty(value["verified_read"])
-            if case=="g1":
-              nonempty(value["native_complete"])
-              identity(value["restarted"])
-              return value["restarted"]["binary"]
-            pause=value["human_pause"]
-            assert isinstance(pause["http_status"],int)
-            assert pause["goal"]["goal_id"]==goal and pause["goal"]["accounting_run_id"]==run
-            assert isinstance(pause["goal"]["version"],int)
-            return value["identity"]["binary"]
-
-          selected={}
-          for case in ("g1","g2"):
-            values={}
-            for kind,limit in (("proof",131072),("cleanup",4096)):
-              name=f"all471-{case}-{kind}.json"
-              matches=list(root.glob("*/"+name))
-              assert len(matches)==1,(name,len(matches))
-              src=matches[0]
-              assert not src.parent.is_symlink()
-              with os.fdopen(os.open(src,os.O_RDONLY|os.O_NOFOLLOW),"rb") as handle:
-                descriptor=os.fstat(handle.fileno())
-                assert stat.S_ISREG(descriptor.st_mode) and descriptor.st_size<=limit
-                payload=handle.read(limit+1)
-              assert len(payload)<=limit
-              values[kind]=json.loads(payload)
-              selected[name]=payload
-            binary=proof(values["proof"],case)
-            cleanup=values["cleanup"]
-            assert set(cleanup)=={"pid","binaryPath","baseUrl","provider","exitCode","signalCode"}
-            assert isinstance(cleanup["pid"],int) and cleanup["pid"]>0 and cleanup["binaryPath"]==binary
-            assert cleanup["exitCode"] is not None or cleanup["signalCode"] is not None
-
-          manifest={"source_revision":source,"files":{name:{"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()} for name,data in selected.items()}}
-          manifest_bytes=(json.dumps(manifest,indent=2)+"\n").encode()
-          assert len(manifest_bytes)<=4096
-          selected["manifest.json"]=manifest_bytes
-          assert len(selected)==5 and sum(map(len,selected.values()))<=274432
-          # No destination is published until both complete cases and ledgers validate.
-          dest.mkdir()
-          for name,data in selected.items():
-            (dest/name).write_bytes(data)
-          PYPROOF
-
+        run: python3 .github/scripts/browser-proof.py --root crates/nac-server/web/test-results --source "$GOAL_PROOF_SOURCE"
       - name: Retain only ALL471 goal proof and cleanup receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -350,9 +307,22 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: nac-web-playwright
+          name: nac-web-playwright-proof-${{ github.run_attempt }}
           path: crates/nac-server/web/test-results
           if-no-files-found: ignore
+
+  browser:
+    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, browser-shards, browser-proof]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every browser shard and complete goal proof
+        env:
+          SHARD_RESULT: ${{ needs.browser-shards.result }}
+          PROOF_RESULT: ${{ needs.browser-proof.result }}
+        run: |
+          test "$SHARD_RESULT" = success
+          test "$PROOF_RESULT" = success
 
   test-core:
     if: ${{ needs.prepare.outputs.run == 'true' }}
@@ -393,7 +363,11 @@ jobs:
         run: make test-capture-qualification
 
       - name: Test PR gates and rollout safeguards
-        run: node --test .github/scripts/pr-*.test.mjs
+        run: |
+          node --test .github/scripts/pr-*.test.mjs
+          python3 .github/scripts/browser-proof.test.py
+          python3 .github/scripts/browser-inventory.test.py
+          python3 .github/scripts/ci-timings.test.py
 
       - name: Test stable release policy and configuration
         run: |
@@ -590,7 +564,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

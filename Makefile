@@ -118,6 +118,9 @@ test-release:
 	sh -n .github/scripts/stable-release-rollout.sh
 	node --test .github/scripts/release-policy.test.mjs
 	node --test .github/scripts/pr-*.test.mjs
+	python3 .github/scripts/browser-proof.test.py
+	python3 .github/scripts/browser-inventory.test.py
+	python3 .github/scripts/ci-timings.test.py
 	$(MAKE) test-stable-binary
 
 ## Build a stable binary and exercise its real readiness/status identity contract

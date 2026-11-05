@@ -22,7 +22,7 @@ managed image work remains contents-read/build-and-smoke only.
 | Web lint/typecheck | Stable lint, server checks/assets and managed repeat | `test-assets` lint/typecheck once; formatting remains in lint |
 | Generated API document, app types, bounded nac-client types | `test-assets -> test-api-contract` plus managed repeat | Same sole writer/check chain in server; required receipt |
 | Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes the identical committed bundles from the same candidate |
-| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; same browser command/config, retries and assertions |
+| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; four file-isolated ordinary shards plus dedicated goal proof; same selected tests, retries and assertions |
 | Source-size, source workflow/binary, durability, managed load/static image contract | Stable workspace plus managed repeat | Stable workspace; required receipt |
 | Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Always managed quality, after receipt validation; never deduplicated |
 | Exact native linux/amd64 image, load, smoke, inventory, advisory scan/qualification | Managed contract/quality/build-smoke/result | Same exact loaded image ID and candidate, scanner infrastructure enforced; findings advisory as accepted |
@@ -55,6 +55,26 @@ attempt. A complete valid earlier receipt with the same run/repository/candidate
 selects full `make ci` in the current attempt; it is never reused. Future attempts,
 foreign identities, malformed or incomplete results still fail closed. Browser/native/build/source-security are separately
 required by the final aggregate, rather than falsely described as receipt contents.
+
+## Complete production browser partition (ALL-582)
+
+Four ordinary machines each run one native Playwright file shard, one worker,
+zero retries, and unchanged real-clock journeys. A dedicated machine runs both
+ALL471 goal-proof cases and the original bounded proof/cleanup collector. It
+also lists the complete current suite and all five partitions, rejecting any
+missing, duplicate, unexpected or changed-skip selection before its journeys.
+Each executing shard uses the same exclusion and shard arguments as those
+inventories. The final aggregate requires every shard, proof job and browser
+join in addition to independent assets/API drift checks. Failure artifacts have
+unique shard/attempt names; bounded proof artifacts retain their existing scope.
+
+Static inventory metadata never supplies execution success. The aggregate uses
+actual same-run job results, preserving successful siblings across GitHub's
+failed-job rerun behavior without looking up prior green runs or caching verdicts.
+See [browser partition commands and controls](browser-sharding.md) and the
+[observed timing collector](ci-timings.md). Setup, compilation, scheduling and
+artifact overhead on all machines remains part of measured processing and
+executed-job totals; parallel execution does not imply lower total compute.
 
 ## Early image branch and complete late join (ALL-582)
 
