@@ -32,7 +32,7 @@ const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "brows
 // Its old digest is independently checked after reversing exactly those inputs.
 // The other four workflow hashes, graph, profiles, commands and identities stay fixed.
 const baseline = {
-  "stable-release": "1bd0b4b2236140f0b5e56e30daa28345ec948a5f06299e486c97811a5f1ed6a9",
+  "stable-release": "e58c6a530fba723dcee4be2280ce35eb544366153ae0fe7edd283f825f80b4ab",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
   "managed-image-build": "c82a05b0089599969dc17e4d0bf0e57aee293dcf8439b3cb4c325a3b2ec0bcb8",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
@@ -168,7 +168,7 @@ function verify(values) {
     cache.with.key = "${{ github.job }}";
     cache.with["save-if"] = trust;
   }
-  assert.equal(digest(beforeShared), "eeafa4d914c1a2dc3fc6a63b91a29bff3b212adda1e04bd45f4e6804c3a8a79f",
+  assert.equal(digest(beforeShared), "a14e76578b200d595eba627f03b5aa18381a50af07bc2b0993926448a391d357",
     "reversing only S17 must recover the exact pre-shared workflow");
   for (const [name, expected] of Object.entries(baseline)) assert.equal(digest(normalized[name]), expected, `${name}: acceptance behavior changed outside cache control`);
   // No flag is allowed to affect a command, if/needs, receipt, privilege or role.

@@ -244,12 +244,11 @@ function includes(patterns: string[], file: string) {
 
 test("elapsed evidence stays bounded on success and failure while old failure artifacts remain", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/stable-release.yml"), "utf8");
-  const selectedStep = workflow
+  const browserShards = workflow.split("\n  browser-shards:\n")[1].split("\n  browser-proof:\n")[0];
+  const selectedStep = browserShards
     .split("      - name: Upload selected elapsed interval evidence")[1]
-    .split("      - name: Upload browser test artifacts")[0];
-  const failureStep = workflow
-    .split("      - name: Upload browser test artifacts")[1]
-    .split("\n  test-core:")[0];
+    .split("      - name: Upload browser shard failure artifacts")[0];
+  const failureStep = browserShards.split("      - name: Upload browser shard failure artifacts")[1];
   const selected = uploadPaths(selectedStep);
   const failure = uploadPaths(failureStep);
   expect(selected).toHaveLength(6);

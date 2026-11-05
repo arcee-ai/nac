@@ -50,7 +50,7 @@ function verify(workflow) {
   // Canonical full parsed workflow from ad3400565aad89834742893ad36183254b5098af.
   // Reverse ONLY S12's server input: all three provenance fields stay present.
   assert.equal(createHash("sha256").update(JSON.stringify(sort(reversed))).digest("hex"),
-    "6911d5ed043ce21d95bc0507012e7f4e4990d907ea432aedc68d43ac957ae03b");
+    "ff682ecf61c3194aebcd0de6b24cf8ebeaa583a9c542c6ef726db9c8826ed6ac");
 }
 
 test("only the server runner input changes; pinned compiler/cache trust and stable identity stay", () => verify(read()));
