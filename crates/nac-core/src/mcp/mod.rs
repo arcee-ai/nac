@@ -513,38 +513,113 @@ pub(crate) mod test_support {
         (url, handle)
     }
 
-    pub(crate) fn start_auth_retry_http_mcp_server() -> (String, thread::JoinHandle<()>) {
+    pub(crate) struct AuthRetryTrace {
+        started: Instant,
+        events: Mutex<Vec<(u128, &'static str, usize)>>,
+        accepts: std::sync::atomic::AtomicUsize,
+        initializes: std::sync::atomic::AtomicUsize,
+        unreadable: std::sync::atomic::AtomicUsize,
+        dropped: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AuthRetryTrace {
+        pub(crate) fn note(&self, phase: &'static str, attempt: usize) {
+            use std::sync::atomic::Ordering::Relaxed;
+            match phase {
+                "accepted" => {
+                    self.accepts.fetch_add(1, Relaxed);
+                }
+                "initialize" => {
+                    self.initializes.fetch_add(1, Relaxed);
+                }
+                "request-unreadable" => {
+                    self.unreadable.fetch_add(1, Relaxed);
+                }
+                _ => {}
+            }
+            // Diagnostics must neither wait for another thread nor grow with
+            // request traffic. Missing observations are explicit in failures.
+            match self.events.try_lock() {
+                Ok(mut events) if events.len() < 64 => {
+                    events.push((self.started.elapsed().as_millis(), phase, attempt));
+                }
+                _ => {
+                    self.dropped.fetch_add(1, Relaxed);
+                }
+            }
+        }
+
+        pub(crate) fn snapshot(&self) -> String {
+            use std::sync::atomic::Ordering::Relaxed;
+            let events = self.events.try_lock().map_or_else(
+                |_| "unavailable (busy or poisoned)".to_string(),
+                |events| format!("{events:?}"),
+            );
+            format!(
+                "auth-retry fixture: elapsed_ms={} accepts={} initializes={} unreadable={} dropped={} events=(elapsed_ms,phase,attempt){events}",
+                self.started.elapsed().as_millis(),
+                self.accepts.load(Relaxed),
+                self.initializes.load(Relaxed),
+                self.unreadable.load(Relaxed),
+                self.dropped.load(Relaxed),
+            )
+        }
+    }
+
+    pub(crate) fn start_auth_retry_http_mcp_server(
+    ) -> (String, thread::JoinHandle<()>, Arc<AuthRetryTrace>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind auth retry MCP server");
         listener
             .set_nonblocking(true)
             .expect("set auth retry MCP listener nonblocking");
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let trace = Arc::new(AuthRetryTrace {
+            started: Instant::now(),
+            events: Mutex::new(Vec::new()),
+            accepts: 0.into(),
+            initializes: 0.into(),
+            unreadable: 0.into(),
+            dropped: 0.into(),
+        });
+        trace.note("listener-bound", 0);
+        let observed = Arc::clone(&trace);
         let handle = thread::spawn(move || {
+            observed.note("server-thread-start", 0);
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut initialize_attempts = 0;
             let mut initialized = false;
             while Instant::now() < deadline && !initialized {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        observed.note("accepted", initialize_attempts);
                         let Some(request) = read_fake_http_request(&mut stream) else {
+                            observed.note("request-unreadable", initialize_attempts);
                             continue;
                         };
+                        observed.note("request-read", initialize_attempts);
                         let Some(body) = request.body else {
+                            observed.note("request-no-body", initialize_attempts);
                             continue;
                         };
                         let method = body.get("method").and_then(Value::as_str).unwrap_or("");
                         if method == "notifications/initialized" && initialize_attempts == 2 {
+                            observed.note("initialized-notification", initialize_attempts);
                             write_fake_http_response(&mut stream, "202 Accepted", None, "");
+                            observed.note("initialized-write-returned", initialize_attempts);
                             initialized = true;
                             continue;
                         }
                         if method != "initialize" {
+                            observed.note("other-method", initialize_attempts);
                             write_fake_http_response(&mut stream, "202 Accepted", None, "");
                             continue;
                         }
                         initialize_attempts += 1;
+                        observed.note("initialize", initialize_attempts);
                         thread::sleep(Duration::from_millis(200));
+                        observed.note("response-delay-ended", initialize_attempts);
                         if initialize_attempts == 1 {
+                            observed.note("401-write-start", initialize_attempts);
                             write_fake_http_response_with_headers(
                                 &mut stream,
                                 "401 Unauthorized",
@@ -552,6 +627,7 @@ pub(crate) mod test_support {
                                 None,
                                 "",
                             );
+                            observed.note("401-write-returned", initialize_attempts);
                         } else {
                             let id = body.get("id").cloned().unwrap_or(Value::Null);
                             let response = json!({
@@ -563,12 +639,14 @@ pub(crate) mod test_support {
                                     "serverInfo":{"name":"auth-retry","version":"0.1.0"}
                                 }
                             });
+                            observed.note("200-write-start", initialize_attempts);
                             write_fake_http_response(
                                 &mut stream,
                                 "200 OK",
                                 Some("application/json"),
                                 &response.to_string(),
                             );
+                            observed.note("200-write-returned", initialize_attempts);
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -577,8 +655,9 @@ pub(crate) mod test_support {
                     Err(_) => break,
                 }
             }
+            observed.note("server-exit", initialize_attempts);
         });
-        (url, handle)
+        (url, handle, trace)
     }
 
     pub(crate) fn start_deadline_http_mcp_server(
