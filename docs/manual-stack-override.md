@@ -66,10 +66,13 @@ remaining members and any active request UUID. A timed-out request may still
 finish; inspect its result and actual PR state before deciding what to do next.
 
 After a lower member lands, GitHub may automatically retarget/rebase the others.
-Their authored diffs must still match, byte for byte except blob IDs and hunk
-line offsets, and the new lowest base must be the just-confirmed merge commit.
-This deliberately rejects some harmless context changes and unrelated trunk
-advances. No author code is automatically fixed, rebased or marked ready.
+Their authored diffs must still match, with full changed-file blob revisions
+pinned as well as patch bytes. Diff-header abbreviations and hunk line offsets
+are normalized; moving identical patch text to another repeated block cannot
+approve different file content. The new lowest base must be the just-confirmed
+merge commit. This deliberately rejects harmless changes within affected files,
+some context changes and unrelated trunk advances. No author code is
+automatically fixed, rebased or marked ready.
 
 ## Safeguards and limits
 
