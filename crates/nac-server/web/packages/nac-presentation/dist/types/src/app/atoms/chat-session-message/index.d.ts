@@ -5,16 +5,20 @@ export declare enum ChatSessionMessageVariant {
     Danger = "danger",
     Success = "success"
 }
+export type ChatSessionMessageAction = {
+    label: string;
+    onClick: () => void;
+} | {
+    label: string;
+    href: string;
+};
 interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
     title: React.ReactNode;
     variant?: ChatSessionMessageVariant;
     /** Optional second line explaining the title. */
     children?: React.ReactNode;
     /** Optional way out of whatever the message reports. */
-    action?: {
-        label: string;
-        onClick: () => void;
-    };
+    action?: ChatSessionMessageAction;
 }
 /**
  * What the transcript says when something happened to the run rather than in
