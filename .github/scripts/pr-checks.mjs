@@ -12,6 +12,7 @@ export const requiredJobs = [
   "test-core",
   "test-workspace",
   "quality",
+  "browser-binary",
   "browser-shards",
   "browser-proof",
   "browser",

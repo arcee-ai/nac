@@ -8,6 +8,17 @@ PR cohort, human review/landing and deployed schedule qualification remain separ
 No settings, other tickets, test selections or production source were changed for
 this inventory. It consumes no latency-strategy number.
 
+The later S09 candidate adds a mandatory exact-run browser binary producer and
+refines the ordinary matrix from four to eight nonempty file-isolated parts.
+The same 205 native-selected tests remain a disjoint complete union with the two
+dedicated proofs. Verified artifact consumption or fully validated older-attempt
+fresh-source fallback changes compilation only; pinned Rust, zero retries,
+assertions, real clocks, full proof/cleanup validation and independent assets/API
+checks remain mandatory. Producer and both browser roles are explicit final
+requirements. See [transport](browser-binary.md) and
+[the S09 selection receipt](evidence/all-582/browser-binary-strategy.json).
+The source inventory below remains the historical snapshot at its named revision.
+
 [The generated JSON](evidence/all-582/coverage-inventory.json) retains exact workflow
 hashes, triggers, conditions, job edges, runner matrices, commands and cache
 configuration. Baseline-to-candidate hashes show source/image daily workflows,
