@@ -38,10 +38,11 @@ def checked_stat(value, directory=False):
         require(stat.S_ISREG(value.st_mode) and value.st_nlink == 1, 'UPLOAD_REGULAR_SINGLE_LINK')
 
 
-def allowed_path(relative):
+def allowed_path(relative, allow_validation=False):
     require(re.fullmatch(r'[A-Za-z0-9_./-]+', relative), 'UPLOAD_PATH')
     parts = PurePosixPath(relative).parts
-    require(parts[0] in TOP, 'UPLOAD_UNEXPECTED_ROOT_ENTRY')
+    require(parts[0] in TOP or (allow_validation and relative == 'upload-validation.json'),
+            'UPLOAD_UNEXPECTED_ROOT_ENTRY')
     for index, part in enumerate(parts):
         require(not re.search(r'credential|secret|token|id_rsa|id_ed25519', part, re.I),
                 'UPLOAD_SENSITIVE_PATH')
@@ -70,19 +71,21 @@ def read_file(parent, name):
         os.close(fd)
 
 
-def validate_upload(root, control, run_id, attempt):
+def validate_upload(root, control, run_id, attempt, *, export_bound=None, allow_validation=False):
     root = Path(root)
     expected = identity(root, control, run_id, attempt)
     require(root.is_absolute() and root.name == 'heartbeat-evidence'
             and root.parent.resolve() == root.parent and os.getuid() > 0, 'UPLOAD_ROOT_PATH')
     files, documents = {}, {}
+    observed_bytes = 0
 
     def walk(fd, prefix=''):
+        nonlocal observed_bytes
         before = os.fstat(fd)
         checked_stat(before, directory=True)
         for name in sorted(os.listdir(fd)):
             relative = prefix+name
-            allowed_path(relative)
+            allowed_path(relative, allow_validation)
             require(name != 'lifeline.sock', 'UPLOAD_UNRETIRED_ENDPOINT')
             if name == 'artifact-manifest.json':
                 require(relative in MANIFESTS, 'UPLOAD_UNEXPECTED_PRODUCER_MANIFEST')
@@ -99,6 +102,9 @@ def validate_upload(root, control, run_id, attempt):
                     os.close(child)
             else:
                 checked_stat(value)  # Reject special entries before attempting an open.
+                observed_bytes += value.st_size
+                if export_bound is not None:
+                    require(observed_bytes <= export_bound, 'CALENDAR_EXPORT_BOUND')
                 record, small = read_file(fd, name)
                 files[relative] = record
                 if relative == 'ownership.json' or relative in MANIFESTS:
@@ -131,16 +137,50 @@ def validate_upload(root, control, run_id, attempt):
             require(files.get(target) == {'bytes': entry['bytes'], 'sha256': entry['sha256']},
                     'UPLOAD_MANIFEST_ORIGINAL_MISSING_OR_CHANGED')
         manifests.append({'file': name, 'entries': len(entries)})
+    if export_bound is not None:
+        require(sum(row['bytes'] for row in files.values()) <= export_bound, 'CALENDAR_EXPORT_BOUND')
     return {'state': 'VALIDATED_OWNED_UPLOAD_TREE', 'identity': expected, 'files': files,
             'producer_manifests': manifests, 'excluded': ['run-build/**'],
             'limits': 'Path/ownership/manifest validation only; never runtime or visual acceptance'}
 
 
+def finish_upload(root, control, run_id, attempt, mode):
+    """Only a successful return admits upload. Never prune failed evidence."""
+    bound = None
+    if mode == 'calendar-cost':
+        from calendar_cost import EXPORT_BOUND
+        bound = EXPORT_BOUND
+    result = validate_upload(root, control, run_id, attempt, export_bound=bound)
+    if bound is not None:
+        base_bytes = sum(row['bytes'] for row in result['files'].values())
+        result.update(mode=mode, export_bound_bytes=bound, aggregate_bytes=base_bytes,
+                      aggregate_scope='All guarded files including this receipt; only run-build/** excluded')
+        # Account for this receipt without inventing an impossible self hash.
+        # JSON integer widths converge; no extra after-size file is emitted.
+        for _ in range(8):
+            payload = (json.dumps(result, indent=2)+'\n').encode()
+            total = base_bytes+len(payload)
+            if result['aggregate_bytes'] == total:
+                break
+            result['aggregate_bytes'] = total
+        else:
+            raise RuntimeError('UPLOAD_SIZE_ACCOUNTING_UNSTABLE')
+        require(total <= bound, 'CALENDAR_EXPORT_BOUND')
+    write_json(Path(root)/'upload-validation.json', result)
+    if bound is not None:
+        final = validate_upload(root, control, run_id, attempt, export_bound=bound, allow_validation=True)
+        receipt = final['files'].pop('upload-validation.json')
+        require(receipt == {'bytes': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()},
+                'UPLOAD_VALIDATION_RECEIPT_CHANGED')
+        require(final['files'] == result['files'], 'UPLOAD_FINAL_TREE_CHANGED')
+        require(sum(row['bytes'] for row in final['files'].values())+receipt['bytes'] == total,
+                'UPLOAD_FINAL_SIZE_CHANGED')
+    return result
+
+
 if __name__ == '__main__':
     root = Path(os.environ['RUNNER_TEMP'])/'heartbeat-evidence'
-    result = validate_upload(root, os.environ['EXPECTED_CONTROL'], os.environ['GITHUB_RUN_ID'],
-                             os.environ['GITHUB_RUN_ATTEMPT'])
-    # Only this guard adds this receipt after validating every producer original.
-    write_json(root/'upload-validation.json', result)
+    result = finish_upload(root, os.environ['EXPECTED_CONTROL'], os.environ['GITHUB_RUN_ID'],
+                           os.environ['GITHUB_RUN_ATTEMPT'], os.environ.get('EVIDENCE_MODE', ''))
     print(json.dumps({'state': result['state'], 'files': len(result['files']),
                       'producer_manifests': result['producer_manifests'], 'excluded': result['excluded']}))

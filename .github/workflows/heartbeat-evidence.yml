@@ -40,17 +40,19 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, 'control/.github/scripts/heartbeat-evidence')
           from artifact_upload import initialize_output
-          from contract import BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, require, validate_request, write_json
+          from contract import BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, CALENDAR_MODE, require, validate_request, write_json
+          import calendar_cost
           output = Path(os.environ['RUNNER_TEMP'])/'heartbeat-evidence'
           initialize_output(output, os.environ['EXPECTED_CONTROL'])
           proof = {'state': 'FAIL_DISPATCH_BINDING', 'runtime_started': False}
           try:
               mode = os.environ['EVIDENCE_MODE']
-              require(mode in (MODE, CUSTODY_MODE), 'EXPLICIT_EVIDENCE_MODE')
+              require(mode in (MODE, CUSTODY_MODE, CALENDAR_MODE), 'EXPLICIT_EVIDENCE_MODE')
+              head, tree, baseline = (calendar_cost.HEAD, calendar_cost.TREE, '') if mode == CALENDAR_MODE else (HEAD, TREE, BASELINE)
               validate_request(os.environ['EXPECTED_CONTROL'], os.environ['GITHUB_EVENT_NAME'],
-                               os.environ['GITHUB_REF'], mode, HEAD, TREE, BASELINE, expected_mode=mode)
+                               os.environ['GITHUB_REF'], mode, head, tree, baseline, expected_mode=mode)
               assert os.environ['EXPECTED_CONTROL'] == os.environ['GITHUB_SHA'], 'control revision changed'
-              proof.update(state='BOUND', control=os.environ['EXPECTED_CONTROL'], head=HEAD, tree=TREE, baseline=BASELINE)
+              proof.update(state='BOUND', control=os.environ['EXPECTED_CONTROL'], head=head, tree=tree, baseline=baseline)
           finally:
               write_json(output/'dispatch.json', proof)
           PY
@@ -59,22 +61,22 @@ jobs:
           python3 control/.github/scripts/heartbeat-evidence/custody_check.py \
             --output "$RUNNER_TEMP/heartbeat-evidence/custody"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        if: ${{ inputs.mode == 'matched-and-measure' }}
+        if: ${{ inputs.mode == 'matched-and-measure' || inputs.mode == 'calendar-cost' }}
         with:
-          ref: 48b9769453c7cb0b245d9f9b1f955ef4a880a431
+          ref: ${{ inputs.mode == 'calendar-cost' && 'cb1f76f29302f4eafa768e6913d257b75e3ab247' || '48b9769453c7cb0b245d9f9b1f955ef4a880a431' }}
           fetch-depth: 0
           persist-credentials: false
           path: product
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-        if: ${{ inputs.mode == 'matched-and-measure' }}
+        if: ${{ inputs.mode == 'matched-and-measure' || inputs.mode == 'calendar-cost' }}
         with:
           toolchain: 1.98.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: ${{ inputs.mode == 'matched-and-measure' }}
+        if: ${{ inputs.mode == 'matched-and-measure' || inputs.mode == 'calendar-cost' }}
         with:
           node-version: 24.22.1
       - name: Prepare locked product dependencies before the isolated workload
-        if: ${{ inputs.mode == 'matched-and-measure' }}
+        if: ${{ inputs.mode == 'matched-and-measure' || inputs.mode == 'calendar-cost' }}
         working-directory: product
         run: |
           setup_status=0
@@ -95,6 +97,14 @@ jobs:
           python3 control/.github/scripts/heartbeat-evidence/run.py \
             --product "$GITHUB_WORKSPACE/product" --control "$EXPECTED_CONTROL" \
             --mode "$EVIDENCE_MODE" --output "$RUNNER_TEMP/heartbeat-evidence/run"
+      - name: Measure both current Calendar cost selectors in one default-profile binary
+        if: ${{ inputs.mode == 'calendar-cost' }}
+        run: |
+          python3 control/.github/scripts/heartbeat-evidence/run.py \
+            --product "$GITHUB_WORKSPACE/product" --control "$EXPECTED_CONTROL" \
+            --mode calendar-cost --head cb1f76f29302f4eafa768e6913d257b75e3ab247 \
+            --tree 8681d950d2fb6c09e1e8fa488d0c9609a38b6f1a --baseline '' \
+            --output "$RUNNER_TEMP/heartbeat-evidence/run"
       - name: Validate the fresh owned evidence tree before retaining hidden originals
         id: evidence-guard
         if: always()

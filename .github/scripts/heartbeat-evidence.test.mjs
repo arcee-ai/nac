@@ -20,6 +20,7 @@ test('ordinary workflow checks include only pure evidence controls',()=>{
  assert.deepEqual(target.trim().split('\n').map(s=>s.trim()),[
   'python3 -B .github/scripts/heartbeat-evidence/contract.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/runner.test.py',
+  'python3 -B .github/scripts/heartbeat-evidence/calendar_cost.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/artifact_upload.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/custody.test.py',
   'python3 -B .github/scripts/heartbeat-evidence/custody_check.test.py',
@@ -40,8 +41,8 @@ function route(expression,event,mode){
 
 test('ordinary events and default none retain ordinary required CI; evidence is explicit',()=>{
  assert.equal(stable.on.workflow_dispatch.inputs.heartbeat_evidence.default,'none');
- assert.deepEqual(stable.on.workflow_dispatch.inputs.heartbeat_evidence.options,['none','matched-and-measure','custody-check']);
- for(const [event,mode,selected] of [['push','',false],['pull_request','',false],['workflow_dispatch','',false],['workflow_dispatch','none',false],['workflow_dispatch','matched-and-measure',true],['workflow_dispatch','invalid',true]]){
+ assert.deepEqual(stable.on.workflow_dispatch.inputs.heartbeat_evidence.options,['none','matched-and-measure','custody-check','calendar-cost']);
+ for(const [event,mode,selected] of [['push','',false],['pull_request','',false],['workflow_dispatch','',false],['workflow_dispatch','none',false],['workflow_dispatch','matched-and-measure',true],['workflow_dispatch','calendar-cost',true],['workflow_dispatch','invalid',true]]){
   assert.equal(route(stable.jobs['heartbeat-evidence'].if,event,mode),selected);
   assert.equal(route(stable.jobs.prepare.if,event,mode),!selected);
   assert.equal(route(stable.jobs['required-pr-checks'].if,event,mode),!selected);
@@ -67,7 +68,7 @@ test('control is event SHA, product is independently pinned, and artifacts survi
  const steps=evidence.jobs.evidence.steps;
  const checkouts=steps.filter(s=>s.uses?.startsWith('actions/checkout@'));
  assert.equal(checkouts[0].with.ref,'${{ github.sha }}');
- assert.equal(checkouts[1].with.ref,'48b9769453c7cb0b245d9f9b1f955ef4a880a431');
+ assert.equal(checkouts[1].with.ref,"${{ inputs.mode == 'calendar-cost' && 'cb1f76f29302f4eafa768e6913d257b75e3ab247' || '48b9769453c7cb0b245d9f9b1f955ef4a880a431' }}");
  assert.ok(checkouts.every(s=>s.with['persist-credentials']===false));
  const bind=steps.findIndex(s=>s.name?.startsWith('Bind explicit'));
  const setup=steps.findIndex(s=>s.run?.includes('make setup >'));
@@ -111,9 +112,18 @@ test('custody-only proves real cancellation before costly setup and cannot run p
  const setup=steps.findIndex(s=>s.run?.includes('make setup >'));
  assert.ok(gate>0&&gate<setup);
  const product=steps.filter(s=>s.with?.path==='product'||s.uses?.startsWith('dtolnay/rust-toolchain@')||s.uses?.startsWith('actions/setup-node@')||s.working_directory||s['working-directory']||s.run?.includes('heartbeat-evidence/run.py'));
- assert.equal(product.length,6);
- assert.ok(product.every(s=>s.if==="${{ inputs.mode == 'matched-and-measure' }}"));
- assert.match(steps[gate-1].run,/require\(mode in \(MODE, CUSTODY_MODE\)/);
+ assert.equal(product.length,7);
+ const common="${{ inputs.mode == 'matched-and-measure' || inputs.mode == 'calendar-cost' }}";
+ const old="${{ inputs.mode == 'matched-and-measure' }}";
+ const cost="${{ inputs.mode == 'calendar-cost' }}";
+ assert.equal(product.filter(s=>s.if===common).length,4);
+ assert.equal(product.filter(s=>s.if===old).length,2);
+ assert.equal(product.filter(s=>s.if===cost).length,1);
+ assert.ok(product.every(s=>[common,old,cost].includes(s.if)));
+ const costStep=product.find(s=>s.if===cost);
+ assert.match(costStep.run,/--mode calendar-cost --head cb1f76f29302f4eafa768e6913d257b75e3ab247/);
+ assert.match(costStep.run,/--tree 8681d950d2fb6c09e1e8fa488d0c9609a38b6f1a --baseline ''/);
+ assert.match(steps[gate-1].run,/require\(mode in \(MODE, CUSTODY_MODE, CALENDAR_MODE\)/);
  assert.equal(steps.find(s=>s.id==='evidence-guard').if,'always()');
  assert.equal(steps.at(-1).if,"${{ always() && steps.evidence-guard.outcome == 'success' }}");
 });
@@ -157,15 +167,27 @@ with patch.object(fixture.platform,'system',return_value='Linux'), \
     try:fixture.main()
     finally:print(json.dumps({'cases':calls,'dont_write_bytecode':sys.dont_write_bytecode}))
 `;
- function probe(name,preflightPolicy,driverPolicy,dirty=false){
+ function probe(name,preflightPolicy,driverPolicy,dirty=false,mode='custody-check',defect=''){
   const work=path.join(directory,name),control=path.join(work,'control');
   const scripts=path.join(control,'.github/scripts/heartbeat-evidence');
   const temporary=path.join(work,'runner-temp');
   fs.mkdirSync(scripts,{recursive:true});
   fs.mkdirSync(temporary);
   fs.copyFileSync('.gitignore',path.join(control,'.gitignore'));
-  for(const file of ['contract.py','artifact_upload.py','owned_process.py','namespace_custody.py','run.py','custody_check.py'])
+  for(const file of ['contract.py','calendar_cost.py','artifact_upload.py','owned_process.py','namespace_custody.py','run.py','custody_check.py'])
    fs.copyFileSync('.github/scripts/heartbeat-evidence/'+file,path.join(scripts,file));
+  // Defects affect ONLY the temporary tracked fixture, never the real source.
+  if(defect==='head'||defect==='tree'||defect==='hash'){
+   const file=path.join(scripts,'custody_check.py');
+   let value=fs.readFileSync(file,'utf8');
+   const from=defect==='hash'?'4b25ae7d90f3db590215831a6830cad92599ca9b224c3fb76a670977dbfb5d18':
+    "(calendar_cost.HEAD, calendar_cost.TREE, '')";
+   const to=defect==='hash'?'af654f9cb797ac7e39d5bcd9e4ed1ed6f20d169566af83b32649e51e5c308c9b':
+    defect==='head'?"('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', calendar_cost.TREE, '')":
+    "(calendar_cost.HEAD, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '')";
+   assert.ok(value.includes(from),'inject a named defect into the actual entry source');
+   fs.writeFileSync(file,value.replace(from,to));
+  }
   // Child-local configuration excludes host ignore/cache/signing settings.
   const environment={PATH:process.env.PATH,HOME:work,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
   const git=(...args)=>{
@@ -179,19 +201,30 @@ with patch.object(fixture.platform,'system',return_value='Linux'), \
   assert.equal(git('status','--porcelain'),'');
   if(dirty)fs.writeFileSync(path.join(control,'substantive-untracked.txt'),'must still fail closed');
   const event=path.join(work,'event.json');
-  fs.writeFileSync(event,JSON.stringify({inputs:{heartbeat_evidence:'custody-check',heartbeat_control_sha:head}}));
+  fs.writeFileSync(event,JSON.stringify({inputs:{heartbeat_evidence:mode,heartbeat_control_sha:head}}));
   const common={...environment,EXPECTED_CONTROL:head,GITHUB_SHA:head,GITHUB_ACTIONS:'true',
    GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',
-   GITHUB_REF:'refs/heads/codex/all-480-linux-evidence',GITHUB_EVENT_NAME:'workflow_dispatch',
-   EVIDENCE_MODE:'custody-check',GITHUB_EVENT_PATH:event,RUNNER_TEMP:temporary};
+   GITHUB_REF:mode==='calendar-cost'?'refs/heads/codex/all-481-linux-cost-evidence':'refs/heads/codex/all-480-linux-evidence',GITHUB_EVENT_NAME:'workflow_dispatch',
+   EVIDENCE_MODE:mode,GITHUB_EVENT_PATH:event,RUNNER_TEMP:temporary};
   const policy=value=>value===undefined?{}:{PYTHONDONTWRITEBYTECODE:String(value)};
   const preflight=spawnSync('python3',[...(bindingLaunch[1]?['-B']:[]),'-'],{
    cwd:work,env:{...common,...policy(preflightPolicy)},input:bindingLines.slice(1,-1).join('\n')+'\n',encoding:'utf8',timeout:10000});
   assert.equal(preflight.status,0,preflight.stderr);
   const afterPreflight=git('status','--porcelain');
+  const driverEnvironment={...common,...policy(driverPolicy)};
+  if(defect==='mode')driverEnvironment.EVIDENCE_MODE='invalid';
+  if(defect==='ref')driverEnvironment.GITHUB_REF='refs/heads/wrong-control';
+  if(defect==='event')fs.writeFileSync(event,JSON.stringify({inputs:{
+   heartbeat_evidence:'custody-check',heartbeat_control_sha:head}}));
+  if(defect==='control'){
+   driverEnvironment.EXPECTED_CONTROL='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+   driverEnvironment.GITHUB_SHA=driverEnvironment.EXPECTED_CONTROL;
+   fs.writeFileSync(event,JSON.stringify({inputs:{heartbeat_evidence:mode,
+    heartbeat_control_sha:driverEnvironment.EXPECTED_CONTROL}}));
+  }
   const result=spawnSync('python3',[...(driverLaunch[1]?['-B']:[]),'-c',harness,
    path.join(work,driverLaunch[2]),path.join(temporary,'heartbeat-evidence/custody')],{
-   cwd:work,env:{...common,...policy(driverPolicy)},encoding:'utf8',timeout:10000});
+   cwd:work,env:driverEnvironment,encoding:'utf8',timeout:10000});
   return {status:result.status,stdout:result.stdout,stderr:result.stderr,afterPreflight,
    afterDriver:git('status','--porcelain')};
  }
@@ -219,6 +252,23 @@ with patch.object(fixture.platform,'system',return_value='Linux'), \
   assert.match(substantive.afterDriver,/substantive-untracked.txt/);
   assert.doesNotMatch(substantive.afterDriver,/__pycache__/);
   assert.deepEqual(JSON.parse(substantive.stdout.trim()).cases,[]);
+  const matched=probe('matched-entry',jobPolicy,jobPolicy,false,'matched-and-measure');
+  assert.equal(matched.status,0,JSON.stringify(matched,null,2));
+  assert.deepEqual(JSON.parse(matched.stdout.trim()).cases,['controller','wrapper']);
+  const calendar=probe('calendar-entry',jobPolicy,jobPolicy,false,'calendar-cost');
+  assert.equal(calendar.status,0,JSON.stringify(calendar,null,2));
+  assert.equal(calendar.afterPreflight,'');assert.equal(calendar.afterDriver,'');
+  assert.deepEqual(JSON.parse(calendar.stdout.trim()).cases,['controller','wrapper']);
+  for(const [defect,code] of [['mode','CUSTODY_SELECTOR'],['ref','EXPLICIT_DISPATCH'],
+   ['control','CONTROL_REVISION'],['head','PRODUCT_PINS'],['tree','PRODUCT_PINS'],
+   ['dirty','CONTROL_REVISION'],['hash','REVIEWED_OWNER_CHANGED'],['event','DISPATCH_INPUT_BINDING']]){
+   const rejected=probe('calendar-reject-'+defect,jobPolicy,jobPolicy,defect==='dirty','calendar-cost',defect);
+   assert.notEqual(rejected.status,0);
+   assert.ok(rejected.stderr.includes(code),JSON.stringify({defect,...rejected}));
+   assert.deepEqual(JSON.parse(rejected.stdout.trim()).cases,[]);
+  }
+  t.diagnostic(JSON.stringify({calendarEntry:'MOCKED',accepted:['controller','wrapper'],
+   rejected:['mode','ref','control','head','tree','dirty','hash','event']}));
   const summary=result=>({status:result.status,afterPreflight:result.afterPreflight,
    afterDriver:result.afterDriver,report:JSON.parse(result.stdout.trim()),
    controlRevision:/CONTROL_REVISION/.test(result.stderr)});

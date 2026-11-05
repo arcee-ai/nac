@@ -13,15 +13,16 @@ import sys
 import time
 import uuid
 
-from contract import (BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, require, validate_event,
+from contract import (BASELINE, HEAD, TREE, MODE, CUSTODY_MODE, CALENDAR_MODE, require, validate_event,
                       validate_request, write_json, sha256)
 from namespace_custody import Kernel, NamespaceCustody, receive_fd, send_fd
 from owned_process import clean_environment, interrupt
+import calendar_cost
 
 SOURCE = Path(__file__).resolve().parent
 # Exact production owners; changed owner hashes require affected source review.
 # The fixture copies no implementation and does not alter production custody.
-OWNER_HASHES = {'run.py': 'af654f9cb797ac7e39d5bcd9e4ed1ed6f20d169566af83b32649e51e5c308c9b', 'namespace_custody.py': '0fc67f4332480afa1e90fe3107bccf9c41cbab284029d4b4833b391c665a9ce8', 'owned_process.py': '7e747e4d051e3b13a510f46968d028f7c24a89b853297e306f6f213c4e256757'}
+OWNER_HASHES = {'run.py': '4b25ae7d90f3db590215831a6830cad92599ca9b224c3fb76a670977dbfb5d18', 'namespace_custody.py': '0fc67f4332480afa1e90fe3107bccf9c41cbab284029d4b4833b391c665a9ce8', 'owned_process.py': '7e747e4d051e3b13a510f46968d028f7c24a89b853297e306f6f213c4e256757'}
 spec = importlib.util.spec_from_file_location('evidence_owner', SOURCE/'run.py')
 owner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(owner)
@@ -309,9 +310,11 @@ def main():
         return controller(args.controller, args.output, args.driver_fd)
     require(platform.system() == 'Linux' and os.environ.get('GITHUB_ACTIONS') == 'true', 'LINUX_ACTIONS_ONLY')
     mode, control = os.environ['EVIDENCE_MODE'], os.environ['EXPECTED_CONTROL']
-    require(mode in (MODE, CUSTODY_MODE), 'CUSTODY_SELECTOR')
+    require(mode in (MODE, CUSTODY_MODE, CALENDAR_MODE), 'CUSTODY_SELECTOR')
+    head, tree, baseline = ((calendar_cost.HEAD, calendar_cost.TREE, '') if mode == CALENDAR_MODE
+                            else (HEAD, TREE, BASELINE))
     validate_request(control, os.environ.get('GITHUB_EVENT_NAME'), os.environ.get('GITHUB_REF'),
-        mode, HEAD, TREE, BASELINE, expected_mode=mode)
+        mode, head, tree, baseline, expected_mode=mode)
     validate_event(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()), mode, control, expected_mode=mode)
     require(owner.git(SOURCE, 'rev-parse', 'HEAD') == control and os.environ['GITHUB_SHA'] == control and
             owner.git(SOURCE, 'status', '--porcelain') == '', 'CONTROL_REVISION')

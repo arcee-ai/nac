@@ -20,6 +20,7 @@ from contract import (ASSETS, BASELINE, HEAD, MODE, TEST, TREE, artifact_manifes
                       validate_event, validate_request, verify_pair, write_json)
 from owned_process import clean_environment, interrupt, reap_namespace, run_owned
 from namespace_custody import Lifeline, NamespaceCustody, execute_namespace
+import calendar_cost
 
 SOURCE = Path(__file__).resolve().parent
 
@@ -104,7 +105,7 @@ def safe_error(error):
     return code if isinstance(error, RuntimeError) and re.fullmatch('[A-Z][A-Z0-9_]{0,63}', code) else 'EVIDENCE_PHASE_FAILED'
 
 
-def final_checks(result, product, output, measurement_started):
+def final_checks(result, product, output, measurement_started, verifier=None):
     """Attempt every final check; preserve the original failure and each cleanup error."""
     errors = []
     labels = (['post-measurement-resources', 'performance-fixture-cleanup'] if measurement_started else [])
@@ -119,8 +120,11 @@ def final_checks(result, product, output, measurement_started):
                              automatic_delete=False)
                 require(not proof['remaining'], 'PERFORMANCE_FIXTURE_RETAINED')
             else:
-                verify_product(product)
-                proof.update(head=HEAD, tree=TREE, assets=ASSETS)
+                (verifier or verify_product)(product)
+                if verifier is None:
+                    proof.update(head=HEAD, tree=TREE, assets=ASSETS)
+                else:
+                    proof.update(head=calendar_cost.HEAD, tree=calendar_cost.TREE)
             proof['state'] = 'PASS'
         except BaseException as error:
             proof['first_error'] = safe_error(error)
@@ -136,6 +140,8 @@ def inside(context_file, output):
     context = json.loads(context_file.read_text())
     namespace, lifeline = bootstrap_namespace(context)
     try:
+        if context.get('mode') == calendar_cost.MODE:
+            return calendar_cost.workload(context, output, namespace, retain_executable, final_checks, git, resource_sample)
         return workload(context, output, namespace)
     finally:
         lifeline.close()
@@ -226,13 +232,18 @@ def workload(context, output, namespace):
 
 def outside(args):
     validate_request(args.control, os.environ.get('GITHUB_EVENT_NAME'), os.environ.get('GITHUB_REF'),
-                     args.mode, args.head, args.tree, args.baseline)
-    validate_event(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()), args.mode, args.control)
+                     args.mode, args.head, args.tree, args.baseline,
+                     expected_mode=args.mode if args.mode == calendar_cost.MODE else MODE)
+    validate_event(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()), args.mode, args.control,
+                   expected_mode=args.mode if args.mode == calendar_cost.MODE else MODE)
     require(platform.system() == 'Linux' and os.environ.get('GITHUB_ACTIONS') == 'true', 'LINUX_ACTIONS_ONLY')
     require(os.environ.get('GITHUB_SHA') == args.control and git(SOURCE, 'rev-parse', 'HEAD') == args.control,
             'CONTROL_REVISION')
     product, output = args.product.resolve(), args.output.resolve()
-    verify_product(product)
+    if args.mode == calendar_cost.MODE:
+        calendar_cost.verify_product(product, git)
+    else:
+        verify_product(product)
     require(not product.is_relative_to(output) and not output.is_relative_to(product), 'OUTPUT_OWNERSHIP')
     output.mkdir(mode=0o700)
     # One evidence lane job owns this VM. Serialize its only child workload;
@@ -247,6 +258,8 @@ def outside(args):
                    'host_namespaces': {name: os.stat('/proc/self/ns/'+name).st_ino for name in ('net', 'pid')},
                    'browsers': os.environ['PLAYWRIGHT_BROWSERS_PATH'],
                    'tool_environment': clean_environment(output.parent, output.parent)}
+        if args.mode == calendar_cost.MODE:
+            context['mode'] = calendar_cost.MODE
         context_file = output/'context.json'
         write_json(context_file, context)
         environment = clean_environment(output.parent, output.parent)
@@ -267,22 +280,30 @@ def finalize_namespace(argv, environment, output, product, context):
         require(not first_error, first_error or 'FINITE_EVIDENCE_FAILED')
         result = json.loads((output/'evidence.json').read_text())
         require(result['state'].startswith('PASS_') and result['namespace']['pid1'], 'NAMESPACE_RESULT')
-        verify_product(product)
+        if context.get('mode') == calendar_cost.MODE:
+            calendar_cost.verify_product(product, git)
+        else:
+            verify_product(product)
     except BaseException:
         first_error = first_error or 'FINITE_EVIDENCE_FAILED'
     finally:
         if custody is not None:
             custody.close()
         retired = retirement['state'] == 'RETIRED'
+        cost_mode = context.get('mode') == calendar_cost.MODE
         write_json(output/'terminal.json', {
             'state': 'UNRESOLVED' if not retired else ('FAIL' if first_error else 'PASS_EVIDENCE_RETAINED'),
             'namespace_retirement': retirement, 'artifacts_stable': retired,
             'artifact_hashing': 'after verified PID1 death' if retired else 'WITHHELD: possible live writer',
-            'first_error': first_error, 'control': context['control'], 'head': HEAD, 'tree': TREE,
-            'baseline': BASELINE, 'attempts': 1, 'lock_owner': os.getpid(),
-            'no_automatic_retry': True, 'review_original_pngs': True})
+            'first_error': first_error, 'control': context['control'],
+            'head': calendar_cost.HEAD if cost_mode else HEAD, 'tree': calendar_cost.TREE if cost_mode else TREE,
+            'baseline': '' if cost_mode else BASELINE, 'attempts': 1, 'lock_owner': os.getpid(),
+            'no_automatic_retry': True, 'review_original_pngs': not cost_mode})
         if retired:
-            write_json(output/'artifact-manifest.json', artifact_manifest(output))
+            manifest = artifact_manifest(output)
+            if cost_mode:
+                manifest['pixel_inspection'] = 'NOT_APPLICABLE_COST_ONLY_MODE'
+            write_json(output/'artifact-manifest.json', manifest)
     require(not first_error and retired, first_error or 'NAMESPACE_RETIREMENT_UNRESOLVED')
 
 

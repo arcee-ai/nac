@@ -156,3 +156,89 @@ Those require the separately allocated execution and image inspection. The
 earlier Darwin observer05/06 failures and unrun native compatibility cases remain
 recorded separately; this lane neither requires them universally for ALL-480 nor
 substitutes for Mac-specific ALL-349/351/WK requirements. No merge is authorized.
+
+
+## Calendar cost-only successor (source; execution separately admitted)
+
+The opt-in calendar-cost mode pins product cb1f76f29302f4eafa768e6913d257b75e3ab247,
+tree8681d950d2fb6c09e1e8fa488d0c9609a38b6f1a and the exact control branch
+codex/all-481-linux-cost-evidence. Existing matched-and-measure/custody-check
+pins, visual behavior, ownership and ordinary/default-none CI are unchanged.
+Do not publish or dispatch this source until the original SAME592 affected
+review and Root source acceptance. A later explicit dispatch supplies the new
+control SHA using the existing two declared inputs; no product/command/selector
+input is accepted. Product592 and prior1370 control refs remain untouched.
+
+The mode runs guide-required locked setup before private namespace entry,
+then builds ONLY one normal nac-server library test executable using locked
+offline Cargo. It has ownfeatures[], opt0/debug2/debugassertions/overflowchecks,
+normal core/managed default+openapi+test-support dependencies, and no profile,
+identity, vendor or wrapper overrides. Raw compiler JSON, dependency graph,
+rustc/cargo, exact source/tree/lock/manifest/measurement-source hashes and host
+kernel/architecture are retained. The unique actual server artifact must be
+within the owned build root, no symlink, at most1GiB, and is copied once to0700.
+
+The FULL list from that same retained ELF must include both exact owning
+interval/Calendar ignored selectors once. All compile/copy/hash/inventory
+writers finish and namespace children settle before one fresh60s quiet interval.
+A sampled observer remains active through both selectors, rejecting compile/
+browser/Node workers, unknown process observations, observation errors or floor
+loss. Its PID/start/CPU metadata is from the private namespace, without argv or
+environment. Serial job isolation is the evidence for absence of other OWNED
+guest workloads; background guest services/hypervisor competition are not
+controlled or silently claimed to be idle/dedicated physical hardware.
+
+Exactly one interval invocation precedes one Calendar invocation, same ELF,
+each180s, exact/ignored/nocapture/single-threaded. Require1P0F0I plus3 ordered
+N1/10/100 rows each,2owners,active1/4/4,pending0/6/96,retainedN and catchup1/8.
+Validate current cadence/calculation/retention schema and nullable whole-process
+RSS.24sample quantile indexes12/22/23, cold-vs-preview scope, fixed order/cache,
+pending mock/non-Git fixture, seven-day lateness/nonSLA limits remain intact.
+No real model, Git materialization, goal-publication, Mac353 or exactMac1061
+performance is measured. First failure stops later dispatch; no retry/waiver.
+
+The existing45min job cap and20min inner/21min outer namespace ownership limits
+are unchanged. New mode reserves120s at its original inner cutoff for cleanup.
+Before starting quiet it must fit60s quiet+435s cases/ordinary closure+120s
+cleanup; before each case retain(remainingcases*180)+75+120s. Build has a720s
+maximum but is not promised to fit those reserves: slow build stops BEFORE
+measurement. No deadline resets or use of historical runtimes. All phases
+retain the established ordinary child receipts, namespace lifeline/pidfd
+retirement, failure finalizers and guarded manifest export after writer death.
+
+Guest resource admission is deliberately separate from laptop20GiB policy:
+require actual free disk>7.75GiB (5GiBbuild forecast,1.5GiBexport bound,
+256MiBfailure reserve,1GiB floor) and MemAvailable>=4GiB BEFORE Cargo. Check
+the1GiB+256MiB free-disk threshold before/after phases and during quiet/cases.
+The retained ELF is<=1GiB and complete run export<=1.5GiB; run-build remains
+excluded. These are forecast/admission limits, not measured current capacity
+or an OS quota/disk reservation. No cache cleanup or enlarged runner is
+implicitly authorized. Root must accept these explicit guest limits before
+future dispatch; failure requires a separate decision, never automatic resize.
+
+Source controls include calendar_cost.test.py in the existing Makefile target.
+They prohibit real subprocess/socket/native calls, mock all runtime ports,
+exercise real new parsers/runner orchestration/quiet-time arithmetic and retain
+legacy cases. Node workflow checks were updated for the new fixed mode and
+import file; a source-only phase that forbids Node must disclose those checks
+and full workflow lint as NOT RUN, not passing. No runtime pass follows from
+these pure controls. Old local attempts1/2/3, old Linux failures/supplier
+identities and acceptedquiet0 remain immutable.
+
+
+### COST-C1 final stable upload bound
+
+For calendar-cost, the authoritative1.5GiB check is now at FINAL upload
+admission over ALL exported regular-file bytes: outer setup/custody, run data,
+producer manifests, late diagnostics and upload-validation.json itself.
+Only run-build/** is excluded. The first guarded walk can stop oversize
+before hashing further bulk; all passing files retain the original ownership,
+no-follow, single-link, stable-hash and producer-manifest checks.
+
+The guard accounts for its own receipt bytes to a fixed point, then writes the
+receipt and revalidates the entire final tree and exact receipt hash/size.
+New/changed/deleted records fail admission. No records are written afterward
+inside the upload tree. Workflow step success remains mandatory for upload.
+Overflow WITHHOLDS upload without pruning/deleting original failed evidence.
+An undersize retired failure bundle remains eligible; legacy modes retain
+their original behavior. These pure controls do not qualify a real upload.

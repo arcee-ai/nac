@@ -15,6 +15,7 @@ ASSETS = '502447dd764fdc4be9db1816fa67d74c4ff9f36b'
 BRANCH = 'refs/heads/codex/all-480-linux-evidence'
 MODE = 'matched-and-measure'
 CUSTODY_MODE = 'custody-check'
+CALENDAR_MODE = 'calendar-cost'
 TEST = 'application::heartbeat_scheduler::tests::heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention'
 METRICS = {'cold_scan_ms', 'warm_p50_ms', 'warm_p95_ms', 'warm_max_ms',
            'maximum_admission_lateness_ms', 'database_bytes',
@@ -27,14 +28,19 @@ def require(value, code):
 
 
 def validate_request(control, event, ref, mode, head, tree, baseline, *, expected_mode=MODE):
-    require(expected_mode in (MODE, CUSTODY_MODE), 'EXPECTED_EVIDENCE_MODE')
+    require(expected_mode in (MODE, CUSTODY_MODE, CALENDAR_MODE), 'EXPECTED_EVIDENCE_MODE')
     require(bool(re.fullmatch('[0-9a-f]{40}', control)), 'CONTROL_SHA')
+    if expected_mode == CALENDAR_MODE:
+        from calendar_cost import HEAD as COST_HEAD, TREE as COST_TREE, BRANCH as COST_BRANCH
+        require(event == 'workflow_dispatch' and ref == COST_BRANCH and mode == CALENDAR_MODE, 'EXPLICIT_DISPATCH')
+        require((head, tree, baseline) == (COST_HEAD, COST_TREE, ''), 'PRODUCT_PINS')
+        return
     require(event == 'workflow_dispatch' and ref == BRANCH and mode == expected_mode, 'EXPLICIT_DISPATCH')
     require((head, tree, baseline) == (HEAD, TREE, BASELINE), 'PRODUCT_PINS')
 
 
 def validate_event(event, mode, control, *, expected_mode=MODE):
-    require(expected_mode in (MODE, CUSTODY_MODE), 'EXPECTED_EVIDENCE_MODE')
+    require(expected_mode in (MODE, CUSTODY_MODE, CALENDAR_MODE), 'EXPECTED_EVIDENCE_MODE')
     inputs = event.get('inputs') if type(event) is dict else None
     require(type(inputs) is dict and set(inputs) == {'heartbeat_evidence', 'heartbeat_control_sha'},
             'DISPATCH_INPUT_SCHEMA')
