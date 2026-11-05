@@ -248,7 +248,9 @@ test("elapsed evidence stays bounded on success and failure while old failure ar
   const selectedStep = browserShards
     .split("      - name: Upload selected elapsed interval evidence")[1]
     .split("      - name: Upload browser shard failure artifacts")[0];
-  const failureStep = browserShards.split("      - name: Upload browser shard failure artifacts")[1];
+  const failureStep = browserShards.split(
+    "      - name: Upload browser shard failure artifacts",
+  )[1];
   const selected = uploadPaths(selectedStep);
   const failure = uploadPaths(failureStep);
   expect(selected).toHaveLength(6);
