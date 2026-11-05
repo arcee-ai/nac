@@ -246,14 +246,20 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard webView === self.webView, !stopping, failure == nil else { return }
-        commands.navigationStarted(in: webView, navigation: navigation)
+        // Every callback fences the previous document, but only an admitted
+        // navigation may replace the tracked completion/timeout identity.
+        defer { commands.navigationStarted(in: webView, navigation: activeNavigation) }
+        guard let navigation, let incarnation = workspaceIncarnation,
+              engine.receipt?.incarnation == incarnation else { return }
+        if let tracked = navigationIncarnations[navigation] {
+            guard tracked == incarnation else { return }
+        } else {
+            guard let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
+                  url.host == baseURL.host, url.port == baseURL.port else { return }
+            // Includes ordinary WebView reloads while retaining the launch binding.
+            navigationIncarnations[navigation] = incarnation
+        }
         activeNavigation = navigation
-        guard let navigation, navigationIncarnations[navigation] == nil,
-              let incarnation = workspaceIncarnation, engine.receipt?.incarnation == incarnation,
-              let url = webView.url, let baseURL, url.scheme == baseURL.scheme,
-              url.host == baseURL.host, url.port == baseURL.port else { return }
-        // Includes ordinary WebView reloads while retaining the launch binding.
-        navigationIncarnations[navigation] = incarnation
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
