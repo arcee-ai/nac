@@ -113,13 +113,36 @@ Cleanup has its own120-second deadline; the wrapper allows150seconds to finish
 the report before its final owned-controller stop. These are failure bounds,
 not assertions that interrupted backend execution was observed to complete.
 
-Resource sampling every five seconds uses host free space plus rounded-up Docker
-logical totals and owned worktree/evidence bytes. Stop at13GiB host free or19GiB
-accounted data including3.3GiB output reservation; the20GiB cap/12GiB floor remain
-independent limits. Logical Docker counts can double-count shared layers; this is
-conservative sampled accounting, not a physical peak proof. Telemetry failure
-fails closed. State over4GiB or evidence over1GiB fails. Admission/cleanup/guard
-failures and costs stay in the report. No local heavy build is authorized.
+Before any solve, bind fixed initial Docker usage, host free space and exact
+pre-existing image IDs. Initial cache, containers and volumes must be empty;
+image count/IDs must agree. Sampling every five seconds preserves global raw
+categories and verifies every initial image ID remains present. Charge positive
+rounded logical growth above that fixed stock, plus owned worktree/evidence
+bytes and3.3GiB output reservation, against the unchanged19GiB early stop/20GiB
+cap. Independently stop at13GiB host free (12GiB floor), or when the high-water
+decrease in filesystem free space plus the same reservation reaches19GiB. No
+baseline reset between arms, cap increase, image deletion or cache prune occurs.
+Malformed/unavailable telemetry, lost initial IDs and resource crossings fail
+closed. Logical categories may overlap; filesystem changes include all runner
+activity/deletions. Neither is an exact owned physical peak/cost. State over4GiB
+or evidence over1GiB fails. All failures/costs stay visible; no local heavy build.
+
+First hosted controller736a3d8642ca968aad4fdc0dcb14b5c9dd883445,
+run42108983591:1, failed its original global-stock guard during baseline A.
+Source release compilation completed377.4s (six local/zero external compiles);
+the CLI was killed at447.595s during runtime provenance, before any image IID or
+smoke/inventory/scan. The other three arms did not execute. Live qualification
+passed188.473s; both owned worktrees/private root were removed. Daemon-side solve
+termination was not independently observed. Initial rounded Docker stock was
+3,599,000,003 bytes (six preinstalled images); the final global logical total was
+17,065,000,002. Adding owned298,481,243 and reserved3,543,348,019 crossed19GiB at
+20,906,829,264 bytes. Minimum sampled host free remained85,218,467,840 bytes.
+Subtracting fixed initial stock yields17,307,829,261 charged bytes; replay of all
+126 samples reproduces the original abort and no revised historical crossing.
+This accounting correction does not prove remaining export/candidate-profile
+growth or four-arm feasibility. ZIP13455095793 (2,795,740 bytes) SHA256:
+`8568541872ebc15a1b41d7d2dfb47d3a08d144a870772506bc6019ebe0ff77f2`.
+The original failed run and unexecuted identity/parity obligations remain intact.
 
 This is cold **compiler state**, not globally cold image/CDN/OS caches. Fixed
 baseline-first order, warmer host caches before candidate A, and profile-layer

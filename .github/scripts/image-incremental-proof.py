@@ -68,12 +68,17 @@ def candidate_dockerfile(original, cache_id):
     return generated
 
 
-def docker_bytes(text):
-    """Conservative rounded logical usage, not a physical or billable byte claim."""
+def docker_rows(text):
     rows = [json.loads(line) for line in text.splitlines() if line.strip()]
     require({row['Type'] for row in rows} ==
             {'Images', 'Containers', 'Local Volumes', 'Build Cache'} and len(rows) == 4,
             'unknown Docker usage schema')
+    return rows
+
+
+def docker_bytes(text):
+    """Conservative rounded logical usage, not a physical or billable byte claim."""
+    rows = docker_rows(text)
     total = 0
     for row in rows:
         match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)\s*(B|kB|MB|GB|TB)', row['Size'])
@@ -83,6 +88,25 @@ def docker_bytes(text):
         scale = {'B': 1, 'kB': 1000, 'MB': 1000**2, 'GB': 1000**3, 'TB': 1000**4}[match[2]]
         total += int(((value + quantum) * scale).to_integral_value(rounding=ROUND_CEILING))
     return total
+
+
+def image_ids(text):
+    ids = text.splitlines()
+    require(all(re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in ids),
+            'unknown Docker image identity')
+    return sorted(set(ids))
+
+
+def resource_accounting(baseline, logical, owned, output, free, previous_peak):
+    """Fixed stock subtraction; independent high-water filesystem-growth fence."""
+    growth = max(previous_peak, baseline['host_free_bytes']-free, 0)
+    added = max(0, logical-baseline['Docker_logical_rounded_up_bytes'])
+    return {'host_free_bytes': free, 'Docker_logical_rounded_up_bytes': logical,
+            'Docker_incremental_logical_bytes': added,
+            'owned_worktree_output_bytes': owned, 'output_bytes': output,
+            'accounting_with_reservation_bytes': added+owned+RESERVE,
+            'filesystem_growth_high_water_bytes': growth,
+            'filesystem_growth_with_reservation_bytes': growth+RESERVE}
 
 
 def supervise(argv, env, timeout, limit, state, tick=None):
@@ -167,11 +191,15 @@ class Proof:
             for name, source, inc in ARMS], 'resource_samples': [],
             'qualification': 'Private combined S08/S18 refinement;14 mechanisms/0of10 unchanged',
             'limits': {'controller_seconds': 4200, 'output_bytes': GIB,
-                       'Docker_logical_plus_owned_and_reserve_early_bytes': 19*GIB,
-                       'Docker_logical_cap_bytes': 20*GIB, 'output_reservation_bytes': RESERVE,
+                       'Docker_incremental_logical_plus_owned_and_reserve_early_bytes': 19*GIB,
+                       'Docker_incremental_logical_cap_bytes': 20*GIB,
+                       'filesystem_growth_plus_reserve_early_bytes': 19*GIB,
+                       'output_reservation_bytes': RESERVE,
                        'host_free_early_bytes': 13*GIB, 'host_free_floor_bytes': 12*GIB},
-            'guard_scope': 'Sampled host free plus rounded-up Docker logical total and owned files; '
-                'logical totals may double-count shared data; not exact physical peak/cost.',
+            'guard_scope': 'Fixed initial Docker stock excluded from incremental logical budget; '
+                'independent sampled host-free and high-water filesystem-growth fences. '
+                'Global/raw usage retained; neither logical overlap nor filesystem delta '
+                'is exact owned physical peak/cost.',
             'cache': 'Read existing S07 only; no shared compiler import/export/cache-to/image push'}
 
     def save(self):
@@ -207,8 +235,34 @@ class Proof:
             self.commands.append(state)
             (self.output/'commands.json').write_text(json.dumps(self.commands, indent=2)+'\n')
 
+    def bind_resource_baseline(self):
+        require('resource_baseline' not in self.report, 'resource baseline already bound')
+        free = shutil.disk_usage(self.temp).free
+        require(free >= 33*GIB, 'insufficient initial free-space budget')
+        text, _ = self.command('usage-baseline',
+            ['docker', 'system', 'df', '--format', '{{json .}}'], timeout=10, monitor=False)
+        rows = docker_rows(text)
+        logical = docker_bytes(text)
+        for row in rows:
+            require(re.fullmatch(r'[0-9]+', row.get('TotalCount', '')) is not None,
+                    'unknown Docker usage count')
+            if row['Type'] != 'Images':
+                require(row['TotalCount'] == row.get('Active') == '0'
+                        and row['Size'] == '0B', 'initial Docker cache/container/volume stock nonempty')
+        ids, _ = self.command('baseline-images',
+            ['docker', 'image', 'ls', '--all', '--quiet', '--no-trunc'], timeout=10, monitor=False)
+        identities = image_ids(ids)
+        require(len(identities) == int(next(row['TotalCount'] for row in rows if row['Type'] == 'Images')),
+                'initial Docker image inventory differs from usage')
+        self.report['resource_baseline'] = {'at': now(), 'host_free_bytes': free,
+            'Docker_logical_rounded_up_bytes': logical, 'raw_categories': rows,
+            'preexisting_image_ids': identities}
+        self.save()
+        self.guard(force=True)
+
     def guard(self, force=False):
         require(time.monotonic()-self.start < 4200, 'whole proof deadline exceeded')
+        require('resource_baseline' in self.report, 'resource baseline unavailable')
         free = shutil.disk_usage(self.temp).free
         require(free >= 13*GIB, 'host free reserve reached')
         if not force and time.monotonic()-self.last_usage < 5:
@@ -217,16 +271,23 @@ class Proof:
         text, _ = self.command(f'usage-{len(self.report["resource_samples"])}',
             ['docker', 'system', 'df', '--format', '{{json .}}'], timeout=10, monitor=False)
         logical = docker_bytes(text)
+        ids, _ = self.command(f'images-{len(self.report["resource_samples"])}',
+            ['docker', 'image', 'ls', '--all', '--quiet', '--no-trunc'], timeout=10, monitor=False)
+        require(set(self.report['resource_baseline']['preexisting_image_ids']) <= set(image_ids(ids)),
+                'initial Docker image stock drifted')
         owned = sum(p.stat().st_size for root in (self.output, self.private)
                     for p in root.rglob('*') if p.is_file() and not p.is_symlink())
         output = sum(p.stat().st_size for p in self.output.rglob('*') if p.is_file())
-        sample = {'at': now(), 'host_free_bytes': free, 'Docker_logical_rounded_up_bytes': logical,
-                  'owned_worktree_output_bytes': owned, 'output_bytes': output,
-                  'accounting_with_reservation_bytes': logical+owned+RESERVE}
+        peak = max((s['filesystem_growth_high_water_bytes'] for s in self.report['resource_samples']), default=0)
+        sample = {'at': now(), **resource_accounting(self.report['resource_baseline'],
+                  logical, owned, output, free, peak)}
         self.report['resource_samples'].append(sample)
         self.save()
         require(output <= GIB, 'owned evidence output bound reached')
-        require(logical+owned+RESERVE < 19*GIB, 'owned Docker logical budget early stop')
+        require(sample['accounting_with_reservation_bytes'] < 19*GIB,
+                'owned Docker incremental logical budget early stop')
+        require(sample['filesystem_growth_with_reservation_bytes'] < 19*GIB,
+                'filesystem growth budget early stop')
 
     def preflight(self):
         e = self.environment
@@ -245,6 +306,7 @@ class Proof:
         require(all(e.get(key) for key in ('ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL')),
                 'JavaScript action cache-read runtime unavailable')
         require(shutil.disk_usage(self.temp).free >= 33*GIB, 'insufficient initial free-space budget')
+        self.bind_resource_baseline()
         head, _ = self.command('controller-source', ['git', '-C', self.workspace, 'rev-parse', 'HEAD'])
         require(head.strip() == e['EXPECTED_CONTROLLER_SHA'] == e.get('GITHUB_SHA'),
                 'controller checkout differs from event source')

@@ -88,6 +88,8 @@ class ProofControls(unittest.TestCase):
     def test_resource_failure_stops_before_next_command(self):
         with tempfile.TemporaryDirectory() as value:
             p = proof.Proof(ROOT, Path(value), {})
+            p.report['resource_baseline'] = {'host_free_bytes': 40*proof.GIB,
+                'Docker_logical_rounded_up_bytes': 0, 'preexisting_image_ids': []}
             with patch.object(proof.shutil, 'disk_usage') as disk:
                 disk.return_value.free = 12*proof.GIB
                 with self.assertRaisesRegex(ValueError, 'host free reserve'):
@@ -103,10 +105,13 @@ class ProofControls(unittest.TestCase):
             p = proof.Proof(ROOT, Path(value), {})
             rows = [{'Type': t, 'Size': '5GB'} for t in
                     ('Images', 'Containers', 'Local Volumes', 'Build Cache')]
+            p.report['resource_baseline'] = {'host_free_bytes': 40*proof.GIB,
+                'Docker_logical_rounded_up_bytes': 0, 'preexisting_image_ids': []}
             with patch.object(proof.shutil, 'disk_usage') as disk, patch.object(p, 'command') as command:
                 disk.return_value.free = 40*proof.GIB
-                command.return_value = ('\n'.join(json.dumps(r) for r in rows), 0)
-                with self.assertRaisesRegex(ValueError, 'logical budget'):
+                command.side_effect = lambda label, *_args, **_kwargs: (
+                    '' if label.startswith('images-') else '\n'.join(json.dumps(r) for r in rows), 0)
+                with self.assertRaisesRegex(ValueError, 'incremental logical budget'):
                     p.guard(force=True)
             p.report['arms'][0]['image'] = 'sha256:'+'1'*64
             calls = []
@@ -117,6 +122,113 @@ class ProofControls(unittest.TestCase):
                 failures = p.cleanup()
             self.assertIn('baseline-A-container', failures)
             self.assertFalse(any('rm' in argv for argv in calls))
+
+    def test_fixed_stock_accounting_and_filesystem_high_water(self):
+        baseline = {'host_free_bytes': 93476716544, 'Docker_logical_rounded_up_bytes': 3599000003}
+        actual = proof.resource_accounting(baseline, 17065000002, 298481243,
+                                          215612351, 85218467840, 0)
+        self.assertEqual(actual['accounting_with_reservation_bytes'], 17307829261)
+        self.assertLess(actual['accounting_with_reservation_bytes'], 19*proof.GIB)
+        self.assertEqual(actual['filesystem_growth_high_water_bytes'], 8258248704)
+        recovered = proof.resource_accounting(baseline, 0, 0, 0,
+            baseline['host_free_bytes']+1, actual['filesystem_growth_high_water_bytes'])
+        self.assertEqual(recovered['Docker_incremental_logical_bytes'], 0)
+        self.assertEqual(recovered['filesystem_growth_high_water_bytes'], 8258248704)
+
+    def fake_docker(self, temporary):
+        """Actual tiny CLI children, never the host Docker daemon."""
+        root = Path(temporary)
+        telemetry = root/'telemetry.json'
+        ids = ['sha256:'+'a'*64]
+        rows = [{'Type': t, 'Size': '3.598GB' if t == 'Images' else '0B',
+                 'Active': '0', 'TotalCount': '1' if t == 'Images' else '0'}
+                for t in ('Images', 'Containers', 'Local Volumes', 'Build Cache')]
+        telemetry.write_text(json.dumps({'rows': rows, 'ids': ids}))
+        executable = root/'docker'
+        executable.write_text('#!'+sys.executable+'\nimport json,sys\n'
+            f'p=json.load(open({str(telemetry)!r}))\n'
+            'if p.get("exit"): raise SystemExit(p["exit"])\n'
+            'if sys.argv[1:3]==["system","df"]:\n'
+            ' print("\\n".join(json.dumps(r) for r in p["rows"]))\n'
+            'elif sys.argv[1:3]==["image","ls"]:\n'
+            ' sys.stdout.write("\\n".join(p["ids"]))\n'
+            'else: raise SystemExit(91)\n')
+        executable.chmod(0o700)
+        return telemetry, rows, ids
+
+    def test_initial_stock_binding_and_real_telemetry_rejections(self):
+        cases = ['positive', 'cache', 'container', 'volume', 'count', 'unit', 'id',
+                 'id-count', 'schema', 'unavailable']
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as value:
+                telemetry, rows, ids = self.fake_docker(value)
+                if case in ('cache', 'container', 'volume'):
+                    row = rows[{'cache': 3, 'container': 1, 'volume': 2}[case]]
+                    row.update(Size='1B', TotalCount='1')
+                elif case == 'count':
+                    rows[0]['TotalCount'] = 'unknown'
+                elif case == 'unit':
+                    rows[0]['Size'] = '3GiB'
+                elif case == 'id':
+                    ids[:] = ['untrusted\noutput=value']
+                elif case == 'id-count':
+                    ids.clear()
+                elif case == 'schema':
+                    rows.pop()
+                telemetry.write_text(json.dumps({'rows': rows, 'ids': ids,
+                    'exit': 23 if case == 'unavailable' else 0}))
+                p = proof.Proof(ROOT, Path(value), {'PATH': value})
+                with patch.object(proof.shutil, 'disk_usage') as disk:
+                    disk.return_value.free = 80*proof.GIB
+                    if case == 'positive':
+                        p.bind_resource_baseline()
+                        self.assertEqual(p.report['resource_baseline']['preexisting_image_ids'], ids)
+                        self.assertEqual(p.report['resource_samples'][0]['Docker_incremental_logical_bytes'], 0)
+                        with self.assertRaisesRegex(ValueError, 'already bound'):
+                            p.bind_resource_baseline()
+                    else:
+                        with self.assertRaises((ValueError, KeyError)):
+                            p.bind_resource_baseline()
+                        self.assertNotIn('resource_baseline', p.report)
+
+    def test_injected_resource_failures_reap_only_owned_child(self):
+        cases = [('logical', 'incremental logical budget'), ('free', 'host free reserve'),
+                 ('filesystem', 'filesystem growth budget'), ('ids', 'stock drifted'),
+                 ('malformed', 'usage schema'), ('unavailable', 'exit 23')]
+        for case, message in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as value:
+                telemetry, rows, ids = self.fake_docker(value)
+                p = proof.Proof(ROOT, Path(value), {'PATH': value})
+                sentinel = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(30)'])
+                state = {}
+                try:
+                    with patch.object(proof.shutil, 'disk_usage') as disk:
+                        disk.return_value.free = 80*proof.GIB
+                        p.bind_resource_baseline()
+                        if case == 'logical':
+                            rows[3]['Size'] = '18GB'
+                        elif case == 'free':
+                            disk.return_value.free = 13*proof.GIB-1
+                        elif case == 'filesystem':
+                            disk.return_value.free = 60*proof.GIB
+                        elif case == 'ids':
+                            ids.clear()
+                        elif case == 'malformed':
+                            rows.pop()
+                        telemetry.write_text(json.dumps({'rows': rows, 'ids': ids,
+                            'exit': 23 if case == 'unavailable' else 0}))
+                        with self.assertRaisesRegex(ValueError, message):
+                            proof.supervise([sys.executable, '-c', 'import time;time.sleep(30)'],
+                                dict(os.environ), 5, 65536, state, lambda: p.guard(force=True))
+                    self.assertIsNone(sentinel.poll())
+                    self.assertIsNotNone(state['exit'])
+                    self.assertTrue(state['interrupted_or_failed'])
+                    self.assertNotIn('reap_failed', state)
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(state['pid'], 0)
+                finally:
+                    sentinel.kill()
+                    sentinel.wait(timeout=2)
 
     def test_actual_build_command_never_exports_and_binds_source_metadata(self):
         with tempfile.TemporaryDirectory() as value:
