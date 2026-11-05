@@ -100,6 +100,27 @@ new joins and transfers add real processing overhead that must be measured,
 not subtracted using DAG arithmetic. S03 has no measured hosted latency until
 its first ordinary candidate run completes.
 
+Live scanner qualification now has its own mandatory branch after the image
+contract, overlapping construction. Candidate inventory and scanning still use
+the actual loaded/smoked image and independently obtain live tools/databases.
+The image result enumerates both branches; failed, skipped, cancelled or missing
+qualification cannot pass the aggregate. Fixture artifacts remain separate from
+exact-image evidence. This saves a serial edge at the cost of additional runner
+setup and independent database downloads; a fresh local qualification took
+107.844 seconds, which is not an observed pipeline saving.
+
+The image builder also compiles the exact locked dependency graph in a layer
+keyed by unchanged workspace manifests. Placeholder local targets enable that
+dependency compile; after real source COPY, `cargo clean --release --locked
+--offline --workspace` removes every local workspace artifact before the exact
+candidate build. This cleanup is mandatory: source timestamps alone can retain
+a placeholder binary. External dependency outputs remain available, while local
+build scripts, product code and embedded assets are compiled from real source.
+Wolfi tooling/runtime and all image smoke/security obligations are unchanged.
+`scripts/test-managed-dependency-layer.py` checks manifest bytes, workspace/target
+coverage and cleanup ordering. First prelanding builds can miss the new layer;
+PRs still cannot export it. Full cold/warm linux/amd64 measurements are pending.
+
 ## Cache and cancellation boundary
 
 Cargo cache keys include an owned `nac-ci-v1` prefix and job role; the pinned
