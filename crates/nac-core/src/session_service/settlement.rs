@@ -273,7 +273,7 @@ impl SessionService {
                 .as_ref()
                 .map_or(0, crate::model::TokenUsage::billable_tokens);
             match crate::store::spawn_blocking_store_caller(move || {
-                crate::store::settle_session_goal_run_with_failure(
+                crate::store::settle_session_goal_run_with_provenance(
                     &path,
                     &session_id,
                     &owned_run_id,
@@ -285,17 +285,27 @@ impl SessionService {
             })
             .await
             {
-                Ok(Ok(goal)) => {
+                Ok(Ok((goal, last_run))) => {
                     if let Some(goal) = goal {
                         receipt.known = goal.accounting_run_id.is_none();
-                        match u64::try_from(goal.version) {
-                            Ok(version) => {
-                                receipt.goal = Some(crate::events::AttentionGoal {
-                                    id: goal.goal_id,
-                                    version,
-                                });
+                        if last_run.as_deref() != Some(run_id.as_str()) {
+                            // A completed row can outlive its run. Do not adopt it
+                            // for a later request; unfinished/conflicting goals
+                            // remain unknown rather than becoming goal-free.
+                            receipt.known &= goal.status == crate::store::GoalStatus::Complete
+                                && last_run.is_some()
+                                && goal.continuation_run_id.is_none()
+                                && goal.next_attempt_at_epoch_ms.is_none();
+                        } else {
+                            match u64::try_from(goal.version) {
+                                Ok(version) => {
+                                    receipt.goal = Some(crate::events::AttentionGoal {
+                                        id: goal.goal_id,
+                                        version,
+                                    });
+                                }
+                                Err(_) => receipt.known = false,
                             }
-                            Err(_) => receipt.known = false,
                         }
                     }
                 }

@@ -6,6 +6,8 @@ use tokio::sync::Notify;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Case {
     Complete,
+    HistoricalGoal,
+    HistoricalGoalQueue,
     QueueAfterComplete,
     Queue,
     QueueThree,
@@ -26,8 +28,8 @@ async fn wait_for(mut condition: impl FnMut() -> bool) {
 
 async fn run(case: Case) {
     let planned_calls = match case {
-        Case::Queue => 2,
-        Case::QueueThree => 3,
+        Case::Queue | Case::HistoricalGoal => 2,
+        Case::QueueThree | Case::HistoricalGoalQueue => 3,
         _ => 1,
     };
     let root = std::env::temp_dir().join(format!("nac-goal-free-feed-{}", Uuid::new_v4()));
@@ -81,6 +83,7 @@ async fn run(case: Case) {
     let mut body = open(app.clone()).await;
     assert_eq!(frame(&mut body).await["kind"], "baseline");
     assert!(!service.has_event_subscribers());
+    let history_start = store::read_completion_page(&path, None).unwrap().cursor;
     let response = post(
         app.clone(),
         "/sessions/session/runs",
@@ -94,13 +97,64 @@ async fn run(case: Case) {
             .unwrap(),
     )
     .unwrap();
-    let first_run = submitted["run_id"].as_str().unwrap().to_owned();
-    let mut expected_final = first_run.clone();
+    let mut first_run = submitted["run_id"].as_str().unwrap().to_owned();
     let mut three_run_frontier = None;
     tokio::time::timeout(Duration::from_secs(5), reached.notified())
         .await
         .unwrap();
-    if matches!(case, Case::Queue | Case::QueueThree) {
+    let historical = if matches!(case, Case::HistoricalGoal | Case::HistoricalGoalQueue) {
+        let goal = service
+            .create_direct_goal("first goal", None)
+            .await
+            .unwrap();
+        let (goal_path, goal_id) = (path.clone(), goal.goal_id.clone());
+        store::spawn_blocking_store_caller(move || {
+            store::update_session_goal_by_model(
+                &goal_path,
+                "session",
+                &goal_id,
+                store::GoalStatus::Complete,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        release.notify_one();
+        let completed = fact(&mut body, "work_settled").await;
+        assert_eq!(completed["change"]["work"]["disposition"], "completed");
+        assert_eq!(completed["change"]["work"]["run_id"], first_run);
+        assert_eq!(completed["change"]["work"]["goal"]["id"], goal.goal_id);
+        wait_for(|| !service.has_active_operation()).await;
+        let settled_goal = store::load_session_goal(&path, "session").unwrap().unwrap();
+        assert_eq!(settled_goal.status, store::GoalStatus::Complete);
+        assert!(settled_goal.accounting_run_id.is_none());
+        let prior_run = first_run.clone();
+        let response = post(
+            app.clone(),
+            "/sessions/session/runs",
+            serde_json::json!({"prompt":"Later ordinary request"}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let submitted: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        first_run = submitted["run_id"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(5), reached.notified())
+            .await
+            .unwrap();
+        Some((settled_goal, prior_run))
+    } else {
+        None
+    };
+    let mut expected_final = first_run.clone();
+    if matches!(
+        case,
+        Case::Queue | Case::QueueThree | Case::HistoricalGoalQueue
+    ) {
         service
             .enqueue_direct_input(
                 store::InboxDelivery::Queue,
@@ -135,7 +189,7 @@ async fn run(case: Case) {
     } else {
         release.notify_one();
     }
-    if case == Case::Queue {
+    if matches!(case, Case::Queue | Case::HistoricalGoalQueue) {
         tokio::time::timeout(Duration::from_secs(5), reached.notified())
             .await
             .unwrap();
@@ -143,6 +197,7 @@ async fn run(case: Case) {
         let continuing = fact(&mut body, "work_settled").await;
         assert_eq!(continuing["change"]["work"]["run_id"], first_run);
         assert_eq!(continuing["change"]["work"]["disposition"], "continuing");
+        assert!(continuing["change"]["work"]["goal"].is_null());
         assert_eq!(continuing["new_attention"], false);
         release.notify_one();
     }
@@ -220,8 +275,16 @@ async fn run(case: Case) {
     }
     if matches!(
         case,
-        Case::Complete | Case::Queue | Case::QueueThree | Case::QueueAfterComplete
+        Case::Complete
+            | Case::Queue
+            | Case::QueueThree
+            | Case::QueueAfterComplete
+            | Case::HistoricalGoal
+            | Case::HistoricalGoalQueue
     ) {
+        if let Some((_, prior_run)) = &historical {
+            eprintln!("LEFTOVER_GOAL_REGRESSION: goal A={prior_run} completed; waiting for later request {expected_final} without goal attribution");
+        }
         let completed = fact(&mut body, "work_settled").await;
         assert_eq!(completed["change"]["work"]["disposition"], "completed");
         assert!(completed["change"]["work"]["goal"].is_null());
@@ -282,6 +345,53 @@ async fn run(case: Case) {
                 "canceling queued work cannot renotify the prior run"
             );
             drop(peer);
+        }
+        if let Some((goal, prior_run)) = &historical {
+            assert_eq!(
+                store::load_session_goal(&path, "session").unwrap().as_ref(),
+                Some(goal),
+                "later requests must not change old goal identity, version, accounting or usage"
+            );
+            let metadata = store::read_attention_metadata(&path, Some("session"))
+                .unwrap()
+                .remove(0);
+            assert_eq!(metadata.goal.unwrap().last_run.as_ref(), Some(prior_run));
+            let page = store::read_completion_page(&path, Some(&history_start)).unwrap();
+            assert!(!page.more);
+            assert_eq!(page.items.len(), planned_calls);
+            let goal_items: Vec<_> = page
+                .items
+                .iter()
+                .filter(|item| item.kind == store::CompletionKind::Goal)
+                .collect();
+            assert_eq!(goal_items.len(), 1);
+            assert_eq!(goal_items[0].run_id, *prior_run);
+            assert_eq!(
+                goal_items[0].goal_id.as_deref(),
+                Some(goal.goal_id.as_str())
+            );
+            for request in page
+                .items
+                .iter()
+                .filter(|item| item.kind == store::CompletionKind::Request)
+            {
+                assert!(request.goal_id.is_none());
+                assert_ne!(request.run_id, *prior_run);
+            }
+            assert_eq!(
+                page.items
+                    .iter()
+                    .filter(|item| item.run_id == first_run)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                page.items
+                    .iter()
+                    .filter(|item| item.run_id == expected_final)
+                    .count(),
+                1
+            );
         }
         // A changed canonical configuration cannot keep the old service's proof.
         if case == Case::Complete {
@@ -393,4 +503,14 @@ async fn attention_f1_actual_three_model_sse_keeps_b_identity_until_exact_c_comp
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     run(Case::QueueThree).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completed_goal_does_not_capture_later_human_run_or_queued_continuation() {
+    let _guard = SERVER_MODEL_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for case in [Case::HistoricalGoal, Case::HistoricalGoalQueue] {
+        run(case).await;
+    }
 }

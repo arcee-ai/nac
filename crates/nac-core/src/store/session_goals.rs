@@ -652,23 +652,9 @@ pub fn settle_session_goal_run_with_failure(
     disposition: GoalRunDisposition,
     failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<Option<SessionGoalRecord>> {
-    let mut connection = open_runtime_connection(path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let goal = settle_session_goal_run_with_connection(
-        &transaction,
-        session_id,
-        run_id,
-        final_billable_tokens,
-        terminal_at_epoch_ms,
-        disposition,
-        failure,
-    )?;
-    transaction.commit()?;
-    if let Some(goal) = &goal {
-        committed(path, goal, GoalChangeKind::Current);
-    }
-    Ok(goal)
+    Ok(settle_session_goal_run_with_provenance(
+        path, session_id, run_id, final_billable_tokens, terminal_at_epoch_ms, disposition, failure,
+    )?.0)
 }
 command SettleSessionGoalRunWithFailureCommand {
     session_id: String = session_id.to_owned(),
@@ -681,6 +667,53 @@ command SettleSessionGoalRunWithFailureCommand {
 call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition, command.failure.as_ref())
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
 port public;
+}
+
+coordinated_command! {
+/// Keep exact settled-run provenance in the same transaction as accounting.
+/// The public current-row result alone does not imply participation by this run.
+pub(crate) fn settle_session_goal_run_with_provenance(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+    final_billable_tokens: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<(Option<SessionGoalRecord>, Option<String>)> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let goal = settle_session_goal_run_with_connection(
+        &transaction,
+        session_id,
+        run_id,
+        final_billable_tokens,
+        terminal_at_epoch_ms,
+        disposition,
+        failure,
+    )?;
+    let last_run = transaction.query_row(
+        "SELECT last_run_id FROM session_goals WHERE session_id=?1", [session_id],
+        |row| row.get::<_, Option<String>>(0),
+    ).optional()?.flatten();
+    transaction.commit()?;
+    if let Some(goal) = &goal {
+        committed(path, goal, GoalChangeKind::Current);
+    }
+    Ok((goal, last_run))
+}
+command SettleSessionGoalRunWithProvenanceCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    final_billable_tokens: u64 = final_billable_tokens,
+    terminal_at_epoch_ms: u64 = terminal_at_epoch_ms,
+    disposition: GoalRunDisposition = disposition,
+    failure: Option<crate::run_failure::RunFailure> = failure.cloned(),
+}
+call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition, command.failure.as_ref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port internal;
 }
 
 pub(crate) fn settle_session_goal_run_with_connection(
