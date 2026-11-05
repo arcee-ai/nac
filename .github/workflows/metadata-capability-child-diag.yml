@@ -1,0 +1,13 @@
+name: DIAG metadata child
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  child:
+    name: DIAG child leaf
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: DIAG no build or quality verdict
+        run: printf 'DIAG reusable child executed; no source quality result\n'

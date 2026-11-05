@@ -1,0 +1,77 @@
+name: DIAG metadata capability
+run-name: DIAG metadata capability ${{ inputs.phase }}
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [admit, observe]
+        required: true
+      prior_run:
+        type: string
+        default: ''
+        required: false
+      tuple_digest:
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: diag-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+jobs:
+  select:
+    name: DIAG admission v1 ${{ inputs.tuple_digest }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      mode: ${{ steps.select.outputs.mode }}
+    steps:
+      - name: DIAG checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: DIAG validate identity and public admission
+        id: select
+        env:
+          DIAG_PHASE: ${{ inputs.phase }}
+          DIAG_PRIOR_RUN: ${{ inputs.prior_run }}
+          DIAG_TUPLE_DIGEST: ${{ inputs.tuple_digest }}
+        run: python3 .github/scripts/metadata-capability-diag.py
+  sentinel:
+    name: DIAG intentionally failed or missing selector
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      mode: ${{ steps.empty.outputs.mode }}
+    steps:
+      - name: DIAG no output and intentional first-run failure
+        id: empty
+        env:
+          DIAG_PHASE: ${{ inputs.phase }}
+        run: |
+          test "$DIAG_PHASE" = observe
+  aggregate:
+    name: ${{ needs.select.result == 'success' && needs.select.outputs.mode == 'pure' && 'DIAG PURE aggregate' || 'DIAG FULL aggregate default' }}
+    if: ${{ always() }}
+    needs: [select, sentinel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: DIAG record safe default expressions
+        env:
+          DIAG_SELECT_RESULT: ${{ needs.select.result }}
+          DIAG_MODE: ${{ needs.select.outputs.mode }}
+          DIAG_SENTINEL_RESULT: ${{ needs.sentinel.result }}
+          DIAG_SENTINEL_MODE: ${{ needs.sentinel.outputs.mode }}
+          DIAG_MISSING_DEFAULT: ${{ needs.sentinel.result == 'success' && needs.sentinel.outputs.mode == 'pure' && 'DIAG PURE invalid' || 'DIAG FULL no-output default' }}
+        run: |
+          test -z "$DIAG_SENTINEL_MODE"
+          test "$DIAG_MISSING_DEFAULT" = 'DIAG FULL no-output default'
+          printf 'selector_result=%s selector_mode=%s sentinel_result=%s default=%s\n' "$DIAG_SELECT_RESULT" "$DIAG_MODE" "$DIAG_SENTINEL_RESULT" "$DIAG_MISSING_DEFAULT"
+  caller:
+    name: ${{ (inputs.phase == 'admit' && needs.sentinel.result == 'success' && needs.sentinel.outputs.mode == 'pure' || inputs.phase == 'observe' && needs.select.result == 'success' && needs.select.outputs.mode == 'pure') && 'DIAG PURE caller omitted' || 'DIAG FULL caller default' }}
+    if: ${{ always() && !(needs.select.result == 'success' && needs.select.outputs.mode == 'pure') }}
+    needs: [select, sentinel]
+    uses: ./.github/workflows/metadata-capability-child-diag.yml
