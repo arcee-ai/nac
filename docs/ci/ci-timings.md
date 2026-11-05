@@ -32,8 +32,9 @@ can differ. The collector obtains the actual candidate from `SOURCE_SHA` and/or
 matching `EXPECTED_SHA` in the final aggregate log. Missing/conflicting identities,
 foreign run/attempt jobs or incomplete duration evidence make the metric ineligible.
 
-Processing latency is elapsed preparation start through final aggregate end.
-Event-to-green additionally includes initial preparation wait. Both include later
+Processing latency begins at admission identity when that unit precedes prepare,
+or at prepare for legacy workflows, through final aggregate end. Event-to-green
+additionally includes the initial wait before that first execution. Both include later
 scheduling gaps, setup, artifact movement and aggregate overhead. Executed job
 seconds are summed separately by reported runner labels/group; they are neither
 CPU time nor a billable dollar estimate. Pending jobs make compute totals partial.

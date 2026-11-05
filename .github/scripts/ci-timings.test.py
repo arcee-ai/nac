@@ -74,6 +74,8 @@ class TimingControls(unittest.TestCase):
         self.assertFalse(self.report(bad)['metric_eligible'])
         bad = fixture();bad[0]['referenced_workflows']=[{'path':'arcee-ai/nac/.github/workflows/ci-admission.yml@'+SHA}]
         self.assertFalse(self.report(bad)['metric_eligible'])
+        bad = fixture();bad[1].append({'id':4,'name':'ci-admission','run_id':123,'run_attempt':1,'status':'completed','conclusion':'skipped'})
+        self.assertFalse(self.report(bad)['metric_eligible'])
 
     def test_candidate_environment_log_identity_is_mandatory(self):
         for log in ['', 'echo "sha=$SOURCE_SHA"', f'SOURCE_SHA: {SHA}\nSOURCE_SHA: ' + 'c' * 40]:

@@ -212,7 +212,7 @@ def processing_start(run, jobs, prepare):
     refs = run.get("referenced_workflows", [])
     has_unit = any(isinstance(ref, dict) and "/.github/workflows/ci-admission.yml@" in ref.get("path", "")
                    for ref in refs)
-    if not matches and not has_unit and not any(str(job.get("name", "")).startswith("ci-admission /") for job in jobs):
+    if not matches and not has_unit and not any(job.get("name") == "ci-admission" or str(job.get("name", "")).startswith("ci-admission /") for job in jobs):
         return timestamp(prepare.get("started_at")), "prepare"
     if len(matches) != 1:
         raise ValueError("expected exactly one admission identity processing start")
