@@ -75,8 +75,11 @@ function validate(config, required = requiredJobs) {
     const guard = named(consumer, "Validate browser artifact selection and current runner");
     assert.equal(guard.if, undefined);
     assert.equal(guard.env.BROWSER_ARTIFACT_ID, "${{ needs.browser-binary.outputs.artifact_id }}");
+    assert.equal(guard.env.BROWSER_BINARY_RECEIPT, "${{ needs.browser-binary.outputs.receipt }}");
     assert.match(guard.run, /\$\{ImageOS:\?missing runner OS\}.*\$\{ImageVersion:\?missing runner image version\}/);
     assert.ok(guard.run.includes('[[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]'));
+    assert.ok(guard.run.includes('test -n "$BROWSER_BINARY_RECEIPT"'));
+    assert.ok(guard.run.includes('mkdir "$GITHUB_WORKSPACE/browser-binary-download"'));
     const fetch = consumer.steps.find(s => s.uses === download);
     assert.ok(consumer.steps.indexOf(guard) < consumer.steps.indexOf(fetch));
     assert.equal(fetch.if, undefined);
@@ -138,6 +141,8 @@ test("seeded producer, digest-origin, fallback, runtime and required-DAG regress
     w => { step(w.jobs["browser-binary"], "upload").with.name = "previous-green"; },
     w => { step(w.jobs["browser-binary"], "upload").with["compression-level"] = 6; },
     w => { named(w.jobs["browser-shards"], "Validate browser artifact selection and current runner").run = "true"; },
+    w => { delete named(w.jobs["browser-shards"], "Validate browser artifact selection and current runner").env.BROWSER_BINARY_RECEIPT; },
+    w => { const guard = named(w.jobs["browser-proof"], "Validate browser artifact selection and current runner"); guard.run = guard.run.replace('mkdir "$GITHUB_WORKSPACE/browser-binary-download"', 'true'); },
     w => { w.jobs["browser-shards"].steps.find(s => s.uses === download).with["artifact-ids"] = ""; },
     w => { w.jobs["browser-shards"].steps.find(s => s.uses === download).with["run-id"] = "old-run"; },
     w => { step(w.jobs["browser-shards"], "binary").env.BROWSER_BINARY_RECEIPT = "${{ inputs.receipt }}"; },
@@ -193,14 +198,29 @@ test("actual pre-download guard rejects empty image identity, wrong source/host 
     const env = { ...process.env, PATH: `${root}:${process.env.PATH}`,
       NAC_SOURCE_REVISION: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
       ImageOS: "ubuntu24", ImageVersion: "20261101.1", BROWSER_ARTIFACT_ID: "123",
-      FAKE_RUST_HOST: "x86_64-unknown-linux-gnu" };
+      FAKE_RUST_HOST: "x86_64-unknown-linux-gnu", GITHUB_WORKSPACE: root,
+      BROWSER_BINARY_RECEIPT: "authenticated producer receipt" };
     const run = overrides => spawnSync("bash", ["-e", "-c", guard], { encoding: "utf8", env: { ...env, ...overrides } });
     assert.equal(run({}).status, 0);
     for (const overrides of [
       { ImageOS: "" }, { ImageVersion: "" }, { NAC_SOURCE_REVISION: "b".repeat(40) },
+      { BROWSER_BINARY_RECEIPT: "" },
       { FAKE_RUST_HOST: "aarch64-apple-darwin" },
       ...["", "0", "001", "1,2", "1;false"].map(value => ({ BROWSER_ARTIFACT_ID: value })),
     ]) assert.notEqual(run(overrides).status, 0, JSON.stringify(overrides));
+    const destination = path.join(root, "browser-binary-download");
+    assert.notEqual(run({}).status, 0, "existing directory must be preserved and rejected");
+    fs.rmdirSync(destination);
+    fs.writeFileSync(destination, "existing file");
+    assert.notEqual(run({}).status, 0, "existing file must be preserved and rejected");
+    assert.equal(fs.readFileSync(destination, "utf8"), "existing file");
+    fs.unlinkSync(destination);
+    const sibling = path.join(root, "sibling");
+    fs.mkdirSync(sibling);
+    fs.symlinkSync(sibling, destination);
+    assert.notEqual(run({}).status, 0, "symlink destination must be preserved and rejected");
+    assert.equal(fs.readlinkSync(destination), sibling);
+    assert.deepEqual(fs.readdirSync(sibling), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

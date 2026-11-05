@@ -295,11 +295,14 @@ jobs:
       - name: Validate browser artifact selection and current runner
         env:
           BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
+          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
         run: |
           : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
           test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
           test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
           [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          test -n "$BROWSER_BINARY_RECEIPT"
+          mkdir "$GITHUB_WORKSPACE/browser-binary-download"
       - name: Download only this producer's browser executable artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -386,11 +389,14 @@ jobs:
       - name: Validate browser artifact selection and current runner
         env:
           BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
+          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
         run: |
           : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
           test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
           test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
           [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          test -n "$BROWSER_BINARY_RECEIPT"
+          mkdir "$GITHUB_WORKSPACE/browser-binary-download"
       - name: Download only this producer's browser executable artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
