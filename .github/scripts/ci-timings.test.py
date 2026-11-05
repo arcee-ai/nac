@@ -95,6 +95,7 @@ class TimingControls(unittest.TestCase):
     def test_retry_metrics_do_not_qualify_as_first_attempt(self):
         evidence = fixture()
         evidence[0]['run_attempt'] = 2
+        evidence[0]['run_started_at'] = evidence[0]['created_at']
         for job in evidence[1]:
             job['run_attempt'] = 2
         report = self.report(evidence)
@@ -102,6 +103,33 @@ class TimingControls(unittest.TestCase):
         self.assertFalse(report['ordinary_first_attempt_metric'])
         evidence[0]['event'] = 'workflow_dispatch'
         self.assertFalse(self.report(evidence)['ordinary_first_attempt_metric'])
+
+    def test_partial_retry_cloned_ids_and_attempts_do_not_duplicate_prior_compute(self):
+        evidence = fixture()
+        evidence[0].update(run_attempt=2, run_started_at='2026-11-04T00:02:00Z')
+        for job in evidence[1]:
+            job['run_attempt'] = 2  # Actual API reassigns even carried-forward jobs.
+        report = self.report(evidence)
+        self.assertEqual(report['carried_forward_job_ids'], [1])
+        self.assertEqual(report['carried_forward_job_seconds'], 20)
+        self.assertEqual(report['completed_job_seconds'], 135)
+        self.assertEqual(report['job_view_completed_seconds'], 155)
+        self.assertFalse(report['metric_eligible'])
+        self.assertFalse(report['ordinary_first_attempt_metric'])
+        self.assertIn('partial retry carries forward prior job results', report['ineligible_reasons'])
+        for boundary in [None, 'invalid']:
+            evidence[0]['run_started_at'] = boundary
+            report = self.report(evidence)
+            self.assertEqual(report['completed_job_seconds'], 0)
+            self.assertEqual(report['job_view_completed_seconds'], 155)
+            self.assertEqual(report['unclassified_completed_job_seconds'], 155)
+            self.assertEqual(report['incomplete_compute_job_ids'], [1, 2, 3])
+            self.assertFalse(report['metric_eligible'])
+        evidence[0]['run_started_at'] = '2026-11-04T00:01:10Z'
+        report = self.report(evidence)
+        self.assertEqual(report['incomplete_compute_job_ids'], [1])
+        self.assertEqual(report['completed_job_seconds'], 135)
+        self.assertEqual(report['unclassified_completed_job_seconds'], 20)
 
     def test_skips_do_not_contribute_compute_and_partial_compute_is_explicit(self):
         evidence = fixture()
