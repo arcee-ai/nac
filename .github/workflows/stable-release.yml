@@ -561,17 +561,25 @@ jobs:
       policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
       trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
 
+  managed-fault:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
+    uses: ./.github/workflows/managed-fault.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.sha }}
+
   managed-quality:
-    needs: [prepare, quality]
+    needs: [prepare, quality, managed-fault]
     if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
     uses: ./.github/workflows/managed-quality.yml
     with:
       source_sha: ${{ needs.prepare.outputs.sha }}
       quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
+      fault_receipt: ${{ needs.managed-fault.outputs.fault_receipt }}
 
   managed:
     if: ${{ always() && needs.prepare.outputs.managed_applicable == 'true' }}
-    needs: [prepare, managed-image, managed-quality]
+    needs: [prepare, managed-image, managed-fault, managed-quality]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -598,7 +606,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-quality, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

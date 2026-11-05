@@ -132,7 +132,7 @@ test("reusable managed graph rejects every incomplete inner job and a different 
 test("early image and late managed joins reject incomplete or foreign branches", () => {
   for (const [verify, jobs] of [
     [requireImageComplete, imageJobs],
-    [requireManagedCallerComplete, ["prepare", "managed-image", "managed-quality"]],
+    [requireManagedCallerComplete, ["prepare", "managed-image", "managed-fault", "managed-quality"]],
   ]) {
     const complete = () => ({
       ...Object.fromEntries(jobs.map(job => [job, { result: "success", outputs: { sha } }])),
@@ -151,7 +151,7 @@ test("early image and late managed joins reject incomplete or foreign branches",
     assert.throws(() => verify({ ...complete(), extra: { result: "success" } }, sha));
     assert.throws(() => verify(complete(), "b".repeat(40)));
   }
-  const needs = Object.fromEntries(["prepare", "managed-image", "managed-quality"].map(job =>
+  const needs = Object.fromEntries(["prepare", "managed-image", "managed-fault", "managed-quality"].map(job =>
     [job, { result: "success", outputs: { sha } }]));
   for (const wrong of [undefined, "", "b".repeat(40)]) {
     needs["managed-image"].outputs.sha = wrong;

@@ -161,7 +161,12 @@ test('quality reusable retains full fallback, current-attempt validation and man
   assert.equal(full.if, "steps.quality-mode.outputs.mode == 'full'");
   const fault = steps.find(s => s.run === 'make test-managed-fault-fixture');
   assert.ok(steps.indexOf(fault) > steps.indexOf(full));
-  assert.equal(fault.if, undefined);
+  assert.equal(fault.if, "steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'");
+  const faultMode = steps.find(s => s.id === 'fault-mode');
+  assert.equal(faultMode.env.FAULT_RECEIPT, '${{ inputs.fault_receipt }}');
+  assert.equal(faultMode.env.EXPECTED_SHA, '${{ inputs.source_sha }}');
+  assert.ok(faultMode.run.includes('managed-fault.mjs mode'));
+  assert.equal(faultMode.if, undefined);
   assert.equal(fault['continue-on-error'], undefined);
   assert.equal(quality.permissions.contents, 'read');
 });

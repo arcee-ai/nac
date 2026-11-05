@@ -12,6 +12,11 @@ on:
         default: ''
         type: string
 
+      fault_receipt:
+        description: Complete successful private fixture from the same caller run and attempt
+        default: ''
+        type: string
+
 permissions:
   contents: read
 
@@ -26,26 +31,34 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
-      - name: Install pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-        with:
-          components: rustfmt, clippy
       - name: Install Node LTS
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-      - name: Cache managed fault and standalone quality compilation
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: nac-ci-v1
-          key: managed-quality
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Select verified reuse or full quality for this attempt
         id: quality-mode
         env:
           QUALITY_RECEIPT: ${{ inputs.quality_receipt }}
           EXPECTED_SHA: ${{ inputs.source_sha }}
         run: node .github/scripts/pr-checks.mjs quality-mode >> "$GITHUB_OUTPUT"
+      - name: Select verified same-attempt fault reuse or full fixture
+        id: fault-mode
+        env:
+          FAULT_RECEIPT: ${{ inputs.fault_receipt }}
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: node .github/scripts/managed-fault.mjs mode >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain
+        if: steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+      - name: Cache managed fault and standalone quality compilation
+        if: steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: managed-quality
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Install test dependencies
         if: steps.quality-mode.outputs.mode == 'full'
         run: |
@@ -56,5 +69,6 @@ jobs:
         run: make ci
 
       - name: Verify the private managed fault fixture
+        if: steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'
         run: make test-managed-fault-fixture
 

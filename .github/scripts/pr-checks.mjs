@@ -79,7 +79,7 @@ export function qualityMode(receipt, sha, context) {
 
 export const managedJobs = ["prepare", "quality", "build-smoke"];
 export const imageJobs = ["prepare", "contract", "scanner-qualification", "build-smoke"];
-export const managedCallerJobs = ["managed-image", "managed-quality", "managed"];
+export const managedCallerJobs = ["managed-image", "managed-fault", "managed-quality", "managed"];
 
 function requireCandidateJobs(needs, expectedSha, jobs, label) {
   if (!/^[a-f0-9]{40}$/.test(expectedSha ?? "") || needs.prepare?.outputs?.sha !== expectedSha) {
@@ -102,7 +102,7 @@ export function requireImageComplete(needs, expectedSha) {
 }
 
 export function requireManagedCallerComplete(needs, expectedSha) {
-  requireCandidateJobs(needs, expectedSha, ["prepare", "managed-image", "managed-quality"], "managed caller");
+  requireCandidateJobs(needs, expectedSha, ["prepare", "managed-image", "managed-fault", "managed-quality"], "managed caller");
   // The image branch resolves its own checkout; it must return this candidate.
   if (needs["managed-image"].outputs?.sha !== expectedSha) {
     throw new Error("managed image differs from the caller's candidate");
