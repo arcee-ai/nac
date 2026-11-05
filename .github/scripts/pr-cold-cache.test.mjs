@@ -62,6 +62,15 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 function verify(values) {
   const normalized = structuredClone(values);
   const top = normalized["stable-release"];
+  // Reverse only S02's ordinary execution/list granularity; proof remains serial.
+  for (const step of [
+    top.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard"),
+    top.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection"),
+  ]) {
+    assert.equal(step.run.split("--fully-parallel").length, 2);
+    assert.ok(step.run.includes("--fully-parallel --grep-invert='exact-goal-wait.e2e.ts'"));
+    step.run = step.run.replace("--fully-parallel ", "");
+  }
   const identity = top.jobs.prepare.steps.find(step => step.id === "ci");
   // Reverse only the three observational bindings to recover S17's exact
   // 1bd0... workflow; commands, graph, caches and every other field stay bound.

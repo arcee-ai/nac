@@ -5,6 +5,8 @@ Inputs are native `playwright test --list --reporter=json` outputs. Generate the
 complete inventory without filters, then every ordinary shard and the dedicated
 goal-proof selection from the same checkout and config. This checks selection;
 successful execution of every part remains a separate required job boundary.
+The first part is the unchanged serial proof file; remaining parts are ordinary
+test-granularity shards. Both modes keep one worker and zero retries.
 """
 
 import argparse
@@ -13,12 +15,12 @@ import json
 import pathlib
 
 
-def inventory(report):
+def inventory(report, fully_parallel=False):
     if report.get("errors") != []:
         raise ValueError("Playwright inventory has collection errors")
     config = report["config"]
-    if config["workers"] != 1 or config["fullyParallel"] is not False:
-        raise ValueError("browser shards must retain one worker and file isolation")
+    if config["workers"] != 1 or config["fullyParallel"] is not fully_parallel:
+        raise ValueError("browser inventory must retain one worker and its lane's parallel mode")
     if any(project["retries"] != 0 for project in config["projects"]):
         raise ValueError("browser shards must retain zero retries")
     selected = []
@@ -41,9 +43,19 @@ def inventory(report):
 
 def validate(complete, parts):
     expected = inventory(complete)
+    if len(parts) < 2:
+        raise ValueError("browser partition requires serial proof first, then ordinary shards")
+    proof = inventory(parts[0])
+    expected_proof = {test for test in expected if test[1] == "exact-goal-wait.e2e.ts"}
+    if not expected_proof or proof != expected_proof:
+        raise ValueError("first browser part must be the complete unchanged serial proof file")
     counts = collections.Counter()
-    for part in parts:
-        counts.update(inventory(part))
+    counts.update(proof)
+    for part in parts[1:]:
+        ordinary = inventory(part, fully_parallel=True)
+        if any(test[1] == "exact-goal-wait.e2e.ts" for test in ordinary):
+            raise ValueError("ordinary shards cannot include proof tests")
+        counts.update(ordinary)
     duplicated = [test for test, count in counts.items() if count != 1]
     missing = expected - counts.keys()
     unexpected = counts.keys() - expected

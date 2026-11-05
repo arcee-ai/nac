@@ -22,7 +22,7 @@ managed image work remains contents-read/build-and-smoke only.
 | Web lint/typecheck | Stable lint, server checks/assets and managed repeat | `test-assets` lint/typecheck once; formatting remains in lint |
 | Generated API document, app types, bounded nac-client types | `test-assets -> test-api-contract` plus managed repeat | Same sole writer/check chain in server; required receipt |
 | Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes the identical committed bundles from the same candidate |
-| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; eight file-isolated ordinary shards plus dedicated goal proof; same selected tests, retries and assertions |
+| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; eight individual-test ordinary shards plus dedicated serial goal proof; same selected tests, retries and assertions |
 | Source-size, source workflow/binary, durability, managed load/static image contract | Stable workspace plus managed repeat | Stable workspace; required receipt |
 | Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Early complete fixture plus exact-attempt late validation; standalone/retry full fallback retains all four commands |
 | Exact native linux/amd64 image, load, smoke, inventory, advisory scan/qualification | Managed contract/quality/build-smoke/result | Same exact loaded image ID and candidate, scanner infrastructure enforced; findings advisory as accepted |
@@ -91,8 +91,10 @@ this is not a storage, larger-runner, local-host or future-plan cost estimate.
 
 ## Complete production browser partition (ALL-582)
 
-Eight ordinary machines each run one native Playwright file shard, one worker,
-zero retries, and unchanged real-clock journeys. A dedicated machine runs both
+Eight ordinary machines each run one native Playwright individual-test shard,
+one worker, zero retries, and unchanged real-clock journeys. Only ordinary
+execution/discovery add `--fully-parallel`; complete discovery and proof retain
+the serial default. A dedicated machine runs both
 ALL471 goal-proof cases and the original bounded proof/cleanup collector. It
 also lists the complete current suite and all nine partitions, rejecting any
 missing, duplicate, unexpected or changed-skip selection before its journeys.

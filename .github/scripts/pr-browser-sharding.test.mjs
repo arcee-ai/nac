@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { requiredJobs, managedCallerJobs, requireComplete } from "./pr-checks.mjs";
@@ -8,21 +9,22 @@ import { requiredJobs, managedCallerJobs, requireComplete } from "./pr-checks.mj
 const YAML = createRequire(import.meta.url)("yaml");
 const workflow = YAML.parse(fs.readFileSync(".github/workflows/stable-release.yml", "utf8"));
 
-test("every file-isolated browser shard executes the inventoried exclusion and partition", () => {
+test("ordinary test-granularity shards execute the inventoried exclusion while proof stays serial", () => {
   const job = workflow.jobs["browser-shards"];
   assert.deepEqual(job.needs, ["prepare", "browser-binary"]);
   assert.deepEqual(job.strategy, { "fail-fast": false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } });
   assert.equal(job.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   const execute = job.steps.find(step => step.name === "Run production-embedded browser shard");
   assert.equal(execute.env.BROWSER_SHARD, "${{ matrix.shard }}");
-  assert.match(execute.run, /run test:e2e -- --grep-invert='exact-goal-wait.e2e.ts' --shard="\$BROWSER_SHARD\/8"/);
-  assert.doesNotMatch(execute.run, /--workers|--retries|--fully-parallel/);
+  assert.equal(execute.run, "npm --prefix crates/nac-server/web run test:e2e -- --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard=\"$BROWSER_SHARD/8\"");
+  assert.doesNotMatch(execute.run, /--workers|--retries/);
   const proof = workflow.jobs["browser-proof"];
   assert.deepEqual(proof.needs, ["prepare", "browser-binary"]);
   assert.equal(proof.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   const select = proof.steps.find(step => step.name === "Verify complete disjoint current browser selection");
   assert.match(select.run, /for shard in 1 2 3 4 5 6 7 8;/);
-  assert.match(select.run, /--grep-invert='exact-goal-wait.e2e.ts' --shard="\$shard\/8" --list --reporter=json/);
+  assert.match(select.run, /test --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="\$shard\/8" --list --reporter=json/);
+  assert.equal(select.run.split("--fully-parallel").length, 2);
   assert.match(select.run, /playwright test --list --reporter=json/);
   assert.match(select.run, /playwright test exact-goal-wait.e2e.ts --list --reporter=json/);
   assert.match(select.run, /browser-inventory.py/);
@@ -31,6 +33,7 @@ test("every file-isolated browser shard executes the inventoried exclusion and p
   }
   const run = proof.steps.find(step => step.name === "Run production-embedded goal proof journeys");
   assert.match(run.run, /run test:e2e -- exact-goal-wait.e2e.ts\s*$/);
+  assert.doesNotMatch(run.run, /--fully-parallel|--workers|--retries/);
   const stage = proof.steps.find(step => step.name === "Stage only the two bounded ALL471 goal receipts");
   assert.equal(stage.if, "always()");
   assert.equal(stage.env.GOAL_PROOF_SOURCE, "${{ needs.prepare.outputs.sha }}");
@@ -39,6 +42,37 @@ test("every file-isolated browser shard executes the inventoried exclusion and p
   assert.equal(artifact.with.path, "crates/nac-server/web/test-results/all471-goal-proof-artifact/*.json");
   assert.equal(artifact.with["if-no-files-found"], "error");
   for (const item of [job, proof]) for (const step of item.steps) assert.equal(step["continue-on-error"], undefined);
+});
+
+function verifyGranularity(value) {
+  const before = structuredClone(value);
+  for (const step of [
+    before.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard"),
+    before.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection"),
+  ]) {
+    assert.equal(step.run.split("--fully-parallel").length, 2);
+    assert.ok(step.run.includes("--fully-parallel --grep-invert='exact-goal-wait.e2e.ts'"));
+    step.run = step.run.replace("--fully-parallel ", "");
+  }
+  const sort = v => Array.isArray(v) ? v.map(sort) : v && typeof v === "object"
+    ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)])) : v;
+  assert.equal(createHash("sha256").update(JSON.stringify(sort(before))).digest("hex"),
+    "594ebf9a187b5651bc66988705a796d8ef12d95dafb25f8771a370f0c36145df",
+    "exact canonical workflow at3769e2aa11d2c36de75305355f167c921b2b81e8, including S12/provenance/S17");
+}
+
+test("reversing only the two ordinary flags recovers the exact pre-refinement workflow", () => verifyGranularity(workflow));
+
+test("granularity cannot drift between collection/execution or spread to proof, workers or retries", () => {
+  for (const mutate of [
+    w => { w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run = w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run.replace("--fully-parallel ", ""); },
+    w => { w.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection").run = w.jobs["browser-proof"].steps.find(s => s.name === "Verify complete disjoint current browser selection").run.replace("--fully-parallel ", ""); },
+    w => { w.jobs["browser-proof"].steps.find(s => s.name === "Run production-embedded goal proof journeys").run += " --fully-parallel"; },
+    w => { w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run += " --workers=2"; },
+    w => { w.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard").run += " --retries=1"; },
+  ]) {
+    const changed = structuredClone(workflow); mutate(changed); assert.throws(() => verifyGranularity(changed));
+  }
 });
 
 test("browser compatibility join and final gate reject every incomplete shard/proof result", () => {
