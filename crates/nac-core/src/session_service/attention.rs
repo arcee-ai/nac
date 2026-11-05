@@ -162,7 +162,18 @@ pub(super) fn operation_changed(
     if let AttentionOperation::Run(run) = &operation {
         state.last_operation_run = Some(run.clone());
     }
+    // A predecessor's continuation expires when its admitted successor stops.
+    // Goal retry receipts are published after Idle and survive its no-op updates.
+    let finished_continuation = matches!(
+        (&state.snapshot.operation, &operation),
+        (AttentionOperation::Run(_), AttentionOperation::Idle)
+    ) && state
+        .snapshot
+        .settled
+        .as_ref()
+        .is_some_and(|work| work.disposition == SettledWorkDisposition::Continuing);
     if matches!(&operation, AttentionOperation::Run(id) if state.snapshot.settled.as_ref().is_some_and(|work| &work.run_id != id))
+        || finished_continuation
     {
         state.snapshot.settled = None;
     }

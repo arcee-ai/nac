@@ -1,6 +1,8 @@
 use super::*;
 use crate::model::ModelClient;
 
+#[path = "attention_continuation_tests.rs"]
+mod continuation;
 #[path = "attention_goal_free_tests.rs"]
 mod goal_free;
 #[path = "attention_goal_publication_tests.rs"]
