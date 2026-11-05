@@ -10,6 +10,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import shlex
 import sys
 import time
 
@@ -64,10 +65,12 @@ def selected(text):
     return rows
 
 
-def package_pin(text, name, version):
+def package_pin(text, name, version, offers):
     rows = [base.fields(x) for x in text.strip().split('\n\n')]
     pins = {store.canonical({k:r[k] for k in store.FIELDS}) for r in rows
-            if r.get('Package')==name and r.get('Version')==version}
+            if r.get('Package')==name and r.get('Version')==version
+            and store.offer_name(r) in offers
+            and offers[store.offer_name(r)] == (r['Filename'], int(r['Size']))}
     if len(pins) != 1:
         raise ValueError('exact current package metadata ambiguous/missing')
     return json.loads(pins.pop())
@@ -100,8 +103,9 @@ Dir::Cache::archives "{root}/archives";
 Dir::Cache::pkgcache "";
 Dir::Cache::srcpkgcache "";
 Dir::Log "{root}/log";
-APT::Architecture "amd64v3";
-APT::Architectures {{ "amd64v3"; }};
+APT::Architecture "amd64";
+APT::Architectures {{ "amd64"; }};
+APT::Architecture-Variants "amd64v3";
 Acquire::Check-Date "true";
 Acquire::Check-Valid-Until "true";
 Acquire::AllowInsecureRepositories "false";
@@ -109,7 +113,7 @@ Acquire::AllowDowngradeToInsecureRepositories "false";
 Debug::NoLocking "true";
 '''
         self.execute(label+'-config', ['tee',root+'/apt.conf'], input_data=config.encode())
-        sources = ''.join(f'deb [arch=amd64v3 signed-by={base.KEYRING}] '
+        sources = ''.join(f'deb [arch=amd64 signed-by={base.KEYRING}] '
             f'http://azure.archive.ubuntu.com/ubuntu {suite} main restricted universe multiverse\n'
             for suite in ('resolute','resolute-updates','resolute-security','resolute-backports'))
         self.execute(label+'-sources', ['tee',root+'/sources.list'],input_data=sources.encode())
@@ -133,10 +137,23 @@ Debug::NoLocking "true";
             signed.append({'sha256':base.digest(raw),'fields':{k:v for k,v in base.fields(raw.decode()).items()
                 if k in ('Suite','Codename','Date','Valid-Until')}})
         simulation=self.apt(label+'-solver',root,['apt-get','-s','install','--no-install-recommends',*names]).decode()
+        uri_text=self.apt(label+'-uris',root,['apt-get','--print-uris','--download-only','--yes',
+            'install','--no-install-recommends',*names]).decode()
+        offers={}
+        for line in uri_text.splitlines():
+            if not line.startswith("'http"):
+                continue
+            parts=shlex.split(line)
+            prefix='http://azure.archive.ubuntu.com/ubuntu/'
+            if len(parts)!=4 or not parts[0].startswith(prefix) or parts[1] in offers:
+                raise ValueError('unexpected selected archive URI')
+            offers[parts[1]]=(parts[0][len(prefix):],int(parts[2]))
         pins=[]
         for i,(name,version) in enumerate(selected(simulation)):
             raw=self.apt(f'{label}-metadata-{i}',root,['apt-cache','show',name+'='+version]).decode()
-            pins.append(package_pin(raw,name,version))
+            pins.append(package_pin(raw,name,version,offers))
+        if {store.offer_name(p) for p in pins} != set(offers):
+            raise ValueError('selected URI inventory differs from full closure')
         plan={'schema':1,'repository':self.args.repository,'platform':'ubuntu26.04-amd64-amd64v3',
               'packages':sorted(pins,key=lambda p:p['Package'])}
         store.validate_plan(plan)
