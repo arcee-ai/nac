@@ -751,5 +751,41 @@
     "compatibility": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s12-compatibility",
     "candidate_controls": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s12-candidate",
     "note": "Filesystem locations are local-only retained evidence, never portable build inputs or dependencies."
+  },
+  "controller_cancellation_validation": {
+    "concern": "Controller wait after TERM was unbounded; interrupted native-test/cargo command could ignore TERM.",
+    "baseline": {
+      "source": "17bce8ecdaef64c806d63945ef5a259b5074e865",
+      "signal": "SIGTERM",
+      "controller_still_running_after_1s": true,
+      "child_ignores_TERM": true,
+      "owned_child_identity": {
+        "pid": 12721,
+        "pgid": 12721
+      },
+      "controller_pid": 12720,
+      "controller_exit_after_external_owned_group_KILL": -2,
+      "private_runtime_removed": true,
+      "outer_owned_root_removed": true
+    },
+    "repair": {
+      "TERM_grace_seconds": 15,
+      "KILL_reap_seconds": 5,
+      "scope": "Only controller interruption; only the process group created with start_new_session=True. No NAC test deadline, retry, selection, assertion or outcome change."
+    },
+    "actual_production_grace_control": {
+      "signals": [
+        "SIGINT",
+        "SIGTERM"
+      ],
+      "result": "Both passed; controller nonzero after owned-group KILL, child gone, private runtime removed, separate sentinel process group survived.",
+      "real_total_seconds": 30.696,
+      "no_mocked_clock": true,
+      "helper_sha256": "102320094bfb4716b5e4a3adf4d133a187d744555f3d9f9d6fd494c6cec211fa",
+      "test_source_sha256": "172442b3c789d1ac33a6476b671f3ff9a03f5e16680eba7ae4a2547fe0c0d4d4"
+    },
+    "routine_regression": "Actual signals and TERM-ignoring owned child/groups; test-only0.15s TERM grace/1s reap, production constants separately checked15/5. Avoids30s per PR without changing production configuration.",
+    "raw_locator": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s12-cancellation",
+    "raw_locator_kind": "local-only evidence, not a build dependency; original S12 measurement files unchanged"
   }
 }

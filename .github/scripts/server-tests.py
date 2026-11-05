@@ -15,6 +15,8 @@ from nextest_tool import install
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / ".github/nextest-ci.toml"
+SHUTDOWN_TERM_SECONDS = 15
+SHUTDOWN_KILL_SECONDS = 5
 POLICY = {"profile": {"ci": {
     "retries": 0, "fail-fast": False, "test-threads": 4,
     "leak-timeout": {"period": "200ms", "result": "fail"},
@@ -55,8 +57,21 @@ def execute(command, environment, cwd=ROOT):
         return child.wait()
     except BaseException:
         if child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
-            child.wait()
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                # Controller cancellation only: allow nextest's native grace
+                # period, then settle only the group this invocation created.
+                child.wait(timeout=SHUTDOWN_TERM_SECONDS)
+            except subprocess.TimeoutExpired:
+                print("server controller: TERM grace expired; killing owned command group", flush=True)
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait(timeout=SHUTDOWN_KILL_SECONDS)
         raise
 
 

@@ -41,6 +41,9 @@ override is added. Nextest writes JUnit beneath that store, never to compiler
 caches. User config and inherited NEXTEST policy variables are excluded. Normal
 success/failure and handled interruption clean the private directory. Failures
 remain in the job log; no quality result or history is imported from a cache.
+On controller cancellation, only its created command group receives TERM. After
+15seconds it escalates to KILL, with a further bounded5seconds to reap. This
+shutdown bound applies only after interruption and adds no test deadline.
 
 The committed profile uses native
 `leak-timeout = { period = "200ms", result = "fail" }`. The period matches the

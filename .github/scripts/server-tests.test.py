@@ -28,6 +28,61 @@ SPEC.loader.exec_module(runner)
 
 
 class Controls(unittest.TestCase):
+    def test_real_interrupt_escalates_only_owned_group_and_cleans_private_state(self):
+        self.assertEqual(runner.SHUTDOWN_TERM_SECONDS, 15)
+        self.assertEqual(runner.SHUTDOWN_KILL_SECONDS, 5)
+        # Real signals/processes with a test-only shorter controller grace.
+        # The production15s path was also exercised locally for both signals.
+        control_grace = .15
+        for signum in [signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signal=signum), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                ready = root / "child.json"
+                child = root / "ignore-term.py"
+                child.write_text('import signal,time,os,sys,json\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nopen(sys.argv[1],"w").write(json.dumps({"pid":os.getpid(),"pgid":os.getpgrp()}))\nwhile True:time.sleep(1)\n')
+                driver = root / "controller.py"
+                driver.write_text('import sys,signal,importlib.util,tempfile,pathlib,os\nsys.dont_write_bytecode=True\nsys.path.insert(0,' + repr(str(runner.ROOT / '.github/scripts')) + ')\ns=importlib.util.spec_from_file_location("runner",' + repr(str(runner.ROOT / '.github/scripts/server-tests.py')) + ')\nm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\nm.SHUTDOWN_TERM_SECONDS=0.15\nm.SHUTDOWN_KILL_SECONDS=1\nsignal.signal(signal.SIGTERM,m.interrupted)\nwith tempfile.TemporaryDirectory(prefix="private-",dir=sys.argv[1]) as runtime:\n pathlib.Path(sys.argv[1],"runtime").write_text(runtime)\n m.execute([sys.executable,sys.argv[2],sys.argv[3]],dict(os.environ))\n')
+                unrelated = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"], start_new_session=True)
+                controller = subprocess.Popen([sys.executable, str(driver), str(root), str(child), str(ready)],
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                identity = None
+                settled = False
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and time.monotonic() < deadline:
+                        time.sleep(.02)
+                    self.assertTrue(ready.exists())
+                    identity = json.loads(ready.read_text())
+                    self.assertEqual(identity["pid"], identity["pgid"])
+                    self.assertEqual(os.getpgid(identity["pid"]), identity["pgid"])
+                    started = time.monotonic()
+                    os.kill(controller.pid, signum)
+                    stdout, stderr = controller.communicate(timeout=6)
+                    elapsed = time.monotonic() - started
+                    self.assertNotEqual(controller.returncode, 0)
+                    self.assertIn(b"TERM grace expired; killing owned command group", stdout)
+                    self.assertIn(b"KeyboardInterrupt", stderr)
+                    self.assertGreaterEqual(elapsed, control_grace)
+                    self.assertFalse(Path((root / "runtime").read_text()).exists())
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(identity["pid"], 0)
+                    settled = True
+                    self.assertIsNone(unrelated.poll(), "cancellation must not kill another group")
+                finally:
+                    if controller.poll() is None:
+                        os.killpg(controller.pid, signal.SIGKILL)
+                        controller.wait(timeout=5)
+                    if identity is not None and not settled:
+                        try:
+                            command = subprocess.check_output(["ps", "-p", str(identity["pid"]), "-o", "command="], text=True)
+                            if str(child) in command and os.getpgid(identity["pid"]) == identity["pgid"]:
+                                os.killpg(identity["pgid"], signal.SIGKILL)
+                        except (ProcessLookupError, subprocess.CalledProcessError):
+                            pass
+                    if unrelated.poll() is None:
+                        os.killpg(unrelated.pid, signal.SIGKILL)
+                    unrelated.wait(timeout=5)
+
     def test_pins_have_no_override(self):
         self.assertEqual(tool.VERSION, "0.9.151")
         self.assertEqual(tool.SHA256, "1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4")
