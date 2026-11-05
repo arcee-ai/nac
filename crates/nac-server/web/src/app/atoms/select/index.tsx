@@ -16,7 +16,7 @@ export interface SelectItem {
   hoverHint?: HoverHintConfig;
 }
 
-interface SelectProps {
+interface SelectProps extends Pick<React.AriaAttributes, "aria-invalid" | "aria-describedby"> {
   items?: SelectItem[];
   value?: string;
   onValueChange?: (id: string) => void;
@@ -80,6 +80,8 @@ const Select: React.FC<SelectProps> = ({
   triggerClassName = "",
   panelClassName = "",
   onOpenChange,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }) => {
   const [open, setOpen] = useState(false);
   const selected = items.find((item) => item.id === value);
@@ -101,6 +103,8 @@ const Select: React.FC<SelectProps> = ({
     content: trailingIcon ? ButtonContent.IconRight : ButtonContent.Text,
     onClick: () => !disabled && changeOpen(!open),
     "aria-expanded": open,
+    "aria-invalid": ariaInvalid,
+    "aria-describedby": ariaDescribedBy,
   };
   const triggerClass = `${triggerClassName} overflow-hidden max-w-full`;
   const triggerFace = (

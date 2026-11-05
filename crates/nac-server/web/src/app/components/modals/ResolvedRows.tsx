@@ -1,3 +1,4 @@
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { Input, InputSize, Loader, LoaderSize, Separator } from "@/app/atoms";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
@@ -37,11 +38,12 @@ export function ResolvedRows({
   onModel: (model: string) => void;
   failed: boolean;
 }) {
+  const isMobile = useIsMobile();
   if (resolving) {
     return (
       <div className="flex items-center gap-2 py-1">
         <Loader size={LoaderSize.XSmall} />
-        <span className="text-micro text-basic-muted">
+        <span className="text-small !leading-[22px] text-basic-secondary">
           Checking the key and reading the model list…
         </span>
       </div>
@@ -49,7 +51,7 @@ export function ResolvedRows({
   }
   if (!resolved || !backend) {
     return failed ? null : (
-      <p className="text-micro text-basic-muted py-1">
+      <p className="text-small !leading-[22px] text-basic-secondary py-1">
         Pick a configuration to see its provider and models.
       </p>
     );
@@ -72,11 +74,13 @@ export function ResolvedRows({
   return (
     <>
       <ConfigRow
+        presentation="form"
         label="Model Provider"
         required
         hint="Service that provides the models for this session."
         control={
           <SmallSelect
+            presentation="form"
             items={PROTOCOL_ITEMS}
             value={backend}
             onValueChange={(id) =>
@@ -91,12 +95,14 @@ export function ResolvedRows({
         <>
           <Separator />
           <ConfigRow
+            presentation="form"
             label="API Key"
             required
             hint="Held by NAC for this configuration; save a new setup to use a different key."
             control={
               <Input
-                inputSize={InputSize.Medium}
+                aria-label="API Key"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className={CONTROL_WIDTH}
                 value={MASKED_KEY}
                 isDisabled
@@ -110,28 +116,32 @@ export function ResolvedRows({
       <Separator />
       {listed || failedListing ? (
         <ConfigRow
+          presentation="form"
           label="Default Model"
           invalid={failedListing}
           hint="The NAC session will start with this default and may switch to another."
           control={
             <SmallSelect
+              presentation="form"
               items={failedListing ? [] : modelChoices}
               value={failedListing ? "" : model}
               onValueChange={onModel}
               disabled={failedListing}
-              placeholder="–"
+              placeholder={failedListing ? "Model list unavailable" : "No models offered"}
             />
           }
         />
       ) : (
         <>
           <ConfigRow
+            presentation="form"
             label="Model"
             required
             hint="Model identifier the endpoint expects."
             control={
               <Input
-                inputSize={InputSize.Medium}
+                aria-label="Model"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className={CONTROL_WIDTH}
                 placeholder="gpt-5.5"
                 value={model}
@@ -141,12 +151,14 @@ export function ResolvedRows({
           />
           <Separator />
           <ConfigRow
+            presentation="form"
             label="Base URL"
             required
             hint="Endpoint the session sends its requests to."
             control={
               <Input
-                inputSize={InputSize.Medium}
+                aria-label="Base URL"
+                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className={CONTROL_WIDTH}
                 placeholder="https://api.openai.com/v1"
                 value={baseUrl}
