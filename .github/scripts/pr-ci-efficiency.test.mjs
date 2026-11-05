@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { qualityJobs, qualityReceipt, verifyQuality, qualityMode, requiredJobs, requireComplete } from "./pr-checks.mjs";
+import { managedCallerJobs, imageJobs, managedJobs, qualityJobs, qualityReceipt, verifyQuality, qualityMode, requiredJobs, requireComplete } from "./pr-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
@@ -60,18 +60,20 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   assert.equal(receipt.env.NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(receipt.env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
   assert.match(receipt.run, /pr-checks.mjs quality-receipt/);
-  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "quality"]);
-  assert.equal(stable.jobs.managed.with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
-  assert.equal(managed.on.workflow_call.inputs.quality_receipt.default, "");
+  assert.deepEqual(stable.jobs["managed-quality"].needs, ["prepare", "quality"]);
+  assert.equal(stable.jobs["managed-image"].needs, "prepare");
+  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "managed-image", "managed-quality"]);
+  assert.equal(stable.jobs["managed-quality"].with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
+  assert.equal(workflow("managed-quality").on.workflow_call.inputs.quality_receipt.default, "");
   assert.equal(managed.on.workflow_dispatch, null, "standalone has no caller-supplied skip/receipt inputs");
-  const steps = managed.jobs.quality.steps;
+  const steps = workflow("managed-quality").jobs.quality.steps;
   const validate = steps.findIndex(s => s.run?.includes("pr-checks.mjs quality-mode"));
   const full = steps.findIndex(s => s.run === "make ci");
   const fault = steps.findIndex(s => s.run === "make test-managed-fault-fixture");
   assert.ok(validate >= 0 && full > validate && fault > full);
   assert.equal(steps[validate].if, undefined);
   assert.equal(steps[validate].env.QUALITY_RECEIPT, "${{ inputs.quality_receipt }}");
-  assert.equal(steps[validate].env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
+  assert.equal(steps[validate].env.EXPECTED_SHA, "${{ inputs.source_sha }}");
   assert.equal(steps[full].if, "steps.quality-mode.outputs.mode == 'full'");
   assert.equal(steps[fault].if, undefined, "feature-gated fault tests are never deduplicated");
   for (const step of steps) assert.equal(step["continue-on-error"], undefined);
@@ -110,7 +112,7 @@ test("release-local guide drift runs before a reusable quality receipt", () => {
 
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
 test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Cargo/container caches", () => {
-  for (const file of ["stable-release", "managed-image", "macos-native"]) {
+  for (const file of ["stable-release", "managed-image", "managed-image-build", "managed-quality", "macos-native"]) {
     const config = workflow(file);
     assert.equal(config.permissions.contents, "read");
     for (const job of Object.values(config.jobs)) {
@@ -125,7 +127,7 @@ test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Carg
       }
     }
   }
-  const build = workflow("managed-image").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
+  const build = workflow("managed-image-build").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
   assert.equal(build.with["cache-from"], "type=gha,scope=nac-managed-linux-amd64-v1");
   assert.equal(build.with["cache-to"], "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}");
   assert.equal(build.with.push, false);
@@ -152,9 +154,9 @@ test("PR identity cancels superseded checks while tag/push/dispatch/release muta
 });
 
 test("seeded browser/source/native/image failures still fail the full current-candidate aggregate", () => {
-  for (const job of ["test-server", "browser", "quality", "source-security", "macos-native", "workflow-lint", "managed"]) {
+  for (const job of ["test-server", "browser", "quality", "source-security", "macos-native", "workflow-lint", ...managedCallerJobs]) {
     for (const result of ["failure", "cancelled", "skipped"]) {
-      const needs = Object.fromEntries([...requiredJobs, "managed"].map(name => [name, { result: "success" }]));
+      const needs = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map(name => [name, { result: "success" }]));
       needs.prepare.outputs = { sha, run: "true" };
       needs[job].result = result;
       assert.throws(() => requireComplete(needs, "true", sha), undefined, `${job}/${result}`);
@@ -183,9 +185,10 @@ test("failed-job reruns repeat full quality for a valid earlier attempt without 
 });
 
 test("unprivileged image verification overlaps fault compilation but final managed and publication gates require both", () => {
-  const managed = workflow("managed-image");
+  const managed = workflow("managed-image-build");
   assert.deepEqual(managed.jobs["build-smoke"].needs, ["prepare", "contract"]);
-  assert.deepEqual(managed.jobs.result.needs, ["prepare", "contract", "quality", "build-smoke"]);
+  assert.deepEqual(managed.jobs.result.needs, imageJobs);
+  assert.deepEqual(workflow("managed-image").jobs.result.needs, managedJobs);
   assert.equal(managed.permissions.contents, "read");
   assert.equal(managed.jobs["build-smoke"].permissions, undefined);
   const stable = workflow("stable-release");

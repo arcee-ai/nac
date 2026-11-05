@@ -37,8 +37,8 @@ Tests start after preparation instead of waiting for clippy; both the compatibil
 `test` result and Required PR checks still wait for lint. The receipt records only
 an exact, complete successful result set from preparation, lint, workflow lint,
 server unit/assets, core and workspace. It binds candidate SHA, repository, run ID and attempt.
-The managed caller directly needs the receipt-producing `quality` job and passes
-its output. The separate compatibility `test` result requires both quality and
+The `managed-quality` caller directly needs the receipt-producing `quality` job
+and passes its output. The separate compatibility `test` result requires both quality and
 browser success. Browser builds the exact candidate with its checked-in bundles;
 server `test-assets` independently proves those committed bytes match the sole
 writer. Both jobs are mandatory in Required PR checks. Browser never supplies
@@ -46,14 +46,39 @@ quality evidence, and image work need not wait for an unrelated browser journey.
 reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
 manual managed runs, which expose no receipt/skip dispatch input. The feature-gated
-fault fixture always runs. Image construction/smoke and fault compilation run
-concurrently after the managed contract. The terminal managed result requires
-both; unprivileged construction is never publication authority. No cross-workflow status lookup or previous green
+fault fixture always runs. Image construction/smoke starts after preparation and
+its image contract, independently of ordinary quality. Fault compilation follows
+the complete quality receipt. The terminal managed result requires both
+exact-candidate branches; unprivileged construction is never publication authority. No cross-workflow status lookup or previous green
 candidate can supply quality evidence. A failed-job rerun can retain successful upstream outputs from an earlier
 attempt. A complete valid earlier receipt with the same run/repository/candidate
 selects full `make ci` in the current attempt; it is never reused. Future attempts,
 foreign identities, malformed or incomplete results still fail closed. Browser/native/build/source-security are separately
 required by the final aggregate, rather than falsely described as receipt contents.
+
+## Early image branch and complete late join (ALL-582)
+
+Ordinary applicable candidates call `managed-image-build.yml` after preparation,
+while `managed-quality.yml` waits for the complete same-attempt quality receipt.
+The former retains candidate preparation, contract, exact image build/load/smoke,
+trusted policy selection, inventory, live scan/qualification and evidence upload.
+The latter retains receipt validation, full fallback on blank/earlier receipts,
+and mandatory fault tests/clippy. Both reusable workflows run contents-read with
+no publication permissions or PR cache writes.
+
+The always-run `managed` join requires image and quality success, verifies the
+image workflow's resolved SHA against preparation, and fails on missing,
+failed, cancelled or skipped work. Required PR checks independently enumerates
+both branches and the join. Only explicit non-applicability permits all three
+to skip. Standalone managed dispatch calls the same implementation units and
+still runs full `make ci`; it exposes no skip/receipt dispatch inputs. Stable
+publication continues to wait for the full final aggregate.
+
+This changes scheduling, not coverage. An earlier image failure does not cancel
+ordinary quality or browser/native checks; all results remain observable. The
+new joins and transfers add real processing overhead that must be measured,
+not subtracted using DAG arithmetic. S03 has no measured hosted latency until
+its first ordinary candidate run completes.
 
 ## Cache and cancellation boundary
 

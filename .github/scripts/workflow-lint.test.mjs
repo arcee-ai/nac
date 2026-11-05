@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { inventory, lint } from "./workflow-lint.mjs";
 import { installTools, pins, verifyArchive } from "./workflow-lint-tools.mjs";
-import { requiredJobs, requireComplete } from "./pr-checks.mjs";
+import { requiredJobs, managedCallerJobs, requireComplete } from "./pr-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
@@ -223,7 +223,7 @@ test("fast lane is exact-candidate, unprivileged and explicitly required on ever
   for (const step of job.steps) if (step.uses) assert.match(step.uses, /@[a-f0-9]{40}$/);
   const sha = "a".repeat(40);
   for (const result of ["failure", "cancelled", "skipped", "pending", "neutral", undefined]) {
-    const needs = Object.fromEntries(requiredJobs.map((id) => [id, { result: "success" }]));
+    const needs = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map((id) => [id, { result: "success" }]));
     needs.prepare.outputs = { sha, run: "true" };
     needs.managed = { result: "success" };
     needs["workflow-lint"].result = result;
