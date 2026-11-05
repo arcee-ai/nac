@@ -114,9 +114,12 @@ The read-only cache inventory had 63 entries occupying 10,717,790,847 reported
 stored bytes. Historical server/browser entries totaled 1,251,997,183 bytes,
 but used the older `8c9843e5` environment. No participating `a7860c54` entry
 existed. New-profile compressed capacity savings therefore remain unknown.
-The configured limit was not returned by the usage endpoint; if the previously
-observed 10-GiB limit still applies, headroom was only 19,627,393 bytes. A new
-namespace can overlap old entries and cause eviction before reducing occupancy.
+The separate storage-limit endpoint still reports `max_cache_size_gb: 10`.
+Its [API documentation](https://docs.github.com/en/rest/actions/cache#set-github-actions-cache-storage-limit-for-a-repository)
+describes gigabytes; exact byte headroom is not inferred from that value.
+The retained historical adaptation record's conditional 10-GiB calculation
+is not measured headroom. A new namespace can overlap old entries and cause
+eviction before reducing occupancy.
 Do not delete old caches or raise limits to manufacture a result.
 
 New-namespace PRs start cold until an ordinary successful trusted landing seeds

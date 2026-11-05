@@ -1723,5 +1723,19 @@
       "command": "git diff --cached --check",
       "passed": true
     }
+  },
+  "storage_limit_followup": {
+    "observed_at_utc": "2026-11-05T04:49:53.607337+00:00",
+    "method": "GET",
+    "endpoint": "repos/arcee-ai/nac/actions/cache/storage-limit",
+    "api_version": "2026-03-10",
+    "response": {
+      "max_cache_size_gb": 10
+    },
+    "raw_response_sha256": "0dd1a2c35b447726ee6ff0cfdf629e7fcb6364aca3531f64ed48481af93dccd9",
+    "official_units": "gigabytes",
+    "reference": "https://docs.github.com/en/rest/actions/cache#set-github-actions-cache-storage-limit-for-a-repository",
+    "byte_headroom": null,
+    "interpretation": "The historical narrow_adaptation record is preserved, including its explicitly conditional binary-unit calculation. That calculation is not measured service headroom; do not infer an exact byte budget from the API value. No setting was changed."
   }
 }
