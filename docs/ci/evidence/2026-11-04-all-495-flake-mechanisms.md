@@ -109,7 +109,8 @@ Every attempt of every completed `stable-release.yml` run created from October 2
 November 4 at 20:00 UTC: 2,398 runs and 2,433 attempts. This is before this branch's fixes.
 Only passed and failed jobs are counted, using the `browser` job and the
 `ARM macOS process and credentials` job. #380 merged on October 31 at 00:36 UTC and #473 at
-00:52 UTC. Windows split by run creation time at the end of October 30 UTC.
+00:52 UTC. Windows split by run creation time at the end of October 30 UTC. One failed browser job from
+November 1 (`125012412385`) has no retrievable log, so it's counted in the total but not classified.
 
 | Failure | Through October 30 | From October 31 |
 | --- | --- | --- |
