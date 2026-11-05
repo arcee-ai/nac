@@ -455,28 +455,348 @@
         "workflow is not a completed success",
         "failed/cancelled/pending/incomplete job evidence"
       ]
+    },
+    {
+      "run_id": 41958708860,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41958708860",
+      "event": "pull_request",
+      "branch_head_sha": "34ed5f017ebee0e7aa1baa3c1a4c85a60405db01",
+      "candidate_sha": "5f97368afcda82bd664c900f56fa90fd409de353",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 991.0,
+      "event_to_green_seconds": 994.0,
+      "observed_prepare_to_result_seconds": 991.0,
+      "observed_event_to_result_seconds": 994.0,
+      "initial_wait_seconds": 3.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5958.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 879.0
+      },
+      "completed_job_seconds": 6837.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41958708487,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41958708487",
+      "event": "pull_request",
+      "branch_head_sha": "319341e5c2bc055730a7c35e34297003d7f7d39a",
+      "candidate_sha": "b5bfdf8d1e3c78865269b88604727823dfc13fea",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 947.0,
+      "event_to_green_seconds": 1038.0,
+      "observed_prepare_to_result_seconds": 947.0,
+      "observed_event_to_result_seconds": 1038.0,
+      "initial_wait_seconds": 91.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 6061.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 842.0
+      },
+      "completed_job_seconds": 6903.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41958735079,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41958735079",
+      "event": "pull_request",
+      "branch_head_sha": "3e9912ce4ef4af794e2d58010ba63f2ab40eb612",
+      "candidate_sha": "7548886f6cb05605beee0873a91399c6d2265016",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 1039.0,
+      "event_to_green_seconds": 1127.0,
+      "observed_prepare_to_result_seconds": 1039.0,
+      "observed_event_to_result_seconds": 1127.0,
+      "initial_wait_seconds": 88.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 6086.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 728.0
+      },
+      "completed_job_seconds": 6814.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41963983443,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963983443",
+      "event": "pull_request",
+      "branch_head_sha": "7abfb43c75d853db220f42f744d13abb02c09e53",
+      "candidate_sha": "115dd249b2f9638a2854508872c89ac4d1aecab1",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 956.0,
+      "event_to_green_seconds": 958.0,
+      "observed_prepare_to_result_seconds": 956.0,
+      "observed_event_to_result_seconds": 958.0,
+      "initial_wait_seconds": 2.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5723.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 520.0
+      },
+      "completed_job_seconds": 6243.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41963984719,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963984719",
+      "event": "pull_request",
+      "branch_head_sha": "5f714aad145447e09af25d5ed50a9ce57a4aef62",
+      "candidate_sha": null,
+      "status": "completed",
+      "conclusion": "failure",
+      "processing_seconds": null,
+      "event_to_green_seconds": null,
+      "observed_prepare_to_result_seconds": null,
+      "observed_event_to_result_seconds": null,
+      "initial_wait_seconds": null,
+      "metric_eligible": false,
+      "ordinary_first_attempt_metric": false,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 1344.0
+      },
+      "completed_job_seconds": 1344.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": [
+        "expected exactly one prepare job",
+        "expected exactly one Required PR checks job",
+        "workflow is not a completed success",
+        "failed/cancelled/pending/incomplete job evidence"
+      ]
+    },
+    {
+      "run_id": 41963984751,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963984751",
+      "event": "pull_request",
+      "branch_head_sha": "0bf44f31df9ce2de9a975247da94a586deeb7120",
+      "candidate_sha": "ac1210caeef7d93cc8d17b06e6d9e401c15efa90",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 972.0,
+      "event_to_green_seconds": 988.0,
+      "observed_prepare_to_result_seconds": 972.0,
+      "observed_event_to_result_seconds": 988.0,
+      "initial_wait_seconds": 16.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 6633.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 1009.0
+      },
+      "completed_job_seconds": 7642.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41963985027,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963985027",
+      "event": "pull_request",
+      "branch_head_sha": "5f714aad145447e09af25d5ed50a9ce57a4aef62",
+      "candidate_sha": "840b62adc26e2d52231b841fba1736565120b286",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 995.0,
+      "event_to_green_seconds": 1007.0,
+      "observed_prepare_to_result_seconds": 995.0,
+      "observed_event_to_result_seconds": 1007.0,
+      "initial_wait_seconds": 12.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 6629.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 776.0
+      },
+      "completed_job_seconds": 7405.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41963985617,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963985617",
+      "event": "pull_request",
+      "branch_head_sha": "2a4a52e2044eb6db14c93f97ea83a36b79a1f61c",
+      "candidate_sha": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 1189.0,
+      "event_to_green_seconds": 1192.0,
+      "observed_prepare_to_result_seconds": 1189.0,
+      "observed_event_to_result_seconds": 1192.0,
+      "initial_wait_seconds": 3.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 6651.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 1014.0
+      },
+      "completed_job_seconds": 7665.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41966958028,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41966958028",
+      "event": "pull_request",
+      "branch_head_sha": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+      "candidate_sha": "597a545bcfe1babc1c2c49e8ae8de57037cbffd2",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 694.0,
+      "event_to_green_seconds": 696.0,
+      "observed_prepare_to_result_seconds": 694.0,
+      "observed_event_to_result_seconds": 696.0,
+      "initial_wait_seconds": 2.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 4490.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 674.0
+      },
+      "completed_job_seconds": 5164.0,
+      "carried_forward_job_ids": [],
+      "carried_forward_job_seconds_by_runner": {},
+      "carried_forward_job_seconds": 0,
+      "job_view_completed_seconds": 5164.0,
+      "unclassified_completed_job_seconds": 0.0,
+      "compute_scope": "new execution only; carried-forward job-view durations reported separately",
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
     }
   ],
   "limitations": [
     "Earlier candidates before daily-rescan selector repair; not proof of current-head coverage parity.",
-    "Controlled all-cold run and representative backend/frontend/docs cohort remain pending.",
+    "One constrained controlled-cold attempt is audited in controlled-cold/audit.json; this does not qualify a representative consecutive backend/frontend/docs cohort.",
     "Identical-source metadata/retry runs are not used to fill the cohort.",
-    "Combined changes cannot be summed as independent isolated savings."
+    "Combined changes cannot be summed as independent isolated savings.",
+    "All original thirteen observations and failure records remain unchanged. New observations include the independent native failure with no invented collector candidate; successful later runs do not erase it.",
+    "Controlled partial retry 41963983443:2 stays in browser-partial-retry.json and is not appended as an ordinary observation.",
+    "Raw local integrity locators are not public download URLs; no chosen-window mean, additive whole-CI saving, cost, infeasibility or cohort qualification is claimed."
   ],
   "strategy_disposition": {
     "S01": "retain; missing Git watch mechanism and full workspace lane gain observed",
-    "S02": "native four-machine execution observed; fonts network outlier retained; eight-machine refinement pending",
+    "S02": "Eight ordinary shards plus the separate goal-proof inventory executed completely on hosted first passes; one worker per machine retained. Four-to-eight machine tuning remains S02, not extra strategy credit; no isolated/additive whole-run claim.",
     "S03": "early image scheduling and early exact-attempt fault branch observed on current603; full qualification pending",
     "S04": "ARG cache invalidation mechanism measured; retained",
     "S05": "mandatory qualification executes independently; observed whole-path impact overlaps other branches",
     "S06": "local four-worker comparison measured; production keeps one worker per machine",
-    "S07": "cold actual image passed; dependency-layer cross-source warm benefit not yet hosted-qualified",
+    "S07": "Four full local linux/amd64 Wolfi images completed under ARM-host emulation and bounded resources: warm wall -60.65%, CPU -62.11%, external compiles 305 to 0 with six local crates rebuilt; cold wall +5.72%. Two resource-guard aborts and cached retry COPY caveat retained. All image smoke/inventory passed; live strict scans blocked 32/55. Not hosted/cohort acceptance or isolated cold attribution; trusted warm cache requires human-approved dev/main push; PR export remains disabled. See S07-full-image/summary.json.",
     "S08": "actual NAC compile-only artifact reuse measured; combined rollout observed separately",
-    "S09": "Hosted producer and matching-image consumer execution measured; whole run failed strict runner-image equality during mixed hosted images. Fully validated mismatches now discard bytes and build current source; corrupt/foreign/future evidence still fails. Repaired whole-run and partial-retry qualification pending.",
-    "S10": "earlier whole candidate passed; current601 first attempt failed desktop ready-read deadline and poisoned shared lock; retained, investigation pending",
+    "S09": "Repaired first-pass hosted runs 41958708860/41958708487 and 41963983443:1 completed. Valid image mismatch discards bytes and rebuilds exact current source; cold attempt 41963985617:1 exercised six such fallbacks. Controlled partial retry 41963983443:2 accepted older-producer receipt only as source fallback, rebuilt and retained current proof; kept separately in browser-partial-retry.json, never ordinary/cohort credit. Original image-mismatch failure retained; corrupt/foreign/future bytes still fail closed.",
+    "S10": "Parallel backend/frontend scheduling observed on later successful whole runs, but original desktop ready-read deadline failure and shared-lock poisoning remain unresolved. Later passes do not erase the first failure or establish a production fix/cohort acceptance.",
     "S11": "design-only; const API compatibility decision, not measured",
     "S13": "main redundancy hypothesis falsified by font-download trace; no claimed latency gain",
-    "S18": "actual NAC local release identity-change97.96s nonincremental vs17.71s modeled retained incremental; binary and Guide identities verified; strict helper/workflow rollout pending"
+    "S18": "Actual NAC local release identity-change 97.96 s nonincremental vs 17.71 s modeled retained incremental; exact binary/Guide identity verified. Hosted 41958735079 and controlled-cold41963985617 completed both unchanged release targets and full identities; cold S18 restores absent, PR staging skipped. Trusted dev/main seed publication, actual hosted restored-seed reuse and capacity/whole-path qualification remain pending.",
+    "S17": "Twelfth measured mechanism: bounded local compile-only cache-sharing comparison rejects broad workspace4 sharing (73 extra external units, +14.019666 s compile, +40.43 s CPU, 3.0648x raw snapshot). Narrow server/browser reader rebuilt 0 extra external units and exact identical browser binary, but pinned-action Linux transfer/seed/capacity and whole-pipeline behavior remain pending hosted. Narrow namespace adaptation is this same strategy; parameter tuning and this docs rollup add no strategies."
   },
   "measured_strategy_ids": [
     "S01",
@@ -489,9 +809,10 @@
     "S08",
     "S09",
     "S10",
+    "S17",
     "S18"
   ],
-  "strategy_count_boundary": "11 distinct measured mechanisms, including S09 actual hosted failure; combined hosted effects overlap and local mechanisms are not hosted acceptance. No infeasibility claim.",
+  "strategy_count_boundary": "12 distinct measured mechanisms, including actual rejected broad S17 and original S09 failure. Local compile models, parameter refinements and combined hosted results are not independent whole-pipeline acceptance; docs and cache tuning add no strategy. No infeasibility claim.",
   "failure_dispositions": [
     {
       "run_id": 41947952992,
@@ -518,6 +839,291 @@
       "disposition": "Valid artifact image mismatch now selects fresh source after complete validation; mismatch bytes are discarded. Corrupt/missing/foreign/future evidence remains fail closed. Actual image environment diagnostics added; repaired hosted run pending.",
       "portable_evidence": "browser-binary-image-rollout.json",
       "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930"
+    },
+    {
+      "run_id": 41963984719,
+      "job_id": 127036600486,
+      "candidate_sha": null,
+      "branch_head_sha": "5f714aad145447e09af25d5ed50a9ce57a4aef62",
+      "first_failure": "mcp::tests::refreshed_auth_handshake_gets_a_fresh_startup_budget: called Result::unwrap() on Err: timed out connecting HTTP MCP server 'auth-retry' after 500ms",
+      "path": "crates/nac-core/src/mcp/tests.rs:657:6",
+      "disposition": "Independent native workflow failed its full default workspace phase; later selected ignored cases were not executed. Collector has neither prepare nor Required PR checks and leaves candidate null. Local diagnosis separately identifies source; do not fabricate collector candidate or substitute later pass. Initial vs refreshed timeout phase and scheduling vs fixture stall remain undistinguished; no production fix shown.",
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41963984719/job/127036600486",
+      "local_diagnosis": {
+        "path": "native/new-failure-41963984719/diagnosis.json",
+        "sha256": "14eae41225f28660220b8521c3e4c24a1b83cef28721f5b34cbb9743783a7245"
+      }
     }
-  ]
+  ],
+  "append_provenance": {
+    "base": "004492fc300b296e6245a0f0768a892f98c8a42d",
+    "original_observation_count": 13,
+    "appended_observation_count": 9,
+    "original_csv_bytes": 804695,
+    "original_csv_sha256": "38373f2715361f5b9053966d052da22dc42964c0a426a887b4638519e95966ad",
+    "original_csv_data_rows": 3140,
+    "appended_csv_rows": 3189,
+    "raw_locator_root": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba",
+    "visibility": "Original raw files are machine-local; relative locators below are relative to raw_locator_root, not the Git checkout. No public raw URL.",
+    "records": [
+      {
+        "run_id": 41958708860,
+        "attempt": 1,
+        "snapshot": "snapshot-image-fallback-first-success",
+        "raw_job_count": 34,
+        "appended_csv_rows": 402,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708860-attempt-1/summary.json",
+            "sha256": "4b0eddc461e59c522d54811bca5472fd5c22fd35f2d292eca47272d79f1f3c28"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708860-attempt-1/run.json",
+            "sha256": "761a2dab6a779baa068a181880cea182c9a73d68a0e89cadeb0804e9c0fdb554"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708860-attempt-1/jobs.json",
+            "sha256": "9ce63e4a614ada555b2a5e9bcdc3f62ce96a4d2b991fc688eb4ec8cdfe5d3bb5"
+          }
+        ]
+      },
+      {
+        "run_id": 41958708487,
+        "attempt": 1,
+        "snapshot": "snapshot-image-fallback-first-success",
+        "raw_job_count": 34,
+        "appended_csv_rows": 405,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708487-attempt-1/summary.json",
+            "sha256": "1856fca3b14be7cb42bab0054289c5167e44b4ac52ea49ffa79f6eed4720370c"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708487-attempt-1/run.json",
+            "sha256": "cb429b29c9e1622573fd036ba6a1b977961660a80013b300cc08d83d6e14ba80"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-image-fallback-first-success/run-41958708487-attempt-1/jobs.json",
+            "sha256": "84a29ef85a66af13eab09f9260eafdfadbe7c4e2f5b442b24f8ff55da3a6900a"
+          }
+        ]
+      },
+      {
+        "run_id": 41958735079,
+        "attempt": 1,
+        "snapshot": "snapshot-release-incremental-first-success",
+        "raw_job_count": 34,
+        "appended_csv_rows": 406,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-release-incremental-first-success/run-41958735079-attempt-1/summary.json",
+            "sha256": "d054e5452cb83d0a6e2a8dc32982b036c1c7f07e16227257ebee9dea075e4521"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-release-incremental-first-success/run-41958735079-attempt-1/run.json",
+            "sha256": "c2f221e1cababb4b33794c5a490e660ade7f32d61129c4314986d4a170da5f61"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-release-incremental-first-success/run-41958735079-attempt-1/jobs.json",
+            "sha256": "7e5376ef15b489e0016b9c63ea427db0c38f3537b600ea4aadb51f16474ed679"
+          }
+        ]
+      },
+      {
+        "run_id": 41963983443,
+        "attempt": 1,
+        "snapshot": "snapshot-browser-retry-name-first-success",
+        "raw_job_count": 34,
+        "appended_csv_rows": 399,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-browser-retry-name-first-success/run-41963983443-attempt-1/summary.json",
+            "sha256": "fd74c714dd9911a74b4e8fbfa2da35a5211ee0e238f72ed09876fd271c000e51"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-browser-retry-name-first-success/run-41963983443-attempt-1/run.json",
+            "sha256": "a765d6e72e85e4f1a407cc2ce8a386f96fa0676c2e11e96f90486e77d0136a9f"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-browser-retry-name-first-success/run-41963983443-attempt-1/jobs.json",
+            "sha256": "7b69d3a00c30055b29aa287101c5ab851069112ab51c22dd8bca726060753786"
+          }
+        ]
+      },
+      {
+        "run_id": 41963984719,
+        "attempt": 1,
+        "snapshot": "snapshot-cold-and-current-native",
+        "raw_job_count": 2,
+        "appended_csv_rows": 16,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984719-attempt-1/summary.json",
+            "sha256": "aa3fa50432896f737487a650f41cd41e8054eb2639a03eaf6b6ebc40b2432960"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984719-attempt-1/run.json",
+            "sha256": "0a1f131cbe879b22a586ff3f706076a802b8e074bffb9521a5a4fffcd3b16eef"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984719-attempt-1/jobs.json",
+            "sha256": "a579763f0ca8212e7773b11b5f62e588da26100efdcb3b96b072a23762d9824e"
+          }
+        ]
+      },
+      {
+        "run_id": 41963984751,
+        "attempt": 1,
+        "snapshot": "snapshot-cold-and-current-native",
+        "raw_job_count": 34,
+        "appended_csv_rows": 409,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984751-attempt-1/summary.json",
+            "sha256": "9b03b06fb77f06983177abe2970a7eccbb2e01ec0894f63e8edc23d80a34dd58"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984751-attempt-1/run.json",
+            "sha256": "d8b564ac6ef402560ecbb91827267cc6995f42dce5ab69d08549e7a327dc9d75"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963984751-attempt-1/jobs.json",
+            "sha256": "fa022c29ffaea53165f1be6e0d637203d55ff403b29fd291630945a6a705ec7e"
+          }
+        ]
+      },
+      {
+        "run_id": 41963985027,
+        "attempt": 1,
+        "snapshot": "snapshot-cold-and-current-native",
+        "raw_job_count": 34,
+        "appended_csv_rows": 410,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985027-attempt-1/summary.json",
+            "sha256": "b45ce211333410ca6c91daf74bc233c84713852a3eeb2df9ac517d7d2142a768"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985027-attempt-1/run.json",
+            "sha256": "8a57353e12c09c772318c06611b417f1e5ba893615cda29c3e8c069b80ec136f"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985027-attempt-1/jobs.json",
+            "sha256": "d4be242195bbf967556b12d366094e0d7485cd3ed6a47c4fb2f58ee14c8d0049"
+          }
+        ]
+      },
+      {
+        "run_id": 41963985617,
+        "attempt": 1,
+        "snapshot": "snapshot-cold-and-current-native",
+        "raw_job_count": 34,
+        "appended_csv_rows": 410,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985617-attempt-1/summary.json",
+            "sha256": "aa03e3b3a3e8ccf8ae1519a91b5e9acf1b7961c97d2e63becd071ce2390e541b"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985617-attempt-1/run.json",
+            "sha256": "2ecf534167ef035c434b48a22a82cc4661c1cdc1c4ab7d731e6d0b643c59d9eb"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-cold-and-current-native/run-41963985617-attempt-1/jobs.json",
+            "sha256": "31db99d33c05b6e18af236cecc874f8d713767d11e25bf48c9687f1c9bf5e793"
+          }
+        ]
+      },
+      {
+        "run_id": 41966958028,
+        "attempt": 1,
+        "snapshot": "snapshot-docs-evidence-first-success",
+        "raw_job_count": 30,
+        "appended_csv_rows": 332,
+        "local_files": [
+          {
+            "path": "ci-hillclimb/snapshot-docs-evidence-first-success/run-41966958028-attempt-1/summary.json",
+            "sha256": "001c37c07b8839257478be33ad7ab8c59357cf414e55c0e3408a8d0871502cae"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-docs-evidence-first-success/run-41966958028-attempt-1/run.json",
+            "sha256": "7abe19c31d1ba52ff812b270671f2178ab2418f6b38a83ef5b63ddebf24d9838"
+          },
+          {
+            "path": "ci-hillclimb/snapshot-docs-evidence-first-success/run-41966958028-attempt-1/jobs.json",
+            "sha256": "9e61008eece04bfcf2492ccf2570ee007cb22afc3fef76d0e5949ae80860b467"
+          }
+        ]
+      }
+    ]
+  },
+  "s17_measurement": {
+    "source": "41c9575a698dbf8ea746c2ba2c04f1bdb230900e",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "logical_cpus": 18,
+    "ram_bytes": 38654705664,
+    "cargo_jobs": 6,
+    "registry": "warm locked offline",
+    "pruning": "cargo clean --locked --workspace models source-output pruning; not actual pinned action cleanup/archive/restore",
+    "readers": {
+      "browser": {
+        "seconds": {
+          "cold": 57.055841,
+          "role_warm": 30.579555,
+          "shared_warm": 30.486229
+        },
+        "external_compiled": {
+          "cold": 361,
+          "role_warm": 0,
+          "shared_warm": 0
+        },
+        "extra_external_shared_vs_role": 0
+      },
+      "workspace4": {
+        "seconds": {
+          "cold": 18.001882,
+          "role_warm": 1.836137,
+          "shared_warm": 15.855803
+        },
+        "external_compiled": {
+          "cold": 141,
+          "role_warm": 0,
+          "shared_warm": 73
+        },
+        "extra_external_shared_vs_role": 73
+      }
+    },
+    "broad_decision": "Reject as proposed for workspace4:73 additional external units rebuild,+14.019666s compilation and+40.43s CPU versus its own role snapshot, while restoring a3.0648x larger raw target snapshot.25units directly differ in reported features/profile;48 have the same reported features/profile but different dependency/fingerprint context. The frozen writer does not learn reader-added variants.",
+    "narrow_proposal": {
+      "authoritative_writer": "test-server",
+      "readers": [
+        "browser-binary",
+        "browser-proof",
+        "browser-shards"
+      ],
+      "shared_key_candidate": "server-browser-linux-gnu-debug0-v1",
+      "writers": "Successful trusted dev/main push only; all readers save-if false; retain actual cold run/attempt prefix and default hashes",
+      "hosted_status": "Pending. Existing namespace starts cold; first parallel readers do not wait for writer. No trusted new-profile seed exists in assessment; exact hits are immutable. Preserve independent workspace4 and unrelated role caches.",
+      "capacity": "Local raw target bytes are not Actions compressed occupancy/transfer/cost. No new shared archive exists; old namespace overlap/eviction and actual configured storage limit remain unqualified."
+    },
+    "local_evidence": [
+      {
+        "path": "browser/s17-local/comparison.json",
+        "sha256": "80f877110423215c3bb207b79ee0602e64638f25e419725fe483ce076b2ae186"
+      },
+      {
+        "path": "browser/s17-local/narrow-adaptation.json",
+        "sha256": "5486e3ed901513dfeb2e55d724356aaf21ad33072523a1e76a1152ec8dc10f71"
+      }
+    ],
+    "limitations": [
+      "Local macOS ARM != hosted Linux; registry warm, target cold.",
+      "Compile-only --no-run is not test execution or CI acceptance.",
+      "Every reader arm uses the exact same absolute active target path.",
+      "Cargo workspace clean models source-output pruning; it is not the pinned action filesystem cleanup algorithm.",
+      "APFS private clones model local copy overhead, not Actions compression/network/archive transfer.",
+      "HOME and provider credentials are absent from the explicit allowlist; shared Cargo registry is read for locked offline dependencies.",
+      "Role warm precedes shared warm, so page-cache/order effects remain; all comparisons disclosed, not a hosted speedup claim."
+    ]
+  }
 }

@@ -113,14 +113,16 @@ test("release-local guide drift runs before a reusable quality receipt", () => {
 });
 
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
-test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Cargo/container caches", () => {
+const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "browser-shards"]);
+test("compiler caches preserve independent roles and one trusted server/browser writer", () => {
   for (const file of ["stable-release", "managed-image", "managed-image-build", "managed-quality", "managed-fault", "macos-native"]) {
     const config = workflow(file);
     assert.equal(config.permissions.contents, "read");
-    for (const job of Object.values(config.jobs)) {
+    for (const [jobName, job] of Object.entries(config.jobs)) {
       for (const step of job.steps ?? []) {
         if (step.uses?.startsWith("Swatinem/rust-cache@")) {
-          assert.equal(step.with["save-if"], trustedWrite, file);
+          const readonly = file === "stable-release" && readonlyBrowserCaches.has(jobName);
+          assert.equal(step.with["save-if"], readonly ? "false" : trustedWrite, `${file}/${jobName}`);
           assert.equal(step.with["prefix-key"], file === "stable-release"
             ? "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}"
             : "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");

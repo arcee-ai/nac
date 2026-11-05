@@ -14,8 +14,46 @@ const upload = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
 const download = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
 const sourceMode = "steps.binary.outputs.mode == 'source'";
+const compilerGroup = "server-browser-linux-gnu-debug0-v1";
+const compilerRoles = ["test-server", "browser-binary", "browser-proof", "browser-shards"];
+const compilerPrefix = "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}";
 const step = (job, id) => job.steps.find(s => s.id === id);
 const named = (job, name) => job.steps.find(s => s.name === name);
+
+function compilerCacheGroup(config) {
+  const caches = Object.entries(config.jobs).flatMap(([job, value]) => (value.steps ?? [])
+    .filter(s => s.uses?.startsWith("Swatinem/rust-cache@")).map(cache => ({ job, value, cache })));
+  assert.deepEqual(caches.filter(({ cache }) => cache.with["shared-key"] === compilerGroup)
+    .map(({ job }) => job).sort(), [...compilerRoles].sort(), "exactly four measured default-feature roles share");
+  for (const { job, value, cache } of caches) {
+    if (!compilerRoles.includes(job)) {
+      assert.notEqual(cache.with["shared-key"], compilerGroup);
+      continue;
+    }
+    assert.equal(cache.uses, "Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4");
+    assert.deepEqual(cache.with, {
+      "prefix-key": compilerPrefix, "shared-key": compilerGroup,
+      "save-if": job === "test-server" ? trustedWrite : "false",
+    }, "one trusted writer, no key override, default environment hashing and workspace pruning");
+    assert.equal(cache.if, ["browser-proof", "browser-shards"].includes(job) ? sourceMode : undefined);
+    assert.equal(cache["continue-on-error"], undefined);
+    assert.equal(value["runs-on"], "ubuntu-latest");
+    assert.equal(value.env.CARGO_PROFILE_DEV_DEBUG, "0");
+    assert.equal(value.env.CARGO_PROFILE_TEST_DEBUG, "0");
+    // Pinned restore exports zero before key construction. Browser runtime
+    // keeps its explicit zero even on the normal no-cache artifact path.
+    assert.equal(value.env.CARGO_INCREMENTAL, job === "test-server" ? undefined : "0");
+    assert.ok(value.steps.some(s => s.uses === rust));
+  }
+  assert.equal(named(config.jobs["test-server"], "Run nac-server tests").run,
+    "cargo test -p nac-server --locked");
+  assert.match(step(config.jobs["browser-binary"], "pack").run,
+    /^cargo build --locked -p nac-server --bin nac-web$/m);
+  for (const role of ["browser-proof", "browser-shards"]) {
+    assert.equal(named(config.jobs[role], "Rebuild current-attempt source after a valid older producer").run,
+      "cargo build --locked -p nac-server --bin nac-web");
+  }
+}
 
 function profile(job) {
   assert.equal(job.env.CARGO_PROFILE_DEV_DEBUG, "0");
@@ -44,6 +82,7 @@ function identityArguments(run) {
 }
 
 function validate(config, required = requiredJobs) {
+  compilerCacheGroup(config);
   assert.equal(config.permissions.contents, "read");
   const producer = config.jobs["browser-binary"];
   assert.equal(producer.needs, "prepare");
@@ -97,7 +136,7 @@ function validate(config, required = requiredJobs) {
     const cache = consumer.steps.find(s => s.uses?.startsWith("Swatinem/rust-cache@"));
     const rebuild = named(consumer, "Rebuild current-attempt source after a valid older producer");
     assert.equal(cache.if, sourceMode);
-    assert.equal(cache.with["save-if"], trustedWrite);
+    assert.equal(cache.with["save-if"], "false");
     assert.equal(cache.with["prefix-key"], "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");
     assert.equal(rebuild.if, sourceMode);
     assert.equal(rebuild.run, "cargo build --locked -p nac-server --bin nac-web");
@@ -129,12 +168,41 @@ function validate(config, required = requiredJobs) {
   assert.ok(config.jobs["required-pr-checks"].needs.includes("browser-binary"));
   for (const job of [producer, config.jobs["browser-shards"], proof]) {
     for (const cache of job.steps.filter(s => s.uses?.startsWith("Swatinem/rust-cache@"))) {
-      assert.equal(cache.with["save-if"], trustedWrite);
+      assert.equal(cache.with["save-if"], "false");
     }
   }
 }
 
 test("parsed same-run browser producer and consumers preserve identity, runtime and retry contracts", () => validate(stable));
+
+test("narrow compiler cache rejects extra roles, writers, profiles, flags and weakened cache policy", () => {
+  compilerCacheGroup(stable);
+  const cache = (w, job) => w.jobs[job].steps.find(s => s.uses?.startsWith("Swatinem/rust-cache@"));
+  const mutations = [
+    w => { delete cache(w, "test-server").with["shared-key"]; },
+    w => { cache(w, "browser-binary").with.key = "ignored-reader-suffix"; },
+    w => { cache(w, "browser-binary").with["save-if"] = trustedWrite; },
+    w => { cache(w, "browser-proof").with["save-if"] = false; },
+    w => { cache(w, "test-server").with["save-if"] = "true"; },
+    w => { cache(w, "browser-shards").with["add-rust-environment-hash-key"] = false; },
+    w => { cache(w, "browser-binary").with["cache-workspace-crates"] = true; },
+    w => { cache(w, "test-server").with["cache-on-failure"] = true; },
+    w => { cache(w, "browser-proof").with["prefix-key"] = "nac-ci-v1"; },
+    w => { delete cache(w, "browser-shards").if; },
+    w => { w.jobs["test-workspace"].steps.find(s => s.uses?.startsWith("Swatinem/")).with["shared-key"] = compilerGroup; },
+    w => { cache(w, "test-core").with["shared-key"] = compilerGroup; },
+    w => { cache(w, "lint").with["shared-key"] = compilerGroup; },
+    w => { w.jobs["test-server"].env.CARGO_PROFILE_DEV_DEBUG = "2"; },
+    w => { named(w.jobs["test-server"], "Run nac-server tests").run += " --all-features"; },
+    w => { step(w.jobs["browser-binary"], "pack").run = step(w.jobs["browser-binary"], "pack").run.replace(
+      "cargo build --locked -p nac-server --bin nac-web", "cargo build --locked -p nac-server --bin nac-web --features managed-fault-fixture"); },
+    w => { w.jobs["browser-proof"].steps.push(structuredClone(cache(w, "browser-proof"))); },
+  ];
+  for (const [index, mutate] of mutations.entries()) {
+    const broken = structuredClone(stable); mutate(broken);
+    assert.throws(() => compilerCacheGroup(broken), undefined, `compiler group mutation ${index}`);
+  }
+});
 
 test("seeded producer, digest-origin, fallback, runtime and required-DAG regressions are rejected", () => {
   const mutations = [
