@@ -19663,7 +19663,7 @@
           },
           "path": {
             "type": "string",
-            "description": "Existing path relative to the current Local workspace."
+            "description": "Existing Files path: repository-relative for Git workspaces, or relative\nto the selected workspace root for nongit workspaces."
           }
         },
         "additionalProperties": false
