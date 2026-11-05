@@ -35,6 +35,43 @@ def identity(log, names):
     return values.pop()
 
 
+def event_provenance(log, run_event):
+    result = {"classification": "unknown", "event_name": None, "action": None,
+              "base_changed": None, "reason": None}
+    values = {}
+    for name in ("CI_EVENT_NAME", "CI_EVENT_ACTION", "CI_EVENT_BASE_CHANGED"):
+        # Only the runner's printed environment, never echoed shell expressions.
+        lines = [line for line in log.splitlines() if re.search(r"\b" + name + r"\b", line)]
+        pattern = (r"(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z )?  "
+                   + name + r":(?: (.*))?")
+        match = re.fullmatch(pattern, lines[0]) if len(lines) == 1 else None
+        if match is None:
+            result["reason"] = "missing, multiple or malformed " + name
+            return result
+        values[name] = match[1] or ""
+    event, action, changed = (values[name] for name in
+                              ("CI_EVENT_NAME", "CI_EVENT_ACTION", "CI_EVENT_BASE_CHANGED"))
+    if event not in ("pull_request", "push", "workflow_dispatch") or event != run_event:
+        result["reason"] = "event name is noncanonical or differs from run API"
+    elif changed not in ("true", "false"):
+        result["reason"] = "base-change value is not a canonical boolean"
+    elif event != "pull_request" and (action != "" or changed != "false"):
+        result["reason"] = "non-PR event has PR action or base-change metadata"
+    elif event == "pull_request" and (action not in
+            ("opened", "synchronize", "reopened", "ready_for_review", "edited")
+            or (changed == "true" and action != "edited")):
+        result["reason"] = "PR action/base-change combination is noncanonical"
+    else:
+        result.update(event_name=event, action=action, base_changed=changed == "true")
+        if event != "pull_request":
+            result["classification"] = "non-pr"
+        elif action in ("opened", "synchronize", "reopened") or changed == "true":
+            result["classification"] = "source"
+        else:
+            result["classification"] = "metadata-only" if action == "edited" else "non-source"
+    return result
+
+
 def summarize(run, jobs, logs, repository):
     reasons = []
     result = {"run_id": run.get("id"), "attempt": run.get("run_attempt"),
@@ -45,6 +82,7 @@ def summarize(run, jobs, logs, repository):
               "observed_prepare_to_result_seconds": None, "observed_event_to_result_seconds": None,
               "initial_wait_seconds": None, "metric_eligible": False,
               "ordinary_first_attempt_metric": False, "cohort_qualified": False,
+              "event_provenance": event_provenance("", run.get("event")),
               "cohort_remaining": ["consecutive ordinary run sequence", "at least five meaningful source SHAs",
                                    "representative backend/managed/frontend/docs cases", "controlled cold-cache evidence",
                                    "complete coverage matrix and negative controls", "cache/resources/cost disclosure"]}
@@ -115,6 +153,7 @@ def summarize(run, jobs, logs, repository):
     result["cost"] = "not estimated; runner-seconds are not billable cost or CPU time"
     if "prepare" in selected:
         prepare = selected["prepare"]
+        result["event_provenance"] = event_provenance(logs.get(str(prepare["id"]), ""), run.get("event"))
         try:
             candidate = identity(logs.get(str(prepare["id"]), ""), ["SOURCE_SHA", "CANDIDATE_SHA"])
             result["candidate_sha"] = candidate
@@ -152,7 +191,8 @@ def summarize(run, jobs, logs, repository):
         reasons.append("failed/cancelled/pending/incomplete job evidence")
     result["ineligible_reasons"] = reasons
     result["metric_eligible"] = not reasons
-    result["ordinary_first_attempt_metric"] = not reasons and run.get("event") == "pull_request" and attempt == 1
+    result["ordinary_first_attempt_metric"] = (not reasons and attempt == 1
+                                              and result["event_provenance"]["classification"] == "source")
     if not reasons:
         result["processing_seconds"] = result["observed_prepare_to_result_seconds"]
         result["event_to_green_seconds"] = result["observed_event_to_result_seconds"]

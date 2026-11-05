@@ -16,6 +16,12 @@ SPEC.loader.exec_module(runner)
 SHA = 'a' * 40
 
 
+def provenance(event='pull_request', action='opened', changed='false'):
+    return ''.join(f'2026-11-04T00:01:00.1234567Z   {name}: {value}\n' for name, value in
+                   [('CI_EVENT_NAME', event), ('CI_EVENT_ACTION', action),
+                    ('CI_EVENT_BASE_CHANGED', changed)])
+
+
 def fixture():
     run = {'id': 123, 'run_attempt': 1, 'repository': {'full_name': 'arcee-ai/nac'},
            'head_sha': 'b' * 40, 'event': 'pull_request', 'status': 'completed',
@@ -28,7 +34,7 @@ def fixture():
                      'status': 'completed', 'conclusion': 'success', 'labels': ['ubuntu-latest'],
                      'started_at': '2026-11-04T00:' + start + 'Z',
                      'completed_at': '2026-11-04T00:' + end + 'Z'})
-    logs = {'1': f'2026-11-04T00:01:00Z   SOURCE_SHA: {SHA}\n  CANDIDATE_SHA: {SHA}\n',
+    logs = {'1': f'2026-11-04T00:01:00Z   SOURCE_SHA: {SHA}\n  CANDIDATE_SHA: {SHA}\n' + provenance(),
             '3': f'2026-11-04T00:10:00Z   EXPECTED_SHA: {SHA}\n'}
     return run, jobs, logs
 
@@ -56,6 +62,61 @@ class TimingControls(unittest.TestCase):
         evidence = fixture()
         evidence[2]['3'] = 'EXPECTED_SHA: ' + 'b' * 40
         self.assertFalse(self.report(evidence)['metric_eligible'])
+
+    def test_only_proven_source_events_can_be_ordinary_first_attempt_metrics(self):
+        for action, changed, classification in [
+                ('opened', 'false', 'source'), ('synchronize', 'false', 'source'),
+                ('reopened', 'false', 'source'), ('edited', 'true', 'source'),
+                ('edited', 'false', 'metadata-only'), ('ready_for_review', 'false', 'non-source')]:
+            with self.subTest(action=action, changed=changed):
+                evidence = fixture()
+                evidence[2]['1'] = evidence[2]['1'].replace(provenance(), provenance(action=action, changed=changed))
+                report = self.report(evidence)
+                self.assertTrue(report['metric_eligible'])
+                self.assertEqual(report['event_provenance'], {
+                    'classification': classification, 'event_name': 'pull_request', 'action': action,
+                    'base_changed': changed == 'true', 'reason': None})
+                self.assertEqual(report['ordinary_first_attempt_metric'], classification == 'source')
+                self.assertFalse(report['cohort_qualified'])
+
+    def test_push_and_manual_are_known_but_never_ordinary(self):
+        for event in ['push', 'workflow_dispatch']:
+            evidence = fixture()
+            evidence[0]['event'] = event
+            evidence[2]['1'] = evidence[2]['1'].replace(provenance(), provenance(event, ''))
+            report = self.report(evidence)
+            self.assertTrue(report['metric_eligible'])
+            self.assertEqual(report['event_provenance']['classification'], 'non-pr')
+            self.assertFalse(report['event_provenance']['base_changed'])
+            self.assertFalse(report['ordinary_first_attempt_metric'])
+
+    def test_unknown_provenance_does_not_invent_source_events_or_erase_diagnostic_metrics(self):
+        valid = provenance()
+        cases = ['', valid.replace('CI_EVENT_ACTION: opened', 'CI_EVENT_ACTION:'),
+                 valid.replace('CI_EVENT_NAME: pull_request', 'CI_EVENT_NAME: push'),
+                 valid.replace('CI_EVENT_NAME: pull_request', 'CI_EVENT_NAME: PULL_REQUEST'),
+                 valid.replace('CI_EVENT_ACTION: opened', 'CI_EVENT_ACTION: Opened'),
+                 provenance(action='labeled'), provenance(action='opened', changed='true'),
+                 provenance('push', 'opened'), provenance('workflow_dispatch', '', 'true')]
+        for value in ['True', 'FALSE', '0', '1', '"false"', '"true"', '', 'false ', ' false', 'null']:
+            cases.append(provenance(changed=value))
+        for name in ['CI_EVENT_NAME', 'CI_EVENT_ACTION', 'CI_EVENT_BASE_CHANGED']:
+            line = next(line for line in valid.splitlines(keepends=True) if name in line)
+            cases += [valid.replace(line, ''), valid + line,
+                      valid + line.replace(': ', ': different-'),
+                      valid.replace(line, 'echo "' + line.strip() + '"\n'),
+                      valid + line.replace(': ', ' : ')]
+        for log in cases:
+            with self.subTest(log=log):
+                evidence = fixture()
+                evidence[2]['1'] = evidence[2]['1'].replace(valid, log)
+                report = self.report(evidence)
+                self.assertTrue(report['metric_eligible'])
+                self.assertEqual(report['processing_seconds'], 555)
+                self.assertEqual(report['event_provenance']['classification'], 'unknown')
+                self.assertIsNone(report['event_provenance']['base_changed'])
+                self.assertIsNotNone(report['event_provenance']['reason'])
+                self.assertFalse(report['ordinary_first_attempt_metric'])
 
     def test_failure_cancel_pending_skip_missing_aggregate_are_retained_ineligible(self):
         for conclusion in ['failure', 'cancelled', 'skipped', None]:
@@ -100,6 +161,7 @@ class TimingControls(unittest.TestCase):
             job['run_attempt'] = 2
         report = self.report(evidence)
         self.assertTrue(report['metric_eligible'])
+        self.assertEqual(report['event_provenance']['classification'], 'source')
         self.assertFalse(report['ordinary_first_attempt_metric'])
         evidence[0]['event'] = 'workflow_dispatch'
         self.assertFalse(self.report(evidence)['ordinary_first_attempt_metric'])
@@ -149,6 +211,27 @@ class TimingControls(unittest.TestCase):
                     runner.capture('arcee-ai/nac', ['123'], path)
                 network.assert_not_called()
             self.assertEqual((path / 'old').read_text(), 'preserved')
+
+    def test_real_summarize_cli_retains_source_metadata_and_historical_unknown(self):
+        for event_log, expected in [(provenance(), 'source'),
+                                    (provenance(action='edited'), 'metadata-only'), ('', 'unknown')]:
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory)
+                run, jobs, logs = fixture()
+                logs['1'] = logs['1'].replace(provenance(), event_log)
+                (path / 'run.json').write_text(json.dumps(run))
+                (path / 'jobs.json').write_text(json.dumps(jobs))
+                for job, log in logs.items():
+                    (path / f'job-{job}.log').write_text(log)
+                original = (path / 'run.json').read_bytes()
+                result = subprocess.run([sys.executable, str(SPEC.origin), 'summarize', str(path)],
+                                        capture_output=True, text=True, check=True)
+                report = json.loads(result.stdout)[0]
+                self.assertTrue(report['metric_eligible'])
+                self.assertEqual(report['event_provenance']['classification'], expected)
+                self.assertEqual(report['ordinary_first_attempt_metric'], expected == 'source')
+                self.assertEqual((path / 'run.json').read_bytes(), original)
+                self.assertFalse((path / 'summary.json').exists())
 
     def test_capture_pins_attempt_and_pagination_preserves_commands_and_logs(self):
         run, jobs, logs = fixture()
