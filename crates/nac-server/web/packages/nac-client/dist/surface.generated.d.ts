@@ -1,10 +1,19 @@
 export declare const NAC_API_SURFACE: {
+    readonly "GET /sessions/{session_id}/integrations": "private:standalone session integration status";
+    readonly "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh";
     readonly "GET /product-context": "api.getProductContext";
     readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
+    readonly "POST /sessions/{session_id}/task-followup-delegations": "private:human task follow-up delegation issuance";
+    readonly "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}": "private:passive human delegation inspection";
+    readonly "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}": "private:human task follow-up delegation revocation";
     readonly "GET /sessions/{session_id}/questions": "private:standalone exact structured questions";
     readonly "GET /sessions/{session_id}/questions/{request_id}": "private:standalone exact structured question read";
     readonly "POST /sessions/{session_id}/questions/{request_id}/answer": "private:authenticated human question answer";
     readonly "POST /sessions/{session_id}/questions/{request_id}/cancel": "private:authenticated human question cancellation";
+    readonly "GET /heartbeats": "private:standalone Local heartbeat inventory";
+    readonly "GET /sessions/{session_id}/heartbeats/{schedule_id}": "private:standalone passive heartbeat history";
+    readonly "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control";
+    readonly "POST /sessions/{session_id}/heartbeats/attention": "private:standalone human result acknowledgement";
     readonly "POST /task-launches": "private:standalone Local retained task launch";
     readonly "GET /task-launches/{request_id}": "private:standalone passive launch status";
     readonly "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation";

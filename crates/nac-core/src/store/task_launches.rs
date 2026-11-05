@@ -257,7 +257,8 @@ pub fn reserve_task_launch(path: &Path, request: TaskLaunchRequest, source: Task
         tx.execute("INSERT INTO project_git_sources(project_id,source_json) VALUES (?1,?2)",
             params![request.project_id,serde_json::to_string(&source)?])?;
     }
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let native = super::native_task_launches::reserved_identity(&tx, &request, &source)?;
+    let session_id = native.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let canonical_store = std::fs::canonicalize(path)?;
     let workspace_path = canonical_store.parent().ok_or_else(|| anyhow!("store has no parent"))?
         .join("task-worktrees").join(&session_id);
@@ -280,6 +281,14 @@ pub fn update_task_launch(path: &Path, request_id: &str, phase: TaskLaunchPhase,
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let existing = load(&tx, request_id)?.ok_or_else(|| anyhow!("launch not found"))?;
+    // Native cancellation and the next retained preparation phase share this
+    // writer boundary. Cancellation after reservation must fence Git/runtime
+    // admission too, rather than waiting for the final publication check.
+    let native_cancelled: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 AND phase='cancelled')",
+        [request_id], |row| row.get(0),
+    )?;
+    let phase = if native_cancelled { TaskLaunchPhase::Cancelled } else { phase };
     // Cancellation wins over late preparation/error responses. Publication is
     // only performed by the session creation transaction below.
     if existing.phase != TaskLaunchPhase::Cancelled && (existing.phase != TaskLaunchPhase::Ready || phase == TaskLaunchPhase::Cancelled) {
@@ -357,6 +366,7 @@ pub(crate) fn publish_in_transaction(
         params![launch.session_id, launch.request.prompt, now],
     )?;
     let input_id = tx.last_insert_rowid();
+    super::native_task_launches::publish_retained_in_transaction(tx, &launch, input_id)?;
     tx.execute("UPDATE task_launches SET phase='ready',first_input_id=?2,error=NULL,updated_at=?3 WHERE request_id=?1",
         params![request_id,input_id,now])?;
     Ok(())

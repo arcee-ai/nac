@@ -382,3 +382,7 @@ mod tests;
 #[cfg(test)]
 #[path = "task_wait_authorization_tests.rs"]
 mod authorization_tests;
+
+#[cfg(test)]
+#[path = "task_wait_approval_tests.rs"]
+mod approval_tests;

@@ -20,7 +20,7 @@ function fixture(t, name = "is-number", version = "7.0.0") {
     mkdirSync(join(root, dirname(input)), { recursive: true });
     const filename = input === INPUTS[0] ? "Cargo.lock" : "package-lock.json";
     copyFileSync(
-      fileURLToPath(new URL(`./fixtures/security/safe/${filename}`, import.meta.url)),
+      fileURLToPath(new URL(`./fixtures/security/safe/${filename}.fixture`, import.meta.url)),
       join(root, input),
     );
   }

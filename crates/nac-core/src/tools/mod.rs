@@ -31,11 +31,14 @@ pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
 pub(crate) mod orchestrator;
+mod peer_goals;
 pub(crate) mod product_context;
 pub mod read;
 mod runtime_context;
 pub(crate) mod subagent;
 mod task_discovery;
+mod task_followups;
+mod task_launch;
 mod task_questions;
 pub(crate) use task_discovery::url_component;
 mod task_wait;
@@ -168,6 +171,8 @@ pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
     "read_command_output",
 ];
 
+pub(crate) const TASK_FOLLOWUP_TOOL_NAMES: [&str; 2] = ["send_task_followup", "read_task_followup"];
+
 pub(crate) const PRODUCT_CONTEXT_TOOL_NAMES: [&str; 2] =
     ["get_product_context", "resolve_product_destination"];
 
@@ -184,7 +189,8 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
-pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
+pub(crate) mod heartbeat;
+pub(crate) const DIRECT_TOOL_NAMES: [&str; 32] = [
     "nac_guide",
     "read",
     "write",
@@ -195,18 +201,28 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 22] = [
     "write_stdin",
     "read_command_output",
     "list_executions",
+    "list_projects",
+    "launch_task",
+    "task_launch_status",
     "find_tasks",
     "read_task",
+    "send_task_followup",
+    "read_task_followup",
     "wait_tasks",
     "request_question",
     "read_question",
     "answer_question",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
     "subagent",
     "subagent_status",
     "subagent_cancel",
+    "heartbeat_control",
+    "list_heartbeats",
+    "read_heartbeat",
+    "report_heartbeat",
 ];
 pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_launch",
@@ -217,7 +233,7 @@ pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
     "orchestrator_cancel",
 ];
 pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
+pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 33] = [
     "nac_guide",
     "read",
     "write",
@@ -228,15 +244,23 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 25] = [
     "write_stdin",
     "read_command_output",
     "list_executions",
+    "list_projects",
+    "launch_task",
+    "task_launch_status",
     "find_tasks",
     "read_task",
     "wait_tasks",
+    "task_goal",
     "create_goal",
     "get_goal",
     "update_goal",
     "subagent",
     "subagent_status",
     "subagent_cancel",
+    "heartbeat_control",
+    "list_heartbeats",
+    "read_heartbeat",
+    "report_heartbeat",
     "orchestrator_launch",
     "orchestrator_status",
     "orchestrator_steer",
@@ -259,17 +283,27 @@ fn worker_tool_registry(
         .register(terminal_tools::WriteStdinTool)
         .register(terminal_tools::ReadCommandOutputTool)
         .register(execution_observation::ListExecutionsTool)
+        .register(task_launch::ListProjectsTool)
+        .register(task_launch::LaunchTaskTool)
+        .register(task_launch::TaskLaunchStatusTool)
         .register(task_discovery::FindTasksTool)
         .register(task_discovery::ReadTaskTool)
+        .register(task_followups::SendTaskFollowupTool)
+        .register(task_followups::ReadTaskFollowupTool)
         .register(task_wait::WaitTasksTool)
         .register(task_questions::CreateQuestionTool)
         .register(task_questions::ReadQuestionTool)
         .register(task_questions::AnswerQuestionTool)
+        .register(peer_goals::PeerGoalTool)
         .register(goal::CreateGoalTool)
         .register(product_context::ReadTool)
         .register(product_context::ResolveTool)
         .register(goal::GetGoalTool)
         .register(goal::UpdateGoalTool)
+        .register(heartbeat::HeartbeatControlTool::native())
+        .register(heartbeat::ListHeartbeatsTool)
+        .register(heartbeat::ReadHeartbeatTool)
+        .register(heartbeat::ReportHeartbeatTool)
         .register(subagent::SubagentTool)
         .register(subagent::SubagentStatusTool)
         .register(subagent::SubagentCancelTool)
@@ -532,10 +566,12 @@ mod tests;
 /// Create a `ToolRuntime` suitable for unit tests.  Uses the current
 /// directory as the workspace, an empty store path, a dummy session id,
 /// and no MCP / skills / worker executable.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let backend = crate::sandbox::execution_backend_from_sandbox(None, &workspace_cwd);
+    let backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
+        workspace_cwd: workspace_cwd.clone(),
+    });
     ToolRuntime {
         product_context: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
@@ -560,6 +596,10 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         permission_rules: Arc::new(Vec::new()),
         goal_runtime: None,
         task_question_answers: None,
+        heartbeat_human_request: None,
+        heartbeat_execution: false,
+        heartbeat_goal_id: None,
+        heartbeat_needs_human_action: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         command_environment: None,
         web_credential: None,
         command_redactions: Arc::new(StdMutex::new(HashMap::new())),

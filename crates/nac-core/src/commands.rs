@@ -258,6 +258,18 @@ pub(crate) fn expand_user_prompt(prompt: &str, skills: Option<&SkillRegistry>) -
 }
 
 pub fn display_prompt_from_message(content: &str) -> String {
+    // Presentation only. Runtime provenance, never this text, selects an
+    // automation's authority and exact admitted occurrence.
+    if let Some(header) = content
+        .strip_prefix("Heartbeat check: ")
+        .and_then(|text| text.split_once("\n<nac_heartbeat>\n"))
+    {
+        if header.1.ends_with("\n</nac_heartbeat>") {
+            if let Ok(name) = serde_json::from_str::<String>(header.0) {
+                return format!("Heartbeat check: {name}");
+            }
+        }
+    }
     if let Some(collapsed) = invoked_skills_display_prompt(content) {
         return collapsed;
     }
@@ -903,5 +915,19 @@ mod tests {
                 vector.name
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod heartbeat_display_tests {
+    #[test]
+    fn heartbeat_envelope_displays_only_its_name_without_affecting_ordinary_text() {
+        let content="Heartbeat check: \"Local job\"\n<nac_heartbeat>\nBound instructions and expanded skills\n</nac_heartbeat>";
+        assert_eq!(
+            super::display_prompt_from_message(content),
+            "Heartbeat check: Local job"
+        );
+        let incomplete = "Heartbeat check: Local job\n<nac_heartbeat>mention";
+        assert_eq!(super::display_prompt_from_message(incomplete), incomplete);
     }
 }

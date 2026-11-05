@@ -1,8 +1,18 @@
 // Explicit native client coverage, not a hosted authorization allowlist.
 // New Rust operations must be deliberately classified before generation succeeds.
 export const clientApiSurface = {
+  "GET /sessions/{session_id}/integrations": "private:standalone session integration status",
+  "POST /sessions/{session_id}/integrations/refresh":
+    "private:standalone explicit session integration refresh",
   "GET /product-context": "api.getProductContext",
   "POST /product-destinations/resolve": "api.resolveProductDestination",
+
+  "POST /sessions/{session_id}/task-followup-delegations":
+    "private:human task follow-up delegation issuance",
+  "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:passive human delegation inspection",
+  "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}":
+    "private:human task follow-up delegation revocation",
   "GET /sessions/{session_id}/questions": "private:standalone exact structured questions",
   "GET /sessions/{session_id}/questions/{request_id}":
     "private:standalone exact structured question read",
@@ -10,6 +20,12 @@ export const clientApiSurface = {
     "private:authenticated human question answer",
   "POST /sessions/{session_id}/questions/{request_id}/cancel":
     "private:authenticated human question cancellation",
+  "GET /heartbeats": "private:standalone Local heartbeat inventory",
+  "GET /sessions/{session_id}/heartbeats/{schedule_id}":
+    "private:standalone passive heartbeat history",
+  "POST /sessions/{session_id}/heartbeats/control": "private:standalone human heartbeat control",
+  "POST /sessions/{session_id}/heartbeats/attention":
+    "private:standalone human result acknowledgement",
   "POST /task-launches": "private:standalone Local retained task launch",
   "GET /task-launches/{request_id}": "private:standalone passive launch status",
   "POST /task-launches/{request_id}/cancel": "private:standalone launch cancellation",

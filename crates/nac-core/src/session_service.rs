@@ -41,16 +41,23 @@ mod delegated_input;
 mod delegated_input_test_support;
 mod direct_interaction;
 mod frontend_projection;
+mod heartbeats;
+pub(crate) use heartbeats::SubmittedHeartbeat;
 mod manual_compaction;
+mod mcp_refresh;
 mod operation_state;
 pub(crate) mod questions;
 pub use questions::{AuthorizedQuestionInformation, TaskQuestionAnswerPort};
+mod peer_goals;
 mod recovery;
 mod settlement;
 mod shell_command_types;
 mod shell_commands;
 mod shell_output;
 mod shell_settlement;
+mod task_followup_admission;
+mod task_followup_delegations;
+pub(crate) use task_followup_delegations::SubmittedTaskFollowupDelegation;
 mod terminal_selection_admission;
 pub(crate) use shell_command_types::SubmittedShell;
 pub use shell_command_types::{
@@ -657,10 +664,11 @@ pub struct SessionService {
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
-    /// MCP capability and prompt inventory captured at session construction.
-    mcp: Option<Arc<crate::mcp::McpRegistry>>,
+    /// Independently refreshed inventory shared with this session's agent.
+    mcp: Arc<crate::mcp::SessionMcpMounts>,
     terminal_manager: crate::terminal::TerminalManager,
     user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
+    heartbeat_context: Option<Arc<heartbeats::HeartbeatContext>>,
     shell_runtime: Option<crate::tools::ToolRuntime>,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
@@ -722,6 +730,7 @@ impl ActiveSessionOperation {
 }
 
 struct ActiveRunState {
+    heartbeat: bool,
     snapshot: ActiveRunSnapshot,
     started_at: Instant,
     finishing: bool,
@@ -743,6 +752,7 @@ struct ActiveRunState {
 
 #[derive(Default)]
 struct RunAdmissionKind {
+    heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
     /// What a person typed for a prompt submitted on a human-facing route.
@@ -960,11 +970,15 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input_with_mcp(input, self.skills.as_deref(), self.mcp.as_deref())
+        commands::prepare_user_input_with_mcp(
+            input,
+            self.skills.as_deref(),
+            self.mcp.registry().as_deref(),
+        )
     }
 
     pub fn slash_command_definitions(&self) -> Vec<crate::commands::SlashCommandDefinition> {
-        commands::session_slash_command_definitions(self.mcp.as_deref())
+        commands::session_slash_command_definitions(self.mcp.registry().as_deref())
     }
 
     pub async fn resolve_mcp_prompt(
@@ -973,7 +987,7 @@ impl SessionService {
     ) -> Result<PreparedPrompt> {
         let registry = self
             .mcp
-            .as_deref()
+            .registry()
             .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
         registry.resolve_prompt_invocation(invocation).await
     }

@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "kind": "qualification provenance audit, not strategy or cohort acceptance",
+  "cohort_qualified": false,
+  "audited_source": "c34f07c56db5f88d7f6dc09a45b8ad4997744b4e",
+  "snapshot": {
+    "utc": "2026-11-05T05:18:54.609602+00:00",
+    "commands": "read-only gh api public repo workflow run metadata, repo events and issue timelines; no administrative endpoints"
+  },
+  "outcome": "Insufficient provenance and sequence evidence; no honest qualifying consecutive ten ordinary source-origin first-attempt run window proved by available retained data. This is not a claim that such a window is impossible.",
+  "historical_boundary": "The 22 committed observations used PR+attempt1 as a weaker potential ordinary metric indicator; all cohort flags were false. They and their raw snapshots remain unchanged.",
+  "run_list_scope": {
+    "created_filter": "2026-11-05T00:23:52Z..2026-11-05T05:30:00Z",
+    "actual_latest_created_at": "2026-11-05T05:09:21Z",
+    "workflow": "stable-release.yml",
+    "event": "pull_request",
+    "pages": [
+      100,
+      100,
+      39
+    ],
+    "total_count": 239,
+    "unique_run_ids": 239,
+    "ordering": "workflow run_number, not completion time",
+    "left_boundary_warning": "Starts at first committed metric sample, not all prior repository history; first observed branch/head is not proven first source event. List shows latest attempt metadata, original attempt snapshots remain distinct."
+  },
+  "counts": {
+    "all_stable_PR_runs": {
+      "count": 239,
+      "conclusions": {
+        "success": 91,
+        "cancelled": 113,
+        "failure": 14,
+        "pending": 21
+      },
+      "unique_branch_head_pairs": 76,
+      "longest_unfiltered_success_streak": 11
+    },
+    "ALL582_branch_runs": {
+      "count": 114,
+      "conclusions": {
+        "success": 50,
+        "cancelled": 56,
+        "failure": 6,
+        "pending": 2
+      },
+      "unique_branch_head_pairs": 34,
+      "longest_unfiltered_success_streak": 6
+    }
+  },
+  "raw_green_streaks": [
+    {
+      "length": 11,
+      "run_numbers": [
+        3471,
+        3472,
+        3473,
+        3474,
+        3475,
+        3476,
+        3477,
+        3478,
+        3479,
+        3480,
+        3481
+      ],
+      "distinct_heads": 9,
+      "qualification": "not qualified; includes repeated heads/metadata edit clusters; action/source-origin/representative mapping not proved"
+    },
+    {
+      "length": 10,
+      "run_numbers": [
+        3516,
+        3517,
+        3518,
+        3519,
+        3520,
+        3521,
+        3522,
+        3523,
+        3524,
+        3525
+      ],
+      "distinct_heads": 10,
+      "qualification": "not qualified; includes repeated heads/metadata edit clusters; action/source-origin/representative mapping not proved"
+    }
+  ],
+  "critical_source_first_cancellations": {
+    "first_observed_5cf_source_run": 41969704296,
+    "first_observed_5cf_conclusion": "cancelled",
+    "first_observed_75_source_run": 41970288223,
+    "first_observed_75_conclusion": "cancelled",
+    "first_observed_75_jobs": 0,
+    "later_green_75_run": 41970310086,
+    "later_green_created": "2026-11-05T04:50:53Z",
+    "public_body_edit_timestamp": "2026-11-05T04:50:49Z",
+    "qualification": "Strong metadata-edit correlation; actual trigger action unavailable, so no authoritative edited label or promotion to source-first run."
+  },
+  "actual_failure_despite_cancelled_run": {
+    "run_id": 41964010933,
+    "overall": "cancelled",
+    "shard7_job": 127043162857,
+    "shard7_conclusion": "failure",
+    "required_aggregate_conclusion": "failure",
+    "disposition": "Retain actual failed job despite overall cancellation; separate from same-head green41963983443 and its later attempt2."
+  },
+  "independent_native_dispositions": [
+    {
+      "run_id": 41969827542,
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "head": "5cf10cbc4dbcdb92246d01275bca5e07422c4ae9"
+    },
+    {
+      "run_id": 41963985081,
+      "event": "pull_request",
+      "conclusion": "success",
+      "head": "5f714aad145447e09af25d5ed50a9ce57a4aef62"
+    },
+    {
+      "run_id": 41963984719,
+      "event": "pull_request",
+      "conclusion": "failure",
+      "head": "5f714aad145447e09af25d5ed50a9ce57a4aef62"
+    },
+    {
+      "run_id": 41958708155,
+      "event": "pull_request",
+      "conclusion": "failure",
+      "head": "319341e5c2bc055730a7c35e34297003d7f7d39a"
+    },
+    {
+      "run_id": 41958708312,
+      "event": "pull_request",
+      "conclusion": "failure",
+      "head": "319341e5c2bc055730a7c35e34297003d7f7d39a"
+    },
+    {
+      "run_id": 41956624862,
+      "event": "pull_request",
+      "conclusion": "failure",
+      "head": "c062894b218da73c71ea982d0ebdf2a264d5728c"
+    }
+  ],
+  "retry_disposition": "41963983443 attempt1 success remains separate from later attempt2; neither replaces failed/cancelled41964010933. Source-first cancellations and duplicate metadata runs remain in the denominator.",
+  "provenance_gap": "Actual sampled prepare logs printed candidate/base SHA and event name but no original action/base-change metadata. Run API omits action; public activity omits synchronize/edited. Public history can corroborate selected changes but cannot authoritatively bind all run triggers.",
+  "example_public_event_mismatch": "Public opened611 timestamp04:44:51 payload PR.head=75dff, but first actual run04:44:55 head=5cf; do not treat embedded PR object as historical source proof.",
+  "future_capture": {
+    "location": "existing main prepare CI identity step environment; no commands/conditions/trigger changes",
+    "bindings": {
+      "CI_EVENT_NAME": "${{ github.event_name }}",
+      "CI_EVENT_ACTION": "${{ github.event.action }}",
+      "CI_EVENT_BASE_CHANGED": "${{ toJSON(github.event.changes.base != null) }}"
+    },
+    "classification": "Canonical source PR action plus attempt1 and existing timing/status/identity checks are necessary for ordinary metric flag; unknown/metadata/manual/push/retries never qualify. No cohort inferred.",
+    "uncaptured_cancellations": "Runs cancelled before preparation remain unknown and must be retained, not dropped.",
+    "owner_boundary": "PR594 owns trigger deduplication/metadata reuse/cancellation behavior; no such change here."
+  },
+  "remaining": [
+    "Prospectively defined ordinary sequence and complete failure/cancellation/duplicate dispositions.",
+    "At least five meaningful source SHAs with backend/managed/frontend/docs and controlled-cold representation.",
+    "Actual current required acceptance, latency, resources, cache/cost and negative-control evidence for a complete consecutive window."
+  ],
+  "cold_observation": "41963985617 retained constrained controlled-cold mechanism audit remains distinct; actual cold consumers do not establish complete cohort.",
+  "raw_evidence": {
+    "directory": "qualification-provenance (owned durable ALL-582 artifact root)",
+    "full_audit_sha256": "1f171fc74a34188a4a29897566250c4f8e467d73a9aec27d29978fd8038884b0",
+    "run_ledger_sha256": "156414a7abc00a61355a7110b282524f9cc33f01c0be393ec8bc747d0bcfde5d",
+    "historical_22_snapshot_sha256": "5310047c666bedb7e0decf141ae4f849c6fbf121819f1ec44ea330fd1317207d",
+    "manifest": "sha256-manifest.json",
+    "raw_files": "run lists, prepare logs, attempt1/latest metadata, public events/timelines/narrow GraphQL history, exact611 prepared workflow, committed cold/failure snapshots"
+  },
+  "primary_sources": [
+    {
+      "title": "Workflow run REST API",
+      "url": "https://docs.github.com/en/rest/actions/workflow-runs"
+    },
+    {
+      "title": "Public events limits/latency",
+      "url": "https://docs.github.com/en/rest/activity/events"
+    },
+    {
+      "title": "PullRequestEvent activity subset",
+      "url": "https://docs.github.com/en/rest/using-the-rest-api/github-event-types#pullrequestevent"
+    },
+    {
+      "title": "Issue timeline title/base events",
+      "url": "https://docs.github.com/en/rest/using-the-rest-api/issue-event-types"
+    },
+    {
+      "title": "Full event payload at runner",
+      "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context"
+    }
+  ],
+  "actions_taken": "Read-only metadata/log reads; no source/CI mutations during audit, no runs manufactured. Subsequent provenance patch is observational only."
+}

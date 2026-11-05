@@ -52,12 +52,21 @@ impl<'a> TaskLaunchApplication<'a> {
     }
 
     pub(crate) async fn start(&self, request: TaskLaunchRequest) -> Result<TaskLaunchRecord> {
+        let admission = self.manager.inner.task_preparations.admit().await?;
+        self.start_admitted(request, admission, None).await
+    }
+
+    pub(crate) async fn start_admitted(
+        &self,
+        request: TaskLaunchRequest,
+        admission: tokio::sync::OwnedRwLockReadGuard<()>,
+        authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
+    ) -> Result<TaskLaunchRecord> {
         request.validate()?;
         anyhow::ensure!(
             self.manager.managed_host().is_none(),
             "invalid request: retained tasks require an unmanaged Local host"
         );
-        let admission = self.manager.inner.task_preparations.admit().await?;
         let manager = self.manager.clone();
         let (reply, response) = tokio::sync::oneshot::channel();
         // Register before source resolution. HTTP cancellation cannot detach
@@ -65,13 +74,47 @@ impl<'a> TaskLaunchApplication<'a> {
         tokio::spawn(async move {
             let _admission = admission;
             let prepared = Self::resolve_and_reserve(&manager, request).await;
-            let (record, lease) = match prepared {
+            let (mut record, lease) = match prepared {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     let _ = reply.send(Err(error));
                     return;
                 }
             };
+            if lease.is_some() && record.phase == TaskLaunchPhase::Failed {
+                match Self::phase(&manager, &record, TaskLaunchPhase::Pinned).await {
+                    Ok(resumed) => record = resumed,
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                        return;
+                    }
+                }
+            }
+            if lease.is_some()
+                && !matches!(
+                    record.phase,
+                    TaskLaunchPhase::Ready | TaskLaunchPhase::Cancelled
+                )
+            {
+                if let Some(authorization) = authorization {
+                    if let Err(error) = authorization.authorize_preparation(&record).await {
+                        let path = manager.inner.store_path.clone();
+                        let id = record.request.request_id.clone();
+                        let message = format!("{error:#}");
+                        let _ = store::spawn_blocking_store_caller(move || {
+                            store::update_task_launch(
+                                &path,
+                                &id,
+                                TaskLaunchPhase::Failed,
+                                Some(message),
+                            )
+                        })
+                        .await;
+                        let _ = reply.send(Err(error));
+                        return;
+                    }
+                }
+            }
             let _ = reply.send(Ok(record.clone()));
             if let Some(_lease) = lease {
                 if !matches!(
@@ -81,13 +124,25 @@ impl<'a> TaskLaunchApplication<'a> {
                     if let Err(error) = Self::prepare(&manager, record.clone()).await {
                         let path = manager.inner.store_path.clone();
                         let id = record.request.request_id;
-                        let _ = store::spawn_blocking_store_caller(move || {
+                        let _ = store::spawn_blocking_store_caller(move || -> Result<()> {
+                            let message = format!("{error:#}");
                             store::update_task_launch(
                                 &path,
                                 &id,
                                 TaskLaunchPhase::Failed,
-                                Some(format!("{error:#}")),
-                            )
+                                Some(message.clone()),
+                            )?;
+                            if store::load_native_task_launch(&path, &id)?.is_some() {
+                                // Preparation can already be published while
+                                // its original input still awaits admission.
+                                store::update_native_task_launch(
+                                    &path,
+                                    &id,
+                                    "failed",
+                                    Some(message),
+                                )?;
+                            }
+                            Ok(())
                         })
                         .await;
                     }
@@ -141,6 +196,20 @@ impl<'a> TaskLaunchApplication<'a> {
         }
         let (project, bound, invoking) =
             context.ok_or_else(|| anyhow!("launch source context missing"))?;
+        #[cfg(test)]
+        {
+            let gate = manager
+                .inner
+                .task_preparations
+                .source_resolution
+                .lock()
+                .unwrap()
+                .clone();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.resume.notified().await;
+            }
+        }
         let source = manager
             .inner
             .task_preparations
@@ -204,6 +273,20 @@ impl<'a> TaskLaunchApplication<'a> {
         // owns its idempotent promotion; reattachment recovers pending input.
         let service = manager.inner.active_sessions.read().await.get(&id).cloned();
         if let Some(service) = service {
+            #[cfg(test)]
+            {
+                let gate = manager
+                    .inner
+                    .task_preparations
+                    .initial_input_wake
+                    .lock()
+                    .unwrap()
+                    .clone();
+                if let Some(gate) = gate {
+                    gate.reached.notify_one();
+                    gate.resume.notified().await;
+                }
+            }
             if manager.inner.task_preparations.git.check_running().is_ok() {
                 manager.wake_direct_inbox(&service).await?;
             } else {
@@ -252,6 +335,13 @@ pub(crate) fn reconcile_startup(path: &std::path::Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    std::thread::scope(|scope| scope.spawn(|| store::reconcile_task_launches(path)).join())
-        .map_err(|_| anyhow!("task preparation reconciliation thread panicked"))?
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                store::reconcile_task_launches(path)?;
+                store::reconcile_native_task_launches(path)
+            })
+            .join()
+    })
+    .map_err(|_| anyhow!("task preparation reconciliation thread panicked"))?
 }

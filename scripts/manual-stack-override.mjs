@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import { inspectChecks, readCurrentMerge } from './manual-stack-checks.mjs';
 
 const REPO = 'arcee-ai/nac';
 const ROOT = `repos/${REPO}`;
@@ -73,16 +75,38 @@ export function createHelper(transport = ghTransport, {
     const review = await get('rulesets/26484091');
     const universal = await get('rulesets/25983949');
     const rules = await get('rules/branches/dev');
+    const hardPull = {
+      required_approving_review_count: 0, dismiss_stale_reviews_on_push: false,
+      required_reviewers: [], require_code_owner_review: false,
+      dismissal_restriction: { enabled: false, allowed_actors: [] },
+      require_last_push_approval: false, required_review_thread_resolution: false,
+      require_extra_approval_for_unattributed_changes: false,
+      allowed_merge_methods: ['merge', 'squash', 'rebase'],
+    };
+    const personalPull = { ...hardPull, required_approving_review_count: 1,
+      require_code_owner_review: true, require_last_push_approval: true,
+      required_review_thread_resolution: true, require_extra_approval_for_unattributed_changes: true };
+    const checks = { strict_required_status_checks_policy: true, do_not_enforce_on_create: false,
+      required_status_checks: [{ context: 'Required PR checks', integration_id: 15368 }] };
+    const conditions = { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } };
     insist(review.enforcement === 'active' && review.current_user_can_bypass === 'pull_requests_only' &&
       same(review.bypass_actors, [{ actor_id: 20910163, actor_type: 'User', bypass_mode: 'pull_request' }]) &&
-      review.rules.length === 1 && review.rules[0].type === 'pull_request', 'Review-only bypass policy differs');
+      isDeepStrictEqual(review.conditions, conditions) &&
+      same(review.rules.map(rule => rule.type).sort(), ['pull_request', 'required_status_checks']) &&
+      isDeepStrictEqual(review.rules.find(rule => rule.type === 'pull_request')?.parameters, personalPull) &&
+      isDeepStrictEqual(review.rules.find(rule => rule.type === 'required_status_checks')?.parameters, checks),
+    'Personal PR bypass policy differs');
     insist(universal.enforcement === 'active' && universal.current_user_can_bypass === 'never' &&
-      universal.bypass_actors.length === 0 && universal.rules.some(r => r.type === 'pull_request' &&
-        r.parameters.required_review_thread_resolution === true) &&
-      ['deletion', 'non_fast_forward'].every(type => universal.rules.some(r => r.type === type)),
+      universal.bypass_actors.length === 0 && isDeepStrictEqual(universal.conditions, conditions) &&
+      same(universal.rules.map(rule => rule.type).sort(), ['deletion', 'non_fast_forward', 'pull_request']) &&
+      isDeepStrictEqual(universal.rules.find(rule => rule.type === 'pull_request')?.parameters, hardPull),
     'Universal protections differ');
-    insist(rules.some(r => r.ruleset_id === 26484091) && rules.some(r => r.ruleset_id === 25983949),
-      'Expected dev policies are not effective');
+    // Match the actual dev placement, including parameters. Inherited policies
+    // remain in the fingerprint and check inventory; they are never bypassed.
+    const effective = id => rules.filter(rule => rule.ruleset_id === id)
+      .map(({ type, parameters }) => parameters === undefined ? { type } : { type, parameters });
+    insist(isDeepStrictEqual(effective(26484091), review.rules) &&
+      isDeepStrictEqual(effective(25983949), universal.rules), 'Expected dev policies are not effective');
     return { fingerprint: digest(JSON.stringify({ review: {
       enforcement: review.enforcement, bypass_actors: review.bypass_actors, rules: review.rules,
       conditions: review.conditions,
@@ -101,20 +125,8 @@ export function createHelper(transport = ghTransport, {
     throw new Error('Pagination limit exceeded');
   }
   async function validation(pr, rules) {
-    const checks = await pages(`commits/${pr.head.sha}/check-runs?filter=latest`, 'check_runs');
-    const statuses = await pages(`commits/${pr.head.sha}/status`, 'statuses');
-    const required = new Set(['Required PR checks', 'source-security / Full locked source scan']);
-    for (const rule of rules.filter(r => r.type === 'required_status_checks')) {
-      for (const check of rule.parameters.required_status_checks) required.add(check.context);
-    }
-    const records = [...checks.map(c => ({ name: c.name,
-      state: c.status === 'completed' ? c.conclusion : c.status })),
-    ...statuses.map(s => ({ name: s.context, state: s.state }))];
-    const blockers = records.filter(r => !['success', 'neutral', 'skipped'].includes(r.state) ||
-      required.has(r.name) && r.state !== 'success').map(r => `${r.name}: ${r.state}`);
-    for (const name of required) if (!records.some(r => r.name === name && r.state === 'success')) {
-      blockers.push(`${name}: missing successful result`);
-    }
+    const evidence = await inspectChecks(pr, rules, { get, pages });
+    const { blockers } = evidence;
     let cursor = null;
     for (let page = 0; page < 100; page++) {
       const data = await api('POST', 'graphql', { query: `query($number:Int!,$cursor:String) {
@@ -128,7 +140,15 @@ export function createHelper(transport = ghTransport, {
         'Review query failed or head changed');
       const threads = data.data.repository.pullRequest.reviewThreads;
       if (threads.nodes.some(t => t.isResolved !== true)) blockers.push('Unresolved review conversations');
-      if (!threads.pageInfo.hasNextPage) return { records, blockers };
+      if (!threads.pageInfo.hasNextPage) {
+        const after = await get(`pulls/${pr.number}`);
+        insist(same([after.head.ref, after.head.sha, after.base.ref, after.base.sha],
+          [pr.head.ref, pr.head.sha, pr.base.ref, pr.base.sha]), 'PR head/base changed during validation');
+        if (evidence.checkProvenance.currentMerge) insist(
+          await readCurrentMerge(after, get) === evidence.checkProvenance.currentMerge,
+          'PR current merge changed during validation');
+        return evidence;
+      }
       insist(threads.pageInfo.endCursor && threads.pageInfo.endCursor !== cursor, 'Invalid review pagination');
       cursor = threads.pageInfo.endCursor;
     }
@@ -233,9 +253,23 @@ export function createHelper(transport = ghTransport, {
         }
         insist(result.status === 'merged', `${result.status === 'enqueued' ? 'Queued, not merged' : 'Merge stopped'}: ${JSON.stringify(result)}`);
         const merged = await get(`pulls/${lowest.number}`);
-        insist(merged.merged === true && merged.head.sha === lowest.head.sha && SHA.test(merged.merge_commit_sha) &&
-          merged.merge_commit_sha === result.details?.sha, 'Merge result is not confirmed by PR state');
-        previousMerge = merged.merge_commit_sha;
+        const landedSha = result.details?.sha;
+        insist(SHA.test(landedSha) && merged.number === lowest.number && merged.merged === true &&
+          merged.state === 'closed' && merged.head.sha === lowest.head.sha &&
+          merged.base.ref === 'dev' && merged.base.repo?.full_name === REPO,
+        'Merge result is not confirmed by PR state');
+        // The pinned REST version omits merge_commit_sha. Confirm the actual
+        // landed squash commit S; the pre-merge synthetic test ref M is not S.
+        const proof = await api('POST', 'graphql', { query: `query($number:Int!) {
+          repository(owner:"arcee-ai",name:"nac") { nameWithOwner pullRequest(number:$number) {
+            number merged headRefOid baseRefName mergeCommit { oid }
+          } }
+        }`, variables: { number: lowest.number } });
+        const repository = proof.data?.repository, receipt = repository?.pullRequest;
+        insist(!proof.errors && repository?.nameWithOwner === REPO && receipt?.number === lowest.number &&
+          receipt.merged === true && receipt.headRefOid === lowest.head.sha && receipt.baseRefName === 'dev' &&
+          receipt.mergeCommit?.oid === landedSha, 'Merge result is not confirmed by landed-commit receipt');
+        previousMerge = landedSha;
         landed.push(remaining.shift());
         active = null;
         log(`Landed #${lowest.number} at ${previousMerge}; remaining: ${remaining.join(', ') || 'none'}`);
@@ -259,7 +293,7 @@ export async function main(args, { helper = createHelper(), out = console.log } 
   insist(Number.isSafeInteger(stack) && stack > 0 && members.every(n => Number.isSafeInteger(n) && n > 0) &&
     new Set(members).size === members.length, 'Invalid stack/member numbers');
   const plan = await helper.preview(stack, members);
-  out(`PREVIEW ONLY: ${REPO} stack ${stack}; exact merge set (bottom to top): ${members.join(', ')}\nSequential squash/default routing; review-only bypass. Partial landing is possible; queued is not merged.`);
+  out(`PREVIEW ONLY: ${REPO} stack ${stack}; exact merge set (bottom to top): ${members.join(', ')}\nSequential squash/default routing; personal PR exception, strict helper quality gates. Partial landing is possible; queued is not merged.`);
   out(`Full stack membership (including retained merged members): ${plan.membership.join(', ')}`);
   for (const member of plan.members) out(JSON.stringify(member, null, 2));
   fs.writeFileSync(args[5], `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });

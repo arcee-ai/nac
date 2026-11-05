@@ -665,6 +665,16 @@ impl SessionService {
         let goal_final_billable_tokens = completed_usage
             .as_ref()
             .map_or(0, crate::model::TokenUsage::billable_tokens);
+        let heartbeat_settlement = {
+            let operation = self.lock_active_operation();
+            matches!(operation.as_ref(),Some(ActiveSessionOperation::Run(run)) if run.heartbeat && run.snapshot.run_id==active_run.run_id)
+                .then(||crate::store::HeartbeatRunSettlement{
+                    tokens_used:completed_usage.as_ref().map(crate::model::TokenUsage::billable_tokens),
+                    duration_ms:completed_duration_ms.unwrap_or_default(),
+                    terminal_at_epoch_ms:now_epoch_ms(),
+                    needs_human_action:self.heartbeat_context.as_ref().is_some_and(|context|context.needs_human_action()),
+                })
+        };
         {
             let snapshot = self.session_snapshot.lock().await;
             if snapshot.is_none() {
@@ -745,6 +755,7 @@ impl SessionService {
             });
         }
         update.finished_run_result = run_result;
+        update.heartbeat_settlement = heartbeat_settlement;
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         crate::store::spawn_blocking_store_caller(move || {

@@ -7,6 +7,7 @@ export type ReasoningEffort = ApiSchema<"ReasoningEffort">;
 export type DispatchWeight = "light" | "heavy";
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
+export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
 /**
  * The optional light worker model. Same shape on records and requests: the
  * credential is always a selector name, never a key value.
@@ -308,3 +309,11 @@ export type ProductNavigationResolution = ApiSchema<"ProductNavigationResolution
 export type QuestionRecord = ApiSchema<"QuestionRecord">;
 export type QuestionAnswer = ApiSchema<"QuestionAnswer">;
 export type QuestionAnswerReceipt = ApiSchema<"QuestionAnswerReceipt">;
+export type HeartbeatSpec = ApiSchema<"HeartbeatSpec">;
+export type HeartbeatSchedule = ApiSchema<"HeartbeatSchedule">;
+export type HeartbeatAction = ApiSchema<"HeartbeatAction">;
+export type HeartbeatReceipt = ApiSchema<"HeartbeatReceipt">;
+export type HeartbeatOccurrence = ApiSchema<"HeartbeatOccurrence">;
+export type HeartbeatInspection = ApiSchema<"HeartbeatInspection">;
+export type HeartbeatControlRequest = ApiSchema<"HeartbeatControlRequest">;
+export type HeartbeatAttentionResult = ApiSchema<"HeartbeatAttentionResult">;

@@ -18,6 +18,9 @@ impl SessionService {
         // finish; every later admission observes this flag under that lock.
         self.stopping_admission
             .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(context) = &self.heartbeat_context {
+            context.stop().await;
+        }
         if let Some(context) = &self.user_terminal_context {
             context.stop_admission().await;
         }
@@ -784,6 +787,14 @@ impl SessionService {
             self.cancel_goal_retry_wake();
             return Ok(None);
         };
+        if crate::store::heartbeat_blocks_goal_continuation(
+            &self.metadata.store_path,
+            session_id,
+            &goal.goal_id,
+        )? {
+            self.cancel_goal_retry_wake();
+            return Ok(None);
+        }
         if goal
             .next_attempt_at_epoch_ms
             .is_some_and(|deadline| deadline > now_epoch_ms())
@@ -806,7 +817,7 @@ impl SessionService {
         .map_err(anyhow::Error::new)
     }
 
-    fn cancel_goal_retry_wake(&self) {
+    pub(super) fn cancel_goal_retry_wake(&self) {
         let wake = self
             .goal_retry_wake
             .lock()

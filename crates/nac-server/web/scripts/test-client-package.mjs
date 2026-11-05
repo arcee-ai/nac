@@ -101,8 +101,11 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 160);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 169);
 for (const resource of [
+  "POST /sessions/{session_id}/task-followup-delegations",
+  "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}",
+  "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}",
   "GET /sessions/{session_id}/questions",
   "GET /sessions/{session_id}/questions/{request_id}",
   "POST /sessions/{session_id}/questions/{request_id}/answer",
@@ -138,6 +141,17 @@ assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
+assert.equal("sessionIntegrations" in api, false);
+assert.equal("refreshSessionIntegrations" in api, false);
+assert.equal(NAC_API_SURFACE["GET /sessions/{session_id}/integrations"], "private:standalone session integration status");
+assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/integrations/refresh"], "private:standalone explicit session integration refresh");
+assert.equal("controlHeartbeat" in api, false);
+for (const [operation, owner] of [
+  ["GET /heartbeats", "private:standalone Local heartbeat inventory"],
+  ["GET /sessions/{session_id}/heartbeats/{schedule_id}", "private:standalone passive heartbeat history"],
+  ["POST /sessions/{session_id}/heartbeats/control", "private:standalone human heartbeat control"],
+  ["POST /sessions/{session_id}/heartbeats/attention", "private:standalone human result acknowledgement"],
+]) assert.equal(NAC_API_SURFACE[operation], owner);
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {

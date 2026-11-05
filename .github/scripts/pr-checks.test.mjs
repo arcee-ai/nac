@@ -11,6 +11,10 @@ import {
   requiredJobs,
   requireComplete,
   managedJobs,
+  imageJobs,
+  managedCallerJobs,
+  requireImageComplete,
+  requireManagedCallerComplete,
   requireManagedComplete,
 } from "./pr-checks.mjs";
 
@@ -18,7 +22,7 @@ const sha = "a".repeat(40);
 function successful(managed = "success") {
   const needs = Object.fromEntries(requiredJobs.map((job) => [job, { result: "success" }]));
   needs.prepare.outputs = { sha, run: "true" };
-  needs.managed = { result: managed };
+  for (const job of managedCallerJobs) needs[job] = { result: managed };
   return needs;
 }
 
@@ -79,7 +83,7 @@ test("real Git renames out of managed inputs cannot skip the managed graph", () 
 });
 
 test("every failed, cancelled, pending, missing or unexpectedly skipped job fails closed", () => {
-  for (const job of [...requiredJobs, "managed"]) {
+  for (const job of [...requiredJobs, ...managedCallerJobs]) {
     for (const result of ["failure", "cancelled", "skipped", "pending", "neutral", "", undefined]) {
       const needs = successful();
       needs[job].result = result;
@@ -125,6 +129,36 @@ test("reusable managed graph rejects every incomplete inner job and a different 
   }
 });
 
+test("early image and late managed joins reject incomplete or foreign branches", () => {
+  for (const [verify, jobs] of [
+    [requireImageComplete, imageJobs],
+    [requireManagedCallerComplete, ["prepare", "managed-image", "managed-fault", "managed-quality"]],
+  ]) {
+    const complete = () => ({
+      ...Object.fromEntries(jobs.map(job => [job, { result: "success", outputs: { sha } }])),
+    });
+    verify(complete(), sha);
+    for (const job of jobs) {
+      for (const result of ["failure", "cancelled", "skipped", "pending", undefined]) {
+        const needs = complete();
+        needs[job].result = result;
+        assert.throws(() => verify(needs, sha), undefined, `${job}/${result}`);
+      }
+      const needs = complete();
+      delete needs[job];
+      assert.throws(() => verify(needs, sha));
+    }
+    assert.throws(() => verify({ ...complete(), extra: { result: "success" } }, sha));
+    assert.throws(() => verify(complete(), "b".repeat(40)));
+  }
+  const needs = Object.fromEntries(["prepare", "managed-image", "managed-fault", "managed-quality"].map(job =>
+    [job, { result: "success", outputs: { sha } }]));
+  for (const wrong of [undefined, "", "b".repeat(40)]) {
+    needs["managed-image"].outputs.sha = wrong;
+    assert.throws(() => requireManagedCallerComplete(needs, sha));
+  }
+});
+
 test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivileged candidate graph", () => {
   const workflow = fs.readFileSync(".github/workflows/stable-release.yml", "utf8");
   const triggers = workflow.split("\npermissions:")[0];
@@ -134,20 +168,21 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
   assert.match(aggregate, /name: Required PR checks\n    if: \$\{\{ always\(\) \}\}/);
   const dependencies = aggregate.match(/needs: \[(.*)\]/)[1].split(", ");
-  assert.deepEqual(dependencies.sort(), [...requiredJobs, "managed"].sort());
+  assert.deepEqual(dependencies.sort(), [...requiredJobs, ...managedCallerJobs].sort());
   assert.match(aggregate, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
   assert.match(workflow, /run: make test-assets/);
   assert.match(workflow, /-p nac-contracts -p nac-credential-store -p nac-managed -p nac-process/);
   assert.match(workflow, /make test-durability test-managed-load test-managed-image-contract/);
-  assert.match(workflow, /NAC_E2E_BINARY=.* npm --prefix crates\/nac-server\/web run test:e2e/);
+  assert.match(workflow, /NAC_E2E_BINARY: \$\{\{ steps.runtime.outputs.binary \}\}/);
+  assert.match(workflow, /npm --prefix crates\/nac-server\/web run test:e2e/);
   assert.match(workflow, /runner: macos-26/);
   assert.match(workflow, /target: x86_64-unknown-linux-musl/);
-  assert.match(workflow, /uses: \.\/\.github\/workflows\/managed-image.yml/);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/managed-image-build.yml/);
   const managed = fs.readFileSync(".github/workflows/managed-image.yml", "utf8");
   assert.doesNotMatch(managed.split("\npermissions:")[0], /pull_request:/);
   assert.match(managed, /workflow_call:/);
   assert.match(managed, /name: Managed checks complete\n    if: \$\{\{ always\(\) \}\}/);
-  assert.match(managed, /needs: \[prepare, contract, quality, build-smoke\]/);
+  assert.match(managed, /needs: \[prepare, quality, build-smoke\]/);
 });
 
 test("overlapping caller runs cannot replace pending managed work and pushes have one producer", () => {
@@ -158,7 +193,7 @@ test("overlapping caller runs cannot replace pending managed work and pushes hav
   assert.match(triggers, /workflow_dispatch:/);
   assert.doesNotMatch(triggers, /\n  (push|pull_request):/);
   assert.match(stable.split("\npermissions:")[0], /push:\n    branches: \[main, dev\]/);
-  assert.match(stable, /uses: \.\/\.github\/workflows\/managed-image.yml/);
+  assert.match(stable, /uses: \.\/\.github\/workflows\/managed-image-build.yml/);
   const group = managed.match(/group: (.*)/)[1];
   assert.equal(group, "managed-image-${{ github.run_id }}-${{ github.run_attempt }}");
   const calls = [101, 102, 103].map((id) =>

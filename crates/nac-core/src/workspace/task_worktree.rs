@@ -274,32 +274,10 @@ pub fn authorize_human_preparation(
     store_path: &Path,
 ) -> Result<()> {
     use crate::permissions::{PermissionBackend, PermissionEffect, PermissionPolicy};
-    use crate::tools::kernel::PermissionResource;
     let backend = crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: launch.source.source_cwd.clone(),
     };
-    let mut resources = crate::permissions::file_resources(
-        "edit",
-        launch.workspace_path.clone(),
-        &backend,
-        store_path,
-        true,
-    );
-    resources.push(PermissionResource::new(
-        "execute",
-        format!(
-            "git worktree add --detach {} {}",
-            launch.workspace_path.display(),
-            launch.source.commit
-        ),
-    ));
-    resources.push(PermissionResource::new(
-        "execute",
-        format!(
-            "git update-ref refs/nac/task-launches/{} {}",
-            launch.request.request_id, launch.source.commit
-        ),
-    ));
+    let resources = preparation_resources(launch, &backend, store_path);
     let decision =
         PermissionPolicy::for_backend(PermissionBackend::Local, config.permissions.rules.clone())
             .evaluate(&resources, &[]);
@@ -312,6 +290,47 @@ pub fn authorize_human_preparation(
             .unwrap_or("configured policy")
     );
     Ok(())
+}
+
+/// Exact effects shared by human denial checks and ordinary native agent authorization.
+pub(crate) fn preparation_resources(
+    launch: &TaskLaunchRecord,
+    backend: &crate::sandbox::ExecutionBackend,
+    store_path: &Path,
+) -> Vec<crate::tools::kernel::PermissionResource> {
+    use crate::tools::kernel::PermissionResource;
+    let mut resources = crate::permissions::file_resources(
+        "edit",
+        launch.workspace_path.clone(),
+        backend,
+        store_path,
+        true,
+    );
+    for tokens in preparation_commands(launch) {
+        resources.push(PermissionResource::new("execute", tokens.join(" ")));
+    }
+    resources
+}
+
+/// Semantic argv for policy. The Git adapter additionally disables hooks/filters
+/// and supplies its own option separators; these never add caller authority.
+pub(crate) fn preparation_commands(launch: &TaskLaunchRecord) -> [Vec<String>; 2] {
+    [
+        vec![
+            "git".into(),
+            "worktree".into(),
+            "add".into(),
+            "--detach".into(),
+            launch.workspace_path.to_string_lossy().into_owned(),
+            launch.source.commit.clone(),
+        ],
+        vec![
+            "git".into(),
+            "update-ref".into(),
+            format!("refs/nac/task-launches/{}", launch.request.request_id),
+            launch.source.commit.clone(),
+        ],
+    ]
 }
 
 /// Must run under the launch's cross-process operation lease. Existing paths

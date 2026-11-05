@@ -613,9 +613,27 @@ impl SessionManager {
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }
+        nac_core::task_launch_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::native_task_launches::NativeTaskLaunchController::new(&manager)),
+        );
+        nac_core::task_followups::register_controller(
+            store_path.clone(),
+            Arc::new(application::task_followups::ServerTaskFollowupController {
+                manager: Arc::downgrade(&manager.inner),
+                #[cfg(test)]
+                after_admission: None,
+            }),
+        );
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
+        nac_core::peer_goal_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::peer_goals::ServerPeerGoalController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
@@ -901,6 +919,12 @@ impl SessionManager {
 
     pub(crate) fn session_intents(&self) -> application::sessions::SessionIntentApplication<'_> {
         application::sessions::SessionIntentApplication::new(self)
+    }
+
+    pub(crate) fn session_integrations(
+        &self,
+    ) -> application::session_integrations::SessionIntegrationApplication<'_> {
+        application::session_integrations::SessionIntegrationApplication::new(self)
     }
 
     pub(crate) fn session_runs(&self) -> application::session_runs::SessionRunApplication<'_> {
