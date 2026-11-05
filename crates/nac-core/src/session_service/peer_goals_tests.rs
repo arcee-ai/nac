@@ -430,10 +430,10 @@ async fn peer_goals_native_first_start_reply_loss_replays_one_admission_headless
     assert_eq!((calls, starts, losses), (1, 1, 1));
     assert!(!replay_error);
     assert_eq!(replayed["status"], "replayed");
-    assert_eq!(
-        replayed["receipt"],
-        serde_json::to_value(&admitted).unwrap()
-    );
+    let mut expected_receipt = serde_json::to_value(&admitted).unwrap();
+    expected_receipt["request"]["objective_truncated"] = json!(false);
+    expected_receipt["admitted_goal"]["objective_truncated"] = json!(false);
+    assert_eq!(replayed["receipt"], expected_receipt);
     assert_eq!(before, after);
     assert_eq!(after.goal_id, admitted.admitted_goal.goal_id);
     assert_eq!(
