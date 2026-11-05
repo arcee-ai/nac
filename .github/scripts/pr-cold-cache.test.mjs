@@ -30,9 +30,10 @@ const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "brows
 // S17 on parent 004492fc300b296e6245a0f0768a892f98c8a42d intentionally changes
 // only stable-release's four shared-key inputs and three read-only save inputs.
 // Its old digest is independently checked after reversing exactly those inputs.
-// The other four workflow hashes, graph, profiles, commands and identities stay fixed.
+// Startup custody adds its exact required test step to both stable projections.
+// The other four workflow hashes and every normalization remain unchanged.
 const baseline = {
-  "stable-release": "e58c6a530fba723dcee4be2280ce35eb544366153ae0fe7edd283f825f80b4ab",
+  "stable-release": "b294cdca15eaa1caa1644e0f203f2ec68340ca8721310d573509ccac3e482342",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
   "managed-image-build": "c82a05b0089599969dc17e4d0bf0e57aee293dcf8439b3cb4c325a3b2ec0bcb8",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
@@ -168,7 +169,7 @@ function verify(values) {
     cache.with.key = "${{ github.job }}";
     cache.with["save-if"] = trust;
   }
-  assert.equal(digest(beforeShared), "a14e76578b200d595eba627f03b5aa18381a50af07bc2b0993926448a391d357",
+  assert.equal(digest(beforeShared), "a402f7ca0130187fd1d88bed1f0f28785fa768cc4def5f30977e3bcc3f3f8ec6",
     "reversing only S17 must recover the exact pre-shared workflow");
   for (const [name, expected] of Object.entries(baseline)) assert.equal(digest(normalized[name]), expected, `${name}: acceptance behavior changed outside cache control`);
   // No flag is allowed to affect a command, if/needs, receipt, privilege or role.
