@@ -1092,5 +1092,7 @@ mod task_launch_shutdown;
 
 #[path = "tests/desktop_lifecycle.rs"]
 mod desktop_lifecycle;
+#[path = "tests/heartbeats.rs"]
+mod heartbeats;
 #[path = "tests/native_task_launches.rs"]
 mod native_task_launches;

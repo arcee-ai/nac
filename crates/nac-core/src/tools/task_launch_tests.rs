@@ -11,7 +11,12 @@ use std::sync::{
 };
 
 struct Controller {
+    resolves: AtomicUsize,
     launches: AtomicUsize,
+    reservations: AtomicUsize,
+    project_reads: AtomicUsize,
+    status_reads: AtomicUsize,
+    store_path: std::path::PathBuf,
     cwd: std::path::PathBuf,
 }
 impl Controller {
@@ -32,24 +37,39 @@ impl Controller {
 }
 impl TaskLaunchController for Controller {
     fn projects<'a>(&'a self, _: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<SavedTaskProject>>> {
-        Box::pin(async move { Ok(vec![self.target()]) })
+        Box::pin(async move {
+            self.project_reads.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![self.target()])
+        })
     }
     fn resolve<'a>(
         &'a self,
         _: &'a str,
         _: &'a NativeTaskRequest,
     ) -> BoxFuture<'a, anyhow::Result<SavedTaskProject>> {
-        Box::pin(async move { Ok(self.target()) })
+        Box::pin(async move {
+            self.resolves.fetch_add(1, Ordering::SeqCst);
+            Ok(self.target())
+        })
     }
     fn launch<'a>(
         &'a self,
-        _: &'a str,
-        _: NativeTaskRequest,
-        _: SavedTaskProject,
+        caller: &'a str,
+        request: NativeTaskRequest,
+        target: SavedTaskProject,
         _: task_launch_control::NativeTaskAuthorization,
     ) -> BoxFuture<'a, anyhow::Result<NativeTaskReceipt>> {
         Box::pin(async move {
             self.launches.fetch_add(1, Ordering::SeqCst);
+            crate::store::reserve_native_task_launch(
+                &self.store_path,
+                caller,
+                &target.project_id,
+                &target.cwd,
+                false,
+                request,
+            )?;
+            self.reservations.fetch_add(1, Ordering::SeqCst);
             Err(anyhow::anyhow!("reached launch"))
         })
     }
@@ -58,7 +78,10 @@ impl TaskLaunchController for Controller {
         _: &'a str,
         _: &'a str,
     ) -> BoxFuture<'a, anyhow::Result<NativeTaskReceipt>> {
-        Box::pin(async move { Err(anyhow::anyhow!("not found")) })
+        Box::pin(async move {
+            self.status_reads.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::anyhow!("not found"))
+        })
     }
 }
 fn fixture(rules: Vec<PermissionRule>) -> (super::super::ToolRuntime, Arc<Controller>) {
@@ -68,6 +91,31 @@ fn fixture(rules: Vec<PermissionRule>) -> (super::super::ToolRuntime, Arc<Contro
         .join("store.db");
     crate::store::initialize(&runtime.store_path).unwrap();
     crate::store::insert_test_session(&runtime.store_path, "caller");
+    let conn = crate::store::open_runtime_connection(&runtime.store_path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET behavior='direct',cwd=?1,store_path=?2 WHERE session_id='caller'",
+        rusqlite::params![
+            runtime.workspace_cwd.to_string_lossy(),
+            runtime.store_path.to_string_lossy()
+        ],
+    )
+    .unwrap();
+    drop(conn);
+    crate::store::insert_project(
+        &runtime.store_path,
+        crate::store::NewProject {
+            project_id: "p".into(),
+            name: None,
+            description: None,
+            cwd: runtime.workspace_cwd.clone(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    crate::store::assign_session_to_project(&runtime.store_path, "p", "caller").unwrap();
     runtime.session_id = Some("caller".into());
     runtime.permission_broker = Some(Arc::new(PermissionBroker::new(
         runtime.store_path.clone(),
@@ -77,7 +125,12 @@ fn fixture(rules: Vec<PermissionRule>) -> (super::super::ToolRuntime, Arc<Contro
         rules,
     )));
     let controller = Arc::new(Controller {
+        resolves: AtomicUsize::new(0),
         launches: AtomicUsize::new(0),
+        reservations: AtomicUsize::new(0),
+        project_reads: AtomicUsize::new(0),
+        status_reads: AtomicUsize::new(0),
+        store_path: runtime.store_path.clone(),
         cwd: runtime.workspace_cwd.clone(),
     });
     task_launch_control::register_controller(runtime.store_path.clone(), controller.clone());
@@ -94,6 +147,179 @@ async fn call(runtime: &super::super::ToolRuntime, name: &str, args: Value) -> T
         &crate::model::ModelClient::new_for_test(),
     )
     .await
+}
+
+async fn automatic_launch_is_denied(goal_id: Option<String>) {
+    let (mut runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    runtime.heartbeat_execution = true;
+    runtime.heartbeat_goal_id = goal_id;
+    for project in [None, Some("p")] {
+        let mut input = request();
+        input["project_id"] = json!(project);
+        let request_id = input["request_id"].as_str().unwrap().to_owned();
+        let result = call(&runtime, "launch_task", input).await;
+        let reserved = crate::store::load_native_task_launch(&runtime.store_path, &request_id)
+            .unwrap()
+            .is_some();
+        eprintln!(
+            "automatic launch: goal={:?} project={project:?} resolves={} launches={} reservations={} durable_intent={reserved} result={}",
+            runtime.heartbeat_goal_id,
+            controller.resolves.load(Ordering::SeqCst),
+            controller.launches.load(Ordering::SeqCst),
+            controller.reservations.load(Ordering::SeqCst),
+            result.content
+        );
+        assert!(result.is_error);
+        assert!(result
+            .content
+            .to_string()
+            .contains("heartbeat cannot create a new conversation"));
+        assert_eq!(controller.resolves.load(Ordering::SeqCst), 0);
+        assert_eq!(controller.launches.load(Ordering::SeqCst), 0);
+        assert_eq!(controller.reservations.load(Ordering::SeqCst), 0);
+        assert!(!reserved);
+        assert!(runtime.heartbeat_needs_human_action.load(Ordering::Acquire));
+        assert!(runtime
+            .permission_broker
+            .as_ref()
+            .unwrap()
+            .pending()
+            .is_empty());
+    }
+    let conn = crate::store::open_runtime_connection(&runtime.store_path).unwrap();
+    let sessions: i64 = conn
+        .query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sessions, 1);
+    drop(conn);
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn automatic_native_launch_with_bound_goal_is_hard_denied_under_allow() {
+    automatic_launch_is_denied(Some("bound-goal".into())).await;
+}
+
+#[tokio::test]
+async fn automatic_native_launch_without_goal_is_hard_denied_under_allow() {
+    automatic_launch_is_denied(None).await;
+}
+
+#[tokio::test]
+async fn automatic_native_handle_launch_is_denied_before_resolution() {
+    let (mut runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    runtime.heartbeat_execution = true;
+    let registry = super::super::kernel::ToolRegistry::builder()
+        .register(LaunchTaskTool)
+        .finish()
+        .unwrap();
+    let handle = registry.native_handle::<LaunchTaskTool>().unwrap();
+    let client = crate::model::ModelClient::new_for_test();
+    let result = handle
+        .invoke(
+            LaunchTaskTool.decode(request()).unwrap(),
+            ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &ToolCallContext::default(),
+        )
+        .await;
+    assert!(result.is_error);
+    assert!(result
+        .content
+        .to_string()
+        .contains("heartbeat cannot create a new conversation"));
+    assert_eq!(controller.resolves.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.launches.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.reservations.load(Ordering::SeqCst), 0);
+    assert!(runtime.heartbeat_needs_human_action.load(Ordering::Acquire));
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn intentional_native_launch_under_allow_reaches_durable_reservation() {
+    let (runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    let input = request();
+    let request_id = input["request_id"].as_str().unwrap().to_owned();
+    let result = call(&runtime, "launch_task", input).await;
+    assert!(
+        result.content.to_string().contains("reached launch"),
+        "{}",
+        result.content
+    );
+    assert_eq!(controller.resolves.load(Ordering::SeqCst), 1);
+    assert_eq!(controller.launches.load(Ordering::SeqCst), 1);
+    assert_eq!(controller.reservations.load(Ordering::SeqCst), 1);
+    assert!(
+        crate::store::load_native_task_launch(&runtime.store_path, &request_id)
+            .unwrap()
+            .is_some()
+    );
+    assert!(!runtime.heartbeat_needs_human_action.load(Ordering::Acquire));
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn native_launch_allow_cannot_substitute_a_local_backend() {
+    let (mut runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Ssh(
+        crate::sandbox::SshBackend::new("unused.invalid".into(), "/remote".into()),
+    ));
+    let result = call(&runtime, "launch_task", request()).await;
+    assert!(result.is_error);
+    assert!(result
+        .content
+        .to_string()
+        .contains("backend substitution is unavailable"));
+    assert_eq!(controller.resolves.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.reservations.load(Ordering::SeqCst), 0);
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn native_launch_allow_cannot_admit_after_cancellation() {
+    let (runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    runtime.command_cancellation.cancel();
+    let result = call(&runtime, "launch_task", request()).await;
+    assert!(result.is_error);
+    assert_eq!(controller.launches.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.reservations.load(Ordering::SeqCst), 0);
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn automatic_native_project_and_status_reads_remain_passive() {
+    let (mut runtime, controller) =
+        fixture(vec![PermissionRule::new("*", "*", PermissionEffect::Allow)]);
+    runtime.heartbeat_execution = true;
+    for goal_id in [None, Some("bound-goal".into())] {
+        runtime.heartbeat_goal_id = goal_id;
+        assert!(!call(&runtime, "list_projects", json!({})).await.is_error);
+        let status = call(
+            &runtime,
+            "task_launch_status",
+            json!({"request_id":uuid::Uuid::new_v4().to_string()}),
+        )
+        .await;
+        assert!(
+            status.content.to_string().contains("not found"),
+            "{}",
+            status.content
+        );
+    }
+    assert_eq!(controller.project_reads.load(Ordering::SeqCst), 2);
+    assert_eq!(controller.status_reads.load(Ordering::SeqCst), 2);
+    assert_eq!(controller.resolves.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.launches.load(Ordering::SeqCst), 0);
+    assert_eq!(controller.reservations.load(Ordering::SeqCst), 0);
+    assert!(!runtime.heartbeat_needs_human_action.load(Ordering::Acquire));
+    std::fs::remove_dir_all(runtime.store_path.parent().unwrap()).unwrap();
 }
 
 #[tokio::test]

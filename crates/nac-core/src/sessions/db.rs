@@ -318,6 +318,33 @@ fn save_session_run_state_inner(path: &Path, update: &SessionRunStateUpdate) -> 
             durable_failure.as_ref(),
         )?;
     }
+    if let Some(settlement) = &update.heartbeat_settlement {
+        let terminal = if update.failed_run_id.is_some() {
+            crate::store::HeartbeatOutcome::Failed
+        } else if update.finished_run_disposition
+            == Some(crate::store::RunTerminalDisposition::Cancelled)
+        {
+            crate::store::HeartbeatOutcome::Interrupted
+        } else if settlement.needs_human_action {
+            crate::store::HeartbeatOutcome::NeedsHumanAction
+        } else {
+            crate::store::HeartbeatOutcome::Unknown
+        };
+        let run = update
+            .finished_run_id
+            .as_deref()
+            .or(update.failed_run_id.as_deref())
+            .context("heartbeat settlement requires an exact terminal run")?;
+        crate::store::settle_heartbeat_with_connection(
+            &tx,
+            &update.session_id,
+            run,
+            terminal,
+            settlement.tokens_used.and_then(|n| i64::try_from(n).ok()),
+            i64::try_from(settlement.duration_ms).unwrap_or(i64::MAX),
+            i64::try_from(settlement.terminal_at_epoch_ms).unwrap_or(i64::MAX),
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
