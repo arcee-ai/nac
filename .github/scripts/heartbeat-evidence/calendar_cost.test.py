@@ -128,6 +128,142 @@ class Contracts(unittest.TestCase):
             cost.verify_product(Path('/synthetic'), lambda *_: 'wrong')
 
 
+class ExecutableAdmission(unittest.TestCase):
+    def candidate(self, *, canonical=True, contained=True, size=1):
+        candidate = Mock(spec=Path)
+        candidate.resolve.return_value = candidate if canonical else Path('/synthetic/resolved')
+        candidate.is_relative_to.return_value = contained
+        candidate.stat.return_value = Mock(st_size=size, st_mode=0o100700, st_dev=1, st_ino=2,
+                                           st_nlink=1, st_uid=1001, st_gid=1001, st_mtime_ns=3)
+        return candidate
+
+    def exercise(self, candidate, reason=None, error=RuntimeError):
+        with tempfile.TemporaryDirectory() as d:
+            output_dir = Path(d)
+            evidence = {}
+            if reason is None:
+                cost.admit_executable(candidate, Path('/synthetic/build'), output_dir, evidence)
+            else:
+                # The helper must persist the receipt before its failure reaches this caller.
+                with self.assertRaises(error):
+                    cost.admit_executable(candidate, Path('/synthetic/build'), output_dir, evidence)
+            receipt = json.loads((output_dir/'executable-admission.json').read_text())
+            self.assertEqual(receipt, evidence['executable_admission'])
+        self.assertEqual(receipt['first_failed_predicate'], reason)
+        self.assertEqual(receipt['state'], 'PASS' if reason is None else 'FAIL')
+        self.assertEqual(receipt['candidate'], str(candidate))
+        self.assertEqual(receipt['expected_build'], '/synthetic/build')
+        self.assertEqual(receipt['limit_bytes'], cost.GIB)
+        return receipt
+
+    def test_noncanonical_path_records_first_failure_without_containment_or_stat(self):
+        candidate = self.candidate(canonical=False)
+        receipt = self.exercise(candidate, 'canonical_equal')
+        self.assertEqual(receipt['resolved_candidate'], '/synthetic/resolved')
+        self.assertEqual(receipt['checks'], {
+            'canonical_equal': False, 'within_build': None, 'size_within_bound': None})
+        self.assertIsNone(receipt['file_metadata'])
+        candidate.is_relative_to.assert_not_called()
+        candidate.stat.assert_not_called()
+
+    def test_outside_build_never_reads_file_metadata(self):
+        candidate = self.candidate(contained=False)
+        receipt = self.exercise(candidate, 'within_build')
+        self.assertEqual(receipt['checks'], {
+            'canonical_equal': True, 'within_build': False, 'size_within_bound': None})
+        self.assertIsNone(receipt['file_metadata'])
+        candidate.stat.assert_not_called()
+
+    def test_size_over_exact_limit_is_rejected_with_actual_bounded_metadata(self):
+        candidate = self.candidate(size=cost.GIB+1)
+        receipt = self.exercise(candidate, 'size_within_bound')
+        self.assertEqual(receipt['file_metadata']['st_size'], cost.GIB+1)
+        self.assertEqual(receipt['checks'], {
+            'canonical_equal': True, 'within_build': True, 'size_within_bound': False})
+        candidate.stat.assert_called_once_with()
+
+    def test_exact_limit_remains_inclusively_accepted(self):
+        candidate = self.candidate(size=cost.GIB)
+        receipt = self.exercise(candidate)
+        self.assertEqual(receipt['file_metadata']['st_size'], cost.GIB)
+        self.assertTrue(all(receipt['checks'].values()))
+        candidate.stat.assert_called_once_with()
+
+    def test_unknown_stat_is_recorded_and_original_exception_preserved(self):
+        candidate = self.candidate()
+        candidate.stat.side_effect = PermissionError(13, 'synthetic metadata unavailable')
+        receipt = self.exercise(candidate, 'stat_unknown', error=PermissionError)
+        self.assertEqual(receipt['metadata_error'],
+                         {'operation': 'stat', 'type': 'PermissionError', 'errno': 13})
+        self.assertEqual(receipt['checks'], {
+            'canonical_equal': True, 'within_build': True, 'size_within_bound': None})
+        self.assertIsNone(receipt['file_metadata'])
+
+    def test_unknown_resolution_never_checks_containment_or_stat(self):
+        candidate = self.candidate()
+        candidate.resolve.side_effect = OSError(5, 'synthetic resolution unavailable')
+        receipt = self.exercise(candidate, 'resolve_unknown', error=OSError)
+        self.assertEqual(receipt['metadata_error'], {'operation': 'resolve', 'type': 'OSError', 'errno': 5})
+        self.assertTrue(all(value is None for value in receipt['checks'].values()))
+        candidate.is_relative_to.assert_not_called()
+        candidate.stat.assert_not_called()
+
+    def test_valid_admission_preserves_order_and_single_metadata_read(self):
+        candidate = self.candidate(size=42)
+        calls = Mock()
+        calls.attach_mock(candidate.resolve, 'resolve')
+        calls.attach_mock(candidate.is_relative_to, 'containment')
+        calls.attach_mock(candidate.stat, 'stat')
+        receipt = self.exercise(candidate)
+        self.assertEqual([call[0] for call in calls.mock_calls], ['resolve', 'containment', 'stat'])
+        self.assertTrue(all(receipt['checks'].values()))
+        self.assertIsNone(receipt['metadata_error'])
+
+
+    def receipt_failure(self, candidate, *, primary=None):
+        evidence = {}
+        receipt_error = OSError(28, 'synthetic receipt unavailable')
+        with tempfile.TemporaryDirectory() as d, \
+             patch.object(cost, 'write_json', side_effect=receipt_error) as writer:
+            with self.assertRaises(BaseException) as caught:
+                cost.admit_executable(candidate, Path('/synthetic/build'), Path(d), evidence)
+            writer.assert_called_once()
+        proof = evidence['executable_admission']
+        self.assertEqual(proof['state'], 'FAIL')
+        self.assertEqual(proof['receipt_error'],
+                         {'operation': 'write_receipt', 'type': 'OSError', 'errno': 28})
+        if primary is not None:
+            self.assertIs(caught.exception, primary)
+            self.assertIs(caught.exception.__cause__, receipt_error)
+        return caught.exception, receipt_error, proof
+
+    def test_original_stat_error_survives_secondary_receipt_error(self):
+        candidate = self.candidate()
+        primary = PermissionError(13, 'synthetic stat unavailable')
+        candidate.stat.side_effect = primary
+        _, _, proof = self.receipt_failure(candidate, primary=primary)
+        self.assertEqual(proof['first_failed_predicate'], 'stat_unknown')
+        self.assertEqual(proof['metadata_error'],
+                         {'operation': 'stat', 'type': 'PermissionError', 'errno': 13})
+
+    def test_false_predicate_survives_secondary_receipt_error(self):
+        candidate = self.candidate(canonical=False)
+        raised, receipt_error, proof = self.receipt_failure(candidate)
+        self.assertIsInstance(raised, RuntimeError)
+        self.assertEqual(str(raised), 'CALENDAR_EXECUTABLE_BOUND')
+        self.assertIs(raised.__cause__, receipt_error)
+        self.assertEqual(proof['first_failed_predicate'], 'canonical_equal')
+        self.assertIsNone(proof['metadata_error'])
+        candidate.stat.assert_not_called()
+
+    def test_valid_candidate_cannot_pass_if_receipt_write_fails(self):
+        raised, receipt_error, proof = self.receipt_failure(self.candidate())
+        self.assertIs(raised, receipt_error)
+        self.assertTrue(all(proof['checks'].values()))
+        self.assertIsNone(proof['first_failed_predicate'])
+        self.assertIsNone(proof['metadata_error'])
+
+
 class FakeMonitor:
     def __init__(self):
         self.error = None
@@ -187,6 +323,7 @@ class Workload(unittest.TestCase):
         out.mkdir()
         calls, envs = [], []
         monitor = FakeMonitor()
+        monitor.retained = Mock(wraps=runner.retain_executable)
         clock = [0.0]
 
         def phase(argv, cwd, env, output_dir, label, bound):
@@ -198,6 +335,8 @@ class Workload(unittest.TestCase):
                 records = compiler(str(exe))
                 if failure == 'profile':
                     records[0]['profile']['debuginfo'] = 0
+                if failure in ('executable', 'executable-receipt'):
+                    records[0]['executable'] = str(root/'out-build/alias/../test')
                 text = '\n'.join(json.dumps(x) for x in records)
             elif label == 'measurement-inventory':
                 text = listing()
@@ -216,8 +355,14 @@ class Workload(unittest.TestCase):
                 text = 'synthetic provenance'
             (out/(label+'.stdout')).write_text(text)
 
+        def write_json(path, value):
+            if path.name == 'executable-admission.json' and failure in ('receipt', 'executable-receipt'):
+                raise OSError(28, 'synthetic receipt unavailable')
+            c.write_json(path, value)
+
         context = {'control': 'a'*40, 'product': str(product), 'tool_environment': {'PATH': '/synthetic'}}
         with patch.dict(os.environ, {}, clear=True), patch.object(cost, 'run_owned', phase), \
+             patch.object(cost, 'write_json', side_effect=write_json), \
              patch.object(cost, 'verify_product'), \
              patch.object(cost, 'free_bytes', return_value=0 if failure == 'disk' else 20*cost.GIB), \
              patch.object(cost, 'reap_namespace', return_value={'remaining': []}), \
@@ -227,7 +372,7 @@ class Workload(unittest.TestCase):
              patch.object(runner, 'resource_sample', return_value={}):
             resources = lambda: {'memory': {'MemAvailable': str(0 if failure == 'memory' else 8*1024**2)+' kB'},
                                  'loadavg': 'synthetic'}
-            code = cost.workload(context, out, {'pid1': True}, runner.retain_executable,
+            code = cost.workload(context, out, {'pid1': True}, monitor.retained,
                                  runner.final_checks, Mock(), resources)
         return code, json.loads((out/'evidence.json').read_text()), calls, envs, monitor
 
@@ -243,6 +388,36 @@ class Workload(unittest.TestCase):
         self.assertEqual(len(result['measurements']), 2)
         self.assertTrue(monitor.started)
         self.assertTrue(all(not any(k.startswith('CARGO_PROFILE_') for k in env) for env in envs))
+
+    def test_failed_executable_receipt_precedes_owner_error_and_no_copy_list_or_cases(self):
+        with tempfile.TemporaryDirectory() as d:
+            code, result, calls, _, monitor = self.exercise(Path(d), 'executable')
+            receipt = json.loads((Path(d)/'out/executable-admission.json').read_text())
+        self.assertEqual(code, 90)
+        self.assertEqual(result['first_error'], 'CALENDAR_EXECUTABLE_BOUND')
+        self.assertEqual(receipt['first_failed_predicate'], 'canonical_equal')
+        self.assertFalse(result['measurement_attempted'])
+        self.assertFalse(any(label.startswith('measurement-') for label, *_ in calls))
+        self.assertFalse(monitor.started)
+        monitor.retained.assert_not_called()
+
+    def test_receipt_io_failure_retains_primary_and_stops_copy_inventory_and_quiet(self):
+        for failure, first_error, predicate in (
+                ('executable-receipt', 'CALENDAR_EXECUTABLE_BOUND', 'canonical_equal'),
+                ('receipt', 'CALENDAR_EVIDENCE_FAILED', None)):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as d:
+                code, result, calls, _, monitor = self.exercise(Path(d), failure)
+            self.assertEqual(code, 90)
+            self.assertEqual(result['first_error'], first_error)
+            proof = result['executable_admission']
+            self.assertEqual(proof['state'], 'FAIL')
+            self.assertEqual(proof['first_failed_predicate'], predicate)
+            self.assertEqual(proof['receipt_error'],
+                             {'operation': 'write_receipt', 'type': 'OSError', 'errno': 28})
+            self.assertFalse(result['measurement_attempted'])
+            self.assertFalse(any(label.startswith('measurement-') for label, *_ in calls))
+            self.assertFalse(monitor.started)
+            monitor.retained.assert_not_called()
 
     def test_profile_failure_never_runs_inventory_or_cases(self):
         with tempfile.TemporaryDirectory() as d:

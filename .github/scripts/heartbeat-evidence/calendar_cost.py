@@ -97,6 +97,56 @@ def compiler_artifact(stdout):
     return artifact
 
 
+def admit_executable(executable, build, output, evidence):
+    """Record the existing short-circuit admission before any copy or listing."""
+    proof = {'state': 'FAIL', 'candidate': str(executable), 'expected_build': str(build),
+             'resolved_candidate': None, 'limit_bytes': GIB,
+             'checks': {'canonical_equal': None, 'within_build': None, 'size_within_bound': None},
+             'file_metadata': None, 'first_failed_predicate': None, 'metadata_error': None,
+             'receipt_error': None}
+    evidence['executable_admission'] = proof
+    operation, primary = 'resolve', None
+    try:
+        resolved = executable.resolve()
+        proof['resolved_candidate'] = str(resolved)
+        proof['checks']['canonical_equal'] = executable == resolved
+        if not proof['checks']['canonical_equal']:
+            proof['first_failed_predicate'] = 'canonical_equal'
+        else:
+            operation = 'containment'
+            proof['checks']['within_build'] = executable.is_relative_to(build)
+            if not proof['checks']['within_build']:
+                proof['first_failed_predicate'] = 'within_build'
+            else:
+                operation = 'stat'
+                value = executable.stat()  # Same single read, only after BOTH existing path guards.
+                proof['file_metadata'] = {name: getattr(value, name) for name in (
+                    'st_size', 'st_mode', 'st_dev', 'st_ino', 'st_nlink', 'st_uid', 'st_gid', 'st_mtime_ns')}
+                proof['checks']['size_within_bound'] = value.st_size <= GIB
+                if not proof['checks']['size_within_bound']:
+                    proof['first_failed_predicate'] = 'size_within_bound'
+        if proof['first_failed_predicate'] is None:
+            proof['state'] = 'PASS'
+    except BaseException as error:
+        primary = error
+        proof['first_failed_predicate'] = operation+'_unknown'
+        proof['metadata_error'] = {'operation': operation, 'type': type(error).__name__,
+                                   'errno': error.errno if isinstance(error, OSError) else None}
+    if primary is None and proof['state'] != 'PASS':
+        primary = RuntimeError('CALENDAR_EXECUTABLE_BOUND')
+    try:
+        write_json(output/'executable-admission.json', proof)
+    except BaseException as receipt_error:
+        proof['state'] = 'FAIL'
+        proof['receipt_error'] = {'operation': 'write_receipt', 'type': type(receipt_error).__name__,
+                                 'errno': receipt_error.errno if isinstance(receipt_error, OSError) else None}
+        if primary is not None:
+            raise primary from receipt_error
+        raise  # A valid candidate cannot proceed without its receipt.
+    if primary is not None:
+        raise primary
+
+
 def free_bytes(path):
     value = os.statvfs(path)
     return value.f_bavail*value.f_frsize
@@ -227,8 +277,7 @@ def workload(context, output, namespace, retain_executable, final_checks, git, r
                                   '--no-run', '--message-format=json'], 720)
         artifact = compiler_artifact((output/'build-measurement.stdout').read_text())
         executable = Path(artifact['executable'])
-        require(executable == executable.resolve() and executable.is_relative_to(build)
-                and executable.stat().st_size <= GIB, 'CALENDAR_EXECUTABLE_BOUND')
+        admit_executable(executable, build, output, result)
         measurement = output/'bin/heartbeat-measurement'
         result['measurement_binary'] = retain_executable(executable, measurement)
         host = os.uname()  # No platform.platform()/processor helper subprocess.
