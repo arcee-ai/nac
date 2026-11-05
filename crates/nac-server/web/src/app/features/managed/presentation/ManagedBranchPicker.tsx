@@ -96,6 +96,10 @@ export function ManagedBranchPicker({
   };
 
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      if (event.key === "Escape") event.stopPropagation();
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -132,7 +136,10 @@ export function ManagedBranchPicker({
   };
 
   const status = isLoading ? (
-    <div role="status" className="flex items-center gap-2 p-3 text-small text-basic-tertiary">
+    <div
+      role="status"
+      className="flex items-center gap-2 p-3 text-small !leading-[22px] text-basic-secondary"
+    >
       <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
       Loading branches…
     </div>
@@ -141,17 +148,17 @@ export function ManagedBranchPicker({
       {error}
     </p>
   ) : branches.length === 0 ? (
-    <p role="status" className="p-3 text-small text-basic-tertiary">
+    <p role="status" className="p-3 text-small !leading-[22px] text-basic-secondary">
       No branches found.
     </p>
   ) : visibleBranches.length === 0 ? (
-    <p role="status" className="p-3 text-small text-basic-tertiary">
+    <p role="status" className="p-3 text-small !leading-[22px] text-basic-secondary">
       No branches match &quot;{query.trim()}&quot;.
     </p>
   ) : null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 text-small text-basic-secondary">
+    <div className="flex min-w-0 flex-col gap-2 label-small text-basic-primary">
       <span>Branch</span>
       <Popover
         open={open}
@@ -206,7 +213,7 @@ export function ManagedBranchPicker({
                       tabIndex={-1}
                       size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
                       active={branch === activeBranch}
-                      className="shrink-0"
+                      className="min-h-11 shrink-0 md:min-h-9"
                       onMouseEnter={() => setActiveBranch(branch)}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => choose(branch)}
@@ -227,13 +234,14 @@ export function ManagedBranchPicker({
         <button
           ref={triggerRef}
           type="button"
-          className="btn btn-medium btn-secondary btn-icon-right w-full max-w-full overflow-hidden"
+          className="btn btn-medium btn-secondary btn-icon-right min-h-11 w-full max-w-full overflow-hidden"
           aria-label={`Branch: ${value || "Select a branch"}`}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={open ? listboxId : undefined}
           onClick={openPicker}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
             event.preventDefault();
             if (!open) openPicker();
@@ -244,7 +252,7 @@ export function ManagedBranchPicker({
           </span>
           <Icon
             iconName={IconName.Down}
-            className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : "rotate-0"}`}
+            className={`shrink-0 transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-180" : "rotate-0"}`}
           />
         </button>
       </Popover>
