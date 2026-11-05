@@ -24,7 +24,7 @@ managed image work remains contents-read/build-and-smoke only.
 | Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes the identical committed bundles from the same candidate |
 | Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; four file-isolated ordinary shards plus dedicated goal proof; same selected tests, retries and assertions |
 | Source-size, source workflow/binary, durability, managed load/static image contract | Stable workspace plus managed repeat | Stable workspace; required receipt |
-| Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Always managed quality, after receipt validation; never deduplicated |
+| Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Early complete fixture plus exact-attempt late validation; standalone/retry full fallback retains all four commands |
 | Exact native linux/amd64 image, load, smoke, inventory, advisory scan/qualification | Managed contract/quality/build-smoke/result | Same exact loaded image ID and candidate, scanner infrastructure enforced; findings advisory as accepted |
 | Source security, full Cargo/web/release npm locks | Direct aggregate dependency | Unchanged direct dependency; no cache of scan verdicts or advisory DB |
 | Required native ARM process/credential/terminal cases | Direct aggregate dependency | Same selection, isolation and Darwin negative control; fixed existing compiler |
@@ -47,9 +47,10 @@ reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
 manual managed runs, which expose no receipt/skip dispatch input. The feature-gated
 fault fixture always runs. Image construction/smoke starts after preparation and
-its image contract, independently of ordinary quality. Fault compilation follows
-the complete quality receipt. The terminal managed result requires both
-exact-candidate branches; unprivileged construction is never publication authority. No cross-workflow status lookup or previous green
+its image contract, independently of ordinary quality. Fault checks also start
+after preparation and produce a complete same-attempt fixture receipt. The late
+controller validates ordinary and fault receipts. The terminal managed result
+requires every branch; unprivileged construction is never publication authority. No cross-workflow status lookup or previous green
 candidate can supply quality evidence. A failed-job rerun can retain successful upstream outputs from an earlier
 attempt. A complete valid earlier receipt with the same run/repository/candidate
 selects full `make ci` in the current attempt; it is never reused. Future attempts,
@@ -109,17 +110,23 @@ executed-job totals; parallel execution does not imply lower total compute.
 ## Early image branch and complete late join (ALL-582)
 
 Ordinary applicable candidates call `managed-image-build.yml` after preparation,
-while `managed-quality.yml` waits for the complete same-attempt quality receipt.
-The former retains candidate preparation, contract, exact image build/load/smoke,
+while `managed-fault.yml` starts the complete feature fixture after preparation.
+`managed-quality.yml` waits for both complete same-attempt receipts.
+The image unit retains candidate preparation, contract, exact image build/load/smoke,
 trusted policy selection, inventory, live scan/qualification and evidence upload.
-The latter retains receipt validation, full fallback on blank/earlier receipts,
-and mandatory fault tests/clippy. Both reusable workflows run contents-read with
-no publication permissions or PR cache writes.
+The late controller retains receipt validation, full fallback on blank/earlier
+receipts, and mandatory fault tests/clippy whenever either full fallback applies.
+Only two complete current-attempt receipts permit avoiding already finished
+work. Compiler installation/cache restoration occurs only when execution is
+required; malformed evidence fails before that work. Standalone dispatch still
+supplies no early fault receipt and therefore runs the full fixture. All reusable units run contents-read with no publication
+permissions or PR cache writes.
 
-The always-run `managed` join requires image and quality success, verifies the
+The always-run `managed` join requires image, early fault and late quality
+success, verifies the
 image workflow's resolved SHA against preparation, and fails on missing,
 failed, cancelled or skipped work. Required PR checks independently enumerates
-both branches and the join. Only explicit non-applicability permits all three
+the image, early fault, late quality branches and the join. Only explicit non-applicability permits those managed branches and the join
 to skip. Standalone managed dispatch calls the same implementation units and
 still runs full `make ci`; it exposes no skip/receipt dispatch inputs. Stable
 publication continues to wait for the full final aggregate.
@@ -127,8 +134,9 @@ publication continues to wait for the full final aggregate.
 This changes scheduling, not coverage. An earlier image failure does not cancel
 ordinary quality or browser/native checks; all results remain observable. The
 new joins and transfers add real processing overhead that must be measured,
-not subtracted using DAG arithmetic. S03 has no measured hosted latency until
-its first ordinary candidate run completes.
+not subtracted using DAG arithmetic. Earlier S03 candidates have completed
+ordinary runs; the subsequent early-fault refinement still needs current-head
+measurement.
 
 Live scanner qualification now has its own mandatory branch after the image
 contract, overlapping construction. Candidate inventory and scanning still use
@@ -232,3 +240,13 @@ conditions and release noncancellation. Existing aggregate tests reject every
 incomplete expected job and current-candidate mismatch. Real workflow/shell lint,
 source-security fixtures and image negative controls remain separate enforcement
 proofs; local controls do not claim a live production red-merge or release test.
+
+
+The S03 early-fault refinement is documented in [its receipt contract](managed-fault.md).
+It is one scheduling strategy refined after the bottleneck moved, not another
+attempt manufactured from the experiment budget. First complete ordinary metric
+observations at earlier candidates were 1,022s and 1,027s processing (run IDs
+41941010941 and 41941048432). These are successful metric samples, not a qualified
+cohort: full representative changes, controlled cold-cache and current coverage
+acceptance remain pending. The [coverage inventory](all-582-coverage.md) separates
+those gates and known pre-existing schedule gaps.

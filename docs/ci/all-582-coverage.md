@@ -172,3 +172,26 @@ job names and fix the daily producer selector, then attach actual current-head
 positive/negative and deployed-schedule evidence. Ordinary pending CI, one green
 run or this inventory alone does not satisfy ALL-582's timing cohort or coverage
 acceptance.
+
+
+## Subsequent integration receipts
+
+The source snapshot above remains pinned to `7446e433`; its hashes are historical,
+not an assertion that later files are identical. The observed daily-rescan
+producer gap is repaired in the scheduling layer: selection recognizes the
+current `managed-image / build-smoke` producer and the retained legacy
+`managed / build-smoke` producer, rejects ambiguous producers, and cannot skip
+new successful inventory when its artifact is missing or expired. A workflow
+contract derives the current producer name from the actual reusable graph.
+Python rescan and real workflow contracts pass; deployed daily execution is
+still pending human landing and the actual schedule.
+
+S03b now adds required early `managed-fault` and preserves the separate late
+`managed-quality` controller. Current-attempt fixture receipts bind the complete
+unchanged Make target to source/repository/run/attempt; blank or valid older
+receipts repeat execution, while corrupt/foreign/future evidence fails. Both
+receipt modes are checked before conditional compiler setup. Standalone runs
+still execute full ordinary quality plus the private fixture. New job sets,
+combined retry/failure controls, and the receipt table in `managed-fault.md`
+supplement the original matrix; hosted execution remains a separate receipt.
+S09 is not yet incorporated into this source snapshot.

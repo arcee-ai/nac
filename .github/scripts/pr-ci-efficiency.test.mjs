@@ -60,9 +60,9 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   assert.equal(receipt.env.NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(receipt.env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
   assert.match(receipt.run, /pr-checks.mjs quality-receipt/);
-  assert.deepEqual(stable.jobs["managed-quality"].needs, ["prepare", "quality"]);
+  assert.deepEqual(stable.jobs["managed-quality"].needs, ["prepare", "quality", "managed-fault"]);
   assert.equal(stable.jobs["managed-image"].needs, "prepare");
-  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "managed-image", "managed-quality"]);
+  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "managed-image", "managed-fault", "managed-quality"]);
   assert.equal(stable.jobs["managed-quality"].with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
   assert.equal(workflow("managed-quality").on.workflow_call.inputs.quality_receipt.default, "");
   assert.equal(managed.on.workflow_dispatch, null, "standalone has no caller-supplied skip/receipt inputs");
@@ -75,7 +75,7 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   assert.equal(steps[validate].env.QUALITY_RECEIPT, "${{ inputs.quality_receipt }}");
   assert.equal(steps[validate].env.EXPECTED_SHA, "${{ inputs.source_sha }}");
   assert.equal(steps[full].if, "steps.quality-mode.outputs.mode == 'full'");
-  assert.equal(steps[fault].if, undefined, "feature-gated fault tests are never deduplicated");
+  assert.equal(steps[fault].if, "steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'", "private fixture requires fresh full execution unless exact same-attempt early evidence validates");
   for (const step of steps) assert.equal(step["continue-on-error"], undefined);
 });
 
@@ -112,7 +112,7 @@ test("release-local guide drift runs before a reusable quality receipt", () => {
 
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
 test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Cargo/container caches", () => {
-  for (const file of ["stable-release", "managed-image", "managed-image-build", "managed-quality", "macos-native"]) {
+  for (const file of ["stable-release", "managed-image", "managed-image-build", "managed-quality", "managed-fault", "macos-native"]) {
     const config = workflow(file);
     assert.equal(config.permissions.contents, "read");
     for (const job of Object.values(config.jobs)) {

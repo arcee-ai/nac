@@ -1,0 +1,95 @@
+{
+  "ticket": "ALL-582",
+  "kind": "metric-observations-not-cohort-qualification",
+  "runs": [
+    {
+      "run_id": 41941010941,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41941010941",
+      "event": "pull_request",
+      "branch_head_sha": "7a80821ffcbfacba72a707312e50ad6414e65999",
+      "candidate_sha": "b87c273c27662ecc57cdf9cab1f22c151478e246",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 1022.0,
+      "event_to_green_seconds": 1025.0,
+      "observed_prepare_to_result_seconds": 1022.0,
+      "observed_event_to_result_seconds": 1025.0,
+      "initial_wait_seconds": 3.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5985.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 805.0
+      },
+      "completed_job_seconds": 6790.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    },
+    {
+      "run_id": 41941048432,
+      "attempt": 1,
+      "url": "https://github.com/arcee-ai/nac/actions/runs/41941048432",
+      "event": "pull_request",
+      "branch_head_sha": "51444e1d3ee856b47be1acabea66c0bc883ef153",
+      "candidate_sha": "336d8d455b85b1de85db5c3f13ba21fb4a22286d",
+      "status": "completed",
+      "conclusion": "success",
+      "processing_seconds": 1027.0,
+      "event_to_green_seconds": 1085.0,
+      "observed_prepare_to_result_seconds": 1027.0,
+      "observed_event_to_result_seconds": 1085.0,
+      "initial_wait_seconds": 58.0,
+      "metric_eligible": true,
+      "ordinary_first_attempt_metric": true,
+      "cohort_qualified": false,
+      "cohort_remaining": [
+        "consecutive ordinary run sequence",
+        "at least five meaningful source SHAs",
+        "representative backend/managed/frontend/docs cases",
+        "controlled cold-cache evidence",
+        "complete coverage matrix and negative controls",
+        "cache/resources/cost disclosure"
+      ],
+      "completed_job_seconds_by_runner": {
+        "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5536.0,
+        "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 755.0
+      },
+      "completed_job_seconds": 6291.0,
+      "incomplete_compute_job_ids": [],
+      "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+      "ineligible_reasons": []
+    }
+  ],
+  "limitations": [
+    "Earlier candidates before daily-rescan selector repair; not proof of current-head coverage parity.",
+    "Controlled all-cold run and representative backend/frontend/docs cohort remain pending.",
+    "Identical-source metadata/retry runs are not used to fill the cohort.",
+    "Combined changes cannot be summed as independent isolated savings."
+  ],
+  "strategy_disposition": {
+    "S01": "retain; missing Git watch mechanism and full workspace lane gain observed",
+    "S02": "native four-machine execution observed; fonts network outlier retained; eight-machine refinement pending",
+    "S03": "early image scheduling observed; early fault refinement pending",
+    "S04": "ARG cache invalidation mechanism measured; retained",
+    "S05": "mandatory qualification executes independently; observed whole-path impact overlaps other branches",
+    "S06": "local four-worker comparison measured; production keeps one worker per machine",
+    "S07": "cold actual image passed; dependency-layer cross-source warm benefit not yet hosted-qualified",
+    "S08": "actual NAC compile-only artifact reuse measured; combined rollout observed separately",
+    "S09": "binary distribution helper/prototype measured; hosted rollout pending",
+    "S10": "parallel server candidate CI passed; exact processing receipt being captured",
+    "S11": "design-only; const API compatibility decision, not measured",
+    "S13": "main redundancy hypothesis falsified by font-download trace; no claimed latency gain",
+    "S18": "tiny and actual NAC incremental benchmark underway; no rollout chosen"
+  }
+}

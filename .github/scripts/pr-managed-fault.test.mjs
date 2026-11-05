@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { qualityJobs, qualityReceipt, qualityMode, managedCallerJobs } from "./pr-checks.mjs";
 import { faultReceipt, verifyFaultReceipt, faultMode } from "./managed-fault.mjs";
 
 const require = createRequire(import.meta.url);
@@ -152,5 +153,64 @@ test("real Make fixture retains all three test filters and clippy; each failure 
         ["clippy", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--lib", "--bins", "--", "-D", "warnings"],
       ]);
     }
+  }
+});
+
+test("late controller validates both receipts before conditional work and joins the early result", () => {
+  const workflow = name => YAML.parse(fs.readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+  const stable = workflow("stable-release");
+  const early = stable.jobs["managed-fault"];
+  assert.equal(early.needs, "prepare");
+  assert.equal(early.uses, "./.github/workflows/managed-fault.yml");
+  assert.equal(early.with.source_sha, "${{ needs.prepare.outputs.sha }}");
+  const late = stable.jobs["managed-quality"];
+  assert.deepEqual(late.needs, ["prepare", "quality", "managed-fault"]);
+  assert.equal(late.with.fault_receipt, "${{ needs.managed-fault.outputs.fault_receipt }}");
+  assert.equal(late.with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
+  assert.ok(managedCallerJobs.includes("managed-fault"));
+  assert.ok(stable.jobs.managed.needs.includes("managed-fault"));
+  assert.ok(stable.jobs["required-pr-checks"].needs.includes("managed-fault"));
+  const quality = workflow("managed-quality");
+  assert.equal(quality.on.workflow_call.inputs.fault_receipt.default, "");
+  const steps = quality.jobs.quality.steps;
+  const base = steps.findIndex(s => s.id === "quality-mode");
+  const fault = steps.findIndex(s => s.id === "fault-mode");
+  assert.equal(steps[base].if, undefined);
+  assert.equal(steps[fault].if, undefined);
+  assert.equal(steps[fault].env.FAULT_RECEIPT, "${{ inputs.fault_receipt }}");
+  const full = "steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'";
+  for (const step of steps.filter(s => s.uses?.startsWith("dtolnay/") || s.uses?.startsWith("Swatinem/") || s.run === "make test-managed-fault-fixture")) {
+    assert.ok(steps.indexOf(step) > base && steps.indexOf(step) > fault);
+    assert.equal(step.if, full);
+  }
+  assert.equal(steps.find(s => s.run === "make ci").if, "steps.quality-mode.outputs.mode == 'full'");
+  const wrapper = workflow("managed-image");
+  assert.equal(wrapper.on.workflow_dispatch, null);
+  assert.equal(wrapper.on.workflow_call.inputs.fault_receipt, undefined, "standalone callers cannot supply a new skip input");
+  assert.equal(wrapper.jobs.quality.with.fault_receipt, undefined);
+});
+
+test("combined blank and retry evidence preserves full standalone and current-attempt fixture execution", () => {
+  const current = { ...context, run_attempt: "2" };
+  const quality = attempt => qualityReceipt({
+    ...Object.fromEntries(qualityJobs.map(job => [job, { result: "success" }])),
+    prepare: { result: "success", outputs: { sha, run: "true" } },
+  }, sha, { ...context, run_attempt: attempt });
+  const fault = attempt => faultReceipt(sha, "success", sha, { ...context, run_attempt: attempt });
+  for (const [base, feature, fullBase, fullFixture] of [
+    [null, undefined, true, true],
+    [quality("2"), fault("2"), false, false],
+    [quality("2"), fault("1"), false, true],
+    [quality("1"), fault("2"), true, true],
+    [quality("1"), fault("1"), true, true],
+    [quality("2"), undefined, false, true],
+  ]) {
+    const q = qualityMode(base, sha, current);
+    const f = faultMode(feature, sha, current);
+    assert.equal(q === "full", fullBase);
+    assert.equal(q === "full" || f === "full", fullFixture);
+  }
+  for (const invalid of [null, {}, { ...fault("1"), fixture_result: "failure" }, { ...fault("1"), sha: "b".repeat(40) }, fault("3")]) {
+    assert.throws(() => faultMode(invalid, sha, current));
   }
 });
