@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -20,6 +21,8 @@ from urllib.parse import unquote
 sys.dont_write_bytecode=True
 SPEC=importlib.util.spec_from_file_location('store',Path(__file__).with_name('apt-archive-store.py'))
 store=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(store)
+SUPERVISOR=importlib.util.spec_from_file_location('supervisor',Path(__file__).with_name('browser-apt-supervisor.py'))
+supervisor=importlib.util.module_from_spec(SUPERVISOR);SUPERVISOR.loader.exec_module(supervisor)
 ROOT=Path(__file__).resolve().parents[2]
 CACHE=Path('/var/cache/apt/archives')
 PLATFORM='ubuntu26.04-amd64-amd64v3'
@@ -66,28 +69,75 @@ def run(state,label,command,*,cwd=ROOT,timeout=900):
     files=[state/(label+s)for s in ('.stdout.log','.stderr.log')]
     require(all(not os.path.lexists(p)for p in files),'command already attempted; no retry')
     env={k:os.environ[k]for k in ('PATH','HOME','LANG','LC_ALL')if k in os.environ}
-    start=time.monotonic();child=None;error=None
+    start=time.monotonic();child=None;error=None;control=None;nonce=None;privileged=command[:1]==['sudo']
+    if privileged:
+        require(len(command)>1 and not command[1].startswith('-'),'explicit sudo command required')
+        caller=supervisor.process(os.getpid());require(caller and caller['uid']==os.getuid()and os.getuid()>0,'ordinary Linux caller required')
+        control=state/(label+'-privileged');control.mkdir(mode=0o700);nonce=secrets.token_hex(16)
+        executable='/usr/bin/apt-get'if command[1]=='apt-get'else command[1]
+        require(Path(executable).is_absolute(),'absolute privileged executable required')
+        launch=['sudo','-n','--',sys.executable,str(Path(__file__).with_name('browser-apt-supervisor.py')),
+            '--control',str(control),'--nonce',nonce,'--caller',str(caller['pid']),'--start',str(caller['start']),
+            '--timeout',str(timeout),'--cwd',str(cwd),'--',executable,*command[2:]]
+    else:launch=command
     try:
         with files[0].open('xb')as out,files[1].open('xb')as err:
-            child=subprocess.Popen(command,cwd=cwd,env=env,stdout=out,stderr=err,start_new_session=True)
+            child=subprocess.Popen(launch,cwd=cwd,env=env,stdout=out,stderr=err,start_new_session=True)
             while child.poll()is None:
                 require(time.monotonic()-start<timeout,'command controller timeout; no retry')
                 require(shutil.disk_usage(state).free>=13*1024**3,'13GiB reserve')
                 require(sum(p.stat().st_size for p in files)<=32*1024**2,'command output bound')
                 time.sleep(.1)
+        if privileged:await_privileged_result(control,nonce)
         require(child.returncode==0,f'{label} exit{child.returncode}; no retry')
         require(sum(p.stat().st_size for p in files)<=32*1024**2,'command output bound')
         return files[0].read_text()
     except BaseException as caught:
         error=type(caught).__name__+': '+str(caught)
-        if child:
+        if child and privileged:
+            request_stop(control,nonce)
+            # Root owns teardown. Sudo exit alone is never cleanup evidence.
+            child.wait(timeout=8)
+            await_privileged_result(control,nonce,cancelled=True)
+        elif child:
             try:os.killpg(child.pid,signal.SIGKILL)
             except ProcessLookupError:pass
             child.wait(timeout=10)
         raise
     finally:
         write(state/(label+'-command.json'),{'args':command,'seconds':time.monotonic()-start,
-            'pid':child.pid if child else None,'exit':child.returncode if child else None,'error':error})
+            'pid':child.pid if child else None,'exit':child.returncode if child else None,'error':error,
+            'privileged_supervision':str(control)if control else None})
+
+
+def request_stop(control,nonce):
+    path=control/'stop'
+    if os.path.lexists(path):
+        with store.regular(path)as source:require(source.read(65)==nonce.encode(),'foreign existing stop request')
+        return
+    temporary=control/'stop.tmp'
+    handle=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(handle,'wb')as out:out.write(nonce.encode())
+    os.rename(temporary,path)
+
+
+def await_privileged_result(control,nonce,*,cancelled=False):
+    deadline=time.monotonic()+5
+    while not os.path.lexists(control/'result.json'):
+        require(time.monotonic()<deadline,'missing bounded root cleanup receipt')
+        time.sleep(.025)
+    return privileged_result(control,nonce,cancelled=cancelled)
+
+
+def privileged_result(control,nonce,*,cancelled=False):
+    path=control/'result.json'
+    info=path.lstat();require(stat.S_ISREG(info.st_mode)and info.st_uid==0 and info.st_nlink==1,'missing actual root receipt')
+    result=load(path)
+    require(result.get('schema')==1 and result.get('nonce')==nonce and result.get('uid')==0,'foreign root supervisor receipt')
+    require(result.get('cleanup',{}).get('remaining')==[],'privileged descendants not reaped')
+    if not cancelled:
+        require(result.get('reason')=='completed'and result.get('exit')==0 and result.get('error')is None,'privileged command failed')
+    return result
 
 
 def source_identity(source):

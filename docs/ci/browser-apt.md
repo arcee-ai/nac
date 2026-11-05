@@ -91,8 +91,17 @@ refuses foreign replacements or malformed/link ownership evidence. Normal APT
 may already have removed the files through ordinary hooks. No global cache is
 pruned; private evidence/downloads last until upload and disposable-runner cleanup.
 Native helper commands retain exit/wall/cost logs, bounded output and a 13 GiB free
-space guard; interruption/timeout kills only their created process group and
-remains a failure. No NAC test deadline or retry is changed.
+space guard. Ordinary commands use their own process group. Privileged metadata
+commands use a root-side Linux subreaper with a private nonce/caller PID-start
+lease, exact owned kernel ancestry and pidfd signalling. Timeout, interruption or
+caller/launcher loss triggers bounded TERM then KILL and reaping, including
+escaped-session descendants. Sudo-wrapper exit never proves cleanup: the caller
+requires an actual root-owned receipt with no remaining descendants. No broad
+PID/name scan, unrelated process signalling, NAC deadline or retry is introduced.
+The private standard-GNU UID0 control includes the old wrapper-group survivor gap,
+a TERM-ignoring descendant, parent loss and an independent root sentinel. Its
+actual hosted result remains a separate gate; local mocked/nonroot controls do
+not establish privileged teardown.
 
 ## Cold mode, coverage and quality ownership
 
@@ -109,8 +118,8 @@ quality or execution verdict and never enters managed quality receipt reuse.
 Independent API/assets checks and the selected-binary ALL471 source/hash binding
 remain mandatory.
 
-The current 205-name disjoint inventory, all 203 ordinary selections and two
-proof names remain. Ordinary test-level sharding stays eight shards, one worker,
+The complete current disjoint inventory, all ordinary selections and the
+dedicated proof names remain. Ordinary test-level sharding stays eight shards, one worker,
 zero retries. Dedicated proof stays serial with its real clocks, original
 assertions/deadlines/cleanup and bounded two-receipt artifact. The private pilot's
 three representative journeys are not the full acceptance set.

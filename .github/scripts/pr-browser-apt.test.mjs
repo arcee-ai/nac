@@ -89,10 +89,27 @@ test('real preflight cold and unsupported modes perform no native command or sna
 });
 
 test('real CLI malformed/mismatch/ownership controls and immutable store guards remain in required release checks',()=>{
-  for(const filename of ['browser-apt.test.py','apt-archive-store.test.py']) {
+  for(const filename of ['browser-apt.test.py','apt-archive-store.test.py','browser-apt-supervisor.test.py']) {
     const r=spawnSync('python3',[`.github/scripts/${filename}`,'-v'],
       {encoding:'utf8',timeout:60000,maxBuffer:4*1024*1024,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});
     assert.equal(r.status,0,r.stderr);assert.match(r.stderr,/\nOK\n/);
   }
   assert.match(fs.readFileSync('Makefile','utf8'),/node --test \.github\/scripts\/pr-\*\.test\.mjs/);
+});
+
+
+test('private UID0 lifecycle control is isolated and preserves first failure evidence',()=>{
+  const value=YAML.parse(fs.readFileSync('.github/workflows/apt-supervisor-control.yml','utf8'));
+  assert.deepEqual(value.on,{push:{branches:['codex/all-582-apt-supervisor-control']}});
+  assert.deepEqual(value.permissions,{contents:'read'});
+  assert.deepEqual(Object.keys(value.jobs),['root-lifecycle']);
+  const job=value.jobs['root-lifecycle'];assert.equal(job['runs-on'],'ubuntu-latest');
+  assert.equal(job['timeout-minutes'],4);assert.equal(job.steps.length,3);
+  assert.equal(job.steps[0].with['persist-credentials'],false);assert.equal(job.steps[0].with.ref,'${{ github.sha }}');
+  assert.equal(job.steps[1].run,'python3 .github/scripts/browser-apt-root-control.py driver --state "$RUNNER_TEMP/browser-apt-root-control"');
+  assert.equal(job.steps[1]['continue-on-error'],undefined);
+  const evidence=job.steps[2];assert.equal(evidence.if,'always()');
+  assert.equal(evidence.with.name,'browser-apt-root-control-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+  assert.equal(evidence.with['if-no-files-found'],'error');
+  assert.doesNotMatch(JSON.stringify(value),/secrets\.|cache@|cargo |apt-get |docker /);
 });
