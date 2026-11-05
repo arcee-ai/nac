@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -166,6 +168,38 @@ class Controls(unittest.TestCase):
         self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
         self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
 
+    def test_real_unix_socket_suffixes_fit_short_owned_root_not_long_default(self):
+        # These are the exact suffix lengths from the two failed Rust cases,
+        # including both readonly and workspace sockets in the first case.
+        suffixes = ('nac-sock-95a2e5c0/r/d.sock', 'nac-sock-95a2e5c0/w/d.sock',
+                    'nac-sock-ac2f8471/r/d.sock')
+        with tempfile.TemporaryDirectory(prefix='nac-sock-control-', dir='/tmp') as directory:
+            owned = Path(directory).resolve()
+            # A 56-byte canonical default root reproduces the local Darwin
+            # layout without creating files in an unowned /var/folders tree.
+            long_default = owned / ('x' * (56 - len(str(owned).encode('utf-8')) - 1))
+            long_default.mkdir()
+            self.assertEqual(len(str(long_default).encode('utf-8')), 56)
+            with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-', dir=long_default) as old:
+                for suffix in suffixes:
+                    path = Path(old).resolve() / suffix
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                        with self.subTest(path_bytes=len(str(path).encode('utf-8'))):
+                            with self.assertRaisesRegex(OSError, 'path too long'):
+                                listener.bind(str(path))
+            with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-', dir='/tmp') as short:
+                fixture = Path(short).resolve()
+                self.assertEqual(fixture.parent, Path('/tmp').resolve())
+                self.assertEqual(stat.S_IMODE(fixture.stat().st_mode), 0o700)
+                for suffix in suffixes:
+                    path = fixture / suffix
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                        listener.bind(str(path))
+                        self.assertTrue(path.is_socket())
+            self.assertFalse(fixture.exists())
+
     def test_full_command_plan_is_serial_and_exact(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -173,7 +207,7 @@ class Controls(unittest.TestCase):
             (root / 'debug/nac-web').touch()
             cargo = root / 'cargo'
             cargo.write_text("""#!/usr/bin/env python3
-import json, os, sys
+import json, os, socket, sys
 from pathlib import Path
 inventory=json.loads(Path(os.environ['CONTROL_INVENTORY']).read_text())
 if '--no-run' in sys.argv:
@@ -189,14 +223,25 @@ elif '--exact' in sys.argv:
     with open(os.environ['CONTROL_ORDER'],'a') as f: f.write(names[0]+'\\n')
 elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
     assert '--ignored' not in sys.argv
+    fixture=Path(os.environ['TMPDIR'])
+    assert fixture.parent == Path('/tmp').resolve()
+    assert fixture.name.startswith('nac-portability-fixture-')
+    assert os.environ['TMP'] == os.environ['TEMP'] == str(fixture)
+    for suffix in ('nac-sock-95a2e5c0/r/d.sock', 'nac-sock-ac2f8471/r/d.sock'):
+        path=fixture/suffix
+        path.parent.mkdir(parents=True,exist_ok=True)
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
     with open(os.environ['CONTROL_ORDER'],'a') as f: f.write('workspace\\n')
 """)
             cargo.chmod(0o700)
             sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
             order = root / 'order'
+            long_default = root / ('long-host-default-' * 4)
+            long_default.mkdir()
             env = dict(os.environ, CARGO=str(cargo), CARGO_TARGET_DIR=str(root),
                        CONTROL_INVENTORY=str(runner.INVENTORY), CONTROL_ORDER=str(order),
-                       CONTROL_BUILD_TMPDIR=os.environ.get('TMPDIR', ''))
+                       TMPDIR=str(long_default), CONTROL_BUILD_TMPDIR=str(long_default))
             result = subprocess.run([sys.executable, str(SCRIPT), '--expected-sha', sha,
                                      '--output', str(root / 'evidence')],
                                     env=env, text=True, capture_output=True)
@@ -205,8 +250,12 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
                         if c['disposition'] == 'included']
             self.assertEqual(order.read_text().splitlines(), ['workspace', *included])
             report = json.loads((root / 'evidence/report.json').read_text())
+            self.assertEqual(Path(report['fixture_root']).parent, Path('/tmp').resolve())
+            self.assertEqual(report['fixture_root_bytes'], len(report['fixture_root'].encode('utf-8')))
+            self.assertFalse(Path(report['fixture_root']).exists())
             self.assertEqual(report['fixture_pids_remaining'], [])
-            self.assertEqual(report['fixture_files_remaining'], [])
+            self.assertIn('nac-sock-95a2e5c0/r/d.sock', report['fixture_files_remaining'])
+            self.assertIn('nac-sock-ac2f8471/r/d.sock', report['fixture_files_remaining'])
 
     def test_real_rust_seed_is_detected_once_and_removed(self):
         with tempfile.TemporaryDirectory() as directory:

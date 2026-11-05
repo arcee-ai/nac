@@ -106,8 +106,13 @@ separate logs. Owned persistence JSON evidence is uploaded alongside it. Cache
 hits are not called cold compiles. Compile and test times are separate; the
 runner does not double the suite to manufacture warm evidence.
 
-Only test execution uses a canonical invocation-specific temporary directory;
-compiler caches remain outside it. SIGINT/SIGTERM and command timeouts terminate
+Only test execution uses a canonical invocation-specific temporary directory
+created under `/tmp` (`/private/tmp` after canonicalization on macOS), retaining
+the existing random `nac-portability-fixture-` prefix and private mode. The report
+records `fixture_root` and its UTF-8 `fixture_root_bytes`. The default Darwin
+`/var/folders` path plus the invocation prefix can exceed Unix socket address
+limits after unchanged Rust fixtures append their own directories and socket
+names. Compiler caches remain outside this root. SIGINT/SIGTERM and command timeouts terminate
 the active owned process group, including descendants, then retain failure or
 cancellation reports. Before removing the fixture directory, the runner uses full-width process argv, records
 remaining files, fails on process commands referencing that exact private path,
@@ -117,7 +122,7 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Twelve controls cover stale evidence rejection, inventory drift, exact-selection
+Thirteen controls cover stale evidence rejection, inventory drift, exact-selection
 failure, the full serialized command plan, long-argv fixture process visibility,
 allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
 process behind a readiness barrier. They also cover a real zombie-only group,
@@ -126,6 +131,11 @@ and retained timing/summary when cleanup fails. The captured twenty-name native
 discovery also reproduces the old seven-name rejection, accepts the repaired
 inventory, and rejects every individual removal/rename plus an unreviewed
 addition. The allowlist control pins the original four selected names exactly.
+Real Unix-socket controls reproduce rejected long paths and bind all three
+actual readonly/workspace socket suffixes under the short private root. The
+full runner command-plan control starts with a deliberately long host `TMPDIR`,
+binds real sockets through the actual selected test environment, checks the
+recorded canonical root, and verifies its removal after fixture enumeration.
 On Darwin, EPERM is normalized
 only after a fresh PID/PGID/state listing proves no live members of the exact
 owned group; other permission failures remain errors. The Rust fixture lives in its own temporary
@@ -142,6 +152,22 @@ Expected exit: 1; `portability_seeded_failure` exits 101 exactly once and later
 suites do not start. In hosted manual dispatch, `seed-failure=true` provides the
 same intentionally red qualification; do not retry it into a pass. The control
 suite separately verifies that expected failure and returns success.
+
+The first run after inventory repair,
+[41958708312 / 127019682544](https://github.com/arcee-ai/nac/actions/runs/41958708312/job/127019682544),
+candidate `b5bfdf8d1e3c78865269b88604727823dfc13fea`, admitted all twenty names
+then failed the default core suite: 2,127 passed, two failed and sixteen ignored.
+Both failures were real Unix socket binds with `path must be shorter than SUN_LEN`:
+`permissions::review::tests::sockets_in_readonly_mounts_or_the_workspace_are_not_confined`
+and `permissions::review_tests::socket_added_to_readonly_mount_during_review_discards_approval`.
+Their suffix `/nac-sock-<8hex>/r/d.sock` is 27 bytes; the first also binds the
+equally long `/w/d.sock`. The retained report names the failed fixture leaves
+but did not record the absolute hosted temp prefix, whose exact length remains
+unknown. A real local Darwin bind control rejects 116-byte old-layout paths and
+accepts 72-byte paths with the unchanged prefix under canonical `/private/tmp`.
+This placement repair changes no Rust test, permission policy, timeout or retry.
+The failed run stays failed; a full native run beyond this point is still needed,
+including the later workspace packages and four selected ignored cases.
 
 ## Triage and rollout acceptance
 
