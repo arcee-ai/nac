@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { reverseBrowserApt } from "./browser-apt-wiring.mjs";
 
 const YAML = createRequire(import.meta.url)("yaml");
 const read = () => YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
@@ -32,6 +33,8 @@ function verify(workflow) {
   for (const step of job.steps) assert.equal(step["continue-on-error"], undefined);
   assert.ok(job.steps.some(s => s.uses === "dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0"));
   const reversed = structuredClone(workflow);
+  // Authenticate and reverse the later relay before the historical S01 guard.
+  reverseBrowserApt(reversed);
   // S02 changes only ordinary execution/list granularity, never the proof CLI.
   for (const step of [
     reversed.jobs["browser-shards"].steps.find(s => s.name === "Run production-embedded browser shard"),
@@ -60,6 +63,7 @@ test("parsed runner/profile/cache weakening fails closed", () => {
     w => { w.jobs["test-server"].steps.find(s => s.uses?.startsWith("Swatinem/")).with["save-if"] = "true"; },
     w => { w.jobs["test-server"].steps.find(s => s.uses?.startsWith("Swatinem/")).with["cache-all-crates"] = true; },
     w => { w.jobs["test-server"]["runs-on"] = "macos-latest"; },
+    w => { w.jobs["browser-binary"].steps.find(s => s.id === "apt-upload").with["if-no-files-found"] = "ignore"; },
   ]) { const candidate = read(); mutate(candidate); assert.throws(() => verify(candidate)); }
 });
 test("real stdlib installer, private-store policy and failure propagation controls", () => {
