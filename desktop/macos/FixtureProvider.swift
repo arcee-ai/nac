@@ -9,6 +9,19 @@ final class FixtureProvider {
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
     private(set) var responseCount = 0
+    #if PREVIEW_SMOKE
+    var holdResponses = false
+    private(set) var heldResponseCount = 0
+    private var heldResponses: [() -> Void] = []
+    func releaseResponses() {
+        holdResponses = false
+        let completions = heldResponses
+        heldResponses.removeAll()
+        completions.forEach { $0() }
+    }
+    // Main-queue fixture observation only; never retains a proxy destination.
+    private(set) var rejectedConnectCount = 0
+    #endif
     private var startContinuation: CheckedContinuation<Void, Error>?
     var baseURL: URL!
 
@@ -57,6 +70,9 @@ final class FixtureProvider {
         listener?.cancel()
         for connection in connections.values { connection.cancel() }
         connections.removeAll()
+        #if PREVIEW_SMOKE
+        heldResponses.removeAll()
+        #endif
     }
 
     private func receive(_ connection: NWConnection, accumulated: Data) {
@@ -90,6 +106,9 @@ final class FixtureProvider {
         guard route == "POST /responses HTTP/1.1",
               let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               request["model"] as? String == "gpt-5.6-sol" else {
+            #if PREVIEW_SMOKE
+            if route.hasPrefix("CONNECT ") { rejectedConnectCount = min(32, rejectedConnectCount + 1) }
+            #endif
             send(connection, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", final: true)
             return
         }
@@ -107,13 +126,21 @@ final class FixtureProvider {
         send(connection, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" +
              event(["type": "response.output_text.delta", "delta": Self.partial]))
         // Deliberately separate transport frames so the real UI can observe streaming.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        let finish = { [weak self] in
             guard let self else { return }
             self.send(connection, self.event(["type": "response.output_text.delta",
                 "delta": " NAC Mac preview."]) +
                 self.event(["type": "response.output_item.done", "output_index": 0, "item": item]) +
                 self.event(["type": "response.completed", "response": response]), final: true)
         }
+        #if PREVIEW_SMOKE
+        if holdResponses {
+            heldResponseCount += 1
+            heldResponses.append(finish)
+            return
+        }
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: finish)
     }
 
     private func encode(_ object: [String: Any]) -> String {

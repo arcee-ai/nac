@@ -6,6 +6,8 @@ import type {
 } from "../../../../packages/nac-client/src/index";
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { recoveryForRuntime, type TerminalInputRecoveryLease } from "./inputRecovery";
+import { mayOfferInputControl } from "./useInputOwnership";
+import type { TerminalLinkMode } from "./terminalLinkMode";
 
 export function useTerminalController(
   sessionId: string,
@@ -14,12 +16,14 @@ export function useTerminalController(
   source?: ExecutionStatus,
   options: {
     readonly?: boolean;
+    linkMode?: TerminalLinkMode;
     inputControl?: InputControlStatus | null;
     inputPaused?: boolean;
   } = {},
 ) {
   const runtime = useNativeRuntime();
   const { api } = runtime;
+  const linkMode = options.linkMode ?? "browser";
   const current = useRef<TerminalControls | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState("Connecting");
@@ -68,12 +72,19 @@ export function useTerminalController(
     if (!host) return;
     // Reserve recovery capacity before fresh input can be accepted. The exact
     // opaque execution handle already contains its process-owner incarnation.
-    const lease = recoveryForRuntime(runtime).acquire(sessionId, terminalId);
+    // Historical/non-input-capable observation must not consume unresolved
+    // recovered-input seats. Unknown sources stay conservative; transient
+    // controller/frozen/in-flight/alive polling never changes this lifetime.
+    const source = latestSource.current;
+    const observationOnly =
+      !!options.readonly || (source !== undefined && !mayOfferInputControl(source, false));
+    const lease = recoveryForRuntime(runtime).acquire(sessionId, terminalId, observationOnly);
     recovery.current = lease;
     const close = openTerminalObservation({
       api,
       source: latestSource.current,
       readonly: options.readonly,
+      linkMode,
       inputControl: latestInput.current.binding,
       inputPaused: latestInput.current.paused,
       sessionId,
@@ -112,6 +123,7 @@ export function useTerminalController(
     source?.input,
     source?.resize,
     options.readonly,
+    linkMode,
   ]);
 
   return {

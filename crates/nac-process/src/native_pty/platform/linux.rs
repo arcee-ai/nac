@@ -181,9 +181,20 @@ pub(super) fn rows(excluded_root: Option<libc::pid_t>) -> io::Result<Vec<Row>> {
 }
 
 fn read(pid: libc::pid_t) -> io::Result<Option<Row>> {
-    let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+    row_from_stat(pid, std::fs::read_to_string(format!("/proc/{pid}/stat")))
+}
+
+fn row_from_stat(pid: libc::pid_t, result: io::Result<String>) -> io::Result<Option<Row>> {
+    let stat = match result {
         Ok(stat) => stat,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // A task can disappear during procfs open/read even after a live
+        // pidfd probe. This classification applies only to that stat read.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     let (ppid, pgrp, start_time) = crate::parse_process_stat(&stat)
@@ -212,84 +223,5 @@ fn read(pid: libc::pid_t) -> io::Result<Option<Row>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::{Child, Command};
-    struct Fixture(Child);
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    #[test]
-    fn foreign_child_of_recycled_parent_identity_is_not_adopted() {
-        let fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
-        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
-        let parent = read(row.ppid).unwrap().unwrap();
-        let mut retired = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
-        let retired_row = read(retired.0.id() as libc::pid_t).unwrap().unwrap();
-        let mut original = Identity::capture(retired_row).unwrap().unwrap();
-        retired.0.kill().unwrap();
-        retired.0.wait().unwrap();
-        // Emulate a same-jiffy replacement: numeric PID and start time both
-        // appear to match, while the ORIGINAL parent pidfd identifies death.
-        original.0.metadata = parent.metadata;
-        let error = match Identity::capture_owned(
-            row,
-            super::super::Evidence::Parent(std::sync::Arc::new(original)),
-        ) {
-            Err(error) => error,
-            Ok(_) => panic!("foreign replacement-parent child was accepted"),
-        };
-        assert_eq!(error.raw_os_error(), Some(libc::ESRCH));
-        assert!(read(fixture.0.id() as libc::pid_t).unwrap().unwrap().live);
-    }
-    #[test]
-    fn exact_live_parent_and_child_identity_can_be_captured() {
-        let fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
-        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
-        let parent = read(row.ppid).unwrap().unwrap();
-        let identity = Identity::capture_owned(
-            row,
-            super::super::Evidence::Parent(std::sync::Arc::new(
-                Identity::capture(parent).unwrap().unwrap(),
-            )),
-        )
-        .unwrap()
-        .unwrap();
-        assert!(identity.live().unwrap());
-    }
-    #[test]
-    fn changed_original_parent_stamp_retains_child_capture_uncertainty() {
-        let fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
-        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
-        let parent = Identity::capture(read(row.ppid).unwrap().unwrap())
-            .unwrap()
-            .unwrap();
-        let error = parent.require_original_start(parent.0.metadata.start_time.wrapping_add(1));
-        assert!(error.is_err());
-        assert!(parent.capability_live().unwrap());
-        assert!(read(row.pid).unwrap().unwrap().live);
-    }
-    #[test]
-    fn conclusive_original_child_death_resolves_pending_capture() {
-        let mut fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());
-        let row = read(fixture.0.id() as libc::pid_t).unwrap().unwrap();
-        let parent = Identity::capture(read(row.ppid).unwrap().unwrap())
-            .unwrap()
-            .unwrap();
-        fixture.0.kill().unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while read(row.pid).unwrap().is_some_and(|current| current.live) {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        assert!(Identity::capture_owned(
-            row,
-            super::super::Evidence::Parent(std::sync::Arc::new(parent))
-        )
-        .unwrap()
-        .is_none());
-    }
-}
+#[path = "linux_tests.rs"]
+mod tests;

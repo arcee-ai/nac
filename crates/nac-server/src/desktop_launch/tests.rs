@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn store_ownership_failure_is_typed_and_diagnostics_are_constant() {
+    use nac_core::sessions::StoreProcessLeaseError;
+
+    for (error, expected) in [
+        (
+            anyhow::Error::new(StoreProcessLeaseError::Busy).context("private-diagnostic-canary"),
+            "store_owned",
+        ),
+        (
+            anyhow::anyhow!(StoreProcessLeaseError::Busy.to_string()),
+            "engine_unavailable",
+        ),
+        (
+            anyhow::Error::new(StoreProcessLeaseError::Store(anyhow::anyhow!(
+                "private-diagnostic-canary"
+            ))),
+            "engine_unavailable",
+        ),
+    ] {
+        let (parent, launch) = channel();
+        parent
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        launch.failed(&error);
+        let bytes = read_record(&mut BufReader::new(parent)).unwrap();
+        let receipt: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(receipt["kind"], "failed");
+        assert_eq!(receipt["version"], VERSION);
+        assert_eq!(receipt["incarnation"], launch.incarnation);
+        assert_eq!(receipt["stage"], "startup");
+        assert_eq!(receipt["code"], expected);
+        assert!(!String::from_utf8_lossy(&bytes).contains("private-diagnostic-canary"));
+        assert!(receipt.get("endpoint").is_none());
+        assert!(bytes.len() <= LIMIT);
+    }
+}
+
+#[test]
 fn records_are_bounded_and_require_a_complete_line() {
     for bytes in [
         vec![b'x'; LIMIT + 1],

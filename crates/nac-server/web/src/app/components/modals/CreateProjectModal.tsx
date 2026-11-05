@@ -316,6 +316,7 @@ function CreateProjectForm({
     if (next === mode) return;
     setError(null);
     setMode(next);
+    setPicking(false);
     setConnection(null);
     setCwd(next === "ssh" ? "" : defaultCwd);
   };
@@ -592,6 +593,7 @@ function CreateProjectForm({
                 content={ButtonContent.IconRight}
                 className={cn("w-full", invalid("cwd") && "input-validation")}
                 style={CWD_BUTTON_PADDING}
+                aria-label={cwd ? `Choose Working Folder: ${cwd}` : "Choose Working Folder"}
                 onClick={() => setPicking(true)}
               >
                 <span
@@ -809,7 +811,8 @@ function CreateProjectForm({
       <PathPickerModal
         open={picking}
         kind="directory"
-        initialPath={cwd.trim()}
+        nativeLocalDirectory={mode === "local"}
+        initialPath={cwd}
         ssh={connected}
         onClose={() => setPicking(false)}
         onSelect={(path) => {

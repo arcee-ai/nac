@@ -56,6 +56,15 @@ struct Cli {
     reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
 )]
 enum RootCommand {
+    /// Resolve local Mac launch paths without opening the selected store.
+    #[cfg(unix)]
+    #[command(name = "__desktop-configuration", hide = true)]
+    DesktopConfiguration {
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        store_path: Option<PathBuf>,
+    },
     /// Read the bundled release-local NAC Guide without a server or network
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
     Guide(GuideCli),
@@ -547,13 +556,40 @@ async fn run() -> Result<()> {
     let invocation_name = current_invocation_name();
     let matches = cli_command(&invocation_name).get_matches();
     let cli = Cli::from_arg_matches(&matches).map_err(|error| anyhow!(error.to_string()))?;
+    #[cfg(all(feature = "native-auth-fixture", unix))]
+    if cli.command.is_some()
+        && !matches!(
+            &cli.command,
+            Some(RootCommand::DesktopIdentity | RootCommand::DesktopConfiguration { .. })
+        )
+    {
+        return Err(anyhow!(
+            "native auth fixture executable does not admit effectful CLI commands"
+        ));
+    }
     match cli.command {
+        #[cfg(unix)]
+        Some(RootCommand::DesktopConfiguration {
+            directory,
+            store_path,
+        }) => {
+            #[cfg(feature = "native-auth-fixture")]
+            nac_server::native_auth_fixture::admit_configuration(
+                &directory,
+                store_path.as_deref(),
+            )?;
+            println!(
+                "{}",
+                nac_server::desktop_startup::configuration_json(&directory, store_path)?
+            );
+            Ok(())
+        }
         None => {
             #[cfg(unix)]
             if let Some(desktop) = desktop {
                 let result = run_server_inner(cli.server, &invocation_name, Some(&desktop)).await;
-                if result.is_err() {
-                    desktop.failed();
+                if let Err(error) = &result {
+                    desktop.failed(error);
                     return Err(anyhow!("bundled desktop engine startup failed"));
                 }
                 return result;
@@ -664,6 +700,15 @@ async fn run_server_inner(
 ) -> Result<()> {
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
+    #[cfg(all(feature = "native-auth-fixture", unix))]
+    nac_server::native_auth_fixture::admit_serving(
+        cli.directory.as_deref(),
+        cli.store_path.as_deref(),
+        bind,
+        desktop.is_some(),
+        cli.managed_config.is_some() || std::env::var_os("NAC_MANAGED_CONFIG").is_some(),
+        cli.allow_remote,
+    )?;
     let managed_config_path = cli
         .managed_config
         .or_else(|| std::env::var_os("NAC_MANAGED_CONFIG").map(PathBuf::from));

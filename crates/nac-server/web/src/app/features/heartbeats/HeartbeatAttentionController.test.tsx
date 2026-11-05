@@ -106,3 +106,33 @@ it("discards an old runtime's late ACK completion after replacement", async () =
   await act(async () => nextReply.resolve(new Response(null, { status: 204 })));
   expect(next.stores.attentionStore.attentionStore.getState().acknowledgements).toEqual({});
 });
+
+it("preserves the pending heartbeat ACK across native presentation capability changes", async () => {
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockRejectedValueOnce(new Error("disconnected"))
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  const instance = runtime("native", fetch);
+  const connect = vi.fn(() => () => {});
+  const view = render(
+    <NativePresentationRoot runtime={instance} router={router} desktopCommands={{ connect }} />,
+  );
+  await act(async () => {
+    instance.stores.attentionStore.clearAttention("opened", 7);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(instance.stores.attentionStore.attentionStore.getState().acknowledgements).toEqual({
+    opened: 7,
+  });
+  view.rerender(<NativePresentationRoot runtime={instance} router={router} />);
+  await act(async () => vi.advanceTimersByTimeAsync(30000));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({ through_sequence: 7 });
+  expect(instance.stores.attentionStore.attentionStore.getState().acknowledgements).toEqual({});
+  expect(connect).not.toHaveBeenCalled();
+  view.unmount();
+  await act(async () => vi.advanceTimersByTimeAsync(30000));
+  expect(fetch).toHaveBeenCalledTimes(2);
+});

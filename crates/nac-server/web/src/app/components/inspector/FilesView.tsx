@@ -1,4 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { RevealInFinder } from "@/app/features/workspace-reveal/RevealInFinder";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -628,6 +629,11 @@ export function FilesView({
           changed={changed}
           revision={revision}
           readOnly={readOnly}
+          reveal={
+            current && revision == null && !readOnly ? (
+              <RevealInFinder sessionId={sessionId} snapshot={snapshot} path={current} />
+            ) : null
+          }
         />
       }
       list={

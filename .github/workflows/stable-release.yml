@@ -187,6 +187,18 @@ jobs:
       - name: Run nac-server tests
         run: cargo test -p nac-server --locked
 
+      - name: Test isolated native-auth fixture boundary
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          fixture_sha=$(git rev-parse --verify HEAD)
+          test "$fixture_sha" = "$EXPECTED_SOURCE_SHA"
+          printf 'Native-auth fixture source: %s\n' "$fixture_sha"
+          NAC_BUILD_TRACK=dev \
+          NAC_BUILD_ID="native-auth-fixture-v1-${fixture_sha}" \
+          NAC_SOURCE_REVISION="$fixture_sha" \
+            cargo test --locked -p nac-server --lib --features native-auth-fixture native_auth_fixture::tests::
+
       - name: Exercise stable binary readiness and status identity
         run: make test-stable-binary
 
@@ -440,6 +452,10 @@ jobs:
           prefix-key: nac-ci-v1
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Check startup fixture root custody without native processes
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), "Startup fixture controls require Python >= 3.11"; print(sys.version)'
+          python3 -B -m unittest discover -s desktop/macos -p test_startup_custody.py -v
       - name: Test the other four workspace crates
         run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
       - name: Preserve source, size, and lifecycle contracts on every PR
