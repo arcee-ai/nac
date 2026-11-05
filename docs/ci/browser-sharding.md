@@ -8,23 +8,25 @@ clock behavior remain effective. This partition changes scheduling only.
 The ordinary shards exclude `exact-goal-wait.e2e.ts` from Playwright's full-title
 selection. A dedicated proof job runs that entire file, including both ALL471
 cases, then validates and stages their four bounded proof/cleanup receipts.
-The terminal browser result must require every ordinary shard, the dedicated
-proof job and the complete selection check. Use `fail-fast: false` for the
-ordinary matrix so a failed shard does not erase other shards' evidence.
+The terminal browser result must require the exact binary producer, every
+ordinary shard, the dedicated proof job and the complete selection check. Use
+`fail-fast: false` for the ordinary matrix so a failed shard does not erase
+other shards' evidence.
 
 ## Runnable selections
 
 After the normal locked dependency setup, execute these commands from
 `crates/nac-server/web`. All jobs must check out the same prepared candidate.
-`NAC_E2E_BINARY` must name that candidate's production-embedded binary, and
+`NAC_E2E_BINARY` must name the verified same-run executable or the valid
+older-attempt fresh-source fallback from [the transport contract](browser-binary.md), and
 `NAC_E2E_ARTIFACTS` must be an isolated job-owned directory.
 
 ```sh
-# Each ordinary matrix job: index is 1, 2, 3 or 4.
+# Each ordinary matrix job: index is 1 through 8.
 ./node_modules/.bin/playwright test --grep-invert='exact-goal-wait.e2e.ts' \
-  --shard="$index/4" --list --reporter=json > ordinary-inventory.json
+  --shard="$index/8" --list --reporter=json > ordinary-inventory.json
 ./node_modules/.bin/playwright test --grep-invert='exact-goal-wait.e2e.ts' \
-  --shard="$index/4"
+  --shard="$index/8"
 
 # The dedicated goal-proof job: no ordinary shard filter.
 ./node_modules/.bin/playwright test --list --reporter=json > complete-inventory.json
@@ -38,6 +40,9 @@ From the repository root, stage the proof after execution with:
 ```sh
 python3 .github/scripts/browser-proof.py \
   --root "$NAC_E2E_ARTIFACTS" --source "$CANDIDATE_SHA"
+python3 .github/scripts/browser-binary.py verify-proof \
+  --binary "$NAC_E2E_BINARY" --source "$CANDIDATE_SHA" \
+  --proof-dir "$NAC_E2E_ARTIFACTS/all471-goal-proof-artifact"
 ```
 
 Upload only `all471-goal-proof-artifact/*.json` as the bounded proof artifact.
@@ -49,7 +54,7 @@ successful artifact collection.
 
 ## Complete selection check
 
-The dedicated proof job also generates all four ordinary selection inventories
+The dedicated proof job also generates all eight ordinary selection inventories
 locally, using exactly the same shard and exclusion arguments as the matrix.
 The inventories are static selection metadata, not execution receipts. This
 avoids cross-machine artifact aggregation and preserves GitHub's existing
@@ -58,20 +63,22 @@ attempt of the same run. Never look up a green run, reuse previous-candidate
 artifacts or cache a browser verdict.
 
 The proof job executes the validator with the complete inventory, the dedicated
-proof inventory and all four ordinary inventories:
+proof inventory and all eight ordinary inventories:
 
 ```sh
 python3 .github/scripts/browser-inventory.py \
   --complete complete-inventory.json --part proof-inventory.json \
   --part ordinary-1.json --part ordinary-2.json \
-  --part ordinary-3.json --part ordinary-4.json
+  --part ordinary-3.json --part ordinary-4.json \
+  --part ordinary-5.json --part ordinary-6.json \
+  --part ordinary-7.json --part ordinary-8.json
 ```
 
 Retain these static inventories separately from the bounded proof artifact when
 needed for diagnostics. Workflow controls must enforce that the matrix execution
 and the inventory generation use the same filters and shard count. The final
-browser aggregate requires successful ordinary matrix and proof-job results;
-it does not infer execution success from these inventories.
+browser aggregate requires successful producer, ordinary matrix and proof-job
+results; it does not infer execution success from these inventories.
 
 The validator rejects collection errors, empty or duplicate inventories, missing
 or unexpected tests, duplicate execution across parts, changed expected skips,

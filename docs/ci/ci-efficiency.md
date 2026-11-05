@@ -22,7 +22,7 @@ managed image work remains contents-read/build-and-smoke only.
 | Web lint/typecheck | Stable lint, server checks/assets and managed repeat | `test-assets` lint/typecheck once; formatting remains in lint |
 | Generated API document, app types, bounded nac-client types | `test-assets -> test-api-contract` plus managed repeat | Same sole writer/check chain in server; required receipt |
 | Committed browser, nac-client and nac-presentation dist | Server asset build, browser rebuild, managed asset build | One server `test-assets` build and unchanged dirty-output failure check; browser consumes the identical committed bundles from the same candidate |
-| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; four file-isolated ordinary shards plus dedicated goal proof; same selected tests, retries and assertions |
+| Web tests and production Chromium journeys | Stable server plus managed web tests | Stable server tests plus separate required concurrent browser job; eight file-isolated ordinary shards plus dedicated goal proof; same selected tests, retries and assertions |
 | Source-size, source workflow/binary, durability, managed load/static image contract | Stable workspace plus managed repeat | Stable workspace; required receipt |
 | Managed private fault feature tests and feature clippy | Managed quality after full `make ci` | Early complete fixture plus exact-attempt late validation; standalone/retry full fallback retains all four commands |
 | Exact native linux/amd64 image, load, smoke, inventory, advisory scan/qualification | Managed contract/quality/build-smoke/result | Same exact loaded image ID and candidate, scanner infrastructure enforced; findings advisory as accepted |
@@ -39,9 +39,11 @@ an exact, complete successful result set from preparation, lint, workflow lint,
 server unit/assets, core and workspace. It binds candidate SHA, repository, run ID and attempt.
 The `managed-quality` caller directly needs the receipt-producing `quality` job
 and passes its output. The separate compatibility `test` result requires both quality and
-browser success. Browser builds the exact candidate with its checked-in bundles;
-server `test-assets` independently proves those committed bytes match the sole
-writer. Both jobs are mandatory in Required PR checks. Browser never supplies
+browser success. A required producer builds the exact candidate with its checked-in bundles;
+consumers validate the same-run executable bytes or build fresh source after valid
+older-attempt evidence. Server `test-assets` independently proves those committed
+bytes match the sole writer. The producer, browser acceptance and server drift
+checks are mandatory in Required PR checks. Browser never supplies
 quality evidence, and image work need not wait for an unrelated browser journey. The
 reusable quality job validates all fields and results before reuse; invalid or
 foreign evidence fails. A blank receipt runs full `make ci`, including in standalone
@@ -89,15 +91,26 @@ this is not a storage, larger-runner, local-host or future-plan cost estimate.
 
 ## Complete production browser partition (ALL-582)
 
-Four ordinary machines each run one native Playwright file shard, one worker,
+Eight ordinary machines each run one native Playwright file shard, one worker,
 zero retries, and unchanged real-clock journeys. A dedicated machine runs both
 ALL471 goal-proof cases and the original bounded proof/cleanup collector. It
-also lists the complete current suite and all five partitions, rejecting any
+also lists the complete current suite and all nine partitions, rejecting any
 missing, duplicate, unexpected or changed-skip selection before its journeys.
 Each executing shard uses the same exclusion and shard arguments as those
 inventories. The final aggregate requires every shard, proof job and browser
 join in addition to independent assets/API drift checks. Failure artifacts have
 unique shard/attempt names; bounded proof artifacts retain their existing scope.
+
+The required `browser-binary` producer compiles once with explicit current source,
+dev build identity and dev/test debug symbols disabled. Per-ID consumers verify
+repository/run/attempt/compiler/runner/profile, full archive and binary digests
+before exposing an executable. A fully valid older artifact selects a fresh
+current-attempt source build; invalid or missing evidence fails. Pinned Rust and
+all other runtime tools stay installed, and normal consumers explicitly keep
+`CARGO_INCREMENTAL=0`. Only the source fallback restores its compiler cache; all
+cache writes retain the existing trusted-push condition. Actual goal proofs bind
+to the selected executable's path, full source and hash. See the
+[binary transport and retry contract](browser-binary.md).
 
 Static inventory metadata never supplies execution success. The aggregate uses
 actual same-run job results, preserving successful siblings across GitHub's

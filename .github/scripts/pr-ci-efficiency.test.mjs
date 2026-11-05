@@ -85,13 +85,15 @@ test("browser binds the same committed bundle and independent drift gate without
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
   const stable = workflow("stable-release");
   const browserJob = stable.jobs["browser-shards"];
-  assert.equal(browserJob.needs, "prepare");
+  assert.deepEqual(browserJob.needs, ["prepare", "browser-binary"]);
   assert.equal(browserJob.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   assert.ok(requiredJobs.includes("browser"));
   assert.deepEqual(stable.jobs.test.needs, ["prepare", "quality", "browser"]);
   const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser shard");
-  assert.match(browser.run, /cargo build --locked -p nac-server --bin nac-web/);
-  assert.match(browser.run, /NAC_E2E_BINARY="\$GITHUB_WORKSPACE\/target\/debug\/nac-web" npm --prefix crates\/nac-server\/web run test:e2e/);
+  assert.equal(browser.env.NAC_E2E_BINARY, "${{ steps.runtime.outputs.binary }}");
+  assert.match(browser.run, /npm --prefix crates\/nac-server\/web run test:e2e/);
+  assert.match(stable.jobs["browser-binary"].steps.find(s => s.id === "pack").run,
+    /cargo build --locked -p nac-server --bin nac-web/);
   const makefile = readFileSync("Makefile", "utf8");
   assert.match(makefile, /test-assets: test-api-contract/);
   for (const output of ["assets/dist", "packages/nac-client/dist", "packages/nac-presentation/dist"]) assert.ok(makefile.includes(output));

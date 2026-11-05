@@ -128,7 +128,9 @@ class BrowserBinaryCliTests(unittest.TestCase):
                 self.reject(identity={field: wrong})
 
     def test_malformed_expected_context(self):
-        for change in ({"source": "not-a-sha"}, {"run-id": "001"}, {"attempt": "0"}):
+        for change in ({"source": "not-a-sha"}, {"run-id": "001"}, {"attempt": "0"},
+                       {"runner-image": "@"}, {"runner-image": "ubuntu24@"},
+                       {"runner-image": "@20261101.1"}):
             with self.subTest(change=change):
                 self.reject(identity=change)
 

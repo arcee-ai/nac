@@ -1,7 +1,7 @@
 # Same-run browser binary transport
 
-The optional S09 candidate compiles one exact prepared browser executable and
-transfers its bytes to four ordinary shards and the dedicated ALL471 proof job.
+The S09 candidate compiles one exact prepared browser executable and transfers
+its bytes to eight ordinary shards and the dedicated ALL471 proof job.
 It carries no test result and supplies no permission to skip existing tests,
 drift checks, proofs, native tooling, image checks or final aggregates. Measure
 the full hosted path before retaining it: duplicated compilation decreases, but
@@ -9,8 +9,10 @@ a producer dependency and artifact transfer can add scheduling and wall time.
 
 `.github/scripts/browser-binary.py` uses Python's standard library. The producer
 packages a regular executable as `browser-binary.tar.gz`; the consumer streams
-and verifies it without using filesystem archive-extraction APIs. Both commands
-print structured JSON and can append their fields to `--github-output`.
+and verifies it without using filesystem archive-extraction APIs. Normal
+consumers retain the pinned Rust runtime and explicit
+`CARGO_INCREMENTAL=0`; only source-fallback consumers restore compiler caches.
+Both commands print structured JSON and can append their fields to `--github-output`.
 
 ## Producer
 
@@ -20,9 +22,11 @@ root after checking out `CANDIDATE_SHA`. `ImageOS` and `ImageVersion` are the
 hosted runner's image identity; every consumer must expect the same image.
 
 ```sh
-export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
 export NAC_SOURCE_REVISION="$CANDIDATE_SHA"
 export NAC_BUILD_TRACK=dev NAC_BUILD_ID="dev-$CANDIDATE_SHA"
+: "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
+test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 cargo build --locked -p nac-server --bin nac-web
 
 python3 .github/scripts/browser-binary.py pack \
@@ -123,12 +127,27 @@ initial/restarted identities and G2's identity to name that same absolute path,
 full source and hash. This works for both verified artifact and fresh-source
 fallback modes. It supplements the full original collector; it cannot substitute
 for its goal/accounting/native-call/cleanup validation. Ordinary shards consume
-the same authenticated producer bytes, and all five test jobs remain required.
+the same authenticated producer bytes, and all nine consumer test instances
+remain required.
 
-## Checks and measurement boundary
+## Implemented workflow and measurement boundary
+
+`browser-binary` is required by both browser consumers, the browser join and the
+explicit final required-job contract. Consumers select the producer's actual
+artifact ID, validate its anchored receipt and full bytes, then run the unchanged
+selections. A current artifact avoids compilation/cache duplication; a valid old
+attempt runs the original locked source build. Parsed workflow negative controls
+cover these edges, exact identity/profile inputs, trusted cache writes and proof
+binding. The native eight-shard inventory is a refinement of S02, not another
+strategy: all eight ordinary selections are nonempty and their union with the
+two dedicated proofs exactly covers the same 205 tests. No browser assertion,
+worker setting, retry or clock changed.
+
+Run focused controls:
 
 ```sh
 python3 .github/scripts/browser-binary.test.py
+node --test .github/scripts/pr-browser-binary.test.mjs .github/scripts/pr-browser-sharding.test.mjs
 ```
 
 The real CLI controls exercise valid current transport and older-attempt source

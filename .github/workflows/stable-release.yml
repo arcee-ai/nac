@@ -222,17 +222,20 @@ jobs:
         run: make test-assets
 
 
-  browser-shards:
+  browser-binary:
     if: ${{ needs.prepare.outputs.run == 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
+    outputs:
+      receipt: ${{ steps.pack.outputs.receipt }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
+      NAC_BUILD_TRACK: dev
+      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -244,6 +247,100 @@ jobs:
           prefix-key: nac-ci-v1
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Build and package the exact browser executable
+        id: pack
+        run: |
+          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
+          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
+          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
+          cargo build --locked -p nac-server --bin nac-web
+          python3 .github/scripts/browser-binary.py pack \
+            --binary "$GITHUB_WORKSPACE/target/debug/nac-web" \
+            --output-dir "$GITHUB_WORKSPACE/browser-binary-upload" \
+            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
+            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
+      - name: Retain same-run browser executable bytes
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-binary-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.pack.outputs.archive }}
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  browser-shards:
+    if: ${{ needs.prepare.outputs.run == 'true' }}
+    needs: [prepare, browser-binary]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
+      NAC_BUILD_TRACK: dev
+      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - name: Validate browser artifact selection and current runner
+        env:
+          BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
+        run: |
+          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
+          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
+          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
+          [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+      - name: Download only this producer's browser executable artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.browser-binary.outputs.artifact_id }}
+          path: browser-binary-download
+          merge-multiple: true
+      - name: Validate exact-run executable or select fresh source fallback
+        id: binary
+        env:
+          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
+        run: |
+          python3 .github/scripts/browser-binary.py consume \
+            --archive "$GITHUB_WORKSPACE/browser-binary-download/browser-binary.tar.gz" \
+            --output-dir "$GITHUB_WORKSPACE/browser-binary-runtime" \
+            --receipt-env BROWSER_BINARY_RECEIPT \
+            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
+            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.binary.outputs.mode == 'source'
+        with:
+          prefix-key: nac-ci-v1
+          key: ${{ github.job }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Rebuild current-attempt source after a valid older producer
+        if: steps.binary.outputs.mode == 'source'
+        run: cargo build --locked -p nac-server --bin nac-web
+      - name: Select the verified current-attempt browser executable
+        id: runtime
+        env:
+          BROWSER_BINARY_MODE: ${{ steps.binary.outputs.mode }}
+          VERIFIED_BROWSER_BINARY: ${{ steps.binary.outputs.binary }}
+        run: |
+          case "$BROWSER_BINARY_MODE" in
+            artifact) test -n "$VERIFIED_BROWSER_BINARY"; binary="$VERIFIED_BROWSER_BINARY" ;;
+            source) binary="$GITHUB_WORKSPACE/target/debug/nac-web" ;;
+            *) exit 1 ;;
+          esac
+          test -x "$binary"
+          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
@@ -251,19 +348,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes less
       - name: Install locked browser dependencies
         run: npm --prefix crates/nac-server/web ci
-      # This candidate's committed bundles are checked by test-server/test-assets.
-      # The final aggregate requires BOTH that drift gate and these real journeys.
+      # test-server-web separately proves the same candidate's committed bundles.
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
-
       - name: Run production-embedded browser shard
         env:
+          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
           BROWSER_SHARD: ${{ matrix.shard }}
-        run: |
-          cargo build --locked -p nac-server --bin nac-web
-          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e -- --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/4"
+        run: npm --prefix crates/nac-server/web run test:e2e -- --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/8"
       - name: Upload browser shard failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -274,22 +368,70 @@ jobs:
 
   browser-proof:
     if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
+    needs: [prepare, browser-binary]
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
+      NAC_BUILD_TRACK: dev
+      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - name: Validate browser artifact selection and current runner
+        env:
+          BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
+        run: |
+          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
+          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
+          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
+          [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+      - name: Download only this producer's browser executable artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.browser-binary.outputs.artifact_id }}
+          path: browser-binary-download
+          merge-multiple: true
+      - name: Validate exact-run executable or select fresh source fallback
+        id: binary
+        env:
+          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
+        run: |
+          python3 .github/scripts/browser-binary.py consume \
+            --archive "$GITHUB_WORKSPACE/browser-binary-download/browser-binary.tar.gz" \
+            --output-dir "$GITHUB_WORKSPACE/browser-binary-runtime" \
+            --receipt-env BROWSER_BINARY_RECEIPT \
+            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
+            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.binary.outputs.mode == 'source'
         with:
           prefix-key: nac-ci-v1
           key: ${{ github.job }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Rebuild current-attempt source after a valid older producer
+        if: steps.binary.outputs.mode == 'source'
+        run: cargo build --locked -p nac-server --bin nac-web
+      - name: Select the verified current-attempt browser executable
+        id: runtime
+        env:
+          BROWSER_BINARY_MODE: ${{ steps.binary.outputs.mode }}
+          VERIFIED_BROWSER_BINARY: ${{ steps.binary.outputs.binary }}
+        run: |
+          case "$BROWSER_BINARY_MODE" in
+            artifact) test -n "$VERIFIED_BROWSER_BINARY"; binary="$VERIFIED_BROWSER_BINARY" ;;
+            source) binary="$GITHUB_WORKSPACE/target/debug/nac-web" ;;
+            *) exit 1 ;;
+          esac
+          test -x "$binary"
+          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
@@ -297,36 +439,40 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes less
       - name: Install locked browser dependencies
         run: npm --prefix crates/nac-server/web ci
-      # This candidate's committed bundles are checked by test-server/test-assets.
-      # The final aggregate requires BOTH that drift gate and these real journeys.
+      # test-server-web separately proves the same candidate's committed bundles.
       - name: Install Playwright Chromium
         working-directory: crates/nac-server/web
         run: npx playwright install --with-deps chromium
-
       - name: Verify complete disjoint current browser selection
         working-directory: crates/nac-server/web
         run: |
           mkdir -p browser-inventory
           npx playwright test --list --reporter=json > browser-inventory/complete.json
           npx playwright test exact-goal-wait.e2e.ts --list --reporter=json > browser-inventory/proof.json
-          for shard in 1 2 3 4; do
-            npx playwright test --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/4" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
+          for shard in 1 2 3 4 5 6 7 8; do
+            npx playwright test --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/8" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
           done
           python3 ../../../.github/scripts/browser-inventory.py \
             --complete browser-inventory/complete.json --part browser-inventory/proof.json \
             --part browser-inventory/ordinary-1.json --part browser-inventory/ordinary-2.json \
-            --part browser-inventory/ordinary-3.json --part browser-inventory/ordinary-4.json
+            --part browser-inventory/ordinary-3.json --part browser-inventory/ordinary-4.json \
+            --part browser-inventory/ordinary-5.json --part browser-inventory/ordinary-6.json \
+            --part browser-inventory/ordinary-7.json --part browser-inventory/ordinary-8.json
       - name: Run production-embedded goal proof journeys
         env:
+          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
-        run: |
-          cargo build --locked -p nac-server --bin nac-web
-          NAC_E2E_BINARY="$GITHUB_WORKSPACE/target/debug/nac-web" npm --prefix crates/nac-server/web run test:e2e -- exact-goal-wait.e2e.ts
+        run: npm --prefix crates/nac-server/web run test:e2e -- exact-goal-wait.e2e.ts
       - name: Stage only the two bounded ALL471 goal receipts
         if: always()
         env:
           GOAL_PROOF_SOURCE: ${{ needs.prepare.outputs.sha }}
-        run: python3 .github/scripts/browser-proof.py --root crates/nac-server/web/test-results --source "$GOAL_PROOF_SOURCE"
+          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
+        run: |
+          python3 .github/scripts/browser-proof.py --root crates/nac-server/web/test-results --source "$GOAL_PROOF_SOURCE"
+          python3 .github/scripts/browser-binary.py verify-proof \
+            --binary "$NAC_E2E_BINARY" --source "$GOAL_PROOF_SOURCE" \
+            --proof-dir crates/nac-server/web/test-results/all471-goal-proof-artifact
       - name: Retain only ALL471 goal proof and cleanup receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -335,7 +481,6 @@ jobs:
           path: crates/nac-server/web/test-results/all471-goal-proof-artifact/*.json
           retention-days: 7
           if-no-files-found: error
-
       - name: Upload browser test artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -346,14 +491,16 @@ jobs:
 
   browser:
     if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, browser-shards, browser-proof]
+    needs: [prepare, browser-binary, browser-shards, browser-proof]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every browser shard and complete goal proof
+      - name: Require the exact binary, every browser shard and complete goal proof
         env:
+          BINARY_RESULT: ${{ needs.browser-binary.result }}
           SHARD_RESULT: ${{ needs.browser-shards.result }}
           PROOF_RESULT: ${{ needs.browser-proof.result }}
         run: |
+          test "$BINARY_RESULT" = success
           test "$SHARD_RESULT" = success
           test "$PROOF_RESULT" = success
 
@@ -400,6 +547,7 @@ jobs:
           node --test .github/scripts/pr-*.test.mjs
           python3 .github/scripts/browser-proof.test.py
           python3 .github/scripts/browser-inventory.test.py
+          python3 .github/scripts/browser-binary.test.py
           python3 .github/scripts/ci-timings.test.py
 
       - name: Test stable release policy and configuration
@@ -606,7 +754,7 @@ jobs:
   required-pr-checks:
     name: Required PR checks
     if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
+    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-binary, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

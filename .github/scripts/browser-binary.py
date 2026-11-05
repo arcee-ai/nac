@@ -62,7 +62,9 @@ def identity(value):
     require(integer(value["run_attempt"]), "invalid run attempt")
     require(text(value["target"]) and re.fullmatch(r"[A-Za-z0-9_.-]+", value["target"]), "invalid target")
     require(text(value["rustc"]) and value["rustc"].startswith("rustc "), "invalid compiler identity")
-    require(text(value["runner_image"]), "invalid runner image")
+    require(text(value["runner_image"])
+            and re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", value["runner_image"]),
+            "invalid runner image")
     require(value["profile"] == "dev" and type(value["dev_debug"]) is int and value["dev_debug"] == 0,
             "invalid browser profile")
     require(value["build_track"] == "dev" and value["build_id"] == f"dev-{source}", "invalid build identity")
