@@ -11,6 +11,8 @@ test("browser without a desktop bridge retains shared New Chat and focus", async
   const composer = page.getByRole("combobox", { name: "Message" });
   await expect(composer).toBeVisible();
   expect(await page.evaluate(() => Reflect.has(globalThis, "__nacDesktop"))).toBe(false);
+  // The shared chord needs this session's project from the hydrated global list.
+  await expect(page.locator('[data-sidebar="true"] button[aria-current="page"]')).toHaveCount(1);
   await composer.focus();
   const mac = await page.evaluate("/Mac|iPhone|iPad|iPod/.test(navigator.userAgent)");
   await page.keyboard.press(mac ? "Meta+Shift+O" : "Control+Shift+O");
