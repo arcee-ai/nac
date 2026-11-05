@@ -1,863 +1,247 @@
-name: Stable release
-
+name: Private Darwin readiness diagnostic
 on:
-  push:
-    branches: [main, dev]
-    tags: ["v*.*.*"]
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
-    inputs:
-      cold_caches:
-        description: Measure required Rust and image cache misses while running all acceptance work
-        type: boolean
-        required: false
-        default: false
-
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.changes.base != null) }}
-
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      cold_caches: ${{ steps.cache-mode.outputs.cold_caches }}
-      run: ${{ steps.stable.outputs.run || steps.ci.outputs.run }}
-      sha: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
-      version: ${{ steps.stable.outputs.version || steps.ci.outputs.version }}
-      tag: ${{ steps.stable.outputs.tag }}
-      managed_applicable: ${{ steps.applicability.outputs.managed_applicable }}
-      source_policy_mode: ${{ steps.source-policy.outputs.mode }}
-      source_policy_sha: ${{ steps.source-policy.outputs.policy_sha }}
-
+  darwin-readiness:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          persist-credentials: false
           ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Validate stable release target
-        id: stable
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          git fetch --no-tags origin dev:refs/remotes/origin/dev
-          source_sha="$(git rev-parse HEAD)"
-          SOURCE_SHA="$source_sha" DEV_REF=refs/remotes/origin/dev node .github/scripts/release-policy.mjs validate-stable
-          {
-            echo "run=true"
-            echo "sha=$source_sha"
-            echo "version=$(tr -d '[:space:]' < version.txt)"
-            echo "tag=$RELEASE_TAG"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Capture CI source identity
-        id: ci
-        if: >-
-          (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) ||
-          github.event_name == 'pull_request' ||
-          github.event_name == 'workflow_dispatch'
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_EVENT_ACTION: ${{ github.event.action }}
-          CI_EVENT_BASE_CHANGED: ${{ toJSON(github.event.changes.base != null) }}
-        run: |
-          version="$(tr -d '[:space:]' < version.txt)"
-          {
-            echo "run=true"
-            echo "sha=$SOURCE_SHA"
-            echo "version=$version"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Select explicit cache-read measurement mode
-        id: cache-mode
-        env:
-          DISPATCH_COLD_CACHES: ${{ toJSON(inputs.cold_caches) }}
-        run: python3 .github/scripts/cold-caches.py >> "$GITHUB_OUTPUT"
-
-      - name: Select ordinary base policy or publication-only resolution
-        id: source-policy
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ steps.stable.outputs.sha || steps.ci.outputs.sha }}
-        run: node .github/scripts/publication-policy.mjs select "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Decide managed applicability from the complete merge diff
-        id: applicability
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [ "$EVENT_NAME" = pull_request ]; then
-            git diff --no-renames --name-only -z "$BASE_SHA" HEAD > "$RUNNER_TEMP/pr-paths"
-            node .github/scripts/pr-checks.mjs applicability "$RUNNER_TEMP/pr-paths" >> "$GITHUB_OUTPUT"
-          else
-            echo 'managed_applicable=true' >> "$GITHUB_OUTPUT"
-          fi
-
-  workflow-lint:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
+          fetch-depth: 2
+      - name: Bind actual hosted ARM runner
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          uname -a
+          sw_vers
+          printf 'ImageOS=%s ImageVersion=%s RUNNER_ARCH=%s\n' "$ImageOS" "$ImageVersion" "$RUNNER_ARCH"
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          shared-key: native-regressions
+          save-if: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-      - name: Install locked workflow-parser dependencies
-        run: npm --prefix .github/scripts ci --ignore-scripts
-      - name: Check workflows and scripts, then prove enforcement
-        run: make lint-workflows test-workflow-lint test-manual-stack-override
-
-  lint:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-
-      - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-
-      - name: Install web dependencies
-        working-directory: crates/nac-server/web
-        run: npm ci
-
-      - name: Lint backend (frontend lint is part of test-assets)
-        run: cargo clippy --workspace --locked --lib --bins -- -D warnings
-
-      - name: Check frontend and backend formatting
-        run: make format-check
-
-  test-server:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          shared-key: server-browser-linux-gnu-debug0-v1
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-
-      - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-
-      - name: Run nac-server tests
-        run: python3 .github/scripts/server-tests.py
-
-      - name: Exercise stable binary readiness and status identity
-        run: make test-stable-binary
-
-
-  test-server-web:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-
-      - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-
-      - name: Install web dependencies
-        working-directory: crates/nac-server/web
-        run: npm ci
-
-      - name: Run frontend tests
-        working-directory: crates/nac-server/web
-        run: npm test
-
-      # The build output is committed so that building nac-web never needs Node.
-      # Rebuilding it here catches a commit that changed `web/` without shipping
-      # the matching bundle.
-      - name: Check generated API and every committed browser/client bundle
-        run: make test-assets
-
-
-  browser-binary:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    outputs:
-      receipt: ${{ steps.pack.outputs.receipt }}
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
-      NAC_BUILD_TRACK: dev
-      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          shared-key: server-browser-linux-gnu-debug0-v1
-          save-if: "false"
-      - name: Build and package the exact browser executable
-        id: pack
+      - name: Prepare canonical locked dependencies
+        run: make setup
+      - name: Build once and record ten finite native episodes
         run: |
-          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
-          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
-          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
-          cargo build --locked -p nac-server --bin nac-web
-          python3 .github/scripts/browser-binary.py pack \
-            --binary "$GITHUB_WORKSPACE/target/debug/nac-web" \
-            --output-dir "$GITHUB_WORKSPACE/browser-binary-upload" \
-            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
-            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
-      - name: Retain same-run browser executable bytes
-        id: upload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: browser-binary-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.pack.outputs.archive }}
-          compression-level: 0
-          retention-days: 7
-          if-no-files-found: error
+          python3 - --expected-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/darwin-readiness-diagnostic" <<'PYDIAGNOSTIC'
+          #!/usr/bin/env python3
+          """Private finite Darwin diagnostic. Execution requires separate Root admission."""
+          import argparse
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import platform
+          import re
+          import subprocess
+          import time
 
-  browser-shards:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, browser-binary]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
-      NAC_BUILD_TRACK: dev
-      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-      - name: Validate browser artifact selection and current runner
-        env:
-          BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
-          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
-        run: |
-          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
-          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
-          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
-          [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          test -n "$BROWSER_BINARY_RECEIPT"
-          printf 'Browser consumer runner image: %s@%s\n' "$ImageOS" "$ImageVersion"
-          mkdir "$GITHUB_WORKSPACE/browser-binary-download"
-      - name: Download only this producer's browser executable artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          artifact-ids: ${{ needs.browser-binary.outputs.artifact_id }}
-          path: browser-binary-download
-          merge-multiple: true
-      - name: Validate exact-run executable or select fresh source fallback
-        id: binary
-        env:
-          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
-        run: |
-          python3 .github/scripts/browser-binary.py consume \
-            --archive "$GITHUB_WORKSPACE/browser-binary-download/browser-binary.tar.gz" \
-            --output-dir "$GITHUB_WORKSPACE/browser-binary-runtime" \
-            --receipt-env BROWSER_BINARY_RECEIPT \
-            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
-            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: steps.binary.outputs.mode == 'source'
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          shared-key: server-browser-linux-gnu-debug0-v1
-          save-if: "false"
-      - name: Rebuild current-attempt source after a valid older producer
-        if: steps.binary.outputs.mode == 'source'
-        run: cargo build --locked -p nac-server --bin nac-web
-      - name: Select the verified current-attempt browser executable
-        id: runtime
-        env:
-          BROWSER_BINARY_MODE: ${{ steps.binary.outputs.mode }}
-          VERIFIED_BROWSER_BINARY: ${{ steps.binary.outputs.binary }}
-        run: |
-          case "$BROWSER_BINARY_MODE" in
-            artifact) test -n "$VERIFIED_BROWSER_BINARY"; binary="$VERIFIED_BROWSER_BINARY" ;;
-            source) binary="$GITHUB_WORKSPACE/target/debug/nac-web" ;;
-            *) exit 1 ;;
-          esac
-          test -x "$binary"
-          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-      - name: Provision real terminal pager
-        run: sudo apt-get update && sudo apt-get install --yes less
-      - name: Install locked browser dependencies
-        run: npm --prefix crates/nac-server/web ci
-      # test-server-web separately proves the same candidate's committed bundles.
-      - name: Install Playwright Chromium
-        working-directory: crates/nac-server/web
-        run: npx playwright install --with-deps chromium
-      - name: Run production-embedded browser shard
-        env:
-          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
-          NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
-          BROWSER_SHARD: ${{ matrix.shard }}
-        run: npm --prefix crates/nac-server/web run test:e2e -- --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/8"
-      - name: Upload browser shard failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: nac-web-playwright-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: crates/nac-server/web/test-results
-          if-no-files-found: ignore
+          BASE = "4368844dbeca3f5c08ae345b86e730995166000a"
+          SOURCE = "crates/nac-process/src/native_pty/platform_tests.rs"
+          SOURCE_SHA256 = "8cf3ae16021acf688e04a93b5ddc41cf11348b872b86052efb97ed8dc278144f"
+          ORIGINAL_IMAGE = "20261026.0455.2"
+          OWNER_BLOBS = {
+              "crates/nac-process/src/native_pty/platform/macos.rs": "ba7f900a2ce229ebc5fb59618ebee8d11ff0dc40",
+              SOURCE: "1b93e808de3dd31f9550181bf26086d4f85a2db7",
+              "crates/nac-process/src/native_pty/platform/macos_tests.rs": "748c99de636f5f2c192d617dd2ff716d952916e8",
+              "crates/nac-process/src/native_pty/platform/macos/inspection.rs": "784049dc396bcf91fbcfb12ce078a0cc8ea533a8",
+              "crates/nac-process/src/native_pty/platform/macos/signal_diagnostics.rs": "69b07344a75818e4dc6517ad4b5ffeb047b7e05c",
+              "crates/nac-process/src/native_pty/platform.rs": "6aeb3696ee7476f65ed98131f273abd3b0510880",
+              "crates/nac-process/AGENTS.md": "3a22afcf4fa85463abe7bca547cd4a664df9381a",
+          }
+          STRESS = "native_pty::platform::tests::active_census_releases_dead_capabilities_after_child_discovery"
+          HELPER = "native_pty::platform::tests::readiness_diagnostic_child"
+          CONTROLS = [
+              "audit_signal_rejects_wrong_version_without_signaling_fixture",
+              "mismatched_unique_identity_cannot_signal_fixture",
+              "atomic_signal_permission_failure_retains_exact_live_identity",
+              "exec_refresh_keeps_unique_identity_and_uses_new_version",
+          ]
 
-  browser-proof:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, browser-binary]
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
-      NAC_BUILD_TRACK: dev
-      NAC_BUILD_ID: dev-${{ needs.prepare.outputs.sha }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-      - name: Validate browser artifact selection and current runner
-        env:
-          BROWSER_ARTIFACT_ID: ${{ needs.browser-binary.outputs.artifact_id }}
-          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
-        run: |
-          : "${ImageOS:?missing runner OS}" "${ImageVersion:?missing runner image version}"
-          test "$(git rev-parse HEAD)" = "$NAC_SOURCE_REVISION"
-          test "$(rustc -vV | sed -n 's/^host: //p')" = x86_64-unknown-linux-gnu
-          [[ "$BROWSER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          test -n "$BROWSER_BINARY_RECEIPT"
-          printf 'Browser consumer runner image: %s@%s\n' "$ImageOS" "$ImageVersion"
-          mkdir "$GITHUB_WORKSPACE/browser-binary-download"
-      - name: Download only this producer's browser executable artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          artifact-ids: ${{ needs.browser-binary.outputs.artifact_id }}
-          path: browser-binary-download
-          merge-multiple: true
-      - name: Validate exact-run executable or select fresh source fallback
-        id: binary
-        env:
-          BROWSER_BINARY_RECEIPT: ${{ needs.browser-binary.outputs.receipt }}
-        run: |
-          python3 .github/scripts/browser-binary.py consume \
-            --archive "$GITHUB_WORKSPACE/browser-binary-download/browser-binary.tar.gz" \
-            --output-dir "$GITHUB_WORKSPACE/browser-binary-runtime" \
-            --receipt-env BROWSER_BINARY_RECEIPT \
-            --source "$NAC_SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --target x86_64-unknown-linux-gnu --rustc "$(rustc --version)" \
-            --runner-image "$ImageOS@$ImageVersion" --github-output "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: steps.binary.outputs.mode == 'source'
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          shared-key: server-browser-linux-gnu-debug0-v1
-          save-if: "false"
-      - name: Rebuild current-attempt source after a valid older producer
-        if: steps.binary.outputs.mode == 'source'
-        run: cargo build --locked -p nac-server --bin nac-web
-      - name: Select the verified current-attempt browser executable
-        id: runtime
-        env:
-          BROWSER_BINARY_MODE: ${{ steps.binary.outputs.mode }}
-          VERIFIED_BROWSER_BINARY: ${{ steps.binary.outputs.binary }}
-        run: |
-          case "$BROWSER_BINARY_MODE" in
-            artifact) test -n "$VERIFIED_BROWSER_BINARY"; binary="$VERIFIED_BROWSER_BINARY" ;;
-            source) binary="$GITHUB_WORKSPACE/target/debug/nac-web" ;;
-            *) exit 1 ;;
-          esac
-          test -x "$binary"
-          printf 'binary=%s\n' "$binary" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-      - name: Provision real terminal pager
-        run: sudo apt-get update && sudo apt-get install --yes less
-      - name: Install locked browser dependencies
-        run: npm --prefix crates/nac-server/web ci
-      # test-server-web separately proves the same candidate's committed bundles.
-      - name: Install Playwright Chromium
-        working-directory: crates/nac-server/web
-        run: npx playwright install --with-deps chromium
-      - name: Verify complete disjoint current browser selection
-        working-directory: crates/nac-server/web
-        run: |
-          mkdir -p browser-inventory
-          npx playwright test --list --reporter=json > browser-inventory/complete.json
-          npx playwright test exact-goal-wait.e2e.ts --list --reporter=json > browser-inventory/proof.json
-          for shard in 1 2 3 4 5 6 7 8; do
-            npx playwright test --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="$shard/8" --list --reporter=json > "browser-inventory/ordinary-$shard.json"
-          done
-          python3 ../../../.github/scripts/browser-inventory.py \
-            --complete browser-inventory/complete.json --part browser-inventory/proof.json \
-            --part browser-inventory/ordinary-1.json --part browser-inventory/ordinary-2.json \
-            --part browser-inventory/ordinary-3.json --part browser-inventory/ordinary-4.json \
-            --part browser-inventory/ordinary-5.json --part browser-inventory/ordinary-6.json \
-            --part browser-inventory/ordinary-7.json --part browser-inventory/ordinary-8.json
-      - name: Run production-embedded goal proof journeys
-        env:
-          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
-          NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
-        run: npm --prefix crates/nac-server/web run test:e2e -- exact-goal-wait.e2e.ts
-      - name: Stage only the two bounded ALL471 goal receipts
+
+          def selected_result(name, output, code):
+              """Bind real libtest selection and final summary, including nested isolation."""
+              if "running 0 tests" in output or "running 1 test" not in output:
+                  return False
+              if f"test {name} ..." not in output or "could not compile" in output:
+                  return False
+              summaries = re.findall(r"^test result: (.+)$", output, re.MULTILINE)
+              if not summaries:
+                  return False
+              if code == 0:
+                  return summaries[-1].startswith("ok. 1 passed; 0 failed; 0 ignored;")
+              if code != 101 or not summaries[-1].startswith("FAILED. 0 passed; 1 failed; 0 ignored;"):
+                  return False
+              sections = output.rsplit("\nfailures:\n", 1)
+              if len(sections) != 2:
+                  return False
+              names = sections[1].split("\ntest result:", 1)[0].splitlines()
+              return [line for line in names if line] == [f"    {name}"]
+
+
+          def case_expectation(label, name, output, code, negative):
+              selected = selected_result(name, output, code)
+              marker_lines = [line for line in output.splitlines() if "NAC_PROCESS_READY_DIAGNOSTIC wait=" in line]
+              rows = [re.fullmatch(r"NAC_PROCESS_READY_DIAGNOSTIC wait=(true|false) iteration=(\d+) pid=(\d+)", line)
+                      for line in marker_lines]
+              markers = len(rows)
+              acceptable = code == 0
+              if negative is not None:
+                  acceptable = code == 101 and negative in output and "NAC_PROCESS_SIGNAL_DIAGNOSTIC" not in output
+              if label in ("pid-only", "ready") and code == 0:
+                  expected_wait = "true" if label == "ready" else "false"
+                  acceptable = acceptable and markers == 48 and all(
+                      row is not None and row[1] == expected_wait and int(row[2]) == i and int(row[3]) > 0
+                      for i, row in enumerate(rows))
+              return selected, bool(acceptable), markers
+
+
+          def clean_environment(values):
+              return {k: v for k, v in values.items()
+                      if not k.startswith("NAC_PROCESS_READY_") and k != "NAC_PROCESS_TEST_FD_STRESS_CHILD"}
+
+
+          def emit(label, raw):
+              print(f"BEGIN_RAW {label}", flush=True)
+              print(raw, end="" if raw.endswith("\n") else "\n", flush=True)
+              print(f"END_RAW {label}", flush=True)
+
+
+          def read(args):
+              return subprocess.check_output(args, text=True, timeout=30).strip()
+
+
+          p = argparse.ArgumentParser()
+          p.add_argument("--expected-sha", required=True)
+          p.add_argument("--output", type=pathlib.Path, required=True)
+          a = p.parse_args()
+          assert platform.system() == "Darwin" and platform.machine() == "arm64"
+          assert os.environ.get("GITHUB_ACTIONS") == "true", "actual hosted native CI required"
+          assert os.environ.get("CARGO_BUILD_JOBS") == "2" and os.environ.get("CARGO_INCREMENTAL") == "0"
+          assert read(["git", "rev-parse", "HEAD"]) == a.expected_sha == os.environ["GITHUB_SHA"]
+          assert read(["git", "rev-parse", "HEAD^"]) == BASE
+          assert read(["git", "diff", "--name-only", BASE, "HEAD"]).splitlines() == [
+              ".github/workflows/stable-release.yml", SOURCE]
+          assert not read(["git", "status", "--porcelain"])
+          assert hashlib.sha256(pathlib.Path(SOURCE).read_bytes()).hexdigest() == SOURCE_SHA256
+          for owner, blob in OWNER_BLOBS.items():
+              assert read(["git", "rev-parse", f"{BASE}:{owner}"]) == blob
+              if owner != SOURCE:
+                  assert read(["git", "rev-parse", f"HEAD:{owner}"]) == blob
+          a.output.mkdir(parents=True, exist_ok=False)
+          env = clean_environment(os.environ)
+          report = {
+              "actual_sha": a.expected_sha, "base": BASE, "source_sha256": SOURCE_SHA256,
+              "source_blob": read(["git", "rev-parse", f"HEAD:{SOURCE}"]),
+              "tree": read(["git", "rev-parse", "HEAD^{tree}"]),
+              "workflow_sha256": hashlib.sha256(pathlib.Path(".github/workflows/stable-release.yml").read_bytes()).hexdigest(),
+              "cargo_lock_sha256": hashlib.sha256(pathlib.Path("Cargo.lock").read_bytes()).hexdigest(),
+              "os": read(["sw_vers"]), "kernel": read(["uname", "-a"]),
+              "rust": read(["rustc", "-Vv"]), "cargo": read(["cargo", "-V"]),
+              "ci": {k: os.environ.get(k) for k in ["GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB",
+                    "GITHUB_SHA", "GITHUB_WORKFLOW", "GITHUB_REPOSITORY", "RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion"]},
+              "original_failure": {"run": 42067358355, "job": 127386277504,
+                                   "tested_merge": "55c0e6a4670be1fc9f0cc304da7ed49ee2e5d90e", "image": ORIGINAL_IMAGE,
+                                   "os_version": "26.6.2", "os_build": "25G83", "installed_kernel_source_match": "unproven"},
+              "original_owner_blobs": OWNER_BLOBS,
+              "image_matches_original": os.environ.get("ImageVersion") == ORIGINAL_IMAGE,
+              "original_failure_resolved": False, "causal_proof": False, "expected_episode_count": 10, "episodes": [],
+          }
+
+
+          def save():
+              raw = json.dumps(report, indent=2) + "\n"
+              (a.output / "report.json").write_text(raw)
+              emit("report", raw)
+
+
+          save()
+          build = subprocess.run(["cargo", "test", "--locked", "-p", "nac-process", "--lib",
+                                  "--no-run", "--message-format=json"], env=env, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+          for label, raw in [("build.jsonl", build.stdout), ("build.stderr", build.stderr)]:
+              (a.output / label).write_text(raw)
+              emit(label, raw)
+          report["build_returncode"] = build.returncode
+          save()
+          assert build.returncode == 0, "build failed; no runtime evidence"
+          artifacts = [json.loads(line) for line in build.stdout.splitlines() if line.startswith("{")]
+          binaries = {x["executable"] for x in artifacts if x.get("reason") == "compiler-artifact"
+                      and x.get("profile", {}).get("test") and x.get("executable")
+                      and x.get("target", {}).get("name") == "nac_process"}
+          assert len(binaries) == 1, "ambiguous exact test artifact"
+          binary = binaries.pop()
+          report["binary"] = binary
+          report["binary_sha256"] = hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
+          listed = subprocess.check_output([binary, "--list"], env=env, text=True)
+          (a.output / "list.log").write_text(listed)
+          emit("list", listed)
+          names = [HELPER, STRESS] + ["native_pty::platform::macos::tests::" + n for n in CONTROLS]
+          assert all(n + ": test" in listed.splitlines() for n in names), "exact selection absent"
+          cases = [("helper-disabled", HELPER, {}, None)]
+          cases += [("control-" + n, "native_pty::platform::macos::tests::" + n, {}, None) for n in CONTROLS]
+          cases += [
+              ("original-baseline", STRESS, {}, None),
+              ("pid-only", STRESS, {"NAC_PROCESS_READY_DIAGNOSTIC": "pid-only"}, None),
+              ("ready", STRESS, {"NAC_PROCESS_READY_DIAGNOSTIC": "ready"}, None),
+              ("missing-ready", STRESS, {"NAC_PROCESS_READY_DIAGNOSTIC": "ready", "NAC_PROCESS_READY_SUPPRESS": "1"}, "post-exec readiness read:"),
+              ("wrong-ready-pid", STRESS, {"NAC_PROCESS_READY_DIAGNOSTIC": "ready", "NAC_PROCESS_READY_WRONG_PID": "1"}, "readiness PID mismatch"),
+          ]
+          assert len(cases) == 10
+          valid = True
+          for label, name, extra, negative in cases:
+              assert hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest() == report["binary_sha256"]
+              identity = {"label": label, "name": name, "env": extra, "candidate": a.expected_sha,
+                          "binary_sha256": report["binary_sha256"], "ci": report["ci"]}
+              print("BEGIN_CASE " + json.dumps(identity, sort_keys=True), flush=True)
+              started = time.monotonic()
+              result = subprocess.run([binary, "--exact", name, "--test-threads=1", "--nocapture"],
+                                      env={**env, **extra}, text=True, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, check=False)
+              (a.output / (label + ".log")).write_text(result.stdout)
+              emit(label, result.stdout)
+              selected, acceptable, markers = case_expectation(label, name, result.stdout, result.returncode, negative)
+              episode = {**identity, "returncode": result.returncode, "seconds": round(time.monotonic() - started, 3),
+                         "selected": selected, "control_expectation_met": acceptable, "diagnostic_iterations": markers,
+                         "raw_output_sha256": hashlib.sha256(result.stdout.encode()).hexdigest()}
+              report["episodes"].append(episode)
+              print("END_CASE " + json.dumps(episode, sort_keys=True), flush=True)
+              save()
+              valid = valid and selected and acceptable
+              if not selected or (negative is not None or label.startswith("control-") or label == "helper-disabled") and not acceptable:
+                  report["stop_reason"] = "selection or prerequisite/negative control failed; remaining cases UNRUN"
+                  break
+          report["complete"] = len(report["episodes"]) == len(cases)
+          report["diagnostic_controls_and_episodes_met"] = bool(valid and report["complete"])
+          report["source_clean_after"] = not read(["git", "status", "--porcelain"])
+          save()
+          assert report["source_clean_after"], "source drift after diagnostic"
+          # Failure is retained even if another comparison arm passes; no rerun or repair.
+          raise SystemExit(0 if report["diagnostic_controls_and_episodes_met"] else 1)
+          PYDIAGNOSTIC
+      - name: Retain raw diagnostic evidence in addition to job stdout
         if: always()
-        env:
-          GOAL_PROOF_SOURCE: ${{ needs.prepare.outputs.sha }}
-          NAC_E2E_BINARY: ${{ steps.runtime.outputs.binary }}
-        run: |
-          python3 .github/scripts/browser-proof.py --root crates/nac-server/web/test-results --source "$GOAL_PROOF_SOURCE"
-          python3 .github/scripts/browser-binary.py verify-proof \
-            --binary "$NAC_E2E_BINARY" --source "$GOAL_PROOF_SOURCE" \
-            --proof-dir crates/nac-server/web/test-results/all471-goal-proof-artifact
-      - name: Retain only ALL471 goal proof and cleanup receipts
-        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: all471-goal-proof-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: crates/nac-server/web/test-results/all471-goal-proof-artifact/*.json
-          retention-days: 7
+          name: darwin-readiness-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/darwin-readiness-diagnostic
           if-no-files-found: error
-      - name: Upload browser test artifacts
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: nac-web-playwright-proof-${{ github.run_attempt }}
-          path: crates/nac-server/web/test-results
-          if-no-files-found: ignore
-
-  browser:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, browser-binary, browser-shards, browser-proof]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require the exact binary, every browser shard and complete goal proof
-        env:
-          BINARY_RESULT: ${{ needs.browser-binary.result }}
-          SHARD_RESULT: ${{ needs.browser-shards.result }}
-          PROOF_RESULT: ${{ needs.browser-proof.result }}
-        run: |
-          test "$BINARY_RESULT" = success
-          test "$SHARD_RESULT" = success
-          test "$PROOF_RESULT" = success
-
-  test-core:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-
-      - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-
-      - name: Install pinned release-policy dependencies
-        working-directory: .github/scripts
-        run: npm ci
-
-      - name: Run nac-core and nac-catalog-gen tests
-        run: cargo test -p nac-core -p nac-catalog-gen --locked
-
-      - name: Qualify isolated current-contents contract fixtures
-        run: make test-capture-qualification
-
-      - name: Test PR gates and rollout safeguards
-        run: |
-          node --test .github/scripts/pr-*.test.mjs
-          python3 .github/scripts/browser-proof.test.py
-          python3 .github/scripts/browser-inventory.test.py
-          python3 .github/scripts/browser-binary.test.py
-          python3 .github/scripts/ci-timings.test.py
-
-      - name: Test stable release policy and configuration
-        run: |
-          bash -n .github/scripts/stable-release-preparation.sh
-          sh -n .github/scripts/stable-release-rollout.sh
-          node --test .github/scripts/release-policy.test.mjs
-
-      - name: Test stable installer routing
-        run: |
-          sh -n scripts/install.sh
-          sh .github/scripts/install.test.sh
-
-  test-workspace:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_PROFILE_DEV_DEBUG: "0"
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-      - name: Test the other four workspace crates
-        run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
-      - name: Preserve source, size, and lifecycle contracts on every PR
-        run: |
-          make test-nac-guide
-          make test-source-size test-source-workflow test-source-binary
-          make test-durability test-managed-load test-managed-image-contract
-
-  quality:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, lint, workflow-lint, test-server, test-server-web, test-core, test-workspace]
-    runs-on: ubuntu-latest
-    outputs:
-      quality_receipt: ${{ steps.receipt.outputs.quality_receipt }}
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-      - name: Bind complete successful quality results to this candidate
-        id: receipt
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
-        run: node .github/scripts/pr-checks.mjs quality-receipt >> "$GITHUB_OUTPUT"
-
-  test:
-    if: ${{ always() && needs.prepare.outputs.run == 'true' }}
-    needs: [prepare, quality, browser]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require shared quality and real browser acceptance
-        env:
-          QUALITY_RESULT: ${{ needs.quality.result }}
-          BROWSER_RESULT: ${{ needs.browser.result }}
-        run: |
-          test "$QUALITY_RESULT" = success
-          test "$BROWSER_RESULT" = success
-
-  build:
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    needs: prepare
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - runner: macos-26
-            target: aarch64-apple-darwin
-
-    runs-on: ${{ matrix.runner }}
-    env:
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Rust build
-        id: release-cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: ${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
-          key: ${{ github.job }}-${{ matrix.target }}-incremental16-v1
-          cache-directories: ${{ github.workspace }}/.nac-ci-incremental-cache/${{ matrix.target }}
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-
-      - name: Restore verified compiler incremental data
-        env:
-          CARGO_INCREMENTAL: "1"
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 scripts/ci-incremental.py restore --workspace "$(pwd -P)" --target "$RELEASE_TARGET"
-
-      - name: Build nac-web binary
-        env:
-          CARGO_INCREMENTAL: "1"
-          NAC_BUILD_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
-          NAC_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
-          NAC_SOURCE_REVISION: ${{ needs.prepare.outputs.sha }}
-        run: |
-          cargo build --release --locked \
-            -p nac-server --bin nac-web \
-            --target ${{ matrix.target }}
-
-      - name: Package and verify archive
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist/pkg
-          cp "target/${{ matrix.target }}/release/nac-web" dist/pkg/nac-web
-          cp LICENSE dist/pkg/LICENSE
-          tar -czf "dist/nac-${{ matrix.target }}.tar.gz" \
-            -C dist/pkg nac-web LICENSE
-
-          short_revision="$(git rev-parse --short=12 "$SOURCE_SHA")"
-          test "$(dist/pkg/nac-web -V)" = "nac-web $RELEASE_VERSION"
-          test "$(dist/pkg/nac-web --version)" = "nac-web $RELEASE_VERSION ($short_revision)"
-          test "$(tar -tzf "dist/nac-${{ matrix.target }}.tar.gz" | sort)" = "$(printf 'LICENSE\nnac-web')"
-
-      - name: Verify full release-local Guide identity
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
-          EXPECTED_TRACK: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) && 'stable' || 'dev' }}
-          EXPECTED_BUILD_ID: ${{ needs.prepare.outputs.tag || format('dev-{0}', needs.prepare.outputs.sha) }}
-        run: |
-          set -euo pipefail
-          env -i PATH="$PATH" dist/pkg/nac-web guide skills discovery |
-            python3 .github/scripts/release-identity.py \
-              --version "$RELEASE_VERSION" --source "$SOURCE_SHA" \
-              --track "$EXPECTED_TRACK" --build-id "$EXPECTED_BUILD_ID"
-
-      - name: Stage trusted compiler incremental snapshot
-        if: >-
-          github.event_name == 'push' &&
-          (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') &&
-          steps.release-cache.outputs.cache-hit != 'true'
-        env:
-          CARGO_INCREMENTAL: "1"
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 scripts/ci-incremental.py stage --workspace "$(pwd -P)" --target "$RELEASE_TARGET"
-
-      - name: Upload archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: nac-${{ matrix.target }}
-          path: dist/nac-${{ matrix.target }}.tar.gz
-
-  macos-native:
-    needs: prepare
-    if: ${{ needs.prepare.outputs.run == 'true' }}
-    uses: ./.github/workflows/macos-native.yml
-    with:
-      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
-      source-sha: ${{ needs.prepare.outputs.sha }}
-
-  managed-image:
-    needs: prepare
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
-    uses: ./.github/workflows/managed-image-build.yml
-    with:
-      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
-      source_sha: ${{ needs.prepare.outputs.sha }}
-      policy_mode: ${{ needs.prepare.outputs.source_policy_mode }}
-      trusted_policy_sha: ${{ needs.prepare.outputs.source_policy_sha }}
-
-  managed-fault:
-    needs: prepare
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
-    uses: ./.github/workflows/managed-fault.yml
-    with:
-      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
-      source_sha: ${{ needs.prepare.outputs.sha }}
-
-  managed-quality:
-    needs: [prepare, quality, managed-fault]
-    if: ${{ needs.prepare.outputs.managed_applicable == 'true' }}
-    uses: ./.github/workflows/managed-quality.yml
-    with:
-      cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
-      source_sha: ${{ needs.prepare.outputs.sha }}
-      quality_receipt: ${{ needs.quality.outputs.quality_receipt }}
-      fault_receipt: ${{ needs.managed-fault.outputs.fault_receipt }}
-
-  managed:
-    if: ${{ always() && needs.prepare.outputs.managed_applicable == 'true' }}
-    needs: [prepare, managed-image, managed-fault, managed-quality]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-      - name: Require exact-candidate image and complete managed fault quality
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          EXPECTED_SHA: ${{ needs.prepare.outputs.sha }}
-        run: node .github/scripts/pr-checks.mjs managed-caller-aggregate
-
-  source-security:
-    needs: prepare
-    uses: ./.github/workflows/source-security.yml
-    with:
-      candidate-sha: ${{ needs.prepare.outputs.sha }}
-      policy-mode: ${{ needs.prepare.outputs.source_policy_mode }}
-      trusted-policy-sha: ${{ needs.prepare.outputs.source_policy_sha }}
-
-  required-pr-checks:
-    name: Required PR checks
-    if: ${{ always() }}
-    needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-binary, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24.22.1
-      - name: Require every applicable job from this run
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          MANAGED_APPLICABLE: ${{ needs.prepare.outputs.managed_applicable }}
-          EXPECTED_SHA: ${{ github.sha }}
-        run: node .github/scripts/pr-checks.mjs aggregate
-
-  publish:
-    if: >-
-      needs.prepare.outputs.run == 'true' &&
-      github.event_name == 'push' &&
-      startsWith(github.ref, 'refs/tags/v')
-    needs: [prepare, test, build, required-pr-checks, source-security]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - name: Download archives
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: dist
-          pattern: nac-*
-          merge-multiple: true
-
-      - name: Upload stable release archives
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: gh release upload "$RELEASE_TAG" dist/* --clobber
+          retention-days: 14

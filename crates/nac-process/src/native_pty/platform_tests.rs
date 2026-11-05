@@ -12,15 +12,20 @@ struct Root {
     output: ChildStdout,
     authority: Authority,
     jobs: Vec<TestIdentity>,
+    #[cfg(target_os = "macos")]
+    readiness: Option<Readiness>,
 }
 impl Root {
     fn new() -> io::Result<Self> {
         let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "while read token; do sleep 30 & job=$!; echo $job; wait $job; done",
+        ]);
+        Self::from_command(command)
+    }
+    fn from_command(mut command: Command) -> io::Result<Self> {
         command
-            .args([
-                "-c",
-                "while read token; do sleep 30 & job=$!; echo $job; wait $job; done",
-            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -52,9 +57,15 @@ impl Root {
             child,
             authority,
             jobs: Vec::new(),
+            #[cfg(target_os = "macos")]
+            readiness: None,
         })
     }
     fn job(&mut self) -> io::Result<libc::pid_t> {
+        #[cfg(target_os = "macos")]
+        if let Some(readiness) = &mut self.readiness {
+            readiness.bind()?;
+        }
         self.input.write_all(b"job\n")?;
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut line = Vec::new();
@@ -164,6 +175,13 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         assert!(status.success(), "isolated FD stress failed: {status}");
         return;
     }
+    #[cfg(target_os = "macos")]
+    let mut root = match std::env::var("NAC_PROCESS_READY_DIAGNOSTIC") {
+        Err(std::env::VarError::NotPresent) => Root::new().unwrap(),
+        Ok(arm) if arm == "pid-only" || arm == "ready" => Root::diagnostic(arm == "ready").unwrap(),
+        other => panic!("invalid readiness diagnostic arm: {other:?}"),
+    };
+    #[cfg(target_os = "linux")]
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
@@ -171,6 +189,14 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         let pid = root.job().unwrap();
         root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
         assert!(!root.authority.leader_exited().unwrap());
+        #[cfg(target_os = "macos")]
+        if let Some(readiness) = &mut root.readiness {
+            readiness.wait(pid).unwrap();
+            eprintln!(
+                "NAC_PROCESS_READY_DIAGNOSTIC wait={} iteration={} pid={}",
+                readiness.wait, _iteration, pid
+            );
+        }
         let identity = Arc::clone(
             root.authority
                 .members
@@ -253,4 +279,141 @@ fn missing_unreaped_root_fence_rejects_fresh_discovery() {
     );
     assert!(root.authority.members.is_empty());
     assert!(root.authority.pending_capture.is_empty());
+}
+
+// Diagnostic only: reuse this test binary's existing --exact child mechanism.
+// Both arms launch the same final executable and use the same churn assertions.
+#[cfg(target_os = "macos")]
+const READY_HELPER: &str = "native_pty::platform::tests::readiness_diagnostic_child";
+
+#[cfg(target_os = "macos")]
+struct Readiness {
+    directory: std::path::PathBuf,
+    listener: Option<std::os::unix::net::UnixListener>,
+    wait: bool,
+    connection: Option<std::os::unix::net::UnixStream>,
+}
+#[cfg(target_os = "macos")]
+impl Readiness {
+    fn new(wait: bool) -> io::Result<Self> {
+        // Keep the Unix socket address within Darwin's sockaddr_un bound.
+        let directory =
+            std::path::Path::new("/tmp").join(format!("nac-ready-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory)?;
+        Ok(Self {
+            directory,
+            listener: None,
+            wait,
+            connection: None,
+        })
+    }
+    fn endpoint(&self) -> std::path::PathBuf {
+        self.directory.join("r")
+    }
+    fn bind(&mut self) -> io::Result<()> {
+        drop(self.connection.take());
+        drop(self.listener.take());
+        match std::fs::remove_file(self.endpoint()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let listener = std::os::unix::net::UnixListener::bind(self.endpoint())?;
+        listener.set_nonblocking(true)?;
+        self.listener = Some(listener);
+        Ok(())
+    }
+    fn wait(&mut self, pid: libc::pid_t) -> io::Result<()> {
+        if !self.wait {
+            return Ok(());
+        }
+        let listener = self.listener.as_ref().unwrap();
+        let mut descriptor = libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one initialized descriptor; finite wait, no signal retry.
+        let result = unsafe { libc::poll(&mut descriptor, 1, 3000) };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if result == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "post-exec readiness missing",
+            ));
+        }
+        let (mut stream, _) = listener.accept()?;
+        stream.set_nonblocking(false)?;
+        stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+        let mut bytes = [0; 4];
+        stream.read_exact(&mut bytes).map_err(|error| {
+            io::Error::new(error.kind(), format!("post-exec readiness read: {error}"))
+        })?;
+        if u32::from_be_bytes(bytes) != pid as u32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "readiness PID mismatch",
+            ));
+        }
+        self.connection = Some(stream);
+        // No PID or message becomes authority: the caller still uses its
+        // independently captured exact member, atomic signal, and death proof.
+        Ok(())
+    }
+}
+#[cfg(target_os = "macos")]
+impl Drop for Readiness {
+    fn drop(&mut self) {
+        drop(self.listener.take());
+        let _ = std::fs::remove_file(self.endpoint());
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+#[cfg(target_os = "macos")]
+impl Root {
+    fn diagnostic(wait: bool) -> io::Result<Self> {
+        let readiness = Readiness::new(wait)?;
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "while read token; do \"$1\" --exact \"$2\" --test-threads=1 --nocapture >/dev/null & job=$!; echo $job; wait $job; done",
+            "fixture",
+        ]).arg(std::env::current_exe()?).arg(READY_HELPER)
+          .env("NAC_PROCESS_READY_HELPER", "1")
+          .env("NAC_PROCESS_READY_SOCKET", readiness.endpoint());
+        let mut root = Self::from_command(command)?;
+        root.readiness = Some(readiness);
+        Ok(root)
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn readiness_diagnostic_child() {
+    if std::env::var("NAC_PROCESS_READY_HELPER").as_deref() != Ok("1") {
+        return;
+    }
+    let mut stream = std::os::unix::net::UnixStream::connect(
+        std::env::var_os("NAC_PROCESS_READY_SOCKET").expect("helper socket missing"),
+    )
+    .unwrap();
+    // This body runs in the final test executable after exec; it performs no
+    // subsequent spawn/exec. No record from the parent shell satisfies this gate.
+    if std::env::var("NAC_PROCESS_READY_SUPPRESS").as_deref() != Ok("1") {
+        let mut pid = std::process::id();
+        if std::env::var("NAC_PROCESS_READY_WRONG_PID").as_deref() == Ok("1") {
+            pid = pid.wrapping_add(1);
+        }
+        stream.write_all(&pid.to_be_bytes()).unwrap();
+    }
+    // Parent retains its accepted connection until exact teardown. The PID-only
+    // arm leaves the same connection queued. No stabilization delay or exec.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let mut end = [0];
+    let outcome = stream.read(&mut end);
+    panic!("diagnostic helper ended before atomic teardown: {outcome:?}");
 }
