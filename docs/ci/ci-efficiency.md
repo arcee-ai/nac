@@ -206,6 +206,15 @@ inventory, scanning and retained candidate-named artifacts retain the existing
 single-build identity boundary. Cache hits never replace smoke/security checks.
 Credentialed publication does not execute untrusted cached builds or candidate code.
 
+The [S19 driver candidate](evidence/all-582/S19-driver-selection/README.md) uses a
+bounded capability selector for the existing native containerd-backed Engine
+builder and explicitly passes the setup action's builder name to the image build.
+Unsupported or unknown configurations retain the original docker-container driver;
+cache trust/cold flags and all image/quality gates remain unchanged. The tiny
+load/payload comparison retained a failed cross-arm layer-equality control and
+different BuildKit/frontend versions; full hosted NAC/cache/resource/performance
+qualification remains pending, without strategy or cohort credit.
+
 Ordinary `pull_request` runs share a concurrency group only with the same PR
 number and cancel superseded runs on synchronize or base-ref edits. Title/body
 edits, ready transitions and reopen events queue without cancelling active work. Push/tag/manual runs have unique run groups

@@ -66,6 +66,7 @@ for name in ("NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"):
         sys.exit(f"managed image contract: compilation must consume exact {name}")
 PY_CACHE
 python3 "$repo_root/scripts/test-managed-dependency-layer.py"
+python3 "$repo_root/.github/scripts/image-build-driver.test.py"
 require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'
