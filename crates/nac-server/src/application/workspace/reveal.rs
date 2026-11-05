@@ -98,8 +98,8 @@ fn reveal_relative_path(repo: &Path, root: &Path, path: &str) -> Result<String> 
         let prefix_text = prefix
             .to_str()
             .ok_or_else(|| anyhow!("invalid path: file is not UTF-8"))?;
-        let _pinned_prefix = workspace::resolve_local_reveal(&repo, prefix_text)?;
-        if repo.join(&prefix).canonicalize()? != root {
+        let pinned_prefix = workspace::resolve_local_reveal(&repo, prefix_text)?;
+        if !pinned_prefix.matches_directory(&root)? {
             anyhow::bail!("invalid path: file is outside the selected workspace");
         }
     }

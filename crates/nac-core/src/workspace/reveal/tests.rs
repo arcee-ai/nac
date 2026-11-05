@@ -79,3 +79,55 @@ fn moved_replaced_or_symlinked_ancestors_invalidate_a_resolved_target() {
     std::fs::write(fixture.0.join("folder/file"), "replacement").unwrap();
     assert!(target.revalidate().is_err());
 }
+
+#[test]
+fn directory_matching_uses_retained_identity_and_rejects_files_and_links() {
+    let fixture = Fixture::new();
+    let selected = fixture.0.join("selected");
+    let other = fixture.0.join("other");
+    std::fs::create_dir(&selected).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(selected.join("file"), "fixture").unwrap();
+    symlink("selected", fixture.0.join("alias")).unwrap();
+    let directory = LocalRevealTarget::resolve(&fixture.0, "selected").unwrap();
+    let file = LocalRevealTarget::resolve(&fixture.0, "selected/file").unwrap();
+    assert!(directory.matches_directory(&selected).unwrap());
+    assert!(!directory.matches_directory(&other).unwrap());
+    assert!(!directory
+        .matches_directory(&fixture.0.join("alias"))
+        .unwrap());
+    assert!(!file.matches_directory(&selected).unwrap());
+}
+
+#[test]
+fn replaced_prefix_cannot_borrow_selected_directory_identity_from_a_fresh_lookup() {
+    let fixture = Fixture::new();
+    let selected = fixture.0.join("selected");
+    let other = fixture.0.join("other");
+    std::fs::create_dir(&selected).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(selected.join("file"), "selected file").unwrap();
+    std::fs::write(other.join("file"), "outside file").unwrap();
+    let prefix = LocalRevealTarget::resolve(&fixture.0, "other").unwrap();
+    std::fs::rename(&other, fixture.0.join("moved-other")).unwrap();
+    symlink("selected", &other).unwrap();
+    // This is the first repair's actual two-operation interleaving: no-follow
+    // resolution succeeded above, but its later pathname comparison accepts a
+    // replacement link and would map the outside suffix to the selected file.
+    assert_eq!(
+        other.canonicalize().unwrap(),
+        selected.canonicalize().unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(other.join("file")).unwrap(),
+        "selected file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.0.join("moved-other/file")).unwrap(),
+        "outside file"
+    );
+    assert!(prefix.matches_directory(&selected).is_err());
+    std::fs::remove_file(&other).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    assert!(prefix.matches_directory(&other).is_err());
+}
