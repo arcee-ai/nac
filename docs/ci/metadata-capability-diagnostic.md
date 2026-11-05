@@ -2,9 +2,39 @@
 
 This manual-only diagnostic tests provider primitives. It changes no production
 workflow, quality gate, source admission, permission or cohort classification.
-The only publication target is `codex/all-582-metadata-capability`; root owns
+The only publication target is `codex/all-582-metadata-capability-registered`; root owns
 publication and dispatch after ONE bounded independent source review. No PR is
 created. Base: `914782659a6183b89070a3516e2e44776b1eeb06`.
+
+## Registration-only revision / original stop preserved
+
+Original private candidate `6a546046ca916d3cbea358f5298f4545beabe27c` and
+`codex/all-582-metadata-capability` remain unchanged. Root's original workflow
+GET returned404 because its new path was unregistered on default. No dispatch
+POST, run or compute occurred: the actual run budget remains ZERO used. This
+revision supersedes ONLY that registration/path prerequisite, not the graph or
+production admission protocol. An unpushed APT-path draft was WITHDRAWN because
+that registered pilot was push-only; it was never committed or dispatched.
+
+Use `.github/workflows/nightly-portability.yml` ONLY on this NEW private branch,
+Root verified actual current default branch `dev`, active workflow ID393682517,
+and default blob754b8ec099c4cd9602b433da02600361c062c430 with real
+workflow_dispatch (seed-failure input). The bounded authoritative reads and
+original source are retained under `metadata-capability-runtime/eligible-*`
+and `repository-for-registration.json`. This proves preflight eligibility only;
+exact-private-ref dispatch remains unobserved. Preserve original default source
+in the evidence packet. This is a branch-only DIAG override, MUST NEVER LAND, and
+must never alter default/scheduled/native nightly behavior. No original default,
+036 APT ref, other owner branch, settings, permissions or trigger is mutated.
+The DIAG parent bytes are identical to6a546; the reusable DIAG child is unchanged.
+
+Root must independently review only the changed capability/guards, then preflight
+the registered nightly workflow with the exact new ref. Registered status alone
+is insufficient. If manual eligibility or exact-ref support is unavailable,
+STOP with no further path/trigger workaround. A404 preflight is not a run or
+successful capability observation. At mostTWO actual dispatches remain allowed;
+all accounting, failure-preservation and DIAG constraints below remain unchanged.
+No source coalescing or optimization credit.
 
 ## Two-run graph and expected observations
 
@@ -46,13 +76,15 @@ that would be a failed/inconclusive screen, not permission to retry.
 
 ## Root-only publication and runtime contract
 
-Commit and independently review the exact six-file candidate first. Root may
+Commit and independently review the original candidate plus this narrow
+registration/path correction first. NEVER merge/cherry-pick this branch-only
+nightly override into default or any ordinary source candidate. Root may
 push the private branch and dispatch this manual workflow at that exact commit.
-GitHub may require manual workflow registration/default-branch presence; if
-unavailable, STOP unsupported without adding triggers or landing solely to test.
+The already registered path still requires actual exact-private-ref capability;
+if unavailable, STOP unsupported without adding triggers or landing solely to test.
 Compute tuple_digest locally with the committed script's digest(full commit SHA):
 import its `digest` function through Python importlib; no API call is needed. Fixed payload
-is `["DIAG-only-v1","arcee-ai/nac",full_sha,".github/workflows/metadata-capability-diag.yml"]`
+is `["DIAG-only-v1","arcee-ai/nac",full_sha,".github/workflows/nightly-portability.yml"]`
 serialized as compact JSON and SHA256. It is not a production tuple.
 
 At most TWO dispatches, attempt1 only, no reruns/retries. Run2 requires terminal

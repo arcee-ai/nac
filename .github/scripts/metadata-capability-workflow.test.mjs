@@ -2,9 +2,10 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import YAML from "yaml";
+import { execFileSync } from "node:child_process";
 const root = new URL("../workflows/", import.meta.url);
 const load = name => YAML.parse(fs.readFileSync(new URL(name, root), "utf8"));
-const parent = load("metadata-capability-diag.yml");
+const parent = load("nightly-portability.yml");
 const child = load("metadata-capability-child-diag.yml");
 const pure = "needs.select.result == 'success' && needs.select.outputs.mode == 'pure'";
 const aggregate = "${{ " + pure + " && 'DIAG PURE aggregate' || 'DIAG FULL aggregate default' }}";
@@ -70,4 +71,15 @@ test("failed and missing selectors remain actual graph observations", () => {
   assert.equal(parent.jobs.aggregate.steps[0].env.DIAG_MISSING_DEFAULT,
     "${{ needs.sentinel.result == 'success' && needs.sentinel.outputs.mode == 'pure' && 'DIAG PURE invalid' || 'DIAG FULL no-output default' }}");
   assert.match(parent.jobs.aggregate.steps[0].run, /test -z "\$DIAG_SENTINEL_MODE"/);
+});
+
+test("registered path revision keeps the original four-node parent byte-identical", () => {
+  assert.deepEqual(Object.keys(parent.on), ["workflow_dispatch"]);
+  const original = execFileSync("git", ["show", "6a546046ca916d3cbea358f5298f4545beabe27c:.github/workflows/metadata-capability-diag.yml"], {encoding:"utf8"});
+  assert.equal(fs.readFileSync(new URL("nightly-portability.yml", root), "utf8"), original);
+  assert.ok(!fs.existsSync(new URL("apt-runtime-parity.yml", root)));
+  const script = fs.readFileSync(new URL("./metadata-capability-diag.py", import.meta.url), "utf8");
+  assert.ok(script.includes('BRANCH = "refs/heads/codex/all-582-metadata-capability-registered"'));
+  assert.ok(script.includes('WORKFLOW = ".github/workflows/nightly-portability.yml"'));
+  assert.ok(!fs.existsSync(new URL("metadata-capability-diag.yml", root)));
 });

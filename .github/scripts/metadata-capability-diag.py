@@ -9,8 +9,8 @@ import urllib.request
 from pathlib import Path
 
 REPOSITORY = "arcee-ai/nac"
-BRANCH = "refs/heads/codex/all-582-metadata-capability"
-WORKFLOW = ".github/workflows/metadata-capability-diag.yml"
+BRANCH = "refs/heads/codex/all-582-metadata-capability-registered"
+WORKFLOW = ".github/workflows/nightly-portability.yml"
 PROTECTED = {"Required PR checks", "source-security / Full locked source scan",
              "macos-native / ARM macOS process and credentials"}
 LIMIT = 512 * 1024
