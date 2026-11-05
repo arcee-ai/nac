@@ -48,7 +48,9 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
         if !supported || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
             return None;
         }
-        if work.goal.as_ref() != stored.goal.as_ref().map(|goal| &goal.identity) {
+        if work.goal.as_ref() != stored.goal.as_ref().map(|goal| &goal.identity)
+            && !(work.goal.is_none() && stored.goal_is_historical_for(&work.run_id))
+        {
             return None;
         }
         if work.disposition == SettledWorkDisposition::Completed {

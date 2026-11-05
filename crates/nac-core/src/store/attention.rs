@@ -39,13 +39,25 @@ pub struct AttentionStoredSession {
 }
 
 impl AttentionStoredSession {
+    /// A retained completed goal is historical only for a different exact run.
+    /// Unfinished, unattributed or continuing goals remain current obligations.
+    pub fn goal_is_historical_for(&self, run_id: &str) -> bool {
+        self.goal.as_ref().is_some_and(|goal| {
+            goal.status == GoalStatus::Complete
+                && goal.accounting_run.is_none()
+                && goal.continuation_run.is_none()
+                && !goal.retry_scheduled
+                && goal.last_run.as_deref().is_some_and(|last| last != run_id)
+        })
+    }
+
     /// This is necessary durable evidence, never a settlement/idle receipt by itself.
     pub fn verifies_goal_free_idle(&self, run_id: &str, config_version: Option<i64>) -> bool {
         self.primary
             && self.direct
             && self.questions_supported
             && config_version == Some(self.config_version)
-            && self.goal.is_none()
+            && (self.goal.is_none() || self.goal_is_historical_for(run_id))
             && self.question.is_none()
             && !self.inbox_pending
             && !self.manual_unsettled

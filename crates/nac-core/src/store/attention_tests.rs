@@ -336,3 +336,100 @@ fn attention_goal_free_metadata_reads_exact_latest_outcome_and_recovery_without_
     drop(connection);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn historical_completed_goal_allows_only_a_later_exact_successful_idle_request() {
+    let path = fixture();
+    let goal = create_session_goal(&path, "session", "old goal", None, None).unwrap();
+    bind_session_goal_run(
+        &path,
+        "session",
+        &GoalRunBaseline {
+            run_id: "goal-run".into(),
+            billable_tokens: 0,
+            started_at_epoch_ms: 0,
+            continuation: false,
+        },
+    )
+    .unwrap();
+    update_session_goal_by_model(&path, "session", &goal.goal_id, GoalStatus::Complete).unwrap();
+    let (settled, last_run) = settle_session_goal_run_with_provenance(
+        &path,
+        "session",
+        "goal-run",
+        2,
+        1,
+        GoalRunDisposition::Completed,
+        None,
+    )
+    .unwrap();
+    assert_eq!(last_run.as_deref(), Some("goal-run"));
+    let (again, last_run) = settle_session_goal_run_with_provenance(
+        &path,
+        "session",
+        "goal-run",
+        99,
+        99,
+        GoalRunDisposition::Completed,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        again, settled,
+        "idempotent legitimate settlement retains provenance"
+    );
+    assert_eq!(last_run.as_deref(), Some("goal-run"));
+    let (unrelated, last_run) = settle_session_goal_run_with_provenance(
+        &path,
+        "session",
+        "later",
+        99,
+        99,
+        GoalRunDisposition::Completed,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        unrelated, settled,
+        "later request cannot charge or rewrite old goal"
+    );
+    assert_eq!(last_run.as_deref(), Some("goal-run"));
+    let connection = open_runtime_connection(&path).unwrap();
+    record_run_outcome_with_connection(
+        &connection,
+        "session",
+        "later",
+        RunOutcomeDisposition::Completed,
+        None,
+        None,
+    )
+    .unwrap();
+    let read = || {
+        read_attention_metadata(&path, Some("session"))
+            .unwrap()
+            .remove(0)
+    };
+    assert!(read().verifies_goal_free_idle("later", Some(0)));
+    assert!(!read().verifies_goal_free_idle("goal-run", Some(0)));
+    for assignment in [
+        "status='paused'",
+        "status='blocked'",
+        "status='active'",
+        "accounting_run_id='foreign',accounting_token_baseline=0,accounting_started_at_epoch_ms=0",
+        "accounting_run_id='foreign',accounting_token_baseline=0,accounting_started_at_epoch_ms=0,continuation_run_id='foreign'",
+        "next_attempt_at_epoch_ms=1",
+        "last_run_id=NULL",
+        "last_run_id='later'",
+    ] {
+        connection.execute("UPDATE session_goals SET status='complete',accounting_run_id=NULL,accounting_token_baseline=NULL,accounting_started_at_epoch_ms=NULL,continuation_run_id=NULL,next_attempt_at_epoch_ms=NULL,last_run_id='goal-run'", []).unwrap();
+        connection
+            .execute(&format!("UPDATE session_goals SET {assignment}"), [])
+            .unwrap();
+        assert!(
+            !read().verifies_goal_free_idle("later", Some(0)),
+            "{assignment}"
+        );
+    }
+    drop(connection);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
