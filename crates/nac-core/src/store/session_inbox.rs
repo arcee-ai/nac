@@ -1,5 +1,16 @@
 use super::*;
 
+/// Inbox edits and cancellation require a nonnegative expected revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NegativeInboxVersion;
+
+impl std::fmt::Display for NegativeInboxVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("inbox item version must not be negative")
+    }
+}
+impl std::error::Error for NegativeInboxVersion {}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -435,7 +446,7 @@ pub fn update_pending_session_inbox_item(
     target_run_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
     if expected_version < 0 {
-        return Err(anyhow!("inbox item version must not be negative"));
+        return Err(NegativeInboxVersion.into());
     }
     if delivery == InboxDelivery::Queue && target_run_id.is_some() {
         return Err(anyhow!("queued inbox input cannot target an active run"));
@@ -488,7 +499,7 @@ pub fn cancel_pending_session_inbox_item(
     expected_version: i64,
 ) -> Result<SessionInboxRecord> {
     if expected_version < 0 {
-        return Err(anyhow!("inbox item version must not be negative"));
+        return Err(NegativeInboxVersion.into());
     }
     let mut connection = open_runtime_connection(path)?;
     let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -557,6 +568,44 @@ mod tests {
                 uuid::Uuid::new_v4()
             ))
             .join("store.db")
+    }
+
+    #[test]
+    fn negative_inbox_versions_are_typed_before_lookup_without_mutation() {
+        let path = temp_store_path("negative-version");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session");
+        let item = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "retain input",
+            None,
+            None,
+        )
+        .unwrap();
+        for id in [item.id, 9223372036854775800] {
+            for error in [
+                update_pending_session_inbox_item(
+                    &path,
+                    "session",
+                    id,
+                    -1,
+                    InboxDelivery::Queue,
+                    Some("also-invalid-target"),
+                )
+                .unwrap_err(),
+                cancel_pending_session_inbox_item(&path, "session", id, -1).unwrap_err(),
+            ] {
+                assert!(error.downcast_ref::<NegativeInboxVersion>().is_some());
+                assert_eq!(error.to_string(), "inbox item version must not be negative");
+                assert_eq!(
+                    list_session_inbox(&path, "session").unwrap(),
+                    vec![item.clone()]
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
