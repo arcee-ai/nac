@@ -56,7 +56,7 @@ import sys
 source = pathlib.Path(sys.argv[1]).read_text().splitlines()
 first_stage = source[:next(i for i, line in enumerate(source) if line.endswith(" AS runtime-package-sdk"))]
 copy = first_stage.index("COPY . .")
-compile_line = next(i for i, line in enumerate(first_stage) if "cargo build --release --locked -p nac-server --bin nac-web" in line)
+compile_line = next(i for i, line in enumerate(first_stage) if i > copy and "cargo build --release --locked -p nac-server --bin nac-web" in line)
 for name in ("NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"):
     declarations = [i for i, line in enumerate(first_stage) if line.startswith(f"ARG {name}")]
     if len(declarations) != 1 or not copy < declarations[0] < compile_line:
@@ -65,6 +65,7 @@ for name in ("NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"):
     if not any(assignment in line for line in first_stage[declarations[0] + 1:compile_line]):
         sys.exit(f"managed image contract: compilation must consume exact {name}")
 PY_CACHE
+python3 "$repo_root/scripts/test-managed-dependency-layer.py"
 require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'

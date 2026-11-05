@@ -81,7 +81,33 @@ jobs:
         run: |
           npm --prefix .github/scripts ci --ignore-scripts
           python3 -m unittest discover -s scripts/security -p 'test_*.py'
-          node --test scripts/security/image-policy.test.mjs scripts/security/image-workflow.test.mjs scripts/security/image-publication.test.mjs
+          node --test scripts/security/image-policy.test.mjs scripts/security/image-workflow.test.mjs scripts/security/image-scanner-workflow.test.mjs scripts/security/image-publication.test.mjs
+
+  scanner-qualification:
+    # Live scanner controls do not consume the candidate image. Keep their
+    # separate tools/database local to this job; image scanning still runs live.
+    needs: [prepare, contract]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+      - name: Qualify real OS/Node advisory matching and runtime/DB negatives
+        run: |
+          python3 scripts/security/image_qualify.py --output image-security-fixtures \
+            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
+      - name: Retain live qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: managed-image-security-fixtures-${{ needs.prepare.outputs.sha }}
+          path: |
+            image-security-fixtures/
+            !image-security-fixtures/**/root/**
+          retention-days: 14
+          if-no-files-found: error
+
 
   build-smoke:
     # Image construction/smoke is unprivileged; result still requires full fault quality.
@@ -146,10 +172,6 @@ jobs:
           path: trusted-image-policy
           fetch-depth: 0
           persist-credentials: false
-      - name: Qualify real OS/Node advisory matching and runtime/DB negatives
-        run: |
-          python3 scripts/security/image_qualify.py --output image-security-fixtures \
-            --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
       - name: Inventory the exact tested image
         id: inventory
         if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.smoke.outcome == 'success' }}
@@ -198,21 +220,11 @@ jobs:
           path: image-security-evidence/
           retention-days: 14
           if-no-files-found: error
-      - name: Retain live qualification evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: managed-image-security-fixtures-${{ needs.prepare.outputs.sha }}
-          path: |
-            image-security-fixtures/
-            !image-security-fixtures/**/root/**
-          retention-days: 14
-          if-no-files-found: error
 
   result:
     name: Managed image checks complete
     if: ${{ always() }}
-    needs: [prepare, contract, build-smoke]
+    needs: [prepare, contract, scanner-qualification, build-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

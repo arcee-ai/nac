@@ -137,7 +137,7 @@ test('image reusable requires contracts and retains an unconditional fail-closed
   assert.equal(image.on.workflow_call.inputs.source_sha.required, true);
   assert.equal(image.on.workflow_call.outputs.sha.value, '${{ jobs.prepare.outputs.sha }}');
   assert.deepEqual(image.jobs['build-smoke'].needs, ['prepare', 'contract']);
-  assert.deepEqual(image.jobs.result.needs, ['prepare', 'contract', 'build-smoke']);
+  assert.deepEqual(image.jobs.result.needs, ['prepare', 'contract', 'scanner-qualification', 'build-smoke']);
   assert.equal(image.jobs.result.if, '${{ always() }}');
   assert.ok(image.jobs.result.steps.at(-1).run.includes('pr-checks.mjs managed-image-aggregate'));
   for (const job of Object.values(image.jobs)) {
