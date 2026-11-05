@@ -118,6 +118,10 @@ function validate(config, required = requiredJobs) {
   assert.ok(stage.run.indexOf("browser-proof.py") < stage.run.indexOf("browser-binary.py verify-proof"));
   assert.match(stage.run, /browser-binary.py verify-proof/);
   assert.match(stage.run, /--binary "\$NAC_E2E_BINARY" --source "\$GOAL_PROOF_SOURCE"/);
+  const proofArtifact = named(proof, "Retain only ALL471 goal proof and cleanup receipts");
+  assert.equal(proofArtifact.with.name,
+    "all471-goal-proof-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}");
+  assert.equal(proofArtifact.with.overwrite, undefined, "retain earlier successful proof attempts");
   assert.deepEqual(config.jobs.browser.needs, ["prepare", "browser-binary", "browser-shards", "browser-proof"]);
   assert.equal(config.jobs.browser.steps[0].env.BINARY_RESULT, "${{ needs.browser-binary.result }}");
   assert.match(config.jobs.browser.steps[0].run, /test "\$BINARY_RESULT" = success/);
@@ -156,6 +160,9 @@ test("seeded producer, digest-origin, fallback, runtime and required-DAG regress
     w => { named(w.jobs["browser-shards"], "Rebuild current-attempt source after a valid older producer").run = "true"; },
     w => { w.jobs["browser-proof"].steps.find(s => s.run?.includes("run test:e2e")).env.NAC_E2E_BINARY = "/old/binary"; },
     w => { named(w.jobs["browser-proof"], "Stage only the two bounded ALL471 goal receipts").run = "python3 .github/scripts/browser-proof.py"; },
+    w => { const artifact = named(w.jobs["browser-proof"], "Retain only ALL471 goal proof and cleanup receipts"); artifact.with.name = artifact.with.name.replace("-${{ github.run_id }}", ""); },
+    w => { const artifact = named(w.jobs["browser-proof"], "Retain only ALL471 goal proof and cleanup receipts"); artifact.with.name = artifact.with.name.replace("-${{ github.run_attempt }}", ""); },
+    w => { named(w.jobs["browser-proof"], "Retain only ALL471 goal proof and cleanup receipts").with.overwrite = true; },
     w => { w.jobs.browser.needs = ["prepare", "browser-shards", "browser-proof"]; },
     w => { w.jobs["required-pr-checks"].needs = w.jobs["required-pr-checks"].needs.filter(n => n !== "browser-binary"); },
   ];
@@ -165,6 +172,51 @@ test("seeded producer, digest-origin, fallback, runtime and required-DAG regress
     assert.throws(() => validate(broken), undefined, `seed ${index}`);
   }
   assert.throws(() => validate(stable, requiredJobs.filter(n => n !== "browser-binary")));
+});
+
+test("two proof attempts retain unique artifacts while the retained producer requires fresh source", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-browser-proof-retry-"));
+  try {
+    const source = "a".repeat(40);
+    const run = "123456";
+    const fixture = path.join(root, "fixture");
+    fs.writeFileSync(fixture, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const common = ["--source", source, "--repository", "arcee-ai/nac", "--run-id", run,
+      "--target", "x86_64-unknown-linux-gnu", "--rustc", "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "--runner-image", "ubuntu26@20261101.186.1"];
+    const cli = (command, args, attempt, receipt) => JSON.parse(execFileSync("python3",
+      [".github/scripts/browser-binary.py", command, ...args, ...common, "--attempt", String(attempt)],
+      { encoding: "utf8", env: { ...process.env, BROWSER_BINARY_RECEIPT: JSON.stringify(receipt ?? {}) } }));
+    const producer = cli("pack", ["--binary", fixture, "--output-dir", path.join(root, "producer")], 1);
+    const retainedBytes = fs.readFileSync(producer.archive);
+    const template = named(stable.jobs["browser-proof"], "Retain only ALL471 goal proof and cleanup receipts").with.name;
+    const name = (attempt, runId = run) => template.replace("${{ needs.prepare.outputs.sha }}", source)
+      .replace("${{ github.run_id }}", runId).replace("${{ github.run_attempt }}", String(attempt));
+    const records = [];
+    for (const attempt of [1, 2]) {
+      const output = path.join(root, `runtime-${attempt}`);
+      const admitted = cli("consume", ["--archive", producer.archive, "--output-dir", output], attempt, producer.receipt);
+      const artifactName = name(attempt);
+      assert.match(artifactName, /^all471-goal-proof-[a-f0-9]{40}-[1-9][0-9]*-[1-9][0-9]*$/);
+      assert.ok(artifactName.length < 128);
+      records.push({ attempt, artifactName, admitted });
+      assert.equal(admitted.producer_attempt, 1);
+      assert.equal(admitted.mode, attempt === 1 ? "artifact" : "source");
+      assert.equal(admitted.fallback_reason, attempt === 1 ? "" : "older-attempt");
+      if (attempt === 2) {
+        assert.equal(admitted.binary, "");
+        assert.equal(admitted.binary_sha256, "");
+        assert.equal(fs.existsSync(output), false);
+      }
+    }
+    assert.notEqual(records[0].artifactName, records[1].artifactName);
+    assert.notEqual(name(1), name(1, "123457"));
+    assert.equal(producer.receipt.run_attempt, 1);
+    assert.deepEqual(fs.readFileSync(producer.archive), retainedBytes);
+    // A second upload namespace is current-attempt evidence, never permission
+    // to execute the older producer's bytes or reuse its quality verdict.
+    assert.ok(records[1].artifactName.endsWith(`-${run}-2`));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("actual runtime selection exposes only the verified artifact or the fresh source binary", () => {

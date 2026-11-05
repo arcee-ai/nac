@@ -46,6 +46,12 @@ python3 .github/scripts/browser-binary.py verify-proof \
 ```
 
 Upload only `all471-goal-proof-artifact/*.json` as the bounded proof artifact.
+Name it
+`all471-goal-proof-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}`.
+The source prefix remains searchable while each run/attempt has a distinct
+immutable upload. Keep overwrite disabled: earlier proof and cleanup receipts
+remain available when a job is rerun. The existing five files (two goal proofs,
+two cleanup ledgers and their manifest) and their bounds are unchanged.
 The collector retains the original candidate, release, goal, accounting-run,
 native-call and process-exit validation; it stages nothing until both cases
 validate. Collection and upload failures remain job failures even when test

@@ -114,6 +114,19 @@ The source path never exposes or executes transported bytes. A different image
 does not waive any other identity or integrity requirement, and malformed image
 identities still fail. Only a same-image current artifact can become executable.
 
+The proof upload name includes the current source, workflow run and consumer
+attempt as described in [the sharding contract](browser-sharding.md). A retained
+attempt-one producer may select fresh source compilation for a proof rerun on
+attempt two; that attempt uploads its own distinct proof artifact without
+overwriting or deleting attempt one's evidence. Pinned upload v4
+[fails on an existing name unless overwrite is enabled](https://github.com/actions/upload-artifact/blob/ea165f8d65b6e75b540449e92b4886f43607fa02/README.md#usage).
+Workflows in already-created runs retain their original source-only naming;
+qualify the new workflow source before a controlled proof rerun. Repository
+search found no consumer downloading these proof artifacts by name. Consumers
+outside the repository are unknown and must select the explicit run/attempt
+name; no external compatibility is asserted. Historical receipts keep their
+original names.
+
 The output directory must be new. Existing directories, symlinked leaves or an
 immediate symlinked parent are rejected and preserved. Archive inputs must be
 regular non-symlink files. Only `manifest.json` followed by `nac-web` is admitted;
