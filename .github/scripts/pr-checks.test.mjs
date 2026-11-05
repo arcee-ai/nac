@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { codeowners } from "./pr-ruleset.mjs";
 import { ownerArtifacts } from "./update-codeowners.mjs";
 import {
@@ -12,6 +12,8 @@ import {
   requireComplete,
   managedJobs,
   requireManagedComplete,
+  CancelledCandidate,
+  findQualifiedRun,
 } from "./pr-checks.mjs";
 
 const sha = "a".repeat(40);
@@ -104,6 +106,239 @@ test("a green previous candidate or absent preparation cannot satisfy the curren
   const needs = successful();
   needs.prepare.outputs.run = "false";
   assert.throws(() => requireComplete(needs, "true", sha));
+});
+
+// Shape of superseded run 40435629331: prepare cancelled, reusable jobs skipped.
+function supersededRun() {
+  const needs = Object.fromEntries(requiredJobs.map((job) => [job, { result: "cancelled" }]));
+  needs["source-security"].result = "skipped";
+  needs["macos-native"].result = "skipped";
+  needs.managed = { result: "skipped" };
+  return needs;
+}
+
+test("a superseded run is reported as cancellation, not as an unbound candidate", () => {
+  assert.throws(
+    () => requireComplete(supersededRun(), "", sha),
+    (error) => error instanceof CancelledCandidate && /prepare.*cancelled, and no job failed/.test(error.message),
+  );
+  const managed = Object.fromEntries(managedJobs.map((job) => [job, { result: "cancelled" }]));
+  assert.throws(() => requireManagedComplete(managed, sha), CancelledCandidate);
+});
+
+test("quality and test failing only because a dependency was cancelled is still cancellation", () => {
+  const cancelledMidRun = () => ({
+    ...successful(),
+    lint: { result: "cancelled" },
+    quality: { result: "failure" },
+    test: { result: "failure" },
+    managed: { result: "skipped" },
+  });
+  assert.throws(
+    () => requireComplete(cancelledMidRun(), "true", sha),
+    (error) => error instanceof CancelledCandidate && /^lint did not succeed/.test(error.message),
+  );
+
+  // Logged by run 41738348755, cancelled during managed build-smoke.
+  const managedOnly = { ...successful(), managed: { result: "cancelled", outputs: {} } };
+  assert.throws(() => requireComplete(managedOnly, "true", sha), CancelledCandidate);
+
+  const browserOnly = { ...successful(), browser: { result: "cancelled" }, test: { result: "failure" } };
+  assert.throws(() => requireComplete(browserOnly, "true", sha), CancelledCandidate);
+
+  const realFailure = { ...cancelledMidRun(), build: { result: "failure" } };
+  assert.throws(
+    () => requireComplete(realFailure, "true", sha),
+    (error) => !(error instanceof CancelledCandidate) && /^build did not succeed; also cancelled: lint$/.test(error.message),
+  );
+  const managedFailure = { ...cancelledMidRun(), managed: { result: "failure" } };
+  assert.throws(() => requireComplete(managedFailure, "true", sha), /^Error: managed did not succeed/);
+
+  const summaryFailed = { ...successful(), quality: { result: "failure" }, test: { result: "failure" } };
+  assert.throws(() => requireComplete(summaryFailed, "true", sha), /^Error: quality, test did not succeed$/);
+  const browserFailed = { ...successful(), browser: { result: "failure" }, test: { result: "failure" } };
+  assert.throws(() => requireComplete(browserFailed, "true", sha), /^Error: browser, test did not succeed$/);
+});
+
+test("a genuine failure stays visible beside cancellations and is never called cancellation", () => {
+  const needs = supersededRun();
+  needs.browser.result = "failure";
+  needs.lint.result = "failure";
+  assert.throws(
+    () => requireComplete(needs, "", sha),
+    (error) =>
+      !(error instanceof CancelledCandidate) &&
+      /^browser, lint did not succeed; also cancelled: .*prepare/.test(error.message),
+  );
+  const prepareFailed = successful();
+  prepareFailed.prepare = { result: "failure" };
+  assert.throws(() => requireComplete(prepareFailed, "", sha), /^Error: prepare did not succeed$/);
+});
+
+test("the aggregate command stays red for a cancelled candidate and labels it", () => {
+  const run = (needs, applicability = "") =>
+    spawnSync(process.execPath, [new URL("./pr-checks.mjs", import.meta.url).pathname, "aggregate"], {
+      encoding: "utf8",
+      env: { ...process.env, NEEDS_JSON: JSON.stringify(needs), MANAGED_APPLICABLE: applicability, EXPECTED_SHA: sha },
+    });
+  const cancelled = run(supersededRun());
+  assert.equal(cancelled.status, 1);
+  assert.match(cancelled.stdout, /^::warning title=Cancelled run with no failed job::/);
+
+  const failed = supersededRun();
+  failed.browser.result = "failure";
+  const genuine = run(failed);
+  assert.notEqual(genuine.status, 0);
+  assert.doesNotMatch(genuine.stdout, /Cancelled run/);
+  assert.match(genuine.stderr, /browser did not succeed/);
+
+  assert.equal(run(successful(), "true").status, 0);
+  assert.notEqual(run(successful(), "").status, 0);
+});
+
+function reusedRun() {
+  const needs = Object.fromEntries(requiredJobs.map((job) => [job, { result: "skipped" }]));
+  needs.prepare = { result: "success", outputs: { sha, run: "false", reused_run: "42" } };
+  needs["source-security"].result = "success";
+  needs.managed = { result: "skipped" };
+  return needs;
+}
+
+test("a metadata run satisfies the gate only when it bound a reused run and ran nothing else", () => {
+  requireComplete(reusedRun(), "true", sha, "1");
+  assert.throws(() => requireComplete(reusedRun(), "true", sha, "2"), /re-run all jobs/);
+
+  const unbound = reusedRun();
+  delete unbound.prepare.outputs.reused_run;
+  assert.throws(() => requireComplete(unbound, "true", sha, "1"), /did not bind/);
+
+  const stillRun = reusedRun();
+  stillRun.prepare.outputs.run = "true";
+  assert.throws(() => requireComplete(stillRun, "true", sha, "1"), /did not bind/);
+
+  const otherCandidate = reusedRun();
+  otherCandidate.prepare.outputs.sha = "b".repeat(40);
+  assert.throws(() => requireComplete(otherCandidate, "true", sha, "1"), /did not bind/);
+
+  const invalid = reusedRun();
+  invalid.prepare.outputs.reused_run = "42; true";
+  assert.throws(() => requireComplete(invalid, "true", sha, "1"), /invalid reused run/);
+
+  const scanFailed = reusedRun();
+  scanFailed["source-security"].result = "failure";
+  assert.throws(() => requireComplete(scanFailed, "true", sha, "1"), /source-security did not succeed/);
+
+  const scanSkipped = reusedRun();
+  scanSkipped["source-security"].result = "skipped";
+  assert.throws(() => requireComplete(scanSkipped, "true", sha, "1"), /source-security must be success/);
+
+  const ranAnyway = reusedRun();
+  ranAnyway.browser.result = "success";
+  assert.throws(() => requireComplete(ranAnyway, "true", sha, "1"), /browser must be skipped/);
+});
+
+test("only a full run of this exact candidate with nothing newer failed can be reused", async () => {
+  const headSha = "c".repeat(40);
+  const baseSha = "d".repeat(40);
+  const run = (id, change = {}) => ({
+    id,
+    run_number: id,
+    run_attempt: 1,
+    updated_at: `2026-11-04T10:00:${String(id % 60).padStart(2, "0")}Z`,
+    status: "completed",
+    conclusion: "success",
+    path: ".github/workflows/stable-release.yml",
+    pull_requests: [{ number: 7, base: { sha: baseSha }, head: { sha: headSha } }],
+    ...change,
+  });
+  const marker = (id, change = {}) => ({ expired: false, workflow_run: { id, head_sha: headSha }, ...change });
+  const lookup = async ({ artifacts = [marker(42)], runs = [run(42)], status = 200, startedJobs = 3, ...input } = {}) => {
+    const urls = [];
+    const fetcher = async (url) => {
+      urls.push(url);
+      const body = url.includes("/artifacts?")
+        ? { artifacts }
+        : url.endsWith("/jobs")
+          ? { total_count: startedJobs }
+          : { workflow_runs: runs };
+      return { ok: status === 200, status, json: async () => body };
+    };
+    const found = await findQualifiedRun(
+      { repository: "o/r", mergeSha: sha, headSha, baseSha, prNumber: "7", parents: [baseSha, headSha], currentRun: "99", currentAttempt: "1", token: "t", ...input },
+      fetcher,
+    );
+    return { found, urls };
+  };
+
+  const reused = await lookup();
+  assert.equal(reused.found, "42");
+  assert.match(reused.urls[0], new RegExp(`artifacts\\?name=qualified-${sha}&`));
+  assert.match(reused.urls[1], new RegExp(`runs\\?head_sha=${headSha}&event=pull_request`));
+
+  assert.equal((await lookup({ currentAttempt: "2" })).found, null);
+  assert.equal((await lookup({ runs: [run(42), run(50, { conclusion: "cancelled" })], startedJobs: 0 })).found, "42");
+  assert.equal((await lookup({ runs: [run(42), run(50, { conclusion: "failure" })], startedJobs: 0 })).found, null);
+  const cancelledRerun = run(50, { conclusion: "cancelled", run_attempt: 2 });
+  assert.equal((await lookup({ runs: [run(42), cancelledRerun], startedJobs: 0 })).found, null);
+  // A failed rerun of an older run counts, because it finished after the marker run.
+  const rerunFailed = run(40, { conclusion: "failure", updated_at: "2026-11-04T11:00:00Z" });
+  assert.equal((await lookup({ runs: [run(42), rerunFailed] })).found, null);
+  assert.equal((await lookup({ runs: [run(42), run(40, { conclusion: "failure" })] })).found, "42");
+  // A reuse run has no marker and does not block the full run behind it.
+  assert.equal((await lookup({ runs: [run(42), run(50)] })).found, "42");
+  assert.equal((await lookup({ runs: [run(42), run(99, { status: "in_progress", conclusion: null })] })).found, "42");
+
+  for (const newer of [
+    { conclusion: "failure" },
+    { conclusion: "cancelled" },
+    { status: "in_progress", conclusion: null },
+    { pull_requests: [] },
+  ]) {
+    assert.equal((await lookup({ runs: [run(42), run(50, newer)] })).found, null, JSON.stringify(newer));
+  }
+  for (const change of [
+    { conclusion: "failure" },
+    { pull_requests: [] },
+    { pull_requests: [{ number: 8, base: { sha: baseSha }, head: { sha: headSha } }] },
+    { pull_requests: [{ number: 7, base: { sha: sha }, head: { sha: headSha } }] },
+  ]) {
+    assert.equal((await lookup({ runs: [run(42, change)] })).found, null, JSON.stringify(change));
+  }
+  assert.equal((await lookup({ runs: [run(42, { path: ".github/workflows/other.yml" })] })).found, null);
+  assert.equal((await lookup({ runs: [run(50)] })).found, null);
+  assert.equal((await lookup({ artifacts: [] })).found, null);
+  assert.equal((await lookup({ artifacts: [marker(42, { expired: true })] })).found, null);
+  assert.equal((await lookup({ artifacts: [marker(42, { workflow_run: { id: 42, head_sha: sha } })] })).found, null);
+  assert.equal((await lookup({ status: 403 })).found, null);
+
+  const neverCalled = () => {
+    throw new Error("must not be called");
+  };
+  for (const input of [
+    { mergeSha: "bad", parents: [baseSha, headSha] },
+    { mergeSha: sha, parents: [sha, headSha] },
+    { mergeSha: sha, parents: [baseSha, sha] },
+    { mergeSha: sha, parents: [] },
+  ]) {
+    assert.equal(
+      await findQualifiedRun({ repository: "o/r", headSha, baseSha, prNumber: "7", currentRun: "99", currentAttempt: "1", token: "t", ...input }, neverCalled),
+      null,
+    );
+  }
+});
+
+test("the workflow only reuses title or body edits and only full runs record a candidate", () => {
+  const workflow = fs.readFileSync(new URL("../workflows/stable-release.yml", import.meta.url), "utf8");
+  assert.match(
+    workflow,
+    /if: github\.event_name == 'pull_request' && github\.event\.action == 'edited' && github\.event\.changes\.base == null\n/,
+  );
+  const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
+  assert.ok(aggregate.indexOf("pr-checks.mjs aggregate") < aggregate.indexOf("qualified-${{ github.sha }}"));
+  const marker = aggregate.split("pr-checks.mjs aggregate")[1];
+  assert.doesNotMatch(marker, /always\(\)/);
+  assert.equal(marker.match(/needs\.prepare\.outputs\.reused_run == ''/g).length, 2);
+  assert.match(marker, /Upload the qualified candidate marker[^]*continue-on-error: true/);
 });
 
 test("reusable managed graph rejects every incomplete inner job and a different candidate", () => {

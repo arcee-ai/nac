@@ -201,8 +201,11 @@ export async function inspectChecks(pr, rules, { get, pages }) {
           old.status === check.status && old.conclusion === check.conclusion &&
           old.run_id === selected.id && old.head_sha === pr.head.sha &&
           old.check_run_url === `${API}/check-runs/${check.id}` && positive(old.run_attempt) &&
-          replacement && old.run_attempt < replacement.run_attempt &&
-          replacement.run_attempt <= selected.run_attempt,
+          (replacement ? old.run_attempt < replacement.run_attempt &&
+            replacement.run_attempt <= selected.run_attempt
+            // Full qualification renames a job a reused run skipped.
+            : old.conclusion === 'skipped' && old.run_attempt < selected.run_attempt &&
+              jobs.every(j => j.run_attempt === selected.run_attempt)),
         'Partial-rerun supersession is ambiguous');
         oldAttempt = old.run_attempt;
       } else {
@@ -241,7 +244,11 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     const status = matching.filter(r => r.kind === 'status');
     if (!eligible.length && (mandatory.includes(name) ||
       !status.some(r => r.state === 'success' && (app == null || r.app?.id === app)))) {
-      blockers.push(`${name}: missing successful result from the expected owner`);
+      const reused = name === mandatory[2] &&
+        provenance.jobs.some(j => j.name === 'macos-native' && j.conclusion === 'skipped');
+      blockers.push(reused
+        ? `${name}: skipped by reused run ${provenance.selected?.run}; re-run all jobs for full qualification`
+        : `${name}: missing successful result from the expected owner`);
     }
     if (mandatory.includes(name) && matching.some(r => r.kind === 'check' && !authoritative.has(r.id))) {
       blockers.push(`${name}: current check is not bound to the selected workflow jobs`);

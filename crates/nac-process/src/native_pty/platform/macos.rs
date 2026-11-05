@@ -135,6 +135,7 @@ impl Identity {
     fn signal_with(&self, signal: i32, send: AuditSignal) -> io::Result<bool> {
         #[cfg(test)]
         signal_diagnostics::record(self.pid, || "stage=signal_with.enter".to_owned());
+        let mut denied = false;
         #[cfg(test)]
         let mut failure_observation = signal_diagnostics::FailureObservation::default();
         for _ in 0..3 {
@@ -185,11 +186,18 @@ impl Identity {
             if result == 0 {
                 return Ok(true);
             }
-            if result != libc::ESRCH {
+            denied = result == libc::EPERM;
+            if denied {
+                // macOS 26 CI denied targets switching bash to sleep; see the ALL-495 evidence.
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            } else if result != libc::ESRCH {
                 return Err(io::Error::from_raw_os_error(result));
             }
             // ESRCH may mean exec changed the version. Re-inspect and require
             // the same uniqueid before constructing another version key.
+        }
+        if denied {
+            return Err(io::Error::from_raw_os_error(libc::EPERM));
         }
         Err(io::Error::new(
             io::ErrorKind::WouldBlock,

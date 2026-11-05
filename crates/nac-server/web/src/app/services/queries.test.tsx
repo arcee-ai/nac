@@ -128,6 +128,7 @@ function SkillHarness({ id }: { id: string }) {
 describe("session-list polling split", () => {
   it("keeps fast base data authoritative across slower stats polls", async () => {
     const delayedStats = deferred<ManagedSessionSummary[]>();
+    const secondBase = deferred<ManagedSessionSummary[]>();
     let baseRead = 0;
     let statsRead = 0;
     // Hold the empty base response until after the late stats merge is
@@ -141,6 +142,8 @@ describe("session-list polling split", () => {
       }
       baseRead += 1;
       if (baseRead === 1) return Promise.resolve([session("kept", "old")]);
+      // A 5ms poll could otherwise replace "old" before it is observed.
+      if (baseRead === 2) return secondBase.promise;
       if (!allowEmptyBase) return Promise.resolve([session("kept", "new")]);
       return Promise.resolve([]);
     });
@@ -154,6 +157,10 @@ describe("session-list polling split", () => {
     });
     expect(statsRead).toBe(1);
 
+    await act(async () => {
+      secondBase.resolve([session("kept", "new")]);
+      await secondBase.promise;
+    });
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([{ title: "new" }]);
     });
