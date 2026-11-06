@@ -349,6 +349,12 @@ recovery replaces that presentation. It injects the actual renderer delegate
 callback after close, verifies running work and the same owned engine, reopens
 the native status and chooses explicit Stop and Quit. It is not an actual
 WebKit process crash, OS-shutdown case or trusted-input acceptance.
+Unlike close/Cancel, view retirement can disconnect the final interactive
+approver. The renderer case requires the same original pending Ask or its
+exact once-only disconnect denial in that same run, while proving independent
+model/terminal work survives, manual mode and empty grants/executions remain,
+and no input or new admission is replayed. The ordinary close/Cancel fixture
+continues to require its pending Ask to remain unchanged.
 
 The separate `QuitWebViewFixture.swift` / `quit_webview_fixture.py` probe records
 real system WK document/SSE lifetime. Hiding a retained document can keep a live
