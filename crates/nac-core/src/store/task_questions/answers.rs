@@ -99,6 +99,43 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port internal;
 }
 
+/// Passive exact-resolution proof for an owning continuation gate. Answer
+/// authorization and reserved-run consumption remain with the question owner.
+pub(crate) fn delivered_answer_for_source(
+    conn: &Connection,
+    session: &str,
+    request_id: &str,
+    source_run: &str,
+    goal_id: &str,
+) -> Result<bool> {
+    let Some(question) = load(conn, session, request_id)? else {
+        return Ok(false);
+    };
+    if question.status != "answered"
+        || question.continuation_state.as_deref() != Some("delivered")
+        || question.request.run_id != source_run
+        || question.request.generation != source_run
+        || question.goal_id.as_deref() != Some(goal_id)
+        || !compatible(conn, &question)?
+    {
+        return Ok(false);
+    }
+    let Some(receipt) = question.answer else {
+        return Ok(false);
+    };
+    if receipt.session_id != session
+        || receipt.request_id != request_id
+        || receipt.run_id != source_run
+        || receipt.generation != source_run
+    {
+        return Ok(false);
+    }
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_questions q JOIN session_inbox i ON i.id=q.inbox_item_id AND i.session_id=q.session_id WHERE q.session_id=?1 AND q.request_id=?2 AND q.continuation_state='delivered' AND q.continuation_run_id=?3 AND i.id=?4 AND i.status='delivered' AND i.delivered_run_id=?3)",
+        params![session,request_id,receipt.continuation_run_id,receipt.inbox_item_id], |row| row.get(0),
+    )?)
+}
+
 fn continuation_pending(conn: &Connection, receipt: &QuestionAnswerReceipt) -> Result<bool> {
     Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM task_questions q JOIN session_inbox i ON i.id=q.inbox_item_id AND i.session_id=q.session_id WHERE q.session_id=?1 AND q.request_id=?2 AND q.continuation_state='pending' AND i.status='pending' AND q.continuation_run_id=?3)",params![receipt.session_id,receipt.request_id,receipt.continuation_run_id],|r|r.get(0))?)
 }
@@ -174,15 +211,16 @@ pub(crate) fn cancel_question_inbox(conn: &Connection, session: &str, item: i64)
 
 /// Caller already owns the surrounding lifecycle transaction. Exact answer
 /// receipts remain retained while undelivered inbox obligations are cancelled.
+/// Returns whether a question row changed; only the outer commit may publish it.
 pub(crate) fn invalidate_questions(
     conn: &Connection,
     session: &str,
     source_run: Option<&str>,
-) -> Result<()> {
+) -> Result<bool> {
     let now = now_utc();
     conn.execute("UPDATE session_inbox SET status='cancelled',cancelled_at=?3,updated_at=?3,version=version+1 WHERE session_id=?1 AND status='pending' AND id IN(SELECT inbox_item_id FROM task_questions WHERE session_id=?1 AND continuation_state='pending' AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2))",params![session,source_run,now])?;
-    conn.execute("UPDATE task_questions SET status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,continuation_state=CASE WHEN continuation_state='pending' THEN 'cancelled' ELSE continuation_state END,revision=revision+1 WHERE session_id=?1 AND (status='pending' OR continuation_state='pending') AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2)",params![session,source_run])?;
-    Ok(())
+    let changed = conn.execute("UPDATE task_questions SET status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,continuation_state=CASE WHEN continuation_state='pending' THEN 'cancelled' ELSE continuation_state END,revision=revision+1 WHERE session_id=?1 AND (status='pending' OR continuation_state='pending') AND (?2 IS NULL OR json_extract(request_json,'$.run_id')=?2)",params![session,source_run])?;
+    Ok(changed > 0)
 }
 
 coordinated_command! {

@@ -146,6 +146,7 @@ impl<'a> SessionLifecycleApplication<'a> {
         if !deleted {
             return Err(anyhow!("session '{session_id}' was not found"));
         }
+        self.manager.inner.attention.deleted(session_id);
         if let Some(target) = revision_target {
             if let Err(error) = workspace::forget(&target, session_id) {
                 eprintln!("nac: failed to drop workspace revisions: {error:#}");

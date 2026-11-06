@@ -1,11 +1,23 @@
+import type { HeartbeatSchedule, HeartbeatInspection, HeartbeatReceipt, HeartbeatControlRequest, FreshTaskScheduleControlRequest, FreshTaskScheduleInspection, FreshTaskRetainedAllowanceChange, FreshTaskRetainedAllowanceReceipt, HeartbeatPreviewRequest, HeartbeatCalendarPreview } from "../types/api";
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
-import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo, QuestionRecord, QuestionAnswer, QuestionAnswerReceipt } from "../types/api";
+import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo, QuestionRecord, QuestionAnswer, QuestionAnswerReceipt, SessionMcpRefreshStatus } from "../types/api";
 import { nacClient } from "./nacClient";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
     taskQuestions(sessionId: string, signal?: AbortSignal): Promise<QuestionRecord[]>;
     answerTaskQuestion(sessionId: string, answer: QuestionAnswer): Promise<QuestionAnswerReceipt>;
     cancelTaskQuestion(sessionId: string, requestId: string, expectedRevision: number): Promise<QuestionRecord>;
+    changeFreshTaskRetainedAllowance(projectId: string, request: FreshTaskRetainedAllowanceChange): Promise<FreshTaskRetainedAllowanceReceipt>;
+    freshTaskScheduleInventory(projectId: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
+    freshTaskScheduleInspection(projectId: string, scheduleId: string, signal?: AbortSignal): Promise<FreshTaskScheduleInspection>;
+    controlFreshTaskSchedule(projectId: string, request: FreshTaskScheduleControlRequest): Promise<HeartbeatReceipt>;
+    sessionIntegrations(id: string, signal?: AbortSignal): Promise<SessionMcpRefreshStatus>;
+    refreshSessionIntegrations(id: string, expectedRevision: number): Promise<SessionMcpRefreshStatus>;
+    heartbeatInventory(sessionId?: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
+    heartbeatInspection(sessionId: string, scheduleId: string, signal?: AbortSignal): Promise<HeartbeatInspection>;
+    controlHeartbeat(sessionId: string, request: HeartbeatControlRequest): Promise<HeartbeatReceipt>;
+    previewHeartbeat(sessionId: string, request: HeartbeatPreviewRequest, signal?: AbortSignal): Promise<HeartbeatCalendarPreview>;
+    acknowledgeHeartbeats(sessionId: string, throughSequence: number): Promise<void>;
     startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
     taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;
     taskLaunchInventory(projectId: string, signal?: AbortSignal): Promise<TaskLaunchRecord[]>;
