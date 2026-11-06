@@ -139,6 +139,14 @@ default browser, close unrelated tabs or qualify a real vendor. Its common
 builder/PreviewSmoke hook is included; hosted execution remains an integration
 gate.
 
+The hosted controller passes its source-compiled `--console-observer` explicitly
+to both drivers. That route uses the existing detailed console guard: Root's
+`IOConsoleLocked` must be false, runner/console/frontmost ownership must agree,
+and logged-in IOKit/Quartz session, display and window facts must be present.
+Absent optional CGS lock fields stay unknown; explicit true or malformed values
+still refuse launch. Observer failures never fall back to a weaker check. The
+original two-positional driver invocation retains its strict legacy lock check.
+
 `native-auth-browser.yml` supplies a focused macOS26 integration of these
 existing drivers through `ci_native_auth.py`. Before launch it binds the actual
 live GitHub-hosted job and candidate merge parents, observes an unlocked console

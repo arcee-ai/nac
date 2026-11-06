@@ -132,9 +132,9 @@ def main():
         save('HOST-PREFLIGHT.json', dict(source=source, candidate=candidate, job=job,
             legacy_lock=session_lock_state(), detailed_console=detailed_console,
             observer_sha256=hashlib.sha256(observer.read_bytes()).hexdigest(), app_or_browser_launched=False))
-        # Preserve the existing admission. Console diagnostics are read-only and
-        # distinguish an unavailable/locked host from an absent optional bit.
-        console = require_isolated_host()
+        # The existing detailed guard requires explicit Root=false plus agreeing
+        # ownership/IOKit/Quartz evidence. An absent optional CGS bit is not a lock.
+        console = require_isolated_host(observer)
         host = observed([str(host_probe)])
         require(host['os_major'] == 26 and not host['running_browsers'], 'Requires a clean macOS26 browser baseline')
         browser = host['browser']
@@ -153,7 +153,8 @@ def main():
             receipt = json.loads((app / 'Contents/Resources/build-receipt.json').read_text())
             require(receipt['source_head'] == source and not receipt['source_dirty'], 'Producer source drift')
             save(mode + '-receipt.json', receipt)
-            run(driver, [sys.executable, '-B', 'desktop/macos/' + driver, str(app), str(evidence / mode)],
+            run(driver, [sys.executable, '-B', 'desktop/macos/' + driver, str(app), str(evidence / mode),
+                '--console-observer', str(observer)],
                 environment=clean_environment(os.environ), limit=600)
             state = observed([str(observer), 'state', browser])
             require(len(state['apps']) == 1, 'Missing or ambiguous created browser incarnation')
