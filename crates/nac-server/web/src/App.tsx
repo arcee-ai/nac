@@ -9,7 +9,6 @@ import { UiPolicyProvider } from "@/app/features/ui-policy/UiPolicyProvider";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { AppShell } from "@/app/components/AppShell";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
-import DesignPreviewPage from "@/app/components/pages/DesignPreviewPage";
 import ProjectRedirectPage from "@/app/components/pages/ProjectRedirectPage";
 import ProjectsListPage from "@/app/components/pages/ProjectsListPage";
 import ProjectTaskSchedulesPage from "@/app/features/heartbeats/fresh/ProjectTaskSchedulesPage";
@@ -25,6 +24,16 @@ import { ToastProvider } from "@/app/providers/ToastProvider";
 const DesktopSessionTargetOwner = lazy(() =>
   import("@/app/features/desktop-commands/DesktopSessionTargetOwner").then((module) => ({
     default: module.DesktopSessionTargetOwner,
+  })),
+);
+
+// The design showcase is a separate user-selected route. Ordinary workspace
+// startup does not render it; keep its complete page available on demand.
+const DesignPreviewPage = lazy(() =>
+  import("@/app/components/pages/DesignPreviewPage").catch(() => ({
+    default: () => (
+      <p role="alert">The design preview could not be loaded. Reload this page to try again.</p>
+    ),
   })),
 );
 
@@ -45,7 +54,9 @@ export function KeyedSessionPage() {
 function DesignRoute() {
   const policy = useUiPolicy();
   return policy.orchestrationEnabled ? (
-    <DesignPreviewPage />
+    <Suspense fallback={<p role="status">Loading design preview…</p>}>
+      <DesignPreviewPage />
+    </Suspense>
   ) : (
     <Navigate to={routes.list()} replace />
   );
