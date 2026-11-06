@@ -23,7 +23,7 @@ class FinalDraftAcknowledgementControls(unittest.TestCase):
             const plan = {a: 'a', b: 'b'};
             const pause = () => new Promise(setImmediate);
             function harness() {
-              const context = {URL, Request, Response, TextEncoder, Promise, TypeError,
+              const context = {URL, Request, Response, TextEncoder, Promise, TypeError, DOMException, AbortSignal,
                 location: {origin: 'http://127.0.0.1:12001'}, fetch: () => { throw Error('No HTTP'); }};
               context.window = context; context.top = context;
               vm.createContext(context); vm.runInContext(producer, context);
