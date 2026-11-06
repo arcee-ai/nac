@@ -243,9 +243,11 @@ resource sampler called lstat on an enumerated target object pathname that was
 absent. It did not complete compilation or reach binary/full Guide identity or
 the case. Its packet, both earlier private failures and all original terminal
 failures remain frozen. Which process removed/renamed the object was not
-observed; no compiler/product cause is claimed. The additional reported PR563
-1580.8ms failure has no immutable prepared-source binding here and is separate
-context, not profiler evidence or attribution.
+observed; no compiler/product cause is claimed. The additional PR5631580.8ms
+failure is separate context, not profiler evidence or attribution. Its owner
+later supplied cached immutable prepared3416f6e66d91bea08dd0132bc83ae264173470d8,
+distinct from head8fb63b20301e9e8ff074b1ef7ae4b1c3743f669f; no duplicate provider
+fetch, local reproduction or causal equivalence is inferred.
 
 Only compiler ROOT/target sampling now uses a closed descriptor-relative counter.
 Ordinary ownership, device/inode binding, no-follow type checks,200,000 aggregate
