@@ -240,7 +240,7 @@ fn allowed(method: &Method, path: &str) -> bool {
     if matches!(*method, Method::GET | Method::HEAD) {
         return matches!(
             path,
-            "/" | "/index.html"
+            "/" | "/app" | "/index.html"
                 | "/ui-config"
                 | "/health"
                 | "/healthz"
