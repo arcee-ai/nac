@@ -4,6 +4,33 @@ import WebKit
 
 @MainActor
 extension WorkspaceSmoke {
+    // Resolve the owned form's Enabled switch, never another checked switch.
+    // The exact probe is exercised by test_workspace_mcp.mjs.
+    static let disabledMcpFixtureScript = #"""
+    const visible = e => {
+      if (!e || e.closest('[hidden],[inert],[aria-hidden="true"]')) return false;
+      for (let n=e; n; n=n.parentElement) {
+        const s=getComputedStyle(n);
+        if (s.display === 'none' || s.visibility !== 'visible' || Number(s.opacity) < 0.99) return false;
+      }
+      const r=e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const dialogs=[...document.querySelectorAll('[role=dialog][aria-label="MCP servers"][data-modal-open="true"]')].filter(visible);
+    if (dialogs.length !== 1) throw Error('Expected one visible owned MCP dialog');
+    const names=[...dialogs[0].querySelectorAll('input[placeholder="my_server"]')].filter(visible);
+    if (names.length !== 1 || names[0].value !== 'wk_disabled_fixture') throw Error('Expected the owned MCP fixture form');
+    const row=names[0].parentElement?.parentElement;
+    const labels=[...row.querySelectorAll('.label-small')].filter(e => e.textContent.trim() === 'Enabled' && visible(e));
+    const control=labels.length === 1 ? labels[0].parentElement.nextElementSibling : null;
+    if (!control || control.getAttribute('role') !== 'switch' || !visible(control) ||
+        control.matches(':disabled,[aria-disabled="true"]')) throw Error('Expected one actionable owned Enabled switch');
+    const checked=control.getAttribute('aria-checked');
+    if (checked !== 'true' && checked !== 'false') throw Error('Missing owned Enabled state');
+    if (disable && checked === 'true') control.click();
+    return control.getAttribute('aria-checked') === 'false';
+    """#
+
     func directJourney() async {
         await check("orchestration-opt-in") {
             try await self.require("Direct-only policy or behavior choices changed", "return !(await (await fetch('/ui-config')).json()).orchestration_enabled && document.querySelectorAll('[role=radio]').length === 0;")
@@ -88,7 +115,8 @@ extension WorkspaceSmoke {
             try await self.button("Add argument")
             try await self.fill("input[aria-label='Argument 1']", self.app.profile!.root.appendingPathComponent("tmp/workspace-mcp.sh").path)
             // An intentionally disabled fixture never executes a process at session startup.
-            _ = try await self.js("const e=[...document.querySelectorAll('[role=switch]')].find(e => e.getAttribute('aria-checked') === 'true'); if(e)e.click(); return true;")
+            _ = try await self.js("const disable=true;" + Self.disabledMcpFixtureScript)
+            try await self.waitJS("owned MCP fixture disabled before test/save", "const disable=false;" + Self.disabledMcpFixtureScript)
             try await self.button("Test connection")
             try await self.waitJS("local MCP tool discovery", "return document.body.innerText.includes('1 tool found') && document.body.innerText.includes('wk_fixture_echo');")
             try await self.button("Save")

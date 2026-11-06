@@ -478,6 +478,13 @@ final class WorkspaceSmoke {
     }
 
     func snapshot(_ name: String, expecting target: CaptureTarget? = nil) async throws {
+        var targetedCaptureCompleted = false
+        defer {
+            if target != nil && !targetedCaptureCompleted {
+                checks["visible-paint"] = ["status": "unavailable", "detail": "Requested snapshot did not complete all capture and identity checks; inspect retained diagnostics"]
+                record(["paint_diagnostics": paintDiagnostics, "checks": checks])
+            }
+        }
         var readiness: [String: Any] = ["kind": "diagnostic-only"]
         var initialReadiness: [String: Any] = [:]
         let started = Date()
@@ -525,8 +532,6 @@ final class WorkspaceSmoke {
             app.window.occlusionState.contains(.visible)
         if target != nil && !painting {
             checks["visible-paint"] = ["status": "unavailable", "detail": "Requested content is not ready/visible or lacks a fresh frame; inspect capture readiness and retained PNG"]
-        } else if target != nil && checks["visible-paint"] == nil {
-            checks["visible-paint"] = ["status": "pass", "detail": "Fresh animation frame and revealed transcript before native snapshot; inspect retained PNGs"]
         }
         record(["paint_diagnostics": paintDiagnostics, "checks": checks])
         let configuration = WKSnapshotConfiguration()
@@ -575,6 +580,13 @@ final class WorkspaceSmoke {
         record(["paint_diagnostics": paintDiagnostics, "checks": checks])
         if target != nil && (!ready || !painting || !afterSurface) {
             throw PreviewError.message("Capture \(name) did not reach and retain requested visible content")
+        }
+        if target != nil {
+            if checks["visible-paint"] == nil {
+                checks["visible-paint"] = ["status": "pass", "detail": "Fresh frame, retained PNG and requested content/identity checks completed; inspect retained PNGs"]
+            }
+            targetedCaptureCompleted = true
+            record(["paint_diagnostics": paintDiagnostics, "checks": checks])
         }
     }
 }
