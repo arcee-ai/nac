@@ -5,6 +5,7 @@ No local opt-in, vendor credentials, browser configuration, OS settings or TCC
 changes. The Actions job itself supplies the disposable machine/account/profile.
 """
 import json
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -14,7 +15,8 @@ import time
 from urllib.request import Request, urlopen
 
 from external_auth_smoke import require_isolated_host
-from instance_console import require_console
+from instance_console import require_console, record_console
+from smoke import session_lock_state
 
 
 def require(value, message):
@@ -119,16 +121,23 @@ def main():
         job = hosted_job(os.environ, jobs['jobs'], source)
         require(Path.home() == Path('/Users/runner') and Path.home().stat().st_uid == os.getuid(),
                 'Expected disposable hosted runner account')
-        console = require_isolated_host()
         observer, host_probe = output / 'InstanceObservation', output / 'HostedAuthBrowser'
         for name, file, frameworks in [('observer', 'InstanceObservation.swift', ['AppKit']),
                                        ('browser', 'HostedAuthBrowser.swift', ['AppKit'])]:
             destination = observer if name == 'observer' else host_probe
             run('compile-' + name, ['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5', '-O',
                 '-framework', frameworks[0], str(source_root / 'desktop/macos' / file), '-o', str(destination)], limit=60)
+        console_observations = []
+        detailed_console = record_console(observer, console_observations, 'hosted-auth-preflight-diagnostic')
+        save('HOST-PREFLIGHT.json', dict(source=source, candidate=candidate, job=job,
+            legacy_lock=session_lock_state(), detailed_console=detailed_console,
+            observer_sha256=hashlib.sha256(observer.read_bytes()).hexdigest(), app_or_browser_launched=False))
+        # Preserve the existing admission. Console diagnostics are read-only and
+        # distinguish an unavailable/locked host from an absent optional bit.
+        console = require_isolated_host()
         host = observed([str(host_probe)])
         require(host['os_major'] == 26 and not host['running_browsers'], 'Requires a clean macOS26 browser baseline')
-        browser = host['browser']; console_observations = []
+        browser = host['browser']
         require_console(observer, console_observations, 'hosted-auth-before-launch')
         save('HOST.json', dict(source=source, candidate=candidate, job=job, run=os.environ['GITHUB_RUN_ID'],
             attempt=os.environ['GITHUB_RUN_ATTEMPT'], host=host, console=console,
