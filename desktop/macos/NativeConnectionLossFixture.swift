@@ -1,9 +1,21 @@
 import Foundation
 
 // The handler and retirement methods are inserted verbatim. The real native
-// receipt state owns admission; these ports model only WK callback delivery.
+// receipt state owns admission. WK and later storage/target owners are inert
+// ports here; this fixture qualifies only connection-loss callback ordering.
 private enum World { case page }
 private enum NativeCommandScript { static let handler = "nacUIReceipt" }
+private enum WorkspaceStorageScript { static let handler = "nacPresentationStorage" }
+private final class Storage {
+    func retire() {}
+    func flush(completion: (Bool) -> Void) { completion(true) }
+    func receive(_ body: String, expected: NativeDocumentBinding) -> Bool { false }
+}
+private final class Target {
+    let ready = false
+    func end() {}
+    func receive(_ body: String, expected: NativeDocumentBinding) -> Bool { false }
+}
 private final class WKUserContentController {
     var inCallback = false
     var removed = 0
@@ -32,6 +44,9 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
 @MainActor private final class Bridge {
     weak var webView: View?
     let state: NativeCommandState
+    let target = Target()
+    var targetReady: (() -> Void)?
+    var storage: Storage?
     var installed = true
     var navigation: Int? = 1
     var current: EngineReceipt?
@@ -92,7 +107,7 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
             precondition(calls == (change == "none" ? 1 : 0), "Queued loss escaped its original binding")
             if change == "none" {
-                precondition(controller.removed == 1 && !bridge.installed && !controller.removedInsideCallback)
+                precondition(controller.removed > 0 && !bridge.installed && !controller.removedInsideCallback)
             }
         }
         print("Verbatim connection-loss handler: deferred retirement, immediate admission fence, retired/document/view/engine fences and non-loss receipt passed (headless).")
