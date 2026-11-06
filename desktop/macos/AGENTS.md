@@ -50,7 +50,11 @@ authority; the production React UI and HTTP/SSE client remain shared.
   fences each failed child's retirement; only explicit native Retry restarts the
   pinned selected configuration through the ordinary Rust serving lease.
   Preserve PreviewApp's common private `fail(String)` funnel and the engine's
-  receipt invalidation before callbacks. NativeCommands owns menus/bridge and retires through the common fail/actual-stop
+  receipt invalidation before callbacks. A LOCAL_APP view failure retains a
+  verified ready engine with a live Quit owner, including while hidden; it
+  retires the broken view's commands and reports that work continues until
+  explicit Quit. An invalid/retiring engine still uses ordinary owned cleanup.
+  NativeCommands owns menus/bridge and retires through the common fail/actual-stop
   funnel. Hiding an intact window does not retire its bridge. Native Edit stays
   in the AppKit/WK responder chain; never synthesize trusted terminal intent.
 - The read-only `BundleIdentity.sh` helper maps the exact bundled engine identity's track to approved

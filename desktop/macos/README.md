@@ -299,6 +299,12 @@ Closing a normal NAC workspace keeps its document, streams, native command
 bridge and owned engine running. Reopening the same app from the Dock restores
 that window. The disposable development preview still quits on close.
 
+A view failure, including a renderer callback after the window is hidden,
+retires the broken view's commands while keeping a verified ready engine and
+its running work. Reopen shows a truthful native status; explicit Quit still
+owns confirmation and cleanup. Engine/protocol failures invalidate readiness
+before callbacks and retain ordinary owned cleanup.
+
 Explicit Quit presents **Cancel** and **Stop and Quit**. Activity is conservative:
 the shell does not infer idle from one run while approvals, terminal shells or
 commands with uncertain outcomes may remain. Cancel preserves the workspace.
@@ -336,6 +342,13 @@ OS and system WebKit versions.
 Sheet completion is programmatic AppKit, with no OS input events. Evidence
 records locked-console provenance and keeps visible paint and trusted input
 acceptance false. This is not a substitute for full native acceptance.
+
+The separately selected `NAC_LIFECYCLE_SCENARIOS=renderer-hidden` case qualifies
+this ALL-344 failure-status prefix on its owning layer, before ALL-345's renderer
+recovery replaces that presentation. It injects the actual renderer delegate
+callback after close, verifies running work and the same owned engine, reopens
+the native status and chooses explicit Stop and Quit. It is not an actual
+WebKit process crash, OS-shutdown case or trusted-input acceptance.
 
 The separate `QuitWebViewFixture.swift` / `quit_webview_fixture.py` probe records
 real system WK document/SSE lifetime. Hiding a retained document can keep a live
