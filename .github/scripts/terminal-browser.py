@@ -75,6 +75,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-sha', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--prepare-linux-packages', action='store_true')
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
@@ -96,6 +97,8 @@ def main():
             raise RuntimeError('requires native ARM macOS or Linux')
         if platform.system() == 'Darwin' and platform.machine() != 'arm64':
             raise RuntimeError('macOS coverage requires actual ARM64')
+        if args.prepare_linux_packages and platform.system() != 'Linux':
+            raise RuntimeError('package preparation requires native Linux')
         shell = '/bin/zsh' if platform.system() == 'Darwin' else '/bin/bash'
         for executable in (shell, '/usr/bin/less'):
             if not os.access(executable, os.X_OK):
@@ -107,15 +110,38 @@ def main():
         report['python'] = run(['python3', '--version'], 'python')
         report['node'] = run(['node', '--version'], 'node')
         report['rustc'] = run(['rustc', '-Vv'], 'rustc')
-        run([os.environ.get('CARGO', 'cargo'), 'build', '--locked', '-p', 'nac-server', '--bin', 'nac-web'], 'build')
-        binary = (ROOT / os.environ.get('CARGO_TARGET_DIR', 'target') / 'debug/nac-web').resolve()
+        if args.prepare_linux_packages:
+            preparation_spec = importlib.util.spec_from_file_location(
+                'terminal_prepare', Path(__file__).with_name('terminal-browser-prepare.py'))
+            preparation = importlib.util.module_from_spec(preparation_spec)
+            preparation_spec.loader.exec_module(preparation)
+            prepared = preparation.prepare(args.expected_sha, output / 'preparation', env=env)
+            if prepared.get('source') != report['candidate'] or prepared.get('status') != 'prepared' \
+                    or prepared.get('quality_verdict') is not False:
+                raise RuntimeError('incomplete exact-source preparation')
+            report['preparation'] = prepared
+            report['phases'].append({'label': 'build-and-linux-packages', 'seconds': prepared['seconds'],
+                                     'returncode': 0, 'log': 'preparation/preparation.json'})
+        else:
+            run([os.environ.get('CARGO', 'cargo'), 'build', '--locked', '-p', 'nac-server', '--bin', 'nac-web'], 'build')
+        if args.prepare_linux_packages:
+            binary = preparation.verify_binary(prepared['binary'])
+            if binary != output / 'preparation/engine/nac-web':
+                raise RuntimeError('preparation binary is outside its owned engine directory')
+        else:
+            binary = (ROOT / os.environ.get('CARGO_TARGET_DIR', 'target') / 'debug/nac-web').resolve()
         if not os.access(binary, os.X_OK):
             raise RuntimeError(f'built nac-web unavailable: {binary}')
         command = ['npm', '--prefix', str(WEB), 'run', 'test:e2e', '--']
         def episode(file, label):
+            if args.prepare_linux_packages and preparation.verify_binary(prepared['binary']) != binary:
+                raise RuntimeError('prepared binary changed before native episode')
             episode_env = dict(env, NAC_E2E_BINARY=str(binary), NAC_E2E_ARTIFACTS=str(output / label),
                                PLAYWRIGHT_JSON_OUTPUT_FILE=str(output / f'{label}.json'))
-            return run(command + [file, '--grep', TITLE, '--reporter=json'], label, episode_env)
+            result = run(command + [file, '--grep', TITLE, '--reporter=json'], label, episode_env)
+            if args.prepare_linux_packages:
+                preparation.verify_binary(prepared['binary'])
+            return result
         episode(SOURCE.name, 'journey')
         verify_result(output / 'journey.json')
         # A disposable sibling keeps identical imports/fixtures and leaves candidate source untouched.
