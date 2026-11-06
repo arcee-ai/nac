@@ -317,7 +317,12 @@ class RecoveryLaunch:
                 self.log.close()
 
 
-def empty_pair(endpoint, workspace, provider, deadline):
+def empty_pair(endpoint, workspace, provider, deadline, saved_configuration):
+    require(saved_configuration['backend'] == 'openai-responses' and
+            saved_configuration['base_url'] == provider.endpoint and
+            saved_configuration['model'] == 'gpt-5.6-sol' and
+            type(saved_configuration['api_key_env']) is str and
+            bool(saved_configuration['api_key_env']), 'foreign session seed configuration')
     def call(path, body):
         return request(endpoint, path, body, timeout=_remaining(deadline, 8))
     project = call('/projects', dict(name='Disposable storage Q1', cwd=str(workspace)))
@@ -325,7 +330,9 @@ def empty_pair(endpoint, workspace, provider, deadline):
     for _ in range(2):
         result = call('/sessions', dict(behavior='direct', project_id=project['project_id'],
                       model='gpt-5.6-sol', backend='openai-responses', base_url=provider.endpoint,
-                      api_key_env='OPENAI_API_KEY'))
+                      api_key_env=saved_configuration['api_key_env']))
+        require(result['metadata'].get('api_key_env') == saved_configuration['api_key_env'],
+                'seeded session selector changed')
         pair.append(result['metadata']['session_id'])
     return pair
 
@@ -388,7 +395,7 @@ def run_contract(bundle, observer, root, destination, admission):
             require(request(ready['endpoint'], '/store', timeout=_remaining(action_deadline, 8))['store_path'] == str(store),
                     'foreign canonical store')
             if pair is None:
-                pair = empty_pair(ready['endpoint'], workspace, provider, action_deadline)
+                pair = empty_pair(ready['endpoint'], workspace, provider, action_deadline, saved_configuration)
                 db_st = store.stat(); db_pin = (db_st.st_dev, db_st.st_ino)
                 baseline = sqlite_snapshot(store, db_pin, pair)
             require(sqlite_snapshot(store, db_pin, pair) == baseline, 'prelaunch durable facts changed')
