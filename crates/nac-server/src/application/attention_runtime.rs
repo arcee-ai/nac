@@ -873,12 +873,12 @@ impl Live {
                     .as_ref()
                     .is_some_and(|binding| binding.token == token)
             }) {
-                if registration.is_some() && source.service.is_some() {
-                    let binding = source
-                        .binding
-                        .as_mut()
-                        .expect("matching installation owner");
-                    binding.registration = registration;
+                if let (Some(registration), Some(_), Some(binding)) = (
+                    registration,
+                    source.service.as_ref(),
+                    source.binding.as_mut(),
+                ) {
+                    binding.registration = Some(registration);
                     binding.installing = false;
                     // Invalidate every read captured before the installation
                     // receipt, including question commits during the callback.
