@@ -593,12 +593,15 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     [
       "import os,time",
       "os.write(1,b'\\x1b[2J\\x1b[HSELECT-WHILE-OUTPUT\\r\\n')",
-      "for i in range(240):",
-      // Rows stay as wide as the half-row panel the 1500ms budget below was set
-      // against; the wider panel would otherwise grow the noise by 1.6x.
-      " width=min(48,max(1,os.get_terminal_size(1).columns-6))",
-      " block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
-      " os.write(1,block*300); time.sleep(0.02)",
+      "try:",
+      " for i in range(240):",
+      // Retain the original complete noisy workload and row width.
+      "  width=min(48,max(1,os.get_terminal_size(1).columns-6))",
+      "  block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
+      "  os.write(1,block*300); time.sleep(0.02)",
+      "except KeyboardInterrupt:",
+      " os.write(1,b'\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
+      " raise",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
@@ -642,6 +645,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   const measurements: Record<string, unknown> = {};
   try {
     await focus(pane);
+    // Install the echo-proof witness before loading the renderer. The timed
+    // interaction still requires fresh trusted keyboard input in the same shell.
+    await command(page, "nac_probe() { printf '" + octal("NOISE-INTERRUPTED\n") + "'; }");
     await command(page, "python3 noise.py");
     const accessible = pane.locator(".xterm-accessibility");
     await expect(accessible).toContainText("SELECT-WHILE-OUTPUT");
@@ -685,7 +691,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
-    await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
+    await command(page, "nac_probe");
     const timing = await page.evaluate(() => {
       if (!window.terminalRenderedMarker)
         throw new Error("Terminal render measurement was not armed");
@@ -695,6 +701,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     measurements.interruptToRenderedMarkerMs = timing.renderedMs;
     // Accessibility correctness remains required, with its own throttled update
     // lifetime. Its assertion polling never contributes to the recorded latency.
+    await expect(accessible).toContainText("NOISE-SIGINT-OBSERVED");
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
     expect(measurements.interruptToRenderedMarkerMs).toBeLessThan(1500);
     expect(measurements.resizeMs).toBeLessThan(1500);
@@ -748,6 +755,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     });
   }
   expect(pages.length).toBeGreaterThan(2);
+  expect(pages.every((frame) => !frame.gap)).toBe(true);
   expect(Math.max(...pages.map((frame) => frame.retained))).toBeLessThanOrEqual(8 * 1024 * 1024);
   expect(Math.max(...pages.map((frame) => frame.bytes))).toBeLessThanOrEqual(32 * 1024);
   harness.provider.assertConsumed();
