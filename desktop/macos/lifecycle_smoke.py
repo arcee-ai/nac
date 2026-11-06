@@ -18,6 +18,7 @@ from instance_contract import OwnedEngine, digest
 from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, wait_for
 from quit_fixture import QuitWorkspaceFixture, TRANSCRIPT, request
 from smoke import session_lock_state
+from instance_console import require_console
 
 
 def console_state():
@@ -74,7 +75,10 @@ def run_contract(bundle, destination, observer):
     assert receipt['lifecycle_smoke_instrumentation'] and receipt['normal_startup']
     assert receipt['engine_sha256'] == digest(bundle / 'Contents/Resources/nac-web')
     assert receipt['native_sha256'] == digest(bundle / 'Contents/MacOS/NACPreview')
+    console_checks = []
+    require_console(observer, console_checks, "lifecycle-preflight")
     evidence = dict(source_head=head, build_receipt=receipt, console_lock=console_state(),
+                    console_checks=console_checks,
                     console_lock_sources='CGSSessionScreenIsLocked and Root.IOConsoleLocked when present',
                     os=subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip(),
                     visible_paint_acceptance=False, trusted_input_acceptance=False,
@@ -104,7 +108,7 @@ def run_contract(bundle, destination, observer):
             try:
                 subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(profile)],
                                env=environment, check=True, timeout=5)
-                journey = AppJourney(moved, case / 'native.json', profile, environment, store, observer)
+                journey = AppJourney(moved, case / 'native.json', profile, environment, store, observer, console_checks)
                 journey.command[journey.command.index('--instance-scenario') + 1] = scenario
                 journey.launch()
                 ready = journey.stage('ready')
