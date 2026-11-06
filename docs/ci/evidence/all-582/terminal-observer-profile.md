@@ -68,8 +68,18 @@ writer must reproduce them before Rust compilation.
 ## Finite hosted contract (not executed locally)
 
 One manual-only job on the ordinary `ubuntu-latest` runner, with admission
-requiring2CPU x86_64 ubuntu26, contents:read,
+requiring x86_64 ubuntu26 and enforcing a two-CPU allowed-affinity subset
+on the ordinary diagnostic controller (inherited by its child tree), contents:read,
 attempt1, exact private branch/event/repository/repositoryID/source guard.
+Host-visible CPU count is distinct from allowed affinity and cgroup quota. A
+larger normal runner is accepted and pinned to two allowed CPUs; unsupported
+affinity or fewer than two allowed CPUs refuses native work. Available unified
+cgroup ancestor CPU quotas are recorded (missing/unreadable quota evidence
+remains unknown); effective capacity can be below two. This changes only this
+process tree, never runner/cgroup settings. The failed run did not capture
+affinity/cgroup capacity, so this does **not** prove matched runtime capacity
+or establish a product pass.
+
 No token environment, cache publication, image/service, protected checks,
 quality receipt, PR trigger or protected source alias is introduced. Existing
 pinned compiler cache may restore dependencies with `save-if: false`; source

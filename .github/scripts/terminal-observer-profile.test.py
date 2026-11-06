@@ -9,6 +9,7 @@ import tempfile
 import sys
 sys.dont_write_bytecode=True
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 SPEC=importlib.util.spec_from_file_location('profile',Path(__file__).with_name('terminal-observer-profile.py'))
@@ -79,6 +80,21 @@ class Controls(unittest.TestCase):
             result=profile.capture_phases(root,out)
             self.assertEqual(result['counts'],{'client':1,'server':0});self.assertTrue(result['truncated'])
             self.assertNotIn('payload',(out/'phases.json').read_text())
+    def test_large_runner_is_pinned_not_rejected_and_quota_is_reported(self):
+        observed=iter(({2,3,4,5},{2,3}))
+        with patch.object(profile.os,'sched_getaffinity',side_effect=lambda _pid:next(observed),create=True), \
+             patch.object(profile.os,'sched_setaffinity',create=True)as setter, \
+             patch.object(profile.os,'cpu_count',return_value=32), \
+             patch.object(Path,'read_text',side_effect=OSError('unavailable')):
+            value=profile.cpu_capacity()
+        setter.assert_called_once_with(0,{2,3})
+        self.assertEqual(value['host_visible_cpus'],32)
+        self.assertEqual(value['affinity_selected'],[2,3])
+        self.assertFalse(value['matched_failed_runtime'])
+        self.assertIsNotNone(value['cgroup_observation_error'])
+        with patch.object(profile.os,'sched_getaffinity',return_value={0},create=True):
+            with self.assertRaises(ValueError):profile.cpu_capacity()
+
     def test_finite_no_retry_private_workflow(self):
         text=(ROOT/'.github/workflows/nightly-portability.yml').read_text()
         self.assertIn('workflow_dispatch:',text);self.assertNotIn('pull_request:',text);self.assertNotIn('schedule:',text)

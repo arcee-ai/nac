@@ -115,6 +115,39 @@ def capture_phases(raw,out):
             'clock_domains':'independent process clocks; never subtract client/server origins'}
 
 
+def cpu_capacity():
+    """Private process affinity only; never changes runner/cgroup configuration."""
+    require(hasattr(os,'sched_getaffinity')and hasattr(os,'sched_setaffinity'),'CPU affinity unsupported; diagnostic inconclusive')
+    before=sorted(os.sched_getaffinity(0))
+    require(len(before)>=2,'fewer than two allowed CPUs; diagnostic inconclusive')
+    selected=before[:2];os.sched_setaffinity(0,set(selected))
+    after=sorted(os.sched_getaffinity(0));require(after==selected,'two-CPU affinity not enforced; diagnostic inconclusive')
+    quotas=[];quota_error=None
+    try:
+        raw=Path('/proc/self/cgroup').read_text();require(len(raw)<=16384,'cgroup metadata bound')
+        matches=[line[3:]for line in raw.splitlines()if line.startswith('0::')]
+        require(len(matches)==1,'unknown unified cgroup')
+        parts=Path(matches[0]).parts
+        require(matches[0].startswith('/')and '..'not in parts,'noncanonical cgroup path')
+        root=Path('/sys/fs/cgroup');current=root.joinpath(*parts[1:])
+        while True:
+            path=current/'cpu.max'
+            if path.exists():
+                words=path.read_text().split();require(len(words)==2,'unknown cpu.max')
+                require(words[1].isdigit()and int(words[1])>0,'unknown quota period')
+                if words[0]!='max':
+                    require(words[0].isdigit()and int(words[0])>0,'unknown CPU quota')
+                    quotas.append(int(words[0])/int(words[1]))
+            if current==root:break
+            current=current.parent
+    except (OSError,ValueError)as error:quota_error=type(error).__name__+': '+str(error)
+    return {'host_visible_cpus':os.cpu_count(),'affinity_before':before,'affinity_selected':after,
+        'cgroup_v2_quota_cpus':quotas,'cgroup_observation_error':quota_error,
+        'effective_upper_bound_cpus':min([2,*quotas]),
+        'matched_failed_runtime':False,
+        'comparison_limit':'failed-run affinity/cgroup capacity was not captured; pinning does not establish matched machine/runtime'}
+
+
 class Controller:
     def __init__(self,home):
         self.home=home;self.evidence=home/'evidence';self.raw=home/'raw';self.commands=[]
@@ -170,7 +203,8 @@ def main():
     require(os.environ.get('GITHUB_RUN_ATTEMPT')=='1'and re.fullmatch(r'[1-9][0-9]*',os.environ.get('GITHUB_RUN_ID','')),'attempt1 only')
     require(os.environ.get('GITHUB_SHA')==args.source==subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'exact source')
     require(not subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip(),'clean source')
-    require(os.environ.get('ImageOS')=='ubuntu26'and os.cpu_count()==2,'same two-CPU ubuntu26 runner')
+    require(os.environ.get('ImageOS')=='ubuntu26','ubuntu26 runner required')
+    capacity=cpu_capacity()
     require(digest(ROOT/E2E)==E2E_SHA,'unchanged E2E case')
     parent=Path(os.environ['RUNNER_TEMP']);require(parent.is_absolute()and not parent.is_symlink(),'runner temp')
     home=parent/'terminal-observer-profile';home.mkdir(mode=0o700)
@@ -184,6 +218,7 @@ def main():
         require(subprocess.check_output(['cargo','--version'],text=True).startswith('cargo 1.98.0 '),'Cargo1.98')
         require(subprocess.check_output(['rustc','--version'],text=True).startswith('rustc 1.98.0 '),'Rust1.98')
         require(subprocess.check_output(['node','--version'],text=True).strip()=='v24.22.1','Node24.22.1')
+        result['cpu_capacity']=capacity
         result['started_utc']=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
         result['runner']={k:os.environ.get(k)for k in ('ImageOS','ImageVersion','RUNNER_ARCH','RUNNER_OS')}
         result['tools']={tool:subprocess.check_output([tool,'--version'],text=True).strip()for tool in ('cargo','rustc','node','npm')}
