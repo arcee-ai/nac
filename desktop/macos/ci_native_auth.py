@@ -53,6 +53,16 @@ def isolate_subprocess_environment(environment):
     return token
 
 
+def public_candidate(source, parents, environment, pull):
+    """Native GitHub stacks compose the base through prior synthetic merges."""
+    require(pull.get('number') == int(environment['CANDIDATE_PR']) and pull.get('state') == 'open' and
+            pull.get('merge_commit_sha') == source and pull.get('head', {}).get('sha') == environment.get('CANDIDATE_HEAD') and
+            pull.get('base', {}).get('sha') == environment.get('CANDIDATE_BASE') and
+            len(parents) == 2 and parents[1] == environment.get('CANDIDATE_HEAD'),
+            'Checkout is not the current public candidate merge')
+    return dict(source=source, parents=parents, head=pull['head']['sha'], base=pull['base']['sha'])
+
+
 def main():
     token = isolate_subprocess_environment(os.environ)
     source_root, output = (Path(value).resolve() for value in sys.argv[1:])
@@ -96,13 +106,15 @@ def main():
 
     try:
         parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', 'HEAD'], text=True).split()
-        require(parents == [os.environ.get('CANDIDATE_BASE'), os.environ.get('CANDIDATE_HEAD')],
-                'Checkout is not the exact public candidate merge pair')
         require(token and os.environ.get('GITHUB_RUN_ID', '').isdigit(), 'Missing live Actions identity')
-        url = 'https://api.github.com/repos/arcee-ai/nac/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/jobs?per_page=100'
-        with urlopen(Request(url, headers={'Authorization': 'Bearer ' + token,
-                                         'Accept': 'application/vnd.github+json'}), timeout=15) as response:
-            jobs = json.load(response)
+        def service(path):
+            with urlopen(Request('https://api.github.com/repos/arcee-ai/nac/' + path,
+                    headers={'Authorization': 'Bearer ' + token,
+                             'Accept': 'application/vnd.github+json'}), timeout=15) as response:
+                return json.load(response)
+        require(os.environ.get('CANDIDATE_PR', '').isdigit(), 'Missing public pull request identity')
+        candidate = public_candidate(source, parents, os.environ, service('pulls/' + os.environ['CANDIDATE_PR']))
+        jobs = service('actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/jobs?per_page=100')
         require(jobs['total_count'] <= 100, 'Incomplete job metadata')
         job = hosted_job(os.environ, jobs['jobs'], source)
         require(Path.home() == Path('/Users/runner') and Path.home().stat().st_uid == os.getuid(),
@@ -118,7 +130,7 @@ def main():
         require(host['os_major'] == 26 and not host['running_browsers'], 'Requires a clean macOS26 browser baseline')
         browser = host['browser']; console_observations = []
         require_console(observer, console_observations, 'hosted-auth-before-launch')
-        save('HOST.json', dict(source=source, job=job, run=os.environ['GITHUB_RUN_ID'],
+        save('HOST.json', dict(source=source, candidate=candidate, job=job, run=os.environ['GITHUB_RUN_ID'],
             attempt=os.environ['GITHUB_RUN_ATTEMPT'], host=host, console=console,
             console_observations=console_observations,
             profile_contract='fresh dedicated GitHub-hosted VM/account; initial main browsers absent; no default/profile settings changed'))
