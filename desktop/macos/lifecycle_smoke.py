@@ -19,6 +19,7 @@ from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, w
 from quit_fixture import QuitWorkspaceFixture, TRANSCRIPT, request
 from smoke import session_lock_state
 from instance_console import require_console
+from lifecycle_renderer import exercise_hidden_renderer
 
 
 def console_state():
@@ -91,7 +92,7 @@ def run_contract(bundle, destination, observer):
     summary = destination / 'summary.json'
     try:
         for scenario in os.environ.get('NAC_LIFECYCLE_SCENARIOS', 'run,approval,terminal').split(','):
-            assert scenario in ('run', 'approval', 'terminal'), scenario
+            assert scenario in ('run', 'approval', 'terminal', 'renderer-hidden'), scenario
             profile = root / scenario
             profile.mkdir(mode=0o700)
             case = destination / scenario
@@ -136,51 +137,54 @@ def run_contract(bundle, destination, observer):
                 assert closed['close_retained_owners'] and not engine_settled(moved, ready_pid)
                 fixture.assert_work_running()
                 assert request(ready['base_url'], '/sessions/' + fixture.approval_session + '/permissions')['requests']
-                # LaunchServices sends the app's real reopen event to this same
-                # bundle. It does not create or adopt another engine instance.
-                journey.launch()
-                reopened = journey.stage('reopened')
-                assert reopened['reopen_retained_usable_workspace']
-                capture('reopened')
-                fixture.assert_work_running()
-                def os_quit():
-                    result = json.loads(subprocess.check_output([str(observer), 'terminate', str(moved),
-                                                                json.dumps(journey.identity)], text=True, timeout=4))
-                    assert result.get('termination_requested'), result
-                    os_requests.append(result)
-
-                if scenario == 'terminal':
-                    os_quit() # First Quit originates from the public OS application API.
+                if scenario == 'renderer-hidden':
+                    stopped, started = exercise_hidden_renderer(journey, fixture)
                 else:
-                    journey.command_file('quit')
-                confirming = journey.stage('confirming')
-                assert confirming['quit_delegate_requests'] == confirming['quit_confirmation_decisions'] == 1, confirming
-                capture('confirming')
-                fixture.assert_work_running()
-                if scenario == 'terminal':
-                    os_quit() # Reentrant requests may coalesce before reaching native entry.
-                journey.command_file('duplicate-quit')
-                # Preserve the original immediate duplicate/Cancel race in the
-                # run case; the other cases prove a duplicate reached the real
-                # delegate while its first confirmation was still outstanding.
-                if scenario != 'run':
-                    journey.stage('duplicate-confirming')
+                    # LaunchServices sends the app's real reopen event to this same
+                    # bundle. It does not create or adopt another engine instance.
+                    journey.launch()
+                    reopened = journey.stage('reopened')
+                    assert reopened['reopen_retained_usable_workspace']
+                    capture('reopened')
                     fixture.assert_work_running()
-                journey.command_file('cancel')
-                cancelled = journey.stage('cancelled')
-                assert cancelled['cancel_retained_owners']
-                capture('cancelled')
-                fixture.assert_work_running()
-                journey.command_file('quit-again')
-                journey.stage('reconfirming')
-                started = time.monotonic()
-                journey.command_file('stop')
-                stopped = wait_for('Actual native Stop and Quit cleanup',
-                                   lambda: (value if (value := journey.read()).get('stopped') else None), timeout=30)
-                assert stopped['passed'] and stopped['document_released'] and stopped['commands_retired'], stopped
-                wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
-                stopped = journey.read() # Includes the final settled-termination snapshot.
-                verify_native_quit_completion(stopped)
+                    def os_quit():
+                        result = json.loads(subprocess.check_output([str(observer), 'terminate', str(moved),
+                                                                    json.dumps(journey.identity)], text=True, timeout=4))
+                        assert result.get('termination_requested'), result
+                        os_requests.append(result)
+
+                    if scenario == 'terminal':
+                        os_quit() # First Quit originates from the public OS application API.
+                    else:
+                        journey.command_file('quit')
+                    confirming = journey.stage('confirming')
+                    assert confirming['quit_delegate_requests'] == confirming['quit_confirmation_decisions'] == 1, confirming
+                    capture('confirming')
+                    fixture.assert_work_running()
+                    if scenario == 'terminal':
+                        os_quit() # Reentrant requests may coalesce before reaching native entry.
+                    journey.command_file('duplicate-quit')
+                    # Preserve the original immediate duplicate/Cancel race in the
+                    # run case; the other cases prove a duplicate reached the real
+                    # delegate while its first confirmation was still outstanding.
+                    if scenario != 'run':
+                        journey.stage('duplicate-confirming')
+                        fixture.assert_work_running()
+                    journey.command_file('cancel')
+                    cancelled = journey.stage('cancelled')
+                    assert cancelled['cancel_retained_owners']
+                    capture('cancelled')
+                    fixture.assert_work_running()
+                    journey.command_file('quit-again')
+                    journey.stage('reconfirming')
+                    started = time.monotonic()
+                    journey.command_file('stop')
+                    stopped = wait_for('Actual native Stop and Quit cleanup',
+                                       lambda: (value if (value := journey.read()).get('stopped') else None), timeout=30)
+                    assert stopped['passed'] and stopped['document_released'] and stopped['commands_retired'], stopped
+                    wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
+                    stopped = journey.read() # Includes the final settled-termination snapshot.
+                    verify_native_quit_completion(stopped)
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)
