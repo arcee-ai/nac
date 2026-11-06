@@ -29,6 +29,21 @@ enum DesktopStartupTests {
         precondition(finder.store.lastPathComponent == "selected store.db")
         precondition(finder.environment["NAC_ORCHESTRATION"] == "true")
         precondition(!FileManager.default.fileExists(atPath: finder.store.path))
+        // Exercise the real Rust preflight without consulting the operator's
+        // actual fallback home or creating/opening a personal store.
+        let fallbackConfig = home.appendingPathComponent(".config/nac")
+        try FileManager.default.createDirectory(at: fallbackConfig, withIntermediateDirectories: true)
+        try Data("[storage]\nstore_path = 'fallback selected store.db'\n".utf8)
+            .write(to: fallbackConfig.appendingPathComponent("config.toml"))
+        let noHome = try await DesktopStartup.select(executable: executable, identity: identity,
+            options: try DesktopStartup.Options(arguments: []), inherited: [:], fallbackHome: home.path)
+        precondition(noHome.environment["HOME"] == home.path)
+        precondition(noHome.store.lastPathComponent == "fallback selected store.db")
+        precondition(!FileManager.default.fileExists(atPath: noHome.store.path))
+        let explicitOverride = try await DesktopStartup.select(executable: executable, identity: identity,
+            options: options, inherited: ["NAC_HOME": "custom nac"], fallbackHome: home.path)
+        precondition(explicitOverride.environment["HOME"] == home.path)
+        precondition(explicitOverride.store == finder.store)
         try Data("[storage]\nstore_path = [ private-canary\n".utf8).write(to: config)
         do {
             _ = try await DesktopStartup.select(executable: executable, identity: identity, options: options, inherited: inherited)
