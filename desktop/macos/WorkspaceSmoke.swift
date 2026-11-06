@@ -496,7 +496,7 @@ final class WorkspaceSmoke {
         let painting = ready && frame && diagnostic["loadingConversation"] as? Bool == false &&
             diagnostic["visibility"] as? String == "visible" && app.window.isVisible &&
             app.window.occlusionState.contains(.visible)
-        if !painting {
+        if target != nil && !painting {
             checks["visible-paint"] = ["status": "unavailable", "detail": "Requested content is not ready/visible or lacks a fresh frame; inspect capture readiness and retained PNG"]
         } else if target != nil && checks["visible-paint"] == nil {
             checks["visible-paint"] = ["status": "pass", "detail": "Fresh animation frame and revealed transcript before native snapshot; inspect retained PNGs"]
@@ -542,7 +542,7 @@ final class WorkspaceSmoke {
         let afterSurface = app.window.isVisible && app.window.occlusionState.contains(.visible)
         capture["window_visible_after_snapshot"] = afterSurface
         paintDiagnostics[name] = capture
-        if !ready || !afterSurface {
+        if target != nil && (!ready || !afterSurface) {
             checks["visible-paint"] = ["status": "unavailable", "detail": "Semantic capture readiness did not hold; original diagnostic PNG retained"]
         }
         record(["paint_diagnostics": paintDiagnostics, "checks": checks])
