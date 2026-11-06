@@ -44,6 +44,10 @@ private final class Recovery {
     var baseURL: URL? = URL(string: "http://127.0.0.1:1234")
     var navigationIncarnations: [WKNavigation: String] = [:]
     var activeNavigation: WKNavigation?
+    var presentationUpdates = 0
+    // The joined attention owner adds this existing presentation callback to
+    // didFinish. Record the call without introducing AppKit or attention work.
+    func updatePresentation() { presentationUpdates += 1 }
     // APP_DELEGATES
     func deadline(replacement: WKWebView, navigation: WKNavigation) -> () -> Void {
         // Scheduling is an explicit port. The exact production ten-second
@@ -122,7 +126,8 @@ private final class Recovery {
             precondition(app.activeNavigation === foreign && app.commands.navigation === foreign)
             app.webView(app.webView, didFinish: foreign)
             deadline()
-            precondition(app.recovery.loaded == 2 && app.commands.finishes == 2 && app.recovery.failures.isEmpty)
+            precondition(app.recovery.loaded == 2 && app.commands.finishes == 2 && app.recovery.failures.isEmpty
+                && app.presentationUpdates == 2)
             print("PASS ordinary same-origin reload"); return
         case "old-failure":
             app.navigationIncarnations[foreign] = "launch"
@@ -153,12 +158,13 @@ private final class Recovery {
         if scenario == "blank-timeout" {
             deadline()
             precondition(app.recovery.failures == ["The workspace did not finish loading within ten seconds."])
-            precondition(app.recovery.loaded == 0 && app.webView.isHidden)
+            precondition(app.recovery.loaded == 0 && app.webView.isHidden && app.presentationUpdates == 0)
         } else {
             app.webView.url = app.baseURL
             app.webView(app.webView, didFinish: tracked)
             deadline()
-            precondition(app.recovery.loaded == 1 && app.commands.finishes == 1 && app.recovery.failures.isEmpty)
+            precondition(app.recovery.loaded == 1 && app.commands.finishes == 1 && app.recovery.failures.isEmpty
+                && app.presentationUpdates == 1)
             precondition(!app.webView.isHidden && app.status.isHidden)
         }
         print("PASS \(scenario): actual delegate identity and deadline guards (headless ports)")
