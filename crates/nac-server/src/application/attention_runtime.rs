@@ -53,6 +53,10 @@ struct RuntimeState {
     metadata_read_error: Option<rusqlite::Error>,
     #[cfg(test)]
     history_read_error: Option<rusqlite::Error>,
+    #[cfg(test)]
+    installation_gate: Option<Arc<ReadGate>>,
+    #[cfg(test)]
+    fail_installation_snapshot: bool,
 }
 #[cfg(test)]
 struct HistoryWaitGate {
@@ -105,6 +109,8 @@ struct Binding {
     service: Weak<SessionService>,
     token: Uuid,
     registration: Option<Uuid>,
+    // Publication waits for the matching synchronous snapshot and receipt.
+    installing: bool,
     config_version: Option<i64>,
 }
 struct Source {
@@ -157,6 +163,14 @@ impl AttentionServiceObserver for Sink {
         let Some(live) = self.live.upgrade() else {
             return;
         };
+        #[cfg(test)]
+        {
+            let fail = {
+                let mut runtime = live._permit.runtime.lock().unwrap();
+                std::mem::take(&mut runtime.fail_installation_snapshot)
+            };
+            assert!(!fail, "injected initial installation callback failure");
+        }
         let mut state = live
             .state
             .lock()
@@ -519,11 +533,36 @@ impl AttentionRuntime {
                 }
             }
             for _ in 0..16 {
-                let generation = live
-                    .state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .generation;
+                let generation = loop {
+                    let (generation, installing, closed) = {
+                        let state = live
+                            .state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        (
+                            state.generation,
+                            state.sources.values().any(|source| {
+                                source
+                                    .binding
+                                    .as_ref()
+                                    .is_some_and(|binding| binding.installing)
+                            }),
+                            state.closed,
+                        )
+                    };
+                    if closed {
+                        return Err(AttentionSubscribeError::Unavailable(
+                            AttentionUnavailable::Reset,
+                        ));
+                    }
+                    if !installing {
+                        break generation;
+                    }
+                    // The enclosing timeout bounds this wait; dirty hints do
+                    // not consume canonical-read retry budget during install.
+                    // No source/hub/service guard survives across the await.
+                    live.wake.notified().await;
+                };
                 let rows = read(&manager, None, Arc::clone(&live._permit)).await?;
                 live.drain(&mut observation)?;
                 let mut state = live
@@ -535,7 +574,14 @@ impl AttentionRuntime {
                         AttentionUnavailable::Reset,
                     ));
                 }
-                if generation != state.generation {
+                if generation != state.generation
+                    || state.sources.values().any(|source| {
+                        source
+                            .binding
+                            .as_ref()
+                            .is_some_and(|binding| binding.installing)
+                    })
+                {
                     continue;
                 }
                 for row in rows {
@@ -784,12 +830,31 @@ impl Live {
                 service: Arc::downgrade(service),
                 token,
                 registration: None,
+                installing: true,
                 config_version,
             });
             self.dirty(&mut state, id);
             previous
         };
         detach(previous);
+        #[cfg(test)]
+        {
+            let gate = self
+                ._permit
+                .runtime
+                .lock()
+                .unwrap()
+                .installation_gate
+                .take();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("installation control was not released");
+            }
+        }
         // No application/hub lock while invoking a service (the callback takes it).
         let registration = service.install_attention_observer(Arc::new(Sink {
             live: Arc::downgrade(self),
@@ -802,14 +867,29 @@ impl Live {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if state.closed {
                 false
-            } else if let Some(binding) = state
-                .sources
-                .get_mut(id)
-                .and_then(|source| source.binding.as_mut())
-                .filter(|binding| binding.token == token)
-            {
-                binding.registration = registration;
-                true
+            } else if let Some(source) = state.sources.get_mut(id).filter(|source| {
+                source
+                    .binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.token == token)
+            }) {
+                if let (Some(registration), Some(_), Some(binding)) = (
+                    registration,
+                    source.service.as_ref(),
+                    source.binding.as_mut(),
+                ) {
+                    binding.registration = Some(registration);
+                    binding.installing = false;
+                    // Invalidate every read captured before the installation
+                    // receipt, including question commits during the callback.
+                    self.dirty(&mut state, id);
+                    true
+                } else {
+                    // The synchronous installer finished without a matching
+                    // initial snapshot/receipt. Never strand a pending source.
+                    self.fail(&mut state);
+                    false
+                }
             } else {
                 false
             }
@@ -858,11 +938,13 @@ impl Live {
                 AttentionUnavailable::Reset,
             ));
         }
-        let Some(source) = state
-            .sources
-            .get_mut(id)
-            .filter(|source| source.generation == generation)
-        else {
+        let Some(source) = state.sources.get_mut(id).filter(|source| {
+            source.generation == generation
+                && !source
+                    .binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.installing)
+        }) else {
             return Ok(());
         };
         source.stored = rows.into_iter().next();
@@ -915,10 +997,16 @@ async fn run(weak: Weak<Live>, manager: SessionManager, mut reader: Reader) {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             (
                 state.closed,
-                state.dirty.first().and_then(|id| {
+                state.dirty.iter().find_map(|id| {
                     state
                         .sources
                         .get(id)
+                        .filter(|source| {
+                            !source
+                                .binding
+                                .as_ref()
+                                .is_some_and(|binding| binding.installing)
+                        })
                         .map(|source| (id.clone(), source.generation))
                 }),
             )

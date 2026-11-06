@@ -79,6 +79,7 @@ async fn broker_owner_handoff_does_not_reannounce_observed_completion() {
             service: Weak::new(),
             token,
             registration: None,
+            installing: false,
             config_version: Some(0),
         });
         let baseline = normalized("session", source).unwrap();
@@ -284,6 +285,7 @@ fn attention_goal_free_normalization_requires_current_exact_outcome_and_every_ex
             service: Weak::new(),
             token: Uuid::new_v4(),
             registration: None,
+            installing: false,
             config_version: Some(0),
         });
         let mut service = AttentionServiceSnapshot {
@@ -621,3 +623,6 @@ mod scope;
 
 #[path = "attention_decision_tests.rs"]
 mod decisions;
+
+#[path = "attention_installation_tests.rs"]
+mod installation;
