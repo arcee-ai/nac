@@ -1,3 +1,6 @@
+// NAC PROFILE BEGIN
+import { phaseClock, phaseRecord } from "./terminalPhaseProfile.js";
+// NAC PROFILE END
 import type { UserTerminalApi } from "./userTerminalApi.js";
 import type { UserTerminalFrameResponse, UserTerminalResponse } from "./types.js";
 
@@ -249,6 +252,11 @@ export class UserTerminalConnection {
       );
       cancelled(active);
       this.validate(frame, observer);
+      // NAC PROFILE BEGIN
+      const profileAt = phaseClock();
+      const profile = { observer, cursor: frame.offset };
+      phaseRecord("parser_begin", profileAt, profile);
+      // NAC PROFILE END
       try {
         if (frame.gap) await rendered(this.renderer.reset("gap", active), active);
         else if (frame.bytes.length)
@@ -257,10 +265,16 @@ export class UserTerminalConnection {
         this.needsReset = true; // A cancelled/failed parser may have applied only part of a frame.
         throw error;
       }
+      // NAC PROFILE BEGIN
+      phaseRecord("parser_end", profileAt, profile);
+      // NAC PROFILE END
       cancelled(active);
       if (frame.requires_ack) {
         this.acknowledgement = { offset: frame.next_offset, reset: frame.gap };
         this.expectedOffset = frame.next_offset;
+        // NAC PROFILE BEGIN
+        phaseRecord("ack_ready", profileAt, { observer, cursor: frame.next_offset });
+        // NAC PROFILE END
       }
       return frame;
     } finally {

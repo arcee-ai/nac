@@ -143,7 +143,7 @@ pub(crate) async fn pull(
     State(manager): State<SessionManager>,
     Path((session, id, observer)): Path<(String, String, String)>,
     payload: Result<Json<PullUserTerminalRequest>, JsonRejection>,
-) -> Result<Json<ExecutionFrameResponse>, ApiError> {
+) -> Result<axum::response::Response, ApiError> {
     let Json(request) = payload?;
     version(request.protocol_version)?;
     let ack = request
@@ -159,11 +159,31 @@ pub(crate) async fn pull(
         return Err(ApiError::bad_request("reset requires a cursor".into()));
     }
     let observer = identifier(&observer)?;
+    // NAC PROFILE BEGIN
+    let profile_cursor = ack.map_or(0, |value| value.offset);
+    // NAC PROFILE END
     let frame = manager
         .session_terminals()
         .pull_execution(&session, &id, observer, ack, request.wait_ms)
         .await?;
-    Ok(Json(ExecutionFrameResponse::from_frame(observer, frame)?))
+    // NAC PROFILE BEGIN
+    let profile_at = std::time::Instant::now();
+    // NAC PROFILE END
+    let mapped = ExecutionFrameResponse::from_frame(observer, frame)?;
+    // NAC PROFILE BEGIN
+    crate::application::observer_profile::phase(observer, profile_cursor, "mapping", profile_at);
+    let profile_at = std::time::Instant::now();
+    // NAC PROFILE END
+    let response = axum::response::IntoResponse::into_response(Json(mapped));
+    // NAC PROFILE BEGIN
+    crate::application::observer_profile::phase(
+        observer,
+        profile_cursor,
+        "serialization",
+        profile_at,
+    );
+    // NAC PROFILE END
+    Ok(response)
 }
 
 #[utoipa::path(delete, path = "/sessions/{session_id}/executions/{execution_id}/observers/{observer_id}", operation_id = "delete_sessions_session_id_executions_execution_id_observers_observer_id", tag = "conversation",

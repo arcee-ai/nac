@@ -1,3 +1,6 @@
+// NAC PROFILE BEGIN
+import { phaseClock, phaseKey, phaseRecord } from "./terminalPhaseProfile.js";
+// NAC PROFILE END
 import type {
   UiConfiguration,
   ReadinessResponse,
@@ -286,6 +289,11 @@ export class NacTransport {
       requestHeaders.set("Content-Type", "application/json");
     }
 
+    // NAC PROFILE BEGIN
+    const profile = phaseKey(path, body, requestId);
+    let profileAt = phaseClock();
+    if (profile) phaseRecord("fetch_begin", profileAt, profile);
+    // NAC PROFILE END
     const response = await this.fetchImplementation(this.url(path), {
       method,
       headers: Object.fromEntries(requestHeaders.entries()),
@@ -294,6 +302,9 @@ export class NacTransport {
       credentials: this.credentials,
     });
 
+    // NAC PROFILE BEGIN
+    if (profile) phaseRecord("fetch_headers", profileAt, profile);
+    // NAC PROFILE END
     if (!response.ok && !acceptStatuses.includes(response.status)) {
       throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
     }
@@ -303,7 +314,14 @@ export class NacTransport {
       const text = await response.text();
       return (text ? text : undefined) as T;
     }
-    return (await response.json()) as T;
+    // NAC PROFILE BEGIN
+    profileAt = phaseClock();
+    // NAC PROFILE END
+    const decoded = (await response.json()) as T;
+    // NAC PROFILE BEGIN
+    if (profile) phaseRecord("json", profileAt, profile);
+    // NAC PROFILE END
+    return decoded;
   }
 
   async admit<T>(

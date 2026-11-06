@@ -47,3 +47,7 @@ pub(crate) mod product_context;
 pub(crate) mod task_followup_delegations;
 pub(crate) mod task_followups;
 pub(crate) mod task_questions;
+
+// NAC PROFILE BEGIN
+pub(crate) mod observer_profile;
+// NAC PROFILE END

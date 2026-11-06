@@ -1,3 +1,5 @@
+// NAC PROFILE BEGIN
+import { phaseClock, phaseRecord } from "./terminalPhaseProfile.js";
 export const NAC_TERMINAL_PROTOCOL_VERSION = 1;
 const MAX_PAGE = 65_536;
 const MAX_INPUT = 16_384;
@@ -207,6 +209,11 @@ export class UserTerminalConnection {
             }, active);
             cancelled(active);
             this.validate(frame, observer);
+            // NAC PROFILE BEGIN
+            const profileAt = phaseClock();
+            const profile = { observer, cursor: frame.offset };
+            phaseRecord("parser_begin", profileAt, profile);
+            // NAC PROFILE END
             try {
                 if (frame.gap)
                     await rendered(this.renderer.reset("gap", active), active);
@@ -217,10 +224,16 @@ export class UserTerminalConnection {
                 this.needsReset = true; // A cancelled/failed parser may have applied only part of a frame.
                 throw error;
             }
+            // NAC PROFILE BEGIN
+            phaseRecord("parser_end", profileAt, profile);
+            // NAC PROFILE END
             cancelled(active);
             if (frame.requires_ack) {
                 this.acknowledgement = { offset: frame.next_offset, reset: frame.gap };
                 this.expectedOffset = frame.next_offset;
+                // NAC PROFILE BEGIN
+                phaseRecord("ack_ready", profileAt, { observer, cursor: frame.next_offset });
+                // NAC PROFILE END
             }
             return frame;
         }

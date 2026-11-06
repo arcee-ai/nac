@@ -1,3 +1,5 @@
+// NAC PROFILE BEGIN
+import { phaseClock, phaseKey, phaseRecord } from "./terminalPhaseProfile.js";
 export const NAC_HTTP_CLIENT_VERSION = 1;
 export class NacClientConfigurationError extends Error {
     constructor(message) {
@@ -153,6 +155,12 @@ export class NacTransport {
         if (body !== undefined && !requestHeaders.has("Content-Type")) {
             requestHeaders.set("Content-Type", "application/json");
         }
+        // NAC PROFILE BEGIN
+        const profile = phaseKey(path, body, requestId);
+        let profileAt = phaseClock();
+        if (profile)
+            phaseRecord("fetch_begin", profileAt, profile);
+        // NAC PROFILE END
         const response = await this.fetchImplementation(this.url(path), {
             method,
             headers: Object.fromEntries(requestHeaders.entries()),
@@ -160,6 +168,10 @@ export class NacTransport {
             signal,
             credentials: this.credentials,
         });
+        // NAC PROFILE BEGIN
+        if (profile)
+            phaseRecord("fetch_headers", profileAt, profile);
+        // NAC PROFILE END
         if (!response.ok && !acceptStatuses.includes(response.status)) {
             throw new ApiError(response.status, method, path, await errorDetail(response), requestId);
         }
@@ -170,7 +182,15 @@ export class NacTransport {
             const text = await response.text();
             return (text ? text : undefined);
         }
-        return (await response.json());
+        // NAC PROFILE BEGIN
+        profileAt = phaseClock();
+        // NAC PROFILE END
+        const decoded = (await response.json());
+        // NAC PROFILE BEGIN
+        if (profile)
+            phaseRecord("json", profileAt, profile);
+        // NAC PROFILE END
+        return decoded;
     }
     async admit(method, path, options = {}) {
         const requestId = options.requestId ?? this.newRequestId();

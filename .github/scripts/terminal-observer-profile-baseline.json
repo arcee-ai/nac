@@ -1,0 +1,23 @@
+{
+  "base": "5603ad0bda5d8e62cf9587659f4548131c1bbf45",
+  "exact": {
+    ".github/scripts/browser-apt-supervisor.py": "886616e7d3658aa32014d8b61009bfbf434079eaa14dd8365472d49d6525e654",
+    ".github/scripts/browser-apt.py": "00302543d56a570e750acb8ad4b3a70bec5741a38e464573d8adaaeb78b37cf7",
+    "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+    "crates/nac-server/web/openapi.json": "32aa549cfe8ec40c1adc31a21ddc4286427866def27d06cc4a7b4eba2a4644e9",
+    "crates/nac-server/web/package-lock.json": "c2b6c7c9f9f313bcf652dc1bfcc335625d532fdd75ca50823af52e24e46abaaf",
+    "crates/nac-server/web/packages/nac-client/src/executionApi.ts": "92e4b432862d7b77ffb185114abfdd2d699dea3dada24451bd7552ea636c5917",
+    "crates/nac-server/web/playwright.config.ts": "79a85176cc74ed174e52d17642e769cf9aedfb4188cff04368c78ec66664449f",
+    "crates/nac-server/web/src/app/features/terminal/xtermAdapter.ts": "15c57787c605280917096bfc84307b9eb3c8d578168474548603e6b98fa83acc"
+  },
+  "projection": {
+    "crates/nac-server/src/application/execution_observation.rs": "def7e242d55521ac07256c12cd99f4fecce201178e8e1f36c203889d9fe303a6",
+    "crates/nac-server/src/application/mod.rs": "12b86c70e3c50d23486a9908d8c86b7a1f4634f87aa653e6decad875def81876",
+    "crates/nac-server/src/application/terminal_observation.rs": "73eedf37c5bb2d964a029ec5c469156842630191883c6b9642392e78359b7f4b",
+    "crates/nac-server/src/delivery/executions.rs": "73e7643a6be1d3cdfb9b1dcb86e7f36d3346f3017b0f2463c7f7925b328c821c",
+    "crates/nac-server/web/e2e/harness.ts": "1dd0cd496f63599b666c0f41f34586bb99f29e9933c3b8a90fc60a1cb2ffd6b4",
+    "crates/nac-server/web/packages/nac-client/src/nacClient.ts": "163494ca6f40c6e2a30c66049e6414a04dbcc4470b0802cdb1e8674ffe1e171a",
+    "crates/nac-server/web/packages/nac-client/src/userTerminalConnection.ts": "d1a610f1220b09d040c03ddb36f4def97f9018d926a831692011d7f744b4fad4",
+    "crates/nac-server/web/vite.config.ts": "4391a28bd8f9b060ff5802367c2d5766add1f3a01eefda58debf70e8182507d6"
+  }
+}

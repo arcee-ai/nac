@@ -167,6 +167,11 @@ export default defineConfig(({ command }) => {
     base,
     plugins: [locatorJsx(), locatorCopyWithLine(), react(), tailwindcss(), mathjaxFonts()],
     define: {
+      // NAC PROFILE BEGIN
+      __NAC_TERMINAL_PHASE_PROFILE__: JSON.stringify(
+        process.env.NAC_TERMINAL_PHASE_PROFILE === "1",
+      ),
+      // NAC PROFILE END
       __MATHJAX_FONT_URL__: JSON.stringify(base + MATHJAX_FONT_DIR),
       // MathJax reads its own version off disk with `eval('require')` unless a
       // bundler tells it what that version is, and in a browser that eval

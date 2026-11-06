@@ -51,12 +51,28 @@ impl SessionTerminalApplication<'_> {
         ack: Option<RenderAcknowledgement>,
         wait_ms: u16,
     ) -> Result<TerminalFrame, TerminalApplicationError> {
+        // NAC PROFILE BEGIN
+        let profile_cursor = ack.map_or(0, |value| value.offset);
+        let mut profile_at = std::time::Instant::now();
+        // NAC PROFILE END
         let manager = self.manager;
         let _admission = manager.managed_completion_admission_async().await?;
+        // NAC PROFILE BEGIN
+        super::observer_profile::phase(
+            observer,
+            profile_cursor,
+            "completion_admission",
+            profile_at,
+        );
+        profile_at = std::time::Instant::now();
+        // NAC PROFILE END
         let service = self
             .cached_user_service(session_id)
             .await?
             .ok_or(TerminalApplicationError::Unavailable)?;
+        // NAC PROFILE BEGIN
+        super::observer_profile::phase(observer, profile_cursor, "owner_config_before", profile_at);
+        // NAC PROFILE END
         manager
             .inner
             .terminal_observations
@@ -69,10 +85,16 @@ impl SessionTerminalApplication<'_> {
         if frame.execution.is_none() {
             return Err(TerminalApplicationError::Unavailable);
         }
+        // NAC PROFILE BEGIN
+        profile_at = std::time::Instant::now();
+        // NAC PROFILE END
         let current = self
             .cached_user_service(session_id)
             .await?
             .ok_or(TerminalApplicationError::Unavailable)?;
+        // NAC PROFILE BEGIN
+        super::observer_profile::phase(observer, profile_cursor, "owner_config_after", profile_at);
+        // NAC PROFILE END
         if !std::sync::Arc::ptr_eq(&current, &service) {
             return Err(TerminalApplicationError::Unavailable);
         }
