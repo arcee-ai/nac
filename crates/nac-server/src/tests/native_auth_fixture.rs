@@ -146,7 +146,11 @@ async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before
         (Method::HEAD, "/app"),
         (Method::HEAD, "/app?document=fixture"),
     ] {
-        let expected_body: &[u8] = if method == Method::HEAD { b"" } else { b"effect" };
+        let expected_body: &[u8] = if method == Method::HEAD {
+            b""
+        } else {
+            b"effect"
+        };
         let request = axum::http::Request::builder()
             .method(method)
             .uri(path)
