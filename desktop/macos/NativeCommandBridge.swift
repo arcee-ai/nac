@@ -108,7 +108,18 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         components.port = source.port
         let accepted = state.receive(body, origin: components.url, mainFrame: message.frameInfo.isMainFrame,
                                      currentView: message.webView === webView, receipt: receipt())
-        if accepted, state.connectionLost { connectionLost?() }
+        if accepted, state.connectionLost, let binding = state.binding {
+            // Receipt admission fences commands immediately. Retiring the WK
+            // handler/view must wait until this message callback has returned.
+            RunLoop.main.perform(inModes: [.common]) { [weak self, weak webView] in
+                MainActor.assumeIsolated {
+                    guard let self, let webView, self.installed, self.webView === webView,
+                          self.state.binding == binding, self.state.connectionLost,
+                          self.state.matches(self.receipt()) else { return }
+                    self.connectionLost?()
+                }
+            }
+        }
         #if PREVIEW_SMOKE
         if accepted { acceptedReceipts += 1 } else { rejectedReceipts += 1 }
         #else
