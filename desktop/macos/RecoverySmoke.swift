@@ -101,6 +101,17 @@ final class RecoverySmoke {
         evidence["provider_barriers"] = app.provider.heldResponseCount
         evidence["profile"] = app.profile?.root.path
         #endif
+        if take("connection-loss"), let view = app.webView {
+            evidence["fault_kind"] = "page-reported-connection-loss"
+            view.callAsyncJavaScript("""
+                if (typeof window.__nacDesktop?.reportConnectionLost !== 'function') throw new Error('Connection port unavailable');
+                window.__nacDesktop.reportConnectionLost(); return true;
+                """, arguments: [:], in: nil, in: .page) { [weak self] result in
+                    if case .success = result { self?.evidence["connection_loss_script_reply"] = true }
+                    else { self?.evidence["connection_loss_script_reply"] = false }
+                    self?.publish()
+                }
+        }
         if take("renderer-callback"), let view = app.webView {
             evidence["fault_kind"] = "delegate-injection"
             app.webViewWebContentProcessDidTerminate(view)
