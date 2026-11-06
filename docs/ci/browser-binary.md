@@ -162,7 +162,8 @@ remain required.
 `browser-binary` is required by both browser consumers, the browser join and the
 explicit final required-job contract. Consumers select the producer's actual
 artifact ID, validate its anchored receipt and full bytes, then run the unchanged
-selections. A matching current artifact avoids compilation/cache duplication;
+selections. They also await the independently required native-package producer;
+its separate archive authority never admits an executable. A matching current artifact avoids compilation/cache duplication;
 a fully validated older attempt or different runner image runs the original
 locked source build. Parsed workflow negative controls
 cover these edges, exact identity/profile inputs, trusted cache writes and proof

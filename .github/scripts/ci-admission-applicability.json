@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "pr_checks_sha256": "4317326809755287fbe5f5c4a3aa7f280b5b1d9442953139ca767be61be19a93",
+  "pr_checks_sha256": "1c12e1ed2fa2aa78707ae46da445edf2f774eab689721771ff52069122667127",
   "prefixes": [
     ".github/",
     "crates/",

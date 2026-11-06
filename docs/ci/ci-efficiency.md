@@ -114,12 +114,15 @@ cache writes retain the existing trusted-push condition. Actual goal proofs bind
 to the selected executable's path, full source and hash. See the
 [binary transport and retry contract](browser-binary.md).
 
-The same producer also relays current signed OS archive bytes to the eight
-ordinary consumers and proof job. Normal `playwright install --with-deps chromium`
+An independent required `browser-apt` producer relays current signed OS archive
+bytes in parallel with binary compilation. All eight ordinary consumers and the
+proof job await both successful producers. Normal `playwright install --with-deps chromium`
 remains mandatory; validated compatibility mismatches use normal APT, while
 corrupt/foreign/future evidence fails. Cold mode bypasses that relay without
 skipping installation or tests. This adds no shared-cache writer or quality
 receipt. See [native archive relay and qualification boundaries](browser-apt.md).
+The split adds an Ubuntu job and checkout while preserving the native steps;
+any latency/allocation effect requires current-source hosted measurement.
 
 Static inventory metadata never supplies execution success. The aggregate uses
 actual same-run job results, preserving successful siblings across GitHub's

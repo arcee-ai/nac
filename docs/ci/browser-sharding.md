@@ -11,7 +11,8 @@ real clocks, deadlines, cleanup and retry/ignore behavior stay intact.
 The ordinary shards exclude `exact-goal-wait.e2e.ts` from Playwright's full-title
 selection. A dedicated proof job runs that entire file, including both ALL471
 cases, then validates and stages their four bounded proof/cleanup receipts.
-The terminal browser result must require the exact binary producer, every
+The terminal browser result must require both the exact binary and independent
+native-package producers, every
 ordinary shard, the dedicated proof job and the complete selection check. Use
 `fail-fast: false` for the ordinary matrix so a failed shard does not erase
 other shards' evidence.

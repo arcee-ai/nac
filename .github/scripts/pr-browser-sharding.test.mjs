@@ -12,7 +12,7 @@ const workflow = YAML.parse(fs.readFileSync(".github/workflows/stable-release.ym
 
 test("ordinary test-granularity shards execute the inventoried exclusion while proof stays serial", () => {
   const job = workflow.jobs["browser-shards"];
-  assert.deepEqual(job.needs, ["prepare", "browser-binary"]);
+  assert.deepEqual(job.needs, ["prepare", "browser-binary", "browser-apt"]);
   assert.deepEqual(job.strategy, { "fail-fast": false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } });
   assert.equal(job.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   const execute = job.steps.find(step => step.name === "Run production-embedded browser shard");
@@ -20,7 +20,7 @@ test("ordinary test-granularity shards execute the inventoried exclusion while p
   assert.equal(execute.run, "npm --prefix crates/nac-server/web run test:e2e -- --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard=\"$BROWSER_SHARD/8\"");
   assert.doesNotMatch(execute.run, /--workers|--retries/);
   const proof = workflow.jobs["browser-proof"];
-  assert.deepEqual(proof.needs, ["prepare", "browser-binary"]);
+  assert.deepEqual(proof.needs, ["prepare", "browser-binary", "browser-apt"]);
   assert.equal(proof.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   const select = proof.steps.find(step => step.name === "Verify complete disjoint current browser selection");
   assert.match(select.run, /for shard in 1 2 3 4 5 6 7 8;/);
@@ -81,23 +81,24 @@ test("granularity cannot drift between collection/execution or spread to proof, 
 
 test("browser compatibility join and final gate reject every incomplete shard/proof result", () => {
   const browser = workflow.jobs.browser;
-  assert.deepEqual(browser.needs, ["prepare", "browser-binary", "browser-shards", "browser-proof"]);
+  assert.deepEqual(browser.needs, ["prepare", "browser-binary", "browser-apt", "browser-shards", "browser-proof"]);
   assert.match(browser.if, /always\(\)/);
   const gate = browser.steps[0];
   assert.equal(gate.env.BINARY_RESULT, "${{ needs.browser-binary.result }}");
+  assert.equal(gate.env.APT_RESULT, "${{ needs.browser-apt.result }}");
   assert.equal(gate.env.SHARD_RESULT, "${{ needs.browser-shards.result }}");
   assert.equal(gate.env.PROOF_RESULT, "${{ needs.browser-proof.result }}");
-  for (const lane of ["browser-binary", "browser-shards", "browser-proof"]) {
+  for (const lane of ["browser-binary", "browser-apt", "browser-shards", "browser-proof"]) {
     assert.ok(requiredJobs.includes(lane));
     assert.ok(workflow.jobs["required-pr-checks"].needs.includes(lane));
   }
   const sha = "a".repeat(40);
   for (const result of ["success", "failure", "cancelled", "skipped", "pending", ""]) {
-    for (const field of ["BINARY_RESULT", "SHARD_RESULT", "PROOF_RESULT"]) {
-      const executed = spawnSync("bash", ["-e", "-c", gate.run], { env: { ...process.env, BINARY_RESULT: "success", SHARD_RESULT: "success", PROOF_RESULT: "success", [field]: result } });
+    for (const field of ["BINARY_RESULT", "APT_RESULT", "SHARD_RESULT", "PROOF_RESULT"]) {
+      const executed = spawnSync("bash", ["-e", "-c", gate.run], { env: { ...process.env, BINARY_RESULT: "success", APT_RESULT: "success", SHARD_RESULT: "success", PROOF_RESULT: "success", [field]: result } });
       assert.equal(executed.status === 0, result === "success");
     }
-    for (const lane of ["browser-binary", "browser-shards", "browser-proof"]) {
+    for (const lane of ["browser-binary", "browser-apt", "browser-shards", "browser-proof"]) {
       const needs = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map(job => [job, { result: "success" }]));
       needs.prepare.outputs = { sha, run: "true" };
       needs[lane].result = result;

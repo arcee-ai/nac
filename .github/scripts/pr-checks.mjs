@@ -13,6 +13,7 @@ export const requiredJobs = [
   "test-workspace",
   "quality",
   "browser-binary",
+  "browser-apt",
   "browser-shards",
   "browser-proof",
   "browser",
