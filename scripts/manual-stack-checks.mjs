@@ -158,10 +158,16 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     }
     const loaded = new Map();
     async function load(listedRun) {
-      if (loaded.has(listedRun.id)) return loaded.get(listedRun.id);
+      if (loaded.has(listedRun.id)) {
+        const value = loaded.get(listedRun.id);
+        insist(stamp(value.run) === stamp(listedRun), 'Conflicting workflow inventories');
+        return value;
+      }
       const run = await get(`actions/runs/${listedRun.id}`);
       insist(stamp(run) === stamp(listedRun), 'Workflow changed while reading run');
       context(run, pr, workflow);
+      insist(stable.some(r => r.id === run.id && stamp(r) === stamp(run)),
+        'Head/branch workflow inventories disagree');
       const jobs = await pages(`actions/runs/${run.id}/jobs?filter=latest`, 'jobs');
       insist(jobs.length > 0 && new Set(jobs.map(j => j.name)).size === jobs.length &&
         new Set(jobs.map(j => j.id)).size === jobs.length, 'Missing/ambiguous latest matrix jobs');
@@ -182,8 +188,8 @@ export async function inspectChecks(pr, rules, { get, pages }) {
       loaded.set(run.id, value);
       return value;
     }
-    const admission = await selectFullAdmission(pr, stable, listed,
-      { load, commit, get, checks, mandatory });
+    const admission = await selectFullAdmission(pr, listed,
+      { load, commit, get, pages, checks, mandatory });
     const { run: selected, jobs, bound: jobByName } = admission.selected;
     provenance.observations = admission.observations;
     if (admission.tuple) provenance.admission = admission.tuple;
@@ -235,6 +241,8 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     insist(inventory(laterRuns) === inventory(runs), 'Workflow inventory changed during validation');
     const later = newest(laterRuns.filter(r => r.workflow_id === workflow.id || r.path === WORKFLOW));
     insist(stamp(later) === stamp(listed), 'A newer workflow run appeared during validation');
+    if (admission.interval) insist(inventory(await pages(admission.interval.path, 'workflow_runs')) ===
+      inventory(admission.interval.runs), 'Stable branch history changed during validation');
     insist(checkStamp(await pages(`commits/${pr.head.sha}/check-runs?filter=all`, 'check_runs')) === checkStamp(checks) &&
       statusStamp(await pages(`commits/${pr.head.sha}/status`, 'statuses')) === statusStamp(statuses),
     'Check/status inventory changed during validation');

@@ -69,7 +69,8 @@ function fixture() {
     f.onRead?.(path, f.reads.get(path));
     let value;
     if (path === 'actions/workflows/stable-release.yml') value = { id: 100, path: workflow, state: 'active' };
-    else if (/^actions\/runs\/\d+$/.test(path)) value = f.runs.find(r => r.id === Number(path.split('/').at(-1)));
+    else if (/^actions\/runs\/\d+$/.test(path)) value = [...f.runs, ...(f.branchRuns ?? [])]
+      .find(r => r.id === Number(path.split('/').at(-1)));
     else if (path.startsWith('git/commits/')) value = commits[path.split('/').at(-1)];
     else if (path.startsWith('git/trees/')) value = trees[path.split('/').at(-1).split('?')[0]];
     else if (path.startsWith('git/blobs/')) value = blobs.get(path.split('/').at(-1));
@@ -83,7 +84,8 @@ function fixture() {
     f.onPage?.(path, key);
     if (key === 'check_runs') return structuredClone(f.checks);
     if (key === 'statuses') return [];
-    if (key === 'workflow_runs') return structuredClone(f.runs);
+    if (key === 'workflow_runs') return structuredClone(path.startsWith('actions/workflows/') ?
+      (f.branchRuns ?? f.runs.filter(r => r.workflow_id === 100)) : f.runs);
     if (key === 'jobs') return structuredClone(f.jobs.get(Number(path.split('/')[2])) ?? []);
     throw new Error(`Unexpected page ${path}`);
   };
@@ -152,6 +154,24 @@ test('unknown, changed, malformed or unbound observations hold without supersess
     currentColdMutation: f => { f.currentPR = structuredClone(f.pr); f.currentPR.body = '<!-- nac-ci-cold-caches -->'; },
     detailMutation: f => { f.onRead = (p, count) => { if (p === 'actions/runs/3' && count === 2) f.runs[0].run_attempt++; }; },
     inventoryMutation: f => { let n = 0; f.onPage = (_, key) => { if (key === 'workflow_runs' && ++n === 2) f.runs.push(f.makeRun(6)); }; },
+    branchMutation: f => { let n = 0; f.onPage = path => { if (path.startsWith('actions/workflows/') && ++n === 2) f.branchRuns = [...f.runs, f.makeRun(6)]; }; },
+    hiddenHeadChange: f => {
+      f.runs[0].run_number = 5;
+      const other = f.makeRun(4); other.head_sha = sha('e');
+      f.branchRuns = [...f.runs, other];
+    },
+    newestForeignHead: f => {
+      const other = f.makeRun(4); other.head_sha = sha('e');
+      f.branchRuns = [...f.runs, other];
+    },
+    conflictingHistory: f => {
+      f.branchRuns = structuredClone(f.runs);
+      f.branchRuns[0].run_attempt = 2;
+    },
+    changedSyntheticMerge: f => {
+      f.currentMerge = sha('e');
+      f.commits[sha('e')] = { ...structuredClone(f.commits[sha('c')]), sha: sha('e') };
+    },
   };
   for (const [name, change] of Object.entries(mutations)) await t.test(name, async () => {
     const f = fixture(); change(f);

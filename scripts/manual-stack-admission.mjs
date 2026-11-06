@@ -89,11 +89,17 @@ async function currentTuple(pr, prepared, { commit, get }) {
   return { digest: digest(values), values };
 }
 
-export async function selectFullAdmission(pr, stable, latest, { load, commit, get, checks, mandatory }) {
+export async function selectFullAdmission(pr, latest, { load, commit, get, pages, checks, mandatory }) {
   const first = await load(latest);
   if (!first.jobs.some(j => j.name.startsWith(PURE))) return { selected: first, observations: [] };
-  const ordered = [...stable].sort((a, b) => b.run_number - a.run_number);
-  insist(new Set(ordered.map(r => r.id)).size === ordered.length &&
+  // Head-filtered history hides A -> B -> A changes. The independent interval
+  // must include every Stable PR run on this branch, including foreign heads.
+  const path = `actions/workflows/${latest.workflow_id}/runs?branch=${encodeURIComponent(pr.head.ref)}&event=pull_request`;
+  const history = await pages(path, 'workflow_runs');
+  const ordered = [...history].sort((a, b) => b.run_number - a.run_number);
+  insist(ordered.length > 0 && ordered[0].id === latest.id && ordered.every(r =>
+    Number.isSafeInteger(r.id) && r.id > 0 && Number.isSafeInteger(r.run_number) && r.run_number > 0) &&
+    new Set(ordered.map(r => r.id)).size === ordered.length &&
     new Set(ordered.map(r => r.run_number)).size === ordered.length, 'ambiguous Stable interval');
   let tuple, prepared;
   const observations = [];
@@ -122,7 +128,7 @@ export async function selectFullAdmission(pr, stable, latest, { load, commit, ge
       insist(marker.name === FULL + tuple.digest, 'FULL tuple differs from current inputs');
       const binding = digest([2, tuple.digest, run.id, 1]);
       insist(observations.every(o => o.binding === binding), 'metadata pointer is not the newest FULL');
-      return { selected: item, observations, tuple };
+      return { selected: item, observations, tuple, interval: { path, runs: history } };
     }
     const binding = marker.name.slice(PURE.length);
     const suiteChecks = checks.filter(c => c.check_suite?.id === run.check_suite_id);
