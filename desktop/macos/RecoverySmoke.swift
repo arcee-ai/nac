@@ -65,6 +65,13 @@ final class RecoverySmoke {
                 guard let self, let waiting = self.profileOpenWaiters.removeValue(forKey: token) else { return }
                 self.evidence["profile_open_timeout"] = true
                 self.evidence["profile_open_pending"] = !self.profileOpenWaiters.isEmpty
+                #if LOCAL_APP
+                if CommandLine.arguments.contains("--storage-q1-fetch-provider") ||
+                    CommandLine.arguments.contains("--storage-q1-fetch-nonce") {
+                    // Retire Q1 before resuming; a timeout must not render an unbound witness.
+                    self.app.smokeProfileFailure()
+                }
+                #endif
                 waiting.resume()
                 self.publish()
             }
