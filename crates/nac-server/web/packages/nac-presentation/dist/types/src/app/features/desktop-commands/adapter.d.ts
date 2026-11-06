@@ -1,6 +1,8 @@
+import type { DesktopSessionTargetPort } from "./sessionTarget";
+import type { DesktopVisibilityPort } from "./visibility";
 /** UI delivery only. This port carries no server, file, shell or input authority. */
 export type DesktopUIAction = "newSession" | "settings" | "projects";
-export interface DesktopCommandPort {
+export interface DesktopCommandPort extends DesktopSessionTargetPort, DesktopVisibilityPort {
     connect(owner: (message: unknown) => boolean): () => void;
     /** Internal document disposal/readiness facts; never a native operation. */
     connectLifetime?(close: () => void): () => void;
