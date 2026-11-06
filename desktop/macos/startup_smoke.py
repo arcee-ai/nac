@@ -88,6 +88,13 @@ def main():
         raise RuntimeError('The authorized existing ARCEE_API_KEY environment reference is unavailable')
     if 'startup-real-arcee' in os.environ.get('NAC_STARTUP_SCENARIOS', '') and not vendor:
         raise RuntimeError('Run the single bounded real-vendor case separately from dummy fixtures')
+    scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
+        'startup-fresh,startup-home,startup-nac-relative,startup-xdg-relative,startup-store-override,'
+        'startup-invalid-config,startup-future-store,startup-bad-directory,startup-missing-git').split(',')
+    # Reserve every scenario before replacing evidence or starting any actor.
+    # An existing directory may hold receipts from an earlier, unproven run.
+    for scenario in scenarios:
+        (destination / scenario).mkdir()
     identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
     metadata = {
         'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -115,12 +122,8 @@ def main():
         try:
             relocated = Path(relocation).resolve() / 'Moved app folder with spaces' / app.name
             shutil.copytree(app, relocated)
-            scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
-                'startup-fresh,startup-home,startup-nac-relative,startup-xdg-relative,startup-store-override,'
-                'startup-invalid-config,startup-future-store,startup-bad-directory,startup-missing-git').split(',')
             for scenario in scenarios:
                 case = destination / scenario
-                case.mkdir(exist_ok=True)
                 with startup_profile(case / 'result.json', relocated, retained_profiles) as root:
                     home, workspace = root / 'home with spaces', root / 'workspace with spaces'
                     home.mkdir(mode=0o700)
