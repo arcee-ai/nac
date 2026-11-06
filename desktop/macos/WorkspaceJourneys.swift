@@ -29,6 +29,7 @@ extension WorkspaceSmoke {
             return "Actual Markdown table, MathJax and highlighted TypeScript in production transcript"
         }
         await check("transcript") {
+            try await self.recordAssetDocument("before-reload")
             _ = try await self.js("window.__wkReloading = true; return true;")
             self.app.webView.reload()
             try await self.waitJS("persisted rich transcript", "return !window.__wkReloading && document.body.innerText.includes('WK_RICH_COMPLETE');")
@@ -39,11 +40,17 @@ extension WorkspaceSmoke {
             try await self.waitJS("local formula fonts", "await document.fonts.ready; return performance.getEntriesByType('resource').some(e => /mathjax.*woff/i.test(e.name));")
             let value = try await self.js("await document.fonts.load('16px Inter'); return performance.getEntriesByType('resource').map(e => e.name);")
             self.record(["resources": value])
-            try await self.require("Font/chunk delivery failed", "return document.fonts.check('16px Inter') && performance.getEntriesByType('resource').filter(e => e.name.includes('/assets/dist/assets/') && e.name.endsWith('.js')).length >= 3;")
+            try await self.recordAssetDocument("after-reload")
+            guard self.assetDocumentsPass("fonts_chunks_ok") else {
+                throw PreviewError.message("Font/chunk delivery missing or failed in an observed document")
+            }
             return "Inter, lazy JS and MathJax font loaded from embedded production assets"
         }
         await check("offline-assets") {
-            try await self.require("Nonlocal resource or script error", "return performance.getEntriesByType('resource').every(e => new URL(e.name).origin === location.origin) && __previewEvidence.errors.length === 0;")
+            try await self.recordAssetDocument("after-reload")
+            guard self.assetDocumentsPass("offline_ok") else {
+                throw PreviewError.message("Nonlocal resource, script error or missing document asset observation")
+            }
             return "All exercised document/font/chunk/formula requests are loopback; no host network setting changed"
         }
         await check("css-layout") {
