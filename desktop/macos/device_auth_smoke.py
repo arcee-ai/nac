@@ -13,7 +13,7 @@ import time
 
 from device_auth_profile import DeviceProfile, identity
 from external_auth_fixture import AuthFixture
-from external_auth_smoke import close_launch, relocated_app, require_isolated_host, require_terminal
+from external_auth_smoke import auth_arguments, close_launch, relocated_app, require_isolated_host, require_terminal
 
 
 def digest(path):
@@ -58,8 +58,8 @@ def run_case(app, output, profile, scenario, custody):
 
 
 def main():
-    source_app, output = (Path(value).resolve() for value in sys.argv[1:])
-    console = require_isolated_host()
+    source_app, output, observer = auth_arguments(sys.argv[1:])
+    console = require_isolated_host(observer)
     build = identity(source_app / 'Contents/Resources/nac-web')
     receipt = json.loads((source_app / 'Contents/Resources/build-receipt.json').read_text())
     assert receipt['mode'] == 'auth-build' and receipt['source_dirty'] is False
