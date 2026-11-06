@@ -148,6 +148,15 @@ or other-owner cleanup. No local Cargo build, root/APT, browser run or network
 probe was performed during preparation. Cached offline `make setup` and Node
 checks are local; local Node26 differs from required hosted24 and is disclosed.
 
+Dependency accounting is limited to the fixed web and `.github/scripts`
+`node_modules` roots. Descriptor-relative traversal uses no-follow directory
+opens and lstat metadata. Regular files contribute their logical size; a
+symlink contributes only its link-entry size, without reading/statting its
+target or traversing a linked directory. Outside target bytes are **not**
+included. The2GiB logical bound and13GiB physical-free floor remain separate;
+this is not a physical allocation or external-target inventory. Runtime/compiler counters still reject links; selected source/evidence
+readers still require regular single-link files.
+
 Only invocation-created0700 directories are used. Regular evidence files use
 O_NOFOLLOW/O_EXCL and bounded reads; raw traversal rejects links/special files.
 After owned descendants settle, selected numeric phases, immutable identity,

@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -150,6 +151,42 @@ class Controls(unittest.TestCase):
             for error in (RuntimeError('actual case failure'),ValueError('budget-not-executed/no-result: untyped text')):
                 actual={'outcome':'case-started'};profile.record_failure(actual,error)
                 self.assertEqual(actual['outcome'],'case-failed-or-incomplete')
+
+    def test_dependency_inventory_links_are_metadata_only(self):
+        with tempfile.TemporaryDirectory()as directory:
+            root=Path(directory);deps=root/'node_modules';deps.mkdir();(deps/'.bin').mkdir();(deps/'pkg').mkdir()
+            script=deps/'pkg/cli.js';script.write_bytes(b'fixture')
+            outside=root/'outside';outside.mkdir();sentinel=outside/'sentinel';sentinel.write_bytes(b'outside'*200000)
+            os.mkfifo(outside/'must-not-traverse')
+            links=[deps/'.bin/tool',deps/'outside-file',deps/'outside-directory']
+            links[0].symlink_to('../pkg/cli.js');links[1].symlink_to(sentinel);links[2].symlink_to(outside,target_is_directory=True)
+            before=(hashlib.sha256(sentinel.read_bytes()).hexdigest(),sentinel.stat().st_mtime_ns)
+            expected=script.stat().st_size+sum(link.lstat().st_size for link in links)
+            original=profile.os.scandir
+            with patch.object(profile,'DEPENDENCY_ROOTS',(deps,)),patch.object(profile.os,'readlink',side_effect=AssertionError('must not read targets')),patch.object(profile.os,'scandir',wraps=original)as scanned:
+                value=profile.dependency_inventory(deps)
+                self.assertEqual(scanned.call_count,3) # root, .bin, pkg; never outside linked directory.
+                self.assertEqual(value,{'logical_bytes':expected,'regular_files':1,'directories':2,'link_entries':3,'link_bytes':expected-7,'entries':6})
+                with self.assertRaises(ValueError):profile.dependency_inventory(outside)
+                with self.assertRaises(ValueError):profile.size(deps)
+                with self.assertRaises(OSError):profile.regular(links[0])
+            self.assertEqual((hashlib.sha256(sentinel.read_bytes()).hexdigest(),sentinel.stat().st_mtime_ns),before)
+            self.assertTrue((outside/'must-not-traverse').exists())
+            root_link=root/'linked-root';root_link.symlink_to(deps,target_is_directory=True)
+            with patch.object(profile,'DEPENDENCY_ROOTS',(root_link,)),self.assertRaises(OSError):profile.dependency_inventory(root_link)
+
+    def test_cached_dependency_tree_characterization(self):
+        rows=[]
+        for path in profile.DEPENDENCY_ROOTS:
+            value=profile.dependency_inventory(path)
+            self.assertGreater(value['regular_files'],0);self.assertGreater(value['link_entries'],0)
+            rows.append({'root':str(path),**value})
+        self.assertLessEqual(sum(row['logical_bytes']for row in rows),2*profile.GIB)
+        print(json.dumps({'operation':'read-only lstat accounting; no target reads/traversal; no native/build execution','dependencies':rows},sort_keys=True))
+        text=(ROOT/'.github/scripts/terminal-observer-profile.py').read_text()
+        self.assertIn("sum(dependency_inventory(p)['logical_bytes']for p in DEPENDENCY_ROOTS)",text)
+        self.assertIn("sample['dependency_bytes']<=2*GIB",text)
+        self.assertIn("shutil.disk_usage(self.home).free>=13*GIB",text)
 
     def test_finite_no_retry_private_workflow(self):
         text=(ROOT/'.github/workflows/nightly-portability.yml').read_text()

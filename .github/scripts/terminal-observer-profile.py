@@ -20,6 +20,7 @@ sys.dont_write_bytecode=True
 
 ROOT=Path(__file__).resolve().parents[2]
 WEB=ROOT/'crates/nac-server/web'
+DEPENDENCY_ROOTS=(WEB/'node_modules',ROOT/'.github/scripts/node_modules')
 BRANCH='codex/all-582-terminal-observer-profile-20261106'
 CASE='connected renderer keeps copy selection, input, resize and Ctrl-C responsive under finite noisy output'
 E2E='crates/nac-server/web/e2e/terminal-local-acceptance.e2e.ts'
@@ -81,6 +82,39 @@ def size(path):
             require(stat.S_ISDIR(info.st_mode)or stat.S_ISREG(info.st_mode),'owned tree special file')
             if stat.S_ISREG(info.st_mode):total+=info.st_size
     return total
+
+
+def dependency_inventory(path):
+    """Only the two npm dependency roots: count link inode bytes, never targets."""
+    require(path in DEPENDENCY_ROOTS,'explicit dependency root required')
+    counts={'logical_bytes':0,'regular_files':0,'directories':0,'link_entries':0,'link_bytes':0,'entries':0}
+    started=time.monotonic();stack=[]
+    def enter(fd):
+        try:stack.append((fd,os.scandir(fd)))
+        except BaseException:os.close(fd);raise
+    try:
+        try:fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        except FileNotFoundError:return counts
+        enter(fd)
+        while stack:
+            fd,iterator=stack[-1]
+            try:entry=next(iterator)
+            except StopIteration:
+                iterator.close();os.close(fd);stack.pop();continue
+            counts['entries']+=1
+            require(counts['entries']<=200000 and len(stack)<=128 and time.monotonic()-started<=10,'dependency traversal bound')
+            info=entry.stat(follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                counts['link_entries']+=1;counts['link_bytes']+=info.st_size;counts['logical_bytes']+=info.st_size
+            elif stat.S_ISREG(info.st_mode):
+                counts['regular_files']+=1;counts['logical_bytes']+=info.st_size
+            elif stat.S_ISDIR(info.st_mode):
+                counts['directories']+=1
+                enter(os.open(entry.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd))
+            else:raise ValueError('dependency special file')
+        return counts
+    finally:
+        for fd,iterator in stack:iterator.close();os.close(fd)
 
 
 def numeric(value):
@@ -219,7 +253,7 @@ class Controller:
                     if time.monotonic()>=next_scan:
                         sample={'seconds':time.monotonic()-start,
                             'target_bytes':size(ROOT/'target')if label=='build'or not samples else samples[-1]['target_bytes'],
-                            'dependency_bytes':sum(size(p)for p in (WEB/'node_modules',ROOT/'.github/scripts/node_modules'))if label=='setup'or not samples else samples[-1]['dependency_bytes'],
+                            'dependency_bytes':sum(dependency_inventory(p)['logical_bytes']for p in DEPENDENCY_ROOTS)if label=='setup'or not samples else samples[-1]['dependency_bytes'],
                             'runtime_bytes':size(self.home),'free_bytes':shutil.disk_usage(self.home).free}
                         samples.append(sample)
                         require(sample['target_bytes']<=12*GIB,'12GiB compiler target budget')
