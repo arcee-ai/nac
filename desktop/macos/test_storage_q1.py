@@ -120,7 +120,7 @@ class Q1CompositionControls(unittest.TestCase):
                          observer_sha256=q1.digest(observer), seconds=600, exclusive_actor=True,
                          only_q1_actions=True, native_baseline=None, native_baseline_evidence='inert absent checkpoint')
         clock = [10.0]
-        state = dict(launches=[], current=None, requests=[], signals=[], console=[], stopped=0, snapshot_calls=0)
+        state = dict(launches=[], current=None, requests=[], signals=[], console=[], stopped=0, snapshot_calls=0, configurations=[])
         store = root / 'store.db'
         profile = 'b' * 64
         stable = dict(owner='desktop-' + profile, profile=profile, organization='local',
@@ -130,6 +130,14 @@ class Q1CompositionControls(unittest.TestCase):
             state['requests'].append((path, body))
             if path == '/store':
                 return dict(store_path=str(store))
+            if path == '/model-configs':
+                if body is not None:
+                    store.touch(exist_ok=True)
+                    state['configurations'] = [dict(config_id='saved-q1', name=body['name'],
+                        backend=body['backend'], model=body['model'], base_url=body['base_url'],
+                        allow_insecure_http=False, api_key_env='exact-private-selector')]
+                    return state['configurations'][0]
+                return dict(configurations=state['configurations'])
             if path == '/projects':
                 with closing(sqlite3.connect(store)) as db, db:
                     db.execute('CREATE TABLE sessions(session_id TEXT PRIMARY KEY, behavior TEXT, run_count INTEGER, '
@@ -148,6 +156,8 @@ class Q1CompositionControls(unittest.TestCase):
             current = state['current']
             if current is None: return
             control, output, record = current['control'], current['output'], current['record']
+            if (control / 'profile-open-release').exists():
+                record['profile_open_pending'] = False; record['bridge']['ready'] = True
             plan_path = control / 'storage-q1.json'
             if plan_path.exists():
                 plan = json.loads(plan_path.read_text())
@@ -178,7 +188,13 @@ class Q1CompositionControls(unittest.TestCase):
                         ledger.extend([fact, dict(fact, kind='completed', durable=True)])
                     record['storage_q1_native_writes'] = ledger
             if (control / 'capture').exists():
-                record['document'] = dict(requests=[dict(method='GET', path='/sessions/a', status=200)])
+                record['document'] = dict(requests=[dict(method='GET', path='/sessions/a', status=200)],
+                    fetch=dict(version=1, nonce=current['fetch_nonce'], provider=current['fetch_provider'],
+                        selector=json.loads((control / 'storage-q1-fetch.json').read_text())['selector'],
+                        engineOrigin=record['endpoint'], started=1, settled=1, errors=0, active=0, overflow=False,
+                        document=record['bridge']['binding'], rows=[dict(sequence=1, method='GET',
+                            origin=record['endpoint'], path='/sessions/a', state='settled', status=200,
+                            error=False, metadata=None)]))
             if (control / 'stop').exists():
                 if not current['stopped']:
                     current['stopped'] = True; state['stopped'] += 1
@@ -197,14 +213,16 @@ class Q1CompositionControls(unittest.TestCase):
                 output = Path(command[command.index('--recovery-output') + 1])
                 control = Path(command[command.index('--recovery-control') + 1])
                 identity = dict(pid=100+number, launch_time=number, bundle='inert')
-                record = dict(app_pid=identity['pid'], engine_pid=200+number,
+                record = dict(app_pid=identity['pid'], engine_pid=200+number, profile_open_pending=True,
                     endpoint='http://127.0.0.1:' + str(12000+number),
-                    bridge=dict(ready=True, binding=dict(launch='launch-'+str(number),
+                    bridge=dict(ready=False, binding=dict(launch='launch-'+str(number),
                                 view='view-'+str(number), document='doc-'+str(number))),
                     recovery=dict(generation=3), profile_storage=dict(profile=profile,
                                 website_store='persistent-uuid', available=True, persistent=True, selected=True))
                 current = dict(number=number, output=output, control=control, record=record,
-                               identity=identity, stopped=False, observations=0)
+                               identity=identity, stopped=False, observations=0,
+                               fetch_nonce=command[command.index('--storage-q1-fetch-nonce')+1],
+                               fetch_provider=command[command.index('--storage-q1-fetch-provider')+1])
                 state['current'] = current; state['launches'].append(current)
                 output.write_text(json.dumps(record))
 
