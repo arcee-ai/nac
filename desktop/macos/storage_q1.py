@@ -109,6 +109,14 @@ def compare_launches(first, second):
     return dict(same_profile=True, new_observed_port=True, automatic_retry=False)
 
 
+def q1_ui_result(record):
+    phase = record.get('storage_q1', {})
+    if phase.get('status') in ('failed', 'retired'):
+        reason = phase.get('error', 'Q1 document was retired')
+        raise ValueError('Q1 native phase rejected: ' + str(reason)[:512])
+    return record if phase.get('status') == 'ui-passed-awaiting-durability' else None
+
+
 class RecoveryLaunch:
     """Concrete RecoverySmoke adapter; does not inherit instance stage assumptions."""
     def __init__(self, bundle, root, environment, store, observer, number, deadline, checks):
@@ -295,8 +303,7 @@ def run_contract(bundle, observer, root, destination, admission):
             with plan_path.open('x', encoding='utf-8') as out:
                 os.chmod(plan_path, 0o600); json.dump(plan, out, ensure_ascii=False)
             launch.command('storage-q1-' + phase)
-            ui = launch.wait('Q1 UI', lambda: (r if (r := launch.read()).get('storage_q1', {}).get('status') ==
-                                              'ui-passed-awaiting-durability' else None), limit=20)
+            ui = launch.wait('Q1 UI', lambda: q1_ui_result(launch.read()), limit=20)
             require(frame(ui, nonce) == expected, 'changed launch frame')
             launch.command('capture')
             capture = launch.wait('Q1 request capture', lambda: (r if (r := launch.read()).get('document') else None))
