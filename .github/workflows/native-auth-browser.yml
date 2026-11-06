@@ -4,14 +4,11 @@ on:
   pull_request:
     paths:
       - .github/workflows/native-auth-browser.yml
-      - desktop/macos/ci_native_auth.py
-      - desktop/macos/HostedAuthBrowser.swift
-      - desktop/macos/external_auth_smoke.py
-      - desktop/macos/device_auth_smoke.py
-      - desktop/macos/ExternalAuthSmoke.swift
-      - desktop/macos/DeviceAuthSmoke.swift
-      - desktop/macos/external_auth_fixture.py
-      - desktop/macos/device_auth_profile.py
+      - desktop/macos/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - Makefile
 
 permissions:
   contents: read
@@ -49,7 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: native-auth-browser-opt1
-          save-if: false
+          save-if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
       - name: Set up the locked candidate
         run: make setup
       - name: Bind the actual hosted job and run the existing native authentication journeys
