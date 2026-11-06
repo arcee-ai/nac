@@ -868,6 +868,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         ) : null}
         <textarea
           ref={ref}
+          data-nac-retained-draft=""
           className={cn(
             "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]",
             textInset,
