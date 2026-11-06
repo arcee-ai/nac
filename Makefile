@@ -150,7 +150,7 @@ test-source-size:
 .PHONY: test-manual-stack-override
 ## Exercise the human-only stack override without GitHub mutations
 test-manual-stack-override:
-	node --test scripts/manual-stack-override.test.mjs
+	node --test scripts/manual-stack-override.test.mjs scripts/manual-stack-admission.test.mjs
 
 .PHONY: generate-codeowners
 ## Regenerate ownership files from the verified owner roster

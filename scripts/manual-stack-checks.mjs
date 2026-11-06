@@ -1,3 +1,5 @@
+import { cold, selectFullAdmission } from './manual-stack-admission.mjs';
+
 // NAC's Stable workflow is the owner of the mandatory source/native aggregates.
 // Other providers/workflows retain the conservative all-records veto. Unknown
 // provenance never turns a failed check into a successful one.
@@ -115,12 +117,6 @@ export async function inspectChecks(pr, rules, { get, pages }) {
     }
     const stable = runs.filter(r => r.workflow_id === workflow.id || r.path === WORKFLOW);
     const listed = newest(stable);
-    const selected = await get(`actions/runs/${listed.id}`);
-    insist(stamp(selected) === stamp(listed), 'Workflow changed while reading latest run');
-    context(selected, pr, workflow);
-    provenance.selected = { run: selected.id, attempt: selected.run_attempt, suite: selected.check_suite_id };
-    insist(selected.status === 'completed' && selected.conclusion === 'success',
-      `Latest Stable run ${selected.id} attempt ${selected.run_attempt}: ${state(selected)}`);
     const commits = new Map();
     async function commit(sha) {
       insist(SHA.test(sha), 'Git commit identity is unavailable');
@@ -160,25 +156,48 @@ export async function inspectChecks(pr, rules, { get, pages }) {
         kind: parent === pr.base.sha ? 'direct' : 'native-stack' });
       return sha;
     }
-    provenance.selected.testedMerge = await testedMerge(selected, true);
-    const jobs = await pages(`actions/runs/${selected.id}/jobs?filter=latest`, 'jobs');
-    insist(jobs.length > 0 && new Set(jobs.map(j => j.name)).size === jobs.length &&
-      new Set(jobs.map(j => j.id)).size === jobs.length,
-      'Missing/ambiguous latest matrix jobs');
-    const jobByName = new Map();
-    for (const job of jobs) {
-      const id = numericSuffix(job.check_run_url, `${API}/check-runs/`);
-      insist(positive(job.id) && job.run_id === selected.id && job.head_sha === pr.head.sha &&
-        positive(job.run_attempt) && job.run_attempt <= selected.run_attempt && id,
-      'Latest job run/attempt/head binding is ambiguous');
-      const check = checks.find(c => c.id === id);
-      insist(check && action(check) && check.head_sha === pr.head.sha &&
-        check.check_suite?.id === selected.check_suite_id && check.name === job.name &&
-        check.status === job.status && check.conclusion === job.conclusion,
-      'Latest job/check binding is incomplete or changed');
-      authoritative.add(check.id);
-      jobByName.set(job.name, { job, check });
+    const loaded = new Map();
+    async function load(listedRun) {
+      if (loaded.has(listedRun.id)) {
+        const value = loaded.get(listedRun.id);
+        insist(stamp(value.run) === stamp(listedRun), 'Conflicting workflow inventories');
+        return value;
+      }
+      const run = await get(`actions/runs/${listedRun.id}`);
+      insist(stamp(run) === stamp(listedRun), 'Workflow changed while reading run');
+      context(run, pr, workflow);
+      insist(stable.some(r => r.id === run.id && stamp(r) === stamp(run)),
+        'Head/branch workflow inventories disagree');
+      const jobs = await pages(`actions/runs/${run.id}/jobs?filter=latest`, 'jobs');
+      insist(jobs.length > 0 && new Set(jobs.map(j => j.name)).size === jobs.length &&
+        new Set(jobs.map(j => j.id)).size === jobs.length, 'Missing/ambiguous latest matrix jobs');
+      const bound = new Map();
+      for (const job of jobs) {
+        const id = numericSuffix(job.check_run_url, `${API}/check-runs/`);
+        insist(positive(job.id) && job.run_id === run.id && job.head_sha === pr.head.sha &&
+          positive(job.run_attempt) && job.run_attempt <= run.run_attempt && id,
+        'Latest job run/attempt/head binding is ambiguous');
+        const check = checks.find(c => c.id === id);
+        insist(check && action(check) && check.head_sha === pr.head.sha &&
+          check.check_suite?.id === run.check_suite_id && check.name === job.name &&
+          check.status === job.status && check.conclusion === job.conclusion,
+        'Latest job/check binding is incomplete or changed');
+        bound.set(job.name, { job, check });
+      }
+      const value = { run, jobs, bound };
+      loaded.set(run.id, value);
+      return value;
     }
+    const admission = await selectFullAdmission(pr, listed,
+      { load, commit, get, pages, checks, mandatory });
+    const { run: selected, jobs, bound: jobByName } = admission.selected;
+    provenance.observations = admission.observations;
+    if (admission.tuple) provenance.admission = admission.tuple;
+    provenance.selected = { run: selected.id, attempt: selected.run_attempt, suite: selected.check_suite_id };
+    insist(selected.status === 'completed' && selected.conclusion === 'success',
+      `Latest Stable run ${selected.id} attempt ${selected.run_attempt}: ${state(selected)}`);
+    provenance.selected.testedMerge = await testedMerge(selected, true);
+    for (const { check } of jobByName.values()) authoritative.add(check.id);
     provenance.jobs = jobs.map(j => ({ id: j.id, name: j.name, attempt: j.run_attempt,
       check_run_url: j.check_run_url, status: j.status, conclusion: j.conclusion }));
     for (const record of records.filter(r => r.kind === 'check')) {
@@ -188,6 +207,7 @@ export async function inspectChecks(pr, rules, { get, pages }) {
       insist(matches.length < 2, 'Ambiguous historical suite binding');
       const historical = matches[0];
       if (!historical) continue; // Never clear another app/workflow/event by name.
+      if (admission.observations.some(o => o.run === historical.id)) continue;
       const merge = await testedMerge(historical);
       let oldAttempt = historical.run_attempt;
       if (historical.id === selected.id) {
@@ -213,15 +233,25 @@ export async function inspectChecks(pr, rules, { get, pages }) {
       provenance.superseded.push({ check: check.id, run: historical.id,
         attempt: oldAttempt, testedMerge: merge, by: record.supersededBy });
     }
-    const after = await get(`actions/runs/${selected.id}`);
-    insist(stamp(after) === stamp(selected), 'Latest workflow attempt changed during validation');
+    for (const { run } of loaded.values()) {
+      const after = await get(`actions/runs/${run.id}`);
+      insist(stamp(after) === stamp(run), 'Workflow attempt changed during validation');
+    }
     const laterRuns = await pages(`actions/runs?head_sha=${pr.head.sha}`, 'workflow_runs');
     insist(inventory(laterRuns) === inventory(runs), 'Workflow inventory changed during validation');
     const later = newest(laterRuns.filter(r => r.workflow_id === workflow.id || r.path === WORKFLOW));
-    insist(stamp(later) === stamp(selected), 'A newer workflow run appeared during validation');
+    insist(stamp(later) === stamp(listed), 'A newer workflow run appeared during validation');
+    if (admission.interval) insist(inventory(await pages(admission.interval.path, 'workflow_runs')) ===
+      inventory(admission.interval.runs), 'Stable branch history changed during validation');
     insist(checkStamp(await pages(`commits/${pr.head.sha}/check-runs?filter=all`, 'check_runs')) === checkStamp(checks) &&
       statusStamp(await pages(`commits/${pr.head.sha}/status`, 'statuses')) === statusStamp(statuses),
     'Check/status inventory changed during validation');
+    if (admission.tuple) {
+      const current = await get(`pulls/${pr.number}`);
+      insist(JSON.stringify([pair(current), repoStamp(current.head.repo), repoStamp(current.base.repo), cold(current.body)]) ===
+        JSON.stringify([pair(pr), repoStamp(pr.head.repo), repoStamp(pr.base.repo), cold(pr.body)]),
+      'Current admission tuple changed during validation');
+    }
   } catch (error) {
     // A partly verified mapping must never affect readiness.
     authoritative.clear();
