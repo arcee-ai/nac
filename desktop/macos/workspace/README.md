@@ -5,15 +5,13 @@ This test-only suite uses the ALL-340 AppKit preview, bundled production
 It adds no production endpoint, bridge, frontend, provider credentials or
 user-store access. Every launch has its own disposable profile and Git repository.
 
-This private unapplied source composition targets PR634 Native public source
-`1eecc20016f2f00858aa85e42220a5e27fa3e71d`, tree
-`f7523ba2bfed40d7588e10a8a6c810ec47ff00a6`. It carries the retained supplier
-fixture layer from `7e0fd0745eaebb19359778ff7b62dd84d6859335`, preserving the
-current normal39, attention41 and lifecycle41 writer inputs and all v2 profile,
-semantic attention, auth/folder/lifetime and guarded application owners.
-Earlier app/profile compile-only receipts remain historical evidence for their
-own source, not this composition. No new build, compiler, full-Xcode, helper,
-app/WKWebView or minimum-OS evidence is established. Original macOS 14 run
+The workspace instrumentation is added only to the current writer's smoke
+builds. Normal, attention and lifecycle roles retain their own selected inputs
+and profile, attention, auth, folder and lifetime owners. Bind qualification to
+the current selected-role receipt and exact source/native/engine identities;
+earlier standalone receipts do not qualify a later composition. Source, helper
+and compiler checks never replace actual WKWebView or supported-OS evidence.
+The original macOS 14 run
 `41287895060` remains failed and its one allocated attempt remains spent;
 no source budget or generic allowance renews a native case.
 
@@ -31,21 +29,22 @@ qualification belongs to ALL-352.
 Run `make setup` in the fresh worktree. On this shared host use the coordinator's
 admission gate. Build and copy a private executable while holding the Rust
 lease, then consume only that copy in the browser lease. For example, from the
-repository root (the gate's location is specific to this coordination session):
+repository root, set the absolute path to the active coordinator's gate:
 
 ```sh
-python3 /tmp/nac-35-01a18fbf/gate.py setup make setup
-python3 /tmp/nac-35-01a18fbf/gate.py rust /bin/bash -c '
+NAC_COORDINATOR_GATE=/absolute/path/to/active/coordinator/runtime/gate.py
+python3 "$NAC_COORDINATOR_GATE" setup make setup
+python3 "$NAC_COORDINATOR_GATE" rust /bin/bash -c '
   cargo build --locked -p nac-server --bin nac-web &&
   mkdir -p target/all-351 &&
   cp "$CARGO_TARGET_DIR/debug/nac-web" target/all-351/nac-web &&
   NAC_MAC_ENGINE="$PWD/target/all-351/nac-web" ./desktop/macos/workspace.sh
 '
-python3 /tmp/nac-35-01a18fbf/gate.py browser python3 -B \
+python3 "$NAC_COORDINATOR_GATE" browser python3 -B \
   desktop/macos/smoke.py \
   "target/all-351/candidate/NAC Development Preview Smoke.app" \
   target/all-351/candidate-baseline-smoke
-python3 /tmp/nac-35-01a18fbf/gate.py browser python3 -B \
+python3 "$NAC_COORDINATOR_GATE" browser python3 -B \
   desktop/macos/workspace.py run \
   "target/all-351/candidate/NAC Development Preview Smoke.app" \
   target/all-351/candidate-workspace \
