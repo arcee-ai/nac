@@ -86,7 +86,7 @@ test("browser binds the same committed bundle and independent drift gate without
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
   const stable = workflow("stable-release");
   const browserJob = stable.jobs["browser-shards"];
-  assert.deepEqual(browserJob.needs, ["prepare", "browser-binary"]);
+  assert.deepEqual(browserJob.needs, ["prepare", "browser-binary", "browser-apt"]);
   assert.equal(browserJob.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   assert.ok(requiredJobs.includes("browser"));
   assert.deepEqual(stable.jobs.test.needs, ["prepare", "quality", "browser"]);
@@ -162,7 +162,7 @@ test("PR identity cancels superseded checks while tag/push/dispatch/release muta
 });
 
 test("seeded browser/source/native/image failures still fail the full current-candidate aggregate", () => {
-  for (const job of ["test-server", "browser", "quality", "source-security", "macos-native", "workflow-lint", ...managedCallerJobs]) {
+  for (const job of ["test-server", "browser-apt", "browser", "quality", "source-security", "macos-native", "workflow-lint", ...managedCallerJobs]) {
     for (const result of ["failure", "cancelled", "skipped"]) {
       const needs = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map(name => [name, { result: "success" }]));
       needs.prepare.outputs = { sha, run: "true" };

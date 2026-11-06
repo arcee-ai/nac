@@ -1,8 +1,9 @@
 # Same-run authenticated browser OS archive relay
 
-The required `browser-binary` job also exports a current native OS-package
-snapshot. Eight ordinary browser shards and the dedicated proof job consume its
-specific artifact ID. This is same-run byte transport, with no Actions-cache
+The required `browser-apt` job exports a current native OS-package snapshot in
+parallel with the independent `browser-binary` job after preparation. Eight
+ordinary browser shards and the dedicated proof job await both and consume each
+producer's specific artifact ID. This is same-run byte transport, with no Actions-cache
 save/restore, trusted seed, cache quota/eviction claim or new token privilege.
 
 The first private native pilot, source `036416ca23e4147bdd8c29903fe0bb73094adcc6`,
@@ -18,13 +19,17 @@ archive-only prototypes did not establish installation/runtime parity.
 ## Producer and current authority
 
 Compilation and S09 binary transport retain their existing source/profile/Rust
-and read-only compiler cache contract. After binary upload, the same producer
-selects package relay mode, installs the pinned Node/locked web dependency tree
+and read-only compiler cache contract. Independently, the native producer checks
+out the same prepared source, selects package relay mode, installs the pinned Node/locked web dependency tree
 and matches the consumer pager setup when the relay is enabled. These additional
 steps are required when selected. Setup, signature, resolution, prefetch or
 advertised-upload errors are failures, without blanket fallback or retries.
-A single producer now carries an added network cost/tail: retain/revert depends
-on the observed complete path, not a prediction from the pilot.
+The native producer has no Rust toolchain or compiler-cache step. Its original
+seven native steps are unchanged. Both producers must succeed, so a native
+network tail still blocks consumers; this split does not make prefetch optional.
+The extra Ubuntu allocation/checkout/queue cost and current-source full path need
+hosted measurement. No observed saving follows from overlapping a prior
+85-second build with a 552-second prefetch on a different source/run.
 
 The cohesive stdlib owner is `.github/scripts/browser-apt.py`; immutable byte and
 Debian-control validation belongs to `apt-archive-store.py`. Production imports
@@ -110,13 +115,18 @@ unchanged. `cold_caches=true` additionally bypasses package prefetch, package
 artifact reads and offers. Existing Rust/image cold isolation and S09 same-run
 executable sharing remain; normal with-deps and every browser case still run.
 There is no new input or cache-write authority.
+The native job still runs its required checkout/preflight/evidence path in cold
+mode and emits `disabled-cold`; Node/npm, native planning and prefetch stay bypassed.
 
-The job graph and `requiredJobs`/`qualityJobs` lists are unchanged. Browser binary,
-all eight shards and proof must succeed; the browser join, test join and final
+`browser-apt` is a separate explicit `requiredJobs` entry; `qualityJobs` stays
+unchanged. Both producers, all eight shards and proof must succeed; the browser join, test join and final
 Required check retain their exact ownership. Package metadata never supplies a
 quality or execution verdict and never enters managed quality receipt reuse.
 Independent API/assets checks and the selected-binary ALL471 source/hash binding
 remain mandatory.
+The binary and native producers may receive different runner images during a
+rollout. Each artifact retains its independent strict validation and valid
+compatibility fallback; matching one never admits the other or reuses a verdict.
 
 The complete current disjoint inventory, all ordinary selections and the
 dedicated proof names remain. Ordinary test-level sharding stays eight shards, one worker,
@@ -124,8 +134,11 @@ zero retries. Dedicated proof stays serial with its real clocks, original
 assertions/deadlines/cleanup and bounded two-receipt artifact. The private pilot's
 three representative journeys are not the full acceptance set.
 
-`browser-apt-wiring.mjs` matches every newly added AST field before reversing
-exactly those additions. The new parsed guard recovers the full workflow at
+`browser-apt-parallel-wiring.mjs` verifies the exact split job, seven unchanged
+steps, output references and required dependencies before recovering the
+colocated graph at parent `0cfae9c3c999721a9e1e78c0801ccbc974c5d0da`.
+`browser-apt-wiring.mjs` then matches every relay field before reversing
+exactly those additions. The parsed guard recovers the full workflow at
 parent `914782659a6183b89070a3516e2e44776b1eeb06`; the existing cold guard then
 recovers all prior normalized hashes, provenance and four child-workflow hashes.
 It does not delete arbitrary matching steps or replace an opaque failing digest.
@@ -133,6 +146,10 @@ Mutations cover cold reads, missing identity/receipt/fresh leaf, root offer/clea
 weakened normal install/proof/join, cache writes and ignored errors. Real CLI
 archive, mismatch, root-filesystem and owned-child controls run through the
 required release checks.
+The required-job addition intentionally changes the `pr-checks.mjs` and linked
+managed-applicability hash pins; the other six admission authority pins remain
+byte-identical. Existing parent/cold fingerprints and the current elapsed-evidence
+addition remain independently guarded. No private race-controller code enters production.
 
 ## Qualification boundaries
 

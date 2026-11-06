@@ -5,6 +5,8 @@ import {runInNewContext} from 'node:vm';
 import test from 'node:test';
 import YAML from 'yaml';
 import {reverseAdmission,purePredicate,sourceJobs,sourceGroup,forwardedMode} from './ci-admission-wiring.mjs';
+import {aptProducerSteps} from './browser-apt-wiring.mjs';
+import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
 const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
@@ -12,9 +14,9 @@ const sealedPins={
   ".github/scripts/ci-admission.py": "c0c4759af67d407d76b733c1ee0324dcc079da09890f8981ab976d60a5e9ed91",
   ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
   ".github/scripts/ci-admission-contract.json": "d3f4dfffe12024b54ad5ade8023ee9ec3b4cf9867dec01c442b58b19a1593cb9",
-  ".github/scripts/ci-admission-applicability.json": "c1cb0840cd9d05be44064aa8653ff8b6d9aecb62dcbc52ee08cb4a24eb9e765c",
+  ".github/scripts/ci-admission-applicability.json": "7dea3225509631c4dc6dc2947ab9fcf75b8dbd62ff0172bd394815c3a99f56e7",
   ".github/scripts/cold-caches.py": "2b2ea35fd7fa77f036ab6d7e9e1d7fbf974f5c33a070c13b55356664d626f07b",
-  ".github/scripts/pr-checks.mjs": "4317326809755287fbe5f5c4a3aa7f280b5b1d9442953139ca767be61be19a93",
+  ".github/scripts/pr-checks.mjs": "1c12e1ed2fa2aa78707ae46da445edf2f774eab689721771ff52069122667127",
   ".github/scripts/publication-policy.mjs": "c62bba4c71700fc57c48605b5b7209415513b8a7b2bce33b391595e8952a8018",
   ".github/workflows/ci-admission.yml": "d6979c9db4619f87a1321ff3f1e18d30a0004eb6e03035752b08997c16c25c27"
 };
@@ -37,8 +39,8 @@ function state(mode='full'){
 }
 function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
 
-test('FULL projection equals entire landed APT graph; all eight sealed authority pins unchanged',()=>{
- const normalized=structuredClone(stable);reverseAdmission(normalized);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
+test('FULL split projection preserves the landed graph; six authority pins unchanged and two explicitly rebound',()=>{
+ const normalized=structuredClone(stable);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
  for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
 });
 test('actual pre-prepare routing isolates edits and ready before pending-source replacement',()=>{
@@ -99,7 +101,7 @@ test('normalization rejects changed trust, defaults, coverage, APT or extra work
  for(const mutate of [w=>w.concurrency.group=sourceGroup,w=>w.jobs.prepare.outputs.admission_mode="${{ 'pure' }}",
   w=>w.jobs['source-security'].name='source-security',w=>w.jobs['ci-admission'].if='false',
   w=>w.jobs.lint.if='false',w=>w.jobs['required-pr-checks'].steps.at(-1).if='false',
-  w=>w.jobs['browser-binary'].steps.find(s=>s.id==='apt-upload').with['retention-days']=1,
+  w=>w.jobs['browser-apt'].steps.find(s=>s.id==='apt-upload').with['retention-days']=1,
   w=>w.permissions.actions='write',w=>w.jobs.extra={steps:[]},
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence').with.path+='extra.json\n',
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence').if='success()',
@@ -107,6 +109,6 @@ test('normalization rejects changed trust, defaults, coverage, APT or extra work
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence')['continue-on-error']=true,
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload browser shard failure artifacts').with.path='crates/nac-server/web/test-results']){
   const value=structuredClone(stable);mutate(value);
-  assert.throws(()=>{reverseAdmission(value);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
+  assert.throws(()=>{reverseAdmission(value);reverseParallelApt(value,aptProducerSteps);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
  }
 });

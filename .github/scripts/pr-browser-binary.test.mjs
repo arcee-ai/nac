@@ -93,6 +93,8 @@ function validate(config, required = requiredJobs) {
   assert.deepEqual(producer.outputs, {
     receipt: "${{ steps.pack.outputs.receipt }}",
     artifact_id: "${{ steps.upload.outputs.artifact-id }}",
+  });
+  assert.deepEqual(config.jobs["browser-apt"].outputs, {
     apt_mode: "${{ steps.apt-plan.outputs.mode || steps.apt-preflight.outputs.mode }}",
     apt_receipt: "${{ steps.apt-export.outputs.receipt }}",
     apt_artifact_id: "${{ steps.apt-upload.outputs.artifact-id }}",
@@ -114,7 +116,7 @@ function validate(config, required = requiredJobs) {
   });
   for (const name of ["browser-shards", "browser-proof"]) {
     const consumer = config.jobs[name];
-    assert.deepEqual(consumer.needs, ["prepare", "browser-binary"]);
+    assert.deepEqual(consumer.needs, ["prepare", "browser-binary", "browser-apt"]);
     profile(consumer);
     const guard = named(consumer, "Validate browser artifact selection and current runner");
     assert.equal(guard.if, undefined);
@@ -166,7 +168,7 @@ function validate(config, required = requiredJobs) {
   assert.equal(proofArtifact.with.name,
     "all471-goal-proof-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}");
   assert.equal(proofArtifact.with.overwrite, undefined, "retain earlier successful proof attempts");
-  assert.deepEqual(config.jobs.browser.needs, ["prepare", "browser-binary", "browser-shards", "browser-proof"]);
+  assert.deepEqual(config.jobs.browser.needs, ["prepare", "browser-binary", "browser-apt", "browser-shards", "browser-proof"]);
   assert.equal(config.jobs.browser.steps[0].env.BINARY_RESULT, "${{ needs.browser-binary.result }}");
   assert.match(config.jobs.browser.steps[0].run, /test "\$BINARY_RESULT" = success/);
   assert.ok(required.includes("browser-binary"));

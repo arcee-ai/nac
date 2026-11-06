@@ -27,17 +27,23 @@ export const sourceJobs={
     "needs": "prepare",
     "if": "${{ needs.prepare.outputs.run == 'true' }}"
   },
+  "browser-apt": {
+    "needs": "prepare",
+    "if": "${{ needs.prepare.outputs.run == 'true' }}"
+  },
   "browser-shards": {
     "needs": [
       "prepare",
-      "browser-binary"
+      "browser-binary",
+      "browser-apt"
     ],
     "if": "${{ needs.prepare.outputs.run == 'true' }}"
   },
   "browser-proof": {
     "needs": [
       "prepare",
-      "browser-binary"
+      "browser-binary",
+      "browser-apt"
     ],
     "if": "${{ needs.prepare.outputs.run == 'true' }}"
   },
@@ -45,6 +51,7 @@ export const sourceJobs={
     "needs": [
       "prepare",
       "browser-binary",
+      "browser-apt",
       "browser-shards",
       "browser-proof"
     ],
@@ -125,6 +132,7 @@ export const sourceJobs={
       "test-workspace",
       "quality",
       "browser-binary",
+      "browser-apt",
       "browser-shards",
       "browser-proof",
       "browser",

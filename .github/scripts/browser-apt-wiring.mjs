@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { reverseAdmission } from './ci-admission-wiring.mjs';
+import { reverseParallelApt } from './browser-apt-parallel-wiring.mjs';
 
 // Exact relay additions on parent914782659a6183b89070a3516e2e44776b1eeb06.
 // Match every added AST field before removing it; never normalize arbitrary steps.
@@ -142,8 +143,10 @@ const additions={
 };
 
 const oldOutputs={receipt:'${{ steps.pack.outputs.receipt }}',artifact_id:'${{ steps.upload.outputs.artifact-id }}'};
+export const aptProducerSteps=additions.producer;
 export function reverseBrowserApt(workflow) {
   reverseAdmission(workflow);
+  reverseParallelApt(workflow,aptProducerSteps);
   const input=workflow.on.workflow_dispatch.inputs.cold_caches;
   assert.equal(input.description,'Measure Rust/image cache misses and bypass OS archive relay; run all acceptance work');
   input.description='Measure required Rust and image cache misses while running all acceptance work';

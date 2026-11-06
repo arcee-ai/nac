@@ -65,7 +65,7 @@ test("parsed runner/profile/cache weakening fails closed", () => {
     w => { w.jobs["test-server"].steps.find(s => s.uses?.startsWith("Swatinem/")).with["save-if"] = "true"; },
     w => { w.jobs["test-server"].steps.find(s => s.uses?.startsWith("Swatinem/")).with["cache-all-crates"] = true; },
     w => { w.jobs["test-server"]["runs-on"] = "macos-latest"; },
-    w => { w.jobs["browser-binary"].steps.find(s => s.id === "apt-upload").with["if-no-files-found"] = "ignore"; },
+    w => { w.jobs["browser-apt"].steps.find(s => s.id === "apt-upload").with["if-no-files-found"] = "ignore"; },
   ]) { const candidate = read(); mutate(candidate); assert.throws(() => verify(candidate)); }
 });
 test("real stdlib installer, private-store policy and failure propagation controls", () => {

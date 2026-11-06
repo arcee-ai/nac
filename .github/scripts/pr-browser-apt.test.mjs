@@ -21,10 +21,10 @@ function validate(value) {
   const old=structuredClone(value);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');
   for(const role of ['browser-shards','browser-proof']) {
-    const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary']);
+    const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary','browser-apt']);
     const normal=job.steps.find(s=>s.name==='Install Playwright Chromium');
     assert.deepEqual(normal,{name:'Install Playwright Chromium','working-directory':'crates/nac-server/web',run:'npx playwright install --with-deps chromium'});
-    const fetch=job.steps.find(s=>s.with?.['artifact-ids']==='${{ needs.browser-binary.outputs.apt_artifact_id }}');
+    const fetch=job.steps.find(s=>s.with?.['artifact-ids']==='${{ needs.browser-apt.outputs.apt_artifact_id }}');
     assert.ok(fetch);assert.match(fetch.if,/cold_caches != 'true'/);
     assert.match(job.steps.find(s=>s.id==='apt-consume').run,/--source "\$NAC_SOURCE_REVISION"/);
     const offer=job.steps.find(s=>s.run?.includes('browser-apt.py offer'));
@@ -32,10 +32,10 @@ function validate(value) {
     assert.equal(job.steps.find(s=>s.run?.includes('browser-apt.py cleanup')).if,"always() && steps.apt-preflight.outcome == 'success'");
   }
   assert.deepEqual(value.jobs['browser-shards'].strategy.matrix.shard,[1,2,3,4,5,6,7,8]);
-  assert.deepEqual(value.jobs.browser.needs,['prepare','browser-binary','browser-shards','browser-proof']);
+  assert.deepEqual(value.jobs.browser.needs,['prepare','browser-binary','browser-apt','browser-shards','browser-proof']);
   assert.equal(value.jobs['required-pr-checks'].needs.filter(x=>x==='browser-binary').length,1);
-  assert.ok(requiredJobs.includes('browser-binary'));assert.ok(!requiredJobs.includes('browser-apt'));
-  assert.ok(!qualityJobs.includes('browser-binary'));
+  assert.ok(requiredJobs.includes('browser-binary'));assert.ok(requiredJobs.includes('browser-apt'));
+  assert.ok(!qualityJobs.includes('browser-binary'));assert.ok(!qualityJobs.includes('browser-apt'));
   for(const role of ['browser-binary','browser-shards','browser-proof'])
     for(const item of value.jobs[role].steps.filter(s=>s.uses?.startsWith('Swatinem/')))assert.equal(item.with['save-if'],'false');
 }
@@ -44,11 +44,11 @@ test('exact relay-only AST projection recovers the entire frozen production pare
 const step=(w,role,id)=>w.jobs[role].steps.find(s=>s.id===id);
 const mutations={
   'misleading cold description':w=>w.on.workflow_dispatch.inputs.cold_caches.description='Keep cache hot',
-  'no producer output':w=>delete w.jobs['browser-binary'].outputs.apt_receipt,
-  'unanchored producer ID':w=>w.jobs['browser-binary'].outputs.apt_artifact_id='0',
-  'source drift':w=>step(w,'browser-binary','apt-preflight').run=step(w,'browser-binary','apt-preflight').run.replace('$NAC_SOURCE_REVISION','dev'),
+  'no producer output':w=>delete w.jobs['browser-apt'].outputs.apt_receipt,
+  'unanchored producer ID':w=>w.jobs['browser-apt'].outputs.apt_artifact_id='0',
+  'source drift':w=>step(w,'browser-apt','apt-preflight').run=step(w,'browser-apt','apt-preflight').run.replace('$NAC_SOURCE_REVISION','dev'),
   'missing cold bypass':w=>step(w,'browser-proof','apt-preflight').env.COLD_APT='false',
-  'cold artifact read':w=>w.jobs['browser-shards'].steps.find(s=>s.with?.['artifact-ids']?.includes('apt_artifact_id')).if="needs.browser-binary.outputs.apt_mode == 'ready'",
+  'cold artifact read':w=>w.jobs['browser-shards'].steps.find(s=>s.with?.['artifact-ids']?.includes('apt_artifact_id')).if="needs.browser-apt.outputs.apt_mode == 'ready'",
   'missing ID guard':w=>{const s=w.jobs['browser-proof'].steps.find(s=>s.name==='Validate package selection before any download');s.run=s.run.replace('[[ "$APT_ID" =~ ^[1-9][0-9]*$ ]]','true');},
   'missing receipt guard':w=>{const s=w.jobs['browser-proof'].steps.find(s=>s.name==='Validate package selection before any download');s.run=s.run.replace('test -n "$BROWSER_APT_RECEIPT"','true');},
   'existing download leaf':w=>{const s=w.jobs['browser-proof'].steps.find(s=>s.name==='Validate package selection before any download');s.run=s.run.replace('mkdir "$RUNNER_TEMP/browser-apt-download"','mkdir -p "$RUNNER_TEMP/browser-apt-download"');},
@@ -58,12 +58,12 @@ const mutations={
   'cold test skip':w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Run production-embedded browser shard').if='false',
   'proof binary binding removed':w=>w.jobs['browser-proof'].steps.find(s=>s.run?.includes('verify-proof')).run='true',
   'required join weakened':w=>w.jobs.browser.needs.pop(),
-  'extra optional job':w=>w.jobs['browser-apt']={needs:'prepare','runs-on':'ubuntu-latest',steps:[{run:'true'}]},
+  'extra optional job':w=>w.jobs['browser-apt-extra']={needs:'prepare','runs-on':'ubuntu-latest',steps:[{run:'true'}]},
   'compiler cache save broadened':w=>w.jobs['browser-binary'].steps.find(s=>s.uses?.startsWith('Swatinem/')).with['save-if']='true',
   'permission broadened':w=>w.permissions.actions='write',
-  'missing attempt evidence':w=>{const s=w.jobs['browser-binary'].steps.find(s=>s.id==='apt-upload');s.with.name=s.with.name.replace('-${{ github.run_attempt }}','');},
-  'duplicate payload evidence':w=>{const s=w.jobs['browser-binary'].steps.at(-1);s.with.path='${{ runner.temp }}/browser-apt/';},
-  'ignored relay failure':w=>step(w,'browser-binary','apt-export')['continue-on-error']=true,
+  'missing attempt evidence':w=>{const s=w.jobs['browser-apt'].steps.find(s=>s.id==='apt-upload');s.with.name=s.with.name.replace('-${{ github.run_attempt }}','');},
+  'duplicate payload evidence':w=>{const s=w.jobs['browser-apt'].steps.at(-1);s.with.path='${{ runner.temp }}/browser-apt/';},
+  'ignored relay failure':w=>step(w,'browser-apt','apt-export')['continue-on-error']=true,
 };
 for(const[name,mutate]of Object.entries(mutations))test(`rejects ${name}`,()=>{
   const changed=structuredClone(workflow);mutate(changed);assert.throws(()=>validate(changed));
@@ -73,7 +73,7 @@ test('actual parsed cold expression never reads package artifacts in cold mode',
   const expression=workflow.jobs['browser-proof'].steps.find(s=>s.with?.['artifact-ids']?.includes('apt_artifact_id')).if;
   for(const cold of ['true','false'])for(const mode of ['ready','disabled-cold','nothing-missing','unsupported-platform']) {
     const value=runInNewContext(expression.replace(/\.([A-Za-z_][\w-]*)/g,'["$1"]'),
-      {needs:{'browser-binary':{outputs:{apt_mode:mode}},prepare:{outputs:{cold_caches:cold}}}});
+      {needs:{'browser-apt':{outputs:{apt_mode:mode}},prepare:{outputs:{cold_caches:cold}}}});
     assert.equal(value,mode==='ready'&&cold==='false');
   }
 });
