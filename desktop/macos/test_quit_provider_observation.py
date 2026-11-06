@@ -23,7 +23,7 @@ class SocketBytes:
 class InertServer:
     def __init__(self, address, handler):
         self.handler = handler
-        self.server_port = address[1]
+        self.server_port = address[1] or 18080
         self.hold_connections = False
         self.pending = []
 
@@ -160,6 +160,22 @@ class ProviderObservationTests(unittest.TestCase):
                 snapshot = self.provider.ingress_snapshot()
                 self.assertEqual(snapshot['connectionsActive'], 0)
                 with self.assertRaises(ValueError): provider_no_send(snapshot)
+
+
+    def test_q1_exact_models_index_is_read_only_and_default_mode_stays_rejected(self):
+        import json
+        provider=QuitProvider(Path('/inert/no-filesystem-access'),q1_metadata=True)
+        connection=SocketBytes(b'GET /models HTTP/1.0\r\n\r\n')
+        provider.server.process_request(connection,('127.0.0.1',1))
+        body=bytes(connection.output).split(b'\r\n\r\n',1)[1]
+        self.assertEqual(json.loads(body),dict(object='list',data=[dict(id='gpt-5.6-sol',object='model')]))
+        provider.close()
+        self.assertEqual(provider_no_send(provider.ingress_snapshot(),final=True),0)
+        self.assertEqual(provider.requests,[])
+        unknown=self.ingress(b'GET /models HTTP/1.0\r\n\r\n')
+        with self.assertRaises(ValueError):provider_no_send(unknown)
+        provider.server.process_request(SocketBytes(b'GET /models?foreign=1 HTTP/1.0\r\n\r\n'),('127.0.0.1',1))
+        with self.assertRaises(ValueError):provider_no_send(provider.ingress_snapshot())
 
 
 if __name__ == '__main__': unittest.main()
