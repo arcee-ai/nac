@@ -116,5 +116,41 @@ class WorkspaceMatrixTests(unittest.TestCase):
             self.assertIn('Full acceptance is not established.', markdown)
 
 
+    def test_diagnostic_png_never_reclassifies_reported_visible_paint_or_feature_failure(self):
+        # Producer isolation is covered by the exact Swift snapshot preservation check.
+        # The report must retain supplied qualification; raw diagnostics are not authority.
+        provenance = {'os': '27.0.1', 'source_head': 'fixture-source',
+                      'engine_version': 'fixture-engine'}
+        for status in (None, 'pass', 'unavailable', 'fail'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                paint = {'status': status, 'detail': 'Explicit targeted capture result'}
+                failure = {'status': 'fail', 'detail': 'Unrelated feature failed', 'executed': True}
+                episodes = {'workspace-direct': {
+                    'checks': {'markdown-math': failure},
+                    'paint_diagnostics': {'failed-markdown-math.png': {
+                        'readiness': {'kind': 'diagnostic-only'}, 'semantic_ready': True,
+                        'animation_frame_observed': False, 'window_visible_after_snapshot': False}},
+                }}
+                if status is not None:
+                    episodes['workspace-direct']['checks']['visible-paint'] = paint
+                original = deepcopy(episodes)
+                output = Path(temporary)
+                write_report(output, provenance, episodes)
+                report = json.loads((output / 'matrix.json').read_text())
+                rows = {row['id']: row for row in report['rows'] if row['os'] == '27.0.1'}
+                expected_status = status if status is not None else 'unavailable'
+                tested = status is not None
+                self.assertEqual(rows['visible-paint']['status'], expected_status)
+                self.assertEqual(rows['visible-paint']['evidence'], paint if tested else None)
+                self.assertIs(rows['visible-paint']['tested'], tested)
+                self.assertEqual(rows['markdown-math']['status'], 'fail')
+                self.assertEqual(rows['markdown-math']['evidence'], failure)
+                self.assertEqual(episodes, original)
+                self.assertFalse(report['full_acceptance'])
+                self.assertIsNone(report['minimum_selected'])
+                markdown = (output / 'matrix.md').read_text()
+                self.assertIn(f'| visible-paint | 27.0.1 | {tested} | {expected_status} |', markdown)
+                self.assertIn('| markdown-math | 27.0.1 | True | fail |', markdown)
+
 if __name__ == '__main__':
     unittest.main()
