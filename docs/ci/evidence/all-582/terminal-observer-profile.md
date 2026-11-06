@@ -27,7 +27,9 @@ Its native keyboard/type/Enter, focus, noise,45s test timeout,1500ms assertion,
 real clocks, retries0,32KiB frames, ordered delivery, renderer-completion ACK,
 ownership/configuration fences and cancellation are unchanged. No source
 frame bypass, earlier ACK, caching, extra await, header, API field, or middleware
-is introduced. Only one exact-title case runs, worker1, retry0.
+is introduced. Only one exact-title case runs, worker1, retry0. The file-scoped grep accepts
+Playwright's filename/project prefix and anchors the original title at the end;
+the pinned case source contains exactly one such test.
 
 Tagged private statements time existing client fetch→headers, JSON decoding,
 renderer parser completion and ACK readiness, and server completion admission,

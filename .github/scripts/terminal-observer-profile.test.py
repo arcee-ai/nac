@@ -95,6 +95,14 @@ class Controls(unittest.TestCase):
         with patch.object(profile.os,'sched_getaffinity',return_value={0},create=True):
             with self.assertRaises(ValueError):profile.cpu_capacity()
 
+    def test_exact_case_selector_accepts_playwright_prefixed_title(self):
+        selector=re.compile(r'(?:^| )'+re.escape(profile.CASE)+'$')
+        self.assertIsNotNone(selector.search('terminal-local-acceptance.e2e.ts '+profile.CASE))
+        self.assertIsNotNone(selector.search(profile.CASE))
+        self.assertIsNone(selector.search(profile.CASE+' extra'))
+        source=(ROOT/profile.E2E).read_text()
+        self.assertEqual(source.count('test("'+profile.CASE+'"'),1)
+
     def test_native_admission_keeps_full_operation_and_cleanup_budget(self):
         with tempfile.TemporaryDirectory()as directory:
             obj=object.__new__(profile.Controller);obj.evidence=Path(directory);obj.stopped=False;obj.privileged=False;obj.deadline=2000

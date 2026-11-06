@@ -261,7 +261,7 @@ def main():
         result['guide_identity']=identity
         runtime=env|{'NAC_E2E_BINARY':str(binary),'NAC_E2E_ARTIFACTS':str(controller.raw/'playwright'),'KEEP_E2E':'1'}
         result['outcome']='case-started'
-        controller.run('case',['node',str(cli),'test','terminal-local-acceptance.e2e.ts','--grep','^'+re.escape(CASE)+'$','--workers=1','--retries=0'],180,runtime,WEB)
+        controller.run('case',['node',str(cli),'test','terminal-local-acceptance.e2e.ts','--grep',r'(?:^| )'+re.escape(CASE)+'$','--workers=1','--retries=0'],180,runtime,WEB)
         result['outcome']='case-pass'
     except BaseException as error:
         result['error']=type(error).__name__+': '+str(error)
