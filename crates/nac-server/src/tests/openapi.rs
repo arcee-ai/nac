@@ -416,7 +416,7 @@ async fn openapi_document_matches_the_running_api_router() {
         .collect();
     assert_eq!(
         required,
-        std::collections::BTreeSet::from(["path", "expected_workspace_root"])
+        std::collections::BTreeSet::from(["path", "expected_workspace_root", "expected_path_root"])
     );
     assert_eq!(
         document["paths"]["/sessions/{session_id}/workspace/reveal"]["post"]["requestBody"]

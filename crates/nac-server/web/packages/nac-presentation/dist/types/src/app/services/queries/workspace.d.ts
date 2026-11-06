@@ -12,6 +12,7 @@ export declare function useWorkspaceDiff(id: string | null, path: string | null,
  */
 export declare function useWorkspaceFiles(id: string | null, revision?: number | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     files: string[];
+    path_root?: string | null;
     truncated: boolean;
 }>, Error>;
 /** Contents of one file, shown when it has no diff to display. */
