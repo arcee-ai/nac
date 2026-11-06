@@ -23,7 +23,9 @@ impl Root {
                 // from the parent can expose a pre-exec process instead of
                 // the intended job. The child blocks without another exec;
                 // the parent waits before reading the next job token.
-                "while read token; do /bin/sh -c 'printf \"%s\\n\" \"$$\"; read token' <&0 & job=$!; wait $job; done",
+                // Save stdin before the asynchronous list can replace fd 0
+                // with /dev/null (dash does this even with an explicit <&0).
+                "while read token; do /bin/sh -c 'printf \"%s\\n\" \"$$\"; read token' <&3 3<&- & job=$!; wait $job; done 3<&0",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
