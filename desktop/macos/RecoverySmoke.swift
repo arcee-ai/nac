@@ -286,25 +286,40 @@ final class RecoverySmoke {
     /// Private fixture actor through the existing React text/preference owners.
     /// It never submits, sends terminal input, or calls a domain mutation API.
     private func storageQ1(_ phase: String) {
+        func reject(_ reason: String) {
+            evidence["storage_q1"] = ["phase": phase, "status": "failed", "error": reason]
+            publish()
+        }
         guard !storageQ1Running, let view = app.webView, let receipt = app.engine.receipt,
               let endpoint = receipt.endpoint,
               app.commands?.smokeSnapshot["ready"] as? Bool == true,
               let binding = app.commands?.smokeSnapshot["binding"] as? [String: Any],
               let launch = binding["launch"] as? String,
               let document = binding["document"] as? String,
-              let viewID = binding["view"] as? String else { return }
+              let viewID = binding["view"] as? String else {
+            reject("Q1 workspace receipt or ready binding is unavailable")
+            return
+        }
         guard let bytes = try? StorageQ1PlanFile.read(control: control),
               let plan = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
-            evidence["storage_q1"] = ["phase": phase, "status": "failed", "error": "Invalid bounded fixture plan"]
-            publish()
+            reject("Invalid bounded fixture plan")
             return
         }
         let generation = app.recovery.documentGeneration, enginePID = app.engine.pid
-        guard app.canRecoverWorkspace, enginePID > 0 else { return }
+        guard app.canRecoverWorkspace, enginePID > 0 else {
+            reject("Q1 workspace is retired or its owned engine is unavailable")
+            return
+        }
         guard let nonce = plan["nonce"] as? String, UUID(uuidString: nonce) != nil,
               let sessionB = plan["b"] as? String,
-              let profile = app.smokeProfileSnapshot["profile"] as? String else { return }
-        guard let q1QuitLaunch = app.quit.launch else { return }
+              let profile = app.smokeProfileSnapshot["profile"] as? String else {
+            reject("Q1 fixture plan or selected profile is unavailable")
+            return
+        }
+        guard let q1QuitLaunch = app.quit.launch else {
+            reject("Q1 originating launch is unavailable")
+            return
+        }
         WorkspaceStorage.smokeQ1Event = { [weak self, weak view] event, raw in
             guard let self, event["profile"] as? String == profile else { return }
             let current = self.app.commands?.smokeSnapshot["binding"] as? [String: Any]
