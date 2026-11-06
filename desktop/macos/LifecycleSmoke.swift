@@ -56,6 +56,10 @@ final class LifecycleSmoke {
             }
             return
         }
+        if scenario == "renderer-hidden", seen.contains("renderer-loss") {
+            pollRendererFailure()
+            return
+        }
         if let failure = app.failure, !app.stopping { fail(failure); return }
         // A nested poll cannot dispatch Cancel while the public call is in flight.
         if let deadline = duplicateDeadline {
@@ -88,6 +92,23 @@ final class LifecycleSmoke {
             guard !app.window.isVisible, intact() else { fail("Close retired the workspace"); return }
             evidence["close_retained_owners"] = true
             publish("closed")
+        }
+        if scenario == "renderer-hidden", take("renderer-loss") {
+            guard stage == "closed", !app.window.isVisible, intact() else {
+                fail("Renderer injection requires the intact hidden workspace"); return
+            }
+            // Deliver the real delegate callback, not a WebKit process crash.
+            app.webViewWebContentProcessDidTerminate(app.webView)
+            guard app.failure != nil, sameEngine(), !app.stopping,
+                  app.commands.smokeSnapshot["installed"] as? Bool == false else {
+                fail("Hidden renderer failure stopped the owned engine"); return
+            }
+            evidence["renderer_callback_injected"] = true
+            evidence["renderer_retained_engine"] = true
+            evidence["actual_renderer_crash"] = false
+            evidence["renderer_failure_status"] = app.lifecycleFailureStatus
+            publish("renderer-failed")
+            return
         }
         if stage == "closed", app.window.isVisible {
             guard intact() else { fail("Reopen replaced the workspace"); return }
@@ -143,6 +164,31 @@ final class LifecycleSmoke {
             guard intact() else { fail("Cancel changed workspace ownership"); return }
             evidence["cancel_retained_owners"] = true
             publish("cancelled")
+        }
+    }
+
+    private func sameEngine() -> Bool {
+        app.engine.pid == originalPID && originalPID > 0 && app.engine.receipt != nil &&
+            app.engine.receipt?.incarnation == originalReceipt?.incarnation &&
+            app.engine.receipt?.endpoint == originalReceipt?.endpoint &&
+            app.engine.receipt?.store == originalReceipt?.store
+    }
+
+    private func pollRendererFailure() {
+        guard !app.stopping else { return }
+        guard sameEngine() else { fail("Renderer failure did not retain the same engine"); return }
+        if stage == "renderer-failed", app.window.isVisible {
+            evidence["renderer_status_reopened"] = true
+            publish("renderer-reopened")
+        }
+        for command in ["quit", "quit-again"] where take(command) {
+            publish("renderer-quit-requested")
+            RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+        }
+        if case .confirming = app.quit.lifecycle.phase, let sheet = app.window.attachedSheet {
+            evidence["renderer_confirmation_retained_engine"] = true
+            publish("renderer-confirming")
+            if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
         }
     }
 
@@ -290,6 +336,16 @@ final class LifecycleSmoke {
         evidence["document_released"] = originalView == nil && app.webView == nil
         evidence["commands_retired"] = app.commands.smokeSnapshot["installed"] as? Bool == false
         evidence["stopped"] = app.engine.pid == 0 && app.engine.receipt == nil
+        if scenario == "renderer-hidden" {
+            evidence["passed"] = evidence["document_released"] as? Bool == true &&
+                evidence["commands_retired"] as? Bool == true && evidence["stopped"] as? Bool == true &&
+                evidence["close_retained_owners"] as? Bool == true &&
+                evidence["renderer_retained_engine"] as? Bool == true &&
+                evidence["renderer_status_reopened"] as? Bool == true &&
+                evidence["renderer_confirmation_retained_engine"] as? Bool == true
+            publish("stopped")
+            return
+        }
         evidence["passed"] = evidence["document_released"] as? Bool == true &&
             evidence["commands_retired"] as? Bool == true && evidence["stopped"] as? Bool == true &&
             evidence["close_retained_owners"] as? Bool == true &&
