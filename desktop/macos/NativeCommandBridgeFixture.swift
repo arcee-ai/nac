@@ -6,6 +6,10 @@ private enum World { case page }
 private enum NativeCommandScript { static let handler = "nacUIReceipt" }
 private enum WorkspaceStorageScript { static let handler = "nacStorageReceipt" }
 private enum Failure: Error { case unavailable }
+private final class Target {
+    var ended = false
+    func end() { ended = true }
+}
 private final class Storage {
     var retired = false
     var completion: ((Bool) -> Void)?
@@ -38,6 +42,7 @@ private final class State {
 @MainActor private final class Bridge {
     weak var webView: View?
     let state = State()
+    let target = Target()
     var storage: Storage?
     var installed = true
     var navigation: Int? = 1
@@ -57,6 +62,7 @@ private final class State {
                 var answers: [Bool] = []
                 view.onCall = {
                     precondition(!bridge.installed && bridge.state.retired && bridge.navigation == nil)
+                    precondition(bridge.target.ended, "Target admission must end before page disposal")
                     precondition(view.configuration.userContentController.removed ==
                         [NativeCommandScript.handler, WorkspaceStorageScript.handler])
                     precondition(bridge.storage?.retired ?? true, "Storage admission must retire before page disposal")
