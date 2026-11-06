@@ -165,6 +165,48 @@ against known [GO-2025-3390](https://pkg.go.dev/vuln/GO-2025-3390) and
 [GO-2024-3269](https://pkg.go.dev/vuln/GO-2024-3269) vulnerable/fixed boundaries,
 alongside the runtime controls.
 
+Rust coverage executes `rustc -vV`, `cargo -Vv`, `rustup --version`,
+`rustfmt --version` and `clippy-driver --version` inside that same image. It
+records the active toolchain, installed components and target, resolves rustup
+proxies to their actual toolchain binaries, and hashes proxies and installed
+payloads. Exactly the pinned linux/amd64 GNU toolchain and minimal Rust/std/Cargo
+plus rustfmt/Clippy components are admitted. Rustup and its proxies must match
+the source-pinned official installer hash. The reviewed SHA-256 pin for the
+[official 1.98.0 manifest](https://static.rust-lang.org/dist/channel-rust-1.98.0.toml)
+binds component identities and archive hashes. Initial inventory verifies all
+five component archives without executing their installers, then compares their
+payload file hashes and symlink targets with the installed tree. Unexpected
+components, toolchains, targets, binaries or bytes fail independently of findings.
+
+The manifest distinguishes Rust/std 1.98.0, Cargo source 0.99.0, rustfmt 1.9.0
+and Clippy 0.1.98; rustup is separately pinned at 1.29.0. Cargo's executable uses
+the distribution's 1.x version while its source uses 0.x, as described in
+[Cargo's version contract](https://github.com/rust-lang/cargo/blob/0.99.0/src/cargo/version.rs).
+Advisory comparators select the manifest-backed source or binary identity;
+arithmetic version guesses and fictitious crates.io rustc/rustup queries are
+not used. Cargo.lock scanning remains separate source-dependency coverage.
+
+Each scan fetches every page of public published security-advisory JSON from
+`rust-lang/rust`, `cargo`, `rustup`, `rustfmt` and `rust-clippy`, with no private
+credential fallback. Raw responses, URLs, response headers, query timestamps and
+SHA-256 hashes accompany normalized component/range/severity evidence. Responses
+must be fresh within 24 hours; failed, incomplete, malformed, unsupported,
+ambiguous or stale feeds fail closed. A complete empty feed is valid coverage
+for that public repository, and differs from an unavailable feed. Withdrawn
+records remain in normalized evidence with their disposition. High/Critical and
+Unknown matches block through the existing policy; lower severities remain
+reportable. Contradictory prose never overrides a machine range: in particular,
+GHSA-j3xp-wfr4-hx87 remains applicable to Cargo source 0.72.1 shipped with
+Rust 1.71.1. Live controls verify Rust/std 1.58.0/1.58.1 and Cargo/Rust
+1.71.0/1.71.1/1.72.0/1.98.0 against official manifests and current feeds.
+
+This covers public advisories for these installed components on linux/amd64;
+it does not establish undisclosed-vulnerability, arbitrary compiler-soundness,
+or malicious-source safety. [Rust's security policy](https://rust-lang.org/policies/security/)
+explicitly bounds compiler soundness reports and assumes trusted project code
+and dependencies. Platform-specific machine findings are retained conservatively.
+Full image/Grype matching remains active alongside this additive coverage.
+
 `image-tools.json` pins Syft/Grype versions and release archive SHA-256 values.
 The installer verifies archive bytes on every use and extracts only the named
 executable. It records executable digests. No installation script is fetched or
@@ -186,7 +228,10 @@ separate required reporting step consumes that bundle with the full fresh scan.
 Inventory alone cannot satisfy that reporting step. A completed blocked scan can
 satisfy the deferred-enforcement CI stage, but cannot produce a security pass or
 publication receipt.
-Legacy bundles without gh/Git LFS probes or retained source pins remain errors.
+Schema v2 adds the three Rust distribution/payload evidence files. Legacy v1
+bundles, or bundles without Rust probes/source pins, require exact-image
+reinventory; they cannot inherit a Rust completeness assertion. Legacy bundles
+without gh/Git LFS probes or retained source pins also remain errors.
 Requalification requires fresh inventory of the exact loaded supported image
 and its immutable source commit; neither current Dockerfile pins nor edited
 bundle metadata can upgrade legacy evidence. If that image/source is unavailable,
@@ -199,7 +244,7 @@ scanner installation, DB, or advisory failure cannot discard the validated raw
 inputs. Keep all raw findings (including lower severities), policy dispositions,
 runtime versions/advisories, image inspection/identity, tool/DB metadata, and
 result together. `bundle.json` hashes the unchanged SBOM/runtime/identity/coverage
-inputs for later rescans. Artifact upload always runs, with 14-day retention.
+inputs and Rust distribution/payload files for later rescans. Artifact upload always runs, with 14-day retention.
 
 Daily selection uses only trusted `dev` push runs from
 `.github/workflows/stable-release.yml` and the exact completed
