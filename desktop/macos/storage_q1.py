@@ -244,17 +244,19 @@ class RecoveryLaunch:
                 self.launch_helper.terminate()  # Only the unreaped helper handle, not an observed app PID.
                 self.launch_helper.wait(timeout=3)
         original_action_deadline = self.deadline
-        self.deadline = min(self.deadline, time.monotonic() + 30)  # Share the original readiness bound.
+        startup_deadline = min(self.deadline, time.monotonic() + 30)
+        self.deadline = startup_deadline  # Pending and ready share the original 30 seconds.
         pending = self.wait('Q1 pre-render hold', lambda: (r if (r := self.read()).get('profile_open_pending')
-                              and r.get('endpoint') else None), limit=5)
+                              and r.get('endpoint') else None), limit=30)
         require(not pending.get('profile_open_timeout'), 'original profile hold expired')
+        held_deadline = min(startup_deadline, time.monotonic() + 4)
+        self.deadline = held_deadline  # One seed/release budget, never another four seconds.
         observed = self.state()
         require(len(observed['apps']) == 1 and observed['apps'][0]['pid'] == pending['app_pid'], 'unknown held app')
         self.identity = observed['apps'][0]; self.engine_pid = pending['engine_pid']
         self.guard()
-        require(request(pending['endpoint'], '/store', timeout=_remaining(self.deadline, 4))['store_path'] == str(self.store),
+        require(request(pending['endpoint'], '/store', timeout=_remaining(held_deadline, 4))['store_path'] == str(self.store),
                 'foreign held store')
-        held_deadline = min(self.deadline, time.monotonic() + 4)
         provider = self.environment['MODELS_DEV_URL'].removesuffix('/models-dev')
         self.saved_configuration = seed_q1_configuration(pending['endpoint'], provider, self.environment,
                                                         held_deadline, self.saved_configuration, nonce=self.fetch_nonce)
@@ -266,6 +268,7 @@ class RecoveryLaunch:
                            selector=self.saved_configuration['api_key_env'],
                            config_id=self.saved_configuration['config_id'], name=self.saved_configuration['name']), binding)
         self.command('profile-open-release')
+        self.deadline = startup_deadline
         ready = self.wait('RecoverySmoke readiness', lambda: (r if (r := self.read()).get('bridge', {}).get('ready') else None))
         require(not ready.get('profile_open_timeout'), 'initial page escaped original hold')
         state = self.state()
@@ -281,6 +284,8 @@ class RecoveryLaunch:
     def command(self, name):
         require(name in ('storage-q1-seed', 'storage-q1-restore', 'capture', 'stop', 'profile-open-release'), 'unsupported Q1 control')
         self.guard()
+        if name == 'profile-open-release':
+            _remaining(self.deadline, 1)  # Custody checks cannot spend past the shared seed budget.
         require(name not in self.commands, 'control already consumed')
         (self.control / name).touch(mode=0o600, exist_ok=False)
         self.commands.append(name)
