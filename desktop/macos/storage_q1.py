@@ -100,7 +100,7 @@ def q1_fetch_reads(snapshot, expected, provider):
     require(type(rows) is list and snapshot['overflow'] is False and len(rows) <= 128 and
             snapshot['started'] == snapshot['settled'] == len(rows) and
             snapshot['errors'] == snapshot['active'] == 0, 'incomplete/error/overflow fetch witness')
-    failures = []
+    failures = []; blocked = []
     flags = {'canonicalJSON', 'exactKeys', 'backendFixture', 'namedFixtureKey', 'noInlineKey',
              'fixtureEndpoint', 'safeHTTPPolicy', 'exactRoute'}
     for sequence, row in enumerate(rows, 1):
@@ -115,12 +115,19 @@ def q1_fetch_reads(snapshot, expected, provider):
         else:
             metadata = row['metadata']
             require(row['method'] == 'POST' and row['path'] == '/providers/models' and
-                    type(metadata) is dict and set(metadata) == flags | {'kind'} and
-                    metadata['kind'] == 'fixture-provider-models' and
-                    all(metadata[k] is True for k in flags), 'unproven metadata or executable write')
+                    type(metadata) is dict, 'unproven metadata or executable write')
+            if metadata.get('kind') == 'locally-blocked-provider-models':
+                blocked_flags = {'canonicalJSON', 'exactKeys', 'noInlineKey', 'exactRoute', 'notForwarded'}
+                require(set(metadata) == blocked_flags | {'kind'} and
+                        all(metadata[k] is True for k in blocked_flags) and row['status'] == 503,
+                        'unproven local metadata refusal')
+                blocked.append(dict(sequence=sequence, status=503))
+            else:
+                require(set(metadata) == flags | {'kind'} and metadata['kind'] == 'fixture-provider-models' and
+                        all(metadata[k] is True for k in flags), 'unproven metadata or executable write')
             if row['status'] >= 400: failures.append(dict(sequence=sequence, status=row['status']))
     return dict(scope='complete observed fetch prefix at capture', metadataFailures=failures,
-                metadataSuccessClaimed=False, overflow=False)
+                metadataSuccessClaimed=False, locallyBlockedMetadata=blocked, overflow=False)
 
 
 def frame(record, nonce):
