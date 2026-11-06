@@ -20,6 +20,9 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `SessionManager` remains composition/lifecycle state, not a destination for
   unrelated use cases. Add a focused facade and preserve shared gates and exact
   transaction ordering.
+- Lifecycle gates nest parent before child or managed orchestrator, as deletion
+  cascades. Never wait for a parent's gate while holding a descendant's: settle
+  under the descendant's gate, release it, then wake the parent.
 - Authenticated human-initiated product operations never request agent approval.
   Delivery authenticates and scopes requests; core services issue narrow human
   capabilities. Preserve Origin/Fetch Metadata checks, session/host ownership,
