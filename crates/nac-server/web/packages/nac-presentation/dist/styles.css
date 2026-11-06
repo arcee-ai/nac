@@ -3695,6 +3695,11 @@
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow) !important;
   }
 
+[data-nac-runtime]:is(.shadow), [data-nac-runtime] .shadow {
+    --nac-presentation-tw-shadow: 0 1px 3px 0 var(--nac-presentation-tw-shadow-color, #0000001a), 0 1px 2px -1px var(--nac-presentation-tw-shadow-color, #0000001a);
+    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
+  }
+
 [data-nac-runtime]:is(.shadow-2xl), [data-nac-runtime] .shadow-2xl {
     --nac-presentation-tw-shadow: var(--shadow-2xl);
     box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);

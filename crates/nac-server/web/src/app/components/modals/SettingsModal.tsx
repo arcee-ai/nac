@@ -27,6 +27,7 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { observeSettingsFieldVisibility } from "@/app/components/modals/settingsFieldVisibility";
 import { matchesManagedModelPick } from "@/app/features/managed/model";
 import { useManagedHostStatus } from "@/app/features/managed/queries";
 import { resolveCatalogModel } from "@/app/lib/catalog";
@@ -234,6 +235,10 @@ function SettingsForm({
 
   const isMobile = useIsMobile();
   const toast = useToast();
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isMobile && contentRef.current) return observeSettingsFieldVisibility(contentRef.current);
+  }, [isMobile]);
   const client = useQueryClient();
   const action = useSetupAction(open);
   const sessionTitle = useSessionTitle();
@@ -613,7 +618,7 @@ function SettingsForm({
         ) : null
       }
     >
-      <div className="flex min-w-0 flex-col gap-8 [&>*]:shrink-0">
+      <div ref={contentRef} className="flex min-w-0 flex-col gap-8 [&>*]:shrink-0">
         <p className="text-small !leading-[22px] text-basic-secondary">
           Changes apply to this inactive primary chat. Project defaults and existing children keep
           their settings.
