@@ -83,34 +83,132 @@ final class RecoverySmoke {
     static func launchArguments(_ arguments: [String]) -> [String] {
         var result: [String] = [], index = 0
         while index < arguments.count {
-            if ["--recovery-output", "--recovery-control"].contains(arguments[index]) { index += 2 }
+            if ["--recovery-output", "--recovery-control", "--storage-q1-fetch-provider", "--storage-q1-fetch-nonce"].contains(arguments[index]) { index += 2 }
             else { result.append(arguments[index]); index += 1 }
         }
         return result
     }
 
     static var script: WKUserScript {
-        WKUserScript(source: #"""
+        let q1Configuration: String = {
+            #if LOCAL_APP
+            let args = CommandLine.arguments
+            if args.contains("--storage-q1-fetch-provider") || args.contains("--storage-q1-fetch-nonce") {
+                func argument(_ key: String) -> String {
+                    guard let index = args.firstIndex(of: key), index + 1 < args.count else { return "" }
+                    return args[index + 1]
+                }
+                let provider = argument("--storage-q1-fetch-provider")
+                let nonce = argument("--storage-q1-fetch-nonce")
+                let url = URLComponents(string: provider)
+                let valid = provider.utf8.count <= 256 && url?.scheme == "http" && url?.host == "127.0.0.1" &&
+                    (url?.port).map({ (1...65535).contains($0) }) == true && url?.path == "" &&
+                    url?.user == nil && url?.password == nil && url?.query == nil && url?.fragment == nil &&
+                    UUID(uuidString: nonce) != nil
+                var selector = ""
+                if valid, let bytes = try? StorageQ1PlanFile.read(
+                    control: URL(fileURLWithPath: argument("--recovery-control")), name: "storage-q1-fetch.json"),
+                   let binding = try? JSONSerialization.jsonObject(with: bytes) as? [String: String],
+                   binding["nonce"] == nonce, binding["provider"] == provider,
+                   binding["config_id"]?.isEmpty == false, binding["name"]?.isEmpty == false,
+                   let saved = binding["selector"], !saved.isEmpty, saved.utf8.count <= 256 {
+                    selector = saved
+                }
+                let config = ["provider": valid ? provider : "", "nonce": valid ? nonce : "", "selector": selector]
+                if let data = try? JSONSerialization.data(withJSONObject: config) {
+                    return String(decoding: data, as: UTF8.self)
+                }
+                return "{}" // Invalid Q1 activation must never fall back to legacy evidence.
+            }
+            #endif
+            return "null"
+        }()
+        return WKUserScript(source: #"""
         (() => {
           if (window !== window.top) return;
           const actual = window.fetch.bind(window), rows = [];
+          const q1 = __NAC_Q1_FETCH_CONFIGURATION__, engineOrigin = location.origin;
+          const fetchRows = [];
+          let started = 0, settled = 0, errors = 0, active = 0, overflow = false;
           let drop = false;
+          const metadata = (url, method, init) => {
+            if (method !== 'POST' || url?.pathname !== '/providers/models') return null;
+            const facts = {kind: 'unknown', canonicalJSON: false, exactKeys: false,
+              backendFixture: false, namedFixtureKey: false, noInlineKey: false,
+              fixtureEndpoint: false, safeHTTPPolicy: false, exactRoute: false};
+            try {
+              const text = init?.body;
+              if (typeof text !== 'string' || new TextEncoder().encode(text).length > 8192) return facts;
+              const body = JSON.parse(text);
+              if (!body || Array.isArray(body) || typeof body !== 'object') return facts;
+              const keys = Object.keys(body).sort().join(',');
+              facts.canonicalJSON = JSON.stringify(body) === text; // Duplicates/unknown encoding fail closed.
+              facts.exactKeys = keys === 'api_key_env,backend,base_url' ||
+                keys === 'allow_insecure_http,api_key_env,backend,base_url';
+              facts.exactRoute = url.origin === engineOrigin && !url.search && !url.hash;
+              facts.backendFixture = body.backend === 'openai-responses';
+              facts.namedFixtureKey = typeof q1.selector === 'string' && q1.selector.length > 0 && body.api_key_env === q1.selector;
+              facts.noInlineKey = !Object.prototype.hasOwnProperty.call(body, 'api_key');
+              const provider = new URL(q1.provider);
+              facts.fixtureEndpoint = provider.protocol === 'http:' && provider.hostname === '127.0.0.1' &&
+                !!provider.port && !provider.username && !provider.password && !provider.search && !provider.hash &&
+                provider.pathname === '/' && body.base_url === q1.provider;
+              facts.safeHTTPPolicy = !Object.prototype.hasOwnProperty.call(body, 'allow_insecure_http') ||
+                body.allow_insecure_http === false;
+              if (Object.entries(facts).every(([key, value]) => key === 'kind' || value === true))
+                facts.kind = 'fixture-provider-models';
+            } catch (_) { /* Never retain raw bodies, secrets, or exception text. */ }
+            return facts;
+          };
           window.__nacRecoveryEvidence = Object.freeze({
-            rows: () => rows.slice(), dropCommandResponse: () => { drop = true; }
+            rows: () => rows.slice(), dropCommandResponse: () => { drop = true; },
+            q1Snapshot: q1 ? () => ({version: 1, nonce: q1.nonce, provider: q1.provider, selector: q1.selector, engineOrigin,
+              started, settled, errors, active, overflow,
+              rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null}))}) : undefined
           });
           window.fetch = async (input, init) => {
-            const response = await actual(input, init);
-            const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
-            const method = (init?.method || input?.method || 'GET').toUpperCase();
-            if (rows.length < 128) rows.push({path, method, status: response.status});
-            if (drop && method === 'POST' && path.endsWith('/user-commands') && response.ok) {
-              drop = false;
-              throw new TypeError('Recovery fixture dropped one successful command response');
+            let row = null;
+            if (q1) {
+              started += 1; active += 1;
+              row = {sequence: started, method: null, origin: null, path: null,
+                state: 'active', status: null, error: false, metadata: null};
+              try {
+                const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+                row.method = (init?.method || input?.method || 'GET').toUpperCase();
+                row.origin = url.origin; row.path = url.pathname;
+                row.metadata = metadata(url, row.method, init);
+              } catch (_) { /* Unknown observations stay explicit and cannot pass the validator. */ }
+              if (fetchRows.length < 128) fetchRows.push(row); else overflow = true;
             }
-            return response;
+            try {
+              if (row && !(row.origin === engineOrigin && (row.method === 'GET' ||
+                  (row.method === 'POST' && row.path === '/providers/models' &&
+                   row.metadata?.kind === 'fixture-provider-models')))) {
+                throw new TypeError('Q1 rejected an unproven outbound operation');
+              }
+              const response = await actual(input, init);
+              if (row) { row.state = 'settled'; row.status = response.status; settled += 1; }
+              const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
+              const method = (init?.method || input?.method || 'GET').toUpperCase();
+              if (rows.length < 128) rows.push({path, method, status: response.status});
+              if (drop && method === 'POST' && path.endsWith('/user-commands') && response.ok) {
+                drop = false;
+                throw new TypeError('Recovery fixture dropped one successful command response');
+              }
+              return response;
+            } catch (error) {
+              if (row) {
+                if (row.state === 'active') settled += 1;
+                row.state = 'error'; row.error = true; errors += 1;
+              }
+              throw error;
+            } finally {
+              if (row) active -= 1;
+            }
           };
         })();
-        """#, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        """#.replacingOccurrences(of: "__NAC_Q1_FETCH_CONFIGURATION__", with: q1Configuration),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
     func start() {
@@ -251,7 +349,7 @@ final class RecoverySmoke {
     private func capture() {
         guard !capturing, let view = app.webView else { return }
         capturing = true
-        view.callAsyncJavaScript("return {requests: window.__nacRecoveryEvidence?.rows(), runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'), route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'}",
+        view.callAsyncJavaScript("const evidence = window.__nacRecoveryEvidence; let fetch = null; if (typeof evidence?.q1Snapshot === 'function') { const bootstrap = await window.__nacDesktopStorage.open(); fetch = {...evidence.q1Snapshot(), document: bootstrap.document}; } return {requests: evidence?.rows(), fetch, runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'), route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'}",
             arguments: [:], in: nil, in: .page) { [weak self, weak view] result in
             guard let self else { return }
             self.capturing = false
@@ -504,13 +602,14 @@ final class RecoverySmoke {
 
     #if LOCAL_APP
     private enum StorageQ1PlanFile {
-        static func read(control: URL) throws -> Data {
+        static func read(control: URL, name: String = "storage-q1.json") throws -> Data {
+            guard ["storage-q1.json", "storage-q1-fetch.json"].contains(name) else { throw error() }
             let directory = open(control.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             guard directory >= 0 else { throw error() }
             defer { close(directory) }
             var ds = stat()
             guard fstat(directory, &ds) == 0, ds.st_uid == getuid(), ds.st_mode & 0o077 == 0 else { throw error() }
-            let fd = openat(directory, "storage-q1.json", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            let fd = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
             guard fd >= 0 else { throw error() }
             defer { close(fd) }
             var before = stat()
@@ -528,7 +627,7 @@ final class RecoverySmoke {
             }
             var after = stat(), entry = stat(), parent = stat()
             guard fstat(fd, &after) == 0,
-                  fstatat(directory, "storage-q1.json", &entry, AT_SYMLINK_NOFOLLOW) == 0,
+                  fstatat(directory, name, &entry, AT_SYMLINK_NOFOLLOW) == 0,
                   lstat(control.path, &parent) == 0,
                   before.st_dev == after.st_dev, before.st_ino == after.st_ino,
                   before.st_size == after.st_size,
