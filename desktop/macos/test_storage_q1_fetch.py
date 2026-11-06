@@ -1,5 +1,8 @@
-"""Inert collector/producer-contract controls; no JS engine, HTTP, app or provider."""
+"""Inert collector/embedded-JS controls; no HTTP, app or provider."""
 import copy
+import json
+import subprocess
+import textwrap
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
@@ -70,10 +73,124 @@ class FetchReadWitnessControls(unittest.TestCase):
         with self.assertRaises(ValueError):self.check(None)
         with self.assertRaises(ValueError):q1_fetch_reads(self.snapshot(),self.expected,'http://localhost:18080')
 
+    def test_local_metadata_refusal_is_explicit_and_cannot_claim_dispatch_or_success(self):
+        snapshot = self.snapshot(); row = snapshot['rows'][1]
+        row['status'] = 503
+        row['metadata'] = dict(kind='locally-blocked-provider-models', canonicalJSON=True,
+                               exactKeys=True, noInlineKey=True, exactRoute=True, notForwarded=True)
+        result = self.check(snapshot)
+        self.assertEqual(result['locallyBlockedMetadata'], [dict(sequence=2, status=503)])
+        self.assertEqual(result['metadataFailures'], [dict(sequence=2, status=503)])
+        self.assertFalse(result['metadataSuccessClaimed'])
+        for mutate in (lambda r: r.update(status=200), lambda r: r['metadata'].update(noInlineKey=False),
+                       lambda r: r['metadata'].update(rawBody='forbidden'),
+                       lambda r: r['metadata'].pop('notForwarded')):
+            broken = copy.deepcopy(snapshot); mutate(broken['rows'][1])
+            with self.assertRaises(ValueError): self.check(broken)
+
+    def test_actual_embedded_collector_and_capture_under_deferred_fetches(self):
+        source = Path(__file__).with_name('RecoverySmoke.swift').read_text()
+        producer = source.split('return WKUserScript(source: #"""', 1)[1].split('"""#.replacingOccurrences', 1)[0]
+        capture = source.split('private static let captureScript = #"""', 1)[1].split('"""#', 1)[0]
+        configuration = dict(provider=self.provider, nonce=self.expected['nonce'], selector=self.expected['selector'])
+        producer = producer.replace('__NAC_Q1_FETCH_CONFIGURATION__', json.dumps(configuration))
+        program = 'const producer = ' + json.dumps(producer) + '; const capture = ' + json.dumps(capture) + ';\n'
+        program += textwrap.dedent(r"""
+            const assert = (await import('node:assert/strict')).default;
+            const vm = await import('node:vm');
+            function harness(script = producer) {
+              const actual = [], pending = [];
+              const context = {URL, Request, Response, TextEncoder, Promise, TypeError,
+                location: {origin: 'http://127.0.0.1:12001', href: 'http://127.0.0.1:12001/', hash: '#/session/a/files'},
+                document: {querySelector: () => ({getAttribute: () => 'native'})},
+                __nacDesktopStorage: {open: async () => ({document: {launch: 'launch', view: 'view', document: 'document'}})},
+                fetch: (input, init) => { actual.push([String(input), init]); return new Promise((resolve, reject) => pending.push({resolve, reject})); }};
+              context.window = context; context.top = context;
+              vm.createContext(context); vm.runInContext(script, context);
+              const read = body => context.fetch('/providers/models', {method: 'POST', body: JSON.stringify(body)});
+              const take = () => vm.runInContext('(async () => {' + capture + '})()', context);
+              return {context, actual, pending, read, take};
+            }
+            const h = harness();
+            for (const body of [{backend: 'arcee-auth'}, {backend: 'chatgpt-codex-responses'},
+                {backend: 'openai-responses'}, {backend: 'arcee-api', base_url: 'https://foreign.invalid'},
+                {backend: 'anthropic-messages', base_url: 'https://foreign.invalid', api_key_env: 'foreign-selector'}]) {
+              assert.equal((await h.read(body)).status, 503);
+            }
+            assert.equal(h.actual.length, 0); // No external credential resolution or network.
+            const bound = h.read({backend: 'openai-responses', base_url: 'http://127.0.0.1:18080', api_key_env: 'exact-private-selector'});
+            assert.equal(h.actual.length, 1);
+            let completed = false;
+            const taking = h.take().then(value => { completed = true; return value; });
+            await new Promise(setImmediate); // Finish bootstrap's microtask chain before the concurrent-capture probe.
+            assert.equal(completed, false);
+            const concurrent = await h.context.__nacRecoveryEvidence.q1SettledSnapshot().then(() => null, e => e);
+            assert.ok(concurrent instanceof TypeError);
+            h.pending.shift().resolve(new Response('{}', {status: 502}));
+            await bound;
+            const result = await taking;
+            assert.equal(result.fetch.active, 0); assert.equal(result.fetch.errors, 0);
+            assert.equal(result.fetch.started, 6); assert.equal(result.fetch.settled, 6);
+            assert.equal(result.fetch.rows[5].metadata.kind, 'fixture-provider-models');
+            assert.equal(result.fetch.rows[5].status, 502);
+            assert.equal(JSON.stringify(result.fetch).includes('foreign-selector'), false);
+            assert.equal(JSON.stringify(result.fetch).includes('foreign.invalid'), false);
+            const failed = harness();
+            const flight = failed.context.fetch('/sessions/a').catch(() => null);
+            const failedCapture = failed.take(); await new Promise(setImmediate);
+            failed.pending.shift().reject(new TypeError('inert failure'));
+            await flight;
+            const failedResult = await failedCapture;
+            assert.equal(failedResult.fetch.active, 0); assert.equal(failedResult.fetch.errors, 1);
+            const denied = harness();
+            const forbidden = [
+              ['/sessions/a/runs', {method: 'POST', body: '{}'}],
+              ['/providers/models', {method: 'POST', body: '{"backend":"arcee-auth","api_key":"secret"}'}],
+              ['/providers/models?foreign=1', {method: 'POST', body: '{"backend":"arcee-auth"}'}],
+              ['https://foreign.invalid/providers/models', {method: 'POST', body: '{"backend":"arcee-auth"}'}],
+              ['/providers/models', {method: 'POST', body: '{"backend":"unknown"}'}],
+              ['/providers/models', {method: 'POST', body: '{"backend":"arcee-auth","extra":true}'}],
+              ['/providers/models', {method: 'POST', body: '{"backend":"arcee-auth","allow_insecure_http":true}'}],
+              ['/providers/models', {method: 'POST', body: '{"backend":"arcee-auth","backend":"arcee-api"}'}],
+              ['/providers/models', {method: 'POST', body: 'not-json'}]];
+            for (const [input, init] of forbidden) {
+              await assert.rejects(denied.context.fetch(input, init));
+            }
+            assert.equal(denied.actual.length, 0);
+            assert.equal(denied.context.__nacRecoveryEvidence.q1Snapshot().errors, forbidden.length);
+            assert.equal(JSON.stringify(denied.context.__nacRecoveryEvidence.q1Snapshot()).includes('secret'), false);
+            const overflow = harness();
+            for (let i = 0; i < 129; i++) await overflow.read({backend: 'arcee-auth'});
+            assert.equal(overflow.actual.length, 0);
+            assert.equal(overflow.context.__nacRecoveryEvidence.q1Snapshot().overflow, true);
+            const overflowResult = await overflow.take();
+            const legacy = harness(producer.replace(/const q1 = .*?, engineOrigin = location.origin;/,
+              'const q1 = null, engineOrigin = location.origin;'));
+            const legacyFlight = legacy.context.fetch('/sessions/a/user-commands', {method: 'POST', body: '{}'});
+            assert.equal(legacy.actual.length, 1);
+            legacy.pending.shift().resolve(new Response('{}', {status: 200})); await legacyFlight;
+            assert.equal(legacy.context.__nacRecoveryEvidence.q1Snapshot, undefined);
+            legacy.context.__nacRecoveryEvidence.dropCommandResponse();
+            const dropped = legacy.context.fetch('/sessions/a/user-commands', {method: 'POST', body: '{}'});
+            legacy.pending.shift().resolve(new Response('{}', {status: 200}));
+            await assert.rejects(dropped);
+            assert.equal(legacy.actual.length, 2);
+            process.stdout.write(JSON.stringify({snapshot: result.fetch, failed: failedResult.fetch, overflow: overflowResult.fetch}));
+        """)
+        result = subprocess.run(['node', '--input-type=module'], input=program, text=True,
+                                capture_output=True, timeout=8, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        actual = json.loads(result.stdout)
+        qualified = self.check(actual['snapshot'])
+        self.assertEqual(len(qualified['locallyBlockedMetadata']), 5)
+        self.assertEqual(qualified['metadataFailures'][-1], dict(sequence=6, status=502))
+        with self.assertRaises(ValueError): self.check(actual['failed'])
+        with self.assertRaises(ValueError): self.check(actual['overflow'])
+
     def test_swift_producer_contract_redacts_and_tracks_before_await_q1_only(self):
         source=Path(__file__).with_name('RecoverySmoke.swift').read_text()
         admission=source.index('started += 1; active += 1;')
-        actual=source.index('const response = await actual(input, init);')
+        actual=source.index('await actual(input, init);')
         self.assertLess(admission,actual)
         self.assertLess(source.index('Q1 rejected an unproven outbound operation'), actual)
         self.assertIn("row.state = 'error'; row.error = true; errors += 1",source)
