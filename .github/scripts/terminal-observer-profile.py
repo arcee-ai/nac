@@ -175,6 +175,97 @@ def size(path):
     return total
 
 
+
+class CompilerAccountingUnknown(ValueError):
+    """No complete compiler sample fit the unchanged shared scan budget."""
+
+
+class CompilerInventory:
+    """Closed ROOT/target counter; an omitted descendant requires a full rescan."""
+    def __init__(self):self.repository=None;self.root=None;self.last=None;self.complete_bytes=None
+    @staticmethod
+    def identity(info):
+        return (info.st_dev,info.st_ino,stat.S_IFMT(info.st_mode),info.st_uid)
+    def sample(self,*,active=False,cold=False):
+        started=time.monotonic();stack=[];repository=None
+        value={'logical_bytes':None,'complete':False,'last_known_complete_logical_bytes':self.complete_bytes,
+            'entries':0,'passes':0,'root_absent_passes':0,'active_build':active,'atomic_or_peak':False,
+            'disappeared':{'stat':0,'open_directory':0,'directory_recheck':0},'last_pass':None}
+        self.last=value
+        def valid(info,directory=False):
+            require(info.st_uid==os.getuid()and info.st_dev==self.repository[0],'compiler inventory foreign owner/device')
+            require(stat.S_ISDIR(info.st_mode)if directory else stat.S_ISDIR(info.st_mode)or stat.S_ISREG(info.st_mode),'compiler inventory type')
+        def bound():
+            if value['entries']>200000 or value['passes']>200000 or len(stack)>128 or time.monotonic()-started>10:
+                raise CompilerAccountingUnknown('compiler accounting unknown: shared traversal budget exhausted')
+        def enter(fd,parent,name,identity):
+            try:stack.append((fd,os.scandir(fd),parent,name,identity))
+            except BaseException:os.close(fd);raise
+        def repository_unchanged():
+            require(self.identity(os.stat(ROOT,follow_symlinks=False))==self.repository,'compiler repository path changed')
+        try:
+            repository=os.open(ROOT,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+            repo=os.fstat(repository);require(stat.S_ISDIR(repo.st_mode)and repo.st_uid==os.getuid(),'compiler repository owner/type')
+            repo_id=self.identity(repo)
+            require(self.repository is None or self.repository==repo_id,'compiler repository identity changed')
+            self.repository=repo_id
+            while True:
+                value['passes']+=1;bound();disappeared=sum(value['disappeared'].values())
+                current={'logical_bytes_observed':0,'regular_files':0,'directories':0,'entries':0,'complete':False}
+                value['last_pass']=current
+                try:info=os.stat('target',dir_fd=repository,follow_symlinks=False)
+                except FileNotFoundError:
+                    require(self.root is None,'compiler root disappeared')
+                    repository_unchanged();value['root_absent_passes']+=1
+                    if active:continue # Never admit a build cap from absent/incomplete inventory.
+                    require(cold,'compiler root missing after settlement')
+                    value.update(logical_bytes=0,complete=True,initially_absent=True)
+                    self.complete_bytes=0;return value
+                valid(info,True);identity=self.identity(info)
+                require(self.root is None or self.root==identity,'compiler root identity changed')
+                fd=os.open('target',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=repository)
+                try:require(self.identity(os.fstat(fd))==identity,'compiler root changed before open')
+                except BaseException:os.close(fd);raise
+                self.root=identity;enter(fd,repository,'target',identity)
+                while stack:
+                    bound();fd,iterator,parent,name,identity=stack[-1]
+                    try:entry=next(iterator)
+                    except StopIteration:
+                        try:info=os.stat(name,dir_fd=parent,follow_symlinks=False)
+                        except FileNotFoundError:
+                            if not active or name=='target'and parent==repository:raise
+                            value['disappeared']['directory_recheck']+=1
+                        else:require(self.identity(info)==identity,'compiler directory identity changed')
+                        iterator.close();os.close(fd);stack.pop();continue
+                    value['entries']+=1;current['entries']+=1;bound()
+                    try:info=os.stat(entry.name,dir_fd=fd,follow_symlinks=False)
+                    except FileNotFoundError:
+                        if not active:raise
+                        value['disappeared']['stat']+=1;continue
+                    valid(info)
+                    if stat.S_ISREG(info.st_mode):
+                        current['regular_files']+=1;current['logical_bytes_observed']+=info.st_size
+                        require(current['logical_bytes_observed']<=12*GIB,'12GiB compiler target budget')
+                    else:
+                        identity=self.identity(info)
+                        try:child=os.open(entry.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+                        except FileNotFoundError:
+                            if not active:raise
+                            value['disappeared']['open_directory']+=1;continue
+                        try:require(self.identity(os.fstat(child))==identity,'compiler directory changed before open')
+                        except BaseException:os.close(child);raise
+                        current['directories']+=1;enter(child,fd,entry.name,identity)
+                repository_unchanged();bound()
+                value['root_identity']=dict(zip(('dev','ino','type','uid'),self.root))
+                if sum(value['disappeared'].values())!=disappeared:continue
+                current['complete']=True;value.update(logical_bytes=current['logical_bytes_observed'],complete=True)
+                self.complete_bytes=value['logical_bytes'];return value
+        finally:
+            value['seconds']=time.monotonic()-started
+            for fd,iterator,*_ in stack:iterator.close();os.close(fd)
+            if repository is not None:os.close(repository)
+
+
 def dependency_inventory(path):
     """Only the two npm dependency roots: count link inode bytes, never targets."""
     require(path in DEPENDENCY_ROOTS,'explicit dependency root required')
@@ -309,6 +400,7 @@ def cpu_capacity():
 class Controller:
     def __init__(self,home,deadline):
         self.home=home;self.deadline=deadline;self.evidence=home/'evidence';self.raw=home/'raw';self.commands=[]
+        self.compiler_inventory=CompilerInventory()
         self.evidence.mkdir(mode=0o700);self.raw.mkdir(mode=0o700)
         self.supervisor=module('profile_supervisor','browser-apt-supervisor.py');self.supervisor.subreaper()
         self.stopped=False;self.privileged=False
@@ -342,8 +434,10 @@ class Controller:
                     require(time.monotonic()-start<seconds,'phase timeout; no retry')
                     require(shutil.disk_usage(self.home).free>=13*GIB,'13GiB reserve')
                     if time.monotonic()>=next_scan:
-                        sample={'seconds':time.monotonic()-start,
-                            'target_bytes':size(ROOT/'target')if label=='build'or not samples else samples[-1]['target_bytes'],
+                        compiler=self.compiler_inventory.sample(active=label=='build',cold=label!='build')if label=='build'or not samples else samples[-1]['compiler_inventory']
+                        require(compiler['complete']and type(compiler['logical_bytes'])is int,'complete compiler accounting required')
+                        sample={'seconds':time.monotonic()-start,'compiler_inventory':compiler,
+                            'target_bytes':compiler['logical_bytes'],
                             'dependency_bytes':sum(dependency_inventory(p)['logical_bytes']for p in DEPENDENCY_ROOTS)if label=='setup'or not samples else samples[-1]['dependency_bytes'],
                             'runtime_bytes':size(self.home),'free_bytes':shutil.disk_usage(self.home).free}
                         samples.append(sample)
@@ -354,16 +448,25 @@ class Controller:
                         next_scan=time.monotonic()+5
                     time.sleep(.1)
             require(size(self.home)<=512*1024**2,'512MiB final runtime/evidence budget')
-            require(size(ROOT/'target')<=12*GIB,'12GiB final compiler budget')
+            if label!='build':require(size(ROOT/'target')<=12*GIB,'12GiB final compiler budget')
             require(shutil.disk_usage(self.home).free>=13*GIB,'13GiB final reserve')
             require(child.returncode==0,f'{label} failed exit{child.returncode}; no retry')
         except BaseException as caught:error=type(caught).__name__+': '+str(caught);raise
         finally:
-            cleanup=self.supervisor.settle(child)
+            cleanup=self.supervisor.settle(child);last_inventory=self.compiler_inventory.last;final_inventory=None;final_error=None
+            try:
+                require(cleanup['remaining']==[],'owned descendants remain')
+                if label=='build':
+                    final_inventory=self.compiler_inventory.sample()
+                    require(size(ROOT/'target')<=12*GIB,'12GiB final compiler budget')
+            except BaseException as caught:final_error=caught
             receipt={'phase':label,'command':command,'seconds':time.monotonic()-start,'pid':child.pid if child else None,
-                     'exit':child.returncode if child else None,'owner':owner,'error':error,'cleanup':cleanup,'samples':samples}
+                     'exit':child.returncode if child else None,'owner':owner,'error':error,'cleanup':cleanup,'samples':samples,
+                     'compiler_final_inventory':final_inventory,'compiler_final_error':str(final_error)if final_error else None,
+                     'compiler_last_inventory':last_inventory,
+                     'compiler_final_observation':self.compiler_inventory.last if label=='build'else None}
             self.commands.append(receipt);write(self.evidence/(label+'.json'),receipt)
-            require(cleanup['remaining']==[],'owned descendants remain')
+            if final_error is not None:raise final_error
         return out
 
 

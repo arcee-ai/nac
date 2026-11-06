@@ -235,3 +235,37 @@ pinned workflow lint. Keep raw failed preparation attempts as such. Then one
 independent source/protocol-preservation review is required. Actual GNU compile,
 normal privileged setup, resource/cleanup behavior and the original case remain
 **hosted pending**; this candidate does not establish a diagnosis or fix.
+
+## Compiler sampler repair (local only; no fourth run authorized)
+
+Separately authorized third run42162541663:1 on7c8160cad failed while the
+resource sampler called lstat on an enumerated target object pathname that was
+absent. It did not complete compilation or reach binary/full Guide identity or
+the case. Its packet, both earlier private failures and all original terminal
+failures remain frozen. Which process removed/renamed the object was not
+observed; no compiler/product cause is claimed. The additional reported PR563
+1580.8ms failure has no immutable prepared-source binding here and is separate
+context, not profiler evidence or attribution.
+
+Only compiler ROOT/target sampling now uses a closed descriptor-relative counter.
+Ordinary ownership, device/inode binding, no-follow type checks,200,000 aggregate
+entries and one10s scan budget remain mandatory. Descendant ENOENT marks the
+current pass incomplete and records the omission; active-build rescans share
+that SAME entry/time budget and stable root binding. Current logical_bytes is
+null until a complete pass succeeds. Last-known completed bytes are separate
+metadata and never admit a current cap. Initial absent active roots likewise
+cannot yield a cap result; missing/replaced bound roots, changed identities,
+links, special/foreign entries and permission/other errors fail closed. A scan
+that cannot complete in budget raises typed accounting-unknown/no-result.
+Complete scan means no observed omission, never an atomic snapshot or peak.
+The12GiB logical ceiling and13GiB physical-free floor are both unchanged.
+
+After build descendants settle, strict no-omission compiler inventory AND the
+byte-identical original strict size() final cap must pass. Final inventory and
+any secondary rejection are retained in the command receipt. Selected-source,
+evidence/runtime readers and strict size() remain byte-identical. No parser,
+ACK, fixture, await, schema, asset, timeout, job/resource envelope or clock is
+changed. Offline controls use real owned temporary unlink/directory/link/sparse
+fixtures plus explicitly mocked foreign metadata/budget/child APIs; they never
+execute Cargo/native/browser/root or binaries. No fourth allocation/run/push is
+authorized by this local correction. Helper remains private NEVER LAND.
