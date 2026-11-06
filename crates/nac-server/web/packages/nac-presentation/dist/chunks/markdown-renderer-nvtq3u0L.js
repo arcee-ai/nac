@@ -1,6 +1,8 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Q as r, Y as i, Z as a, a as o, c as s } from "./PresentationBoundary-h8wd0qiZ.js";
-import { Fr as c, ar as l, ir as u, n as d, ni as f, o as p, or as m, r as h, t as g, ti as _ } from "./PerfProfiler-lE5aKOii.js";
+import { A as r, D as i, k as a, n as o } from "./RuntimeContext-BntTaIwR.js";
+import { a as s } from "./PresentationBoundary-DgJz1GXw.js";
+import { _r as c, gr as l, ir as u, n as d, o as f, r as p, t as m } from "./PerfProfiler-C8n_GXxw.js";
+import { N as h, i as g, r as _ } from "./Toast-y4mFgUIo.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6522,7 +6524,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-D2aev0d4.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-jgUMKO14.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
@@ -6537,11 +6539,11 @@ function vl(e) {
 }
 function yl({ children: e }) {
 	let t = _l(e).replace(/\n$/, ""), n = vl(e);
-	return /* @__PURE__ */ A(l, {
+	return /* @__PURE__ */ A(_, {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: m.Small,
+		size: g.Small,
 		copyable: !0,
 		expandable: !0,
 		className: "my-6"
@@ -6559,18 +6561,18 @@ function bl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function xl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: o } = s().stores.sessionLayoutStore, { api: l } = s(), m = re(), h = ne(), g = c(), v = p(), y = ee(), b = f(h.pathname), x = b ? y.getQueryData(u.sessionSnapshot(b)) : void 0, S = d(e, [
+	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: p } = o(), m = re(), g = ne(), _ = h(), v = f(), y = ee(), b = c(g.pathname), x = b ? y.getQueryData(u.sessionSnapshot(b)) : void 0, S = d(e, [
 		x?.workspace?.host_root,
 		x?.metadata.workspace_host_path,
 		x?.metadata.cwd
 	]), C = (e) => {
-		b && (r(null), i("tree"), a(e), o(g), m(_.session(b, "files")));
+		b && (r(null), i("tree"), a(e), s(_), m(l.session(b, "files")));
 	};
 	return S.kind === "workspace" && b ? /* @__PURE__ */ A("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), l.openWorkspacePath(b, S.path).catch((e) => {
+			e.preventDefault(), p.openWorkspacePath(b, S.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || v.error(`Could not open file: ${t}`), C(S.path);
 			});
@@ -6643,7 +6645,7 @@ var Cl = Sl(!0), wl = Sl(!1);
 function Tl({ source: e, streaming: t }) {
 	let n = al(e), r = t ? Cl : wl, i = /* @__PURE__ */ A(Ha, {
 		remarkPlugins: ml,
-		urlTransform: h,
+		urlTransform: p,
 		components: r,
 		children: n.source
 	});
@@ -6656,7 +6658,7 @@ function Tl({ source: e, streaming: t }) {
 	}) : i;
 }
 function El({ source: e, components: t }) {
-	let n = s(), i = O(gl(n.assets?.mathjaxFontUrl)), a = o(), c = n.assets ? {
+	let n = o(), i = O(gl(n.assets?.mathjaxFontUrl)), a = s(), c = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
 			let t = r(e) ? e : "";
@@ -6666,7 +6668,7 @@ function El({ source: e, components: t }) {
 	return /* @__PURE__ */ A(Ha, {
 		remarkPlugins: i.remark,
 		rehypePlugins: i.rehype,
-		urlTransform: h,
+		urlTransform: p,
 		components: c,
 		children: e
 	});
@@ -6695,7 +6697,7 @@ var Al = D(function({ children: e, streaming: t = !1 }) {
 	let [n, r] = k(t);
 	t && !n && r(!0);
 	let a = t || n && !kl(e);
-	return /* @__PURE__ */ A(g, {
+	return /* @__PURE__ */ A(m, {
 		id: "markdown",
 		children: a ? el(e).map((e, t) => /* @__PURE__ */ A(Dl, { source: e }, t)) : /* @__PURE__ */ A(Tl, {
 			source: e,
