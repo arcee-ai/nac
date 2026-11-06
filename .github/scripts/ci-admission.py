@@ -30,6 +30,7 @@ CONTEXTS = ["Required PR checks", "source-security / Full locked source scan",
 FULL = CALLER + " / NAC full admission v2 "
 PURE = CALLER + " / NAC metadata observation v2 "
 MAX_BYTES = 4 * 1024**2
+HISTORY_PAGE_SIZE = 20
 
 
 class Unknown(Exception):
@@ -272,10 +273,10 @@ def latest_admission(context, identity, read):
     for page in [1, 2]:
         runs, total = rows(read(f"repos/{REPOSITORY}/actions/workflows/{workflow}/runs",
                                {"branch": identity["head_ref"], "event": "pull_request",
-                                "per_page": 100, "page": page}), "workflow_runs")
+                                "per_page": HISTORY_PAGE_SIZE, "page": page}), "workflow_runs")
         if first_total is None:
             first_total = total
-        require(total == first_total and len(runs) == min(100, max(total - (page - 1) * 100, 0)),
+        require(total == first_total and len(runs) == min(HISTORY_PAGE_SIZE, max(total - (page - 1) * HISTORY_PAGE_SIZE, 0)),
                 "incomplete_or_moving_history_page")
         page_ids = [integer(run.get("id")) for run in runs]
         page_times = [stamp(run.get("created_at")) for run in runs]
@@ -308,9 +309,9 @@ def latest_admission(context, identity, read):
                 expected = observation_digest(identity["digest"], run_id)
                 require(all(value == expected for value in observations), "observation_points_behind_latest_full")
                 return {"run_id": run_id, "attempt": 1, "tuple_digest": identity["digest"]}
-        if page * 100 >= total:
+        if page * HISTORY_PAGE_SIZE >= total:
             break
-        require(len(runs) == 100, "incomplete_history_page")
+        require(len(runs) == HISTORY_PAGE_SIZE, "incomplete_history_page")
     raise Unknown("no_complete_latest_admission")
 
 

@@ -11,7 +11,7 @@ import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
 const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
 const sealedPins={
-  ".github/scripts/ci-admission.py": "c0c4759af67d407d76b733c1ee0324dcc079da09890f8981ab976d60a5e9ed91",
+  ".github/scripts/ci-admission.py": "afa1c74728cdf5646de034a553c32bc5af6552ecc6fdf0bacab67eca31aef04a",
   ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
   ".github/scripts/ci-admission-contract.json": "d3f4dfffe12024b54ad5ade8023ee9ec3b4cf9867dec01c442b58b19a1593cb9",
   ".github/scripts/ci-admission-applicability.json": "7dea3225509631c4dc6dc2947ab9fcf75b8dbd62ff0172bd394815c3a99f56e7",

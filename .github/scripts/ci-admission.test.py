@@ -4,6 +4,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SPEC = importlib.util.spec_from_file_location("admission", Path(__file__).with_name("ci-admission.py"))
@@ -107,6 +108,8 @@ class Admission(unittest.TestCase):
         self.assertEqual(result["required_source_contexts"], [])
         self.assertFalse(result["consumer"]["cross_run_quality_reuse"])
         self.assertEqual(len(self.history.requests), 3)
+        self.assertEqual(self.history.requests[1][1], {"branch":"codex/real-work","event":"pull_request","per_page":20,"page":1})
+        self.assertEqual(self.history.requests[2][1], {"per_page":100})
         for verdict in ["success", "failure", "cancelled", None]:
             self.history.current["conclusion"] = verdict
             self.history.prior["conclusion"] = verdict
@@ -235,7 +238,7 @@ class Admission(unittest.TestCase):
                 super().__init__(identity)
                 self.partial = partial
                 self.future = []
-                for index in range(100):
+                for index in range(20):
                     record = run(1000+index, 1)
                     record["created_at"] = "2026-11-06T00:00:01Z"
                     self.future.append(record)
@@ -243,8 +246,8 @@ class Admission(unittest.TestCase):
                 if path.endswith("/workflows/42/runs"):
                     self.requests.append((path, query))
                     if self.partial:
-                        return {"total_count":100, "workflow_runs":self.runs}
-                    return {"total_count":102, "workflow_runs":self.future if query["page"] == 1 else self.runs}
+                        return {"total_count":20, "workflow_runs":self.runs}
+                    return {"total_count":22, "workflow_runs":self.future if query["page"] == 1 else self.runs}
                 return super().__call__(path, query)
         self.assertEqual(self.select(read=Pages(self.identity))["mode"], "pure")
         self.assert_full(read=Pages(self.identity, partial=True))
@@ -254,6 +257,81 @@ class Admission(unittest.TestCase):
             history.jobs[record["id"]] = History.marker(record, A.PURE+A.observation_digest(self.identity["digest"], 10))
         self.assertEqual(self.assert_full(read=history)["reason"], "history_marker_budget")
         self.assertEqual(len(history.requests), 10)
+
+    def test_real_response_shape_and_unchanged_byte_reader(self):
+        fixture = json.loads(Path(__file__).with_name("ci-admission-history.fixture.json").read_text())
+        self.assertEqual(A.HISTORY_PAGE_SIZE, 20)
+        self.assertEqual(fixture["total_count"], 40)
+        self.assertEqual(len(fixture["workflow_runs"]), 20)
+        self.assertEqual(fixture["wire_bytes"], 269489)
+        self.assertEqual(fixture["wire_sha256"], "3be195c663e216a218763ca0b7881d582fd4077a91765decbb78d0e3476d29fb")
+        self.assertEqual([r["id"] for r in fixture["workflow_runs"][:2]], [42155651222,42155628832])
+        self.assertEqual(len({r["head_sha"] for r in fixture["workflow_runs"][:2]}), 1)
+        # Same retained response length with projected public rows + explicit inert padding.
+        value={"total_count":fixture["total_count"],"workflow_runs":fixture["workflow_runs"],"unused_public_metadata":""}
+        raw=json.dumps(value,separators=(",",":")).encode()
+        value["unused_public_metadata"]="x"*(fixture["wire_bytes"]-len(raw))
+        encoded=json.dumps(value,separators=(",",":")).encode()
+        self.assertEqual(len(encoded),fixture["wire_bytes"])
+        class Response:
+            status=200
+            def __enter__(self):return self
+            def __exit__(self,*_):return False
+            def read(self,limit):return self.data[:limit]
+        class Opener:
+            def open(self,request,timeout):
+                self.request=request;return self.response
+        response=Response();response.data=encoded;opener=Opener();opener.response=response
+        reader=A.PublicReader();reader.opener=opener
+        result=reader("repos/arcee-ai/nac/actions/workflows/42/runs",{"per_page":20,"page":1})
+        self.assertEqual(A.rows(result,"workflow_runs")[1],40)
+        self.assertIn("per_page=20",opener.request.full_url)
+        response.data=b"x"*fixture["oversized_page100_sample_bytes"]
+        reader=A.PublicReader();reader.opener=opener
+        with self.assertRaisesRegex(A.Unknown,"history_byte_budget"):
+            reader("repos/arcee-ai/nac/actions/workflows/42/runs",{"per_page":100,"page":1})
+
+    def test_twenty_row_page_arithmetic_moving_overlap_and_intervening_head(self):
+        class Pages(History):
+            def __init__(self,identity,mutation=None):
+                super().__init__(identity);self.total=22;self.mutation=mutation
+                self.future=[run(1000+i,1)for i in range(20)]
+                for record in self.future:record["created_at"]="2026-11-06T00:00:01Z"
+            def __call__(self,path,query=None):
+                if not path.endswith("/workflows/42/runs"):return super().__call__(path,query)
+                self.requests.append((path,query));assert query["per_page"]==20
+                values=copy.deepcopy(self.future if query["page"]==1 else self.runs)
+                total=self.total
+                if self.mutation=="moving"and query["page"]==2:total+=1
+                if self.mutation=="partial"and query["page"]==2:values=values[:1]
+                if self.mutation=="overlap"and query["page"]==2:values=[copy.deepcopy(self.future[-1]),self.current]
+                if self.mutation=="head":
+                    total=23
+                    if query["page"]==2:values=[self.current,{**run(15,15),"head_sha":"e"*40},self.prior]
+                return {"total_count":total,"workflow_runs":values}
+        good=Pages(self.identity)
+        self.assertEqual(self.select(read=good)["admission"]["run_id"],10)
+        self.assertEqual(len(good.requests),4)
+        for mutation,reason in [("moving","incomplete_or_moving_history_page"),("partial","incomplete_or_moving_history_page"),("overlap","history_overlap_or_order"),("head","intervening_head_change")]:
+            history=Pages(self.identity,mutation)
+            self.assertEqual(self.assert_full(read=history)["reason"],reason)
+            self.assertFalse(any("/runs/10/attempts/"in path for path,_ in history.requests))
+        self.assertEqual(self.history.requests,[])
+
+    def test_no_third_page_or_hidden_full_beyond_bounded_forty(self):
+        class Deep(History):
+            def __call__(self,path,query=None):
+                if not path.endswith("/workflows/42/runs"):return super().__call__(path,query)
+                self.requests.append((path,query));assert query["per_page"]==20
+                assert query["page"]in(1,2)
+                future=[run(1000+i,1)for i in range(39)]
+                for record in future:record["created_at"]="2026-11-06T00:00:01Z"
+                values=future[:20]if query["page"]==1 else future[20:]+[self.current]
+                return {"total_count":41,"workflow_runs":values}
+        history=Deep(self.identity)
+        self.assertEqual(self.assert_full(read=history)["reason"],"no_complete_latest_admission")
+        self.assertEqual(len(history.requests),3)
+        self.assertTrue(all("/attempts/"not in path for path,_ in history.requests))
 
     def test_machine_contract_matches_owner_constants(self):
         contract = json.loads(Path(__file__).with_name("ci-admission-contract.json").read_text())
