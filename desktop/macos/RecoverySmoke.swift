@@ -137,7 +137,10 @@ final class RecoverySmoke {
           const q1 = __NAC_Q1_FETCH_CONFIGURATION__, engineOrigin = location.origin;
           const fetchRows = [];
           let started = 0, settled = 0, errors = 0, active = 0, overflow = false;
-          let drop = false;
+          let drop = false, settledCapture = null;
+          const snapshot = () => ({version: 1, nonce: q1.nonce, provider: q1.provider, selector: q1.selector, engineOrigin,
+            started, settled, errors, active, overflow,
+            rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null}))});
           const metadata = (url, method, init) => {
             if (method !== 'POST' || url?.pathname !== '/providers/models') return null;
             const facts = {kind: 'unknown', canonicalJSON: false, exactKeys: false,
@@ -164,14 +167,29 @@ final class RecoverySmoke {
                 body.allow_insecure_http === false;
               if (Object.entries(facts).every(([key, value]) => key === 'kind' || value === true))
                 facts.kind = 'fixture-provider-models';
+              if (facts.kind === 'unknown' && facts.canonicalJSON && facts.exactRoute && facts.noInlineKey &&
+                  ['backend', 'backend,base_url', 'api_key_env,backend,base_url'].includes(keys) &&
+                  ['deepseek-chat', 'fireworks-chat', 'together-chat', 'openai-responses',
+                   'openai-chat-completions', 'chatgpt-codex-responses', 'anthropic-messages',
+                   'arcee-auth', 'arcee-api'].includes(body.backend) &&
+                  (!Object.prototype.hasOwnProperty.call(body, 'base_url') || (typeof body.base_url === 'string' && body.base_url.length <= 2048)) &&
+                  (!Object.prototype.hasOwnProperty.call(body, 'api_key_env') || (typeof body.api_key_env === 'string' &&
+                    body.api_key_env.length > 0 && body.api_key_env.length <= 256))) {
+                // Recognized catalog read, locally refused; never resolve external credentials or call the engine.
+                return {kind: 'locally-blocked-provider-models', canonicalJSON: true,
+                  exactKeys: true, noInlineKey: true, exactRoute: true, notForwarded: true};
+              }
             } catch (_) { /* Never retain raw bodies, secrets, or exception text. */ }
             return facts;
           };
           window.__nacRecoveryEvidence = Object.freeze({
             rows: () => rows.slice(), dropCommandResponse: () => { drop = true; },
-            q1Snapshot: q1 ? () => ({version: 1, nonce: q1.nonce, provider: q1.provider, selector: q1.selector, engineOrigin,
-              started, settled, errors, active, overflow,
-              rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null}))}) : undefined
+            q1Snapshot: q1 ? snapshot : undefined,
+            q1SettledSnapshot: q1 ? () => {
+              if (active === 0) return Promise.resolve(snapshot());
+              if (settledCapture) return Promise.reject(new TypeError('Q1 capture already pending'));
+              return new Promise(resolve => { settledCapture = resolve; });
+            } : undefined
           });
           window.fetch = async (input, init) => {
             let row = null;
@@ -190,10 +208,13 @@ final class RecoverySmoke {
             try {
               if (row && !(row.origin === engineOrigin && (row.method === 'GET' ||
                   (row.method === 'POST' && row.path === '/providers/models' &&
-                   row.metadata?.kind === 'fixture-provider-models')))) {
+                   ['fixture-provider-models', 'locally-blocked-provider-models'].includes(row.metadata?.kind))))) {
                 throw new TypeError('Q1 rejected an unproven outbound operation');
               }
-              const response = await actual(input, init);
+              const response = row?.metadata?.kind === 'locally-blocked-provider-models'
+                ? new Response(JSON.stringify({error: 'Q1 fixture blocked nonfixture model discovery'}),
+                    {status: 503, headers: {'Content-Type': 'application/json'}})
+                : await actual(input, init);
               if (row) { row.state = 'settled'; row.status = response.status; settled += 1; }
               const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;
               const method = (init?.method || input?.method || 'GET').toUpperCase();
@@ -211,6 +232,10 @@ final class RecoverySmoke {
               throw error;
             } finally {
               if (row) active -= 1;
+              if (q1 && active === 0 && settledCapture) {
+                const complete = settledCapture; settledCapture = null;
+                complete(snapshot());
+              }
             }
           };
         })();
@@ -356,7 +381,7 @@ final class RecoverySmoke {
     private func capture() {
         guard !capturing, let view = app.webView else { return }
         capturing = true
-        view.callAsyncJavaScript("const evidence = window.__nacRecoveryEvidence; let fetch = null; if (typeof evidence?.q1Snapshot === 'function') { const bootstrap = await window.__nacDesktopStorage.open(); fetch = {...evidence.q1Snapshot(), document: bootstrap.document}; } return {requests: evidence?.rows(), fetch, runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'), route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'}",
+        view.callAsyncJavaScript(Self.captureScript,
             arguments: [:], in: nil, in: .page) { [weak self, weak view] result in
             guard let self else { return }
             self.capturing = false
@@ -368,6 +393,19 @@ final class RecoverySmoke {
             self.publish()
         }
     }
+
+    private static let captureScript = #"""
+    const evidence = window.__nacRecoveryEvidence;
+    let fetch = null;
+    if (typeof evidence?.q1SettledSnapshot === 'function') {
+      const bootstrap = await window.__nacDesktopStorage.open();
+      // The existing external capture/action deadline owns this wait. Never sample active work as complete.
+      fetch = {...await evidence.q1SettledSnapshot(), document: bootstrap.document};
+    }
+    return {requests: evidence?.rows(), fetch,
+      runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'),
+      route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'};
+    """#
 
     func didStop() {
         timer?.invalidate()
