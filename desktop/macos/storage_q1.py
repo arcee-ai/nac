@@ -34,12 +34,29 @@ def _remaining(deadline, limit):
     return min(limit, left)
 
 
-def read_record(path):
+class RecordPublicationChanged(FileNotFoundError):
+    """An atomic producer replacement retired this sample; no bytes were accepted."""
+
+
+def read_record(path, *, publication_changes=False):
+    def custody(value):
+        require(stat.S_ISREG(value.st_mode) and value.st_uid == os.getuid() and
+                value.st_nlink in (0, 1) and value.st_size <= 8 * 1024 * 1024,
+                'record custody/bound: regular=%s owned=%s links=%s bytes=%s' %
+                (stat.S_ISREG(value.st_mode), value.st_uid == os.getuid(),
+                 value.st_nlink, value.st_size))
+        if value.st_nlink == 0:
+            changed('record descriptor retired')
+
+    def changed(message):
+        if publication_changes:
+            raise RecordPublicationChanged(message)
+        raise ValueError(message)
+
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)
-        require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid() and
-                before.st_nlink == 1 and before.st_size <= 8 * 1024 * 1024, 'record custody/bound')
+        custody(before)
         raw = b''
         while len(raw) <= 8 * 1024 * 1024:
             part = os.read(fd, 65536)
@@ -48,10 +65,16 @@ def read_record(path):
             raw += part
         require(len(raw) <= 8 * 1024 * 1024, 'record grew')
         after = os.fstat(fd)
+        # In-place mutation is never a publication retry, even if later unlinked.
+        require(all(getattr(before, k) == getattr(after, k) for k in
+                    ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns')), 'record changed')
+        custody(after)
+        entry = path.lstat()
+        custody(entry)
+        if (entry.st_dev, entry.st_ino) != (before.st_dev, before.st_ino):
+            changed('record publication replaced')
         require(all(getattr(before, k) == getattr(after, k) for k in
                     ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')), 'record changed')
-        entry = path.lstat()
-        require((entry.st_dev, entry.st_ino) == (before.st_dev, before.st_ino), 'record replaced')
         return json.loads(raw)
     finally:
         os.close(fd)
@@ -226,7 +249,7 @@ class RecoveryLaunch:
     def read(self):
         _remaining(self.deadline, 1)
         try:
-            return read_record(self.output)
+            return read_record(self.output, publication_changes=True)
         except FileNotFoundError:
             return {}
 
