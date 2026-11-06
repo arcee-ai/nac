@@ -6,10 +6,22 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import patch
-from ci_native_auth import clean_environment, hosted_job, isolate_subprocess_environment
+from ci_native_auth import clean_environment, hosted_job, isolate_subprocess_environment, public_candidate
 
 
 class HostedAuthenticationAdmissionControls(unittest.TestCase):
+    def test_public_stack_merge_can_have_a_composed_base_but_not_a_foreign_candidate(self):
+        source, head, base, composed = (letter * 40 for letter in 'abcd')
+        environment = dict(CANDIDATE_PR='506', CANDIDATE_HEAD=head, CANDIDATE_BASE=base)
+        pull = dict(number=506, state='open', merge_commit_sha=source, head=dict(sha=head), base=dict(sha=base))
+        self.assertEqual(public_candidate(source, [composed, head], environment, pull)['base'], base)
+        for field, value in [('number', 507), ('state', 'closed'), ('merge_commit_sha', 'e' * 40),
+                             ('head', dict(sha='e' * 40)), ('base', dict(sha='e' * 40))]:
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                public_candidate(source, [composed, head], environment, {**pull, field: value})
+        with self.assertRaises(RuntimeError):
+            public_candidate(source, [composed, 'e' * 40], environment, pull)
+
     def test_environment_flags_without_the_matching_live_service_job_cannot_admit(self):
         source = 'a' * 40
         environment = dict(GITHUB_ACTIONS='true', RUNNER_OS='macOS', RUNNER_ENVIRONMENT='github-hosted',
