@@ -19,7 +19,7 @@ class StartupCustody(unittest.TestCase):
     def exercise(self, receipt='complete', cleanup_error=None, success=False,
                  wrapper_error=False, provider_timeout=False, provider_error=False,
                  relocation_error=False, catalog_error=None, stdin_error=False,
-                 stderr_failure=None):
+                 stderr_failure=None, stale_receipt=False, duplicate_scenario=False):
         with tempfile.TemporaryDirectory(prefix='nac-custody-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -31,6 +31,17 @@ class StartupCustody(unittest.TestCase):
             sentinel = sandbox / 'unrelated'
             sentinel.write_bytes(b'preserve')
             output = sandbox / 'evidence'
+            prior = {}
+            if stale_receipt:
+                (output / 'startup-fresh').mkdir(parents=True)
+                prior = {
+                    output / 'startup-fresh/result.json': json.dumps({
+                        'app_pid': 1234, 'engine_pid': 0, 'passed': True, 'stopped': True}).encode(),
+                    output / 'metadata.json': b'prior source metadata',
+                    output / 'provider.log': b'prior provider evidence',
+                }
+                for path, data in prior.items():
+                    path.write_bytes(data)
             roots = []
             phases = ['fixture prepared']
 
@@ -150,7 +161,7 @@ class StartupCustody(unittest.TestCase):
                 stack.enter_context(patch.object(startup_smoke, 'cleanup_failed_case', cleanup))
                 stack.enter_context(patch.object(startup_smoke.shutil, 'rmtree', side_effect=rmtree))
                 stack.enter_context(patch.object(startup_smoke.sys, 'argv', ['startup_smoke.py', str(app), str(output)]))
-                stack.enter_context(patch.dict(startup_smoke.os.environ, {'NAC_STARTUP_SCENARIOS': 'startup-fresh'}, clear=True))
+                stack.enter_context(patch.dict(startup_smoke.os.environ, {'NAC_STARTUP_SCENARIOS': 'startup-fresh,startup-fresh' if duplicate_scenario else 'startup-fresh'}, clear=True))
                 stack.enter_context(patch.object(subprocess, 'Popen', side_effect=popen))
                 stack.enter_context(patch.object(subprocess, 'check_output', return_value='inert source'))
                 stack.enter_context(patch.object(subprocess, 'run', return_value=SimpleNamespace(stdout='')))
@@ -185,6 +196,22 @@ class StartupCustody(unittest.TestCase):
                 'provider_terminate_calls': provider.terminate.call_count,
                 'provider_logs_closed': [handle.closed for handle in provider_logs],
             })
+            if stale_receipt or duplicate_scenario:
+                self.assertIsInstance(error, FileExistsError)
+                self.assertEqual(roots, [], 'Refused evidence must not start a new profile or relocation')
+                self.assertFalse(any(phase.startswith('mock launch:') for phase in phases))
+                cleanup.assert_not_called()
+                provider.wait.assert_not_called()
+                catalog.shutdown.assert_not_called()
+                catalog.server_close.assert_not_called()
+                self.assertEqual(relocation_removals, [])
+                for path, data in prior.items():
+                    self.assertEqual(path.read_bytes(), data, 'Prior evidence was replaced')
+                if duplicate_scenario:
+                    self.assertFalse((output / 'metadata.json').exists())
+                    self.assertFalse((output / 'provider.log').exists())
+                self.assertEqual(sentinel.read_bytes(), b'preserve')
+                return captured.getvalue()
             self.assertEqual(len(roots), 2)
             retained = receipt != 'complete' or cleanup_error is not None
             for index, root in enumerate(roots):
@@ -230,6 +257,12 @@ class StartupCustody(unittest.TestCase):
             if provider_timeout:
                 provider.terminate.assert_called_once()
             return captured.getvalue()
+
+    def test_stale_receipt_cannot_clean_a_new_unproven_attempt(self):
+        self.exercise(receipt='missing', stale_receipt=True)
+
+    def test_duplicate_scenarios_are_refused_before_any_actor(self):
+        self.exercise(duplicate_scenario=True)
 
     def test_missing_receipt_retains_both_roots(self):
         self.exercise(receipt='missing')
