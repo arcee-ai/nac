@@ -67,8 +67,17 @@ A later pure edit cannot replace a failed/pending/absent source verdict.
 
 The public reader uses no Authorization token, proxy credentials, redirect or
 retry. It is limited to30seconds,11requests (current metadata+2pages+8job lists),
-512KiB/response and4MiB total. No calls were made during draft development.
+512KiB/response and4MiB total. Branch history requests use20runs/page,
+with the same two-page ceiling (at most40listed runs, including current/future
+entries). Jobs lists retain their independent100-row bound. No calls were made
+during draft development.
 Missing/incomplete/malformed/overlapping pages or exhausted budgets select FULL.
+A latest FULL outside that bounded40-run window remains unavailable and selects
+full work; the smaller page does not authorize skipping unknown/intervening
+records, adding a head-only filter, reading a third page or raising any cap.
+The8marker limit can stop earlier. This repairs observed512KiB overflow on a
+mature40-run branch; it does not claim an eligible PURE result before the new
+owner bytes are trusted in the original base/head/prepared sources.
 
 The original run's immutable source/branch/repository/workflow and attempt1 are
 bound first. The branch-filtered Stable PR run list must contain current run and
