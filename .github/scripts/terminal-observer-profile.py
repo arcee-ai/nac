@@ -64,6 +64,61 @@ def digest(path):
     return h.hexdigest()
 
 
+def compiler_identity(evidence):
+    """Only ROOT/target/debug/nac-web; never a selected-source reader or walker."""
+    def metadata(info):
+        return {name:getattr(info,'st_'+name)for name in
+            ('dev','ino','mode','uid','gid','size','nlink','mtime_ns','ctime_ns')}
+    receipt={'schema':1,'relative_path':'target/debug/nac-web','maximum_bytes':512*1024**2,
+        'accepted':False,'leaf_lstat':None,'descriptor_before':None,'descriptor_after':None,'path_after':None}
+    directory=None;fd=None;started=time.monotonic()
+    try:
+        directory=os.open(ROOT,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        for component in ('target','debug'):
+            require(os.fstat(directory).st_uid==os.getuid(),'compiler directory owner')
+            child=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory)
+            os.close(directory);directory=child
+        require(os.fstat(directory).st_uid==os.getuid(),'compiler directory owner')
+        receipt['leaf_lstat']=metadata(os.stat('nac-web',dir_fd=directory,follow_symlinks=False))
+        fd=os.open('nac-web',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+        before=os.fstat(fd);receipt['descriptor_before']=metadata(before)
+        require(receipt['leaf_lstat']==receipt['descriptor_before'],'compiler path changed before acquisition')
+        require(stat.S_ISREG(before.st_mode)and before.st_uid==os.getuid(),'compiler output regular owned file required')
+        require(before.st_mode&0o111 and 0<before.st_size<=receipt['maximum_bytes'],'compiler output executable/size bound')
+        result=hashlib.sha256();remaining=before.st_size
+        while True:
+            require(time.monotonic()-started<=10,'compiler hash time bound')
+            chunk=os.read(fd,min(1024**2,remaining+1))
+            if not chunk:break
+            remaining-=len(chunk);require(remaining>=0,'compiler output grew while hashing')
+            result.update(chunk)
+        require(remaining==0,'compiler output shrank while hashing')
+        receipt['sha256']=result.hexdigest()
+        receipt['descriptor_after']=metadata(os.fstat(fd))
+        receipt['path_after']=metadata(os.stat('nac-web',dir_fd=directory,follow_symlinks=False))
+        require(receipt['descriptor_before']==receipt['descriptor_after']==receipt['path_after'],'compiler metadata changed while hashing')
+        receipt['accepted']=True
+        identity={'sha256':receipt['sha256'],'bytes':before.st_size}
+    except BaseException as error:
+        receipt['error']=type(error).__name__+': '+str(error)
+        raise
+    finally:
+        changed_after_check=False
+        if fd is not None:
+            try:
+                receipt['descriptor_after']=metadata(os.fstat(fd))
+                changed_after_check=receipt['accepted']and receipt['descriptor_after']!=receipt['descriptor_before']
+                if changed_after_check:
+                    receipt['accepted']=False;receipt['error']='ValueError: compiler metadata changed before close'
+            finally:os.close(fd)
+        if directory is not None:os.close(directory)
+        receipt['seconds']=time.monotonic()-started
+        # Published before any rejection escapes or caller starts version/Guide.
+        write(evidence/'compiler-output-identity.json',receipt)
+        if changed_after_check:raise ValueError('compiler metadata changed before close')
+    return identity
+
+
 def write(path,value):
     raw=json.dumps(value,sort_keys=True).encode();require(len(raw)<=5*1024**2,'receipt bound')
     fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600)
@@ -317,7 +372,7 @@ def main():
         controller.run('source',['git','diff','--exit-code'],10,env)
         require(not subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip(),'asset writer drift/untracked source')
         controller.run('build',['cargo','build','--locked','-p','nac-server','--bin','nac-web'],720,env)
-        binary=ROOT/'target/debug/nac-web';result['binary']={'sha256':digest(binary),'bytes':binary.stat().st_size}
+        binary=ROOT/'target/debug/nac-web';result['binary']=compiler_identity(controller.evidence)
         controller.run('version',[str(binary),'--version'],10,env)
         guide=controller.run('guide',[str(binary),'guide','skills','discovery'],10,env)
         with regular(guide)as handle:value=json.load(handle)

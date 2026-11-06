@@ -188,6 +188,65 @@ class Controls(unittest.TestCase):
         self.assertIn("sample['dependency_bytes']<=2*GIB",text)
         self.assertIn("shutil.disk_usage(self.home).free>=13*GIB",text)
 
+    def test_compiler_hardlink_characterizes_strict_red_and_identity_green(self):
+        with tempfile.TemporaryDirectory()as directory:
+            root=Path(directory);binary=root/'target/debug/nac-web';binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'#!/bin/sh\nexit 0\n');binary.chmod(0o700)
+            alias=root/'compiler-alias';os.link(binary,alias);evidence=root/'evidence';evidence.mkdir()
+            with self.assertRaisesRegex(ValueError,'single-link'):profile.digest(binary)
+            with patch.object(profile,'ROOT',root),patch.object(profile.os,'scandir',side_effect=AssertionError('no traversal')),patch.object(profile.os,'walk',side_effect=AssertionError('no traversal')),patch.object(profile.subprocess,'Popen')as spawn:
+                value=profile.compiler_identity(evidence);spawn.assert_not_called()
+            self.assertEqual(value,{'sha256':hashlib.sha256(alias.read_bytes()).hexdigest(),'bytes':17})
+            receipt=json.loads((evidence/'compiler-output-identity.json').read_text())
+            self.assertTrue(receipt['accepted']);self.assertEqual(receipt['descriptor_before']['nlink'],2)
+            self.assertEqual(receipt['descriptor_before'],receipt['descriptor_after'])
+            print(json.dumps({'owned_fixture_only':True,'strict_reader':'rejected nlink2','compiler_identity':receipt},sort_keys=True))
+
+    def test_compiler_rejects_links_nonregular_and_outside_without_execution(self):
+        for kind in ('symlink','fifo','directory','parent-link','nonexecutable','oversized'):
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory()as directory:
+                root=Path(directory);binary=root/'target/debug/nac-web';binary.parent.mkdir(parents=True)
+                outside=root/'outside';outside.mkdir();sentinel=outside/'sentinel';sentinel.write_bytes(b'unchanged');sentinel.chmod(0o700)
+                before=(sentinel.read_bytes(),sentinel.stat().st_mtime_ns)
+                if kind=='symlink':binary.symlink_to(sentinel)
+                elif kind=='fifo':os.mkfifo(binary)
+                elif kind=='directory':binary.mkdir()
+                elif kind=='parent-link':
+                    binary.parent.rmdir();binary.parent.symlink_to(outside,target_is_directory=True)
+                else:
+                    binary.write_bytes(b'fixture');binary.chmod(0o600 if kind=='nonexecutable'else 0o700)
+                    if kind=='oversized':
+                        with binary.open('r+b')as handle:handle.truncate(512*1024**2+1)
+                evidence=root/'evidence';evidence.mkdir()
+                with patch.object(profile,'ROOT',root),patch.object(profile.os,'read',side_effect=AssertionError('invalid output must not be read')),patch.object(profile.os,'scandir',side_effect=AssertionError('no traversal')),patch.object(profile.subprocess,'Popen')as spawn:
+                    with self.assertRaises((OSError,ValueError)):profile.compiler_identity(evidence)
+                    spawn.assert_not_called()
+                receipt=json.loads((evidence/'compiler-output-identity.json').read_text());self.assertFalse(receipt['accepted']);self.assertIn('error',receipt)
+                self.assertEqual((sentinel.read_bytes(),sentinel.stat().st_mtime_ns),before)
+                if kind!='parent-link':self.assertIsNotNone(receipt['leaf_lstat'])
+                with self.assertRaises(TypeError):profile.compiler_identity(evidence,sentinel)
+
+    def test_compiler_rejects_real_metadata_change_and_keeps_case_after_identity(self):
+        with tempfile.TemporaryDirectory()as directory:
+            root=Path(directory);binary=root/'target/debug/nac-web';binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'original');binary.chmod(0o700);evidence=root/'evidence';evidence.mkdir()
+            original_read=profile.os.read;changed=False;before=binary.stat()
+            def mutate(fd,count):
+                nonlocal changed
+                value=original_read(fd,count)
+                if not changed:
+                    changed=True;binary.write_bytes(b'changed!');os.utime(binary,ns=(before.st_atime_ns,before.st_mtime_ns+1000000))
+                return value
+            with patch.object(profile,'ROOT',root),patch.object(profile.os,'read',side_effect=mutate),patch.object(profile.subprocess,'Popen')as spawn:
+                with self.assertRaisesRegex(ValueError,'metadata changed'):profile.compiler_identity(evidence)
+                spawn.assert_not_called()
+            receipt=json.loads((evidence/'compiler-output-identity.json').read_text());self.assertFalse(receipt['accepted'])
+            self.assertNotEqual(receipt['descriptor_before'],receipt['descriptor_after'])
+            self.assertEqual(receipt['descriptor_before']['size'],receipt['descriptor_after']['size'])
+        source=(ROOT/'.github/scripts/terminal-observer-profile.py').read_text()
+        positions=[source.index(value)for value in ("result['binary']=compiler_identity(controller.evidence)","controller.run('version'","controller.run('guide'","identity==expected","controller.run('case'")]
+        self.assertEqual(positions,sorted(positions))
+
     def test_finite_no_retry_private_workflow(self):
         text=(ROOT/'.github/workflows/nightly-portability.yml').read_text()
         self.assertIn('workflow_dispatch:',text);self.assertNotIn('pull_request:',text);self.assertNotIn('schedule:',text)

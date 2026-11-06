@@ -168,6 +168,27 @@ untouched. No result, failed setup, failed case or missing numeric side remains
 an explicit first outcome. Upload includes only the evidence subtree, not
 workspaces, credentials, videos or retained terminal payloads.
 
+## Compiler-output identity repair (local preparation only)
+
+The first private run42143349403:1 compiled GNU successfully, then failed at
+`digest(target/debug/nac-web)` before version/Guide/case. Actual failed mode and
+nlink remain unknown. A separate owned temporary executable hardlink reproduces
+the strict selected-reader rejection; it does not prove that historical cause.
+The repository's canonical browser-binary producer accepts bounded nonempty
+executable regular compiler files without imposing single-link metadata.
+
+The diagnostic now hashes only the closed `ROOT/target/debug/nac-web` path,
+opening each literal directory without following links and requiring ordinary
+ownership. Its leaf is no-follow/nonblocking, regular, executable and bounded
+by512MiB/10s hashing. Before/after descriptor metadata and path identity must
+remain equal across the complete hash. Actual lstat/fstat/size/nlink/hash or
+rejection metadata is published before return/rethrow. Selected source/evidence
+`regular` and `digest` readers remain byte-identical and strict single-link.
+Version and bundled Guide checks still follow hashing; the case still follows
+full Guide identity validation. No binary is executed in the offline controls.
+The missing independent post-raw-delete receipt remains an explicit gap; this
+repair does not alter lifecycle code or authorize another profiling run.
+
 ## Pre-execution gates
 
 Run offline projection/numeric/NoFollow controls, focused SDK parser/ACK tests,
