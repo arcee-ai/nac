@@ -279,7 +279,7 @@ async fn prepare_run_config_inner(
             settings.reasoning_effort,
             None,
             Some(connection),
-            agent.messages.clone(),
+            agent.messages.to_vec(),
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
@@ -421,7 +421,7 @@ async fn prepare_run_config_inner(
             settings.reasoning_effort,
             sandbox.as_ref().map(|session| session.spec().clone()),
             None, // fresh local/sandbox sessions carry no ssh_host
-            agent.messages.clone(),
+            agent.messages.to_vec(),
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );

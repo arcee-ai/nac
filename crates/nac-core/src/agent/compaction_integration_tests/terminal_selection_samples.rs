@@ -105,7 +105,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
         EventSink::none(),
         AgentMode::Direct,
     );
-    restarted.messages = canonical.clone();
+    restarted.messages = canonical.clone().into();
     restarted.restore_compaction_checkpoint().unwrap();
     let view = restarted
         .prepare_provider_view(&mut TokenUsage::default(), &[])
@@ -143,7 +143,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
         EventSink::none(),
         AgentMode::Direct,
     );
-    fork.messages = canonical;
+    fork.messages = canonical.into();
     let connection = crate::store::open_runtime_connection(&path).unwrap();
     connection
         .execute(

@@ -470,7 +470,7 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
     // Construct B before A commits so its in-memory Agent has no checkpoint.
     let snapshot_b = sessions::load_session(&store_path, &session_id).unwrap();
     let mut agent_b = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
-    agent_b.messages = snapshot_b.messages.clone();
+    agent_b.messages = snapshot_b.messages.clone().into();
     let parts_b = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
         agent: agent_b,
         client,
@@ -610,7 +610,8 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
     );
     agent.messages = vec![Message::System {
         content: "policy".to_string(),
-    }];
+    }]
+    .into();
     let snapshot = sessions::new_snapshot(
         session_id.to_string(),
         std::path::PathBuf::from("/repo"),
@@ -620,7 +621,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         std::collections::BTreeMap::new(),
     );

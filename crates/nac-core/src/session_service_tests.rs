@@ -340,7 +340,7 @@ pub(crate) fn test_direct_active_service_at(
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -393,7 +393,7 @@ pub(super) fn test_active_service_with_skills(
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -473,7 +473,7 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -618,7 +618,7 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -671,7 +671,7 @@ pub(super) async fn seed_store_transcript(parts: &SessionServiceParts, messages:
         .as_mut()
         .unwrap()
         .messages = messages.clone();
-    parts.service.agent.lock().await.messages = messages.clone();
+    parts.service.agent.lock().await.messages = messages.clone().into();
     let connection =
         crate::store::open_runtime_connection(&parts.service.metadata.store_path).unwrap();
     connection
@@ -768,7 +768,7 @@ pub(super) fn test_compaction_service(
         store_path.clone(),
         Some(session_id.to_string()),
     );
-    agent.messages = compaction_messages();
+    agent.messages = compaction_messages().into();
     agent.last_usage = Some(crate::model::TokenUsage {
         input_tokens: 91,
         output_tokens: 7,
@@ -784,7 +784,7 @@ pub(super) fn test_compaction_service(
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );

@@ -27,6 +27,7 @@ mod prompt_rendering;
 mod questions;
 mod tool_exec;
 mod transcript_commit;
+mod transcript_messages;
 mod transcript_state;
 mod web_capabilities;
 
@@ -58,6 +59,7 @@ pub(crate) use prompt_rendering::{
     render_general_child_system_prompt,
 };
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
+pub(crate) use transcript_messages::TranscriptMessages;
 pub(crate) use transcript_state::truncate_incomplete_tool_turn;
 use transcript_state::{
     acquire_transcript_operation_lease_and_snapshot, append_to_initial_system_message,
@@ -146,7 +148,7 @@ type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
 pub struct Agent {
     client: ModelClient,
     mode: AgentMode,
-    pub messages: Vec<Message>,
+    pub messages: TranscriptMessages,
     tool_defs: Vec<ToolDefinition>,
     fallback_tool_defs: Vec<ToolDefinition>,
     base_tool_defs: Vec<ToolDefinition>,
@@ -443,7 +445,7 @@ impl Agent {
         let agent = Self {
             client,
             mode,
-            messages,
+            messages: messages.into(),
             tool_defs,
             fallback_tool_defs,
             base_tool_defs,
@@ -863,7 +865,7 @@ impl Agent {
                 }
             } else {
                 PreparedProviderView {
-                    messages: self.messages.clone(),
+                    messages: self.messages.to_vec(),
                     context_estimate: 0,
                     checkpoint_id: None,
                 }
@@ -1239,7 +1241,7 @@ impl Agent {
     pub(crate) fn provider_messages_for_test(&mut self) -> Vec<Message> {
         match &mut self.compaction {
             Some(compaction) => compaction.prepare(&self.messages, &self.tool_defs).messages,
-            None => self.messages.clone(),
+            None => self.messages.to_vec(),
         }
     }
 
@@ -1369,7 +1371,7 @@ impl Agent {
         self.committed_log_len = messages.len() as u64;
         self.pending_log_end = None;
         self.unacknowledged_log_message = None;
-        self.messages = messages;
+        self.messages = messages.into();
         if let Some(compaction) = &mut self.compaction {
             compaction.reset_for_transcript_replacement();
         }
