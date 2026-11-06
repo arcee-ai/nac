@@ -1,0 +1,14 @@
+{
+  "base": "5603ad0bda5d8e62cf9587659f4548131c1bbf45",
+  "scope": "Exact unchanged production bytes; no normalization or private Git runtime input.",
+  "files": {
+    ".github/workflows/stable-release.yml": "f126b17689122c12d198a0e68345c18cff95eeb2db7faa837699bd0aa3f676bb",
+    ".github/scripts/browser-apt.py": "00302543d56a570e750acb8ad4b3a70bec5741a38e464573d8adaaeb78b37cf7",
+    ".github/scripts/browser-apt-supervisor.py": "886616e7d3658aa32014d8b61009bfbf434079eaa14dd8365472d49d6525e654",
+    ".github/scripts/apt-archive-store.py": "f1b47b086ad838926f64d833aba876f4c23555c1f223e8cf9ab8ca7b50e29996",
+    ".github/scripts/browser-apt-wiring.mjs": "cfa188e4f552ea00caca2508eafe1a69bc2f2369be3de795745c2423bf83f5fb",
+    ".github/scripts/pr-browser-apt.test.mjs": "e33815062eac8bfef14f60987c9d592acb2bd0063f5cb25b419f18c65de5f1d6",
+    ".github/scripts/pr-cold-cache.test.mjs": "ce9330780b4e2e11a6877cf907d0f17649b13764fabb760e6292df83420bd7d3",
+    ".github/scripts/browser-inventory.py": "efa48714c1d99f7eba381fc1f735c2d22ee9a388f3b9b4f8c32610396d2d718d"
+  }
+}

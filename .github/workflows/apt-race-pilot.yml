@@ -1,0 +1,54 @@
+name: Private authenticated native APT race pilot
+
+on:
+  push:
+    branches: [codex/all-582-apt-race-pilot-20261106]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-apt-race-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  payload-only:
+    runs-on: ubuntu-latest
+    # Admission requires each started native command's full original 900s.
+    # Slow prior operations may leave later operations explicitly unexecuted.
+    timeout-minutes: 40
+    steps:
+      - name: Anchor the absolute infrastructure budget before any setup
+        run: echo "PILOT_JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Install the locked web request authority and parsed-control tooling
+        timeout-minutes: 5
+        run: |
+          npm --prefix crates/nac-server/web ci
+          npm --prefix .github/scripts ci
+      - name: Offline admission, result-rule and actual GNU lease controls
+        timeout-minutes: 2
+        env:
+          APT_RACE_CONTROL_EVIDENCE: ${{ runner.temp }}/apt-race-controls
+        run: |
+          mkdir "$APT_RACE_CONTROL_EVIDENCE"
+          python3 .github/scripts/apt-race-pilot.test.py -v 2>&1 | tee "$APT_RACE_CONTROL_EVIDENCE/python.log"
+          node --test .github/scripts/apt-race-workflow.test.mjs 2>&1 | tee "$APT_RACE_CONTROL_EVIDENCE/workflow.log"
+      - name: One full dynamic-plan baseline and two-route acquisition comparison
+        run: python3 .github/scripts/apt-race-pilot.py --source "$GITHUB_SHA" --output "$RUNNER_TEMP/apt-race-evidence"
+      - name: Retain every first outcome and cleanup receipt without payload copies
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: private-apt-race-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/apt-race-evidence/
+            ${{ runner.temp }}/apt-race-controls/
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
