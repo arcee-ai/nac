@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import { stderr } from "node:process";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -251,8 +252,9 @@ it("keeps import failure local to design and does not automatically retry", asyn
 
 it("keeps the actual complete showcase and its modal local to the selected presentation", async () => {
   const started = performance.now();
-  const phase = (name: string) =>
-    console.info("[showcase-timing]", name, Math.round(performance.now() - started));
+  const phase = (name: string) => {
+    stderr.write(`[showcase-timing] ${name} ${Math.round(performance.now() - started)}ms\n`);
+  };
   const current = fixture("showcase", "/design");
   const sibling = fixture("sibling", "/session/other/files");
   fireEvent.change(sibling.ui.getByRole("textbox", { name: "Session draft" }), {
