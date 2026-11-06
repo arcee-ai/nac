@@ -15,9 +15,7 @@ fn runtime() -> RuntimeMetadata {
 }
 
 fn telemetry_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
-    LOCK.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    crate::telemetry::test_recorder_lock()
 }
 
 fn wait_for_events(exporter: &InMemoryExporter, count: usize) -> Vec<TelemetryEvent> {

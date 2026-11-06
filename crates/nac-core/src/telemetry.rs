@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::error::Error;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -189,11 +189,14 @@ fn digest_identifier(value: &str) -> String {
     // Correlation is intentionally irreversible and fixed-width. Truncating a
     // SHA-256 digest to 64 bits is sufficient for diagnostics while keeping
     // raw identifiers and unbounded label values out of telemetry.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = Sha256::digest(value.as_bytes());
-    digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let mut encoded = String::with_capacity(16);
+    for byte in &digest[..8] {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 fn bounded_scenario(value: &str) -> Option<String> {
@@ -346,6 +349,19 @@ impl Observation {
 static GLOBAL_RECORDER: std::sync::LazyLock<RwLock<TelemetryRecorder>> =
     std::sync::LazyLock::new(|| RwLock::new(TelemetryRecorder::disabled()));
 
+/// Mirrors whether `GLOBAL_RECORDER` exports. Every replacement updates it
+/// under the recorder's write lock, so disabled emitters return before they
+/// build an observation or touch the lock.
+static RECORDER_ENABLED: AtomicBool = AtomicBool::new(false);
+
+fn replace_global_recorder(recorder: TelemetryRecorder) -> TelemetryRecorder {
+    let mut global = GLOBAL_RECORDER
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    RECORDER_ENABLED.store(recorder.is_enabled(), Ordering::Release);
+    std::mem::replace(&mut *global, recorder)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigureStatus {
     Disabled,
@@ -363,10 +379,9 @@ pub fn configure_from_env(runtime: RuntimeMetadata) -> ConfigureStatus {
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(DEFAULT_EXPORT_QUEUE_CAPACITY)
                 .clamp(1, MAX_EXPORT_QUEUE_CAPACITY);
-            *GLOBAL_RECORDER
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                export::stderr_recorder(runtime, capacity);
+            drop(replace_global_recorder(export::stderr_recorder(
+                runtime, capacity,
+            )));
             ConfigureStatus::Stderr
         }
         _ => ConfigureStatus::Invalid,
@@ -388,23 +403,18 @@ pub fn finish_export(timeout: Duration) -> ExportShutdown {
     {
         return ExportShutdown::Disabled;
     }
-    let recorder = std::mem::replace(
-        &mut *GLOBAL_RECORDER
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-        TelemetryRecorder::disabled(),
-    );
-    recorder.finish(timeout)
+    replace_global_recorder(TelemetryRecorder::disabled()).finish(timeout)
 }
 
+/// Lock-free check that emitters use before building an observation.
 pub fn enabled() -> bool {
-    GLOBAL_RECORDER
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .is_enabled()
+    RECORDER_ENABLED.load(Ordering::Acquire)
 }
 
 fn global_record(observation: Observation) {
+    if !enabled() {
+        return;
+    }
     #[cfg(any(test, feature = "test-support"))]
     if TEST_RECORDER_OWNERS
         .lock()
@@ -451,9 +461,7 @@ impl Drop for TestRecorderThreadGuard {
 impl Drop for TestRecorderGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
-            *GLOBAL_RECORDER
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = previous;
+            drop(replace_global_recorder(previous));
         }
         *TEST_RECORDER_OWNERS
             .lock()
@@ -467,12 +475,7 @@ pub fn install_test_recorder(recorder: TelemetryRecorder) -> TestRecorderGuard {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .replace(vec![std::thread::current().id()]);
-    let previous = std::mem::replace(
-        &mut *GLOBAL_RECORDER
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-        recorder,
-    );
+    let previous = replace_global_recorder(recorder);
     TestRecorderGuard {
         previous: Some(previous),
         previous_owners,
@@ -492,6 +495,14 @@ pub fn register_test_recorder_thread() -> TestRecorderThreadGuard {
         owners.push(id);
     }
     TestRecorderThreadGuard(id)
+}
+
+/// Serializes tests that replace the process-wide recorder.
+#[cfg(test)]
+pub(crate) fn test_recorder_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -553,6 +564,9 @@ pub fn observe_store<T>(
     correlation: Correlation,
     action: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    if !enabled() {
+        return action();
+    }
     let started = Instant::now();
     let _scope = StoreCorrelationScope::push(correlation.clone());
     let _queue = PersistenceActivityGuard::start(correlation.clone());
@@ -571,6 +585,9 @@ pub fn observe_store<T>(
 }
 
 pub(crate) fn in_store_command<T>(correlation: Correlation, action: impl FnOnce() -> T) -> T {
+    if !enabled() {
+        return action();
+    }
     let _scope = StoreCorrelationScope::push(correlation.clone());
     let _activity = PersistenceActivityGuard::start(correlation);
     action()
@@ -582,27 +599,34 @@ pub(crate) fn emit_persistence_counts(
     capacity: usize,
     correlation: Correlation,
 ) {
+    if !enabled() {
+        return;
+    }
     for (name, value) in [
         (TelemetryName::PersistenceQueueDepth, queued),
         (TelemetryName::PersistenceExecutorActive, executing),
         (TelemetryName::PersistenceQueueCapacity, capacity),
     ] {
-        emit_active(name, None, value, correlation.clone());
+        emit_active(name, None, value, &correlation);
     }
 }
 
 pub(crate) fn emit_persistence_caller_counts(active: usize, capacity: usize) {
+    if !enabled() {
+        return;
+    }
+    let correlation = Correlation::default();
     emit_active(
         TelemetryName::PersistenceCallerActive,
         None,
         active,
-        Correlation::default(),
+        &correlation,
     );
     emit_active(
         TelemetryName::PersistenceCallerCapacity,
         None,
         capacity,
-        Correlation::default(),
+        &correlation,
     );
 }
 
@@ -613,6 +637,9 @@ pub fn emit_store_duration(
     outcome: TelemetryOutcome,
     error: Option<StoreErrorIdentity>,
 ) {
+    if !enabled() {
+        return;
+    }
     global_record(Observation {
         name: TelemetryName::StoreOperationDuration,
         kind: TelemetryKind::Span,
@@ -631,6 +658,9 @@ pub fn emit_store_duration(
 }
 
 pub fn sqlite_profile(sql: &str, duration: Duration) {
+    if !enabled() {
+        return;
+    }
     let sql = sql.trim_start();
     let operation = if starts_with_ascii_case(sql, "BEGIN") {
         Some(StoreOperation::TransactionBegin)
@@ -659,6 +689,9 @@ fn starts_with_ascii_case(value: &str, prefix: &str) -> bool {
 }
 
 pub fn emit_connection_counts(process: usize, store: usize, correlation: Correlation) {
+    if !enabled() {
+        return;
+    }
     for (route, value) in [("process", process), ("store", store)] {
         global_record(Observation {
             name: TelemetryName::StoreConnectionActive,
@@ -702,7 +735,7 @@ impl PersistenceActivityGuard {
             TelemetryName::PersistenceQueueActive,
             None,
             active,
-            correlation.clone(),
+            &correlation,
         );
         Self {
             correlation,
@@ -721,7 +754,7 @@ impl Drop for PersistenceActivityGuard {
             TelemetryName::PersistenceQueueActive,
             None,
             active,
-            self.correlation.clone(),
+            &self.correlation,
         );
     }
 }
@@ -734,13 +767,15 @@ pub struct RuntimeActivityGuard {
 impl RuntimeActivityGuard {
     pub fn start(activity: RuntimeActivity, correlation: Correlation) -> Self {
         let active = activity_counter(activity).fetch_add(1, Ordering::Relaxed) + 1;
-        emit_active(
-            TelemetryName::RuntimeActivityActive,
-            Some(activity),
-            active,
-            correlation.clone(),
-        );
-        emit_resource_sample(correlation.clone(), None);
+        if enabled() {
+            emit_active(
+                TelemetryName::RuntimeActivityActive,
+                Some(activity),
+                active,
+                &correlation,
+            );
+            emit_resource_sample(correlation.clone(), None);
+        }
         Self {
             activity,
             correlation,
@@ -751,13 +786,15 @@ impl RuntimeActivityGuard {
 impl Drop for RuntimeActivityGuard {
     fn drop(&mut self) {
         let active = activity_counter(self.activity).fetch_sub(1, Ordering::Relaxed) - 1;
-        emit_active(
-            TelemetryName::RuntimeActivityActive,
-            Some(self.activity),
-            active,
-            self.correlation.clone(),
-        );
-        emit_resource_sample(self.correlation.clone(), None);
+        if enabled() {
+            emit_active(
+                TelemetryName::RuntimeActivityActive,
+                Some(self.activity),
+                active,
+                &self.correlation,
+            );
+            emit_resource_sample(self.correlation.clone(), None);
+        }
     }
 }
 
@@ -769,31 +806,29 @@ pub struct ChildProcessGuard {
 impl ChildProcessGuard {
     pub fn start(pid: Option<u32>, correlation: Correlation) -> Self {
         let active = ACTIVE_CHILD_PROCESSES.fetch_add(1, Ordering::Relaxed) + 1;
-        emit_active(
-            TelemetryName::RuntimeActivityActive,
-            Some(RuntimeActivity::ChildProcess),
-            active,
-            correlation.clone(),
-        );
-        emit_child_process(pid, TelemetryOutcome::Started, correlation.clone());
-        emit_resource_sample(correlation.clone(), pid);
+        if enabled() {
+            emit_active(
+                TelemetryName::RuntimeActivityActive,
+                Some(RuntimeActivity::ChildProcess),
+                active,
+                &correlation,
+            );
+            emit_child_process(pid, TelemetryOutcome::Started, &correlation);
+            emit_resource_sample(correlation.clone(), pid);
+        }
         Self { pid, correlation }
     }
 }
 
 impl Drop for ChildProcessGuard {
     fn drop(&mut self) {
-        emit_child_process(
-            self.pid,
-            TelemetryOutcome::Stopped,
-            self.correlation.clone(),
-        );
+        emit_child_process(self.pid, TelemetryOutcome::Stopped, &self.correlation);
         let active = ACTIVE_CHILD_PROCESSES.fetch_sub(1, Ordering::Relaxed) - 1;
         emit_active(
             TelemetryName::RuntimeActivityActive,
             Some(RuntimeActivity::ChildProcess),
             active,
-            self.correlation.clone(),
+            &self.correlation,
         );
     }
 }
@@ -810,8 +845,11 @@ fn emit_active(
     name: TelemetryName,
     activity: Option<RuntimeActivity>,
     active: usize,
-    correlation: Correlation,
+    correlation: &Correlation,
 ) {
+    if !enabled() {
+        return;
+    }
     global_record(Observation {
         name,
         kind: TelemetryKind::Gauge,
@@ -825,11 +863,14 @@ fn emit_active(
         cpu_time_us: None,
         resident_memory_bytes: None,
         error: None,
-        correlation,
+        correlation: correlation.clone(),
     });
 }
 
-fn emit_child_process(pid: Option<u32>, outcome: TelemetryOutcome, correlation: Correlation) {
+fn emit_child_process(pid: Option<u32>, outcome: TelemetryOutcome, correlation: &Correlation) {
+    if !enabled() {
+        return;
+    }
     global_record(Observation {
         name: TelemetryName::ChildProcess,
         kind: TelemetryKind::Diagnostic,
@@ -843,7 +884,7 @@ fn emit_child_process(pid: Option<u32>, outcome: TelemetryOutcome, correlation: 
         cpu_time_us: None,
         resident_memory_bytes: None,
         error: None,
-        correlation,
+        correlation: correlation.clone(),
     });
 }
 
@@ -853,6 +894,9 @@ pub fn emit_http_duration(
     duration: Duration,
     outcome: TelemetryOutcome,
 ) {
+    if !enabled() {
+        return;
+    }
     global_record(Observation {
         name: TelemetryName::HttpRequestDuration,
         kind: TelemetryKind::Span,
@@ -882,3 +926,7 @@ fn bounded_route(value: &str) -> String {
         "/other".to_string()
     }
 }
+
+#[cfg(test)]
+#[path = "telemetry_fast_path_tests.rs"]
+mod fast_path_tests;

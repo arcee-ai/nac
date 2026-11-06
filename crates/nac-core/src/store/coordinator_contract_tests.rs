@@ -594,6 +594,7 @@ async fn queued_writer_keeps_weak_run_authority_instead_of_reviving_a_cancelled_
 #[tokio::test(flavor = "current_thread")]
 async fn queue_diagnostics_cover_commit_and_ack_without_exporting_data_or_error_text() {
     use crate::telemetry::{InMemoryExporter, RuntimeMetadata, TelemetryName, TelemetryRecorder};
+    let _serial = crate::telemetry::test_recorder_lock();
     let exporter = Arc::new(InMemoryExporter::default());
     let recorder = TelemetryRecorder::bounded(
         exporter.clone(),
