@@ -29,7 +29,7 @@ fn schema_44_heartbeats_upgrade_actual_43_atomically_and_preserve_all_supplier_r
         conn.execute("INSERT INTO peer_goal_starts(caller_session_id,request_id,target_session_id,request_json,response_json) VALUES('caller','start','target','canonical arguments','original admission')",[]).unwrap();
         // 44 adds only these tables/indexes. Removing them reconstructs the
         // verified supplier43 catalog, with actual41/42/43 receipts retained.
-        conn.execute_batch("DROP TABLE heartbeat_commands; DROP TABLE heartbeat_occurrences; DROP TABLE heartbeat_schedules; PRAGMA user_version=43;").unwrap();
+        conn.execute_batch("DROP TABLE heartbeat_fresh_destinations; DROP TABLE heartbeat_task_launches; DROP TABLE heartbeat_retained_commands; DROP TABLE heartbeat_retained_allowance; DROP TABLE heartbeat_commands; DROP TABLE heartbeat_occurrences; DROP TABLE heartbeat_schedules; PRAGMA user_version=43;").unwrap();
     }
     assert!(initialize_with_hooks(
         &path,

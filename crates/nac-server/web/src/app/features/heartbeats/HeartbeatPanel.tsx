@@ -100,7 +100,15 @@ function SessionHeartbeats({ sessionId }: { sessionId: string }) {
             <p role="alert">{heartbeat.inventory.error.message}</p>
           ) : null}
           {heartbeat.inventory.data?.map((item) =>
-            item.session_id !== sessionId ? (
+            item.session_id == null ? (
+              <Link
+                key={item.schedule_id}
+                to={`${routes.taskSchedules(item.binding.project_id ?? undefined)}?schedule=${encodeURIComponent(item.schedule_id)}`}
+                className="block p-2"
+              >
+                {item.spec.name} · {item.state} · Open project schedule
+              </Link>
+            ) : item.session_id !== sessionId ? (
               <Link
                 key={item.schedule_id}
                 to={routes.session(item.session_id, "heartbeats")}

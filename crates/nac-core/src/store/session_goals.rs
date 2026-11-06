@@ -1,6 +1,17 @@
 use super::goal_changes::{committed, GoalChangeKind};
 use super::*;
 
+/// A decoded goal edit contains no requested change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmptyGoalUpdate;
+
+impl std::fmt::Display for EmptyGoalUpdate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("goal update is empty")
+    }
+}
+impl std::error::Error for EmptyGoalUpdate {}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -402,7 +413,7 @@ pub(super) fn update_with_connection(
         .transpose()?;
     let budget = update.token_budget.map(validate_budget).transpose()?;
     if objective.is_none() && budget.is_none() && update.status.is_none() {
-        return Err(anyhow!("goal update is empty"));
+        return Err(EmptyGoalUpdate.into());
     }
     require_direct_session(connection, session_id)?;
     let current = load_with_connection(connection, session_id)?
@@ -930,6 +941,49 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac-session-goal-{label}-{}", uuid::Uuid::new_v4()))
             .join("store.db")
+    }
+
+    #[test]
+    fn empty_goal_update_is_typed_before_lookup_and_never_mutates_records() {
+        let path = test_path("empty-update");
+        initialize(&path).unwrap();
+        direct_session(&path, "direct");
+        let goal = create_session_goal(&path, "direct", "retain work", Some(500), None).unwrap();
+        for id in [
+            goal.goal_id.as_str(),
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            let error = update_session_goal_by_user(
+                &path,
+                "direct",
+                id,
+                goal.version,
+                UserGoalUpdate::default(),
+            )
+            .unwrap_err();
+            assert!(error.downcast_ref::<EmptyGoalUpdate>().is_some());
+            assert_eq!(error.to_string(), "goal update is empty");
+            assert_eq!(
+                load_session_goal(&path, "direct").unwrap(),
+                Some(goal.clone())
+            );
+            assert!(list_session_inbox(&path, "direct").unwrap().is_empty());
+        }
+        let cleared = update_session_goal_by_user(
+            &path,
+            "direct",
+            &goal.goal_id,
+            goal.version,
+            UserGoalUpdate {
+                token_budget: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.token_budget, None);
+        assert_eq!(cleared.objective, goal.objective);
+        assert_eq!(cleared.version, goal.version + 1);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

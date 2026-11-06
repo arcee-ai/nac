@@ -23,6 +23,7 @@ export declare const routes: {
     session: (sessionId: string, panel?: SessionPanel) => string;
     /** Redirects to the project's newest session, or offers to start one. */
     project: (projectId: string) => string;
+    taskSchedules: (projectId?: string) => string;
     designPreview: () => string;
 };
 /**

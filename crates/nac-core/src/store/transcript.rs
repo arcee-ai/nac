@@ -423,6 +423,7 @@ fn mark_inbox_item_delivered(
     item_id: i64,
     run_id: &str,
     expected_content: &str,
+    expected_version: Option<i64>,
 ) -> Result<()> {
     super::task_questions::consume_question_answer(transaction, session_id, item_id, run_id)?;
     let now = now_utc();
@@ -431,8 +432,15 @@ fn mark_inbox_item_delivered(
          SET status = 'delivered', delivered_run_id = ?1, delivered_at = ?2,
              updated_at = ?2, version = version + 1
          WHERE session_id = ?3 AND id = ?4 AND status = 'pending'
-           AND content = ?5",
-        params![run_id, now, session_id, item_id, expected_content],
+           AND content = ?5 AND (?6 IS NULL OR version = ?6)",
+        params![
+            run_id,
+            now,
+            session_id,
+            item_id,
+            expected_content,
+            expected_version
+        ],
     )?;
     if changed != 1 {
         return Err(anyhow!(
@@ -648,7 +656,50 @@ impl TranscriptLogWriter {
         }, call |command| command.writer.append_inbox_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, command.inbox_item_id),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
-        self.append_run_prompt_inner(session_id, idx, message, run_id, Some(inbox_item_id), None)
+        let Message::User { content } = message else {
+            anyhow::bail!("a run prompt must be a user transcript message");
+        };
+        self.append_run_prompt_inner(
+            session_id,
+            idx,
+            message,
+            run_id,
+            Some((inbox_item_id, content, None)),
+            None,
+        )
+    }
+
+    /// Persist expanded model text while delivering only the exact raw inbox
+    /// identity captured by admission. No delivery effect occurs before commit.
+    pub(crate) fn append_admitted_inbox_run_prompt(
+        &self,
+        session_id: &str,
+        idx: u64,
+        message: &Message,
+        run_id: &str,
+        inbox: &super::AdmittedInboxPrompt,
+    ) -> Result<()> {
+        coordinate_writer!(self, Result<()>, {
+            session_id: String = session_id.to_owned(),
+            idx: u64 = idx,
+            message: Message = message.clone(),
+            run_id: String = run_id.to_owned(),
+            inbox: super::AdmittedInboxPrompt = inbox.clone(),
+        }, call |command| command.writer.append_admitted_inbox_run_prompt(&command.session_id, command.idx, &command.message, &command.run_id, &command.inbox),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        anyhow::ensure!(
+            inbox.session_id == session_id,
+            "admitted inbox belongs to another session"
+        );
+        self.append_run_prompt_inner(
+            session_id,
+            idx,
+            message,
+            run_id,
+            Some((inbox.id, &inbox.content, Some(inbox.version))),
+            None,
+        )
     }
 
     fn append_run_prompt_inner(
@@ -657,13 +708,24 @@ impl TranscriptLogWriter {
         idx: u64,
         message: &Message,
         run_id: &str,
-        inbox_item_id: Option<i64>,
+        inbox: Option<(i64, &str, Option<i64>)>,
         review_intent: Option<&str>,
     ) -> Result<()> {
-        let Message::User { content } = message else {
+        let Message::User { .. } = message else {
             anyhow::bail!("a run prompt must be a user transcript message");
         };
-        let identity = format!("prompt:{run_id}:{idx}:{inbox_item_id:?}");
+        let inbox_item_id = inbox.map(|(id, _, _)| id);
+        let mut identity = format!("prompt:{run_id}:{idx}:{inbox_item_id:?}");
+        if let Some((_, expected_content, Some(version))) = inbox {
+            use sha2::{Digest, Sha256};
+            // An uncertain-commit replay retains both raw authority and model
+            // payload. Reusing this run/index with a different revision or raw
+            // input cannot adopt the original receipt.
+            identity.push_str(&format!(
+                ":{version}:{:x}",
+                Sha256::digest(expected_content.as_bytes())
+            ));
+        }
         self.commit_append(
             session_id,
             &identity,
@@ -673,16 +735,23 @@ impl TranscriptLogWriter {
             |transaction| {
                 let submitted_message_id = transaction.last_insert_rowid();
                 replace_with_active_run(transaction, session_id, run_id, submitted_message_id)?;
-                if let Some(item_id) = inbox_item_id {
+                if let Some((item_id, expected_content, expected_version)) = inbox {
                     super::heartbeat_prompt_committed(transaction, session_id, item_id, run_id)?;
                     super::transcript_selection::stamp_inbox_attribution(
                         transaction,
                         session_id,
                         item_id,
                         idx,
-                        content,
+                        expected_content,
                     )?;
-                    mark_inbox_item_delivered(transaction, session_id, item_id, run_id, content)?;
+                    mark_inbox_item_delivered(
+                        transaction,
+                        session_id,
+                        item_id,
+                        run_id,
+                        expected_content,
+                        expected_version,
+                    )?;
                 }
                 if let Some(text) = review_intent {
                     super::record_review_intent(transaction, session_id, text)?;
@@ -748,7 +817,8 @@ impl TranscriptLogWriter {
                 session_id,
                 record.id,
                 run_id,
-                &record.content
+                &record.content,
+                None
             )?;
         }
         let ids = records.iter().map(|r| r.id).collect::<Vec<_>>();

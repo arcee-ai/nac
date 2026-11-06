@@ -34,7 +34,10 @@ export function createAttentionStore(_storage?: Pick<Storage, "getItem" | "setIt
     }
     setState({ flagged, acknowledgements });
   }
-  function clearAttention(id: string): void {
+  function clearAttention(id: string, throughSequence?: number): void {
+    if (throughSequence !== undefined) {
+      resultsThrough[id] = Math.max(resultsThrough[id] ?? 0, throughSequence);
+    }
     clearAttentionAll([id]);
   }
 

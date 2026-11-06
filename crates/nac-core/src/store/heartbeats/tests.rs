@@ -82,7 +82,7 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
-fn spec() -> HeartbeatSpec {
+pub(super) fn spec() -> HeartbeatSpec {
     HeartbeatSpec {
         name: "Job check".into(),
         instructions: "Check the authorized Local job result.".into(),
@@ -533,3 +533,85 @@ mod acceptance;
 
 mod question_settlement;
 mod questions;
+
+#[test]
+fn heartbeat_settlement_exact_runtime_run_preserves_other_chat_and_commits_once() {
+    let f = Fixture::new();
+    let schedule = f.create();
+    let other = control_heartbeat(
+        &f.path,
+        "other",
+        &uuid::Uuid::new_v4().to_string(),
+        &HeartbeatAction::Create { spec: spec() },
+        "Check the other chat's job every minute.",
+        f.binding(),
+        1_001,
+    )
+    .unwrap()
+    .schedule;
+    let pending = materialize_heartbeats(&f.path, 61_000)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.schedule_id == schedule.schedule_id)
+        .unwrap();
+    let active = f.admit(&pending, 61_000);
+    let before = list_heartbeats(&f.path, None).unwrap();
+    let history = heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap();
+    for (session, run) in [
+        ("other", active.run_id.as_deref().unwrap()),
+        ("direct", "wrong-run"),
+    ] {
+        let mut conn = open_runtime_connection(&f.path).unwrap();
+        let tx = conn.transaction().unwrap();
+        settle_heartbeat_with_connection(
+            &tx,
+            session,
+            run,
+            HeartbeatOutcome::Failed,
+            Some(99),
+            99,
+            62_000,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(list_heartbeats(&f.path, None).unwrap(), before);
+        assert_eq!(
+            heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap(),
+            history
+        );
+    }
+    {
+        let mut conn = open_runtime_connection(&f.path).unwrap();
+        let tx = conn.transaction().unwrap();
+        settle_heartbeat_with_connection(
+            &tx,
+            "direct",
+            active.run_id.as_deref().unwrap(),
+            HeartbeatOutcome::Interrupted,
+            Some(3),
+            10,
+            63_000,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let settled = heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap();
+    assert_eq!(settled[0].state, HeartbeatOccurrenceState::Settled);
+    assert_eq!(settled[0].outcome, Some(HeartbeatOutcome::Interrupted));
+    assert_eq!(
+        read_heartbeat(&f.path, "direct", &schedule.schedule_id)
+            .unwrap()
+            .tokens_used,
+        3
+    );
+    assert_eq!(
+        read_heartbeat(&f.path, "other", &other.schedule_id).unwrap(),
+        other
+    );
+    reconcile_heartbeat_occurrences(&f.path, "direct", 64_000).unwrap();
+    assert_eq!(
+        heartbeat_history(&f.path, "direct", &schedule.schedule_id).unwrap(),
+        settled
+    );
+    assert!(read_heartbeat(&f.path, "other", &schedule.schedule_id).is_err());
+}

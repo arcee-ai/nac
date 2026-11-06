@@ -4,12 +4,48 @@ fn occurrence(conn: &Connection, session: &str, id: &str) -> Result<HeartbeatOcc
     conn.query_row(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE session_id=?1 AND occurrence_id=?2"),params![session,id],occurrence_row).optional()?.context("heartbeat occurrence was not found")
 }
 
-fn suspend(conn: &Connection, id: &str, reason: &str, now: i64) -> Result<()> {
+pub(super) fn suspend(conn: &Connection, id: &str, reason: &str, now: i64) -> Result<()> {
     // A new review cause invalidates any earlier question-only goal release.
     conn.execute("UPDATE heartbeat_schedules SET binding_json=json_remove(binding_json,'$._goal_question_gate') WHERE schedule_id=?1", [id])?;
     conn.execute("UPDATE heartbeat_schedules SET state='suspended',reason=?2,updated_at_ms=?3 WHERE schedule_id=?1 AND state='active'",params![id,reason,now])?;
     conn.execute("UPDATE heartbeat_occurrences SET state='withdrawn',outcome='needs_human_action',evidence=?2,settled_at_ms=?3,expected_revision=expected_revision+1,settlement_sequence=?4 WHERE schedule_id=?1 AND state='pending'",params![id,reason,now,next_settlement_sequence(conn)?])?;
     prune_history(conn, id)
+}
+
+/// All schedule destinations share host concurrency and automatic-start rate.
+/// Call under the same immediate transaction that accepts the occurrence.
+pub(super) fn admission_capacity(
+    conn: &Connection,
+    schedule_id: &str,
+    now_ms: i64,
+) -> Result<bool> {
+    let active: i64 = conn.query_row(
+        "SELECT count(*) FROM heartbeat_occurrences WHERE state='admitted'",
+        [],
+        |row| row.get(0),
+    )?;
+    if active >= MAX_HEARTBEAT_CONCURRENCY || active_occurrence(conn, schedule_id)?.is_some() {
+        return Ok(false);
+    }
+    let latest: Option<i64> = conn.query_row(
+        "SELECT max(started_at_ms) FROM heartbeat_occurrences",
+        [],
+        |row| row.get(0),
+    )?;
+    if latest.is_some_and(|last| now_ms < last) {
+        return Ok(false);
+    }
+    let recent: i64 = conn.query_row(
+        "SELECT count(*) FROM heartbeat_occurrences WHERE started_at_ms>?1",
+        [now_ms.saturating_sub(60_000)],
+        |row| row.get(0),
+    )?;
+    let last: Option<i64> = conn.query_row(
+        "SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1",
+        [schedule_id],
+        |row| row.get(0),
+    )?;
+    Ok(recent < 60 && last.is_none_or(|last| now_ms.saturating_sub(last) >= 15_000))
 }
 
 coordinated_command! {
@@ -37,15 +73,19 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-fn goal_gate(conn: &Connection, schedule: &HeartbeatSchedule) -> Result<Option<String>> {
+pub(super) fn goal_gate(
+    conn: &Connection,
+    spec: &HeartbeatSpec,
+    session: &str,
+) -> Result<Option<String>> {
     let goal: Option<(String, String)> = conn
         .query_row(
             "SELECT goal_id,status FROM session_goals WHERE session_id=?1",
-            [&schedule.session_id],
+            [session],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    Ok(match (schedule.spec.goal_id.as_deref(),goal) {
+    Ok(match (spec.goal_id.as_deref(),goal) {
         (Some(expected),Some((id,status))) if id==expected && status=="active" => None,
         (Some(_),_) => Some("The bound goal is missing, replaced or inactive; review the heartbeat.".into()),
         (None,Some((_,status))) if status!="complete" => Some("An unfinished goal owns this chat's continuation; review the heartbeat's exact goal binding.".into()),
@@ -62,7 +102,12 @@ pub(crate) fn admit_heartbeat(path:&Path,session_id:&str,occurrence_id:&str,expe
     let mut conn=open_runtime_connection(path)?;
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let pending=occurrence(&tx,session_id,occurrence_id)?;
-    let schedule=load_schedule(&tx,session_id,&pending.schedule_id)?;
+    let schedule=load_schedule_by_id(&tx,&pending.schedule_id)?;
+    if schedule.binding.fresh_task.is_some() && schedule.session_id.is_none() {
+        let admitted=fresh_execution::admit_initial_run(&tx,&pending,session_id,expected_revision,run_id,generation,execution_cwd,now_ms)?;
+        tx.commit()?;
+        return Ok(admitted);
+    }
     ensure!(pending.state==HeartbeatOccurrenceState::Pending && pending.revision==expected_revision,"heartbeat occurrence no longer pending at expected revision");
     ensure!(schedule.state==HeartbeatState::Active && schedule.version==pending.schedule_version,"heartbeat control invalidated this occurrence");
     let binding=current_binding(&tx,session_id);
@@ -72,7 +117,7 @@ pub(crate) fn admit_heartbeat(path:&Path,session_id:&str,occurrence_id:&str,expe
         Some("The heartbeat occurrence allowance is exhausted.".into())
     } else if schedule.spec.token_allowance.is_some_and(|limit|schedule.tokens_used>=limit || schedule.usage_unknown) {
         Some("The heartbeat usage allowance is exhausted or usage is unknown.".into())
-    } else {goal_gate(&tx,&schedule)?};
+    } else {goal_gate(&tx,&schedule.spec,session_id)?};
     if let Some(reason)=reason { suspend(&tx,&schedule.schedule_id,&reason,now_ms)?;tx.commit()?;return Ok(None); }
     // Share the canonical question owner inside this admission transaction.
     // Deferral writes no receipt, retry count or goal authority; the same
@@ -82,17 +127,11 @@ pub(crate) fn admit_heartbeat(path:&Path,session_id:&str,occurrence_id:&str,expe
     }
     let human_pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM session_inbox WHERE session_id=?1 AND status='pending')",[session_id],|row|row.get(0))?;
     if human_pending { return Ok(None); }
-    let active:i64=tx.query_row("SELECT count(*) FROM heartbeat_occurrences WHERE state='admitted'",[],|row|row.get(0))?;
-    if active>=MAX_HEARTBEAT_CONCURRENCY || active_occurrence(&tx,&schedule.schedule_id)?.is_some() {return Ok(None);}
     // Includes manual Run now. No route can turn an active schedule into a
     // high-frequency executor, and stored clock regression cannot reset rate.
     // Defer the whole host on a backward clock rather than counting truncated
     // future history. Pruning retains each schedule's latest admitted start.
-    let host_latest:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences",[],|row|row.get(0))?;
-    if host_latest.is_some_and(|last|now_ms<last) {return Ok(None);}
-    let recent:i64=tx.query_row("SELECT count(*) FROM heartbeat_occurrences WHERE started_at_ms>?1",[now_ms.saturating_sub(60_000)],|row|row.get(0))?;
-    let last:Option<i64>=tx.query_row("SELECT max(started_at_ms) FROM heartbeat_occurrences WHERE schedule_id=?1",[&schedule.schedule_id],|row|row.get(0))?;
-    if recent>=60 || last.is_some_and(|last|now_ms.saturating_sub(last)<15_000) {return Ok(None);}
+    if !admission_capacity(&tx,&schedule.schedule_id,now_ms)? {return Ok(None);}
     let mut bound_goal = None;
     if let Some(goal_id)=schedule.spec.goal_id.as_deref() {
         let unavailable:bool=tx.query_row("SELECT accounting_run_id IS NOT NULL OR coalesce(next_attempt_at_epoch_ms,0)>?3 OR (token_budget IS NOT NULL AND tokens_used>=token_budget) FROM session_goals WHERE session_id=?1 AND goal_id=?2",params![session_id,goal_id,now_ms],|row|row.get(0))?;
@@ -133,10 +172,10 @@ pub(crate) fn heartbeat_prompt_committed(
     inbox: i64,
     run: &str,
 ) -> Result<()> {
-    let bound:Option<(String,String)>=conn.query_row("SELECT state,run_id FROM heartbeat_occurrences WHERE session_id=?1 AND inbox_item_id=?2",params![session,inbox],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
-    if let Some((state, expected)) = bound {
+    let bound:Option<(String,String,Option<i64>)>=conn.query_row("SELECT state,run_id,inbox_item_id FROM heartbeat_occurrences WHERE session_id=?1 AND (inbox_item_id=?2 OR run_id=?3)",params![session,inbox,run],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+    if let Some((state, expected, expected_inbox)) = bound {
         ensure!(
-            state == "admitted" && expected == run,
+            state == "admitted" && expected == run && expected_inbox == Some(inbox),
             "heartbeat prompt does not match its exact admitted occurrence"
         );
     }
@@ -209,9 +248,9 @@ pub(crate) fn settle_heartbeat_with_connection(
     cancellation::consume_stop_request(conn, &active)?;
     conn.execute("UPDATE heartbeat_schedules SET tokens_used=min(9223372036854775807-tokens_used,?2)+tokens_used,time_used_ms=min(9223372036854775807-time_used_ms,?3)+time_used_ms,usage_unknown=max(usage_unknown,?4),updated_at_ms=?5 WHERE schedule_id=?1",params![active.schedule_id,tokens.unwrap_or(0).max(0),duration_ms.max(0),tokens.is_none(),now])?;
     if outcome == HeartbeatOutcome::Unchanged {
-        conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention_through_updated_at',(SELECT updated_at FROM sessions WHERE session_id=?2),'$._attention_through_run_revision',(SELECT coalesce(max(id),0) FROM session_run_outcomes WHERE session_id=?2)) WHERE schedule_id=?1",params![active.schedule_id,session])?;
+        conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention_through_updated_at',(SELECT updated_at FROM sessions WHERE session_id=?2),'$._attention_through_run_revision',(SELECT coalesce(max(id),0) FROM session_run_outcomes WHERE session_id=?2)) WHERE schedule_id=?1 AND session_id=?2",params![active.schedule_id,session])?;
     }
-    let before_suspend = load_schedule(conn, session, &active.schedule_id)?;
+    let before_suspend = load_schedule_by_id(conn, &active.schedule_id)?;
     let question_only = question.as_ref().filter(|_| {
         before_suspend.state == HeartbeatState::Active
             && before_suspend.version == active.schedule_version
@@ -237,7 +276,7 @@ pub(crate) fn settle_heartbeat_with_connection(
     if let Some(question) = question_only {
         question_gate::remember(conn, &active, question)?;
     }
-    let schedule = load_schedule(conn, session, &active.schedule_id)?;
+    let schedule = load_schedule_by_id(conn, &active.schedule_id)?;
     if schedule.starts >= schedule.spec.max_occurrences
         || schedule
             .spec
@@ -251,6 +290,7 @@ pub(crate) fn settle_heartbeat_with_connection(
             now,
         )?;
     }
+    fresh_execution::retain_fresh_initial_outcome(conn, &active)?;
     prune_history(conn, &active.schedule_id)?;
     Ok(())
 }
@@ -293,7 +333,7 @@ coordinated_command! {
 pub fn reconcile_heartbeat_occurrences(path:&Path,session_id:&str,now_ms:i64)->Result<()> {
     let mut conn=open_runtime_connection(path)?;
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let runs={let mut query=tx.prepare("SELECT run_id,started_at_ms FROM heartbeat_occurrences WHERE session_id=?1 AND state='admitted'")?;
+    let runs={let mut query=tx.prepare("SELECT run_id,started_at_ms FROM heartbeat_occurrences WHERE session_id=?1 AND state='admitted' AND run_id IS NOT NULL")?;
         let rows=query.query_map([session_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
         rows};
     for (run,started) in runs {

@@ -9,6 +9,8 @@ impl Agent {
     ) {
         self.tool_runtime.heartbeat_execution = occurrence.is_some();
         self.tool_runtime.heartbeat_goal_id = occurrence.and_then(|o| o.spec.goal_id.clone());
+        self.tool_runtime.heartbeat_schedule = occurrence
+            .map(|occurrence| (occurrence.schedule_id.clone(), occurrence.schedule_version));
     }
     pub(super) async fn capture_heartbeat_request(
         &mut self,

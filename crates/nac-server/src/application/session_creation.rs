@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use nac_core::{
     light_model::{LightModelError, LightModelSettings},
     model::provider_for_model,
@@ -255,7 +255,8 @@ impl<'a> SessionCreationApplication<'a> {
         &self,
         request: SessionCreationCommand,
     ) -> Result<SessionFrontendSnapshot> {
-        self.create_prepared_session(request, None, None).await
+        self.create_prepared_session(request, None, None, None)
+            .await
     }
 
     pub(crate) async fn create_retained_task_session(
@@ -276,7 +277,7 @@ impl<'a> SessionCreationApplication<'a> {
         if let Some(native) = &native {
             apply_native_settings(&mut request, native);
         }
-        self.create_prepared_session(request, Some(launch), None)
+        self.create_prepared_session(request, Some(launch), None, None)
             .await
     }
 
@@ -290,7 +291,39 @@ impl<'a> SessionCreationApplication<'a> {
             ..Default::default()
         };
         apply_native_settings(&mut request, &launch);
-        self.create_prepared_session(request, None, Some(launch))
+        self.create_prepared_session(request, None, Some(launch), None)
+            .await
+    }
+
+    pub(crate) async fn create_scheduled_task_session(
+        &self,
+        retained: Option<nac_core::store::TaskLaunchRecord>,
+        scheduled: nac_core::store::PreparedFreshTaskLaunch,
+    ) -> Result<SessionFrontendSnapshot> {
+        anyhow::ensure!(
+            self.manager.managed_host().is_none(),
+            "scheduled tasks require an unmanaged Local host"
+        );
+        let destination = &scheduled.receipt().destination;
+        let mut request = SessionCreationCommand {
+            behavior: SessionBehavior::Direct,
+            project_id: Some(destination.project_id.clone()),
+            model: destination
+                .model
+                .clone()
+                .map(Field::Set)
+                .unwrap_or(Field::Unchanged),
+            reasoning_effort: destination
+                .reasoning_effort
+                .clone()
+                .map(Field::Set)
+                .unwrap_or(Field::Unchanged),
+            ..SessionCreationCommand::default()
+        };
+        if let Some(defaults) = scheduled.model_defaults() {
+            apply_project_model_defaults(&mut request, defaults.clone());
+        }
+        self.create_prepared_session(request, retained, None, Some(scheduled))
             .await
     }
 
@@ -299,7 +332,12 @@ impl<'a> SessionCreationApplication<'a> {
         mut request: SessionCreationCommand,
         retained: Option<nac_core::store::TaskLaunchRecord>,
         native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
+        scheduled: Option<nac_core::store::PreparedFreshTaskLaunch>,
     ) -> Result<SessionFrontendSnapshot> {
+        anyhow::ensure!(
+            native.is_none() || (retained.is_none() && scheduled.is_none()),
+            "conflict: native and scheduled creation ownership are mutually exclusive"
+        );
         let first_chat_project_id = if request.first_chat {
             Some(
                 request
@@ -343,12 +381,20 @@ impl<'a> SessionCreationApplication<'a> {
                     "invalid request: project_id cannot be combined with cwd or ssh location fields"
                 ));
             }
-            if let Some(defaults) = context.default_model_config {
-                apply_project_model_defaults(&mut request, defaults);
-            } else if let Some(sibling) =
-                newest_project_session(&self.manager.inner.store_path, &context.project.project_id)
+            // A reserved occurrence already owns its model snapshot, including
+            // absent optional defaults. Only an unpinned launch inherits here.
+            if !scheduled
+                .as_ref()
+                .is_some_and(|scheduled| scheduled.model_defaults().is_some())
             {
-                apply_sibling_model_defaults(&mut request, sibling);
+                if let Some(defaults) = context.default_model_config {
+                    apply_project_model_defaults(&mut request, defaults);
+                } else if let Some(sibling) = newest_project_session(
+                    &self.manager.inner.store_path,
+                    &context.project.project_id,
+                ) {
+                    apply_sibling_model_defaults(&mut request, sibling);
+                }
             }
             let project = context.project;
             let ssh = runtime::SshOptions {
@@ -399,6 +445,22 @@ impl<'a> SessionCreationApplication<'a> {
             location.config_cwd.clone_from(&launch.source_cwd);
         }
         let config = NacConfig::load_from_cwd(&location.config_cwd)?;
+        if let Some(scheduled) = &scheduled {
+            nac_core::permissions::authorize_local_scheduled_project(
+                &scheduled.receipt().destination.project_id,
+                &config.permissions.rules,
+            )?;
+            if retained.is_none() {
+                location.workspace_cwd = PathBuf::from(
+                    scheduled
+                        .receipt()
+                        .binding
+                        .execution_cwd
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("scheduled shared directory is unavailable"))?,
+                );
+            }
+        }
         if let Some(launch) = &retained {
             anyhow::ensure!(
                 location.ssh.host().is_none() && !sandbox_requested(&request.sandbox),
@@ -470,7 +532,7 @@ impl<'a> SessionCreationApplication<'a> {
             sandbox: sandbox_options(request.sandbox),
             ssh: location.ssh,
         };
-        if retained.is_some() || native.is_some() {
+        if retained.is_some() || native.is_some() || scheduled.is_some() {
             self.manager.inner.task_preparations.git.check_running()?;
         }
         let preparation = async {
@@ -478,6 +540,8 @@ impl<'a> SessionCreationApplication<'a> {
                 runtime::prepare_retained_task_run_config(options, &config, launch).await
             } else if let Some(launch) = &native {
                 runtime::prepare_native_task_run_config(options, &config, launch).await
+            } else if let Some(scheduled) = &scheduled {
+                runtime::prepare_scheduled_shared_task_run_config(options, &config, scheduled).await
             } else {
                 runtime::prepare_run_config_for_project_with_behavior(
                     options, &config, project_id, behavior,
@@ -496,6 +560,53 @@ impl<'a> SessionCreationApplication<'a> {
                 _ => error,
             }
         })?;
+        if let Some(scheduled) = scheduled
+            .as_ref()
+            .filter(|scheduled| scheduled.model_defaults().is_none())
+        {
+            let pin = async {
+                let snapshot = prepared
+                    .snapshot()
+                    .ok_or_else(|| anyhow!("scheduled prepared metadata is unavailable"))?;
+                let defaults = ModelConfigurationRecord {
+                    config_id: format!("scheduled-defaults:{}", scheduled.receipt().occurrence_id),
+                    name: "Resolved destination defaults".into(),
+                    backend: snapshot.backend.as_str().into(),
+                    model: snapshot.model.clone(),
+                    base_url: snapshot.base_url.clone(),
+                    allow_insecure_http: snapshot.allow_insecure_http,
+                    api_key_env: snapshot.api_key_env.clone(),
+                    reasoning_effort: snapshot
+                        .reasoning_effort
+                        .map(|effort| effort.as_str().into()),
+                    extra_headers: snapshot.extra_headers.clone(),
+                    orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
+                    initial_prompt: None,
+                    light_model: snapshot.light_model.clone(),
+                    created_at: snapshot.created_at.clone(),
+                    updated_at: snapshot.updated_at.clone(),
+                };
+                let path = self.manager.inner.store_path.clone();
+                let occurrence = scheduled.receipt().occurrence_id.clone();
+                nac_core::store::spawn_blocking_store_caller(move || {
+                    nac_core::store::pin_fresh_heartbeat_model_defaults(
+                        &path,
+                        &occurrence,
+                        defaults,
+                    )
+                })
+                .await??;
+                Ok::<_, anyhow::Error>(())
+            }
+            .await;
+            if let Err(error) = pin {
+                prepared
+                    .rollback()
+                    .await
+                    .context("scheduled preparation rollback failed")?;
+                return Err(error);
+            }
+        }
         if let Err(error) = self
             .manager
             .attach_managed_command_environment(prepared.run_config_mut())
@@ -530,7 +641,7 @@ impl<'a> SessionCreationApplication<'a> {
                     gate.resume.notified().await;
                 }
             }
-            if retained.is_some() || native.is_some() {
+            if retained.is_some() || native.is_some() || scheduled.is_some() {
                 self.manager.inner.task_preparations.git.check_running()?;
             }
             Ok::<_, anyhow::Error>(service)
@@ -556,17 +667,25 @@ impl<'a> SessionCreationApplication<'a> {
                     )
                     .await?
             }
-            None => match &native {
-                Some(launch) => {
+            None => {
+                if let Some(launch) = &native {
                     service
                         .persist_new_native_task_session_with_snapshot(
                             resources,
                             launch.request.request_id.clone(),
                         )
                         .await?
+                } else if let Some(scheduled) = &scheduled {
+                    service
+                        .persist_new_task_session_with_snapshot(
+                            resources,
+                            scheduled.receipt().request.request_id.clone(),
+                        )
+                        .await?
+                } else {
+                    service.persist_new_session_with_snapshot(resources).await?
                 }
-                None => service.persist_new_session_with_snapshot(resources).await?,
-            },
+            }
         };
         #[cfg(test)]
         if retained.is_some() || native.is_some() {
@@ -601,7 +720,7 @@ impl<'a> SessionCreationApplication<'a> {
                     .or_insert_with(|| Arc::new(service)),
             )
         };
-        if (retained.is_some() || native.is_some())
+        if (retained.is_some() || native.is_some() || scheduled.is_some())
             && self
                 .manager
                 .inner

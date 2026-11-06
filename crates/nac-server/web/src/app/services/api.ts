@@ -3,6 +3,10 @@ import type {
   HeartbeatInspection,
   HeartbeatReceipt,
   HeartbeatControlRequest,
+  FreshTaskScheduleControlRequest,
+  FreshTaskScheduleInspection,
+  FreshTaskRetainedAllowanceChange,
+  FreshTaskRetainedAllowanceReceipt,
 } from "@/app/types/api";
 // Standalone compatibility facade; feature owners obtain their API from runtime context.
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
@@ -25,6 +29,20 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     requestId: string,
     expectedRevision: number,
   ): Promise<QuestionRecord>;
+  changeFreshTaskRetainedAllowance(
+    projectId: string,
+    request: FreshTaskRetainedAllowanceChange,
+  ): Promise<FreshTaskRetainedAllowanceReceipt>;
+  freshTaskScheduleInventory(projectId: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
+  freshTaskScheduleInspection(
+    projectId: string,
+    scheduleId: string,
+    signal?: AbortSignal,
+  ): Promise<FreshTaskScheduleInspection>;
+  controlFreshTaskSchedule(
+    projectId: string,
+    request: FreshTaskScheduleControlRequest,
+  ): Promise<HeartbeatReceipt>;
   sessionIntegrations(id: string, signal?: AbortSignal): Promise<SessionMcpRefreshStatus>;
   refreshSessionIntegrations(
     id: string,
@@ -67,6 +85,30 @@ export function createNativeApi(
         "POST",
         `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(questionId)}/cancel`,
         { body: { expected_revision: revision } },
+      ),
+    changeFreshTaskRetainedAllowance: (projectId, body) =>
+      request<FreshTaskRetainedAllowanceReceipt>(
+        "POST",
+        `/projects/${encodeURIComponent(projectId)}/task-schedules/retained-allowance`,
+        { body },
+      ),
+    freshTaskScheduleInventory: (projectId, signal) =>
+      request<HeartbeatSchedule[]>(
+        "GET",
+        `/projects/${encodeURIComponent(projectId)}/task-schedules`,
+        { signal },
+      ),
+    freshTaskScheduleInspection: (projectId, scheduleId, signal) =>
+      request<FreshTaskScheduleInspection>(
+        "GET",
+        `/projects/${encodeURIComponent(projectId)}/task-schedules/${encodeURIComponent(scheduleId)}`,
+        { signal },
+      ),
+    controlFreshTaskSchedule: (projectId, body) =>
+      request<HeartbeatReceipt>(
+        "POST",
+        `/projects/${encodeURIComponent(projectId)}/task-schedules/control`,
+        { body },
       ),
     sessionIntegrations: (id, signal) =>
       request<SessionMcpRefreshStatus>("GET", `/sessions/${encodeURIComponent(id)}/integrations`, {

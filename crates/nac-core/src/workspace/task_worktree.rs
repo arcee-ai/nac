@@ -273,6 +273,30 @@ pub fn authorize_human_preparation(
     config: &crate::runtime::NacConfig,
     store_path: &Path,
 ) -> Result<()> {
+    authorize_preparation(launch, config, store_path, true)
+}
+
+/// A saved schedule authorizes its purpose, not human product invocation.
+/// Preparation has no interactive approver; Ask therefore fails closed.
+pub fn authorize_scheduled_preparation(
+    launch: &TaskLaunchRecord,
+    config: &crate::runtime::NacConfig,
+    store_path: &Path,
+) -> Result<()> {
+    crate::permissions::authorize_local_scheduled_project(
+        &launch.request.project_id,
+        &config.permissions.rules,
+    )?;
+    authorize_preparation(launch, config, store_path, false)
+        .map_err(|_| crate::permissions::ScheduledProjectAdmissionRequired.into())
+}
+
+fn authorize_preparation(
+    launch: &TaskLaunchRecord,
+    config: &crate::runtime::NacConfig,
+    store_path: &Path,
+    human_invocation: bool,
+) -> Result<()> {
     use crate::permissions::{PermissionBackend, PermissionEffect, PermissionPolicy};
     let backend = crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: launch.source.source_cwd.clone(),
@@ -288,6 +312,10 @@ pub fn authorize_human_preparation(
             .hard_denial
             .as_deref()
             .unwrap_or("configured policy")
+    );
+    anyhow::ensure!(
+        human_invocation || decision.effect == PermissionEffect::Allow,
+        "scheduled task workspace preparation requires human action: unattended Ask fails closed"
     );
     Ok(())
 }

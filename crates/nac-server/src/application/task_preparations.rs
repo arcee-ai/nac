@@ -16,6 +16,9 @@ pub(crate) struct TaskPreparations {
     pub(crate) source_resolution:
         std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
     #[cfg(test)]
+    pub(crate) scheduled_handoff:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
     pub(crate) initial_input_wake:
         std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
 }

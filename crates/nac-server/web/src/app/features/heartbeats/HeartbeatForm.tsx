@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button, ButtonVariant, Input, TextArea } from "@/app/atoms";
 import type { HeartbeatSpec } from "@/app/types/api";
 
@@ -19,11 +19,15 @@ export function HeartbeatForm({
   disabled,
   onSubmit,
   onCancel,
+  freshTasks = false,
+  children,
 }: {
   initial?: HeartbeatSpec;
   disabled: boolean;
   onSubmit: (spec: HeartbeatSpec) => void;
   onCancel: () => void;
+  freshTasks?: boolean;
+  children?: ReactNode;
 }) {
   const [spec, setSpec] = useState<HeartbeatSpec>(initial ?? defaults);
   const [skillsText, setSkillsText] = useState((initial?.skills ?? []).join(", "));
@@ -31,15 +35,24 @@ export function HeartbeatForm({
     setSpec((current) => ({ ...current, ...patch }));
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSubmit(spec);
+    onSubmit(freshTasks ? { ...spec, goal_id: null } : spec);
   };
   return (
     <form
       onSubmit={submit}
       className="flex flex-col gap-4"
-      aria-label={initial ? "Edit heartbeat" : "Create heartbeat"}
+      aria-label={
+        freshTasks
+          ? initial
+            ? "Edit interval task schedule"
+            : "Create interval task schedule"
+          : initial
+            ? "Edit heartbeat"
+            : "Create heartbeat"
+      }
     >
       <fieldset disabled={disabled} className="flex flex-col gap-4">
+        {children}
         <Input
           label="Name"
           aria-label="Heartbeat name"
@@ -102,8 +115,8 @@ export function HeartbeatForm({
           }
         />
         <Input
-          label="Maximum checks"
-          aria-label="Maximum heartbeat checks"
+          label={freshTasks ? "Maximum tasks" : "Maximum checks"}
+          aria-label={freshTasks ? "Maximum scheduled tasks" : "Maximum heartbeat checks"}
           type="number"
           min={1}
           max={100000}
@@ -121,16 +134,24 @@ export function HeartbeatForm({
             update({ token_allowance: e.target.value === "" ? null : e.target.valueAsNumber })
           }
         />
-        <Input
-          label="Existing goal ID (optional)"
-          aria-label="Existing goal ID"
-          value={spec.goal_id ?? ""}
-          onChange={(e) => update({ goal_id: e.target.value || null })}
-          hintText="Leave empty for an ordinary check. A goal must already be active in this chat."
-        />
+        {!freshTasks && (
+          <Input
+            label="Existing goal ID (optional)"
+            aria-label="Existing goal ID"
+            value={spec.goal_id ?? ""}
+            onChange={(e) => update({ goal_id: e.target.value || null })}
+            hintText="Leave empty for an ordinary check. A goal must already be active in this chat."
+          />
+        )}
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant={ButtonVariant.Primary}>
-            {initial ? "Save heartbeat" : "Create heartbeat"}
+            {freshTasks
+              ? initial
+                ? "Save task schedule"
+                : "Create task schedule"
+              : initial
+                ? "Save heartbeat"
+                : "Create heartbeat"}
           </Button>
           <Button onClick={onCancel}>Cancel</Button>
         </div>

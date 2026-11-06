@@ -57,6 +57,11 @@ share active-operation binding and durable enqueue-before-wake ordering. Retry
 rollback must use that same insertion boundary and preserve relationship leases
 through in-flight store calls; do not fork a second inbox mutation path.
 
+`admission.rs` keeps host/session/workspace admission, occurrence-checked inbox
+ownership, active-run publication and task startup in one ordered owner above
+800 lines. Splitting that sequence into dispatch wrappers would obscure which
+transaction created an input and which authority its run retains.
+
 ## Verification
 
 ```sh

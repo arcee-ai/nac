@@ -400,6 +400,55 @@ export interface components {
     };
     ForkSessionRequest: { message_idx: number };
     ForkSessionResponse: { session_id: string };
+    FreshTaskDestination: {
+      default_ref?: string | null;
+      model?: string | null;
+      pinned_commit?: string | null;
+      project_id: string;
+      reasoning_effort?: string | null;
+      retained_limit: number;
+    };
+    FreshTaskLaunchReceipt: {
+      binding: components["schemas"]["HeartbeatBinding"];
+      created_at_ms: number;
+      destination: components["schemas"]["FreshTaskDestination"];
+      first_input_id?: number | null;
+      initial_outcome?: components["schemas"]["HeartbeatOccurrence"] | null;
+      initial_run_id?: string | null;
+      occurrence_id: string;
+      request: components["schemas"]["TaskLaunchRequest"];
+      schedule_id: string;
+      session_id: string;
+      shared_directory?: boolean | null;
+      stop_requested: boolean;
+    };
+    FreshTaskRetainedAllowance: {
+      retained_count: number;
+      retained_limit: number;
+      revision: number;
+    };
+    FreshTaskRetainedAllowanceChange: {
+      expected_revision: number;
+      request_id: string;
+      retained_limit: number;
+    };
+    FreshTaskRetainedAllowanceReceipt: {
+      allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+      request_id: string;
+    };
+    FreshTaskScheduleControlRequest: {
+      creator_session_id?: string | null;
+      destination?: components["schemas"]["FreshTaskDestination"] | null;
+      operation: components["schemas"]["HeartbeatAction"];
+      request_id: string;
+    };
+    FreshTaskScheduleInspection: {
+      heartbeat: components["schemas"]["HeartbeatInspection"];
+      host_allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+      host_retained_limit: number;
+      inventory: components["schemas"]["FreshTaskLaunchReceipt"][];
+      launches: components["schemas"]["TaskLaunchRecord"][];
+    };
     FunctionCall: { arguments: string; name: string };
     GeneratedCredential: { name: string };
     GitHubBranchListResponse: { branches: string[] };
@@ -467,8 +516,11 @@ export interface components {
     HeartbeatBinding: {
       backend: string;
       config_version: number;
+      creator_session_id?: string | null;
       cwd: string;
       execution_cwd?: string | null;
+      fresh_task?: components["schemas"]["FreshTaskDestination"] | null;
+      model_configuration_id?: string | null;
       project_id?: string | null;
       scheduling_request?: string | null;
       seen_through_sequence?: number;
@@ -498,7 +550,7 @@ export interface components {
       run_now: boolean;
       schedule_id: string;
       schedule_version: number;
-      session_id: string;
+      session_id?: string | null;
       settled_at_ms?: number | null;
       settlement_sequence?: number | null;
       spec: components["schemas"]["HeartbeatSpec"];
@@ -528,7 +580,7 @@ export interface components {
       next_due_ms: number;
       reason?: string | null;
       schedule_id: string;
-      session_id: string;
+      session_id?: string | null;
       spec: components["schemas"]["HeartbeatSpec"];
       starts: number;
       state: components["schemas"]["HeartbeatState"];

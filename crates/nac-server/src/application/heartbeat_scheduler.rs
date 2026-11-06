@@ -13,6 +13,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 
 use super::heartbeats::{epoch_ms, HeartbeatApplication};
 use crate::SessionManager;
+mod fresh;
 
 #[derive(Default)]
 struct SchedulerLifetime {
@@ -173,6 +174,9 @@ async fn tick(manager: &SessionManager, lifetime: &SchedulerLifetime) -> Result<
         if lifetime.is_closed(manager) {
             return Ok(());
         }
+        if fresh::reconcile(manager, &active, lifetime).await? {
+            continue;
+        }
         reconcile_or_stop(manager, &active, lifetime).await?;
     }
     let path = manager.inner.store_path.clone();
@@ -189,13 +193,21 @@ async fn tick(manager: &SessionManager, lifetime: &SchedulerLifetime) -> Result<
         if lifetime.is_closed(manager) {
             return Ok(());
         }
-        let admission = admit(manager, occurrence.clone(), lifetime).await;
+        let admission = if occurrence.session_id.is_none() {
+            fresh::admit(manager, &occurrence, lifetime).await
+        } else {
+            admit(manager, occurrence.clone(), lifetime).await
+        };
         if matches!(admission, Ok(true)) {
             remaining -= 1;
         }
         if let Err(error) = admission {
             if lifetime.is_closed(manager) {
                 return Err(error);
+            }
+            if occurrence.session_id.is_none() {
+                eprintln!("nac: standalone heartbeat reservation deferred: {error:#}");
+                continue;
             }
             // Ordinary busy/lease contention is deferred before reaching here.
             // Genuine pre-admission failures consume the same bounded receipt.
@@ -204,7 +216,7 @@ async fn tick(manager: &SessionManager, lifetime: &SchedulerLifetime) -> Result<
                 store::spawn_blocking_store_caller(move || {
                     store::heartbeat_admission_unavailable(
                         &path,
-                        &occurrence.session_id,
+                        occurrence.execution_session_id()?,
                         &occurrence.occurrence_id,
                         occurrence.revision,
                         false,
@@ -250,7 +262,8 @@ async fn admit(
     if lifetime.is_closed(manager) {
         return Ok(false);
     }
-    let gate = manager.lifecycle_gate(&occurrence.session_id);
+    let session_id = occurrence.execution_session_id()?;
+    let gate = manager.lifecycle_gate(session_id);
     let Ok(_lifecycle) = gate.try_lock() else {
         return Ok(false);
     };
@@ -259,17 +272,17 @@ async fn admit(
         .active_sessions
         .read()
         .await
-        .get(&occurrence.session_id)
+        .get(session_id)
         .is_some_and(|service| service.has_active_operation())
     {
         return Ok(false);
     }
-    let Some(lease) = lease(manager, &occurrence.session_id, lifetime).await? else {
+    let Some(lease) = lease(manager, session_id, lifetime).await? else {
         return Ok(false);
     };
     let application = HeartbeatApplication::new(manager);
     let Some(attachment) = lifetime.begin(manager, || {
-        application.scheduler_service(&occurrence.session_id, &lease)
+        application.scheduler_service(session_id, &lease)
     }) else {
         return Ok(false);
     };
@@ -289,12 +302,13 @@ async fn reconcile_or_stop(
     occurrence: &HeartbeatOccurrence,
     lifetime: &SchedulerLifetime,
 ) -> Result<()> {
+    let session_id = occurrence.execution_session_id()?;
     let cached = manager
         .inner
         .active_sessions
         .read()
         .await
-        .get(&occurrence.session_id)
+        .get(session_id)
         .cloned();
     if lifetime.is_closed(manager) {
         return Ok(());
@@ -302,7 +316,7 @@ async fn reconcile_or_stop(
     if let Some(service) = cached {
         if service.has_active_operation() {
             let path = manager.inner.store_path.clone();
-            let session = occurrence.session_id.clone();
+            let session = session_id.to_owned();
             let active = occurrence.clone();
             let Some(stopping) = lifetime.begin(manager, || {
                 store::spawn_blocking_store_caller(move || {
@@ -336,15 +350,15 @@ async fn reconcile_or_stop(
             return Ok(());
         }
     }
-    let gate = manager.lifecycle_gate(&occurrence.session_id);
+    let gate = manager.lifecycle_gate(session_id);
     let Ok(_lifecycle) = gate.try_lock() else {
         return Ok(());
     };
-    let Some(_lease) = lease(manager, &occurrence.session_id, lifetime).await? else {
+    let Some(_lease) = lease(manager, session_id, lifetime).await? else {
         return Ok(());
     };
     let path = manager.inner.store_path.clone();
-    let id = occurrence.session_id.clone();
+    let id = session_id.to_owned();
     let Some(reconcile) = lifetime.begin(manager, || {
         store::spawn_blocking_store_caller(move || {
             store::reconcile_heartbeat_occurrences(&path, &id, epoch_ms())

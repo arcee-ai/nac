@@ -1341,6 +1341,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         transcript_baseline: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
         inbox_item_id: None,
+        inbox_prompt: None,
         review_intent: None,
         _operation_lease: None,
         _workspace_activity_lease: None,

@@ -726,6 +726,37 @@ impl SessionService {
         .await?
     }
 
+    /// Capture pending delivery authority before a scheduled skill expansion.
+    /// Both ordinary and scheduled queue promotion retain the same raw record.
+    #[expect(
+        clippy::result_large_err,
+        reason = "admission errors carry the complete active-operation conflict snapshot"
+    )]
+    pub(super) fn admitted_inbox_prompt(
+        &self,
+        id: Option<i64>,
+        prompt: &str,
+    ) -> std::result::Result<Option<crate::store::AdmittedInboxPrompt>, SessionSubmitError> {
+        id.map(|id| {
+            let session = self
+                .metadata
+                .session_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("inbox session identity is unavailable"))?;
+            let item =
+                crate::store::load_session_inbox_item(&self.metadata.store_path, session, id)?;
+            anyhow::ensure!(
+                item.status == crate::store::InboxStatus::Pending && item.content == prompt,
+                "inbox item changed before run admission"
+            );
+            Ok::<_, anyhow::Error>(crate::store::AdmittedInboxPrompt::from(item))
+        })
+        .transpose()
+        .map_err(|error| SessionSubmitError::Coordination {
+            message: SessionCoordinationError::store(format!("inbox admission failed: {error:#}")),
+        })
+    }
+
     fn start_next_direct_inbox_item_with_lease(
         &self,
         lease: sessions::SessionOperationLease,

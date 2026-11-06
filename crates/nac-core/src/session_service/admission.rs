@@ -266,11 +266,20 @@ impl SessionService {
     pub(super) fn try_submit_prompt_with_guard<'a>(
         &'a self,
         client_id: Option<SessionClientId>,
-        expanded_prompt: String,
+        mut expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        admission: RunAdmissionKind,
+        mut admission: RunAdmissionKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        admission.inbox_prompt =
+            self.admitted_inbox_prompt(admission.inbox_item_id, &expanded_prompt)?;
+        if admission.heartbeat_occurrence.is_none() {
+            if let Some(inbox) = admission.inbox_item_id {
+                admission.heartbeat_occurrence = self
+                    .prepare_fresh_heartbeat_input(inbox, &mut expanded_prompt)?
+                    .map(Box::new);
+            }
+        }
         let heartbeat_timeout = admission
             .heartbeat_occurrence
             .as_ref()
@@ -289,7 +298,7 @@ impl SessionService {
         let prompt_commit = self
             .run_prompt_commit(&run_id)
             .expect("newly admitted run must own its prompt commit channel");
-        let inbox_item_id = self.run_inbox_item_id(&run_id);
+        let inbox_prompt = self.run_inbox_prompt(&run_id);
         let review_intent = self.run_review_intent(&run_id);
         let event_bus = self.event_bus.clone();
         let service = self.clone();
@@ -326,7 +335,7 @@ impl SessionService {
                         &expanded_prompt,
                         &task_run_id,
                         prompt_commit,
-                        inbox_item_id,
+                        inbox_prompt,
                         review_intent,
                     )
                     .await
@@ -468,11 +477,13 @@ impl SessionService {
             heartbeat_occurrence,
             terminal_selection,
             mut inbox_item_id,
+            inbox_prompt,
             review_intent,
             goal_continuation,
             child_execution_mode,
             managed_orchestrator_execution_mode,
         } = admission;
+        let mut inbox_prompt = inbox_prompt.map(RunInboxPrompt::CapturedRaw);
         let mut guard = guard.unwrap_or_else(|| self.lock_active_operation());
         if self
             .stopping_admission
@@ -751,7 +762,13 @@ impl SessionService {
         if let Some(occurrence) = heartbeat_occurrence {
             let admitted = crate::store::admit_heartbeat(
                 &self.metadata.store_path,
-                &occurrence.session_id,
+                self.metadata.session_id.as_deref().ok_or_else(|| {
+                    SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(
+                            "heartbeat session identity is unavailable",
+                        ),
+                    }
+                })?,
                 &occurrence.occurrence_id,
                 occurrence.revision,
                 active_run.run_id.as_str(),
@@ -772,6 +789,11 @@ impl SessionService {
             .ok_or_else(|| SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
             })?;
+            if inbox_item_id.is_none() && occurrence.inbox_item_id.is_none() {
+                inbox_prompt = admitted
+                    .inbox_item_id
+                    .map(RunInboxPrompt::AdmissionCreatedHeartbeat);
+            }
             inbox_item_id = admitted.inbox_item_id;
         }
         *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
@@ -785,6 +807,7 @@ impl SessionService {
             transcript_baseline: None,
             command_cancellation,
             inbox_item_id,
+            inbox_prompt,
             review_intent,
             _operation_lease: operation_lease,
             _workspace_activity_lease: workspace_activity_lease,

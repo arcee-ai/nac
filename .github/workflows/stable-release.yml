@@ -491,12 +491,29 @@ jobs:
           NAC_E2E_ARTIFACTS: ${{ github.workspace }}/crates/nac-server/web/test-results
           BROWSER_SHARD: ${{ matrix.shard }}
         run: npm --prefix crates/nac-server/web run test:e2e -- --fully-parallel --grep-invert='exact-goal-wait.e2e.ts' --shard="$BROWSER_SHARD/8"
+      - name: Upload selected elapsed interval evidence
+        if: ${{ always() && hashFiles('crates/nac-server/web/test-results/**/elapsed-*.png', 'crates/nac-server/web/test-results/**/elapsed-qualification-*.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nac-web-elapsed-interval-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-human-two-tasks.png
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-human-both-continued.png
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-model-native-two-tasks.png
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-model-native-both-continued.png
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-qualification-human.json
+            crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/elapsed-qualification-model-native.json
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Upload browser shard failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nac-web-playwright-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: crates/nac-server/web/test-results
+          path: |
+            crates/nac-server/web/test-results
+            !crates/nac-server/web/test-results/fresh-interval-tasks.e2e.t-*-ndependently-continues-both*/**
           if-no-files-found: ignore
 
       - name: Retain native package mode and cost evidence

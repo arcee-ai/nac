@@ -27,6 +27,118 @@ fn create() -> HeartbeatAction {
         },
     }
 }
+
+#[tokio::test]
+async fn same_chat_heartbeat_commits_admission_created_inbox_once_with_skills() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use crate::session_service::tests::compaction_response;
+    use crate::skills::{SkillRecord, SkillRegistry};
+
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        compaction_response("Existing chat inspection complete."),
+    )]);
+    let (mut parts, path) = test_direct_active_service(
+        "heartbeat_same_chat_success",
+        "session",
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    );
+    parts.service.skills = Some(Arc::new(SkillRegistry::load_for_test(vec![SkillRecord {
+        name: "verification".into(),
+        description: "Inspect the fixture.".into(),
+        compatibility: None,
+        skill_root_visible: path.parent().unwrap().join("verification"),
+        body: "SAME_CHAT_SKILL_TOKEN: retain the current conversation.".into(),
+        resources: Vec::new(),
+    }])));
+    let broker = Arc::new(PermissionBroker::new(
+        path.clone(),
+        "session".into(),
+        PermissionBackend::Local,
+        parts.service.config_version.unwrap(),
+        vec![
+            PermissionRule::new("heartbeat_manage", "*", PermissionEffect::Allow),
+            PermissionRule::new("heartbeat_run", "*", PermissionEffect::Allow),
+        ],
+    ));
+    parts.service.permission_broker = Some(broker.clone());
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    runtime.skills = parts.service.skills.clone();
+    runtime.permission_broker = Some(broker);
+    parts.service.heartbeat_context = Some(Arc::new(HeartbeatContext::new(
+        runtime,
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    )));
+    let service = &parts.service;
+    let HeartbeatAction::Create { mut spec } = create() else {
+        unreachable!()
+    };
+    spec.instructions = "Inspect this same chat with $verification.".into();
+    spec.skills = vec!["verification".into()];
+    let schedule = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), HeartbeatAction::Create { spec })
+        .await
+        .unwrap()
+        .schedule;
+    let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+        .unwrap()
+        .remove(0);
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    eprintln!(
+        "SAME_CHAT_HEARTBEAT_FIXTURE store={} occurrence={}",
+        path.display(),
+        pending.occurrence_id
+    );
+    let run = service
+        .start_heartbeat_occurrence(pending.clone(), lease)
+        .await
+        .expect("successful same-chat admission must retain its newly created inbox identity")
+        .expect("same-chat heartbeat must acquire its exact run");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while service.has_active_operation() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("same-chat heartbeat did not settle");
+    let inbox = crate::store::list_session_inbox(&path, "session").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Delivered);
+    assert_eq!(inbox[0].version, 1);
+    assert_eq!(
+        inbox[0].delivered_run_id.as_deref(),
+        Some(run.run_id.as_str())
+    );
+    assert!(inbox[0].content.contains("SAME_CHAT_SKILL_TOKEN"));
+    assert_eq!(service.messages_snapshot().await.unwrap().iter().filter(
+        |message| matches!(message, Message::User { content } if content == &inbox[0].content)
+    ).count(), 1);
+    let history = crate::store::heartbeat_history(&path, "session", &schedule.schedule_id).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].session_id.as_deref(), Some("session"));
+    assert_eq!(history[0].run_id.as_deref(), Some(run.run_id.as_str()));
+    assert_eq!(history[0].attempt_count, 1);
+    assert_eq!(
+        history[0].state,
+        crate::store::HeartbeatOccurrenceState::Settled
+    );
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert!(String::from_utf8_lossy(&requests[0].body).contains("SAME_CHAT_SKILL_TOKEN"));
+}
+
 async fn native_control(
     runtime: &crate::tools::ToolRuntime,
     operation: HeartbeatAction,

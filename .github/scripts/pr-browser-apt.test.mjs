@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { reverseBrowserApt } from './browser-apt-wiring.mjs';
+import { reverseElapsedEvidence } from './elapsed-evidence-wiring.mjs';
 import { requiredJobs, qualityJobs } from './pr-checks.mjs';
 
 const require=createRequire(import.meta.url),YAML=require('yaml');
@@ -17,7 +18,7 @@ const hash=v=>createHash('sha256').update(JSON.stringify(sort(v))).digest('hex')
 // Full pre-relay parsed workflow at exact parent914782659a6183b89070a3516e2e44776b1eeb06.
 const parentHash='ae09c30f8765b2116cd9ed25365d2115dffcd7c36630bfa485a4db6e50d19b18';
 function validate(value) {
-  const old=structuredClone(value);reverseBrowserApt(old);assert.equal(hash(old),parentHash);
+  const old=structuredClone(value);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');
   for(const role of ['browser-shards','browser-proof']) {
     const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary']);
