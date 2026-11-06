@@ -9,7 +9,9 @@ import storage_q1 as q1
 
 class Q1HandshakeTests(unittest.TestCase):
     def launch(self, *, pending_after=6, store_seconds=.25, seed_seconds=.25,
-               release_guard_seconds=0, action_deadline=100, hold_expired=False):
+               release_guard_seconds=0, action_deadline=100, hold_expired=False,
+               post_seed_discards=0, post_seed_absent=False, expired_then_missing=False,
+               changed_engine=False):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             owner = q1.RecoveryLaunch.__new__(q1.RecoveryLaunch)
@@ -26,6 +28,9 @@ class Q1HandshakeTests(unittest.TestCase):
             owner.identity = owner.engine_pid = None
             clock = [0.0]
             calls = []
+            seeded = [False]
+            discarded = [post_seed_discards]
+            post_seed_reads = [0]
             identity = dict(pid=17, launch_time=1)
             state = dict(apps=[identity], frontmost=identity)
 
@@ -33,8 +38,17 @@ class Q1HandshakeTests(unittest.TestCase):
                 self.assertTrue(publication_changes)
                 if clock[0] < pending_after:
                     return {}
+                after_seed = seeded[0] and not (root / 'storage-q1-fetch.json').exists()
+                if after_seed:
+                    post_seed_reads[0] += 1
+                    if post_seed_absent:
+                        return {}
+                    if discarded[0] > 0 or (expired_then_missing and post_seed_reads[0] > 1):
+                        discarded[0] -= 1
+                        raise q1.RecordPublicationChanged('inert atomic replacement')
                 return dict(profile_open_pending=not (root / 'profile-open-release').exists(),
-                            profile_open_timeout=hold_expired, app_pid=17, engine_pid=18,
+                            profile_open_timeout=hold_expired or (after_seed and expired_then_missing),
+                            app_pid=17, engine_pid=19 if after_seed and changed_engine else 18,
                             endpoint='http://engine', bridge=dict(ready=True))
 
             def request(endpoint, route, *, timeout):
@@ -48,6 +62,7 @@ class Q1HandshakeTests(unittest.TestCase):
                 q1._remaining(deadline, 4)
                 clock[0] += seed_seconds
                 q1._remaining(deadline, 4)
+                seeded[0] = True
                 return dict(api_key_env='saved-selector', config_id='fixture-id', name='fixture')
 
             original_guard = owner.guard
@@ -82,6 +97,34 @@ class Q1HandshakeTests(unittest.TestCase):
                         released=(root / 'profile-open-release').exists(),
                         binding=(root / 'storage-q1-fetch.json').exists(),
                         deadline=owner.deadline)
+
+    def test_post_seed_publication_discards_wait_within_original_hold_budget(self):
+        result = self.launch(post_seed_discards=2)
+        self.assertIsNone(result['error'])
+        self.assertTrue(result['released'])
+        self.assertAlmostEqual(result['elapsed'], result['calls'][0][1] + .25 + .25 + .1)
+        self.assertEqual(result['deadline'], 100)
+
+    def test_missing_post_seed_record_exhausts_original_budget_without_binding_or_release(self):
+        result = self.launch(post_seed_absent=True)
+        self.assertIsInstance(result['error'], TimeoutError)
+        seed_deadline = result['calls'][1][2]
+        self.assertAlmostEqual(result['elapsed'], seed_deadline)
+        self.assertEqual(result['deadline'], seed_deadline)
+        self.assertFalse(result['binding'])
+        self.assertFalse(result['released'])
+
+    def test_timeout_cannot_be_hidden_by_a_second_discarded_sample(self):
+        result = self.launch(expired_then_missing=True)
+        self.assertIsInstance(result['error'], ValueError)
+        self.assertFalse(result['binding'])
+        self.assertFalse(result['released'])
+
+    def test_post_seed_complete_record_still_requires_the_original_engine(self):
+        result = self.launch(changed_engine=True)
+        self.assertIsInstance(result['error'], ValueError)
+        self.assertFalse(result['binding'])
+        self.assertFalse(result['released'])
 
     def test_engine_readiness_after_five_seconds_uses_original_startup_budget(self):
         result = self.launch()

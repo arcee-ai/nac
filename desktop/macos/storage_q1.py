@@ -302,8 +302,14 @@ class RecoveryLaunch:
         provider = self.environment['MODELS_DEV_URL'].removesuffix('/models-dev')
         self.saved_configuration = seed_q1_configuration(pending['endpoint'], provider, self.environment,
                                                         held_deadline, self.saved_configuration, nonce=self.fetch_nonce)
-        require(self.read().get('profile_open_pending') is True and
-                not self.read().get('profile_open_timeout'), 'original profile hold expired during seed')
+        # One complete publication proves both facts. A discarded atomic sample
+        # cannot mean either "expired" or "not timed out". self.deadline is still
+        # the original held_deadline shared by store lookup, seed and release.
+        held = self.wait('Q1 held record after seed', self.read, limit=4)
+        require(held.get('profile_open_pending') is True and
+                not held.get('profile_open_timeout') and
+                all(held.get(key) == pending[key] for key in ('app_pid', 'engine_pid', 'endpoint')),
+                'original profile hold expired or changed during seed')
         with (self.control / 'storage-q1-fetch.json').open('x') as binding:
             os.chmod(binding.name, 0o600)
             json.dump(dict(nonce=self.fetch_nonce, provider=provider,
