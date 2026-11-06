@@ -4,6 +4,7 @@
 Requires the shared browser lease and the common builder's external-auth hook.
 Does not synthesize OS input or change the system browser, credentials, or TCC.
 """
+import argparse
 from contextlib import contextmanager
 import hashlib
 import json
@@ -18,6 +19,7 @@ import uuid
 
 from external_auth_fixture import AuthFixture, cleanup_note
 from smoke import session_lock_state
+from instance_console import require_console
 
 
 def digest(path):
@@ -25,9 +27,23 @@ def digest(path):
         return hashlib.file_digest(file, 'sha256').hexdigest()
 
 
-def require_isolated_host():
+def auth_arguments(arguments):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('source_app', type=Path)
+    parser.add_argument('output', type=Path)
+    parser.add_argument('--console-observer', type=Path)
+    options = parser.parse_args(arguments)
+    return (options.source_app.resolve(), options.output.resolve(),
+            options.console_observer.resolve() if options.console_observer is not None else None)
+
+
+def require_isolated_host(observer=None):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_OS') != 'macOS':
         raise SystemExit('Real external-browser qualification requires the coordinator-approved isolated hosted Mac contract; no launch attempted')
+    if observer is not None:
+        # The hosted controller supplies its exact source-compiled observer.
+        # Missing optional session bits never replace Root/UID/Quartz evidence.
+        return require_console(observer, [], 'hosted-auth-driver-before-launch')
     console = session_lock_state()
     if not console['observed'] or console['locked'] is not False:
         raise SystemExit('Real external-browser qualification requires an unlocked isolated Mac/browser profile; no launch attempted')
@@ -153,8 +169,8 @@ def require_terminal(record, scenario, build, profile=None):
 
 
 def main():
-    source_app, output = (Path(argument).resolve() for argument in sys.argv[1:])
-    console = require_isolated_host()
+    source_app, output, observer = auth_arguments(sys.argv[1:])
+    console = require_isolated_host(observer)
     output.mkdir(parents=True, exist_ok=True)
     evidence = output / 'external-auth.json'
     assert not evidence.exists(), 'Use a fresh evidence destination'
