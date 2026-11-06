@@ -92,9 +92,9 @@ Bounds are admission/refusal controls, not assurances about provider shutdown:
 
 | Phase | Maximum controller time |
 | --- | ---: |
-| Signed normal `apt-get update` |180s |
+| Signed normal `apt-get update` |900s |
 | Ordinary `make setup` (locked Cargo/npm + Chromium download) |360s |
-| Locked Playwright normal library installation |180s |
+| Locked Playwright normal library installation |900s |
 | Canonical flagged asset writer |180s |
 | Source-drift command |10s |
 | Fresh native locked nac-web build |720s |
@@ -102,11 +102,23 @@ Bounds are admission/refusal controls, not assurances about provider shutdown:
 | One original affected E2E fixture |180s |
 | Reserved descendant cleanup / evidence handling |120s |
 
-Explicit command ceilings total1830s;120s cleanup reserve gives1950s
-(32.5min). The whole job cap is40min, leaving450s for pinned action setup,
-read-only compiler restore and artifact transfer. The provider job cap is the
-outer failure bound; setup/cache/transfer may consume the margin and produce
-no case result. No setup failure or timeout is a passing test.
+The first job step records a wall-clock anchor before checkout/tool/cache setup.
+The absolute envelope is anchor+2400s, with the provider40min job cap as outer
+failure bound. Before **each** operation starts, the controller requires its
+entire execution budget **plus120s cleanup and180s artifact margin** to fit.
+Each started root/native APT operation retains the existing full900s deadline;
+setup360 never wraps or shortens those operations. Build720 and case180 also
+receive complete admission before starting. Insufficient remaining time stops
+as budget-not-executed/no-result, with a refusal receipt and no operation start.
+No guarantee is made that all worst-case phases can execute. Provider work
+before the first step and transfer latency remain envelope limitations; the
+provider cap can still interrupt and yield no result. No setup failure,
+refusal or timeout is a passing case.
+
+Initial b8babc5a50db566a5e71a539fa1c2e982b0ec878 incorrectly advertised180s
+APT operation limits and a summed all-phase promise; that contract is frozen
+and **superseded** by this full900s/admission envelope. CPU-only follow-up
+a11b8e5bd is likewise an intermediate checkpoint, not the final run source.
 
 Normal browser download runs under the ordinary runner UID/HOME/browser-cache
 identity through `make setup`, which invokes `playwright install chromium`.

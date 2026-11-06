@@ -95,6 +95,26 @@ class Controls(unittest.TestCase):
         with patch.object(profile.os,'sched_getaffinity',return_value={0},create=True):
             with self.assertRaises(ValueError):profile.cpu_capacity()
 
+    def test_native_admission_keeps_full_operation_and_cleanup_budget(self):
+        with tempfile.TemporaryDirectory()as directory:
+            obj=object.__new__(profile.Controller);obj.evidence=Path(directory);obj.stopped=False;obj.privileged=False;obj.deadline=2000
+            with patch.object(profile.time,'time',return_value=799):obj.admit('root-native',900)
+            self.assertTrue(json.loads((obj.evidence/'root-native-admission.json').read_text())['admitted'])
+            with patch.object(profile.time,'time',return_value=801),self.assertRaisesRegex(ValueError,'budget-not-executed'):
+                obj.admit('refuse-native',900)
+            self.assertFalse(json.loads((obj.evidence/'refuse-native-admission.json').read_text())['admitted'])
+            for label,budget in [('build',720),('case',180)]:
+                with patch.object(profile.time,'time',return_value=2000-budget-299),self.assertRaises(ValueError):obj.admit(label,budget)
+        text=(ROOT/'.github/scripts/terminal-observer-profile.py').read_text()
+        self.assertIn("controller.native(apt,'apt-update'",text)
+        self.assertIn("controller.native(apt,'browser-libraries'",text)
+        self.assertIn("self.admit(label,900)",text)
+        self.assertEqual(text.count('timeout=900)'),1)
+        self.assertNotIn('timeout=180)',text)
+        obj.privileged=True
+        with self.assertRaises(InterruptedError):obj.stop(15,None)
+        self.assertTrue(obj.stopped)
+
     def test_finite_no_retry_private_workflow(self):
         text=(ROOT/'.github/workflows/nightly-portability.yml').read_text()
         self.assertIn('workflow_dispatch:',text);self.assertNotIn('pull_request:',text);self.assertNotIn('schedule:',text)

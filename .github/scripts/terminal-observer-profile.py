@@ -149,14 +149,29 @@ def cpu_capacity():
 
 
 class Controller:
-    def __init__(self,home):
-        self.home=home;self.evidence=home/'evidence';self.raw=home/'raw';self.commands=[]
+    def __init__(self,home,deadline):
+        self.home=home;self.deadline=deadline;self.evidence=home/'evidence';self.raw=home/'raw';self.commands=[]
         self.evidence.mkdir(mode=0o700);self.raw.mkdir(mode=0o700)
         self.supervisor=module('profile_supervisor','browser-apt-supervisor.py');self.supervisor.subreaper()
-        self.stopped=False
+        self.stopped=False;self.privileged=False
         for sig in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP):signal.signal(sig,self.stop)
-    def stop(self,_sig,_frame):self.stopped=True
+    def stop(self,_sig,_frame):
+        self.stopped=True
+        # Let the existing privileged wrapper send its stop request and verify
+        # the root-owned cleanup receipt, rather than waiting out900s on signal.
+        if self.privileged:raise InterruptedError('privileged controller interrupted')
+    def native(self,apt,label,command,*,cwd=ROOT):
+        self.admit(label,900);self.privileged=True
+        try:return apt.run(self.raw,label,command,cwd=cwd,timeout=900)
+        finally:self.privileged=False
+    def admit(self,label,seconds):
+        remaining=self.deadline-time.time()
+        admitted=not self.stopped and remaining>=seconds+120+180
+        write(self.evidence/(label+'-admission.json'),{'phase':label,'seconds':seconds,
+            'cleanup_reserve_seconds':120,'artifact_margin_seconds':180,'remaining_seconds':remaining,'admitted':admitted})
+        require(admitted,'budget-not-executed/no-result: full operation plus cleanup/transfer does not fit')
     def run(self,label,command,seconds,env=None,cwd=ROOT):
+        self.admit(label,seconds)
         start=time.monotonic();child=None;error=None;cleanup=None;samples=[];owner=None
         out=self.raw/(label+'.stdout');err=self.raw/(label+'.stderr')
         try:
@@ -209,8 +224,11 @@ def main():
     parent=Path(os.environ['RUNNER_TEMP']);require(parent.is_absolute()and not parent.is_symlink(),'runner temp')
     home=parent/'terminal-observer-profile';home.mkdir(mode=0o700)
     require(shutil.disk_usage(home).free>=15*GIB,'15GiB starting reserve,13GiB monitored floor')
-    controller=Controller(home);result={'schema':1,'diagnostic_only':True,'source':args.source,'tree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],cwd=ROOT,text=True).strip(),
-        'e2e_sha256':E2E_SHA,'run_id':os.environ['GITHUB_RUN_ID'],'attempt':1,'outcome':'not-reached','compiler_budget_bytes':12*GIB,'runtime_budget_bytes':512*1024**2}
+    anchor=os.environ.get('PROFILE_JOB_ANCHOR','')
+    require(re.fullmatch(r'[1-9][0-9]{9}',anchor)and 0<=time.time()-int(anchor)<2400,'valid first-step40min anchor required')
+    deadline=int(anchor)+2400
+    controller=Controller(home,deadline);result={'schema':1,'diagnostic_only':True,'source':args.source,'tree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],cwd=ROOT,text=True).strip(),
+        'e2e_sha256':E2E_SHA,'run_id':os.environ['GITHUB_RUN_ID'],'attempt':1,'outcome':'not-reached','compiler_budget_bytes':12*GIB,'runtime_budget_bytes':512*1024**2,'first_step_anchor':int(anchor),'deadline_unix':deadline,'cleanup_reserve_seconds':120,'artifact_margin_seconds':180}
     env={k:os.environ[k]for k in ('PATH','HOME','LANG','LC_ALL','CI')if k in os.environ}
     env.update(CARGO_BUILD_JOBS='2',CARGO_PROFILE_DEV_DEBUG='0',CARGO_PROFILE_TEST_DEBUG='0',CARGO_INCREMENTAL='0',
         NAC_SOURCE_REVISION=args.source,NAC_BUILD_TRACK='dev',NAC_BUILD_ID='dev-'+args.source,NAC_TERMINAL_PHASE_PROFILE='1')
@@ -224,10 +242,10 @@ def main():
         result['tools']={tool:subprocess.check_output([tool,'--version'],text=True).strip()for tool in ('cargo','rustc','node','npm')}
         # Normal signed APT; existing pidfd root supervisor owns privileged descendants.
         apt=module('profile_apt','browser-apt.py')
-        apt.run(controller.raw,'apt-update',['sudo','apt-get','update'],timeout=180)
+        controller.native(apt,'apt-update',['sudo','apt-get','update'])
         controller.run('setup',['make','setup'],360,env)
         cli=WEB/'node_modules/playwright/cli.js'
-        apt.run(controller.raw,'browser-libraries',['sudo',shutil.which('node'),str(cli),'install-deps','chromium'],cwd=WEB,timeout=180)
+        controller.native(apt,'browser-libraries',['sudo',shutil.which('node'),str(cli),'install-deps','chromium'],cwd=WEB)
         controller.run('assets',['npm','run','build'],180,env,WEB)
         controller.run('source',['git','diff','--exit-code'],10,env)
         require(not subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip(),'asset writer drift/untracked source')
@@ -248,6 +266,7 @@ def main():
     except BaseException as error:
         result['error']=type(error).__name__+': '+str(error)
         if result['outcome']=='case-started':result['outcome']='case-failed-or-incomplete'
+        elif str(error).startswith('budget-not-executed/no-result:'):result['outcome']='budget-not-executed/no-result'
         raise
     finally:
         try:
