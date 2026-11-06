@@ -3,6 +3,8 @@
 use super::*;
 #[path = "recovery/attachment.rs"]
 mod attachment;
+#[path = "recovery/handoff.rs"]
+mod handoff;
 use crate::application::{
     heartbeat_scheduler::HeartbeatScheduler, session_creation::CreationProjectionGate,
     task_launches::TaskLaunchApplication,

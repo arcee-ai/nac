@@ -63,17 +63,18 @@ impl<'a> TaskLaunchApplication<'a> {
         admission: tokio::sync::OwnedRwLockReadGuard<()>,
         authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
     ) -> Result<TaskLaunchRecord> {
-        self.start_prepared(request, admission, authorization, None)
+        self.start_prepared(request, admission, authorization, None, None)
             .await
     }
 
     async fn start_with_scheduled(
         &self,
         request: TaskLaunchRequest,
-        scheduled: Option<store::PreparedFreshTaskLaunch>,
+        scheduled: store::PreparedFreshTaskLaunch,
+        admission: tokio::sync::OwnedRwLockReadGuard<()>,
+        lease: sessions::SessionOperationLease,
     ) -> Result<TaskLaunchRecord> {
-        let admission = self.manager.inner.task_preparations.admit().await?;
-        self.start_prepared(request, admission, None, scheduled)
+        self.start_prepared(request, admission, None, Some(scheduled), Some(lease))
             .await
     }
 
@@ -83,6 +84,7 @@ impl<'a> TaskLaunchApplication<'a> {
         admission: tokio::sync::OwnedRwLockReadGuard<()>,
         authorization: Option<nac_core::task_launch_control::NativeTaskAuthorization>,
         scheduled: Option<store::PreparedFreshTaskLaunch>,
+        preparation_lease: Option<sessions::SessionOperationLease>,
     ) -> Result<TaskLaunchRecord> {
         anyhow::ensure!(
             authorization.is_none() || scheduled.is_none(),
@@ -100,7 +102,7 @@ impl<'a> TaskLaunchApplication<'a> {
         // blocking store calls, Git, or publication from the serving lifetime.
         let preparation = tokio::spawn(async move {
             let _admission = admission;
-            let prepared = Self::resolve_and_reserve(&manager, request).await;
+            let prepared = Self::resolve_and_reserve(&manager, request, preparation_lease).await;
             let (mut record, lease) = match prepared {
                 Ok(prepared) => prepared,
                 Err(error) => {
@@ -200,6 +202,7 @@ impl<'a> TaskLaunchApplication<'a> {
     async fn resolve_and_reserve(
         manager: &SessionManager,
         request: TaskLaunchRequest,
+        preparation_lease: Option<sessions::SessionOperationLease>,
     ) -> Result<(TaskLaunchRecord, Option<sessions::SessionOperationLease>)> {
         manager.inner.task_preparations.git.check_running()?;
         let path = manager.inner.store_path.clone();
@@ -207,10 +210,18 @@ impl<'a> TaskLaunchApplication<'a> {
         let (lease, existing, context) =
             store::spawn_blocking_store_caller(move || -> Result<_> {
                 let lease_id = format!("task-launch:{}", intent.request_id);
-                let lease = match sessions::SessionOperationLease::try_acquire(&path, &lease_id) {
-                    Ok(lease) => Some(lease),
-                    Err(sessions::SessionOperationLeaseError::Busy(_)) => None,
-                    Err(error) => return Err(error.into()),
+                let lease = match preparation_lease {
+                    Some(lease) => {
+                        // Scheduled preparation already owns this exact launch.
+                        // Preserve exclusion through source resolution and publication.
+                        lease.validate(&path, &lease_id)?;
+                        Some(lease)
+                    }
+                    None => match sessions::SessionOperationLease::try_acquire(&path, &lease_id) {
+                        Ok(lease) => Some(lease),
+                        Err(sessions::SessionOperationLeaseError::Busy(_)) => None,
+                        Err(error) => return Err(error.into()),
+                    },
                 };
                 let existing = store::load_task_launch(&path, &intent.request_id)?;
                 if let Some(existing) = &existing {

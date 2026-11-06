@@ -82,10 +82,22 @@ impl FreshTaskPreparationPort for TaskLaunchApplication<'_> {
                 .await??;
                 if git {
                     let request = current.receipt().request.clone();
-                    drop(lease);
-                    drop(admission);
+                    #[cfg(test)]
+                    {
+                        let gate = manager
+                            .inner
+                            .task_preparations
+                            .scheduled_handoff
+                            .lock()
+                            .unwrap()
+                            .clone();
+                        if let Some(gate) = gate {
+                            gate.reached.notify_one();
+                            gate.resume.notified().await;
+                        }
+                    }
                     TaskLaunchApplication::new(&manager)
-                        .start_with_scheduled(request, Some(current))
+                        .start_with_scheduled(request, current, admission, lease)
                         .await?;
                 } else {
                     anyhow::ensure!(
