@@ -216,7 +216,13 @@ export const test = base.extend<Fixtures & Options>({
         });
       });
       await use();
-      if (testInfo.status === testInfo.expectedStatus) return;
+      // NAC PROFILE BEGIN
+      if (
+        testInfo.status === testInfo.expectedStatus &&
+        process.env.NAC_TERMINAL_PHASE_PROFILE !== "1"
+      )
+        return;
+      // NAC PROFILE END
 
       const consoleLog = path.join(harness.runRoot, "browser-events.json");
       const domSnapshot = path.join(harness.runRoot, "page.html");
@@ -425,6 +431,11 @@ async function startHarness(
         LANG: "C.UTF-8",
         BROWSER: "none",
         RUST_BACKTRACE: "1",
+        // NAC PROFILE BEGIN
+        ...(process.env.NAC_TERMINAL_PHASE_PROFILE === "1"
+          ? { NAC_TERMINAL_PHASE_PROFILE: "1" }
+          : {}),
+        // NAC PROFILE END
         ...(orchestration === null ? {} : { NAC_ORCHESTRATION: orchestration }),
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
         // Conventional selectors make two independent provider routes

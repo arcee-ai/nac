@@ -249,6 +249,9 @@ impl TerminalObservationHub {
         loop {
             // Completion is observed before paging. If EOF is true, its
             // sanitized final append has committed before this page is read.
+            // NAC PROFILE BEGIN
+            let profile_at = Instant::now();
+            // NAC PROFILE END
             let execution = if observer.execution {
                 Some(
                     observer
@@ -277,6 +280,10 @@ impl TerminalObservationHub {
                     .await
                     .map_err(|_| TerminalApplicationError::Unavailable)?
             };
+            // NAC PROFILE BEGIN
+            super::observer_profile::phase(observer_id, state.cursor, "status", profile_at);
+            let profile_at = Instant::now();
+            // NAC PROFILE END
             let page = if observer.execution {
                 observer
                     .service
@@ -293,6 +300,9 @@ impl TerminalObservationHub {
                     .await
             }
             .map_err(|_| TerminalApplicationError::Unavailable)?;
+            // NAC PROFILE BEGIN
+            super::observer_profile::phase(observer_id, state.cursor, "read_page", profile_at);
+            // NAC PROFILE END
             if page.gap
                 || !page.bytes.is_empty()
                 || terminal.output_complete
