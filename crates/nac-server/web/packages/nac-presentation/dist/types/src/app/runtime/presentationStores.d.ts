@@ -5,7 +5,7 @@ import * as attentionStore from "../store/attentionStore";
 import * as chatTabsStore from "../store/chatTabsStore";
 import * as promptDraftStore from "../store/promptDraftStore";
 import type { NativeRuntimeScope } from "./nativeRuntime";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import * as composerStore from "../store/composerStore";
 import * as runtimeStore from "../store/runtimeStore";
 import * as sessionFiltersStore from "../store/sessionFiltersStore";
@@ -28,7 +28,7 @@ export interface PresentationStores {
     sidebarLayoutStore: ReturnType<typeof sidebarLayoutStore.createSidebarLayoutStore>;
     sshConnectionStore: ReturnType<typeof sshConnectionStore.createSshConnectionStore>;
 }
-export declare function createPresentationStores(storage?: Pick<Storage, "getItem" | "setItem">, scope?: NativeRuntimeScope, draftStorage?: PromptDraftStorage): PresentationStores;
+export declare function createPresentationStores(storage?: Pick<Storage, "getItem" | "setItem">, scope?: NativeRuntimeScope, draftStorage?: PromptDraftStorage, draftPersistenceBinding?: PromptDraftPersistenceBinding): PresentationStores;
 export declare const standalonePresentationStores: {
     promptDraftStore: typeof promptDraftStore;
     panelWidth: typeof panelWidth;
