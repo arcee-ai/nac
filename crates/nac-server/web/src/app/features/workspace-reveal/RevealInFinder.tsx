@@ -6,6 +6,7 @@ import { queryKeys } from "@/app/services/queries";
 import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
 
 import { localRevealRoot } from "./model";
+import type { RevealSelection } from "./selection";
 
 /** Passive eligibility only. The server revalidates the current persisted
  * backend/root and no-follow target for each explicit user invocation. */
@@ -13,10 +14,12 @@ export function RevealInFinder({
   sessionId,
   snapshot,
   path,
+  origin,
 }: {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   path: string;
+  origin: RevealSelection | null;
 }) {
   const runtime = useNativeRuntime();
   const { data: entries } = useQuery<ManagedSessionSummary[]>({
@@ -24,13 +27,21 @@ export function RevealInFinder({
     enabled: false,
   });
   const root = localRevealRoot(sessionId, snapshot, entries);
-  if (!runtime.nativeDirectory || !root) return null;
+  if (
+    !runtime.nativeDirectory ||
+    !root ||
+    origin?.sessionId !== sessionId ||
+    origin.path !== path ||
+    origin.selectedRoot !== root
+  )
+    return null;
   return (
     <RevealRequest
-      key={`${sessionId}:${root}:${path}`}
+      key={JSON.stringify([sessionId, root, origin.pathRoot, path])}
       sessionId={sessionId}
       root={root}
       path={path}
+      pathRoot={origin.pathRoot}
     />
   );
 }
@@ -39,10 +50,12 @@ function RevealRequest({
   sessionId,
   root,
   path,
+  pathRoot,
 }: {
   sessionId: string;
   root: string;
   path: string;
+  pathRoot: string;
 }) {
   const { api } = useNativeRuntime();
   const pending = useRef<AbortController | null>(null);
@@ -61,7 +74,7 @@ function RevealRequest({
     setBusy(true);
     setFailure("");
     try {
-      await api.revealWorkspacePath(sessionId, path, root, request.signal);
+      await api.revealWorkspacePath(sessionId, path, root, pathRoot, request.signal);
     } catch (error) {
       if (!request.signal.aborted)
         setFailure(error instanceof Error ? error.message : String(error));

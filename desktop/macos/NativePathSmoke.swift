@@ -359,7 +359,7 @@ final class NativePathSmoke {
           ['outside-link', root], [revealLeaf, root + '/stale'], ['file:///tmp/not-a-target', root]
         ]) {
           const result = await fetch('/sessions/' + encodeURIComponent(id) + '/workspace/reveal', {
-            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, expected_workspace_root:expected})
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, expected_workspace_root:expected, expected_path_root:expected})
           });
           if (result.status !== 400) throw new Error('Unsafe Finder target was not rejected: ' + path);
           denials.push({path, status:result.status});

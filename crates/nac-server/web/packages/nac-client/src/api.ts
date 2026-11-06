@@ -754,10 +754,15 @@ export function createNacApi(
       id: string,
       path: string,
       expectedWorkspaceRoot: string,
+      expectedPathRoot: string,
       signal?: AbortSignal,
     ) =>
       request<OpenWorkspacePathResult>("POST", `${sessionPath(id)}/workspace/reveal`, {
-        body: { path, expected_workspace_root: expectedWorkspaceRoot },
+        body: {
+          path,
+          expected_workspace_root: expectedWorkspaceRoot,
+          expected_path_root: expectedPathRoot,
+        },
         signal,
       }),
 
