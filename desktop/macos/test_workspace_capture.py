@@ -41,7 +41,15 @@ class WorkspaceCaptureTests(unittest.TestCase):
         projected = projected.replace(" + '?message_limit=3&include_system=false&include_sessions=false'", '')
         self.assertEqual(projected, self.frozen('originalCapturePrefix'))
         self.assertIn('value["canonical_snapshot"] = canonicalState', source)
-        self.assertEqual(source[source.index('    func snapshot('):], self.frozen('originalSnapshotBlock'))
+        # Keep the entire original capture flow except the two diagnostic-only guards.
+        snapshot = self.frozen('originalSnapshotBlock')
+        self.assertEqual(snapshot.count('        if !painting {\n'), 1)
+        self.assertEqual(snapshot.count('        if !ready || !afterSurface {\n'), 1)
+        snapshot = snapshot.replace('        if !painting {\n',
+                                    '        if target != nil && !painting {\n', 1)
+        snapshot = snapshot.replace('        if !ready || !afterSurface {\n',
+                                    '        if target != nil && (!ready || !afterSurface) {\n', 1)
+        self.assertEqual(source[source.index('    func snapshot('):], snapshot)
 
     def test_goal_dependency_source_blocks_all_actions_without_changing_the_success_branch(self):
         """Structural Swift guard check, not a native goal-service execution."""
