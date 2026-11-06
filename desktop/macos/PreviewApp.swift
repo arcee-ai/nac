@@ -248,7 +248,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         guard webView === self.webView, !stopping, failure == nil else { return }
         // Every callback fences the previous document, but only an admitted
         // navigation may replace the tracked completion/timeout identity.
-        defer { commands.navigationStarted(in: webView, navigation: activeNavigation) }
+        defer { commands?.navigationStarted(in: webView, navigation: activeNavigation) }
         guard let navigation, let incarnation = workspaceIncarnation,
               engine.receipt?.incarnation == incarnation else { return }
         if let tracked = navigationIncarnations[navigation] {
