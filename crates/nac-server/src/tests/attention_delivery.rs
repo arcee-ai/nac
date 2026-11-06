@@ -155,6 +155,14 @@ async fn native_attention_real_question_answer_and_goal_completion_are_exact_and
     .await
     .unwrap();
     let answered=post_json(app.clone(),"/sessions/session/questions/choice/answer",serde_json::json!({"request_id":"choice","run_id":old_run,"generation":old_run,"expected_revision":1,"answer":"CSV"})).await;
+    if answered.status() != StatusCode::OK {
+        let status = answered.status();
+        let body = match axum::body::to_bytes(answered.into_body(), 16 * 1024).await {
+            Ok(body) => String::from_utf8_lossy(&body).into_owned(),
+            Err(error) => format!("<response body unavailable within 16 KiB limit: {error}>"),
+        };
+        panic!("question answer expected HTTP 200 OK, got {status}; response body: {body}");
+    }
     assert_eq!(answered.status(), StatusCode::OK);
     let answered = response_json(answered).await;
     let completed = tokio::time::timeout(Duration::from_secs(10), async {
