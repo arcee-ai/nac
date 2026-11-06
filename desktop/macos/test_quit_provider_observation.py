@@ -81,6 +81,24 @@ class ProviderObservationTests(unittest.TestCase):
             pass  # The real handler still propagates malformed body/length errors.
         return self.provider.ingress_snapshot()
 
+    def test_http11_keepalive_request_still_closes_http10_fixture_after_one_read(self):
+        provider = QuitProvider(Path('/inert/no-filesystem-access'), q1_metadata=True)
+        connection = SocketBytes(b'GET /models HTTP/1.1\r\nConnection: keep-alive\r\n\r\n')
+        class NoIdleReread(type(connection.input)):
+            def readline(self, *args):
+                if self.tell() == len(self.getvalue()):
+                    raise AssertionError('unexpected idle second request read')
+                return super().readline(*args)
+        connection.input = NoIdleReread(connection.input.getvalue())
+        provider.server.process_request(connection, ('127.0.0.1', 1))
+        self.assertTrue(bytes(connection.output).startswith(b'HTTP/1.0 200'))
+        snapshot = provider.ingress_snapshot()
+        self.assertEqual(snapshot['total'], 1)
+        self.assertEqual(snapshot['connectionsActive'], 0)
+        self.assertEqual(provider_no_send(snapshot), 0)
+        provider.close()
+        self.assertEqual(provider_no_send(provider.ingress_snapshot(), final=True), 0)
+
     def test_catalog_only_requires_closed_complete_census(self):
         before = self.ingress(b'GET /models-dev HTTP/1.0\r\n\r\n')
         self.assertEqual(before['total'], 1)
