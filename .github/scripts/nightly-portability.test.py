@@ -46,7 +46,47 @@ tests::persistence_load::owned_persistence_load_scenario
 '''.splitlines()
 
 
+def cancellation_fixture_pids(ready, log, deadline):
+    while time.monotonic() < deadline:
+        # The producer writes the complete PID receipt before flushing this
+        # marker. A PID file alone does not establish output to retain.
+        if ready.exists() and log.exists() and 'ready' in log.read_text():
+            pids = [int(pid) for pid in ready.read_text().split()]
+            if len(pids) != 2 or len(set(pids)) != 2 or min(pids) <= 0:
+                raise AssertionError('expected distinct positive root and child PIDs')
+            return pids
+        time.sleep(.02)
+    raise AssertionError('child never reached PID and output readiness barrier')
+
+
 class Controls(unittest.TestCase):
+    def test_cancellation_readiness_waits_for_actual_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            log.write_text('')
+            def release_producer(_):
+                self.assertEqual(log.read_text(), '')
+                log.write_text('ready\n')
+            with patch.object(time, 'sleep', side_effect=release_producer) as poll:
+                self.assertEqual(cancellation_fixture_pids(ready, log, time.monotonic() + 1), [101, 102])
+            poll.assert_called_once_with(.02)
+
+    def test_cancellation_readiness_rejects_missing_output_and_invalid_pids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            with patch.object(time, 'monotonic', side_effect=[0, 1]):
+                with patch.object(time, 'sleep'):
+                    with self.assertRaisesRegex(AssertionError, 'output readiness'):
+                        cancellation_fixture_pids(ready, log, 1)
+            log.write_text('ready\n')
+            for receipt in ('', '101', '101 101', '0 102', '101 102 103', 'invalid 102'):
+                with self.subTest(receipt=receipt):
+                    ready.write_text(receipt)
+                    with self.assertRaises((AssertionError, ValueError)):
+                        cancellation_fixture_pids(ready, log, time.monotonic() + 1)
+
     def test_signal_permission_failure_remains_closed_for_live_group(self):
         with patch.object(runner.os, 'killpg', side_effect=PermissionError('denied')):
             with patch.object(runner, 'live_group_members', return_value=[{'pid': 123, 'group': 123, 'state': 'T'}]):
@@ -335,12 +375,11 @@ else:
             wrapper_log = wrapper_output.open('w')
             process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
                                        stdout=wrapper_log, stderr=subprocess.STDOUT)
+            cancel_sent = False
             try:
-                deadline = time.monotonic() + 10
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(.02)
-                self.assertTrue(ready.exists(), 'child never reached readiness barrier')
-                pids = [int(p) for p in ready.read_text().split()]
+                pids = cancellation_fixture_pids(ready, root / 'nightly-portability/build.log',
+                                                 time.monotonic() + 10)
+                cancel_sent = True
                 process.send_signal(signal.SIGINT)
                 code = process.wait(timeout=10)
                 wrapper_log.flush()
@@ -358,8 +397,15 @@ else:
                 self.assertIn('ready', (evidence / 'build.log').read_text())
             finally:
                 if process.poll() is None:
-                    process.kill()
-                    process.wait()
+                    if not cancel_sent:
+                        process.send_signal(signal.SIGINT)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                        wrapper_log.close()
+                        self.fail('cancellation fixture required forced supervisor cleanup')
                 wrapper_log.close()
 
 
