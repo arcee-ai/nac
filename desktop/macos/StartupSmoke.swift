@@ -174,7 +174,12 @@ final class StartupSmoke {
         app.webView.reload()
         try await waitJS("retained configured transcript", "return !window.__startupReloading && document.body.innerText.includes(\(json(responseText)));")
         evidence["persisted_reload"] = true
-        if value("--smoke-paint") == "1" { try await capture() }
+        if value("--smoke-paint") == "1" {
+            guard let sessionID = metadata["session_id"] as? String else {
+                throw DesktopStartupError.message("Configured capture has no owned session")
+            }
+            try await capture(expectedAnswer: responseText, sessionID: sessionID)
+        }
     }
 
     func didStop() {
@@ -280,7 +285,34 @@ final class StartupSmoke {
         return String(decoding: data, as: UTF8.self).dropFirst().dropLast().description
     }
 
-    private func capture() async throws {
+    static let configuredPaintReadinessScript = #"""
+    const route = location.hash.split('/');
+    if (window.__startupReloading || route[1] !== 'session' || route[2] !== expectedSessionID ||
+        document.visibilityState !== 'visible' ||
+        document.querySelector('[aria-label="Loading conversation"]') ||
+        document.querySelectorAll('[data-nac-runtime]').length !== 1) return false;
+    const visible = element => {
+      if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      const bounds = element.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0 || bounds.left < 0 || bounds.top < 0 ||
+          bounds.right > innerWidth || bounds.bottom > innerHeight) return false;
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) < .99)
+          return false;
+      }
+      return true;
+    };
+    return [...document.querySelectorAll('[data-nac-runtime] p')]
+      .filter(element => element.textContent.trim() === expectedAnswer && visible(element)).length === 1;
+    """#
+
+    private func capture(expectedAnswer: String, sessionID: String) async throws {
+        let probe = "const expectedAnswer=\(json(expectedAnswer)); const expectedSessionID=\(json(sessionID));" + Self.configuredPaintReadinessScript
+        try await waitJS("visible configured transcript", probe)
+        _ = try await js("window.__startupPaintFrame=false; requestAnimationFrame(()=>requestAnimationFrame(()=>window.__startupPaintFrame=true)); return true;")
+        try await waitJS("fresh configured transcript frame", "return window.__startupPaintFrame === true;")
+        try await waitJS("configured transcript after frame", probe)
         let image = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NSImage, Error>) in
             app.webView.takeSnapshot(with: nil) { image, error in
                 if let image { continuation.resume(returning: image) }
@@ -290,6 +322,9 @@ final class StartupSmoke {
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else {
             throw DesktopStartupError.message("Snapshot encoding failed")
+        }
+        guard (try await js(probe)) as? Bool == true else {
+            throw DesktopStartupError.message("Configured transcript changed around capture")
         }
         try png.write(to: output.deletingLastPathComponent().appendingPathComponent("configured-local.png"))
         evidence["paint"] = "captured_unverified"
