@@ -51,10 +51,12 @@ test("retained terminal history reopens without input, expires independently and
   expect(pending.bytes).toEqual([82, 69]);
 
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  await expect(page.getByRole("button", { name: /^(Show|Hide) panel$/ })).toBeVisible();
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   const recent = page.getByRole("region", { name: "Recent terminal activity", exact: true });
+  await expect(recent).toBeVisible();
   const known = recent.getByRole("button", { name: /^! printf RETAINED-HISTORY; exit 7, / });
   await expect(known).toHaveCount(1);
   const operations: string[] = [];
@@ -152,8 +154,10 @@ test("retained terminal history reopens without input, expires independently and
     api.attachExecution(session, id, { protocol_version: 1, page_limit: 2 }),
   ).rejects.toBeTruthy();
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  await expect(page.getByRole("button", { name: /^(Show|Hide) panel$/ })).toBeVisible();
   const panel = page.getByRole("button", { name: "Show panel", exact: true });
   if (await panel.isVisible()) await panel.click();
+  await expect(recent).toBeVisible();
   await known.click();
   await expect(pane.getByLabel("Recorded stdout")).toHaveText("RETAINED-HISTORY");
   await expect(pane).toContainText("no restored live handle");
@@ -210,9 +214,11 @@ test("production history preserves exact byte gaps and requires reset before ret
   expect(tail.next_offset).toBe("1048591");
   await api.detachExecution(session, id, observer.observer_id);
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+  await expect(page.getByRole("button", { name: /^(Show|Hide) panel$/ })).toBeVisible();
   const show = page.getByRole("button", { name: "Show panel", exact: true });
   if (await show.isVisible()) await show.click();
   const recent = page.getByRole("region", { name: "Recent terminal activity", exact: true });
+  await expect(recent).toBeVisible();
   await recent.getByRole("button", { name: /^! python3 -c / }).click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   await expect(pane).toContainText(`Retained bytes ${start}–${end}`);

@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use crate::sandbox::ExecutionBackend;
 use crate::tools::kernel::PermissionResource;
 
+pub(crate) mod attention;
 mod broker;
 mod broker_review;
 mod command_classification;
@@ -27,6 +28,7 @@ mod resource_projection;
 mod review;
 mod review_failure;
 mod shell_parser;
+pub(crate) mod task_observation;
 
 use command_classification::*;
 pub use evaluation::wildcard_match;
@@ -51,7 +53,8 @@ pub use review::{
     REVIEW_DEADLINE,
 };
 pub use review_failure::{PermissionReviewFailureReason, ReviewUnavailable};
-use shell_parser::{canonical_command, command_grant_candidate, parse_shell, ParsedShell};
+pub(crate) use shell_parser::canonical_command;
+use shell_parser::{command_grant_candidate, parse_shell, ParsedShell};
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPROVAL_SUBSCRIBER_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -193,6 +196,7 @@ pub enum AuthorizationOutcome {
 }
 
 struct PendingPermission {
+    explicit_human: bool,
     request: PermissionRequest,
     reply: tokio::sync::oneshot::Sender<PermissionReply>,
 }
@@ -247,6 +251,7 @@ pub struct PermissionBroker {
     session_config_version: i64,
     event_bus: StdMutex<Option<crate::events::SessionEventBus>>,
     state: StdMutex<PermissionBrokerState>,
+    attention: StdMutex<attention::BrokerAttention>,
     approval_observer: tokio::sync::Mutex<PermissionApprovalObserver>,
     reviewer: StdMutex<Option<Arc<dyn PermissionReviewer>>>,
     review: StdMutex<ReviewMemory>,
@@ -279,3 +284,6 @@ mod review_tests;
 #[cfg(test)]
 #[path = "permission_persistence_tests.rs"]
 mod persistence_tests;
+mod scheduled_tasks;
+pub(crate) use scheduled_tasks::authorize_human_retained_allowance;
+pub use scheduled_tasks::{authorize_local_scheduled_project, ScheduledProjectAdmissionRequired};

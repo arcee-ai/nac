@@ -71,7 +71,7 @@ install:
 ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract
+test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract test-manual-stack-override
 
 .PHONY: generate-nac-guide test-nac-guide
 ## Rebuild release-local documentation from canonical maintained Markdown
@@ -118,6 +118,9 @@ test-release:
 	sh -n .github/scripts/stable-release-rollout.sh
 	node --test .github/scripts/release-policy.test.mjs
 	node --test .github/scripts/pr-*.test.mjs
+	python3 .github/scripts/browser-proof.test.py
+	python3 .github/scripts/browser-inventory.test.py
+	python3 .github/scripts/ci-timings.test.py
 	$(MAKE) test-stable-binary
 
 ## Build a stable binary and exercise its real readiness/status identity contract
@@ -143,6 +146,11 @@ test-capture-qualification:
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
 	bash scripts/check-source-size.sh
+
+.PHONY: test-manual-stack-override
+## Exercise the human-only stack override without GitHub mutations
+test-manual-stack-override:
+	node --test scripts/manual-stack-override.test.mjs scripts/manual-stack-admission.test.mjs
 
 .PHONY: generate-codeowners
 ## Regenerate ownership files from the verified owner roster
@@ -198,7 +206,12 @@ test-durability:
 	$(CARGO) test --locked -p nac-core current_schema_delete_mode_initialize_is_read_only_even_during_a_writer_transaction
 	$(CARGO) test --locked -p nac-core invalid_wal_cannot_mask_future_main_schema_or_mutate_any_file
 	$(CARGO) test --locked -p nac-core killed_migrator_rolls_back_and_waiting_process_migrates_exactly_once
+	$(CARGO) test --locked -p nac-core store::heartbeats::tests::calendar
+	$(CARGO) test --locked -p nac-core store::schema::heartbeat_calendar_tests
+	$(CARGO) test --locked -p nac-server heartbeat_calendar_scheduler_two_owners_bound_missed_range_and_admit_once
 	$(CARGO) test --locked -p nac-core cancellation_adopts_a_committed_single_direct_steer_after_async_abort
+	$(CARGO) test --locked -p nac-core followup
+	$(CARGO) test --locked -p nac-server task_followup
 	$(CARGO) test --locked -p nac-core canonical_terminal_recovery_is_retained_until_relationship_settlement
 	$(CARGO) test --locked -p nac-core child_terminal_crash_window_recovers_report_and_delivers_once
 	$(CARGO) test --locked -p nac-core child_pre_prompt_crash_is_interrupted_and_delivered_once_after_restart
@@ -221,7 +234,7 @@ test-managed-fault-fixture:
 ## Reproduce the deterministic 1/2/4 Managed NAC orchestration load scenario
 test-managed-load:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN)
-	NAC_MANAGED_LOAD_WORKER="$(CURDIR)/target/debug/$(BIN)" \
+	NAC_MANAGED_LOAD_WORKER="$${CARGO_TARGET_DIR:-$(CURDIR)/target}/debug/$(BIN)" \
 		$(CARGO) test --locked -p nac-server \
 			tests::managed_load::managed_load_scenario -- --ignored --exact --nocapture --test-threads=1
 

@@ -372,6 +372,7 @@ async fn queued_child_input_survives_waiter_exit_and_recovery_crash_windows() {
                 "child",
                 "relationship-run",
                 crate::store::RunTerminalDisposition::Cancelled,
+                None,
             )
             .unwrap();
             transaction.commit().unwrap();

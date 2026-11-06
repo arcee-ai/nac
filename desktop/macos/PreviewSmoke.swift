@@ -317,11 +317,101 @@ final class PreviewSmoke {
             throw PreviewError.message("Reload did not expose the persisted assistant transcript")
         }
         evidence["persisted_assistant_message"] = true
+        try await settleReloadCapture(sessionID: sessionID)
         try await captureWeb("persisted-chat.png")
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
         try await wait("second provider request") { self.app.provider.responseCount == 2 }
         evidence["close_with_active_run"] = true
+    }
+
+    // Fixture observations only: wait for the shared transcript owner to reveal
+    // its content and finish its fade, rather than changing its loading policy.
+    private static let captureReadiness = #"""
+    const matches = () => location.origin === new URL(expectedOrigin).origin
+      && location.hash.split('/')[2] === expectedSession;
+    if (phase === 'bind') {
+      if (!matches() || window.__previewReloading) return {ready:false, reason:'document'};
+      const binding = {token:documentToken, document, href:location.href,
+        fontsReady:false, paintReady:false, framesPending:false};
+      window.__previewCapture = binding;
+      Promise.all([document.fonts.ready, document.fonts.load('16px Inter')]).then(
+        () => { binding.fontsReady = true; }, () => { binding.fontFailed = true; });
+      return {ready:false, reason:'bound'};
+    }
+    const binding = window.__previewCapture;
+    const visible = element => {
+      if (!(element instanceof Element) || !element.isConnected) return false;
+      const r = element.getBoundingClientRect();
+      if (![r.left,r.top,r.right,r.bottom,r.width,r.height].every(Number.isFinite)
+          || r.width <= 0 || r.height <= 0 || r.right <= 0 || r.bottom <= 0
+          || r.left >= innerWidth || r.top >= innerHeight) return false;
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility !== 'visible'
+            || Number(style.opacity) !== 1) return false;
+      }
+      return true;
+    };
+    const inspect = () => {
+      if (!matches() || window.__previewReloading || !binding
+          || window.__previewCapture !== binding || binding.token !== documentToken
+          || binding.document !== document || binding.href !== location.href)
+        return {ready:false, reason:'document'};
+      if (!binding.fontsReady || binding.fontFailed || document.fonts.status !== 'loaded'
+          || !document.fonts.check('16px Inter')) return {ready:false, reason:'fonts'};
+      const answers = [...document.querySelectorAll('p')]
+        .filter(node => node.textContent === expectedAnswer);
+      const inputs = [...document.querySelectorAll('[role=combobox][aria-label=Message]')];
+      if (answers.length !== 1 || inputs.length !== 1)
+        return {ready:false, reason:'content', answers:answers.length, inputs:inputs.length};
+      const loading = [...document.querySelectorAll('[role=status][aria-label="Loading conversation"]')]
+        .some(node => node.parentElement?.contains(answers[0]));
+      if (loading) return {ready:false, reason:'loading'};
+      if (!visible(answers[0]) || !visible(inputs[0])) return {ready:false, reason:'layout'};
+      return {ready:true, reason:'settled'};
+    };
+    const state = inspect();
+    if (!state.ready) {
+      if (binding) binding.paintReady = false;
+      return state;
+    }
+    if (binding.paintReady) return state;
+    if (!binding.framesPending) {
+      binding.framesPending = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        binding.framesPending = false;
+        binding.paintReady = inspect().ready;
+      }));
+    }
+    return {ready:false, reason:'frames'};
+    """#
+
+    private func settleReloadCapture(sessionID: String) async throws {
+        let view = app.webView!
+        guard let base = app.baseURL, let incarnation = app.engine.receipt?.incarnation else {
+            throw PreviewError.message("Reload capture lost its owned engine")
+        }
+        let token = UUID().uuidString
+        func observe(_ phase: String) async throws -> [String: Any] {
+            guard app.webView === view, app.engine.receipt?.incarnation == incarnation else {
+                throw PreviewError.message("Reload capture lost its owned document")
+            }
+            let value = try await view.callAsyncJavaScript(Self.captureReadiness,
+                arguments: ["phase": phase, "expectedSession": sessionID,
+                            "expectedOrigin": base.absoluteString, "expectedAnswer": FixtureProvider.answer,
+                            "documentToken": token], in: nil, contentWorld: .page)
+            guard let facts = value as? [String: Any] else {
+                throw PreviewError.message("Reload capture readiness was malformed")
+            }
+            return facts
+        }
+        _ = try await observe("bind")
+        try await wait("settled persisted transcript capture") {
+            let facts = try await observe("probe")
+            self.evidence["persisted_capture_readiness"] = facts
+            return facts["ready"] as? Bool == true
+        }
     }
 
     private func sendPrompt(_ prompt: String) async throws {
