@@ -71,11 +71,56 @@ def provider_no_send(snapshot, *, final=False):
     for sequence, row in enumerate(rows, 1):
         require(row['sequence'] == sequence and row['finished'] is True and row['parsed'] is True,
                 'provider unknown/unfinished ingress')
-        require(row['method'] == 'GET' and row['recognized'] == 'catalog' and
-                row['path'].startswith('/models-dev') and row['error'] is None,
+        require(row['method'] == 'GET' and ((row['recognized'] == 'catalog' and
+                row['path'].startswith('/models-dev')) or
+                (row['recognized'] == 'q1-model-index' and row['path'] == '/models')) and row['error'] is None,
                 'provider non-catalog/inference ingress')
     # Zero follows complete recorded ingress, never the recognized-request list.
     return 0
+
+
+def q1_fetch_reads(snapshot, expected, provider):
+    """Validate the observed prefix, not future requests or a metadata success."""
+    address = urlparse(provider)
+    require(address.scheme == 'http' and address.hostname == '127.0.0.1' and address.port and
+            not address.username and not address.password and address.path == '' and
+            not address.query and not address.fragment, 'foreign fixture provider')
+    keys = {'version', 'nonce', 'provider', 'engineOrigin', 'started', 'settled', 'errors',
+            'active', 'overflow', 'rows', 'document', 'selector'}
+    require(type(snapshot) is dict and set(snapshot) == keys, 'missing complete fetch witness')
+    require(type(snapshot['version']) is int and snapshot['version'] == 1, 'fetch witness version')
+    require(snapshot['nonce'] == expected['nonce'] and snapshot['provider'] == provider and
+            snapshot['selector'] == expected['selector'] and
+            snapshot['engineOrigin'] == expected['endpoint'], 'foreign fetch scope')
+    require(snapshot['document'] == {k: expected[k] for k in ('launch', 'view', 'document')},
+            'stale fetch document')
+    require(all(type(snapshot[k]) is int and snapshot[k] >= 0 for k in
+                ('started', 'settled', 'errors', 'active')), 'fetch counter types')
+    rows = snapshot['rows']
+    require(type(rows) is list and snapshot['overflow'] is False and len(rows) <= 128 and
+            snapshot['started'] == snapshot['settled'] == len(rows) and
+            snapshot['errors'] == snapshot['active'] == 0, 'incomplete/error/overflow fetch witness')
+    failures = []
+    flags = {'canonicalJSON', 'exactKeys', 'backendFixture', 'namedFixtureKey', 'noInlineKey',
+             'fixtureEndpoint', 'safeHTTPPolicy', 'exactRoute'}
+    for sequence, row in enumerate(rows, 1):
+        require(type(row) is dict and set(row) == {'sequence', 'method', 'origin', 'path', 'state',
+                'status', 'error', 'metadata'}, 'fetch row shape')
+        require(type(row['sequence']) is int and row['sequence'] == sequence and
+                row['origin'] == expected['endpoint'] and row['state'] == 'settled' and
+                row['error'] is False and type(row['status']) is int and 100 <= row['status'] <= 599 and
+                type(row['path']) is str and row['path'].startswith('/'), 'unknown/foreign/error fetch')
+        if row['method'] == 'GET':
+            require(row['metadata'] is None, 'foreign GET classification')
+        else:
+            metadata = row['metadata']
+            require(row['method'] == 'POST' and row['path'] == '/providers/models' and
+                    type(metadata) is dict and set(metadata) == flags | {'kind'} and
+                    metadata['kind'] == 'fixture-provider-models' and
+                    all(metadata[k] is True for k in flags), 'unproven metadata or executable write')
+            if row['status'] >= 400: failures.append(dict(sequence=sequence, status=row['status']))
+    return dict(scope='complete observed fetch prefix at capture', metadataFailures=failures,
+                metadataSuccessClaimed=False, overflow=False)
 
 
 def frame(record, nonce):
@@ -117,9 +162,29 @@ def q1_ui_result(record):
     return record if phase.get('status') == 'ui-passed-awaiting-durability' else None
 
 
+def seed_q1_configuration(endpoint, provider, environment, deadline, existing=None, nonce=None):
+    """Supported saved-config API only; no discovery, raw SQL or generated-name allowance."""
+    name = existing['name'] if existing else 'Disposable Q1 ' + str(nonce or uuid.uuid4())
+    if existing is None:
+        record = request(endpoint, '/model-configs', dict(name=name, backend='openai-responses',
+            model='gpt-5.6-sol', base_url=provider, allow_insecure_http=False,
+            api_key=environment['OPENAI_API_KEY']), timeout=_remaining(deadline, 8))
+    else:
+        record = existing
+    require(type(record) is dict and record.get('name') == name and
+            record.get('backend') == 'openai-responses' and record.get('base_url') == provider and
+            record.get('model') == 'gpt-5.6-sol' and record.get('allow_insecure_http') is False and
+            type(record.get('config_id')) is str and record['config_id'] and
+            type(record.get('api_key_env')) is str and record['api_key_env'] and
+            len(record['api_key_env']) <= 256 and 'api_key' not in record, 'foreign saved fixture configuration')
+    rows = request(endpoint, '/model-configs', timeout=_remaining(deadline, 8))['configurations']
+    require(type(rows) is list and len(rows) == 1 and rows[0] == record, 'saved fixture readback changed')
+    return record
+
+
 class RecoveryLaunch:
     """Concrete RecoverySmoke adapter; does not inherit instance stage assumptions."""
-    def __init__(self, bundle, root, environment, store, observer, number, deadline, checks):
+    def __init__(self, bundle, root, environment, store, observer, number, deadline, checks, saved_configuration=None):
         self.bundle, self.root, self.environment, self.store = bundle, root, environment, store
         self.observer, self.deadline, self.checks = observer, deadline, checks
         self.control = root / ('q1-controls-' + str(number)); self.control.mkdir(mode=0o700)
@@ -130,6 +195,9 @@ class RecoveryLaunch:
         self.launch_helper = None
         self.log = None
         self.closed = False
+        self.saved_configuration = saved_configuration
+        (self.control / 'profile-open-hold').touch(mode=0o600)
+        self.fetch_nonce = str(uuid.uuid4())
         require(not self.state()['apps'], 'bundle already running')
 
     def state(self):
@@ -163,7 +231,9 @@ class RecoveryLaunch:
         require_console(self.observer, self.checks, 'q1-launch')
         command = ['/usr/bin/open', '-a', str(self.bundle), '--args', '--directory', str(self.root / 'workspace'),
                    '--store-path', str(self.store), '--recovery-output', str(self.output),
-                   '--recovery-control', str(self.control)]
+                   '--recovery-control', str(self.control),
+                   '--storage-q1-fetch-provider', self.environment['MODELS_DEV_URL'].removesuffix('/models-dev'),
+                   '--storage-q1-fetch-nonce', self.fetch_nonce]
         self.log = (self.control / 'launch.log').open('wb')
         self.launch_helper = subprocess.Popen(command, env=self.environment, cwd='/',
                                              stdout=self.log, stderr=self.log)
@@ -173,7 +243,31 @@ class RecoveryLaunch:
             if self.launch_helper.poll() is None:
                 self.launch_helper.terminate()  # Only the unreaped helper handle, not an observed app PID.
                 self.launch_helper.wait(timeout=3)
+        original_action_deadline = self.deadline
+        self.deadline = min(self.deadline, time.monotonic() + 30)  # Share the original readiness bound.
+        pending = self.wait('Q1 pre-render hold', lambda: (r if (r := self.read()).get('profile_open_pending')
+                              and r.get('endpoint') else None), limit=5)
+        require(not pending.get('profile_open_timeout'), 'original profile hold expired')
+        observed = self.state()
+        require(len(observed['apps']) == 1 and observed['apps'][0]['pid'] == pending['app_pid'], 'unknown held app')
+        self.identity = observed['apps'][0]; self.engine_pid = pending['engine_pid']
+        self.guard()
+        require(request(pending['endpoint'], '/store', timeout=_remaining(self.deadline, 4))['store_path'] == str(self.store),
+                'foreign held store')
+        held_deadline = min(self.deadline, time.monotonic() + 4)
+        provider = self.environment['MODELS_DEV_URL'].removesuffix('/models-dev')
+        self.saved_configuration = seed_q1_configuration(pending['endpoint'], provider, self.environment,
+                                                        held_deadline, self.saved_configuration, nonce=self.fetch_nonce)
+        require(self.read().get('profile_open_pending') is True and
+                not self.read().get('profile_open_timeout'), 'original profile hold expired during seed')
+        with (self.control / 'storage-q1-fetch.json').open('x') as binding:
+            os.chmod(binding.name, 0o600)
+            json.dump(dict(nonce=self.fetch_nonce, provider=provider,
+                           selector=self.saved_configuration['api_key_env'],
+                           config_id=self.saved_configuration['config_id'], name=self.saved_configuration['name']), binding)
+        self.command('profile-open-release')
         ready = self.wait('RecoverySmoke readiness', lambda: (r if (r := self.read()).get('bridge', {}).get('ready') else None))
+        require(not ready.get('profile_open_timeout'), 'initial page escaped original hold')
         state = self.state()
         require(len(state['apps']) == 1 and state['apps'][0]['pid'] == ready['app_pid'], 'unknown app identity')
         self.identity = state['apps'][0]
@@ -181,10 +275,11 @@ class RecoveryLaunch:
         require(type(self.engine_pid) is int and self.engine_pid > 0 and
                 not engine_settled(self.bundle, self.engine_pid), 'owned engine not observed')
         self.guard()
+        self.deadline = original_action_deadline
         return ready
 
     def command(self, name):
-        require(name in ('storage-q1-seed', 'storage-q1-restore', 'capture', 'stop'), 'unsupported Q1 control')
+        require(name in ('storage-q1-seed', 'storage-q1-restore', 'capture', 'stop', 'profile-open-release'), 'unsupported Q1 control')
         self.guard()
         require(name not in self.commands, 'control already consumed')
         (self.control / name).touch(mode=0o600, exist_ok=False)
@@ -270,7 +365,7 @@ def run_contract(bundle, observer, root, destination, admission):
         (root / name).mkdir(mode=0o700)
     home, workspace = root / 'home', root / 'workspace'
     store = root / 'store.db'
-    provider = QuitProvider(workspace)
+    provider = QuitProvider(workspace, q1_metadata=True)
     launches, summaries = [], []
     checks = []
     result = dict(passed=False, root=str(root), source_head=source, cleanup=[], launches=summaries,
@@ -284,10 +379,12 @@ def run_contract(bundle, observer, root, destination, admission):
         subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(workspace)],
                        env=environment, check=True, timeout=_remaining(action_deadline, 5))
         pair = None
+        saved_configuration = None
         for number, phase in enumerate(('seed', 'restore'), 1):
-            launch = RecoveryLaunch(bundle, root, environment, store, observer, number, action_deadline, checks)
+            launch = RecoveryLaunch(bundle, root, environment, store, observer, number, action_deadline, checks, saved_configuration)
             launches.append(launch)
             ready = launch.launch()
+            saved_configuration = launch.saved_configuration
             require(request(ready['endpoint'], '/store', timeout=_remaining(action_deadline, 8))['store_path'] == str(store),
                     'foreign canonical store')
             if pair is None:
@@ -296,7 +393,8 @@ def run_contract(bundle, observer, root, destination, admission):
                 baseline = sqlite_snapshot(store, db_pin, pair)
             require(sqlite_snapshot(store, db_pin, pair) == baseline, 'prelaunch durable facts changed')
             provider_no_send(provider.ingress_snapshot())
-            nonce = str(uuid.uuid4()); expected = frame(ready, nonce)
+            nonce = launch.fetch_nonce; expected = frame(ready, nonce)
+            expected['selector'] = saved_configuration['api_key_env']
             plan = dict(version=1, nonce=nonce, a=pair[0], b=pair[1],
                         aText='  雪🙂\n\n!echo inert\n', bText='/not-a-command\nB inert')
             plan_path = launch.control / 'storage-q1.json'
@@ -304,27 +402,24 @@ def run_contract(bundle, observer, root, destination, admission):
                 os.chmod(plan_path, 0o600); json.dump(plan, out, ensure_ascii=False)
             launch.command('storage-q1-' + phase)
             ui = launch.wait('Q1 UI', lambda: q1_ui_result(launch.read()), limit=20)
-            require(frame(ui, nonce) == expected, 'changed launch frame')
+            require(frame(ui, nonce) == {k:v for k,v in expected.items() if k != 'selector'}, 'changed launch frame')
             launch.command('capture')
             capture = launch.wait('Q1 request capture', lambda: (r if (r := launch.read()).get('document') else None))
-            rows = capture['document'].get('requests')
-            require(type(rows) is list, 'request observation missing')
-            overflow = len(rows) >= 128
-            require(not overflow and all(r['method'] == 'GET' for r in rows),
-                    'non-read request or incomplete fetch observation')
+            fetch = q1_fetch_reads(capture['document'].get('fetch'), expected, provider.endpoint)
+            overflow = fetch['overflow']
             launch.deadline = deadline  # Same absolute case clock, original reserve for cleanup only.
             terminal = launch.stop()
             require(terminal.get('storage_q1_overflow') is not True, 'native ledger overflow')
             # Actual externally pinned default-off state only; never invent or persist native JSON.
             disk = observe(root, root_pin, expected['profile'], ui['storage_q1']['binding'],
                            pair[0], pair[1], plan['aText'], expected_native=native_baseline)
-            durable = assert_durable(terminal['storage_q1_native_writes'], expected, disk['checkpointSHA256'],
+            durable = assert_durable(terminal['storage_q1_native_writes'], {k:v for k,v in expected.items() if k != 'selector'}, disk['checkpointSHA256'],
                                      require_b_clear=phase == 'seed')
             require(sqlite_snapshot(store, db_pin, pair) == baseline, 'post-Quit durable facts changed')
             summaries.append(dict(frame=expected, profile=expected['profile'],
                 website_store=ready['profile_storage']['website_store'], store=str(store), home=str(home),
                 app_identity=launch.identity, disk=disk, durable=durable, native=terminal,
-                request_log_overflow=overflow))
+                request_log_overflow=overflow, fetch=fetch))
             if number == 2:
                 result.update(compare_launches(*summaries))
         provider.close()
@@ -352,6 +447,8 @@ def run_contract(bundle, observer, root, destination, admission):
                 provider.close()
         except Exception as error:
             provider_cleanup = dict(known=False, error=str(error))
+        result['saved_configurations'] = [launch.saved_configuration for launch in launches
+                                          if launch.saved_configuration is not None]
         result['provider_cleanup'] = provider_cleanup
         result['provider_final'] = provider.ingress_snapshot()
         cleanup_known = all(item['known'] and item['stopped'] for item in result['cleanup']) and provider_cleanup['known']
