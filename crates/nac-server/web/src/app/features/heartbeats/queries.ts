@@ -5,7 +5,11 @@ import { ApiError } from "@/app/services/api";
 import type { HeartbeatReceipt, HeartbeatInspection } from "@/app/types/api";
 import { secureRequestId } from "@/app/lib/requestId";
 import { queryKeys } from "@/app/services/queries/keys";
-import type { HeartbeatAction, HeartbeatControlRequest } from "@/app/types/api";
+import type {
+  HeartbeatAction,
+  HeartbeatControlRequest,
+  HeartbeatCalendarDraft,
+} from "@/app/types/api";
 
 export const heartbeatKey = (sessionId: string) => ["heartbeats", sessionId] as const;
 
@@ -40,6 +44,7 @@ export function useHeartbeats(sessionId: string, scheduleId: string | null, allC
           const newer = current && current.schedule.version >= receipt.schedule.version;
           return {
             schedule: newer ? current.schedule : receipt.schedule,
+            calendar_preview: newer ? current.calendar_preview : null,
             history:
               current?.history ??
               [receipt.active_occurrence, receipt.occurrence].filter((item) => item != null),
@@ -92,4 +97,21 @@ export function useHeartbeats(sessionId: string, scheduleId: string | null, allC
       if (intent) control.mutate(intent);
     },
   };
+}
+
+export function useHeartbeatCalendarPreview(
+  sessionId: string | undefined,
+  calendar: HeartbeatCalendarDraft | null,
+) {
+  const { api } = useNativeRuntime();
+  return useQuery({
+    queryKey: ["heartbeat-calendar-preview", sessionId, calendar],
+    queryFn: ({ signal }) => {
+      if (!sessionId || !calendar) throw new Error("Calendar preview requires an existing chat");
+      return api.previewHeartbeat(sessionId, { calendar, count: 3 }, signal);
+    },
+    enabled: !!sessionId && calendar !== null,
+    retry: false,
+    staleTime: 0,
+  });
 }

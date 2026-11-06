@@ -29,6 +29,7 @@ async fn reconcile_or_stop(
 
 #[derive(Debug, serde::Serialize)]
 struct Measurement {
+    cadence: &'static str,
     schedules: usize,
     runnable_chats: usize,
     owners: usize,
@@ -40,6 +41,9 @@ struct Measurement {
     warm_max_ms: f64,
     maximum_admission_lateness_ms: i64,
     database_bytes: u64,
+    calculation_ms: f64,
+    catchup_points_per_schedule: i64,
+    retained_occurrence_rows: usize,
     resident_before_kib: Option<u64>,
     resident_active_kib: Option<u64>,
 }
@@ -52,7 +56,7 @@ fn resident_kib() -> Option<u64> {
     String::from_utf8(output.stdout).ok()?.trim().parse().ok()
 }
 
-async fn measure_case(n: usize) -> Measurement {
+async fn measure_case(n: usize, calendar: bool) -> Measurement {
     let root = std::env::temp_dir().join(format!("nac-heartbeat-load-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let root = std::fs::canonicalize(root).unwrap();
@@ -91,12 +95,45 @@ async fn measure_case(n: usize) -> Measurement {
         snapshot.behavior = sessions::SessionBehavior::Direct;
         sessions::create_session(&path, &snapshot).unwrap();
     }
-    let due = epoch_ms();
+    let now = epoch_ms();
+    // A whole-minute daily UTC rule gives an exact canonical seven-day
+    // downtime range, independent of the wall-clock second of this fixture.
+    let minute_boundary = now / 60_000 * 60_000;
+    let first_due = if calendar {
+        minute_boundary - 7 * 86_400_000
+    } else {
+        now
+    };
+    let creation_time = if calendar {
+        first_due - 1
+    } else {
+        now - 60_000
+    };
+    let mut calculation_ms = 0.;
     for index in 0..n {
         let mut binding =
             store::heartbeat_binding(&path, &format!("chat-{}", index % chats)).unwrap();
         binding.execution_cwd = Some(root.to_string_lossy().into_owned());
-        store::control_heartbeat(
+        let cadence = if calendar {
+            let rule = store::HeartbeatCalendarRule {
+                zone: "Etc/UTC".into(),
+                data_version: "2026f".into(),
+                hour: ((minute_boundary / 3_600_000) % 24) as u8,
+                minute: ((minute_boundary / 60_000) % 60) as u8,
+                days: store::HeartbeatCalendarDays::Daily,
+            };
+            let calculation = Instant::now();
+            let preview = rule.preview(creation_time, None, 3).unwrap();
+            calculation_ms += calculation.elapsed().as_secs_f64() * 1000.;
+            assert_eq!(preview.occurrences.len(), 3);
+            assert_eq!(preview.occurrences[0].due_ms, first_due);
+            store::HeartbeatCadence::Calendar(rule)
+        } else {
+            store::HeartbeatCadence::Interval {
+                interval_ms: 60_000,
+            }
+        };
+        let created = store::control_heartbeat(
             &path,
             &format!("chat-{}", index % chats),
             &uuid::Uuid::new_v4().to_string(),
@@ -105,7 +142,7 @@ async fn measure_case(n: usize) -> Measurement {
                     name: format!("Check {index}"),
                     instructions: "Observe the authorized Local fixture.".into(),
                     skills: Vec::new(),
-                    interval_ms: 60_000,
+                    cadence,
                     end_condition: "Finish after fixture verification.".into(),
                     goal_id: None,
                     execution_timeout_ms: 60_000,
@@ -115,9 +152,10 @@ async fn measure_case(n: usize) -> Measurement {
             },
             "Check the Local fixture every minute.",
             &binding,
-            due - 60_000,
+            creation_time,
         )
         .unwrap();
+        assert_eq!(created.schedule.next_due_ms, first_due);
     }
     let manager = || {
         SessionManager::new_unowned_fixture(ServerOptions {
@@ -157,6 +195,15 @@ async fn measure_case(n: usize) -> Measurement {
     .unwrap();
     assert_eq!(active.len(), chats);
     assert_eq!(active.len() + pending.len(), n);
+    let catchup_points = if calendar { 8 } else { 1 };
+    for occurrence in active.iter().chain(pending.iter()) {
+        assert_eq!(occurrence.coalesced_count, catchup_points);
+        assert_eq!(occurrence.due_first_ms, first_due);
+        assert_eq!(
+            occurrence.due_last_ms,
+            if calendar { minute_boundary } else { now }
+        );
+    }
     let lateness = active
         .iter()
         .map(|o| o.started_at_ms.unwrap() - o.due_first_ms)
@@ -175,6 +222,25 @@ async fn measure_case(n: usize) -> Measurement {
     second.quiesce_persistence_callers().await;
     first.drain_persistence().await.unwrap();
     second.drain_persistence().await.unwrap();
+    let retained_occurrence_rows = (0..chats)
+        .flat_map(|chat| store::list_heartbeats(&path, Some(&format!("chat-{chat}"))).unwrap())
+        .map(|schedule| {
+            store::heartbeat_history(
+                &path,
+                schedule
+                    .session_id
+                    .as_deref()
+                    .expect("same-chat fixture owner"),
+                &schedule.schedule_id,
+            )
+            .unwrap()
+            .len()
+        })
+        .sum::<usize>();
+    assert_eq!(
+        retained_occurrence_rows, n,
+        "downtime must not create one row per missed point"
+    );
     let bytes = [
         path.clone(),
         PathBuf::from(format!("{}-wal", path.display())),
@@ -185,6 +251,11 @@ async fn measure_case(n: usize) -> Measurement {
     .map(|m| m.len())
     .sum();
     let measurement = Measurement {
+        cadence: if calendar {
+            "calendar_daily_utc"
+        } else {
+            "interval"
+        },
         schedules: n,
         runnable_chats: chats,
         owners: 2,
@@ -196,6 +267,9 @@ async fn measure_case(n: usize) -> Measurement {
         warm_max_ms: warm[23],
         maximum_admission_lateness_ms: lateness,
         database_bytes: bytes,
+        calculation_ms,
+        catchup_points_per_schedule: catchup_points,
+        retained_occurrence_rows,
         resident_before_kib,
         resident_active_kib,
     };
@@ -210,7 +284,7 @@ async fn measure_case(n: usize) -> Measurement {
 #[tokio::test]
 async fn heartbeat_scheduler_two_owners_admit_once_without_clients_and_shutdown_settles() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let measurement = measure_case(2).await;
+    let measurement = measure_case(2, false).await;
     assert_eq!(measurement.admitted, 2);
     assert_eq!(measurement.pending, 0);
 }
@@ -222,7 +296,28 @@ async fn heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_c
     for n in [1, 10, 100] {
         println!(
             "HEARTBEAT_MEASUREMENT {}",
-            serde_json::to_string(&measure_case(n).await).unwrap()
+            serde_json::to_string(&measure_case(n, false).await).unwrap()
+        );
+    }
+}
+
+#[tokio::test]
+async fn heartbeat_calendar_scheduler_two_owners_bound_missed_range_and_admit_once() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let measurement = measure_case(2, true).await;
+    assert_eq!(measurement.admitted, 2);
+    assert_eq!(measurement.pending, 0);
+    assert_eq!(measurement.catchup_points_per_schedule, 8);
+}
+
+#[tokio::test]
+#[ignore = "run with the shared exclusive measurement lease and --nocapture"]
+async fn heartbeat_calendar_measure_1_10_100_with_two_owners_and_seven_day_downtime() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for n in [1, 10, 100] {
+        println!(
+            "HEARTBEAT_CALENDAR_MEASUREMENT {}",
+            serde_json::to_string(&measure_case(n, true).await).unwrap()
         );
     }
 }

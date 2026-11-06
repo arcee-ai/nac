@@ -59,6 +59,7 @@ impl<'a> FreshTaskScheduleApplication<'a> {
                 heartbeat: HeartbeatInspection {
                     schedule: store::read_heartbeat(&path, &scope, &schedule)?,
                     history: store::heartbeat_history(&path, &scope, &schedule)?,
+                    calendar_preview: None,
                 },
                 inventory,
                 host_retained_limit: store::fresh_heartbeat_host_retained_limit(&path)?,

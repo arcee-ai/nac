@@ -87,7 +87,9 @@ pub(super) fn spec() -> HeartbeatSpec {
         name: "Job check".into(),
         instructions: "Check the authorized Local job result.".into(),
         skills: vec!["verification".into()],
-        interval_ms: 60_000,
+        cadence: crate::store::HeartbeatCadence::Interval {
+            interval_ms: 60_000,
+        },
         end_condition: "Finish when the result is ready.".into(),
         goal_id: None,
         execution_timeout_ms: 300_000,
@@ -271,7 +273,9 @@ fn heartbeat_pause_edit_resume_withdraw_unstarted_and_never_replay_paused_time()
     assert_eq!(now.schedule.next_due_ms, 601_000);
     assert_ne!(now.occurrence.unwrap().occurrence_id, pending.occurrence_id);
     let mut replacement = spec();
-    replacement.interval_ms = 120_000;
+    replacement.cadence = HeartbeatCadence::Interval {
+        interval_ms: 120_000,
+    };
     let edited = f
         .control(
             HeartbeatAction::Edit {
@@ -295,7 +299,9 @@ fn heartbeat_validation_rejects_overflow_and_nonlocal_or_child_targets() {
     let f = Fixture::new();
     for interval in [0, 59_999, i64::MAX] {
         let mut invalid = spec();
-        invalid.interval_ms = interval;
+        invalid.cadence = HeartbeatCadence::Interval {
+            interval_ms: interval,
+        };
         assert!(control_heartbeat(
             &f.path,
             "direct",
@@ -615,3 +621,5 @@ fn heartbeat_settlement_exact_runtime_run_preserves_other_chat_and_commits_once(
     );
     assert!(read_heartbeat(&f.path, "other", &schedule.schedule_id).is_err());
 }
+mod calendar;
+mod codec;

@@ -23,7 +23,9 @@ fn specification() -> HeartbeatSpec {
         name: "Local job".into(),
         instructions: "Check the authorized job.".into(),
         skills: Vec::new(),
-        interval_ms: 60_000,
+        cadence: nac_core::store::HeartbeatCadence::Interval {
+            interval_ms: 60_000,
+        },
         end_condition: "Finish when ready.".into(),
         goal_id: None,
         execution_timeout_ms: 300_000,
@@ -44,6 +46,101 @@ async fn receipt(response: Response) -> HeartbeatReceipt {
     let body = to_bytes(response.into_body(), 1_000_000).await.unwrap();
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn heartbeat_calendar_preview_and_human_controls_share_exact_stored_rule_without_wake() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("calendar_http");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("server-test-key"));
+    seed(&root);
+    let manager = owned_test_manager(&root).unwrap();
+    let app = router(manager.clone());
+    let draft = serde_json::json!({"zone":"America/Los_Angeles","hour":9,"minute":0,"days":{"kind":"weekdays","days":[1,2,3,4,5]}});
+    let response = post_json(
+        app.clone(),
+        "/sessions/session/heartbeats/preview",
+        serde_json::json!({"calendar":draft,"count":3}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let preview: nac_core::store::HeartbeatCalendarPreview =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(preview.calendar.zone, "America/Los_Angeles");
+    assert_eq!(preview.calendar.data_version, "2026f");
+    assert_eq!(preview.occurrences.len(), 3);
+    assert!(preview
+        .occurrences
+        .iter()
+        .all(|p| p.local.ends_with("T09:00:00")));
+    assert!(
+        manager.inner.active_sessions.read().await.is_empty(),
+        "preview must not attach a service"
+    );
+    for (field, value) in [
+        ("zone", serde_json::json!("Mars/Base")),
+        ("days", serde_json::json!({"kind":"monthly","day":1})),
+    ] {
+        let mut invalid = draft.clone();
+        invalid[field] = value;
+        assert_eq!(
+            post_json(
+                app.clone(),
+                "/sessions/session/heartbeats/preview",
+                serde_json::json!({"calendar":invalid,"count":3})
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/sessions/session/heartbeats/preview",
+            serde_json::json!({"calendar":draft,"count":17})
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let mut spec = specification();
+    spec.cadence = nac_core::store::HeartbeatCadence::Calendar(preview.calendar.clone());
+    let created = receipt(
+        control(
+            app.clone(),
+            &uuid::Uuid::new_v4().to_string(),
+            HeartbeatAction::Create { spec },
+        )
+        .await,
+    )
+    .await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/sessions/session/heartbeats/{}",
+                    created.schedule.schedule_id
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let inspection: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(
+        inspection["calendar_preview"]["calendar"]["zone"],
+        "America/Los_Angeles"
+    );
+    assert!(inspection["calendar_preview"]["next_due"]["local"]
+        .as_str()
+        .unwrap()
+        .ends_with("T09:00:00"));
+    assert!(inspection["history"].as_array().unwrap().is_empty());
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
 }
 
 #[tokio::test]
@@ -91,7 +188,9 @@ async fn heartbeat_human_routes_all_controls_lost_ack_and_passive_inventory_with
             },
             "edit" => {
                 let mut spec = specification();
-                spec.interval_ms = 120_000;
+                spec.cadence = nac_core::store::HeartbeatCadence::Interval {
+                    interval_ms: 120_000,
+                };
                 HeartbeatAction::Edit {
                     schedule_id: id,
                     expected_version: expected,

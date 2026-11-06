@@ -145,7 +145,9 @@ async fn delivery_case(information: bool, transient: bool) {
                     name: "Exact answer".into(),
                     instructions: "Report unchanged then ask the exact format.".into(),
                     skills: vec![],
-                    interval_ms: 60_000,
+                    cadence: nac_core::store::HeartbeatCadence::Interval {
+                        interval_ms: 60_000,
+                    },
                     end_condition: "Review the answer".into(),
                     goal_id: Some(goal.goal_id.clone()),
                     execution_timeout_ms: 60_000,

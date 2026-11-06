@@ -586,7 +586,9 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
                         name: "Identity isolation".into(),
                         instructions: "Inspect the fixture.".into(),
                         skills: vec![],
-                        interval_ms: 60_000,
+                        cadence: crate::store::HeartbeatCadence::Interval {
+                            interval_ms: 60_000,
+                        },
                         end_condition: "Retain the result.".into(),
                         goal_id: None,
                         execution_timeout_ms: 30_000,

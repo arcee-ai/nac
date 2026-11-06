@@ -122,7 +122,9 @@ async fn question_yield_case(bound_goal: bool) {
                     name: "Question check".into(),
                     instructions: "Report the job, then ask which result to check next.".into(),
                     skills: Vec::new(),
-                    interval_ms: 60_000,
+                    cadence: nac_core::store::HeartbeatCadence::Interval {
+                        interval_ms: 60_000,
+                    },
                     end_condition: "Finish after the decision is handled.".into(),
                     goal_id: goal.as_ref().map(|g| g.goal_id.clone()),
                     execution_timeout_ms: 60_000,

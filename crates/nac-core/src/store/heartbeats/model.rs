@@ -1,4 +1,5 @@
 //! Bounded interval schedules and their exact occurrence receipts.
+use super::HeartbeatCadence;
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -10,27 +11,26 @@ pub const HEARTBEAT_HISTORY_LIMIT: i64 = 32;
 pub const HEARTBEAT_COMMAND_LIMIT: i64 = 4_096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(
+    try_from = "super::spec_codec::HeartbeatSpecWire",
+    into = "super::spec_codec::HeartbeatSpecWire"
+)]
 pub struct HeartbeatSpec {
     pub name: String,
     pub instructions: String,
-    #[serde(default)]
     pub skills: Vec<String>,
-    pub interval_ms: i64,
+    pub cadence: HeartbeatCadence,
     pub end_condition: String,
     pub goal_id: Option<String>,
-    #[serde(default = "default_deadline")]
     pub execution_timeout_ms: i64,
-    #[serde(default = "default_starts")]
     pub max_occurrences: i64,
     pub token_allowance: Option<i64>,
 }
 
-fn default_deadline() -> i64 {
+pub(super) fn default_deadline() -> i64 {
     300_000
 }
-fn default_starts() -> i64 {
+pub(super) fn default_starts() -> i64 {
     1_000
 }
 
@@ -46,10 +46,7 @@ impl HeartbeatSpec {
                 "heartbeat {field} must contain 1..={max} bytes"
             );
         }
-        ensure!(
-            (MIN_HEARTBEAT_INTERVAL_MS..=MAX_HEARTBEAT_INTERVAL_MS).contains(&self.interval_ms),
-            "heartbeat interval must be between 60 seconds and 365 days"
-        );
+        self.cadence.validate()?;
         ensure!(
             (1_000..=3_600_000).contains(&self.execution_timeout_ms),
             "heartbeat deadline must be between 1 second and 1 hour"

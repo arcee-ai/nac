@@ -1,6 +1,6 @@
 # Heartbeats
 
-An interval heartbeat returns to the same direct Local chat to check a saved
+An interval or calendar heartbeat returns to the same direct Local chat to check a saved
 purpose. Ask the agent explicitly to schedule it, or open the chat's
 **Heartbeats** panel and choose **New heartbeat**. The panel also lists schedules
 from **All chats** on this serving host. SSH, Podman, delegated and managed-host
@@ -8,13 +8,50 @@ execution are not qualified for this initial feature.
 
 ## Scheduling and control
 
-Save the instructions, interval, finish condition and any installed skill names.
+Save the instructions, cadence, finish condition and any installed skill names.
 An ordinary check creates neither a goal nor another chat. Optionally bind an
 already-active goal in this exact chat; paused, blocked, replaced and exhausted
 goals never become active merely because a heartbeat is due.
 
-The first check is due one interval after creation. Later due points stay on
-that anchor. **Run now** requests a separate occurrence without moving it.
+Choose an elapsed interval, daily local time, selected weekdays, or one weekly
+day. Calendar rules always save an explicit IANA timezone, such as
+`America/Los_Angeles`. A new form initially captures the viewing device's zone;
+review it before saving. The stored zone stays fixed when the device or server
+timezone changes. Raw cron/RRULE, monthly/yearly calendars and quiet hours are
+not supported.
+
+The form previews upcoming instants both in the stored zone and UTC before
+creation or an edit. Native agents use `preview_heartbeat` for the same passive
+calculation, then save the returned rule/data version with `heartbeat_control`.
+`read_heartbeat` returns the saved rule, exact next due and upcoming UTC/local
+instants. Preview and history reads never attach, wake or schedule a chat.
+
+Nonexistent spring-forward wall times are skipped. A repeated wall time fires
+once, at its earliest UTC occurrence. Calendar cadence follows local dates, not
+an assumed 24-hour elapsed interval. Editing the zone, time or day rule selects
+a strictly future point of the new version and withdraws unstarted old work;
+already-admitted work keeps its original rule and UTC provenance. Downtime
+coalesces into one check with the actual missed UTC range and count. Resume
+skips deliberately paused dates, including gaps/folds, and a backward clock
+does not rewind the retained next due.
+
+Calendar calculation uses NAC-owned pinned official IANA **2026f** data through
+Jiff **0.2.38**, with the MIT license choice and only `std` enabled. No host zone
+files, automatic network refresh, bundled fallback or POSIX timezone strings
+participate. Every saved calendar rule retains its data version. Unknown zones,
+versions or rules fail visibly. A deliberate data update must retain support
+for saved versions or explicitly migrate/review affected schedules; it must not
+silently reinterpret existing due identities.
+
+Preview contains at most 16 points. Each next/previous search examines at most
+366 local dates; downtime counting uses arithmetic weekday totals and at most
+32,768 timezone transitions rather than replaying every missed date. Existing
+history, start, concurrency and command-receipt limits below also apply to
+calendar schedules. This calendar surface targets existing chats. A calendar
+with a fresh-task destination is unsupported until the separate ALL-484 integration.
+
+For an elapsed interval, the first check is due one interval after creation.
+Later due points stay on that anchor. **Run now** requests a separate occurrence without moving it.
 Busy chats retain one pending check per schedule, coalescing the missed range
 and count; queued human input gets priority. Editing an interval starts a new
 cadence/version and withdraws unstarted old work. **Pause** withdraws pending

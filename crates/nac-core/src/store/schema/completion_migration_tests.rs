@@ -152,7 +152,7 @@ fn completion_schema49_real47_and_actual48_preserve_catalog_rows_rollback_and_re
         assert_eq!(
             conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
                 .unwrap(),
-            49
+            50
         );
         let installed = catalog(&conn);
         for name in LEDGER_TABLES.iter().copied().chain([

@@ -803,6 +803,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::task_launches::start))
         .routes(routes!(delivery::heartbeats::inventory))
         .routes(routes!(delivery::heartbeats::inspect))
+        .routes(routes!(delivery::heartbeats::preview))
         .routes(routes!(delivery::heartbeats::control))
         .routes(routes!(delivery::heartbeats::acknowledge))
         .routes(routes!(delivery::fresh_task_schedules::inventory))

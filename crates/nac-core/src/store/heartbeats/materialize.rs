@@ -22,7 +22,15 @@ pub(super) fn pending_occurrence(
         pending.occurrence_id
     } else {
         let id = uuid::Uuid::new_v4().to_string();
-        conn.execute("INSERT INTO heartbeat_occurrences(occurrence_id,schedule_id,session_id,schedule_version,due_first_ms,due_last_ms,coalesced_count,source,state,specification_json,receipt_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'pending',?9,?10)",params![id,schedule.schedule_id,schedule.session_id,schedule.version,first,last,count,if run_now{"run_now"}else{"interval"},encode(&schedule.spec)?,uuid::Uuid::new_v4().to_string()])?;
+        let source = if run_now {
+            "run_now"
+        } else {
+            match &schedule.spec.cadence {
+                HeartbeatCadence::Interval { .. } => "interval",
+                HeartbeatCadence::Calendar(_) => "calendar",
+            }
+        };
+        conn.execute("INSERT INTO heartbeat_occurrences(occurrence_id,schedule_id,session_id,schedule_version,due_first_ms,due_last_ms,coalesced_count,source,state,specification_json,receipt_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'pending',?9,?10)",params![id,schedule.schedule_id,schedule.session_id,schedule.version,first,last,count,source,encode(&schedule.spec)?,uuid::Uuid::new_v4().to_string()])?;
         id
     };
     Ok(conn.query_row(
@@ -45,11 +53,9 @@ pub fn materialize_heartbeats(path:&Path,now_ms:i64) -> Result<Vec<HeartbeatOccu
         rows
     };
     for schedule in due {
-        let steps=now_ms.checked_sub(schedule.next_due_ms).and_then(|n| n.checked_div(schedule.spec.interval_ms)).and_then(|n|n.checked_add(1)).context("heartbeat cadence overflow")?;
-        let advance=steps.checked_mul(schedule.spec.interval_ms).context("heartbeat cadence overflow")?;
-        let next=schedule.next_due_ms.checked_add(advance).context("heartbeat cadence overflow")?;
-        pending_occurrence(&tx,&schedule,schedule.next_due_ms,next-schedule.spec.interval_ms,steps,false)?;
-        tx.execute("UPDATE heartbeat_schedules SET next_due_ms=?2,updated_at_ms=?3 WHERE schedule_id=?1",params![schedule.schedule_id,next,now_ms])?;
+        let range=schedule.spec.cadence.due_range(schedule.next_due_ms,now_ms)?;
+        pending_occurrence(&tx,&schedule,schedule.next_due_ms,range.last_ms,range.count,false)?;
+        tx.execute("UPDATE heartbeat_schedules SET next_due_ms=?2,updated_at_ms=?3 WHERE schedule_id=?1",params![schedule.schedule_id,range.next_ms,now_ms])?;
     }
     let pending={
         let mut query=tx.prepare(&format!("SELECT {OCCURRENCE_COLUMNS} FROM heartbeat_occurrences WHERE state='pending' ORDER BY due_first_ms,occurrence_id LIMIT ?1"))?;

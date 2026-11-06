@@ -1,4 +1,4 @@
-import type { HeartbeatSchedule, HeartbeatInspection, HeartbeatReceipt, HeartbeatControlRequest, FreshTaskScheduleControlRequest, FreshTaskScheduleInspection, FreshTaskRetainedAllowanceChange, FreshTaskRetainedAllowanceReceipt } from "../types/api";
+import type { HeartbeatSchedule, HeartbeatInspection, HeartbeatReceipt, HeartbeatControlRequest, FreshTaskScheduleControlRequest, FreshTaskScheduleInspection, FreshTaskRetainedAllowanceChange, FreshTaskRetainedAllowanceReceipt, HeartbeatPreviewRequest, HeartbeatCalendarPreview } from "../types/api";
 import { createNacApi } from "../../../packages/nac-client/src/api.js";
 import type { TaskLaunchRecord, TaskLaunchRequest, TaskLaunchSourceInfo, QuestionRecord, QuestionAnswer, QuestionAnswerReceipt, SessionMcpRefreshStatus } from "../types/api";
 import { nacClient } from "./nacClient";
@@ -16,6 +16,7 @@ export type NativeApi = ReturnType<typeof createNacApi> & {
     heartbeatInventory(sessionId?: string, signal?: AbortSignal): Promise<HeartbeatSchedule[]>;
     heartbeatInspection(sessionId: string, scheduleId: string, signal?: AbortSignal): Promise<HeartbeatInspection>;
     controlHeartbeat(sessionId: string, request: HeartbeatControlRequest): Promise<HeartbeatReceipt>;
+    previewHeartbeat(sessionId: string, request: HeartbeatPreviewRequest, signal?: AbortSignal): Promise<HeartbeatCalendarPreview>;
     acknowledgeHeartbeats(sessionId: string, throughSequence: number): Promise<void>;
     startTaskLaunch(request: TaskLaunchRequest): Promise<TaskLaunchRecord>;
     taskLaunchStatus(id: string, signal?: AbortSignal): Promise<TaskLaunchRecord>;

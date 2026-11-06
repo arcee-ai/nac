@@ -382,7 +382,9 @@ async fn observe_stopped_phase() -> anyhow::Result<PhaseObservation> {
                 name: "Due stop fence".into(),
                 instructions: "Observe the local fixture.".into(),
                 skills: Vec::new(),
-                interval_ms: 60_000,
+                cadence: nac_core::store::HeartbeatCadence::Interval {
+                    interval_ms: 60_000,
+                },
                 end_condition: "Stop after the fixture.".into(),
                 goal_id: None,
                 execution_timeout_ms: 30_000,
