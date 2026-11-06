@@ -133,6 +133,24 @@ class Controls(unittest.TestCase):
         with self.assertRaises(InterruptedError):obj.stop(15,None)
         self.assertTrue(obj.stopped)
 
+    def test_case_admission_refusal_never_spawns_or_becomes_case_failure(self):
+        with tempfile.TemporaryDirectory()as directory:
+            obj=object.__new__(profile.Controller);obj.evidence=Path(directory);obj.raw=Path(directory)/'raw'
+            obj.raw.mkdir();obj.stopped=False;obj.deadline=2000
+            result={'outcome':'case-started'}
+            with patch.object(profile.time,'time',return_value=1521),patch.object(profile.subprocess,'Popen')as spawn:
+                try:obj.run('case',['never-execute'],180)
+                except profile.BudgetRefusal as error:profile.record_failure(result,error)
+                else:self.fail('case should refuse before launch')
+                spawn.assert_not_called()
+            self.assertEqual(result['outcome'],'budget-not-executed/no-result')
+            self.assertFalse(json.loads((obj.evidence/'case-admission.json').read_text())['admitted'])
+            self.assertEqual(list(obj.raw.iterdir()),[])
+            self.assertFalse((obj.evidence/'case.json').exists())
+            for error in (RuntimeError('actual case failure'),ValueError('budget-not-executed/no-result: untyped text')):
+                actual={'outcome':'case-started'};profile.record_failure(actual,error)
+                self.assertEqual(actual['outcome'],'case-failed-or-incomplete')
+
     def test_finite_no_retry_private_workflow(self):
         text=(ROOT/'.github/workflows/nightly-portability.yml').read_text()
         self.assertIn('workflow_dispatch:',text);self.assertNotIn('pull_request:',text);self.assertNotIn('schedule:',text)

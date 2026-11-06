@@ -29,6 +29,16 @@ PHASES={'fetch_begin','fetch_headers','json','parser_begin','parser_end','ack_re
 UUID=re.compile(r'[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}',re.I)
 
 
+class BudgetRefusal(ValueError):
+    """An operation was not launched because its complete budget did not fit."""
+
+
+def record_failure(result,error):
+    result['error']=type(error).__name__+': '+str(error)
+    if isinstance(error,BudgetRefusal):result['outcome']='budget-not-executed/no-result'
+    elif result['outcome']=='case-started':result['outcome']='case-failed-or-incomplete'
+
+
 def require(value,message):
     if not value:raise ValueError(message)
 
@@ -192,7 +202,7 @@ class Controller:
         admitted=not self.stopped and remaining>=seconds+120+180
         write(self.evidence/(label+'-admission.json'),{'phase':label,'seconds':seconds,
             'cleanup_reserve_seconds':120,'artifact_margin_seconds':180,'remaining_seconds':remaining,'admitted':admitted})
-        require(admitted,'budget-not-executed/no-result: full operation plus cleanup/transfer does not fit')
+        if not admitted:raise BudgetRefusal('budget-not-executed/no-result: full operation plus cleanup/transfer does not fit')
     def run(self,label,command,seconds,env=None,cwd=ROOT):
         self.admit(label,seconds)
         start=time.monotonic();child=None;error=None;cleanup=None;samples=[];owner=None
@@ -287,9 +297,7 @@ def main():
         controller.run('case',['node',str(cli),'test','terminal-local-acceptance.e2e.ts','--grep',r'(?:^| )'+re.escape(CASE)+'$','--workers=1','--retries=0'],180,runtime,WEB)
         result['outcome']='case-pass'
     except BaseException as error:
-        result['error']=type(error).__name__+': '+str(error)
-        if result['outcome']=='case-started':result['outcome']='case-failed-or-incomplete'
-        elif str(error).startswith('budget-not-executed/no-result:'):result['outcome']='budget-not-executed/no-result'
+        record_failure(result,error)
         raise
     finally:
         try:
