@@ -202,7 +202,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         status.isHidden = false
         #if LOCAL_APP
         let store = launchConfiguration.map { "\n\nSelected store: \($0.store.path)" } ?? ""
-        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\nClose this window and relaunch after correcting the problem. A store written by a newer NAC version requires a compatible version; keep the existing database. Check directory access and whether another NAC process owns this store."
+        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\nClose this window and relaunch after correcting the reported problem."
         #else
         status.stringValue = "NAC preview could not continue\n\n\(message)\n\nClose this window to clean up the disposable fixture.\n\n\(engine.log.suffix(4000))"
         #endif

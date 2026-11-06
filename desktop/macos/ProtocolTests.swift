@@ -48,6 +48,16 @@ struct ProtocolTests {
         }
         let control = try JSONSerialization.jsonObject(with: parser().stop()) as! [String: Any]
         precondition(Set(control.keys) == Set(["kind", "version", "incarnation"]))
+        let failed = try parser()
+        do {
+            _ = try failed.receive(line(["kind": "failed", "version": 1, "incarnation": failed.incarnation,
+                                         "message": "private-canary"]))
+            preconditionFailure("Failed receipt accepted")
+        } catch {
+            precondition(error.localizedDescription.contains("If a newer NAC version"))
+            precondition(error.localizedDescription.contains("compatible version"))
+            precondition(!error.localizedDescription.contains("private-canary"))
+        }
         print("Private engine protocol fixtures passed")
     }
 }
