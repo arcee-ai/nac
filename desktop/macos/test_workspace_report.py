@@ -152,5 +152,29 @@ class WorkspaceMatrixTests(unittest.TestCase):
                 self.assertIn(f'| visible-paint | 27.0.1 | {tested} | {expected_status} |', markdown)
                 self.assertIn('| markdown-math | 27.0.1 | True | fail |', markdown)
 
+    def test_declared_unexercised_links_row_stays_untested_in_json_and_markdown(self):
+        # Consume the actual producer's literal row, not a duplicated fixture declaration.
+        source = (Path(__file__).parent / 'WorkspaceJourneys.swift').read_text()
+        line = next(line.strip() for line in source.splitlines() if line.strip().startswith('checks["links"] = ['))
+        check = json.loads('{' + line.partition('= [')[2].removesuffix(']') + '}')
+        self.assertEqual(check['status'], 'unavailable')
+        self.assertIs(check['executed'], False)
+        original = deepcopy(check)
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw)
+            write_report(output, {'os': '27.0.1', 'source_head': 'fixture-source',
+                                 'engine_version': 'fixture-engine'},
+                         {'workspace-direct': {'checks': {'links': check}}})
+            report = json.loads((output / 'matrix.json').read_text())
+            row = next(r for r in report['rows'] if r['id'] == 'links' and r['os'] == '27.0.1')
+            self.assertFalse(row['tested'])
+            self.assertEqual(row['status'], 'unavailable')
+            self.assertEqual(row['evidence'], original)
+            self.assertEqual(check, original)
+            self.assertIn('| links | 27.0.1 | False | unavailable |', (output / 'matrix.md').read_text())
+            self.assertFalse(report['full_acceptance'])
+            self.assertIsNone(report['minimum_selected'])
+
+
 if __name__ == '__main__':
     unittest.main()

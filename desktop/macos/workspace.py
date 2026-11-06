@@ -39,6 +39,30 @@ def build_manifest(app):
     print(json.dumps(record, indent=2))
 
 
+def wait_for_case(process, evidence, scenario):
+    if scenario != 'workspace-manual':
+        return process.wait(timeout=300)
+    # Staging cannot consume the operator's full 15-minute window. The existing
+    # true-valued app checkpoint starts a separate 900s + 30s cleanup allowance.
+    staging_deadline = time.monotonic() + 300
+    while True:
+        if process.poll() is not None:
+            return process.wait(timeout=0)
+        remaining = staging_deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, 300)
+        try:
+            staged = json.loads(evidence.read_text()).get('manual_stage_ready') is True
+        except FileNotFoundError:
+            staged = False
+        if staged:
+            return process.wait(timeout=15 * 60 + 30)
+        try:
+            return process.wait(timeout=min(0.25, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def run_case(app, output, scenario, *, slow_start=False, provenance=None):
     """Use the existing bounded ownership cleanup on timeout and failed launch."""
     evidence = output / f'{scenario}.json'
@@ -80,7 +104,7 @@ def run_case(app, output, scenario, *, slow_start=False, provenance=None):
             *(['--workspace-console-locked'] if console['screen_locked'] else []),
         ], cwd='/', stdout=log, stderr=log, start_new_session=True)
         try:
-            code = process.wait(timeout=930 if scenario == 'workspace-manual' else 300)
+            code = wait_for_case(process, evidence, scenario)
             record = json.loads(evidence.read_text())
             if not record.get('engine_reaped') or not record.get('profile_removed'):
                 cleanup_failed_case(evidence, relocated)

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from workspace import run_case
+from workspace import run_case, wait_for_case
 
 
 class WorkspaceRunnerTests(unittest.TestCase):
@@ -87,6 +87,60 @@ class WorkspaceRunnerTests(unittest.TestCase):
             self.assertTrue(result['runner_cleanup_attempted'])
             self.assertEqual(result['checks']['direct']['status'], 'pass')
             cleanup.assert_called_once_with(evidence, Path(result['relocated_app']))
+
+
+class ManualBudgetTests(unittest.TestCase):
+    def test_slow_staging_keeps_full_operator_window_plus_owned_cleanup(self):
+        for stage_seconds in (0, 60, 250):
+            with self.subTest(stage_seconds=stage_seconds), tempfile.TemporaryDirectory() as raw:
+                evidence = Path(raw) / 'manual.json'
+                clock = [0.0]
+                launcher = Mock(args=['inert-open-W'], returncode=None)
+                launcher.poll.return_value = None
+                def wait(*, timeout):
+                    if clock[0] < stage_seconds:
+                        clock[0] += timeout
+                        if clock[0] >= stage_seconds:
+                            evidence.write_text(json.dumps({'manual_stage_ready': True}))
+                        raise __import__('subprocess').TimeoutExpired(launcher.args, timeout)
+                    self.assertEqual(timeout, 930)
+                    clock[0] += 900 + 23
+                    return 0
+                if stage_seconds == 0:
+                    evidence.write_text(json.dumps({'manual_stage_ready': True}))
+                launcher.wait.side_effect = wait
+                with patch('workspace.time.monotonic', side_effect=lambda: clock[0]):
+                    self.assertEqual(wait_for_case(launcher, evidence, 'workspace-manual'), 0)
+                self.assertGreaterEqual(clock[0], stage_seconds + 923)
+
+    def test_missing_or_nonboolean_manual_checkpoint_has_bounded_staging(self):
+        import subprocess
+        for value in (None, 1, 'true', False):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as raw:
+                evidence = Path(raw) / 'manual.json'
+                if value is not None:
+                    evidence.write_text(json.dumps({'manual_stage_ready': value}))
+                clock = [0.0]
+                launcher = Mock(args=['inert-open-W'])
+                launcher.poll.return_value = None
+                def wait(*, timeout):
+                    self.assertLessEqual(timeout, .25)
+                    clock[0] += timeout
+                    raise subprocess.TimeoutExpired(launcher.args, timeout)
+                launcher.wait.side_effect = wait
+                with patch('workspace.time.monotonic', side_effect=lambda: clock[0]), self.assertRaises(subprocess.TimeoutExpired):
+                    wait_for_case(launcher, evidence, 'workspace-manual')
+                self.assertEqual(clock[0], 300)
+
+    def test_early_exit_and_nonmanual_budget_keep_existing_behavior(self):
+        launcher = Mock(args=['inert'], returncode=17)
+        launcher.poll.return_value = 17
+        launcher.wait.return_value = 17
+        self.assertEqual(wait_for_case(launcher, Path('never-read'), 'workspace-manual'), 17)
+        launcher.wait.assert_called_once_with(timeout=0)
+        launcher.reset_mock()
+        self.assertEqual(wait_for_case(launcher, Path('never-read'), 'workspace-direct'), 17)
+        launcher.wait.assert_called_once_with(timeout=300)
 
 
 class WorkspaceBuilderTests(unittest.TestCase):
