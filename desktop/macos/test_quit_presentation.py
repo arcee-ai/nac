@@ -38,15 +38,17 @@ class QuitPresentationTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get('NAC_QUIT_RED_SOURCE'), 'Explicit immutable preimage needed for original RED')
     def test_original_owner_reproduces_premature_termination_cancel(self):
         owner = Path(os.environ['NAC_QUIT_RED_SOURCE']).read_text()
-        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text().split('@main struct QuitPresentationControls')[0]
-        # Only the inert global application changes type for the older owner;
-        # the complete original AppQuit bytes are inserted without rewriting it.
-        fixture = fixture.replace('@MainActor let NSApp = NACApplication()', '@MainActor let NSApp = Application()')
+        # The original owner needs its original inert AppKit boundary. The
+        # current MainActor fake cannot compile its retained legacy callback.
+        # Require the explicit immutable boundary with the explicit owner;
+        # candidate and prior-Later controls keep their current strict doubles.
+        fixture = Path(os.environ['NAC_QUIT_RED_BOUNDARY']).read_text().split('@main struct QuitPresentationControls')[0]
         fixture += '''@main struct OriginalReplyControl {
             @MainActor static func main() {
                 let app = PreviewApp()
                 withExtendedLifetime(app) {
-                    precondition(app.quit.shouldTerminate() == .terminateLater,
+                    let owner = AppQuit(app: app)
+                    precondition(owner.shouldTerminate() == .terminateLater,
                                  "Original owner aborts originating transaction")
                 }
             }
