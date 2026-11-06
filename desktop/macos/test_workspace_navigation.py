@@ -41,7 +41,7 @@ class WorkspaceNavigationTests(unittest.TestCase):
         sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
         scenarios = [
             'tracked-load', 'tracked-url-unset', 'blank-finish', 'blank-timeout',
-            'nil-start', 'off-origin', 'foreign-view', 'stopped', 'failed',
+            'nil-start', 'nil-commands', 'off-origin', 'foreign-view', 'stopped', 'failed',
             'stale-engine', 'stale-known', 'same-origin-reload', 'old-failure',
             'current-failure', 'current-provisional-failure',
         ]
