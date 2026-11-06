@@ -1492,3 +1492,376 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
     assert!(projects::list_projects(&store_path).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn direct_goal_and_inbox_invalid_updates_are_bad_requests_without_mutation() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("validation400_original_bodies");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("validation400-test-key"));
+    seed_direct_session(&root, "direct");
+    let path = root.join("store.db");
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "direct").unwrap();
+    let goal =
+        nac_core::store::create_session_goal(&path, "direct", "retain goal", Some(500), None)
+            .unwrap();
+    let goal = nac_core::store::update_session_goal_by_user(
+        &path,
+        "direct",
+        &goal.goal_id,
+        goal.version,
+        nac_core::store::UserGoalUpdate {
+            status: Some(GoalStatus::Paused),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let item = nac_core::store::create_session_inbox_item(
+        &path,
+        "direct",
+        InboxDelivery::Queue,
+        "retain pending input",
+        None,
+        None,
+    )
+    .unwrap();
+    let manager = test_manager(&root);
+    manager.attach_session("direct").await.unwrap();
+    let app = router(manager.clone());
+    let missing_goal = "/sessions/direct/goal/00000000-0000-0000-0000-000000000000";
+    let missing_item = "/sessions/direct/inbox/9223372036854775800";
+    let goal_path = format!("/sessions/direct/goal/{}", goal.goal_id);
+    let item_path = format!("/sessions/direct/inbox/{}", item.id);
+    let mut actual = Vec::new();
+    for (method, uri, raw, message) in [
+        (
+            "PATCH",
+            missing_goal,
+            r#"{"expected_version": 1, "status": null}"#,
+            "goal update is empty",
+        ),
+        (
+            "PATCH",
+            missing_goal,
+            r#"{"expected_version": 1}"#,
+            "goal update is empty",
+        ),
+        (
+            "PATCH",
+            missing_item,
+            r#"{"expected_version": -1, "delivery": "queue"}"#,
+            "inbox item version must not be negative",
+        ),
+        (
+            "PATCH",
+            goal_path.as_str(),
+            r#"{"expected_version": 1, "objective": null}"#,
+            "goal update is empty",
+        ),
+        (
+            "PATCH",
+            item_path.as_str(),
+            r#"{"expected_version": -1, "delivery": "queue"}"#,
+            "inbox item version must not be negative",
+        ),
+        (
+            "DELETE",
+            item_path.as_str(),
+            r#"{"expected_version": -1}"#,
+            "inbox item version must not be negative",
+        ),
+        (
+            "DELETE",
+            missing_item,
+            r#"{"expected_version": -1}"#,
+            "inbox item version must not be negative",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(raw))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        eprintln!("QA400_ORIGINAL {method} {uri} {raw} => {status} {body}");
+        assert_eq!(body["error"], message);
+        assert_eq!(
+            nac_core::store::load_session_goal(&path, "direct").unwrap(),
+            Some(goal.clone())
+        );
+        assert_eq!(
+            nac_core::store::list_session_inbox(&path, "direct").unwrap(),
+            vec![item.clone()]
+        );
+        actual.push(status);
+    }
+    drop(app);
+    drop(manager);
+    drop(lease);
+    let _ = std::fs::remove_dir_all(root);
+    assert_eq!(actual, vec![StatusCode::BAD_REQUEST; 7]);
+}
+
+#[tokio::test]
+async fn direct_validation_mapping_preserves_valid_updates_conflicts_missing_and_internal_failures()
+{
+    async fn mutate(
+        app: axum::Router,
+        method: &str,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        (
+            status,
+            serde_json::from_slice(&response_body(response).await).unwrap(),
+        )
+    }
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("validation400_controls");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("validation400-controls-key"));
+    seed_direct_session(&root, "direct");
+    seed_direct_session(&root, "empty");
+    let path = root.join("store.db");
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "direct").unwrap();
+    let goal =
+        nac_core::store::create_session_goal(&path, "direct", "retain goal", Some(500), None)
+            .unwrap();
+    let goal = nac_core::store::update_session_goal_by_user(
+        &path,
+        "direct",
+        &goal.goal_id,
+        goal.version,
+        nac_core::store::UserGoalUpdate {
+            status: Some(GoalStatus::Paused),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let item = nac_core::store::create_session_inbox_item(
+        &path,
+        "direct",
+        InboxDelivery::Queue,
+        "retain pending input",
+        None,
+        None,
+    )
+    .unwrap();
+    let manager = test_manager(&root);
+    manager.attach_session("direct").await.unwrap();
+    let app = router(manager.clone());
+    let goal_path = format!("/sessions/direct/goal/{}", goal.goal_id);
+    let item_path = format!("/sessions/direct/inbox/{}", item.id);
+    let (status, body) = mutate(
+        app.clone(),
+        "PATCH",
+        &goal_path,
+        serde_json::json!({"expected_version":goal.version,"token_budget":null}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let cleared: SessionGoalRecord = serde_json::from_value(body).unwrap();
+    assert_eq!(cleared.token_budget, None);
+    assert_eq!(cleared.objective, goal.objective);
+    assert_eq!(cleared.status, GoalStatus::Paused);
+    assert_eq!(cleared.version, goal.version + 1);
+    let (status, body) = mutate(
+        app.clone(),
+        "PATCH",
+        &goal_path,
+        serde_json::json!({"expected_version":cleared.version,"objective":"updated goal"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let edited: SessionGoalRecord = serde_json::from_value(body).unwrap();
+    assert_eq!(edited.objective, "updated goal");
+    assert_eq!(edited.version, cleared.version + 1);
+    let (status, _) = mutate(
+        app.clone(),
+        "PATCH",
+        &goal_path,
+        serde_json::json!({"expected_version":cleared.version,"objective":"stale edit"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = mutate(
+        app.clone(),
+        "PATCH",
+        "/sessions/direct/goal/00000000-0000-0000-0000-000000000000",
+        serde_json::json!({"expected_version":edited.version,"objective":"replaced goal"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    for (method, uri, body, expected) in [
+        (
+            "PATCH",
+            "/sessions/empty/goal/00000000-0000-0000-0000-000000000000",
+            serde_json::json!({"expected_version":0,"objective":"missing goal"}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "PATCH",
+            "/sessions/direct/inbox/9223372036854775800",
+            serde_json::json!({"expected_version":0,"delivery":"queue"}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "DELETE",
+            "/sessions/direct/inbox/9223372036854775800",
+            serde_json::json!({"expected_version":0}),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "PATCH",
+            goal_path.as_str(),
+            serde_json::json!({"objective":"missing version"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "PATCH",
+            goal_path.as_str(),
+            serde_json::json!({"expected_version":edited.version,"status":"bogus"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "PATCH",
+            item_path.as_str(),
+            serde_json::json!({"expected_version":item.version,"delivery":42}),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        assert_eq!(mutate(app.clone(), method, uri, body).await.0, expected);
+        assert_eq!(
+            nac_core::store::load_session_goal(&path, "direct").unwrap(),
+            Some(edited.clone())
+        );
+        assert_eq!(
+            nac_core::store::list_session_inbox(&path, "direct").unwrap(),
+            vec![item.clone()]
+        );
+    }
+    let malformed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(&goal_path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        nac_core::store::load_session_goal(&path, "direct").unwrap(),
+        Some(edited.clone())
+    );
+    let (status, body) = mutate(
+        app.clone(),
+        "PATCH",
+        &item_path,
+        serde_json::json!({"expected_version":item.version,"delivery":"steer"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let updated: InboxItemResponse = serde_json::from_value(body).unwrap();
+    assert_eq!(updated.delivery, InboxDelivery::Steer);
+    assert_eq!(updated.version, item.version + 1);
+    let (status, _) = mutate(
+        app.clone(),
+        "PATCH",
+        &item_path,
+        serde_json::json!({"expected_version":item.version,"delivery":"queue"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(&path, "direct", item.id)
+            .unwrap()
+            .version,
+        updated.version
+    );
+    assert_eq!(
+        mutate(
+            app.clone(),
+            "DELETE",
+            &item_path,
+            serde_json::json!({"expected_version":updated.version})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let cancelled = nac_core::store::load_session_inbox_item(&path, "direct", item.id).unwrap();
+    assert_eq!(cancelled.status, nac_core::store::InboxStatus::Cancelled);
+    assert_eq!(cancelled.version, updated.version + 1);
+    assert_eq!(
+        mutate(
+            app.clone(),
+            "DELETE",
+            &item_path,
+            serde_json::json!({"expected_version":cancelled.version})
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(&path, "direct", item.id).unwrap(),
+        cancelled
+    );
+    // A real durable read failure remains500 rather than being reclassified as
+    // an input error. Only this disposable fixture loses its goal table name.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("ALTER TABLE session_goals RENAME TO unavailable_goals")
+        .unwrap();
+    assert_eq!(
+        mutate(
+            app.clone(),
+            "PATCH",
+            &goal_path,
+            serde_json::json!({"expected_version":edited.version,"objective":"must not save"})
+        )
+        .await
+        .0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let retained: (String, i64) = connection
+        .query_row(
+            "SELECT objective,version FROM unavailable_goals WHERE session_id='direct'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(retained, (edited.objective, edited.version));
+    drop(connection);
+    drop(app);
+    drop(manager);
+    drop(lease);
+    let _ = std::fs::remove_dir_all(root);
+}

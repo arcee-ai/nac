@@ -8,6 +8,7 @@ export const PANEL_ICON: Record<SessionPanel, IconName> = {
   delegated: IconName.Robot,
   files: IconName.Folders,
   terminal: IconName.Terminal,
+  heartbeats: IconName.Clock,
   worksets: IconName.Checklist,
   history: IconName.History,
 };

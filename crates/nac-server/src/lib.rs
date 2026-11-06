@@ -326,6 +326,7 @@ struct SessionManagerInner {
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
+    attention: application::attention_runtime::AttentionRuntime,
     task_preparations: application::task_preparations::TaskPreparations,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -585,6 +586,7 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                attention: application::attention_runtime::AttentionRuntime::default(),
                 task_preparations: application::task_preparations::TaskPreparations::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
@@ -613,9 +615,27 @@ impl SessionManager {
         if let Err(error) = mcp_api::synchronize_mcp_oauth_redirect_uris(&manager) {
             eprintln!("MCP OAuth redirect synchronization failed: {error}");
         }
+        nac_core::task_launch_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::native_task_launches::NativeTaskLaunchController::new(&manager)),
+        );
+        nac_core::task_followups::register_controller(
+            store_path.clone(),
+            Arc::new(application::task_followups::ServerTaskFollowupController {
+                manager: Arc::downgrade(&manager.inner),
+                #[cfg(test)]
+                after_admission: None,
+            }),
+        );
         nac_core::traditional_children::register_controller(
             store_path.clone(),
             Arc::new(ServerTraditionalChildController {
+                manager: Arc::downgrade(&manager.inner),
+            }),
+        );
+        nac_core::peer_goal_control::register_controller(
+            store_path.clone(),
+            Arc::new(application::peer_goals::ServerPeerGoalController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
@@ -901,6 +921,12 @@ impl SessionManager {
 
     pub(crate) fn session_intents(&self) -> application::sessions::SessionIntentApplication<'_> {
         application::sessions::SessionIntentApplication::new(self)
+    }
+
+    pub(crate) fn session_integrations(
+        &self,
+    ) -> application::session_integrations::SessionIntegrationApplication<'_> {
+        application::session_integrations::SessionIntegrationApplication::new(self)
     }
 
     pub(crate) fn session_runs(&self) -> application::session_runs::SessionRunApplication<'_> {

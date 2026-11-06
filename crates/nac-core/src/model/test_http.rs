@@ -57,6 +57,7 @@ pub(crate) struct CapturedRequest {
 pub(crate) struct ScriptedServer {
     pub(crate) base_url: String,
     handle: thread::JoinHandle<Vec<CapturedRequest>>,
+    stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl ScriptedServer {
@@ -84,6 +85,8 @@ impl ScriptedServer {
             .set_nonblocking(true)
             .expect("set scripted HTTP listener nonblocking");
         let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
         let handle = thread::spawn(move || {
             let deadline = Instant::now() + timeout;
             let mut requests = Vec::with_capacity(responses.len());
@@ -92,6 +95,9 @@ impl ScriptedServer {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if stopped.load(std::sync::atomic::Ordering::Acquire) {
+                                return requests;
+                            }
                             assert!(
                                 Instant::now() < deadline,
                                 "timed out waiting for scripted HTTP request {}",
@@ -111,7 +117,11 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: Some(stop),
+        }
     }
 
     pub(crate) fn start_same_origin_redirect(
@@ -146,7 +156,11 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: None,
+        }
     }
 
     /// Binds a listener that treats every connection as unexpected: for
@@ -180,7 +194,21 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: None,
+        }
+    }
+
+    /// Test-only bounded cleanup after an intentionally missing successor.
+    /// No request is manufactured and ordinary finish remains strict.
+    pub(crate) fn stop_and_finish(self) -> Vec<CapturedRequest> {
+        self.stop
+            .as_ref()
+            .expect("observed server has a stop handle")
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.handle.join().expect("scripted HTTP server thread")
     }
 
     pub(crate) fn finish(self) -> Vec<CapturedRequest> {

@@ -25,6 +25,7 @@ use crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC as FAILED_RUN_WARNING;
 use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
+use crate::store::RunInboxPrompt;
 use crate::types::Message;
 use crate::view::{
     self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
@@ -34,6 +35,13 @@ use crate::workspace::GitTarget;
 
 mod admission;
 mod attachment;
+mod attention;
+#[cfg(any(test, feature = "test-support"))]
+mod attention_test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub use attention_test_support::{
+    AttentionPublicationBarrier, AttentionPublicationSelection, QuestionSettlementBarrier,
+};
 mod cancellation;
 mod creation;
 mod delegated_input;
@@ -41,14 +49,23 @@ mod delegated_input;
 mod delegated_input_test_support;
 mod direct_interaction;
 mod frontend_projection;
+mod heartbeats;
+pub(crate) use heartbeats::SubmittedHeartbeat;
 mod manual_compaction;
+mod mcp_refresh;
 mod operation_state;
+pub(crate) mod questions;
+pub use questions::{AuthorizedQuestionInformation, TaskQuestionAnswerPort};
+mod peer_goals;
 mod recovery;
 mod settlement;
 mod shell_command_types;
 mod shell_commands;
 mod shell_output;
 mod shell_settlement;
+mod task_followup_admission;
+mod task_followup_delegations;
+pub(crate) use task_followup_delegations::SubmittedTaskFollowupDelegation;
 mod terminal_selection_admission;
 pub(crate) use shell_command_types::SubmittedShell;
 pub use shell_command_types::{
@@ -623,6 +640,7 @@ impl FrontendSnapshotAfterWorkspaceGate {
 pub struct SessionService {
     agent: Arc<Mutex<Agent>>,
     goal_runtime: Option<Arc<crate::goals::GoalRuntime>>,
+    question_owner: Option<Arc<questions::QuestionOwner>>,
     metadata: Arc<SessionMetadata>,
     /// Where git runs for this session's checkout — locally, or on the ssh host
     /// the session is working on. `None` for a sandbox with no mounted working
@@ -651,16 +669,18 @@ pub struct SessionService {
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
+    attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
     active_threads: Arc<crate::tools::ActiveThreadRegistry>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
     skills: Option<Arc<SkillRegistry>>,
-    /// MCP capability and prompt inventory captured at session construction.
-    mcp: Option<Arc<crate::mcp::McpRegistry>>,
+    /// Independently refreshed inventory shared with this session's agent.
+    mcp: Arc<crate::mcp::SessionMcpMounts>,
     terminal_manager: crate::terminal::TerminalManager,
     user_terminal_context: Option<Arc<user_terminals::UserTerminalContext>>,
+    heartbeat_context: Option<Arc<heartbeats::HeartbeatContext>>,
     shell_runtime: Option<crate::tools::ToolRuntime>,
     permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// A sandbox service owns container-local state even while it has no run
@@ -722,6 +742,7 @@ impl ActiveSessionOperation {
 }
 
 struct ActiveRunState {
+    heartbeat: bool,
     snapshot: ActiveRunSnapshot,
     started_at: Instant,
     finishing: bool,
@@ -736,6 +757,7 @@ struct ActiveRunState {
     transcript_baseline: Option<usize>,
     command_cancellation: crate::tools::ThreadCancellation,
     inbox_item_id: Option<i64>,
+    inbox_prompt: Option<RunInboxPrompt>,
     review_intent: Option<String>,
     _operation_lease: Option<Arc<sessions::SessionOperationLease>>,
     _workspace_activity_lease: Option<sessions::WorkspaceActivityLease>,
@@ -743,8 +765,10 @@ struct ActiveRunState {
 
 #[derive(Default)]
 struct RunAdmissionKind {
+    heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,
+    inbox_prompt: Option<crate::store::AdmittedInboxPrompt>,
     /// What a person typed for a prompt submitted on a human-facing route.
     review_intent: Option<String>,
     goal_continuation: bool,
@@ -960,11 +984,15 @@ impl SessionService {
     }
 
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
-        commands::prepare_user_input_with_mcp(input, self.skills.as_deref(), self.mcp.as_deref())
+        commands::prepare_user_input_with_mcp(
+            input,
+            self.skills.as_deref(),
+            self.mcp.registry().as_deref(),
+        )
     }
 
     pub fn slash_command_definitions(&self) -> Vec<crate::commands::SlashCommandDefinition> {
-        commands::session_slash_command_definitions(self.mcp.as_deref())
+        commands::session_slash_command_definitions(self.mcp.registry().as_deref())
     }
 
     pub async fn resolve_mcp_prompt(
@@ -973,7 +1001,7 @@ impl SessionService {
     ) -> Result<PreparedPrompt> {
         let registry = self
             .mcp
-            .as_deref()
+            .registry()
             .ok_or_else(|| anyhow::anyhow!("MCP prompt capability is unavailable"))?;
         registry.resolve_prompt_invocation(invocation).await
     }

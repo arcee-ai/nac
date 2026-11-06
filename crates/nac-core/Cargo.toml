@@ -21,6 +21,7 @@ openapi = ["dep:utoipa", "nac-contracts/openapi"]
 nac-contracts = { path = "../nac-contracts" }
 nac-credential-store = { path = "../nac-credential-store" }
 nac-process = { path = "../nac-process" }
+jiff = { version = "=0.2.38", default-features = false, features = ["std"] }
 tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 reqwest = { workspace = true, features = ["json", "form", "rustls", "stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

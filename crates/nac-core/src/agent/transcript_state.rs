@@ -100,3 +100,103 @@ pub(super) async fn acquire_transcript_operation_lease_and_snapshot(
     .await
     .map_err(|error| anyhow!("transcript log operation lease task failed: {error}"))?
 }
+
+// Transcript synchronization and cancellation-tail restoration share the
+// existing transcript-state owner; the agent loop only coordinates their use.
+use super::*;
+
+impl Agent {
+    /// Stale-transcript guard for the terminal normalization paths (shared
+    /// store, issue #146): `true` when the durable transcript log holds
+    /// rows at or beyond `committed_log_len` — rows this process never
+    /// committed or adopted, so a peer must have appended them while it
+    /// held the operation lease (e.g. the previous run owner crashed and
+    /// this survivor's long-lived agent never re-restored). Deleting the
+    /// log tail from the stale in-memory length would permanently remove
+    /// those committed rows.
+    pub(super) async fn durable_log_has_rows_past_own_commits(&self) -> Result<bool> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(false);
+        };
+        let from_idx = self
+            .pending_log_end
+            .unwrap_or(self.committed_log_len)
+            .max(self.committed_log_len);
+        let writer = Arc::clone(&sink.writer);
+        let session_id = sink.session_id.clone();
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.has_entries_from(&session_id, from_idx)
+        })
+        .await
+        .map_err(|error| anyhow!("transcript log read task failed: {error}"))?
+    }
+
+    /// Adopt the durable transcript (snapshot blob ++ log tail) in memory
+    /// without deleting anything: the read-only half of
+    /// [`Agent::refresh_transcript_under_lease`] for the terminal
+    /// normalization paths, which do not hold the operation lease they
+    /// could pass down. A genuine gap is left for the next lease-held
+    /// restore or admission refresh to repair.
+    pub(super) async fn reload_transcript_from_store(&mut self) -> Result<()> {
+        let Some(sink) = &self.transcript_log else {
+            return Ok(());
+        };
+        let writer = Arc::clone(&sink.writer);
+        let session_id = sink.session_id.clone();
+        let (snapshot, tail) = crate::store::spawn_blocking_store_caller(move || {
+            let snapshot = writer.read_snapshot_messages(&session_id)?;
+            let tail = writer.read_from(&session_id, snapshot.len() as u64)?;
+            Ok::<_, anyhow::Error>((snapshot, tail))
+        })
+        .await
+        .map_err(|error| anyhow!("transcript reload task failed: {error}"))??;
+        let mut merged = snapshot;
+        let mut expected_idx = merged.len() as u64;
+        for (idx, message) in tail {
+            if idx != expected_idx {
+                return Err(anyhow!(
+                    "transcript log tail is not contiguous with the snapshot: expected idx {expected_idx}, found {idx}"
+                ));
+            }
+            merged.push(message);
+            expected_idx = expected_idx
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("transcript log index overflowed"))?;
+        }
+        self.committed_log_len = merged.len() as u64;
+        self.restore_messages(merged);
+        // Failed reads or validation must leave recovery tokens available
+        // for another reload rather than letting cleanup delete unseen rows.
+        self.direct_inbox_append_start = None;
+        self.steering_append_pending = false;
+        Ok(())
+    }
+
+    pub(super) async fn append_cancellation_tail(
+        &mut self,
+        mut messages: Vec<Message>,
+    ) -> Result<()> {
+        let partial = self.take_partial_stream();
+        if !partial.is_empty() {
+            messages.push(Message::Assistant {
+                content: (!partial.text.is_empty()).then_some(partial.text),
+                reasoning_text: (!partial.reasoning.is_empty()).then_some(partial.reasoning),
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: Some(self.client.model_origin()),
+                reasoning_field: None,
+            });
+        }
+        messages.push(Message::Assistant {
+            content: Some(RUN_CANCELLED_MARKER.to_string()),
+            reasoning_text: None,
+            reasoning_details: None,
+            tool_calls: None,
+            duration_ms: None,
+            model_origin: None,
+            reasoning_field: None,
+        });
+        self.push_terminal_batch_and_log(messages).await
+    }
+}

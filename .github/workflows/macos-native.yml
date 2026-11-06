@@ -3,6 +3,11 @@ name: Native macOS regressions
 on:
   workflow_call:
     inputs:
+      cold_caches:
+        description: Explicit PR/manual cache-miss measurement; acceptance work is unchanged
+        type: boolean
+        required: false
+        default: false
       source-sha:
         required: true
         type: string
@@ -39,7 +44,7 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: native-regressions
-          prefix-key: nac-ci-v1
+          prefix-key: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - name: Verify fixture isolation and exact selection controls
         run: python3 .github/scripts/native-regressions.test.py

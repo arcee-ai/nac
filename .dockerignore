@@ -2,6 +2,7 @@
 .agents
 .codex
 target
+/.nac-ci-incremental-cache/
 **/node_modules
 **/test-results
 **/playwright-report
@@ -10,3 +11,7 @@ managed_progress.md
 progress.md
 demo_review.md
 manual_todo.md
+browser-binary-upload
+browser-binary-download
+browser-binary-runtime
+crates/nac-server/web/browser-inventory
