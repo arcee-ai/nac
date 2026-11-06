@@ -53,7 +53,12 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "external-navigation-recording" {
+                if scenario.hasPrefix("workspace-") {
+                    try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
+                } else if scenario == "external-navigation-recording" {
                     evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
                 } else if scenario == "external-auth" {
                     evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
