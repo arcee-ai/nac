@@ -1561,6 +1561,7 @@ export interface components {
             unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
         };
         RevealWorkspacePathRequest: {
+            expected_path_root: string;
             expected_workspace_root: string;
             path: string;
         };
@@ -2410,6 +2411,7 @@ export interface components {
         };
         WorkspaceFileList: {
             files: string[];
+            path_root?: string | null;
             truncated: boolean;
         };
         WorkspaceRevisionChanges: {

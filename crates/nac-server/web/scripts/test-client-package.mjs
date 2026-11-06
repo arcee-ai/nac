@@ -147,7 +147,7 @@ const productApi = createNacApi(createNacClient({
 }));
 await productApi.getProductContext("session /scope");
 await productApi.resolveProductDestination({ destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
-await productApi.revealWorkspacePath("session /scope", "日本語 space/file.txt", "/workspace current");
+await productApi.revealWorkspacePath("session /scope", "日本語 space/file.txt", "/workspace current", "/workspace origin");
 assert.equal(productCalls[0].url, "https://nac.example/runtime/v1/product-context?session_id=session%20%2Fscope");
 assert.equal(productCalls[0].method, "GET");
 assert.equal(productCalls[1].url, "https://nac.example/runtime/v1/product-destinations/resolve");
@@ -155,7 +155,7 @@ assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal(productCalls[2].url, "https://nac.example/runtime/v1/sessions/session%20%2Fscope/workspace/reveal");
 assert.equal(productCalls[2].method, "POST");
-assert.deepEqual(JSON.parse(productCalls[2].body), { path: "日本語 space/file.txt", expected_workspace_root: "/workspace current" });
+assert.deepEqual(JSON.parse(productCalls[2].body), { path: "日本語 space/file.txt", expected_workspace_root: "/workspace current", expected_path_root: "/workspace origin" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
 assert.equal("sessionIntegrations" in api, false);
@@ -217,9 +217,11 @@ assert.deepEqual(context, {
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
 const api = createNacApi(client);
 const projects: Promise<ProjectRecord> = api.createProject({ name: "typed", cwd: "/repo" });
-void api.revealWorkspacePath("session", "relative file", "/workspace", new AbortController().signal);
-// @ts-expect-error expected workspace root is required for Finder reveal
+void api.revealWorkspacePath("session", "relative file", "/workspace", "/repository", new AbortController().signal);
+// @ts-expect-error both selected and originating coordinate roots are required for Finder reveal
 void api.revealWorkspacePath("session", "relative file");
+// @ts-expect-error coordinate root is required even with a selected workspace root
+void api.revealWorkspacePath("session", "relative file", "/workspace");
 const goal: Promise<SessionGoalRecord | null> = api.getGoal("session");
 const permissions: Promise<PermissionStateResponse> = api.getPermissions("session");
 const command: Promise<ShellCommandSnapshot> = api.submitShellCommand("session", { request_id: "command", command: "printf evidence" });

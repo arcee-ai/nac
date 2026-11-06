@@ -1,5 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { RevealInFinder } from "@/app/features/workspace-reveal/RevealInFinder";
+import { useRevealSelection } from "@/app/features/workspace-reveal/selection";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -519,7 +520,7 @@ export function FilesView({
   revision?: number | null;
   readOnly?: boolean;
 }) {
-  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder, selectFile } =
+  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder } =
     useNativeRuntime().stores.sessionLayoutStore;
 
   const client = useQueryClient();
@@ -531,7 +532,7 @@ export function FilesView({
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const { data: listing, error } = useWorkspaceFiles(sessionId, revision);
+  const { data: listing, error, isPlaceholderData } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
 
   // Workspace stats are computed when the snapshot is built, so entering the
@@ -581,6 +582,14 @@ export function FilesView({
   );
   // Landing on the first change keeps the panel useful the moment it opens.
   const current = selected ?? changedNodes[0]?.path ?? null;
+  const { origin, selectFile } = useRevealSelection({
+    sessionId,
+    snapshot,
+    listing,
+    selected,
+    current,
+    active: revision == null && !readOnly && !isPlaceholderData,
+  });
   const currentChange = current ? changedByPath.get(current) : undefined;
   const counts = useChangeCounts(sessionId, currentChange, revision);
   const marked = marksOpen ? current : null;
@@ -632,7 +641,12 @@ export function FilesView({
           readOnly={readOnly}
           reveal={
             current && revision == null && !readOnly ? (
-              <RevealInFinder sessionId={sessionId} snapshot={snapshot} path={current} />
+              <RevealInFinder
+                sessionId={sessionId}
+                snapshot={snapshot}
+                path={current}
+                origin={origin}
+              />
             ) : null
           }
         />

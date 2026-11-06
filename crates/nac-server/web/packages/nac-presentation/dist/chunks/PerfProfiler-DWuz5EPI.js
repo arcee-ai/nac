@@ -824,12 +824,13 @@ function Fe(e, t = {}) {
 			return n != null && a.set("revision", String(n)), r("GET", `${A(e)}/workspace/file?${a.toString()}`, { signal: i });
 		},
 		openWorkspacePath: (e, t) => r("POST", `${A(e)}/workspace/open`, { body: { path: t } }),
-		revealWorkspacePath: (e, t, n, i) => r("POST", `${A(e)}/workspace/reveal`, {
+		revealWorkspacePath: (e, t, n, i, a) => r("POST", `${A(e)}/workspace/reveal`, {
 			body: {
 				path: t,
-				expected_workspace_root: n
+				expected_workspace_root: n,
+				expected_path_root: i
 			},
-			signal: i
+			signal: a
 		}),
 		getWorkspaceRevisions: (e, t) => r("GET", `${A(e)}/workspace/revisions`, { signal: t }),
 		getWorkspaceRevisionChanges: (e, t, n) => r("GET", `${A(e)}/workspace/revisions/${t}/changes`, { signal: n }),

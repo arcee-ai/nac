@@ -10,6 +10,7 @@ impl WorkspaceApplication<'_> {
         session_id: &str,
         path: String,
         expected_workspace_root: String,
+        expected_path_root: String,
     ) -> Result<view::OpenLocalPathResult> {
         let summary = self
             .manager
@@ -23,7 +24,7 @@ impl WorkspaceApplication<'_> {
         let target = self.manager.git_target(&summary)?;
         let root = reveal_root(&summary, &target, Path::new(&expected_workspace_root))?;
         let resolved = nac_core::store::spawn_blocking_store_caller(move || {
-            resolve_reveal_target(&target, &root, &path)
+            resolve_reveal_target(&root, &path, Path::new(&expected_path_root))
         })
         .await
         .context("workspace reveal task failed")??;
@@ -57,15 +58,15 @@ fn reveal_root(
 // Admission and stale-root binding have already run. This same seam is tested
 // before OS handoff, including valid plain Local directories.
 fn resolve_reveal_target(
-    target: &GitTarget,
     root: &Path,
     path: &str,
+    expected_path_root: &Path,
 ) -> Result<workspace::LocalRevealTarget> {
     let path = view::validate_workspace_relpath(path)?;
-    let relative = match target.local_repo_root_if_present()? {
-        Some(repo) => reveal_relative_path(&repo, root, &path)?,
-        None => path,
-    };
+    if !expected_path_root.is_absolute() {
+        anyhow::bail!("invalid path: missing absolute originating file coordinates");
+    }
+    let relative = reveal_relative_path(expected_path_root, root, &path)?;
     // Keep the original selected root, including the resolver's root-link and
     // pinned-identity checks. Never canonicalize a renderer target or widen it.
     workspace::resolve_local_reveal(root, &relative)
@@ -226,12 +227,12 @@ mod tests {
             reveal_relative_path(&repo, &root, path).unwrap(),
             "src/file"
         );
-        assert!(resolve_reveal_target(&target, &root, path).is_ok());
+        assert!(resolve_reveal_target(&root, path, &repo).is_ok());
         symlink("file", root.join("src/link")).unwrap();
-        assert!(resolve_reveal_target(&target, &root, "packages/caf\u{e9}/src/link").is_err());
+        assert!(resolve_reveal_target(&root, "packages/caf\u{e9}/src/link", &repo).is_err());
         std::fs::remove_file(root.join("src/file")).unwrap();
         assert!(root.join("packages/cafe\u{301}/src/file").exists());
-        assert!(resolve_reveal_target(&target, &root, path).is_err());
+        assert!(resolve_reveal_target(&root, path, &repo).is_err());
     }
 
     #[cfg(unix)]
@@ -247,28 +248,74 @@ mod tests {
         assert_eq!(target.local_repo_root_if_present().unwrap(), None);
         assert!(target.repo_root().is_err()); // Existing strict callers stay strict.
         for path in ["file 日本語", "directory"] {
-            assert!(
-                resolve_reveal_target(&target, &root, path).is_ok(),
-                "{path}"
-            );
+            assert!(resolve_reveal_target(&root, path, &root).is_ok(), "{path}");
         }
         symlink("file 日本語", root.join("link")).unwrap();
         for path in ["../outside", "/tmp/absolute", "missing/child", "link"] {
-            assert!(
-                resolve_reveal_target(&target, &root, path).is_err(),
-                "{path}"
-            );
+            assert!(resolve_reveal_target(&root, path, &root).is_err(), "{path}");
         }
         assert!(!root.join("missing").exists());
-        // Bad repository metadata is not a plain-directory fallback. Lexical
-        // denials must still win before this operational discovery failure.
+        // Originating plain-directory coordinates do not depend on later Git metadata.
+        // Lexical denials and the selected-root resolver still apply.
         std::fs::write(root.join(".git"), "gitdir: missing-gitdir\n").unwrap();
-        assert!(resolve_reveal_target(&target, &root, "file 日本語").is_err());
-        let error = resolve_reveal_target(&target, &root, "../outside")
+        assert!(resolve_reveal_target(&root, "file 日本語", &root).is_ok());
+        let error = resolve_reveal_target(&root, "../outside", &root)
             .err()
             .unwrap();
         assert!(error.to_string().contains("invalid path"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_listing_keeps_its_coordinates_after_git_removal_or_nested_repository() {
+        for nested in [false, true] {
+            let repo =
+                std::env::temp_dir().join(format!("nac-reveal-origin-{}", uuid::Uuid::new_v4()));
+            let root = repo.join("packages/app");
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::create_dir_all(root.join("packages/app/src")).unwrap();
+            std::fs::write(root.join("src/main.ts"), "intended").unwrap();
+            std::fs::write(root.join("packages/app/src/main.ts"), "decoy").unwrap();
+            let git = |cwd: &Path| {
+                assert!(std::process::Command::new("git")
+                    .args(["init", "--quiet"])
+                    .arg(cwd)
+                    .status()
+                    .unwrap()
+                    .success())
+            };
+            git(&repo);
+            let root = root.canonicalize().unwrap();
+            let target = GitTarget::local(root.clone());
+            let listing = view::list_files(&target).unwrap();
+            let basis = listing.path_root.unwrap();
+            let path = listing
+                .files
+                .iter()
+                .find(|p| *p == "packages/app/src/main.ts")
+                .unwrap();
+            if nested {
+                git(&root);
+            } else {
+                std::fs::remove_dir_all(repo.join(".git")).unwrap();
+            }
+            assert_eq!(
+                reveal_relative_path(&basis, &root, path).unwrap(),
+                "src/main.ts"
+            );
+            assert!(resolve_reveal_target(&root, path, &basis).is_ok());
+            std::fs::remove_file(root.join("src/main.ts")).unwrap();
+            assert!(root.join("packages/app/src/main.ts").exists());
+            assert!(
+                resolve_reveal_target(&root, path, &basis).is_err(),
+                "Git changes cannot reinterpret the cached identity as the nested decoy"
+            );
+            for missing in ["", ".", "relative"] {
+                assert!(resolve_reveal_target(&root, path, Path::new(missing)).is_err());
+            }
+            std::fs::remove_dir_all(repo).unwrap();
+        }
     }
 
     #[cfg(unix)]
@@ -288,22 +335,19 @@ mod tests {
         std::fs::write(root.join("src/main.ts"), "intended").unwrap();
         std::fs::write(root.join("packages/app/src/main.ts"), "decoy").unwrap();
         let root = root.canonicalize().unwrap();
-        let target = GitTarget::local(root.clone());
-        assert!(resolve_reveal_target(&target, &root, "packages/app/src/main.ts").is_ok());
+        let repo = repo.canonicalize().unwrap();
+        assert!(resolve_reveal_target(&root, "packages/app/src/main.ts", &repo).is_ok());
         for path in [
             "outside.txt",
             "packages/application/src/main.ts",
             "../outside",
         ] {
-            assert!(
-                resolve_reveal_target(&target, &root, path).is_err(),
-                "{path}"
-            );
+            assert!(resolve_reveal_target(&root, path, &repo).is_err(), "{path}");
         }
         std::fs::remove_file(root.join("src/main.ts")).unwrap();
         assert!(root.join("packages/app/src/main.ts").exists());
         assert!(
-            resolve_reveal_target(&target, &root, "packages/app/src/main.ts").is_err(),
+            resolve_reveal_target(&root, "packages/app/src/main.ts", &repo).is_err(),
             "a present decoy cannot replace the missing intended target"
         );
         std::fs::remove_dir_all(repo).unwrap();
@@ -347,17 +391,17 @@ mod tests {
             std::fs::read_to_string(root.join(&relative)).unwrap(),
             "intended"
         );
-        assert!(resolve_reveal_target(&target, &root, "packages/app/src/file").is_ok());
+        assert!(resolve_reveal_target(&root, "packages/app/src/file", &repo).is_ok());
         // A wrong discovery root must remain fenced, never select its sibling.
         assert!(reveal_relative_path(&sibling, &root, "packages/app/src/file").is_err());
         symlink("file", root.join("src/link")).unwrap();
         for path in ["../outside", "outside.txt", "packages/app/src/link"] {
-            assert!(resolve_reveal_target(&target, &root, path).is_err());
+            assert!(resolve_reveal_target(&root, path, &repo).is_err());
         }
         std::fs::remove_file(root.join("src/file")).unwrap();
         assert!(root.join("packages/app/src/file").exists());
         assert!(sibling.join("packages/app/src/file").exists());
-        assert!(resolve_reveal_target(&target, &root, "packages/app/src/file").is_err());
+        assert!(resolve_reveal_target(&root, "packages/app/src/file", &repo).is_err());
     }
 
     #[cfg(unix)]
