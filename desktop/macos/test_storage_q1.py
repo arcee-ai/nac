@@ -153,7 +153,10 @@ class Q1CompositionControls(unittest.TestCase):
                 plan = json.loads(plan_path.read_text())
                 if 'expected' not in current:
                     current['expected'] = q1.frame(record, plan['nonce'])
-                if any((control / ('storage-q1-' + phase)).exists() for phase in ('seed', 'restore')):
+                if fault == 'native-guard-rejection' and (control / 'storage-q1-seed').exists():
+                    record['storage_q1'] = dict(phase='seed', status='failed',
+                                               error='Q1 fixture lost its ready binding')
+                elif any((control / ('storage-q1-' + phase)).exists() for phase in ('seed', 'restore')):
                     phase = 'seed' if current['number'] == 1 else 'restore'
                     record['storage_q1'] = dict(status='ui-passed-awaiting-durability', binding=stable, phase=phase)
                     directory = root / 'home/Library/Application Support/NAC/Presentation/dev' / profile
@@ -306,6 +309,15 @@ class Q1CompositionControls(unittest.TestCase):
         self.assertFalse(report['passed']); self.assertFalse(report['cleanup'][0]['known'])
         self.assertEqual(report['retained_fixture'], str(Path(report['root'])))
         self.assertEqual(len(state['launches']), 1)
+
+    def test_whole_composition_native_guard_rejection_fails_without_polling_or_retry(self):
+        with patch('storage_q1.time.sleep', side_effect=AssertionError('Rejected control was polled again')):
+            result, error, report, state = self.composition('native-guard-rejection')
+        self.assertIsNone(result); self.assertIsInstance(error, ValueError)
+        self.assertIn('Q1 native phase rejected: Q1 fixture lost its ready binding', str(error))
+        self.assertFalse(report['passed']); self.assertEqual(len(state['launches']), 1)
+        self.assertTrue(report['cleanup'][0]['known']); self.assertTrue(report['cleanup'][0]['stopped'])
+        self.assertFalse(report['rerun_authorized'])
 
 
 if __name__ == '__main__': unittest.main()
