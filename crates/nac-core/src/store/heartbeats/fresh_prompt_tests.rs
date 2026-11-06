@@ -5,12 +5,131 @@ use crate::skills::{SkillRecord, SkillRegistry};
 use crate::store::transcript_append::AppendFault;
 use crate::types::Message;
 
+#[path = "quiet_completion_tests.rs"]
+mod quiet_completion_tests;
+
 struct InitialPrompt {
     fixture: Fixture,
     inbox: AdmittedInboxPrompt,
     message: Message,
     run: String,
     occurrence: HeartbeatOccurrence,
+}
+
+#[test]
+fn join_expanded_fresh_input_terminal_completion_survives_lost_ack_once() {
+    let f = initial_prompt();
+    let session = f.inbox.session_id.as_str();
+    let cutoff = read_completion_page(&f.fixture.path, None).unwrap().cursor;
+    let writer = TranscriptLogWriter::new(&f.fixture.path).unwrap();
+    *writer.append_fault.lock().unwrap() = Some((AppendFault::AfterCommitBeforeAck, 1));
+    assert!(writer
+        .append_admitted_inbox_run_prompt(session, 0, &f.message, &f.run, &f.inbox)
+        .is_err());
+    drop(writer);
+    let writer = TranscriptLogWriter::new(&f.fixture.path).unwrap();
+    writer
+        .append_admitted_inbox_run_prompt(session, 0, &f.message, &f.run, &f.inbox)
+        .unwrap();
+    assert_eq!(writer.read_from(session, 0).unwrap().len(), 1);
+    let conn = open_runtime_connection(&f.fixture.path).unwrap();
+    let binding: (String, i64) = conn
+        .query_row(
+            "SELECT run_id,submitted_message_id FROM session_completion_bindings WHERE session_id=?1",
+            [session],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(binding.0, f.run);
+    assert!(binding.1 > 0);
+    drop(conn);
+    let terminal = terminal_update(&f);
+    for _ in 0..2 {
+        crate::sessions::save_session_run_state(&f.fixture.path, &terminal).unwrap();
+        initialize(&f.fixture.path).unwrap();
+    }
+    let page = read_completion_page(&f.fixture.path, Some(&cutoff)).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].session_id, session);
+    assert_eq!(page.items[0].run_id, f.run);
+    assert_eq!(page.items[0].kind, CompletionKind::Request);
+    let input = load_session_inbox_item(&f.fixture.path, session, f.inbox.id).unwrap();
+    assert_eq!(input.status, InboxStatus::Delivered);
+    assert_eq!(input.content, f.inbox.content);
+    assert_eq!(input.version, f.inbox.version + 1);
+    let history = heartbeat_history(
+        &f.fixture.path,
+        "project:project",
+        &f.occurrence.schedule_id,
+    )
+    .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].run_id.as_deref(), Some(f.run.as_str()));
+    assert_eq!(history[0].attempt_count, 1);
+    assert_eq!(list_heartbeats(&f.fixture.path, None).unwrap()[0].starts, 1);
+}
+
+fn terminal_update(f: &InitialPrompt) -> crate::sessions::SessionRunStateUpdate {
+    crate::sessions::SessionRunStateUpdate {
+        session_id: f.inbox.session_id.clone(),
+        ssh: None,
+        sandbox_spec: None,
+        run_state: crate::sessions::SessionRunState::default(),
+        finished_run_id: Some(f.run.clone()),
+        finished_run_disposition: Some(RunTerminalDisposition::Completed),
+        failed_run_id: None,
+        failed_run_failure: None,
+        goal_settlement: None,
+        heartbeat_settlement: None,
+        finished_run_result: Some("retained scheduled result".into()),
+        updated_at: now_utc(),
+    }
+}
+
+#[test]
+fn join_classified_unchanged_fresh_run_stays_quiet_in_completion_feed() {
+    for outcome in [HeartbeatOutcome::Meaningful, HeartbeatOutcome::Unchanged] {
+        let f = initial_prompt();
+        let session = f.inbox.session_id.as_str();
+        let cutoff = read_completion_page(&f.fixture.path, None).unwrap().cursor;
+        TranscriptLogWriter::new(&f.fixture.path)
+            .unwrap()
+            .append_admitted_inbox_run_prompt(session, 0, &f.message, &f.run, &f.inbox)
+            .unwrap();
+        heartbeat_report(
+            &f.fixture.path,
+            session,
+            &f.occurrence.occurrence_id,
+            &f.run,
+            f.occurrence.generation.as_deref().unwrap(),
+            f.occurrence.revision,
+            outcome,
+            "Exact retained initial-run classification.",
+        )
+        .unwrap();
+        let mut terminal = terminal_update(&f);
+        terminal.heartbeat_settlement = Some(HeartbeatRunSettlement {
+            tokens_used: Some(3),
+            duration_ms: 10,
+            terminal_at_epoch_ms: 63_000,
+            needs_human_action: false,
+        });
+        crate::sessions::save_session_run_state(&f.fixture.path, &terminal).unwrap();
+        let history = heartbeat_history(
+            &f.fixture.path,
+            "project:project",
+            &f.occurrence.schedule_id,
+        )
+        .unwrap();
+        assert_eq!(history[0].outcome, Some(outcome));
+        assert_eq!(history[0].run_id.as_deref(), Some(f.run.as_str()));
+        let page = read_completion_page(&f.fixture.path, Some(&cutoff)).unwrap();
+        assert_eq!(
+            page.items.len(),
+            usize::from(outcome != HeartbeatOutcome::Unchanged),
+            "canonical Unchanged must not become a generic native completion"
+        );
+    }
 }
 
 fn initial_prompt() -> InitialPrompt {

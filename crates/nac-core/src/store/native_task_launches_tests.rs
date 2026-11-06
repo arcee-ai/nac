@@ -241,6 +241,7 @@ fn native_admission_error_follows_durable_delivery_despite_stale_retry_and_lost_
                 session,
                 "unrelated-run",
                 RunTerminalDisposition::Completed,
+                None,
             )
             .unwrap();
             tx.commit().unwrap();

@@ -326,6 +326,7 @@ struct SessionManagerInner {
     managed_clones: Option<nac_managed::ManagedCloneService>,
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
+    attention: application::attention_runtime::AttentionRuntime,
     task_preparations: application::task_preparations::TaskPreparations,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -585,6 +586,7 @@ impl SessionManager {
                 managed_model,
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
+                attention: application::attention_runtime::AttentionRuntime::default(),
                 task_preparations: application::task_preparations::TaskPreparations::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),

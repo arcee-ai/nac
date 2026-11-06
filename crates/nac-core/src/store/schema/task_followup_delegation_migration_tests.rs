@@ -13,6 +13,15 @@ const ALLOCATIONS: &[(i64, &[&str])] = &[
     ),
     (45, &["session_mcp_refresh"]),
     (46, &["task_questions"]),
+    (
+        49,
+        &[
+            "session_completion_marks",
+            "session_completion_bindings",
+            "session_completion_occurrences",
+            "session_completion_feed",
+        ],
+    ),
 ];
 
 fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
@@ -231,7 +240,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
-        assert_eq!(STORE_SCHEMA_VERSION, 48);
+        assert_eq!(STORE_SCHEMA_VERSION, 49);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,

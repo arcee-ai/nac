@@ -1531,3 +1531,6 @@ async fn socket_added_to_readonly_mount_during_review_discards_approval() {
     drop(listener);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[path = "permissions/attention_review_tests.rs"]
+mod attention_observation;

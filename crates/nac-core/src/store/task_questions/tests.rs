@@ -72,7 +72,7 @@ fn answer(q: &QuestionRecord, text: &str) -> QuestionAnswer {
 fn end_run(path: &Path, run: &str, disposition: RunTerminalDisposition) {
     let mut conn = open_runtime_connection(path).unwrap();
     let tx = conn.transaction().unwrap();
-    clear_active_run(&tx, "target", run, disposition).unwrap();
+    clear_active_run(&tx, "target", run, disposition, None).unwrap();
     tx.commit().unwrap();
 }
 fn cleanup(path: &Path) {

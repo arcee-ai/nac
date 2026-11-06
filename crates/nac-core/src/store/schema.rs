@@ -3,6 +3,9 @@ use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod completion_migration_tests;
+mod completion_tables;
 mod delegation_receipts;
 #[cfg(test)]
 mod fresh_task_migration_tests;
@@ -31,6 +34,8 @@ mod task_followup_migration_tests;
 #[cfg(test)]
 #[path = "schema/child_input_migration_tests.rs"]
 mod child_input_migration_tests;
+#[cfg(test)]
+mod lineage_retention_tests;
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
@@ -50,7 +55,8 @@ pub(super) use managed_tables::create_managed_maintenance_tables;
 use managed_tables::create_terminal_remote_cleanups_table;
 use model_configurations::create_model_configurations_table;
 use transcript_tables::{
-    backfill_run_counts, create_session_run_recovery_table, create_transcript_append_receipts_table,
+    autoincrement_sequence, backfill_run_counts, create_session_run_recovery_table,
+    create_transcript_append_receipts_table, restore_autoincrement_sequence,
 };
 
 #[cfg(test)]
@@ -79,6 +85,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 49 adds the physical completion ledger; runtime production remains separately owned.
 // 48 adds standalone fresh-task schedule ownership and retained-resource receipts.
 // 47 binds new task follow-ups to retained service-issued human delegation.
 // 46 retains exact structured questions and identified answer continuations.
@@ -121,7 +128,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 48;
+const STORE_SCHEMA_VERSION: i64 = 49;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -815,7 +822,7 @@ fn open_connection_with_hooks(
         }
         2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
         | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | STORE_SCHEMA_VERSION => {}
+        | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | STORE_SCHEMA_VERSION => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1046,6 +1053,7 @@ fn open_connection_with_hooks(
     super::session_mcp_refresh::create_table(&transaction)?;
     super::task_questions::create_table(&transaction)?;
     fresh_task_tables::migrate(&transaction)?;
+    completion_tables::create_tables(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1864,39 +1872,6 @@ fn verify_copy_count(
     Ok(())
 }
 
-fn autoincrement_sequence(conn: &Connection, table: &str) -> Result<Option<i64>> {
-    Ok(conn
-        .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name = ?1",
-            params![table],
-            |row| row.get(0),
-        )
-        .optional()?)
-}
-
-fn restore_autoincrement_sequence(
-    conn: &Connection,
-    table: &str,
-    prior_sequence: Option<i64>,
-) -> Result<()> {
-    let Some(prior_sequence) = prior_sequence else {
-        return Ok(());
-    };
-    let updated = conn.execute(
-        "UPDATE sqlite_sequence
-         SET seq = MAX(seq, ?2)
-         WHERE name = ?1",
-        params![table, prior_sequence],
-    )?;
-    if updated == 0 {
-        conn.execute(
-            "INSERT INTO sqlite_sequence (name, seq) VALUES (?1, ?2)",
-            params![table, prior_sequence],
-        )?;
-    }
-    Ok(())
-}
-
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
         "thread_steering",
@@ -1904,6 +1879,9 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "session_completion_bindings",
+        "session_completion_marks",
+        "session_completion_occurrences",
         "session_inbox",
         "task_followups",
         "session_mcp_refresh",

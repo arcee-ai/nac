@@ -136,6 +136,67 @@ export interface components {
       thread_name?: string | null;
     };
     AttachUserTerminalRequest: { page_limit: number; protocol_version: number };
+    AttentionAvailabilityDto: {
+      permissions: components["schemas"]["AttentionFacetDto"];
+      questions: components["schemas"]["AttentionFacetDto"];
+      reviews: components["schemas"]["AttentionFacetDto"];
+      topology: components["schemas"]["AttentionFacetDto"];
+      work: components["schemas"]["AttentionFacetDto"];
+    };
+    AttentionChangeDto:
+      | { kind: "source_replaced"; snapshot: components["schemas"]["AttentionSnapshotDto"] }
+      | { kind: "work_settled"; work: components["schemas"]["AttentionWorkDto"] }
+      | { kind: "work_cleared" }
+      | { decision: components["schemas"]["AttentionDecisionDto"]; kind: "decision_pending" }
+      | { decision: components["schemas"]["AttentionDecisionDto"]; kind: "decision_resolved" }
+      | { kind: "session_deleted" }
+      | { availability: components["schemas"]["AttentionAvailabilityDto"]; kind: "availability" }
+      | { kind: "checkpoint" };
+    AttentionCursor: { engine: string; epoch: string; sequence: number };
+    AttentionDecisionDto:
+      | { kind: "permission"; request_id: string }
+      | { kind: "review"; review_id: string }
+      | {
+          generation: string;
+          kind: "question";
+          request_id: string;
+          revision: number;
+          run_id: string;
+        };
+    AttentionDispositionDto: "completed" | "continuing" | "waiting_for_decision";
+    AttentionFacetDto: "available" | "unknown" | "unsupported";
+    AttentionFrame:
+      | { kind: "completions"; page: components["schemas"]["CompletionPageDto"] }
+      | {
+          boundary: components["schemas"]["AttentionCursor"];
+          kind: "baseline";
+          reset: components["schemas"]["AttentionResetDto"] | null;
+          sources: components["schemas"]["AttentionSnapshotDto"][];
+        }
+      | {
+          boundary: components["schemas"]["AttentionCursor"];
+          change: components["schemas"]["AttentionChangeDto"];
+          kind: "record";
+          new_attention: boolean;
+          source: components["schemas"]["AttentionSourceDto"];
+          source_revision: number;
+        }
+      | { kind: "reset"; reason: components["schemas"]["AttentionResetDto"] };
+    AttentionGoalDto: { id: string; version: number };
+    AttentionResetDto: "incarnation" | "replay_gap" | "invalid_cursor";
+    AttentionSnapshotDto: {
+      availability: components["schemas"]["AttentionAvailabilityDto"];
+      pending: components["schemas"]["AttentionDecisionDto"][];
+      revision: number;
+      source: components["schemas"]["AttentionSourceDto"];
+      work: components["schemas"]["AttentionWorkDto"] | null;
+    };
+    AttentionSourceDto: { epoch: string; session_id: string };
+    AttentionWorkDto: {
+      disposition: components["schemas"]["AttentionDispositionDto"];
+      goal: components["schemas"]["AttentionGoalDto"] | null;
+      run_id: string;
+    };
     AuthenticateMcpOAuthRequest: { additional_scopes?: string[] };
     AuthenticateMcpOAuthResponse: {
       authorization_url: string;
@@ -199,6 +260,24 @@ export interface components {
           reason: components["schemas"]["CompactionSkipReason"];
           status: "unchanged";
         };
+    CompletionKindDto: "request" | "goal";
+    CompletionOccurrenceDto: {
+      behavior: string;
+      goal_id: string | null;
+      kind: components["schemas"]["CompletionKindDto"];
+      mark_version: number | null;
+      run_id: string;
+      sequence: number;
+      session_id: string;
+    };
+    CompletionPageDto: {
+      baseline: boolean;
+      cursor: number;
+      high_water: number;
+      items: components["schemas"]["CompletionOccurrenceDto"][];
+      more: boolean;
+      store_id: string;
+    };
     ConfigureMcpOAuthRequest: {
       authorization_metadata?: components["schemas"]["McpOAuthAuthorizationMetadataRequest"] | null;
       client_id_credential?: string | null;

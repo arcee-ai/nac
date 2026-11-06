@@ -64,6 +64,18 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   Git credential-helper wiring required by that flow. Provider, credential
   persistence, and clone process behavior stay in `nac-managed`.
 
+- `application/attention.rs` keeps its bounded current projection, replay ring,
+  source compare-and-replace, physical receiver ownership and publication lock
+  together above 800 lines. These checks share one atomic frontier; lifecycle
+  and canonical reads belong to `attention_runtime.rs`, and HTTP mapping stays
+  in delivery. Do not move callbacks or store work under the hub lock.
+- `application/attention_runtime.rs` keeps physical observation lifetime,
+  bounded bootstrap/read tails, weak service ownership and retirement, and
+  generation-checked reconciliation together above 800 lines. These paths
+  share source binding and teardown ordering; normalization/publication stays
+  in its `projection.rs`, broker authority stays in core, and HTTP stays in
+  delivery.
+
 ## Verification
 
 ```sh
