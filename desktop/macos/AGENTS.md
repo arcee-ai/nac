@@ -28,11 +28,14 @@ authority; the production React UI and HTTP/SSE client remain shared.
 - Window close quits the disposable preview, with bounded child cleanup before
   deleting its profile. Normal LOCAL_APP close keeps the same window/document,
   bridge, streams and owned engine; AppInstance reopens it. AppLifecycle/AppQuit
-  own explicit native Cancel or Stop and Quit. Normal-app Quit immediately
-  declines unsettled AppKit termination requests while one asynchronous
-  confirmation/cleanup episode remains owned by AppLifecycle/AppQuit. Cancel
-  preserves work; only settled Stop requests ordinary termination again.
-  There is no outstanding terminateLater handshake or public-entry guard.
+  own explicit native Cancel or Stop and Quit. Normal-app Quit retains one
+  originating terminateLater transaction through confirmation and cleanup;
+  Cancel replies false and preserves work. Stop replies true only after owned
+  shutdown completion. NACApplication fences native duplicates using both the
+  delegate-owned transaction and the original public call through reply unwind.
+  The canonical builder selects NACApplication only for LOCAL_APP. Test-only
+  ATTENTION_SMOKE cleanup reuses that transaction when present; without one it
+  requests local termination only after exact-owned cleanup has settled.
   Preview keeps its existing NSApplication shutdown. Unknown activity requires
   confirmation; a parent run alone never proves idle. Stop retires NativeCommands
   and releases the WK document before PreviewEngine.stop. The engine retains its

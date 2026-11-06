@@ -24,6 +24,12 @@ engine="${NAC_MAC_ENGINE:-${CARGO_TARGET_DIR:-$PWD/target}/debug/nac-web}"
 [[ -x "$engine" ]] || { echo "Missing compiled engine: $engine" >&2; exit 1; }
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp desktop/macos/Info.plist "$app/Contents/Info.plist"
+# Only LOCAL_APP compiles NACApplication. Preview keeps the system class.
+if [[ "$local_app" == 1 ]]; then
+    /usr/libexec/PlistBuddy -c 'Add :NSPrincipalClass string NACApplication' "$app/Contents/Info.plist"
+else
+    /usr/libexec/PlistBuddy -c 'Add :NSPrincipalClass string NSApplication' "$app/Contents/Info.plist"
+fi
 if [[ "$mode" == startup-* ]]; then
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier ai.arcee.nac.local-development' "$app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Set :CFBundleName NAC' "$app/Contents/Info.plist"
