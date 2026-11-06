@@ -5,6 +5,7 @@ import {runInNewContext} from 'node:vm';
 import test from 'node:test';
 import YAML from 'yaml';
 import {reverseAdmission,purePredicate,sourceJobs,sourceGroup,forwardedMode} from './ci-admission-wiring.mjs';
+import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
 const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
 const sealedPins={
@@ -37,7 +38,7 @@ function state(mode='full'){
 function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
 
 test('FULL projection equals entire landed APT graph; all eight sealed authority pins unchanged',()=>{
- const normalized=structuredClone(stable);reverseAdmission(normalized);assert.equal(digest(normalized),parentHash);
+ const normalized=structuredClone(stable);reverseAdmission(normalized);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
  for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
 });
 test('actual pre-prepare routing isolates edits and ready before pending-source replacement',()=>{
@@ -99,8 +100,13 @@ test('normalization rejects changed trust, defaults, coverage, APT or extra work
   w=>w.jobs['source-security'].name='source-security',w=>w.jobs['ci-admission'].if='false',
   w=>w.jobs.lint.if='false',w=>w.jobs['required-pr-checks'].steps.at(-1).if='false',
   w=>w.jobs['browser-binary'].steps.find(s=>s.id==='apt-upload').with['retention-days']=1,
-  w=>w.permissions.actions='write',w=>w.jobs.extra={steps:[]}]){
+  w=>w.permissions.actions='write',w=>w.jobs.extra={steps:[]},
+  w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence').with.path+='extra.json\n',
+  w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence').if='success()',
+  w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence').with['retention-days']=4,
+  w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence')['continue-on-error']=true,
+  w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload browser shard failure artifacts').with.path='crates/nac-server/web/test-results']){
   const value=structuredClone(stable);mutate(value);
-  assert.throws(()=>{reverseAdmission(value);assert.equal(digest(value),parentHash);});
+  assert.throws(()=>{reverseAdmission(value);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
  }
 });
