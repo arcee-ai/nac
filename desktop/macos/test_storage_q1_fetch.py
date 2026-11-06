@@ -18,12 +18,12 @@ class FetchReadWitnessControls(unittest.TestCase):
 
     def snapshot(self):
         return dict(version=1, nonce=self.expected['nonce'], provider=self.provider, selector=self.expected['selector'],
-                    engineOrigin=self.expected['endpoint'], started=2, settled=2, errors=0, active=0, overflow=False,
+                    engineOrigin=self.expected['endpoint'], started=2, settled=2, errors=0, cancelled=0, active=0, overflow=False,
                     document={k:self.expected[k] for k in ('launch','view','document')}, rows=[
             dict(sequence=1, method='GET', origin=self.expected['endpoint'], path='/sessions/a',
-                 state='settled', status=200, error=False, metadata=None),
+                 state='settled', status=200, error=False, metadata=None, cancellation=None),
             dict(sequence=2, method='POST', origin=self.expected['endpoint'], path='/providers/models',
-                 state='settled', status=502, error=False, metadata=dict(kind='fixture-provider-models',
+                 state='settled', status=502, error=False, cancellation=None, metadata=dict(kind='fixture-provider-models',
                     canonicalJSON=True, exactKeys=True, backendFixture=True, namedFixtureKey=True,
                     noInlineKey=True, fixtureEndpoint=True, safeHTTPPolicy=True, exactRoute=True))])
 
@@ -36,6 +36,29 @@ class FetchReadWitnessControls(unittest.TestCase):
         self.assertEqual(result['metadataFailures'],[dict(sequence=2,status=502)])
         self.assertFalse(result['metadataSuccessClaimed'])
         self.assertEqual(snapshot,before)
+
+    def test_only_proven_same_engine_get_cancellation_can_explain_a_counted_rejection(self):
+        snapshot = self.snapshot(); row = snapshot['rows'][0]
+        snapshot.update(errors=1, cancelled=1)
+        row.update(state='cancelled', status=None, error=True,
+                   cancellation=dict(name='AbortError', signalObserved=True, signalAborted=True))
+        result = self.check(snapshot)
+        self.assertEqual(result['cancelledReads'], [dict(sequence=1, path='/sessions/a')])
+        self.assertFalse(result['cancelledReadSuccessClaimed'])
+        self.assertEqual(snapshot['errors'], 1)
+        mutations = [lambda x: x.update(errors=0), lambda x: x.update(cancelled=True),
+                     lambda x: x['rows'][0].update(method='POST'),
+                     lambda x: x['rows'][0].update(origin='http://127.0.0.1:12002'),
+                     lambda x: x['rows'][0].update(status=200), lambda x: x['rows'][0].update(error=False),
+                     lambda x: x['rows'][0].update(state='error'),
+                     lambda x: x['rows'][0]['cancellation'].update(name='TypeError'),
+                     lambda x: x['rows'][0]['cancellation'].update(signalAborted=False),
+                     lambda x: x['rows'][0]['cancellation'].update(signalObserved=1),
+                     lambda x: x['rows'][0]['cancellation'].update(extra=True),
+                     lambda x: x['rows'][0].update(cancellation=None)]
+        for mutate in mutations:
+            value = copy.deepcopy(snapshot); mutate(value)
+            with self.assertRaises(ValueError): self.check(value)
 
     def test_legacy_49_completed_rows_and_path_only_502_remain_unqualified(self):
         legacy=[dict(method='GET',path='/sessions/a',status=200) for _ in range(48)]
@@ -150,7 +173,9 @@ class FetchReadWitnessControls(unittest.TestCase):
             aborted.pending.shift().reject(new DOMException('do not copy exception text', 'AbortError'));
             await abortedRead;
             const abortedResult = await aborted.take();
-            assert.equal(abortedResult.fetch.errors, 1); // Diagnostic only: the acceptance gate is unchanged.
+            assert.equal(abortedResult.fetch.errors, 1); // Every rejection remains counted and rethrown.
+            assert.equal(abortedResult.fetch.cancelled, 1);
+            assert.equal(abortedResult.fetch.rows[0].state, 'cancelled');
             assert.deepEqual(JSON.parse(JSON.stringify(abortedResult.fetchErrors)),
               [{sequence: 1, name: 'AbortError', signalObserved: true, signalAborted: true}]);
             assert.equal(JSON.stringify(abortedResult).includes('do not copy exception text'), false);
@@ -212,7 +237,8 @@ class FetchReadWitnessControls(unittest.TestCase):
         actual=source.index('await actual(input, init);')
         self.assertLess(admission,actual)
         self.assertLess(source.index('Q1 rejected an unproven outbound operation'), actual)
-        self.assertIn("row.state = 'error'; row.error = true; errors += 1",source)
+        # Actual embedded-script controls above verify rejection accounting and
+        # distinguish cancellation without matching the producer's syntax.
         self.assertIn('if (row) active -= 1',source)
         self.assertIn('if (fetchRows.length < 128)',source)
         self.assertIn("q1Snapshot: q1 ?",source)
