@@ -52,8 +52,9 @@ def request(endpoint, path, body=None, method=None, *, timeout=8):
 
 class QuitProvider:
     """One completed transcript, one slow goal, and one unapproved tool call."""
-    def __init__(self, workspace):
+    def __init__(self, workspace, *, q1_metadata=False):
         self.workspace = workspace
+        self.q1_metadata = q1_metadata
         self.release = threading.Event()
         self.goal_accepted = threading.Event()
         self.requests = []
@@ -110,6 +111,14 @@ class QuitProvider:
                 pass
 
             def do_GET(self):
+                if owner.q1_metadata and self.path == '/models':
+                    owner.mark_ingress(self.observation, recognized='q1-model-index')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(dict(object='list', data=[
+                        dict(id='gpt-5.6-sol', object='model')])).encode())
+                    return
                 owner.mark_ingress(self.observation,
                                    recognized='catalog' if self.path.startswith('/models-dev') else None)
                 self.send_response(304 if self.path.startswith('/models-dev') else 404)
