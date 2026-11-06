@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -113,6 +114,28 @@ def capture_phases(raw,out):
     write(out/'phases.json',rows)
     return {'counts':counts,'invalid_records':errors,'truncated':any(r['phase']=='truncated'for r in rows),
             'clock_domains':'independent process clocks; never subtract client/server origins'}
+
+
+def pressure(raw,out):
+    paths=list(raw.rglob('pressure-observations.json'))
+    require(len(paths)<=1,'one pressure observation owner')
+    if not paths:return {'present':False}
+    with regular(paths[0])as source:data=source.read(1024**2+1)
+    require(len(data)<=1024**2,'pressure observation bound')
+    value=json.loads(data,object_pairs_hook=unique)
+    require(set(value)=={'measurements','heartbeat','pages','maxFrameBytes'},'pressure fields')
+    def number(item):return type(item)in(int,float)and math.isfinite(item)and 0<=item<=10**12
+    require(isinstance(value['measurements'],dict)and set(value['measurements'])<={
+        'rowsBeforeHistoryRefresh','rowsAfterHistoryRefresh','resizeMs','interruptToDomMarkerMs','interruptToRenderedMarkerMs','closeSettledMs'},'measurement fields')
+    require(all(number(item)for item in value['measurements'].values()),'numeric measurements')
+    beat=value['heartbeat'];require(set(beat)=={'count','maxGapMs','last','active'}and type(beat['active'])is bool,'heartbeat fields')
+    require(all(number(beat[name])for name in ('count','maxGapMs','last')),'numeric heartbeat')
+    require(isinstance(value['pages'],list)and len(value['pages'])<=2048,'page observation bound')
+    for page in value['pages']:
+        require(set(page)=={'bytes','gap','retained'}and type(page['gap'])is bool and all(number(page[name])for name in ('bytes','retained')),'numeric page observation')
+    require(number(value['maxFrameBytes']),'frame maximum')
+    write(out/'pressure-observations.json',value)
+    return {'present':True,'pages':len(value['pages'])}
 
 
 def cpu_capacity():
@@ -271,6 +294,7 @@ def main():
     finally:
         try:
             result['phases']=capture_phases(controller.raw,controller.evidence)
+            result['pressure']=pressure(controller.raw,controller.evidence)
             require(result['phases']['invalid_records']==0,'malformed numeric record')
             if result['outcome'].startswith('case-'):
                 require(all(result['phases']['counts'].values()),'missing numeric side; diagnostic inconclusive')

@@ -80,6 +80,16 @@ class Controls(unittest.TestCase):
             result=profile.capture_phases(root,out)
             self.assertEqual(result['counts'],{'client':1,'server':0});self.assertTrue(result['truncated'])
             self.assertNotIn('payload',(out/'phases.json').read_text())
+    def test_existing_numeric_case_measurements_keep_values_without_payloads(self):
+        with tempfile.TemporaryDirectory()as directory:
+            root=Path(directory);out=root/'out';out.mkdir();raw=root/'raw';raw.mkdir()
+            value={'measurements':{'interruptToRenderedMarkerMs':1743.1},'heartbeat':{'count':1,'maxGapMs':1.5,'last':1.2,'active':False},'pages':[{'bytes':32768,'gap':False,'retained':100000}],'maxFrameBytes':32768}
+            file=raw/'pressure-observations.json';file.write_text(json.dumps(value))
+            self.assertTrue(profile.pressure(raw,out)['present'])
+            self.assertEqual(json.loads((out/'pressure-observations.json').read_text()),value)
+            value['measurements']['payload']='secret';file.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):profile.pressure(raw,out)
+
     def test_large_runner_is_pinned_not_rejected_and_quota_is_reported(self):
         observed=iter(({2,3,4,5},{2,3}))
         with patch.object(profile.os,'sched_getaffinity',side_effect=lambda _pid:next(observed),create=True), \

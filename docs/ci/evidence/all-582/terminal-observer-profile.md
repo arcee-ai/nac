@@ -151,6 +151,7 @@ checks are local; local Node26 differs from required hosted24 and is disclosed.
 Only invocation-created0700 directories are used. Regular evidence files use
 O_NOFOLLOW/O_EXCL and bounded reads; raw traversal rejects links/special files.
 After owned descendants settle, selected numeric phases, immutable identity,
+the existing case's strictly allowlisted numeric pressure/latency observations,
 command timing/exit/cleanup ledgers, root supervisor receipts and raw file hashes
 are retained. Runtime payload/SQLite/media/raw logs are removed only from this
 invocation's newly created raw subtree; compiler outputs/shared caches are
