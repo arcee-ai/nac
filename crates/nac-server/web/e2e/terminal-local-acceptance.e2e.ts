@@ -599,6 +599,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       "  width=min(48,max(1,os.get_terminal_size(1).columns-6))",
       "  block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
       "  os.write(1,block*300); time.sleep(0.02)",
+      // Keep this foreground process available for SIGINT through the unchanged
+      // 45-second test budget, even if the finite output finishes during setup.
+      " time.sleep(45)",
       "except KeyboardInterrupt:",
       " os.write(1,b'\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
       " raise",
