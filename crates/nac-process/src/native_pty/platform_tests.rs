@@ -19,7 +19,11 @@ impl Root {
         command
             .args([
                 "-c",
-                "while read token; do sleep 30 & job=$!; echo $job; wait $job; done",
+                // The job must announce its own PID after exec. Printing $!
+                // from the parent can expose a pre-exec process instead of
+                // the intended job. The child blocks without another exec;
+                // the parent waits before reading the next job token.
+                "while read token; do /bin/sh -c 'printf \"%s\\n\" \"$$\"; read token' <&0 & job=$!; wait $job; done",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
