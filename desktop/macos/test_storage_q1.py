@@ -223,10 +223,10 @@ class Q1CompositionControls(unittest.TestCase):
                 record['document'] = dict(requests=[dict(method='GET', path='/sessions/a', status=200)],
                     fetch=dict(version=1, nonce=current['fetch_nonce'], provider=current['fetch_provider'],
                         selector=json.loads((control / 'storage-q1-fetch.json').read_text())['selector'],
-                        engineOrigin=record['endpoint'], started=1, settled=1, errors=0, active=0, overflow=False,
+                        engineOrigin=record['endpoint'], started=1, settled=1, errors=0, cancelled=0, active=0, overflow=False,
                         document=record['bridge']['binding'], rows=[dict(sequence=1, method='GET',
                             origin=record['endpoint'], path='/sessions/a', state='settled', status=200,
-                            error=False, metadata=None)]))
+                            error=False, metadata=None, cancellation=None)]))
             if (control / 'stop').exists():
                 if not current['stopped']:
                     current['stopped'] = True; state['stopped'] += 1
