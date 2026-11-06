@@ -4,7 +4,8 @@
 use super::*;
 use crate::store::coordinator::{PersistenceCommand, StoreCoordinator};
 use crate::store::schema::{
-    open_initialized_read_connection, open_runtime_connection, STORE_SCHEMA_VERSION,
+    open_connection, open_initialized_read_connection, open_runtime_connection,
+    STORE_SCHEMA_VERSION,
 };
 use crate::telemetry::Correlation;
 
@@ -255,5 +256,39 @@ async fn a_commands_busy_handler_does_not_leak_into_the_next_command() {
     .await
     .unwrap();
     release.join().unwrap();
+    finish(&path, owner).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_foreign_calendar_format_is_refused_through_the_reused_connection() {
+    let (path, owner) = owned_store("calendar_format").await;
+    on_executor(&owner, |store| open_connection(store).map(drop))
+        .await
+        .unwrap();
+    // A peer leaves the current version header on a foreign occurrence
+    // layout; every reused checkout must still refuse it.
+    let peer = rusqlite::Connection::open(&path).unwrap();
+    peer.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         DROP TABLE heartbeat_occurrences;
+         CREATE TABLE heartbeat_occurrences (id INTEGER PRIMARY KEY);",
+    )
+    .unwrap();
+    drop(peer);
+    for action in ["open", "runtime", "read-only"] {
+        let error = on_executor(&owner, move |store| match action {
+            "open" => open_connection(store).map(drop),
+            "runtime" => open_runtime_connection(store).map(drop),
+            _ => open_initialized_read_connection(store).map(drop),
+        })
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported calendar store format"),
+            "{action}: {error:#}"
+        );
+    }
     finish(&path, owner).await;
 }

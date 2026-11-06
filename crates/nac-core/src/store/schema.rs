@@ -423,6 +423,7 @@ pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
         let schema_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if schema_version == STORE_SCHEMA_VERSION {
+            heartbeat_calendar::verify_format(&conn)?;
             conn.execute_batch("PRAGMA foreign_keys = ON;")?;
             return Ok(conn);
         }
