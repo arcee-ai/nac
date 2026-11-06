@@ -116,7 +116,7 @@ extension WorkspaceSmoke {
             try await self.button("Add argument")
             try await self.fill("input[aria-label='Argument 1']", self.app.profile!.root.appendingPathComponent("tmp/workspace-mcp.sh").path)
             // An intentionally disabled fixture never executes a process at session startup.
-            _ = try await self.js("const disable=true;" + Self.disabledMcpFixtureScript)
+            try await self.waitJS("owned MCP fixture ready and disabled", "const disable=true;" + Self.disabledMcpFixtureScript)
             try await self.waitJS("owned MCP fixture disabled before test/save", "const disable=false;" + Self.disabledMcpFixtureScript)
             try await self.button("Test connection")
             try await self.waitJS("local MCP tool discovery", "return document.body.innerText.includes('1 tool found') && document.body.innerText.includes('wk_fixture_echo');")
