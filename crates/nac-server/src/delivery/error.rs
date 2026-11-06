@@ -349,6 +349,17 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("invalid model configuration")
         {
             StatusCode::BAD_REQUEST
+        } else if error
+            .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
+            .is_none()
+            && (error.root_cause().is::<nac_core::store::EmptyGoalUpdate>()
+                || error
+                    .root_cause()
+                    .is::<nac_core::store::NegativeInboxVersion>())
+        {
+            // Ordinary context retains the owner's validation identity. A marker
+            // used as context around a real store failure is not input validation.
+            StatusCode::BAD_REQUEST
         } else if message.contains("was not found")
             || message.contains("not found")
             || message.contains("has no goal")

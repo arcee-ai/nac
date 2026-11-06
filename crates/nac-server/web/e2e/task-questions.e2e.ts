@@ -389,89 +389,118 @@ test("native coordinator answers only exact authorized information and does not 
     await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
   )[0];
   const guidanceGate = new ScriptGate();
-  harness.provider.enqueue(
-    "question-guidance",
-    { token: "UNRELATED_QUESTION_GUIDANCE" },
-    { kind: "text", stream: "request", text: "Unrelated guidance was retained." },
-    guidanceGate,
-  );
-  const guidanceResponse = await request.post(`${harness.baseUrl}/sessions/${peer}/runs`, {
-    data: { prompt: "UNRELATED_QUESTION_GUIDANCE" },
-  });
-  expect(guidanceResponse.ok()).toBe(true);
-  await guidanceGate.accepted;
-  expect(
-    (await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json())[0].status,
-  ).toBe("pending");
-  harness.provider.enqueue(
-    "read-exact-question",
-    { token: "ANSWER_KNOWN_INFORMATION", requiredTools: ["read_question", "answer_question"] },
-    {
-      kind: "function_call",
-      stream: "request",
-      name: "read_question",
-      callId: "read-question",
-      arguments: { session_id: peer, request_id: "known-branch", project_id: null },
-    },
-  );
-  harness.provider.enqueue(
-    "answer-exact-question",
-    { functionOutputCallId: "read-question" },
-    {
-      kind: "function_call",
-      stream: "request",
-      name: "answer_question",
-      callId: "answer-question",
-      arguments: {
-        session_id: peer,
-        project_id: null,
-        request_id: "known-branch",
-        run_id: question.request.run_id,
-        generation: question.request.generation,
-        expected_revision: question.revision,
-        answer: "The person selected codex/export.",
+  const continuationGate = new ScriptGate();
+  try {
+    harness.provider.enqueue(
+      "question-guidance",
+      { token: "UNRELATED_QUESTION_GUIDANCE" },
+      { kind: "text", stream: "request", text: "Unrelated guidance was retained." },
+      guidanceGate,
+    );
+    const guidanceResponse = await request.post(`${harness.baseUrl}/sessions/${peer}/runs`, {
+      data: { prompt: "UNRELATED_QUESTION_GUIDANCE" },
+    });
+    expect(guidanceResponse.ok()).toBe(true);
+    await guidanceGate.accepted;
+    expect(
+      (await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json())[0].status,
+    ).toBe("pending");
+    harness.provider.enqueue(
+      "read-exact-question",
+      { token: "ANSWER_KNOWN_INFORMATION", requiredTools: ["read_question", "answer_question"] },
+      {
+        kind: "function_call",
+        stream: "request",
+        name: "read_question",
+        callId: "read-question",
+        arguments: { session_id: peer, request_id: "known-branch", project_id: null },
       },
-    },
-  );
-  harness.provider.enqueue(
-    "answered-information",
-    { token: "Structured question response" },
-    { kind: "text", stream: "request", text: "Continue on the selected branch." },
-  );
-  harness.provider.enqueue(
-    "coordinator-information-result",
-    { functionOutputCallId: "answer-question" },
-    { kind: "text", stream: "request", text: "The exact known-information answer was admitted." },
-  );
-  expect(
-    (
-      await request.post(`${harness.baseUrl}/sessions/${coordinator}/runs`, {
-        data: { prompt: "ANSWER_KNOWN_INFORMATION" },
+    );
+    harness.provider.enqueue(
+      "answer-exact-question",
+      { functionOutputCallId: "read-question" },
+      {
+        kind: "function_call",
+        stream: "request",
+        name: "answer_question",
+        callId: "answer-question",
+        arguments: {
+          session_id: peer,
+          project_id: null,
+          request_id: "known-branch",
+          run_id: question.request.run_id,
+          generation: question.request.generation,
+          expected_revision: question.revision,
+          answer: "The person selected codex/export.",
+        },
+      },
+    );
+    harness.provider.enqueue(
+      "answered-information",
+      { token: "Structured question response" },
+      { kind: "text", stream: "request", text: "Continue on the selected branch." },
+      continuationGate,
+    );
+    harness.provider.enqueue(
+      "coordinator-information-result",
+      { functionOutputCallId: "answer-question" },
+      { kind: "text", stream: "request", text: "The exact known-information answer was admitted." },
+    );
+    expect(
+      (
+        await request.post(`${harness.baseUrl}/sessions/${coordinator}/runs`, {
+          data: { prompt: "ANSWER_KNOWN_INFORMATION" },
+        })
+      ).ok(),
+    ).toBe(true);
+    await waitForRunIdle(request, harness, coordinator);
+    const queued = (
+      await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
+    )[0];
+    expect(queued.status).toBe("answered");
+    expect(queued.continuation_state).toBe("pending");
+    expect(queued.request.run_id).toBe(question.request.run_id);
+    expect(
+      harness.provider.requests.filter((entry) => entry.matchedStep === "answered-information"),
+    ).toHaveLength(0);
+    guidanceGate.release();
+    // Guidance can look idle before the reserved continuation is admitted.
+    // Its exact provider request is the delivery barrier, not predecessor idleness.
+    await continuationGate.accepted;
+    continuationGate.release();
+    // The guidance run can publish idle before admitting the queued answer.
+    // Observe this exact durable receipt before waiting for its run to finish.
+    await expect
+      .poll(async () => {
+        const response = await request.get(
+          `${harness.baseUrl}/sessions/${peer}/questions/known-branch`,
+        );
+        expect(response.ok()).toBe(true);
+        const current = await response.json();
+        expect(current.request).toEqual(question.request);
+        expect(current.answer).toEqual(queued.answer);
+        return current.continuation_state;
       })
-    ).ok(),
-  ).toBe(true);
-  await waitForRunIdle(request, harness, coordinator);
-  const queued = (
-    await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
-  )[0];
-  expect(queued.status).toBe("answered");
-  expect(queued.continuation_state).toBe("pending");
-  expect(queued.request.run_id).toBe(question.request.run_id);
-  expect(
-    harness.provider.requests.filter((entry) => entry.matchedStep === "answered-information"),
-  ).toHaveLength(0);
-  guidanceGate.release();
-  await waitForRunIdle(request, harness, peer);
-  const resolved = (
-    await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
-  )[0];
-  expect(resolved.status).toBe("answered");
-  expect(resolved.continuation_state).toBe("delivered");
-  const permissions = await (
-    await request.get(`${harness.baseUrl}/sessions/${peer}/permissions`)
-  ).json();
-  expect(permissions.approval_mode).toBe("manual");
-  expect(permissions.grants).toHaveLength(0);
-  expect(permissions.requests).toHaveLength(0);
-  harness.provider.assertConsumed();
+      .toBe("delivered");
+    await waitForRunIdle(request, harness, peer);
+    const resolved = (
+      await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
+    )[0];
+    expect(resolved.status).toBe("answered");
+    expect(resolved.continuation_state).toBe("delivered");
+    expect(resolved.answer).toEqual(queued.answer);
+    expect(
+      harness.provider.requests.filter((entry) => entry.matchedStep === "answered-information"),
+    ).toHaveLength(1);
+    const permissions = await (
+      await request.get(`${harness.baseUrl}/sessions/${peer}/permissions`)
+    ).json();
+    expect(permissions.approval_mode).toBe("manual");
+    expect(permissions.grants).toHaveLength(0);
+    expect(permissions.requests).toHaveLength(0);
+    harness.provider.assertConsumed();
+  } finally {
+    guidanceGate.release();
+    continuationGate.release();
+  }
 });

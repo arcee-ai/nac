@@ -815,6 +815,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
     let client = crate::model::ModelClient::new_for_test();
     let context = ToolCallContext::default();
     let limit = if cancel { 5_000 } else { 300 };
+    let started = std::time::Instant::now();
     let invoke = crate::tools::execute_tool_with_context(
         "find_tasks",
         json!({"_nac":{"timeout_ms":limit}}),
@@ -830,9 +831,15 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
         })
         .await
         .unwrap();
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(if cancel { 150 } else { 450 })).await;
         if cancel {
             runtime.command_cancellation.cancel();
+        } else {
+            for request in broker.pending() {
+                broker
+                    .reply(&request.id, crate::permissions::PermissionReply::Once)
+                    .unwrap();
+            }
         }
     };
     let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
@@ -840,6 +847,30 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
     })
     .await
     .unwrap();
+    if !cancel {
+        assert!(!result.is_error, "{}", result.content);
+        assert!(result.execution_duration_excludes_authorization);
+        assert!(result
+            .execution_duration_ms
+            .is_some_and(|work| work + 300 < started.elapsed().as_millis() as u64));
+        let AgentEvent::ToolCallFinished {
+            completion_status,
+            execution_duration_ms,
+            ..
+        } = AgentEvent::tool_call_finished(
+            None,
+            "late-project".into(),
+            "find_tasks".into(),
+            &result,
+        )
+        else {
+            panic!("expected finished event");
+        };
+        assert_eq!(completion_status, Some(ToolCompletionStatus::Success));
+        assert_eq!(execution_duration_ms, result.execution_duration_ms);
+        cleanup(&runtime);
+        return;
+    }
     assert!(result.is_error);
     let original = result.content.as_text().unwrap().to_owned();
     let envelope: Value = serde_json::from_str(&original).unwrap();
@@ -898,7 +929,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
 }
 
 #[tokio::test]
-async fn timeout_during_internal_approval_excludes_wait_in_finished_event() {
+async fn internal_approval_outlives_execution_budget_and_excludes_wait_in_finished_event() {
     assert_deadline_during_internal_approval(false).await;
 }
 

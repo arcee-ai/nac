@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn schema_46_upgrades_actual_45_atomically_without_rewriting_supplier_receipts() {
+fn question_table_repair_is_atomic_on_a_hybrid_45_catalog_and_preserves_receipts() {
     let path = std::env::temp_dir()
         .join(format!("nac-question-migration46-{}", uuid::Uuid::new_v4()))
         .join("store.db");
@@ -39,7 +39,10 @@ fn schema_46_upgrades_actual_45_atomically_without_rewriting_supplier_receipts()
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        conn.execute_batch("DROP TABLE task_questions; PRAGMA user_version=45;")
+        // Keep this existing repair fixture's newer48 physical owners explicit;
+        // the delegation matrix owns faithful historical45 reconstruction.
+        // No49 ledger may survive before its older-version repair boundary.
+        conn.execute_batch("DROP TABLE session_completion_marks; DROP TABLE session_completion_bindings; DROP TABLE session_completion_occurrences; DROP TABLE session_completion_feed; DROP TABLE task_questions; PRAGMA user_version=45;")
             .unwrap();
     }
     assert!(initialize_with_hooks(

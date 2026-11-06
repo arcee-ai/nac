@@ -131,26 +131,28 @@ pub(crate) fn replace_with_active_run(
             "session '{session_id}' already has an active durable run"
         ));
     }
+    super::completion_occurrences::begin(transaction, session_id, run_id, submitted_message_id)?;
     Ok(())
 }
 
+/// Returns the question invalidation effect for publication after outer commit.
 pub(crate) fn clear_active_run(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
     disposition: RunTerminalDisposition,
-) -> Result<()> {
+    heartbeat: Option<&super::heartbeats::FinalHeartbeat<'_>>,
+) -> Result<bool> {
     let Some(record) = load_run_recovery_with_connection(transaction, session_id)? else {
-        return Ok(());
+        return Ok(false);
     };
     if record.run_id != run_id || record.status != RunRecoveryStatus::Active {
-        return Ok(());
+        return Ok(false);
     }
-    if disposition == RunTerminalDisposition::Cancelled {
-        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
-    }
-    retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition)?;
-    Ok(())
+    let questions_changed = disposition == RunTerminalDisposition::Cancelled
+        && super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    retain_or_clear_terminal_obligation(transaction, session_id, run_id, disposition, heartbeat)?;
+    Ok(questions_changed)
 }
 
 fn has_running_relationship(
@@ -176,7 +178,21 @@ fn retain_or_clear_terminal_obligation(
     session_id: &str,
     run_id: &str,
     disposition: RunTerminalDisposition,
+    heartbeat: Option<&super::heartbeats::FinalHeartbeat<'_>>,
 ) -> Result<()> {
+    // Recovery consumes only a retained final fact, never a provisional report.
+    let retained = if heartbeat.is_none() {
+        super::heartbeats::final_heartbeat_for_run(transaction, session_id, run_id)?
+    } else {
+        None
+    };
+    super::completion_occurrences::settle(
+        transaction,
+        session_id,
+        run_id,
+        disposition == RunTerminalDisposition::Completed,
+        heartbeat.or(retained.as_ref()),
+    )?;
     if has_running_relationship(transaction, session_id, run_id)? {
         transaction.execute(
             "UPDATE session_run_recovery
@@ -221,12 +237,13 @@ port public;
 /// expected when the prompt transaction itself failed; it must not roll back
 /// the otherwise independent timing and token bookkeeping in the caller's
 /// run-state transaction. An older failed/interrupted row is left untouched.
+/// Returns the question invalidation effect for publication after outer commit.
 pub(crate) fn mark_active_run_failed(
     transaction: &Transaction<'_>,
     session_id: &str,
     run_id: &str,
     failure: Option<&crate::run_failure::RunFailure>,
-) -> Result<()> {
+) -> Result<bool> {
     let sanitized_failure = failure
         .cloned()
         .map(crate::run_failure::RunFailure::sanitized);
@@ -241,12 +258,13 @@ pub(crate) fn mark_active_run_failed(
          WHERE session_id = ?1 AND run_id = ?2 AND status = 'active'",
         params![session_id, run_id, failure_json],
     )?;
-    if changed == 1
+    let questions_changed = changed == 1
         && !failure.is_some_and(|f| f.kind == crate::run_failure::RunFailureKind::Interrupted)
-    {
-        super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+        && super::task_questions::invalidate_questions(transaction, session_id, Some(run_id))?;
+    if changed == 1 {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false, None)?;
     }
-    Ok(())
+    Ok(questions_changed)
 }
 
 coordinated_command! {
@@ -382,15 +400,28 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                 RunTerminalDisposition::Cancelled => GoalRunDisposition::Cancelled,
             },
         )?;
-        retain_or_clear_terminal_obligation(&transaction, session_id, &record.run_id, disposition)?;
-        record_reconciled_outcome(
+        let outcome_changed = record_reconciled_outcome(
             &transaction,
             session_id,
             &record.run_id,
             disposition.into(),
             None,
         )?;
+        // Retiring a recorded obligation changes passive recovery state,
+        // even when its canonical outcome was inserted before restart.
+        let recovery_changed = record.terminal_disposition != Some(disposition)
+            || !has_running_relationship(&transaction, session_id, &record.run_id)?;
+        retain_or_clear_terminal_obligation(
+            &transaction,
+            session_id,
+            &record.run_id,
+            disposition,
+            None,
+        )?;
         transaction.commit()?;
+        if outcome_changed || recovery_changed {
+            super::goal_changes::session_committed(path, session_id);
+        }
         return Ok(ActiveRunReconciliation::CanonicalTerminal);
     }
     if record.status != RunRecoveryStatus::Active {
@@ -447,26 +478,39 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                         RecoveredRunTerminal::Failed => unreachable!(),
                     },
                 )?;
-                retain_or_clear_terminal_obligation(
-                    &transaction,
-                    session_id,
-                    &record.run_id,
-                    durable,
-                )?;
-                record_reconciled_outcome(
+                let outcome_changed = record_reconciled_outcome(
                     &transaction,
                     session_id,
                     &record.run_id,
                     durable.into(),
                     None,
                 )?;
+                // Retiring a recorded obligation changes passive recovery state,
+                // even when its canonical outcome was inserted before restart.
+                let recovery_changed = record.terminal_disposition != Some(durable)
+                    || !has_running_relationship(&transaction, session_id, &record.run_id)?;
+                retain_or_clear_terminal_obligation(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    durable,
+                    None,
+                )?;
                 transaction.commit()?;
+                if outcome_changed || recovery_changed {
+                    super::goal_changes::session_committed(path, session_id);
+                }
                 return Ok(ActiveRunReconciliation::CanonicalTerminal);
             }
             RecoveredRunTerminal::Failed => {
                 let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-                mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
-                record_reconciled_outcome(
+                let questions_changed = mark_active_run_failed(
+                    &transaction,
+                    session_id,
+                    &record.run_id,
+                    failure.as_ref(),
+                )?;
+                let outcome_changed = record_reconciled_outcome(
                     &transaction,
                     session_id,
                     &record.run_id,
@@ -474,6 +518,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
                     failure.as_ref(),
                 )?;
                 transaction.commit()?;
+                if questions_changed || outcome_changed {
+                    super::goal_changes::session_committed(path, session_id);
+                }
                 return Ok(ActiveRunReconciliation::Failed {
                     run_id: record.run_id,
                     failure,
@@ -488,8 +535,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
     // bound goal with the same retry policy as the ordinary run-end path.
     if record.failure.is_some() {
         let failure = reconcile_failed_goal(&transaction, session_id, &record)?;
-        mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
-        record_reconciled_outcome(
+        let questions_changed =
+            mark_active_run_failed(&transaction, session_id, &record.run_id, failure.as_ref())?;
+        let outcome_changed = record_reconciled_outcome(
             &transaction,
             session_id,
             &record.run_id,
@@ -497,6 +545,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
             failure.as_ref(),
         )?;
         transaction.commit()?;
+        if questions_changed || outcome_changed {
+            super::goal_changes::session_committed(path, session_id);
+        }
         return Ok(ActiveRunReconciliation::Failed {
             run_id: record.run_id,
             failure,
@@ -519,7 +570,7 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         ));
     }
     // A replacement run always takes a new run ID, so interruption is this run's final outcome.
-    record_reconciled_outcome(
+    let outcome_changed = record_reconciled_outcome(
         &transaction,
         session_id,
         &record.run_id,
@@ -529,6 +580,9 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         )),
     )?;
     transaction.commit()?;
+    if outcome_changed {
+        super::goal_changes::session_committed(path, session_id);
+    }
     Ok(ActiveRunReconciliation::Interrupted {
         run_id: record.run_id,
     })
@@ -540,7 +594,10 @@ fn record_reconciled_outcome(
     run_id: &str,
     disposition: RunOutcomeDisposition,
     failure: Option<&crate::run_failure::RunFailure>,
-) -> Result<()> {
+) -> Result<bool> {
+    if disposition != RunOutcomeDisposition::Completed {
+        super::completion_occurrences::settle(transaction, session_id, run_id, false, None)?;
+    }
     super::task_evidence::record_run_outcome_with_connection(
         transaction,
         session_id,
@@ -708,6 +765,7 @@ mod tests {
             failed_run_id: None,
             failed_run_failure: None,
             goal_settlement: None,
+            heartbeat_settlement: None,
             finished_run_result: None,
             updated_at: now_utc(),
         }

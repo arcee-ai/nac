@@ -128,12 +128,42 @@ fn schema_45_upgrades_actual_44_atomically_without_rewriting_or_scheduling_work(
         load_session_inbox_item(&path, "target", inbox.id).unwrap(),
         inbox
     );
+    open_runtime_connection(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO session_mcp_refresh VALUES ('owner',1,'requested')",
+            [],
+        )
+        .unwrap();
+    initialize(&path).unwrap();
     assert_eq!(
-        load_session_mcp_refresh(&path, "owner").unwrap().revision,
-        0
+        open_runtime_connection(&path)
+            .unwrap()
+            .query_row::<(i64, String), _, _>(
+                "SELECT revision,requested_at FROM session_mcp_refresh WHERE session_id='owner'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap(),
+        (1, "requested".to_owned())
     );
-    let requested = request_session_mcp_refresh(&path, "owner", 0).unwrap();
+    // The delivered refresh service uses the same schema-45 row after the
+    // later question/delegation/fresh-task migrations; it must not recreate it.
+    let migrated = load_session_mcp_refresh(&path, "owner").unwrap();
+    assert_eq!(migrated.revision, 1);
+    assert_eq!(migrated.requested_at.as_deref(), Some("requested"));
+    let requested = request_session_mcp_refresh(&path, "owner", 1).unwrap();
+    assert_eq!(requested.revision, 2);
+    assert!(request_session_mcp_refresh(&path, "owner", 1).is_err());
     initialize(&path).unwrap();
     assert_eq!(load_session_mcp_refresh(&path, "owner").unwrap(), requested);
+    assert_eq!(
+        load_session_mcp_refresh(&path, "target").unwrap().revision,
+        0
+    );
+    assert_eq!(
+        load_session_inbox_item(&path, "target", inbox.id).unwrap(),
+        inbox
+    );
     std::fs::remove_dir_all(root).unwrap();
 }

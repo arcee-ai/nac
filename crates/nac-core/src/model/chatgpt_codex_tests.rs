@@ -577,6 +577,43 @@ fn codex_request_preserves_nullable_new_delegation_contracts() {
 }
 
 #[test]
+fn codex_task_followup_wire_schema_keeps_idle_bindings_nullable_and_optional() {
+    let definitions = crate::tools::direct_tool_definitions(false);
+    let native = definitions
+        .iter()
+        .find(|tool| tool.function.name == "send_task_followup")
+        .unwrap();
+    let required = json!(["session_id", "request_id", "action", "prompt"]);
+    assert_eq!(native.function.parameters["required"], required);
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &[Message::User {
+            content: "follow up on the idle task".into(),
+        }],
+        &definitions,
+        &levels,
+        Some("caller"),
+    );
+    let tool = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "send_task_followup")
+        .unwrap();
+    assert_eq!(tool["parameters"]["required"], required);
+    for field in ["project_id", "run_id"] {
+        assert_eq!(
+            tool["parameters"]["properties"][field]["type"],
+            json!(["string", "null"])
+        );
+    }
+    assert!(tool.get("strict").is_none());
+}
+
+#[test]
 fn codex_session_headers_share_the_prompt_cache_key() {
     let request = apply_codex_session_headers(
         Client::new().post("https://chatgpt.com/backend-api/codex/responses"),
@@ -1219,6 +1256,36 @@ async fn codex_without_delta_sink_finishes_before_sse_body_closes() {
 }
 
 #[test]
+fn codex_native_task_launch_wire_schema_preserves_the_native_decoder_contract() {
+    let definitions = crate::tools::direct_tool_definitions(false);
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request("gpt-5.6-sol", None, &[], &definitions, &levels, None);
+    let tools = request["tools"].as_array().unwrap();
+    for name in ["list_projects", "launch_task", "task_launch_status"] {
+        let definition = definitions
+            .iter()
+            .find(|tool| tool.function.name == name)
+            .unwrap();
+        let wire = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        assert_eq!(wire["parameters"], definition.function.parameters);
+        assert_eq!(wire["parameters"]["additionalProperties"], false);
+        assert!(wire["parameters"]["properties"]["operation"].is_null());
+    }
+    let discovery = tools
+        .iter()
+        .find(|tool| tool["name"] == "list_projects")
+        .unwrap();
+    // Strict Responses normalization may require every property. Null must
+    // remain an advertised unfiltered value, without inventing a search term.
+    assert_eq!(
+        discovery["parameters"]["properties"]["query"]["type"],
+        json!(["string", "null"])
+    );
+    assert_eq!(discovery["parameters"]["required"], json!([]));
+}
+
+#[test]
 fn codex_wait_wire_schema_keeps_discriminated_nullable_targets() {
     let definitions = crate::tools::direct_with_orchestrator_tool_definitions(false);
     let levels =
@@ -1291,4 +1358,48 @@ fn codex_wait_wire_schema_keeps_discriminated_nullable_targets() {
         json!(["run", null])
     );
     assert_eq!(branches[1]["properties"]["mode"]["enum"], json!(["goal"]));
+}
+
+#[test]
+fn codex_peer_goal_wire_schema_preserves_null_unused_arguments_and_no_implicit_budget() {
+    let messages = [Message::User {
+        content: "inspect an exact peer goal".into(),
+    }];
+    let levels =
+        catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.6-sol",
+        None,
+        &messages,
+        &crate::tools::direct_tool_definitions(false),
+        &levels,
+        Some("caller"),
+    );
+    let tool = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "task_goal")
+        .unwrap();
+    let parameters = &tool["parameters"];
+    let properties = parameters["properties"].as_object().unwrap();
+    let required: std::collections::HashSet<_> = parameters["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(required, properties.keys().map(String::as_str).collect());
+    assert_eq!(parameters["additionalProperties"], false);
+    for field in ["project_id", "request_id", "objective", "goal_id"] {
+        assert_eq!(properties[field]["type"], json!(["string", "null"]));
+    }
+    for field in ["token_budget", "expected_version"] {
+        assert_eq!(properties[field]["type"], json!(["integer", "null"]));
+    }
+    assert!(properties["token_budget"].get("default").is_none());
+    assert_eq!(
+        properties["action"]["enum"],
+        json!(["read", "start", "pause", "resume"])
+    );
 }

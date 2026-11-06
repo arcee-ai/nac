@@ -90,9 +90,14 @@ impl PermissionBroker {
     /// reviews it afresh with this authorization as user intent. Nothing is
     /// bypassed and no grant is created.
     pub fn authorize_review_retry(&self, review_id: &str) -> anyhow::Result<PermissionReview> {
-        self.review_memory()
-            .authorize_retry(review_id)
-            .ok_or_else(|| anyhow::anyhow!("blocked review '{review_id}' was not found"))
+        let (review, publication) = {
+            let mut memory = self.review_memory();
+            let review = memory.authorize_retry(review_id);
+            let publication = review.as_ref().and_then(|_| self.attention_changed());
+            (review, publication)
+        };
+        self.publish_attention(publication);
+        review.ok_or_else(|| anyhow::anyhow!("blocked review '{review_id}' was not found"))
     }
 
     /// Seeds a blocked review for delivery-layer tests.
@@ -110,6 +115,9 @@ impl PermissionBroker {
             review,
             fingerprint,
         });
+        let publication = self.attention_changed();
+        drop(memory);
+        self.publish_attention(publication);
     }
 
     /// Number of live retry authorizations, for delivery-layer tests.
@@ -121,7 +129,13 @@ impl PermissionBroker {
     /// Withdraws a retry authorization whose retry request could not be
     /// delivered, returning the action to the blocked list.
     pub fn revoke_review_retry(&self, review_id: &str) -> bool {
-        self.review_memory().revoke_retry(review_id)
+        let (revoked, publication) = {
+            let mut memory = self.review_memory();
+            let revoked = memory.revoke_retry(review_id);
+            (revoked, revoked.then(|| self.attention_changed()).flatten())
+        };
+        self.publish_attention(publication);
+        revoked
     }
 
     /// Recent automatic reviews in every state, newest first.
@@ -340,17 +354,17 @@ impl PermissionBroker {
         review.outcome = Some(outcome);
         review.code = code;
         review.category = category;
-        let stopped = {
+        let (stopped, publication) = {
             let mut memory = self.review_memory();
             // This check and outcome accounting share the run-state lock, so
             // a sibling that already stopped this run wins over a late verdict.
             if review_stop.is_closed() {
                 memory.forget(&review.id);
-                true
+                (true, None)
             } else {
                 memory.run.record(outcome);
                 memory.record(&review);
-                if matches!(
+                let publication = if matches!(
                     outcome,
                     PermissionReviewOutcome::Rejected | PermissionReviewOutcome::Uncertain
                 ) {
@@ -358,10 +372,14 @@ impl PermissionBroker {
                         review: review.clone(),
                         fingerprint,
                     });
-                }
-                false
+                    self.attention_changed()
+                } else {
+                    None
+                };
+                (false, publication)
             }
         };
+        self.publish_attention(publication);
         if stopped {
             let outcome = Self::review_stopped_outcome(review_stop).await;
             review.outcome = None;

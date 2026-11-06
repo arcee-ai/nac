@@ -1,6 +1,59 @@
 use super::*;
 
 impl PermissionBroker {
+    /// Immutable policy/runtime construction version for a transaction's
+    /// final current-chat control binding; never supplied by model JSON.
+    pub(crate) fn heartbeat_control_config_version(&self) -> i64 {
+        self.session_config_version
+    }
+
+    /// Automatic admission is not an interactive approver. Ask/Deny retain a
+    /// schedule-specific attention reason; executing tools still use their
+    /// ordinary prepared authorization on the selected backend.
+    pub(crate) fn heartbeat_admission_allowed(&self) -> bool {
+        self.policy
+            .evaluate(
+                &[
+                    PermissionResource::new(
+                        "heartbeat_manage",
+                        format!("session:{}", self.session_id),
+                    ),
+                    PermissionResource::new(
+                        "heartbeat_run",
+                        format!("session:{}", self.session_id),
+                    ),
+                ],
+                &[],
+            )
+            .effect
+            == PermissionEffect::Allow
+    }
+
+    /// Issuance honors canonical action/target Deny without entering agent Ask,
+    /// changing approval mode, or persisting a permission grant. This capability
+    /// is unavailable to native invocation and does not authorize a later send.
+    pub(crate) fn authorize_submitted_task_followup_delegation(
+        &self,
+        submission: &crate::session_service::SubmittedTaskFollowupDelegation,
+    ) -> anyhow::Result<()> {
+        if self.backend != "local"
+            || submission.caller() != self.session_id
+            || submission.store_path() != self.store_path
+        {
+            return Err(crate::store::TaskFollowupError::Unavailable.into());
+        }
+        let decision = self
+            .policy
+            .evaluate(&submission.permission_resources(), &[]);
+        if decision.effect == PermissionEffect::Deny {
+            return Err(anyhow::anyhow!(decision.hard_denial.unwrap_or_else(|| {
+                "configured permission rules deny task follow-up delegation".into()
+            }))
+            .context(crate::store::TaskFollowupError::Denied));
+        }
+        Ok(())
+    }
+
     /// Read-only fencing for the additive execution observation capability.
     /// This neither authorizes an operation nor changes ordinary broker policy.
     pub(crate) async fn validate_execution_observation_binding(
@@ -106,6 +159,7 @@ impl PermissionBroker {
             session_config_version,
             event_bus: StdMutex::new(None),
             state: StdMutex::new(PermissionBrokerState::default()),
+            attention: StdMutex::new(attention::BrokerAttention::new()),
             approval_observer: tokio::sync::Mutex::new(PermissionApprovalObserver::default()),
             reviewer: StdMutex::new(None),
             review: StdMutex::new(ReviewMemory::default()),
@@ -223,8 +277,9 @@ impl PermissionBroker {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .pending
-                .keys()
-                .cloned()
+                .iter()
+                .filter(|(_, pending)| !pending.explicit_human)
+                .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
@@ -254,12 +309,12 @@ impl PermissionBroker {
         self.emit_async(crate::events::SessionEvent::PermissionApprovalModeChanged { mode })
             .await;
         after_commit().await;
-        let replies = if mode == PermissionApprovalMode::AutoApprove {
+        let (replies, publication) = if mode == PermissionApprovalMode::AutoApprove {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            auto_approval_candidates
+            let replies = auto_approval_candidates
                 .into_iter()
                 .filter_map(|request_id| {
                     state
@@ -267,10 +322,15 @@ impl PermissionBroker {
                         .remove(&request_id)
                         .map(|pending| (request_id, pending))
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let publication = (!replies.is_empty())
+                .then(|| self.attention_changed())
+                .flatten();
+            (replies, publication)
         } else {
-            Vec::new()
+            (Vec::new(), None)
         };
+        self.publish_attention(publication);
 
         for (request_id, pending) in replies {
             if pending.reply.send(PermissionReply::Once).is_ok() {
@@ -301,17 +361,22 @@ impl PermissionBroker {
     }
 
     fn deliver_reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
-        let pending = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .remove(request_id)
-            .ok_or_else(|| anyhow::anyhow!("permission request '{request_id}' was not found"))?;
-        pending.reply.send(reply).map_err(|_| {
-            anyhow::anyhow!("permission request '{request_id}' is no longer active")
-        })?;
-        Ok(())
+        let (pending, publication) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let pending = state.pending.remove(request_id).ok_or_else(|| {
+                anyhow::anyhow!("permission request '{request_id}' was not found")
+            })?;
+            (pending, self.attention_changed())
+        };
+        let result = pending
+            .reply
+            .send(reply)
+            .map_err(|_| anyhow::anyhow!("permission request '{request_id}' is no longer active"));
+        self.publish_attention(publication);
+        result
     }
 
     pub fn reply(&self, request_id: &str, reply: PermissionReply) -> anyhow::Result<()> {
@@ -340,7 +405,20 @@ impl PermissionBroker {
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
     ) -> AuthorizationOutcome {
-        self.authorize_invocation(tool, resources, context, cancellation, false)
+        self.authorize_invocation(tool, resources, context, cancellation, false, false)
+            .await
+    }
+
+    /// Additional invocation-only authorization for exact peer goal controls.
+    /// Policy Deny still wins; allow rules, grants, auto mode and reviewer
+    /// decisions cannot impersonate the human's explicit reply.
+    pub(crate) async fn authorize_peer_goal(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation("task_goal", resources, context, cancellation, false, true)
             .await
     }
 
@@ -351,8 +429,15 @@ impl PermissionBroker {
         cancellation: &crate::tools::ThreadCancellation,
         _submission: &crate::session_service::SubmittedShell,
     ) -> AuthorizationOutcome {
-        self.authorize_invocation("exec_command", resources, context, cancellation, true)
-            .await
+        self.authorize_invocation(
+            "exec_command",
+            resources,
+            context,
+            cancellation,
+            true,
+            false,
+        )
+        .await
     }
 
     pub(crate) async fn authorize_submitted_user_terminal(
@@ -368,6 +453,25 @@ impl PermissionBroker {
             context,
             cancellation,
             true,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn authorize_submitted_heartbeat(
+        self: &Arc<Self>,
+        resources: &[PermissionResource],
+        context: &crate::tools::kernel::ToolCallContext,
+        cancellation: &crate::tools::ThreadCancellation,
+        _submission: &crate::session_service::SubmittedHeartbeat,
+    ) -> AuthorizationOutcome {
+        self.authorize_invocation(
+            crate::tools::heartbeat::CONTROL_HEARTBEAT,
+            resources,
+            context,
+            cancellation,
+            true,
+            false,
         )
         .await
     }
@@ -421,6 +525,7 @@ impl PermissionBroker {
         context: &crate::tools::kernel::ToolCallContext,
         cancellation: &crate::tools::ThreadCancellation,
         human_submitted: bool,
+        explicit_human: bool,
     ) -> AuthorizationOutcome {
         let review_stop = self.review_run_stop();
         #[cfg(test)]
@@ -448,7 +553,7 @@ impl PermissionBroker {
         };
         let decision = self.policy.evaluate(resources, &remembered);
         match decision.effect {
-            PermissionEffect::Allow => {
+            PermissionEffect::Allow if !explicit_human => {
                 return if cancellation.is_cancelled() {
                     AuthorizationOutcome::Denied(
                         "run was cancelled before authorization completed".to_string(),
@@ -464,7 +569,7 @@ impl PermissionBroker {
                         .unwrap_or_else(|| format!("configured permission rules deny {tool}")),
                 );
             }
-            PermissionEffect::Ask => {}
+            PermissionEffect::Allow | PermissionEffect::Ask => {}
         }
 
         if cancellation.is_cancelled() {
@@ -473,7 +578,7 @@ impl PermissionBroker {
 
         // Service-issued human intent supplies invocation-only authority after policy.
         // This path neither reads approval mode nor creates a remembered grant.
-        if human_submitted {
+        if human_submitted && !explicit_human {
             return AuthorizationOutcome::Allowed;
         }
 
@@ -492,10 +597,10 @@ impl PermissionBroker {
         // policy has produced Ask. It is never cached: independent managers and
         // processes may attach the same durable session.
         let (_, initial_auto_generation, _) = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) if !explicit_human => {
                 return allowed().await;
             }
-            Ok((PermissionApprovalMode::Review, generation, revision)) => {
+            Ok((PermissionApprovalMode::Review, generation, revision)) if !explicit_human => {
                 // Ineligible requests fall through to the manual path below,
                 // which still fails closed without an interactive client.
                 if let Some(outcome) = self
@@ -552,21 +657,25 @@ impl PermissionBroker {
         };
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let approval_generation = match self.load_approval_state().await {
-            Ok((PermissionApprovalMode::AutoApprove, _, _)) => {
+            Ok((PermissionApprovalMode::AutoApprove, _, _)) if !explicit_human => {
                 return allowed().await;
             }
             Ok((
-                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                PermissionApprovalMode::Manual
+                | PermissionApprovalMode::Review
+                | PermissionApprovalMode::AutoApprove,
                 generation,
                 _,
-            )) if generation > initial_auto_generation => {
+            )) if !explicit_human && generation > initial_auto_generation => {
                 // Auto-approve was enabled and then disabled while this Ask
                 // was already resolving broker ownership. The enable still
                 // owns this invocation even though it never became pending.
                 return allowed().await;
             }
             Ok((
-                PermissionApprovalMode::Manual | PermissionApprovalMode::Review,
+                PermissionApprovalMode::Manual
+                | PermissionApprovalMode::Review
+                | PermissionApprovalMode::AutoApprove,
                 generation,
                 _,
             )) => generation,
@@ -594,19 +703,21 @@ impl PermissionBroker {
                     state.pending.insert(
                         request.id.clone(),
                         PendingPermission {
+                            explicit_human,
                             request: request.clone(),
                             reply: sender,
                         },
                     );
-                    Ok(())
+                    Ok(self.attention_changed())
                 })())
             }
         };
-        match admitted {
+        let publication = match admitted {
             None => return Self::review_stopped_outcome(&review_stop).await,
             Some(Err(reason)) => return AuthorizationOutcome::Denied(reason),
-            Some(Ok(())) => {}
-        }
+            Some(Ok(publication)) => publication,
+        };
+        self.publish_attention(publication);
         let _pending_guard = PendingPermissionGuard {
             broker: Arc::downgrade(self),
             request_id: request.id.clone(),
@@ -640,7 +751,7 @@ impl PermissionBroker {
                     self.reply_outcome(receiver.await, &request, &waiter_live, &review_stop).await
                 }
             },
-            () = self.auto_approval_after(approval_generation) => {
+            () = self.auto_approval_after(approval_generation), if !explicit_human => {
                 // A local manual reply or cancellation may have claimed the
                 // request after the durable generation was read. Whichever
                 // removes it first owns the sole reply.
@@ -751,12 +862,17 @@ impl PermissionBroker {
     }
 
     fn remove_pending(&self, request_id: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pending
-            .remove(request_id)
-            .is_some()
+        let (removed, publication) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let removed = state.pending.remove(request_id).is_some();
+            let publication = removed.then(|| self.attention_changed()).flatten();
+            (removed, publication)
+        };
+        self.publish_attention(publication);
+        removed
     }
 
     async fn dismiss_pending_async(&self, request_id: &str, reason: String) -> bool {

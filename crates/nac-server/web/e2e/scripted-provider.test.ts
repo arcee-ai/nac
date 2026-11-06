@@ -81,3 +81,43 @@ test.each([true, false, undefined])(
     provider.assertConsumed();
   },
 );
+
+test("fresh-task matching excludes the caller's quoted handoff receipt", async () => {
+  const provider = new ScriptedProvider();
+  await provider.start();
+  providers.push(provider);
+  provider.enqueue(
+    "caller",
+    { token: "CHILD_BRIEF", functionOutputCallId: "parent-launch" },
+    { kind: "text", text: "caller acknowledged" },
+  );
+  provider.enqueue(
+    "fresh-child",
+    { token: "CHILD_BRIEF", forbiddenToken: "parent-launch" },
+    { kind: "text", text: "child started" },
+  );
+  const post = (input: unknown) =>
+    fetch(`${provider.baseUrl}/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input }),
+      signal: AbortSignal.timeout(2_000),
+    });
+  const caller = await post([
+    { type: "function_call_output", call_id: "parent-launch", output: "CHILD_BRIEF" },
+  ]);
+  expect(caller.status).toBe(200);
+  expect(await caller.json()).toMatchObject({
+    output: [{ content: [{ text: "caller acknowledged" }] }],
+  });
+  const child = await post("CHILD_BRIEF");
+  expect(child.status).toBe(200);
+  expect(await child.json()).toMatchObject({
+    output: [{ content: [{ text: "child started" }] }],
+  });
+  expect(provider.requests.map((request) => request.matchedStep)).toEqual([
+    "caller",
+    "fresh-child",
+  ]);
+  provider.assertConsumed();
+});

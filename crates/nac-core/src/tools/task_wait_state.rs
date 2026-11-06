@@ -235,6 +235,8 @@ impl Target {
     }
 
     pub fn report(&self, caller: &str, mut observation: Value) -> (Value, bool) {
+        let goal_approval =
+            self.mode == Mode::Goal && observation["status"] == "approval_attention";
         let stopped_goal = self.mode == Mode::Goal
             && matches!(
                 observation["status"].as_str(),
@@ -247,6 +249,18 @@ impl Target {
             "active".to_owned()
         } else if observation["status"] == "goal_complete" {
             "goal_complete".to_owned()
+        } else if goal_approval {
+            // Goal progress changes its version without changing an existing
+            // Ask. Keep every other proof/attention field significant and
+            // leave the fresh proof intact for callers without a cursor.
+            let mut attention = observation.clone();
+            if let Some(proof) = attention["proof"].as_object_mut() {
+                proof.remove("version");
+            }
+            format!(
+                "approval_attention_v1:{:x}",
+                Sha256::digest(attention.to_string().as_bytes())
+            )
         } else if stopped_goal {
             // Settlement and retention change proof presentation, not the
             // stopped outcome. A different run or failure still needs attention.
@@ -264,13 +278,14 @@ impl Target {
         } else {
             full_fingerprint()
         };
-        // Old stopped-goal cursors hashed the whole proof. An exact old hash
-        // can migrate quietly. Otherwise re-read and deliver once with resync:
-        // the opaque old hash cannot prove whether only accounting changed.
-        let legacy_goal_cursor = stopped_goal
+        // Old cursors hashed the whole proof. An exact old hash can migrate
+        // quietly. Otherwise deliver once with resync: an opaque hash cannot
+        // prove that only accounting or goal progress changed.
+        let legacy_goal_cursor = (stopped_goal || goal_approval)
             && self.previous.as_ref().is_some_and(|previous| {
                 !matches!(previous.fingerprint.as_str(), "active" | "goal_complete")
                     && !previous.fingerprint.starts_with("goal_outcome_v1:")
+                    && !previous.fingerprint.starts_with("approval_attention_v1:")
             });
         let changed = self.previous.as_ref().is_none_or(|previous| {
             previous.fingerprint != fingerprint

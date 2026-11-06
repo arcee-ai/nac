@@ -532,6 +532,11 @@ export default function ProjectsListPage() {
       <div className="flex h-full min-h-0">
         {isMobile ? null : <LeftSidebar variant="projects" />}
         <div className="min-h-0 min-w-0 flex-1">
+          {!managed.isManaged && (
+            <div className="p-4">
+              <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>
+            </div>
+          )}
           <ProjectsEmptyState
             mobile={isMobile}
             onStart={projectActions.create}
@@ -564,6 +569,11 @@ export default function ProjectsListPage() {
         )}
       >
         <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-18 pb-8" : "py-4")}>
+          {!managed.isManaged && (
+            <div className="flex justify-end">
+              <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>
+            </div>
+          )}
           {error ? (
             <div className="flex items-center gap-2 label-small text-error-primary">
               <span>{errorMessage(error)}</span>

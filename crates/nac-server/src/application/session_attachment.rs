@@ -125,6 +125,7 @@ impl<'a> SessionAttachmentApplication<'a> {
             if service.config_version() != Some(version) {
                 continue;
             }
+            self.manager.inner.attention.bind(&service);
             self.manager
                 .inner
                 .active_sessions
@@ -306,6 +307,7 @@ impl<'a> SessionAttachmentApplication<'a> {
         if let Some(existing) = active.get(session_id) {
             return Ok(Arc::clone(existing));
         }
+        self.manager.inner.attention.bind(&service);
         active.insert(session_id.to_string(), Arc::clone(&service));
         Ok(service)
     }

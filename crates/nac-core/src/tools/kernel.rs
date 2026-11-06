@@ -124,11 +124,13 @@ pub struct ToolCallContext {
 pub(crate) struct InvocationTiming {
     authorization: Duration,
     denied: bool,
+    authorization_waits: usize,
+    authorization_started: Option<Instant>,
+    changed: Arc<tokio::sync::Notify>,
 }
 
 struct ExecutionAuthorizationWait {
     timing: Option<Arc<Mutex<InvocationTiming>>>,
-    started: Instant,
     denied: bool,
 }
 
@@ -138,8 +140,14 @@ impl Drop for ExecutionAuthorizationWait {
             let mut timing = timing
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            timing.authorization += self.started.elapsed();
+            timing.authorization_waits -= 1;
+            if timing.authorization_waits == 0 {
+                if let Some(started) = timing.authorization_started.take() {
+                    timing.authorization += started.elapsed();
+                }
+            }
             timing.denied |= self.denied;
+            timing.changed.notify_waiters();
         }
     }
 }
@@ -151,9 +159,18 @@ impl ToolCallContext {
         &self,
         authorization: impl Future<Output = crate::permissions::AuthorizationOutcome>,
     ) -> crate::permissions::AuthorizationOutcome {
+        if let Some(timing) = &self.execution_timing {
+            let mut timing = timing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if timing.authorization_waits == 0 {
+                timing.authorization_started = Some(Instant::now());
+            }
+            timing.authorization_waits += 1;
+            timing.changed.notify_waiters();
+        }
         let mut wait = ExecutionAuthorizationWait {
             timing: self.execution_timing.clone(),
-            started: Instant::now(),
             denied: false,
         };
         let outcome = authorization.await;
@@ -168,6 +185,55 @@ impl ToolCallContext {
         self.cancellation
             .as_ref()
             .unwrap_or(&runtime.command_cancellation)
+    }
+}
+
+/// Authorization discovered inside a tool has the same execution-budget
+/// treatment as ordinary policy. Count overlapping waits once, keep surrounding
+/// work bounded, and recheck timing after a timer/authorization transition race.
+async fn execution_deadline(
+    timing: Option<&Arc<Mutex<InvocationTiming>>>,
+    started: Instant,
+    budget: Duration,
+) {
+    let Some(timing) = timing else {
+        tokio::time::sleep(budget).await;
+        return;
+    };
+    let changed = Arc::clone(
+        &timing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .changed,
+    );
+    loop {
+        let notified = changed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let (remaining, waiting) = {
+            let timing = timing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let authorization = timing.authorization
+                + timing
+                    .authorization_started
+                    .map_or(Duration::ZERO, |start| start.elapsed());
+            (
+                budget.saturating_sub(started.elapsed().saturating_sub(authorization)),
+                timing.authorization_waits != 0,
+            )
+        };
+        if remaining.is_zero() {
+            return;
+        }
+        if waiting {
+            notified.await;
+        } else {
+            tokio::select! {
+                () = &mut notified => (),
+                () = tokio::time::sleep(remaining) => (),
+            }
+        }
     }
 }
 
@@ -390,7 +456,8 @@ impl PreparedToolCall {
         };
         let started = Instant::now();
         let mut invocation = Box::pin(self.invoke(services, &call_context));
-        let deadline = tokio::time::sleep(timeout.duration);
+        let deadline =
+            execution_deadline(context.execution_timing.as_ref(), started, timeout.duration);
         tokio::pin!(deadline);
 
         tokio::select! {
@@ -689,11 +756,12 @@ pub struct ToolSnapshot {
     entries: Vec<Arc<dyn ErasedTool>>,
 }
 
-// Private routing for the two service-issued human capabilities. Ordinary
-// model/native JSON invocation cannot select either authority.
+// Private routing for service-issued human capabilities. Ordinary
+// model/native JSON invocation cannot select this authority.
 enum HumanSubmission<'a> {
     Shell(&'a crate::session_service::SubmittedShell),
     UserTerminal(&'a crate::session_service::SubmittedUserTerminal),
+    Heartbeat(&'a crate::session_service::SubmittedHeartbeat),
 }
 
 impl ToolSnapshot {
@@ -797,6 +865,22 @@ impl ToolSnapshot {
         .await
     }
 
+    pub(crate) async fn invoke_submitted_heartbeat(
+        &self,
+        submission: &crate::session_service::SubmittedHeartbeat,
+        services: ToolServices<'_>,
+        context: &ToolCallContext,
+    ) -> ToolResult {
+        self.invoke_with_submission(
+            super::heartbeat::CONTROL_HEARTBEAT,
+            submission.tool_input(),
+            services,
+            context,
+            Some(HumanSubmission::Heartbeat(submission)),
+        )
+        .await
+    }
+
     async fn invoke_with_submission(
         &self,
         name: &str,
@@ -813,6 +897,9 @@ impl ToolSnapshot {
                     .iter()
                     .find_map(|resource| resource.hard_denial.as_deref())
                 {
+                    if submission.is_none() {
+                        super::heartbeat::record_denial(services).await;
+                    }
                     return ToolResult::text(
                         format!("Error: permission denied for {name}: {reason}"),
                         true,
@@ -839,12 +926,16 @@ impl ToolSnapshot {
                     .iter()
                     .find_map(|resource| resource.hard_denial.as_deref())
                 {
+                    if submission.is_none() {
+                        super::heartbeat::record_denial(services).await;
+                    }
                     return ToolResult::text(
                         format!("Error: permission denied for {name}: {reason}"),
                         true,
                     );
                 }
                 if let Some(broker) = &services.runtime.permission_broker {
+                    let agent_invocation = submission.is_none();
                     let outcome = match submission {
                         Some(HumanSubmission::Shell(submission)) => {
                             broker
@@ -866,6 +957,16 @@ impl ToolSnapshot {
                                 )
                                 .await
                         }
+                        Some(HumanSubmission::Heartbeat(submission)) => {
+                            broker
+                                .authorize_submitted_heartbeat(
+                                    &resources,
+                                    context,
+                                    context.cancellation(services.runtime),
+                                    submission,
+                                )
+                                .await
+                        }
                         None => {
                             broker
                                 .authorize(
@@ -880,6 +981,9 @@ impl ToolSnapshot {
                     match outcome {
                         crate::permissions::AuthorizationOutcome::Allowed => {}
                         crate::permissions::AuthorizationOutcome::Denied(reason) => {
+                            if agent_invocation {
+                                super::heartbeat::record_denial(services).await;
+                            }
                             return ToolResult::text(
                                 format!("Error: permission denied for {name}: {reason}"),
                                 true,

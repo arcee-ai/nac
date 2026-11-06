@@ -1,4 +1,4 @@
-//! Lossy post-commit goal/question hints, never history or outcome authority.
+//! Lossy post-commit task hints, never history or outcome authority.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -26,6 +26,11 @@ pub(crate) struct GoalChange {
 
 #[derive(Clone, Debug)]
 pub(crate) enum TaskChange {
+    /// Binding/invalidation changed. Only a scoped canonical reread is valid.
+    SessionDirty {
+        store_path: PathBuf,
+        session_id: String,
+    },
     Goal(GoalChange),
     Question {
         store_path: PathBuf,
@@ -33,6 +38,20 @@ pub(crate) enum TaskChange {
         run_id: String,
         goal_id: Option<String>,
     },
+}
+
+/// Outer transaction owners publish after commit and before acknowledgement.
+/// Observation delivery never changes the mutation's result or creates a bus.
+pub(crate) fn session_committed(path: &Path, session: &str) {
+    let changes = CHANGES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(sender) = changes.get(path) {
+        let _ = sender.send(TaskChange::SessionDirty {
+            store_path: path.to_owned(),
+            session_id: session.to_owned(),
+        });
+    }
 }
 
 pub(crate) fn question_committed(path: &Path, question: &super::QuestionRecord) {
