@@ -29,6 +29,15 @@ URI selection and authenticated package-record joining. The two route trees
 rewrite recognized Ubuntu base URIs only. Other native repositories remain
 unchanged. Unknown source/architecture forms stop the pilot.
 
+The first hosted source `67db2f1`, run `42139119881:1`, passed all 22 GNU and
+17 parsed controls, then failed before planning on the actual plural scalar
+`APT::Architecture-Variants "amd64v3";`. The compatibility repair preserves that
+exact field, or the existing singular spelling, under the amd64/amd64v3 contract.
+Duplicate/conflicting spellings, unsupported values and unknown fields still
+fail. That first failure remains evidence; no payload race result is inferred.
+Separately, test-owned subprocess PIPE handles are closed after wait to address
+the recorded unittest ResourceWarnings; no assertion or lifecycle gate changes.
+
 Every route must equal the canonical full current missing closure in package,
 version, control architecture, native Filename variant, size and SHA-256 before
 any baseline or race acquisition starts. No historical nine-package list,

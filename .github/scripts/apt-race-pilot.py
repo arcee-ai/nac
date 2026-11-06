@@ -135,14 +135,20 @@ def copy_sources(root, route):
 
 
 def architecture(text):
-    values = re.findall(r'^APT::Architecture "([a-z0-9]+)";', text, re.M)
-    arches = re.findall(r'^APT::Architectures:: "([a-z0-9]+)";', text, re.M)
-    require(values in (['amd64'], ['amd64v3']) and arches and set(arches) <= {'amd64', 'amd64v3'} and values[0] in arches,
-            'unsupported actual native architecture configuration')
     lines = [line for line in text.splitlines() if line.startswith('APT::Architectur')]
+    fields = {}
     for line in lines:
-        require(re.fullmatch(r'APT::(?:Architecture|Architecture-Variant|Architectures|Architectures::) "[a-z0-9]*";', line),
-                'unknown architecture configuration')
+        match = re.fullmatch(r'APT::(Architecture|Architecture-Variant|Architecture-Variants|Architectures|Architectures::) "([a-z0-9]*)";', line)
+        require(match, 'unknown architecture configuration')
+        fields.setdefault(match[1], []).append(match[2])
+    values, arches = fields.get('Architecture', []), fields.get('Architectures::', [])
+    require(values in (['amd64'], ['amd64v3']) and arches and len(arches) == len(set(arches)) and
+            set(arches) <= {'amd64', 'amd64v3'} and values[0] in arches,
+            'unsupported actual native architecture configuration')
+    require(all(len(rows) == 1 for key, rows in fields.items() if key != 'Architectures::') and
+            fields.get('Architectures', []) in ([], ['']), 'duplicate/conflicting architecture fields')
+    variants = fields.get('Architecture-Variant', [])+fields.get('Architecture-Variants', [])
+    require(len(variants) <= 1 and all(value == 'amd64v3' for value in variants), 'duplicate/conflicting/unsupported variant')
     return '\n'.join(lines)
 
 

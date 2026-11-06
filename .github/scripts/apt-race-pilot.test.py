@@ -114,6 +114,49 @@ class Boundary(unittest.TestCase):
         with self.assertRaises(ValueError):
             pilot.architecture(text.replace('amd64', 'arm64'))
 
+    def test_retained_native_plural_sample_preserved_into_every_private_config(self):
+        # Verbatim architecture lines from run42139119881:1 native-config/stdout.log.
+        text = 'APT::Architecture "amd64";\nAPT::Architecture-Variants "amd64v3";\nAPT::Architectures "";\nAPT::Architectures:: "amd64";\n'
+        for sample in (text, text.replace('Architecture-Variants', 'Architecture-Variant'),
+                       text.replace('APT::Architecture-Variants "amd64v3";\n', ''),
+                       text.replace('"amd64"', '"amd64v3"')):
+            value = pilot.architecture(sample)
+            self.assertEqual(value, sample.strip())
+            for role in ('canonical', 'azure', 'official'):
+                self.assertIn(value+'\n', pilot.config(Path('/tmp/owned')/role, value))
+
+    def test_architecture_duplicates_conflicts_and_unknown_fields_rejected(self):
+        base = 'APT::Architecture "amd64";\nAPT::Architecture-Variants "amd64v3";\nAPT::Architectures "";\nAPT::Architectures:: "amd64";\n'
+        additions = ['APT::Architecture "amd64";', 'APT::Architecture "amd64v3";',
+                     'APT::Architecture-Variants "amd64v3";', 'APT::Architecture-Variant "amd64v3";',
+                     'APT::Architecture-Variant "arm64";', 'APT::Architectures "";',
+                     'APT::Architectures:: "amd64";', 'APT::Architecture-Variants:: "amd64v3";',
+                     'APT::Architecture-Unknown "amd64v3";']
+        for extra in additions:
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                pilot.architecture(base+extra+'\n')
+        for bad in ('arm64', 'amd64', ''):
+            with self.subTest(variant=bad), self.assertRaises(ValueError):
+                pilot.architecture(base.replace('"amd64v3"', '"'+bad+'"'))
+        with self.assertRaises(ValueError):
+            pilot.architecture(base.replace('APT::Architectures "";', 'APT::Architectures "amd64";'))
+
+    def test_test_owned_pipe_handles_closed_after_wait(self):
+        child = subprocess.Popen([sys.executable, '-c', 'print("owned pipe fixture")'],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        child.wait(timeout=5)
+        lease = LinuxLease('test_real_sigint_sigterm_fail_with_cleanup')
+        lease.children, lease.root = [child], self.root
+        try:
+            with patch.dict(os.environ, {'APT_RACE_CONTROL_EVIDENCE': ''}):
+                lease.cleanup()
+            self.assertEqual(child.returncode, 0)
+            self.assertTrue(child.stdout.closed)
+            self.assertTrue(child.stderr.closed)
+        finally:
+            child.stdout.close()
+            child.stderr.close()
+
     def fake_race(self, observed, cancelled=None):
         controller = object.__new__(pilot.Pilot)
         controller.report = {}
@@ -314,6 +357,10 @@ class LinuxLease(unittest.TestCase):
                 child.kill()
                 child.wait(timeout=5)
                 self.fail('owned fixture child required forced termination')
+            finally:
+                for stream in (child.stdout, child.stderr):
+                    if stream is not None:
+                        stream.close()
         destination = os.environ.get('APT_RACE_CONTROL_EVIDENCE')
         if destination:
             copied = Path(destination)/self._testMethodName
