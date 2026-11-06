@@ -162,7 +162,7 @@ extension WorkspaceSmoke {
             try await self.snapshot("projects.png", expecting: .project(id: projectID, title: "Disposable Mac preview"))
             return "Actual production projects route and seeded local project"
         }
-        checks["links"] = ["status": "unavailable", "detail": "Markdown renders internal/source and safe external anchors; actual external native handoff not qualified by this preview. ALL-346/348 integration remains separate."]
+        checks["links"] = ["status": "unavailable", "executed": false, "detail": "Markdown renders internal/source and safe external anchors; actual external native handoff not qualified by this preview. ALL-346/348 integration remains separate."]
     }
 
     func overlayJourney() async throws -> String {
