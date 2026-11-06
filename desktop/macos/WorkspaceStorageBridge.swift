@@ -66,6 +66,13 @@ final class WorkspaceStorageBridge {
               storage.write(namespace: namespace, key: key, value: message["value"] as? String,
                             completion: acknowledge) else { return false }
         sequence = next
+        #if PREVIEW_SMOKE && LOCAL_APP
+        // Passive Q1 observation of this validated, accepted web-port sequence.
+        // Never post a write/flush or substitute the adapter's own counter.
+        webView?.callAsyncJavaScript(
+            "return window.__nacRecoveryEvidence?.q1StoragePost?.(message) === true",
+            arguments: ["message": message], in: nil, in: .page) { _ in }
+        #endif
         return true
     }
 
