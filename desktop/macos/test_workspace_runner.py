@@ -89,6 +89,33 @@ class WorkspaceRunnerTests(unittest.TestCase):
             cleanup.assert_called_once_with(evidence, Path(result['relocated_app']))
 
 
+    def test_first_document_asset_failure_is_retained_when_reloaded_document_is_clean(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+            for path in (app, output, relocation): path.mkdir()
+            evidence = output / 'workspace-direct.json'
+            documents = [{'phase': 'before-reload', 'complete': True, 'offline_ok': False,
+                          'resources': ['https://outside.invalid/font.woff'], 'errors': ['first error']},
+                         {'phase': 'after-reload', 'complete': True, 'offline_ok': True,
+                          'resources': ['http://127.0.0.1:351/local.js'], 'errors': []}]
+            launcher = Mock(returncode=0)
+            def finished(**_):
+                evidence.write_text(json.dumps({'passed': False, 'engine_reaped': True,
+                    'profile_removed': True, 'asset_documents': documents,
+                    'checks': {'offline-assets': {'status': 'fail', 'detail': 'First document failed'}}}))
+                return 0
+            launcher.wait.side_effect = finished
+            with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                    patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                    patch('workspace.subprocess.Popen', return_value=launcher), contextlib.redirect_stdout(io.StringIO()):
+                result = run_case(app, output, 'workspace-direct')
+            self.assertFalse(result['passed'])
+            self.assertEqual(result['asset_documents'], documents)
+            self.assertEqual(json.loads(evidence.read_text())['asset_documents'], documents)
+            self.assertEqual(result['checks']['offline-assets']['status'], 'fail')
+
+
 class ManualBudgetTests(unittest.TestCase):
     def test_slow_staging_keeps_full_operator_window_plus_owned_cleanup(self):
         for stage_seconds in (0, 60, 250):
