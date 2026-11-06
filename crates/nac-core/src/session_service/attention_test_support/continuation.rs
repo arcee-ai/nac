@@ -45,6 +45,7 @@ impl SessionService {
         run: &SessionRunId,
     ) -> AttentionPreflightBarrier {
         let key = Key {
+            kind: Kind::IdlePublication,
             store: self.metadata.store_path.canonicalize().unwrap(),
             session: self.metadata.session_id.clone().unwrap(),
             run: run.to_string(),
@@ -63,6 +64,7 @@ impl SessionService {
     ) {
         let Some(run) = run else { return };
         let key = Key {
+            kind: Kind::IdlePublication,
             store: self.metadata.store_path.canonicalize().unwrap(),
             session: self.metadata.session_id.clone().unwrap(),
             run: run.to_string(),

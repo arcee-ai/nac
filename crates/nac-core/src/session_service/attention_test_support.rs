@@ -9,8 +9,15 @@ use tokio::sync::Notify;
 #[cfg(test)]
 mod continuation;
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+enum Kind {
+    IdlePublication,
+    QuestionSettlement,
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct Key {
+    kind: Kind,
     store: PathBuf,
     session: String,
     run: String,
@@ -22,6 +29,7 @@ struct State {
     attempted: Notify,
     selection: StdMutex<Option<AttentionPublicationSelection>>,
     released: AtomicBool,
+    question_settled: AtomicBool,
 }
 static BARRIERS: LazyLock<StdMutex<HashMap<Key, Weak<State>>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
@@ -32,6 +40,23 @@ pub struct AttentionPublicationBarrier {
     key: Key,
     state: Arc<State>,
 }
+/// Exact question-source settlement after continuation selection has returned.
+/// Separate registration kind preserves the idle publication hook's exclusions.
+pub struct QuestionSettlementBarrier(AttentionPublicationBarrier);
+impl QuestionSettlementBarrier {
+    pub async fn arrived(&self) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(5), self.0.state.arrived.notified()).await?;
+        anyhow::ensure!(
+            self.0.state.question_settled.load(Ordering::Acquire),
+            "question settlement receipt unavailable"
+        );
+        Ok(())
+    }
+    pub fn release(&self) {
+        self.0.release();
+    }
+}
+
 /// Actual stopped continuation selected by settlement, never inferred from
 /// session behavior or the completion ledger. This type is nonshipping.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,7 +146,18 @@ async fn wait(
     bound: Duration,
 ) -> Option<AttentionPublicationWitness> {
     // Reject other dispositions BEFORE consuming an exact registration.
-    let selection = AttentionPublicationSelection::from_selection(selection)?;
+    let idle_selection = match key.kind {
+        Kind::IdlePublication => Some(AttentionPublicationSelection::from_selection(selection)?),
+        Kind::QuestionSettlement => {
+            if !matches!(
+                selection,
+                attention::ContinuationDisposition::WaitingForQuestion
+            ) {
+                return None;
+            }
+            None
+        }
+    };
     // Remove and clone under the registry mutex, then release it BEFORE await.
     let state = BARRIERS
         .lock()
@@ -132,7 +168,10 @@ async fn wait(
     *state
         .selection
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(selection);
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = idle_selection;
+    state
+        .question_settled
+        .store(key.kind == Kind::QuestionSettlement, Ordering::Release);
     state.arrived.notify_one();
     let deadline = tokio::time::Instant::now() + bound;
     while !state.released.load(Ordering::Acquire) && !stopping.load(Ordering::Acquire) {
@@ -151,6 +190,7 @@ impl SessionService {
     ) -> Result<AttentionPublicationBarrier> {
         anyhow::ensure!(!run.is_empty(), "exact run required");
         register(Key {
+            kind: Kind::IdlePublication,
             store: self.metadata.store_path.canonicalize()?,
             session: self
                 .metadata
@@ -159,6 +199,28 @@ impl SessionService {
                 .ok_or_else(|| anyhow::anyhow!("persisted session required"))?,
             run: run.to_owned(),
         })
+    }
+    pub fn hold_question_settlement_for_test(
+        &self,
+        run: &str,
+        generation: &str,
+    ) -> Result<QuestionSettlementBarrier> {
+        // Direct question generations are their exact immutable source run UUID.
+        anyhow::ensure!(
+            !run.is_empty() && run == generation,
+            "exact question run/generation required"
+        );
+        register(Key {
+            kind: Kind::QuestionSettlement,
+            store: self.metadata.store_path.canonicalize()?,
+            session: self
+                .metadata
+                .session_id
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("persisted session required"))?,
+            run: run.to_owned(),
+        })
+        .map(QuestionSettlementBarrier)
     }
     pub(super) async fn wait_attention_publication_for_test(
         &self,
@@ -173,6 +235,14 @@ impl SessionService {
         };
         wait(
             &Key {
+                kind: if matches!(
+                    selection,
+                    attention::ContinuationDisposition::WaitingForQuestion
+                ) {
+                    Kind::QuestionSettlement
+                } else {
+                    Kind::IdlePublication
+                },
                 store,
                 session: session.clone(),
                 run: run.to_string(),
@@ -197,6 +267,7 @@ mod tests {
 
     fn key() -> Key {
         Key {
+            kind: Kind::IdlePublication,
             store: PathBuf::from(format!("/test/{}", Uuid::new_v4())),
             session: "s".into(),
             run: "a".into(),
@@ -363,3 +434,6 @@ mod tests {
         drop(unrelated);
     }
 }
+
+#[cfg(test)]
+mod question_settlement_tests;

@@ -128,6 +128,10 @@ async fn native_attention_real_question_answer_and_goal_completion_are_exact_and
     assert_eq!(goal.status(), StatusCode::CREATED);
     let goal = response_json(goal).await;
     *goal_id.lock().unwrap() = goal["goal_id"].as_str().unwrap().into();
+    let service = manager.inner.active_sessions.read().await["session"].clone();
+    let question_settlement = service
+        .hold_question_settlement_for_test(&old_run, &old_run)
+        .unwrap();
     release.notify_one();
     let mut observed = Vec::new();
     let pending = tokio::time::timeout(Duration::from_secs(10), async {
@@ -146,14 +150,11 @@ async fn native_attention_real_question_answer_and_goal_completion_are_exact_and
     assert_eq!(pending["change"]["decision"]["request_id"], "choice");
     assert_eq!(pending["change"]["decision"]["run_id"], old_run);
     assert_eq!(pending["new_attention"], true);
-    let service = manager.inner.active_sessions.read().await["session"].clone();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while service.has_active_operation() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), question_settlement.arrived())
+        .await
+        .unwrap()
+        .unwrap();
+    question_settlement.release();
     let answered=post_json(app.clone(),"/sessions/session/questions/choice/answer",serde_json::json!({"request_id":"choice","run_id":old_run,"generation":old_run,"expected_revision":1,"answer":"CSV"})).await;
     if answered.status() != StatusCode::OK {
         let status = answered.status();
