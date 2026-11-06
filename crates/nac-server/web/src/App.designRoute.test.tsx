@@ -1,13 +1,6 @@
 /** @vitest-environment jsdom */
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -15,10 +8,8 @@ const state = vi.hoisted(() => ({
   mounted: vi.fn(),
   unmounted: vi.fn(),
   navigate: new Map<number, (path: string) => void>(),
-  useRuntime:
-    undefined as unknown as () => import("./app/runtime/nativeRuntime").NativeRuntime,
-  useNavigate:
-    undefined as unknown as typeof import("react-router-dom").useNavigate,
+  useRuntime: undefined as unknown as () => import("./app/runtime/nativeRuntime").NativeRuntime,
+  useNavigate: undefined as unknown as typeof import("react-router-dom").useNavigate,
 }));
 
 vi.mock("./app/features/heartbeats/HeartbeatAttentionController", () => ({
@@ -96,9 +87,7 @@ vi.mock("./app/components/pages/SessionPage", () => ({
   },
 }));
 
-type Runtime = ReturnType<
-  typeof import("./app/runtime/nativeRuntime").createNativeRuntime
->;
+type Runtime = ReturnType<typeof import("./app/runtime/nativeRuntime").createNativeRuntime>;
 let NativePresentationRoot: typeof import("./app/runtime/NativePresentationRoot").NativePresentationRoot;
 let MemoryRouter: typeof import("react-router-dom").MemoryRouter;
 let createRuntime: typeof import("./app/runtime/nativeRuntime").createNativeRuntime;
@@ -132,16 +121,12 @@ beforeEach(async () => {
     state.imported();
     return page;
   });
-  ({ MemoryRouter, useNavigate: state.useNavigate } =
-    await import("react-router-dom"));
+  ({ MemoryRouter, useNavigate: state.useNavigate } = await import("react-router-dom"));
   state.useRuntime = (await import("./app/runtime/RuntimeContext"))
     .useNativeRuntime as () => Runtime;
-  ({ NativePresentationRoot } =
-    await import("./app/runtime/NativePresentationRoot"));
-  ({ createNativeRuntime: createRuntime } =
-    await import("./app/runtime/nativeRuntime"));
-  ({ createNacClient: createClient } =
-    await import("./app/services/nacClient"));
+  ({ NativePresentationRoot } = await import("./app/runtime/NativePresentationRoot"));
+  ({ createNativeRuntime: createRuntime } = await import("./app/runtime/nativeRuntime"));
+  ({ createNacClient: createClient } = await import("./app/services/nacClient"));
 });
 afterEach(() => {
   cleanup();
@@ -170,9 +155,7 @@ function fixture(owner: string, route: string) {
       runtime={runtime}
       className={`presentation-${owner}`}
       theme={(child) => child}
-      router={(child) => (
-        <MemoryRouter initialEntries={[route]}>{child}</MemoryRouter>
-      )}
+      router={(child) => <MemoryRouter initialEntries={[route]}>{child}</MemoryRouter>}
     />,
   );
   return { runtime, view, fetch, ui: within(view.container) };
@@ -196,12 +179,9 @@ it("loads only the allowed design route, fences late resolution and isolates two
   const ordinary = fixture("ordinary", "/session/one/files");
   const direct = fixture("direct", "/design");
   await direct.ui.findByText("Projects");
-  fireEvent.change(
-    ordinary.ui.getByRole("textbox", { name: "Session draft" }),
-    {
-      target: { value: "retained unsent draft" },
-    },
-  );
+  fireEvent.change(ordinary.ui.getByRole("textbox", { name: "Session draft" }), {
+    target: { value: "retained unsent draft" },
+  });
   expect(state.imported).not.toHaveBeenCalled();
   await act(async () => state.navigate.get(ordinary.runtime.id)!("/design"));
   await ordinary.ui.findByRole("status");
@@ -231,30 +211,21 @@ it("loads only the allowed design route, fences late resolution and isolates two
     fireEvent.change(first.ui.getByRole("textbox", { name: "Preview draft" }), {
       target: { value: "first only" },
     });
+    expect(second.ui.getByRole("textbox", { name: "Preview draft" })).toHaveProperty("value", "");
     expect(
-      second.ui.getByRole("textbox", { name: "Preview draft" }),
-    ).toHaveProperty("value", "");
-    expect(
-      first.view.container
-        .querySelector("[data-nac-runtime]")
-        ?.getAttribute("data-nac-runtime"),
+      first.view.container.querySelector("[data-nac-runtime]")?.getAttribute("data-nac-runtime"),
     ).not.toBe(
-      second.view.container
-        .querySelector("[data-nac-runtime]")
-        ?.getAttribute("data-nac-runtime"),
+      second.view.container.querySelector("[data-nac-runtime]")?.getAttribute("data-nac-runtime"),
     );
     expect(first.view.container.querySelector("[data-nac-overlays]")).not.toBe(
       second.view.container.querySelector("[data-nac-overlays]"),
     );
-    await act(async () =>
-      state.navigate.get(ordinary.runtime.id)!("/session/one/files"),
+    await act(async () => state.navigate.get(ordinary.runtime.id)!("/session/one/files"));
+    expect(ordinary.ui.getByRole("textbox", { name: "Session draft" })).toHaveProperty(
+      "value",
+      "retained unsent draft",
     );
-    expect(
-      ordinary.ui.getByRole("textbox", { name: "Session draft" }),
-    ).toHaveProperty("value", "retained unsent draft");
-    expect(
-      state.unmounted.mock.calls.some(([id]) => id === ordinary.runtime.id),
-    ).toBe(false);
+    expect(state.unmounted.mock.calls.some(([id]) => id === ordinary.runtime.id)).toBe(false);
     expect(first.runtime.isClosed()).toBe(false);
     expect(second.runtime.isClosed()).toBe(false);
     expect(state.imported).toHaveBeenCalledOnce();
@@ -267,12 +238,8 @@ it("keeps import failure local to design and does not automatically retry", asyn
   const current = fixture("failure", "/design");
   await current.ui.findByRole("status");
   await waitFor(() => expect(state.imported).toHaveBeenCalledOnce());
-  await act(async () =>
-    rejectPage(new Error("Controlled design chunk failure")),
-  );
-  expect((await current.ui.findByRole("alert")).textContent).toContain(
-    "Reload this page",
-  );
+  await act(async () => rejectPage(new Error("Controlled design chunk failure")));
+  expect((await current.ui.findByRole("alert")).textContent).toContain("Reload this page");
   expect(current.runtime.isClosed()).toBe(false);
   await act(async () => state.navigate.get(current.runtime.id)!("/"));
   await current.ui.findByText("Projects");
@@ -302,16 +269,15 @@ it("keeps the actual complete showcase and its modal local to the selected prese
     exact: true,
   }).parentElement;
   expect(modalControls).not.toBeNull();
-  fireEvent.click(
-    within(modalControls!).getByRole("button", { name: "Open modal" }),
-  );
+  fireEvent.click(within(modalControls!).getByRole("button", { name: "Open modal" }));
   const dialog = await current.ui.findByRole("dialog", {
     name: "Delete session",
   });
   expect(sibling.ui.queryByRole("dialog")).toBeNull();
-  expect(
-    sibling.ui.getByRole("textbox", { name: "Session draft" }),
-  ).toHaveProperty("value", "sibling unsent draft");
+  expect(sibling.ui.getByRole("textbox", { name: "Session draft" })).toHaveProperty(
+    "value",
+    "sibling unsent draft",
+  );
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(current.ui.queryByRole("dialog")).toBeNull());
   expect(sibling.runtime.isClosed()).toBe(false);
