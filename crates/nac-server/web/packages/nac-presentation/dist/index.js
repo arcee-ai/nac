@@ -24723,7 +24723,7 @@ function Ow({ children: e }) {
 	});
 }
 // src/App.tsx
-var kw = Ka(() => import("./chunks/DesktopSessionTargetOwner-BjXD2XGk.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Aw = Ka(() => import("./chunks/DesignPreviewPage-BvQ9a40j.js").catch(() => ({ default: () => /* @__PURE__ */ Z("p", {
+var kw = Ka(() => import("./chunks/DesktopSessionTargetOwner-BjXD2XGk.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Aw = Ka(() => import("./chunks/DesignPreviewPage-CymErshj.js").catch(() => ({ default: () => /* @__PURE__ */ Z("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));

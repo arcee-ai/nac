@@ -2729,58 +2729,57 @@ function ar() {
 }
 // src/app/components/pages/DesignPreviewPage.tsx
 function or() {
-	let [e, t] = I(!1);
 	return /* @__PURE__ */ z("div", {
 		className: "h-full overflow-y-auto bg-elevation-ground text-basic-primary",
-		children: [
-			/* @__PURE__ */ z("header", {
-				className: "flex items-center gap-4 h-14 px-6 border-b border-secondary",
-				children: [/* @__PURE__ */ R(pe, { height: 18 }), /* @__PURE__ */ R("span", {
-					className: "text-basic-muted label-small",
-					children: "design system"
-				})]
-			}),
-			/* @__PURE__ */ z("main", {
-				className: "p-6 flex flex-col gap-6 max-w-[1100px]",
-				children: [
-					/* @__PURE__ */ R(Vn, {}),
-					/* @__PURE__ */ R(Hn, {}),
-					/* @__PURE__ */ R(xt, {}),
-					/* @__PURE__ */ R(st, {}),
-					/* @__PURE__ */ R(Yt, { onOpenModal: () => t(!0) }),
-					/* @__PURE__ */ R(zn, {}),
-					/* @__PURE__ */ R(wt, {}),
-					/* @__PURE__ */ R(Ln, {}),
-					/* @__PURE__ */ R(Un, {}),
-					/* @__PURE__ */ R(Zn, {}),
-					/* @__PURE__ */ R(In, {}),
-					/* @__PURE__ */ R(ir, {}),
-					/* @__PURE__ */ R(Mn, {}),
-					/* @__PURE__ */ R(qt, {}),
-					/* @__PURE__ */ R(tr, {}),
-					/* @__PURE__ */ R(ot, {}),
-					/* @__PURE__ */ R(Rn, {}),
-					/* @__PURE__ */ R(Dt, {}),
-					/* @__PURE__ */ R(Et, {}),
-					/* @__PURE__ */ R(ar, {})
-				]
-			}),
-			/* @__PURE__ */ R(te, {
-				open: e,
-				onClose: () => t(!1),
-				title: "Delete session",
-				footer: /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(l, {
-					variant: o.Secondary,
-					onClick: () => t(!1),
-					children: "Cancel"
-				}), /* @__PURE__ */ R(l, {
-					variant: o.SecondaryDestructive,
-					onClick: () => t(!1),
-					children: "Delete"
-				})] }),
-				children: "This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the atom."
-			})
-		]
+		children: [/* @__PURE__ */ z("header", {
+			className: "flex items-center gap-4 h-14 px-6 border-b border-secondary",
+			children: [/* @__PURE__ */ R(pe, { height: 18 }), /* @__PURE__ */ R("span", {
+				className: "text-basic-muted label-small",
+				children: "design system"
+			})]
+		}), /* @__PURE__ */ z("main", {
+			className: "p-6 flex flex-col gap-6 max-w-[1100px]",
+			children: [
+				/* @__PURE__ */ R(Vn, {}),
+				/* @__PURE__ */ R(Hn, {}),
+				/* @__PURE__ */ R(xt, {}),
+				/* @__PURE__ */ R(st, {}),
+				/* @__PURE__ */ R(sr, {}),
+				/* @__PURE__ */ R(zn, {}),
+				/* @__PURE__ */ R(wt, {}),
+				/* @__PURE__ */ R(Ln, {}),
+				/* @__PURE__ */ R(Un, {}),
+				/* @__PURE__ */ R(Zn, {}),
+				/* @__PURE__ */ R(In, {}),
+				/* @__PURE__ */ R(ir, {}),
+				/* @__PURE__ */ R(Mn, {}),
+				/* @__PURE__ */ R(qt, {}),
+				/* @__PURE__ */ R(tr, {}),
+				/* @__PURE__ */ R(ot, {}),
+				/* @__PURE__ */ R(Rn, {}),
+				/* @__PURE__ */ R(Dt, {}),
+				/* @__PURE__ */ R(Et, {}),
+				/* @__PURE__ */ R(ar, {})
+			]
+		})]
 	});
+}
+function sr() {
+	let [e, t] = I(!1);
+	return /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(Yt, { onOpenModal: () => t(!0) }), /* @__PURE__ */ R(te, {
+		open: e,
+		onClose: () => t(!1),
+		title: "Delete session",
+		footer: /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(l, {
+			variant: o.Secondary,
+			onClick: () => t(!1),
+			children: "Cancel"
+		}), /* @__PURE__ */ R(l, {
+			variant: o.SecondaryDestructive,
+			onClick: () => t(!1),
+			children: "Delete"
+		})] }),
+		children: "This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the atom."
+	})] });
 }
 export { or as default };
