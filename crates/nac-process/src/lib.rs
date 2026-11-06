@@ -898,14 +898,37 @@ struct ProcessIdentity {
 #[cfg(target_os = "linux")]
 impl ProcessIdentity {
     fn capture(expected: ProcessMetadata) -> std::io::Result<Option<Self>> {
-        let pidfd = match open_pidfd(expected.pid) {
+        Self::capture_with(expected, open_pidfd, |pid| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        })
+    }
+
+    fn capture_with(
+        expected: ProcessMetadata,
+        open_original: impl FnOnce(libc::pid_t) -> std::io::Result<OwnedFd>,
+        read_stat: impl FnOnce(libc::pid_t) -> std::io::Result<String>,
+    ) -> std::io::Result<Option<Self>> {
+        let pidfd = match open_original(expected.pid) {
             Ok(pidfd) => pidfd,
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let stat = match std::fs::read_to_string(format!("/proc/{}/stat", expected.pid)) {
+        let mut original = Self {
+            metadata: expected,
+            pidfd,
+        };
+        let stat = match read_stat(expected.pid) {
             Ok(stat) => stat,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
+                // A proc file opened before exit can report ESRCH while being
+                // read. Only the same retained pidfd can confirm that death.
+                return match original.send_signal(0) {
+                    Err(death) if death.raw_os_error() == Some(libc::ESRCH) => Ok(None),
+                    Err(probe_error) => Err(probe_error),
+                    Ok(()) => Err(error),
+                };
+            }
             Err(error) => return Err(error),
         };
         let Some((ppid, pgrp, start_time)) = parse_process_stat(&stat) else {
@@ -917,15 +940,13 @@ impl ProcessIdentity {
         if start_time != expected.start_time {
             return Ok(None);
         }
-        Ok(Some(Self {
-            metadata: ProcessMetadata {
-                pid: expected.pid,
-                ppid,
-                pgrp,
-                start_time,
-            },
-            pidfd,
-        }))
+        original.metadata = ProcessMetadata {
+            pid: expected.pid,
+            ppid,
+            pgrp,
+            start_time,
+        };
+        Ok(Some(original))
     }
 
     fn send_signal(&self, signal: libc::c_int) -> std::io::Result<()> {
@@ -1357,6 +1378,83 @@ mod tests {
         assert!(identity.is_none());
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat_exit_race_is_confirmed_by_original_pidfd() {
+        use std::io::Read;
+
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let expected = capture_test_identity(child.id() as libc::pid_t).metadata;
+        let identity = ProcessIdentity::capture_with(expected, open_pidfd, |pid| {
+            let mut stat = std::fs::File::open(format!("/proc/{pid}/stat")).unwrap();
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let error = stat.read_to_string(&mut String::new()).unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(libc::ESRCH));
+            Err(error)
+        })
+        .unwrap();
+
+        assert!(identity.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat_esrch_keeps_live_original_capture_uncertain() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let expected = capture_test_identity(child.id() as libc::pid_t).metadata;
+        let result = ProcessIdentity::capture_with(expected, open_pidfd, |_| {
+            Err(std::io::Error::from_raw_os_error(libc::ESRCH))
+        });
+        let still_live = child.try_wait().unwrap().is_none();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(still_live);
+        assert_eq!(result.err().unwrap().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unrelated_proc_stat_error_is_not_hidden_by_original_death() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let expected = capture_test_identity(child.id() as libc::pid_t).metadata;
+        let result = ProcessIdentity::capture_with(expected, open_pidfd, |_| {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            Err(std::io::Error::from_raw_os_error(libc::EACCES))
+        });
+
+        assert_eq!(result.err().unwrap().raw_os_error(), Some(libc::EACCES));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat_esrch_with_uncertain_original_capability_remains_error() {
+        let expected = ProcessMetadata {
+            pid: std::process::id() as libc::pid_t,
+            ppid: 1,
+            pgrp: 1,
+            start_time: 1,
+        };
+        let result = ProcessIdentity::capture_with(
+            expected,
+            |_| Ok(std::fs::File::open("/dev/null").unwrap().into()),
+            |_| Err(std::io::Error::from_raw_os_error(libc::ESRCH)),
+        );
+
+        assert_eq!(result.err().unwrap().raw_os_error(), Some(libc::EBADF));
     }
 
     #[cfg(target_os = "linux")]

@@ -192,16 +192,65 @@ fn plain_local(conn: &Connection, session: &str) -> Result<i64> {
         AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id)", [session], |r|r.get(0)).optional()?;
     version.ok_or_else(|| QuestionError::Unavailable.into())
 }
+fn compatible_identity(
+    conn: &Connection,
+    session: &str,
+    config_version: i64,
+    project_id: &Option<String>,
+    goal_id: &Option<String>,
+    current_goal: impl FnOnce() -> Result<Option<String>>,
+) -> Result<bool> {
+    Ok(plain_local(conn, session).ok() == Some(config_version)
+        && project(conn, session)? == *project_id
+        && current_goal()? == *goal_id)
+}
 fn compatible(conn: &Connection, question: &QuestionRecord) -> Result<bool> {
-    let request = &question.request;
-    Ok(
-        plain_local(conn, &request.session_id).ok() == Some(question.config_version)
-            && project(conn, &request.session_id)? == question.project_id
-            && super::session_goals::load_with_connection(conn, &request.session_id)?
-                .map(|g| g.goal_id)
-                == question.goal_id,
+    compatible_identity(
+        conn,
+        &question.request.session_id,
+        question.config_version,
+        &question.project_id,
+        &question.goal_id,
+        || {
+            // Keep the established mutation path's full durable validation.
+            Ok(
+                super::session_goals::load_with_connection(conn, &question.request.session_id)?
+                    .map(|goal| goal.goal_id),
+            )
+        },
     )
 }
+
+/// Read the same compatible pending identity without loading question/answer
+/// text, choices, objective or creation digest into an observation projection.
+pub(super) fn pending_attention_with_connection(
+    conn: &Connection,
+    session: &str,
+) -> Result<Option<crate::events::AttentionDecision>> {
+    let row = conn.query_row("SELECT substr(request_id,1,513),substr(json_extract(request_json,'$.run_id'),1,513),substr(json_extract(request_json,'$.generation'),1,513),revision,config_version,project_id,goal_id
+        FROM task_questions WHERE session_id=?1 AND status='pending'", [session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,i64>(3)?,row.get::<_,i64>(4)?,row.get::<_,Option<String>>(5)?,row.get::<_,Option<String>>(6)?))).optional()?;
+    let Some((request_id, run_id, generation, revision, config, project, goal)) = row else {
+        return Ok(None);
+    };
+    if !compatible_identity(conn, session, config, &project, &goal, || {
+        Ok(conn
+            .query_row(
+                "SELECT goal_id FROM session_goals WHERE session_id=?1",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?)
+    })? {
+        return Ok(None);
+    }
+    Ok(Some(crate::events::AttentionDecision::Question {
+        request_id,
+        run_id,
+        generation,
+        revision: u64::try_from(revision)?,
+    }))
+}
+
 fn valid_id(id: &str) -> bool {
     !id.trim().is_empty() && id.len() <= 160
 }
@@ -264,6 +313,7 @@ pub(crate) fn create_task_question_bound(path:&Path,request:&QuestionRequest,exp
     tx.execute("INSERT INTO task_questions(session_id,request_id,request_json,config_version,project_id,goal_id,revision,status,created_at,creation_digest)
         VALUES(?1,?2,?3,?4,?5,?6,1,'pending',?7,?8)",params![request.session_id,request.request_id,serde_json::to_string(request)?,expected_config,project(&tx,&request.session_id)?,goal_id,now_utc(),argument_digest])?;
     let question=load(&tx,&request.session_id,&request.request_id)?.ok_or(QuestionError::NotFound)?;
+    super::completion_occurrences::question_yield(&tx,&request.session_id,&request.run_id)?;
     tx.commit()?;
     super::goal_changes::question_committed(path,&question);
     Ok(question)

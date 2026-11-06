@@ -79,6 +79,7 @@ pub(super) fn durable_selection_history() -> (PathBuf, Vec<(u64, Message)>) {
             "session",
             &format!("run-{index}"),
             crate::store::RunTerminalDisposition::Completed,
+            None,
         )
         .unwrap();
         tx.commit().unwrap();

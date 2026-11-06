@@ -14,6 +14,8 @@ use std::time::Duration;
 
 #[derive(Default)]
 struct Behavior {
+    description: Option<String>,
+    instructions: Option<String>,
     /// Holds the first request for this method: signals arrival, then waits for a release.
     held: Option<(&'static str, mpsc::Sender<()>, mpsc::Receiver<()>)>,
     /// Answers tools/call carrying this Authorization header with 401, as for a revoked token.
@@ -31,6 +33,14 @@ pub(crate) struct RecordingMcpServer {
 impl RecordingMcpServer {
     pub(crate) fn start() -> Self {
         Self::start_with(Behavior::default())
+    }
+
+    pub(crate) fn start_with_guidance(description: &str, instructions: &str) -> Self {
+        Self::start_with(Behavior {
+            description: Some(description.to_string()),
+            instructions: Some(instructions.to_string()),
+            ..Behavior::default()
+        })
     }
 
     pub(crate) fn start_holding_first_call() -> (Self, mpsc::Receiver<()>, mpsc::Sender<()>) {
@@ -100,10 +110,12 @@ impl RecordingMcpServer {
                         "protocolVersion": "2025-06-18",
                         "capabilities": {"tools": {"listChanged": false}, "prompts": {"listChanged": false}},
                         "serverInfo": {"name": "recording-mcp", "version": "0.1.0"}
+                        ,"instructions": behavior.instructions
                     }),
                     "prompts/list" => json!({"prompts": []}),
                     "tools/list" => json!({"tools": [{
                         "name": "echo",
+                        "description": behavior.description.as_deref().unwrap_or("Echo a fixture value"),
                         "inputSchema": {"type": "object", "properties": {}}
                     }]}),
                     "tools/call" => {
