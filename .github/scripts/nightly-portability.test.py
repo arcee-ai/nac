@@ -173,17 +173,29 @@ class Controls(unittest.TestCase):
         runner.verify_inventory(historical, [c for c in inventory if c['name'] in RETAINED_IGNORED])
         heartbeat = ('application::heartbeat_scheduler::tests::'
                      'heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention')
-        case = next(c for c in inventory if c['name'] == heartbeat)
-        self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
-        self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
+        calendar = ('application::heartbeat_scheduler::tests::'
+                    'heartbeat_calendar_measure_1_10_100_with_two_owners_and_seven_day_downtime')
+        for name in (heartbeat, calendar):
+            case = next(c for c in inventory if c['name'] == name)
+            self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
+            self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
         owner = runner.ROOT / 'crates/nac-server/src/application/heartbeat_scheduler/tests.rs'
-        self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]',
-                      owner.read_text())
-        self.assertIn('for n in [1, 10, 100]', owner.read_text())
+        source = owner.read_text()
+        for name in (heartbeat, calendar):
+            self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]\n'
+                          + 'async fn ' + name.rsplit('::', 1)[1] + '()', source)
+        self.assertIn('#[tokio::test]\nasync fn heartbeat_calendar_scheduler_two_owners_bound_missed_range_and_admit_once()', source)
+        self.assertIn('for n in [1, 10, 100]', source)
         with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_new:
             runner.verify_inventory(historical, inventory)
         self.assertIn(heartbeat, str(missing_new.exception))
-        reviewed_names = [*RETAINED_IGNORED, heartbeat]
+        self.assertIn(calendar, str(missing_new.exception))
+        # Preserve the prior 21-name receipt as a counterexample too.
+        previous = '\n'.join(name + ': test' for name in [*RETAINED_IGNORED, heartbeat])
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_calendar:
+            runner.verify_inventory(previous, inventory)
+        self.assertIn(calendar, str(missing_calendar.exception))
+        reviewed_names = [*RETAINED_IGNORED, heartbeat, calendar]
         listing = '\n'.join(name + ': test' for name in reviewed_names)
         runner.verify_inventory(listing, inventory)
         # Every removal/rename, including the new manual case, still fails closed.
