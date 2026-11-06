@@ -663,6 +663,9 @@ pub struct SessionService {
     /// advanced over newly appended rows only. Drives steering coverage and
     /// message-cycle metadata without rescanning history per snapshot.
     transcript_scan: Arc<StdMutex<TranscriptScanCache>>,
+    /// Tool-call positions in the transcript log, so one call's content is
+    /// read without decoding the whole transcript.
+    tool_call_index: Arc<tokio::sync::Mutex<tool_call_content::ToolCallIndex>>,
     event_bus: SessionEventBus,
     active_operation: Arc<StdMutex<Option<ActiveSessionOperation>>>,
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,

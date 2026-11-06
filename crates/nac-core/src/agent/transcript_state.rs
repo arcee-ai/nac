@@ -124,12 +124,11 @@ impl Agent {
             .max(self.committed_log_len);
         let writer = Arc::clone(&sink.writer);
         let session_id = sink.session_id.clone();
-        let tail = crate::store::spawn_blocking_store_caller(move || {
-            writer.read_from(&session_id, from_idx)
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.has_entries_from(&session_id, from_idx)
         })
         .await
-        .map_err(|error| anyhow!("transcript log read task failed: {error}"))??;
-        Ok(!tail.is_empty())
+        .map_err(|error| anyhow!("transcript log read task failed: {error}"))?
     }
 
     /// Adopt the durable transcript (snapshot blob ++ log tail) in memory
