@@ -1,0 +1,206 @@
+{
+  "ticket": "ALL-582",
+  "kind": "terminal-history-test-readiness-repair-not-strategy-or-cohort",
+  "original": {
+    "run": 41964010933,
+    "attempt": 1,
+    "job_id": 127043162857,
+    "pr_head": "7abfb43c75d853db220f42f744d13abb02c09e53",
+    "prepared_source": "115dd249b2f9638a2854508872c89ac4d1aecab1",
+    "artifact_id": 13387043954,
+    "artifact_name": "nac-web-playwright-7-1",
+    "failed_test": "terminal-history.e2e.ts:163 production history preserves exact byte gaps and requires reset before retained tail",
+    "failed_source_line": 216,
+    "mechanism": "page.goto(load) returned while workspace configuration rendered Loading. One-shot Show panel isVisible returned false. The later Show panel was never clicked, so populated history remained below aria-hidden=true/inert collapsed ancestor and the role selector could not reach it."
+  },
+  "overall_run_conclusion": "cancelled; shard7 failed before subsequent cancellation; other incomplete jobs are not passed",
+  "trace_timeline": [
+    {
+      "type": "before",
+      "callId": "call@2168",
+      "method": "goto",
+      "startTime": 95875.349,
+      "utc_from_context_clock": "2026-11-05T04:11:55.541340+00:00"
+    },
+    {
+      "type": "after",
+      "callId": "call@2168",
+      "endTime": 96095.425,
+      "result": {
+        "response": "<Response>"
+      },
+      "utc_from_context_clock": "2026-11-05T04:11:55.761416+00:00"
+    },
+    {
+      "type": "before",
+      "callId": "call@2170",
+      "method": "isVisible",
+      "startTime": 96191.731,
+      "utc_from_context_clock": "2026-11-05T04:11:55.857722+00:00"
+    },
+    {
+      "type": "after",
+      "callId": "call@2170",
+      "endTime": 96210.534,
+      "result": {
+        "value": false
+      },
+      "utc_from_context_clock": "2026-11-05T04:11:55.876525+00:00"
+    },
+    {
+      "type": "before",
+      "callId": "call@2172",
+      "method": "click",
+      "startTime": 96216.948,
+      "utc_from_context_clock": "2026-11-05T04:11:55.882939+00:00"
+    }
+  ],
+  "dom_evidence": "After navigation the trace shows Loading workspace configuration; the later snapshot/screenshot contains Show panel and populated history below an aria-hidden/inert collapsed panel. Original snapshots remain in the local diagnosis.",
+  "repair": {
+    "base": "75dff51d4fbbe4a920a6fdb6e5a75a9cc95eeaf1",
+    "locally_built_and_tested_worker_source": "28ac6bead8fbb616fe424b7a720c1b72a35a3f00",
+    "file": "crates/nac-server/web/e2e/terminal-history.e2e.ts",
+    "readiness_assertions_added": 6,
+    "all_prior_source_byte_equal_after_removing_added_lines": true,
+    "original_file_sha256": "0fb6a280ecf74918c5d41be4c6ef39ec8bb1c60e4b28e9298cffea592b62006c",
+    "repaired_file_sha256": "73d04384ae12bd7761922ae634311574faee573127f2518688fc7b2747198d4f",
+    "production_source_or_workflow_change": false,
+    "test_deadlines_ms": [
+      90000,
+      30000
+    ],
+    "configured_retries": 0
+  },
+  "deterministic_control": {
+    "control": "Real Chromium; exact production navigation block. Controlled document hydration, no fixed sleeps. Old arm bounded locator deadline350ms only in this control.",
+    "results": [
+      {
+        "mode": "old-delayed",
+        "ok": false,
+        "error": "locator.click: Timeout 350ms exceeded."
+      },
+      {
+        "mode": "new-delayed",
+        "ok": true
+      },
+      {
+        "mode": "new-already-open",
+        "ok": true
+      }
+    ]
+  },
+  "actual_local_journeys": {
+    "stats": {
+      "startTime": "2026-11-05T05:04:22.894Z",
+      "duration": 15962.561,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "tests": [
+      {
+        "title": "retained terminal history reopens without input, expires independently and survives restart as canonical previews",
+        "ok": true,
+        "timeout": 90000,
+        "results": [
+          {
+            "status": "passed",
+            "duration": 9131,
+            "retry": 0,
+            "errors": []
+          }
+        ]
+      },
+      {
+        "title": "production history preserves exact byte gaps and requires reset before retained tail",
+        "ok": true,
+        "timeout": 90000,
+        "results": [
+          {
+            "status": "passed",
+            "duration": 6342,
+            "retry": 0,
+            "errors": []
+          }
+        ]
+      }
+    ],
+    "configured_retries": [
+      0
+    ],
+    "actual_workers": 1,
+    "owned_binary_processes_after": [],
+    "binary_sha256": "7f311f35ca780d04c7365483b82f708e087e2a01cca66ababa0532ed74713010",
+    "source": "28ac6bead8fbb616fe424b7a720c1b72a35a3f00",
+    "dirty": ""
+  },
+  "local_execution": {
+    "source": "28ac6bead8fbb616fe424b7a720c1b72a35a3f00",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "node_modules/@playwright/test/cli.js",
+      "test",
+      "e2e/terminal-history.e2e.ts",
+      "--reporter=json"
+    ],
+    "cwd": "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web",
+    "env": {
+      "PATH": "/Users/allison/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "HOME": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/failure-41964010933/browser-control-home",
+      "LANG": "en_US.UTF-8",
+      "NAC_E2E_BINARY": "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/target/debug/nac-web",
+      "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/failure-41964010933/current-history-results",
+      "NAC_E2E_CLEANUP_ID": "all582-history-28ac6bead",
+      "PLAYWRIGHT_BROWSERS_PATH": "/Users/allison/Library/Caches/ms-playwright"
+    },
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "binary_sha256": "7f311f35ca780d04c7365483b82f708e087e2a01cca66ababa0532ed74713010",
+    "started_utc": "2026-11-05T05:04:22.516872+00:00",
+    "exit_code": 0,
+    "elapsed_seconds": 16.346140250039753,
+    "finished_utc": "2026-11-05T05:04:38.863279+00:00"
+  },
+  "raw_evidence": {
+    "directory": "browser/failure-41964010933",
+    "access": "Local-only original evidence within the task visualization directory; filenames are integrity locators, not build inputs or public download claims.",
+    "files": {
+      "diagnosis.json": {
+        "bytes": 82800,
+        "sha256": "6a88c2dbc2a7c803c4befaf40a79928ea2da4b44d13e3f0d28a786c2b505656b"
+      },
+      "shard7.log": {
+        "bytes": 87730,
+        "sha256": "fe51b8f064f86717d6bb4c5411a73f8e505ed45fb4ba7c1cd6051c462612a9f0"
+      },
+      "validation-summary.json": {
+        "bytes": 1084,
+        "sha256": "f5e82ea6f85c1af3e6f245b6c9156d3e7900704e93f54ba2c9fd0e8cd413b06c"
+      },
+      "delayed-hydration-result.json": {
+        "bytes": 436,
+        "sha256": "dd8449b281589c62e8490a7574fba72fc4cf9716232c83b652458be152e0d614"
+      },
+      "current-history-receipt.json": {
+        "bytes": 1348,
+        "sha256": "54f008aefe6f6e29f2f0cee8a5342942fc1ed9e680f841a419a3198c5eb9621c"
+      },
+      "build-current-receipt.json": {
+        "bytes": 2011,
+        "sha256": "9ab28606c087db0ddd3f650a92e78ab7cfd6bcbe67b6feb11dd132ff59263596"
+      },
+      "source-and-owner-receipts.json": {
+        "bytes": 118268,
+        "sha256": "4a8e5d1983ec8da58aa3933ab8f7b8f831e9409a44a348a8faba62a184503905"
+      }
+    }
+  },
+  "limitations": [
+    "Actual local journeys ran on macOS ARM with pinned Rust1.98, one worker and zero retries; full hosted205-test acceptance is separate.",
+    "The350ms locator deadline only demonstrates the old isolated delayed-hydration control; real journey90s/30s deadlines and output/eviction/restart behavior are unchanged.",
+    "Existing PR594 does not modify terminal-history or this panel-readiness mechanism; no other owner changes were copied.",
+    "Cherrypick changes delivery commit identity; the exact tested worker source and file hashes are retained rather than relabeled as hosted delivery-head acceptance."
+  ],
+  "ordinary_cohort_qualified": false,
+  "additional_strategy_count": 0
+}

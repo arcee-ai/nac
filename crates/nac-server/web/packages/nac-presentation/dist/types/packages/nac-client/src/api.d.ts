@@ -611,6 +611,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     listSessions: (options?: ListSessionsOptions, signal?: AbortSignal) => Promise<{
         active: boolean;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("./openapi.generated.js").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("./openapi.generated.js").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1033,7 +1036,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getMessages: (id: string, options?: MessagesPageOptions) => Promise<{
         created_at: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
-        page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        page:
+        /** Ask nac-web to open a local workspace path with the OS default handler. */
+        import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{

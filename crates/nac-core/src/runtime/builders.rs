@@ -95,6 +95,58 @@ pub async fn prepare_retained_task_run_config(
     .await
 }
 
+/// Prepare the exact session identity reserved by an independent native launch.
+pub async fn prepare_native_task_run_config(
+    options: RunOptions,
+    config: &NacConfig,
+    launch: &crate::task_launch_control::NativeTaskLaunch,
+) -> Result<PreparedSessionRunConfig> {
+    anyhow::ensure!(
+        !launch.retained
+            && options.ssh.host().is_none()
+            && !options.sandbox.sandbox
+            && !options.sandbox.explicit_sandbox_config_flags_present()
+            && options.sandbox.internal_mounts.is_empty()
+            && options.workspace_cwd == launch.source_cwd,
+        "native launch requires its exact saved Local workspace"
+    );
+    prepare_run_config_inner(
+        options,
+        config,
+        Some(launch.project_id.clone()),
+        sessions::SessionBehavior::Direct,
+        Some(launch.session_id.clone()),
+    )
+    .await
+}
+
+/// Non-Git occurrences keep the established Local shared-directory behavior,
+/// while using the same prepared runtime and a durably reserved task identity.
+pub async fn prepare_scheduled_shared_task_run_config(
+    options: RunOptions,
+    config: &NacConfig,
+    launch: &crate::store::PreparedFreshTaskLaunch,
+) -> Result<PreparedSessionRunConfig> {
+    let receipt = launch.receipt();
+    anyhow::ensure!(
+        options.ssh.host().is_none()
+            && !options.sandbox.sandbox
+            && !options.sandbox.explicit_sandbox_config_flags_present()
+            && options.sandbox.internal_mounts.is_empty()
+            && receipt.destination.pinned_commit.is_none()
+            && receipt.binding.execution_cwd.as_deref() == options.workspace_cwd.to_str(),
+        "scheduled shared-directory task requires its exact selected Local workspace"
+    );
+    prepare_run_config_inner(
+        options,
+        config,
+        Some(receipt.destination.project_id.clone()),
+        sessions::SessionBehavior::Direct,
+        Some(receipt.session_id.clone()),
+    )
+    .await
+}
+
 async fn prepare_run_config_inner(
     options: RunOptions,
     config: &NacConfig,

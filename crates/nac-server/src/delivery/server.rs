@@ -680,6 +680,7 @@ fn embedded_frontend_router(document: PresentationDocument) -> Router {
 fn documented_api() -> OpenApiRouter<SessionManager> {
     let mut documented = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
+        .routes(routes!(delivery::attention::events))
         .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(delivery::product_context::read))
         .routes(routes!(delivery::product_context::resolve))
@@ -744,6 +745,8 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(mcp_runtime_api::connect_handler))
         .routes(routes!(mcp_runtime_api::disconnect_handler))
         .routes(routes!(mcp_runtime_api::reload_handler))
+        .routes(routes!(delivery::session_integrations::status))
+        .routes(routes!(delivery::session_integrations::refresh))
         .routes(routes!(managed_auth::list_handler))
         .routes(routes!(managed_auth::logout_handler))
         .routes(routes!(managed_auth::start_login_handler))
@@ -791,7 +794,25 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::sessions::list_handler,
             delivery::session_lifecycle::create_session
         ))
+        .routes(routes!(delivery::task_questions::list_questions))
+        .routes(routes!(delivery::task_followup_delegations::issue))
+        .routes(routes!(delivery::task_followup_delegations::read))
+        .routes(routes!(delivery::task_followup_delegations::revoke))
+        .routes(routes!(delivery::task_questions::read_question))
+        .routes(routes!(delivery::task_questions::answer_question))
+        .routes(routes!(delivery::task_questions::cancel_question))
         .routes(routes!(delivery::task_launches::start))
+        .routes(routes!(delivery::heartbeats::inventory))
+        .routes(routes!(delivery::heartbeats::inspect))
+        .routes(routes!(delivery::heartbeats::preview))
+        .routes(routes!(delivery::heartbeats::control))
+        .routes(routes!(delivery::heartbeats::acknowledge))
+        .routes(routes!(delivery::fresh_task_schedules::inventory))
+        .routes(routes!(delivery::fresh_task_schedules::inspect))
+        .routes(routes!(delivery::fresh_task_schedules::control))
+        .routes(routes!(
+            delivery::fresh_task_schedules::change_retained_allowance
+        ))
         .routes(routes!(delivery::task_launches::status))
         .routes(routes!(delivery::task_launches::cancel))
         .routes(routes!(delivery::task_launches::inventory))
@@ -1152,6 +1173,9 @@ where
 {
     let mut force_shutdown = Some(force_shutdown);
     let shutdown_manager = manager.clone();
+    let mut heartbeat_scheduler = Some(
+        application::heartbeat_scheduler::HeartbeatScheduler::start(&manager),
+    );
     let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel();
     let (control_graceful_tx, control_graceful_rx) = tokio::sync::oneshot::channel();
     let mut control_server = control.map(|(listener, app)| {
@@ -1199,6 +1223,8 @@ where
                 })
                 .context("failed to start shutdown watchdog")?;
 
+            shutdown_manager.inner.task_preparations.stop();
+            if let Some(scheduler)=heartbeat_scheduler.take() {scheduler.stop().await;}
             shutdown_manager.stop_local_run_admission().await;
             shutdown_manager.cancel_local_active_runs_for_shutdown().await;
             let result = (&mut server)
@@ -1222,6 +1248,9 @@ where
             result
         }
     };
+    if let Some(scheduler) = heartbeat_scheduler.take() {
+        scheduler.stop().await;
+    }
     if let Some(control_server) = control_server {
         control_server.abort();
         let _ = control_server.await;

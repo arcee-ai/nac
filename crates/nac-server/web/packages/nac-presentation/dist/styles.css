@@ -92,6 +92,7 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
     --spacing: .25rem;
+    --container-5xl: 64rem;
     --text-xs: .75rem;
     --text-xs--line-height: calc(1 / .75);
     --text-sm: .875rem;
@@ -1605,6 +1606,10 @@
     width: 1px;
   }
 
+[data-nac-runtime]:is(.max-w-5xl), [data-nac-runtime] .max-w-5xl {
+    max-width: var(--container-5xl);
+  }
+
 [data-nac-runtime]:is(.max-w-6), [data-nac-runtime] .max-w-6 {
     max-width: calc(var(--spacing) * 6);
   }
@@ -1683,6 +1688,10 @@
 
 [data-nac-runtime]:is(.max-w-\[640px\]), [data-nac-runtime] .max-w-\[640px\] {
     max-width: 640px;
+  }
+
+[data-nac-runtime]:is(.max-w-\[656px\]), [data-nac-runtime] .max-w-\[656px\] {
+    max-width: 656px;
   }
 
 [data-nac-runtime]:is(.max-w-\[704px\]), [data-nac-runtime] .max-w-\[704px\] {
@@ -2004,6 +2013,10 @@
     resize: none;
   }
 
+[data-nac-runtime]:is(.resize-y), [data-nac-runtime] .resize-y {
+    resize: vertical;
+  }
+
 [data-nac-runtime]:is(.scrollbar-none), [data-nac-runtime] .scrollbar-none {
     scrollbar-width: none;
   }
@@ -2014,6 +2027,10 @@
 
 [data-nac-runtime]:is(.grid-cols-1), [data-nac-runtime] .grid-cols-1 {
     grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+[data-nac-runtime]:is(.grid-cols-2), [data-nac-runtime] .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
 [data-nac-runtime]:is(.grid-cols-3), [data-nac-runtime] .grid-cols-3 {
@@ -2218,6 +2235,18 @@
 
 [data-nac-runtime]:is(.gap-\[10px\]), [data-nac-runtime] .gap-\[10px\] {
     gap: 10px;
+  }
+
+[data-nac-runtime]:is(:where(.space-y-2 > :not(:last-child))), [data-nac-runtime] :where(.space-y-2 > :not(:last-child)) {
+    --nac-presentation-tw-space-y-reverse: 0;
+    margin-block-start: calc(calc(var(--spacing) * 2) * var(--nac-presentation-tw-space-y-reverse));
+    margin-block-end: calc(calc(var(--spacing) * 2) * calc(1 - var(--nac-presentation-tw-space-y-reverse)));
+  }
+
+[data-nac-runtime]:is(:where(.space-y-3 > :not(:last-child))), [data-nac-runtime] :where(.space-y-3 > :not(:last-child)) {
+    --nac-presentation-tw-space-y-reverse: 0;
+    margin-block-start: calc(calc(var(--spacing) * 3) * var(--nac-presentation-tw-space-y-reverse));
+    margin-block-end: calc(calc(var(--spacing) * 3) * calc(1 - var(--nac-presentation-tw-space-y-reverse)));
   }
 
 [data-nac-runtime]:is(:where(.space-y-reverse > :not(:last-child))), [data-nac-runtime] :where(.space-y-reverse > :not(:last-child)) {
@@ -3552,6 +3581,10 @@
     text-overflow: ellipsis;
   }
 
+[data-nac-runtime]:is(.\!whitespace-normal), [data-nac-runtime] .\!whitespace-normal {
+    white-space: normal !important;
+  }
+
 [data-nac-runtime]:is(.whitespace-normal), [data-nac-runtime] .whitespace-normal {
     white-space: normal;
   }
@@ -4834,6 +4867,10 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    [data-nac-runtime]:is(.md\:grid-cols-\[240px_minmax\(0\,1fr\)\]),[data-nac-runtime] .md\:grid-cols-\[240px_minmax\(0\,1fr\)\] {
+      grid-template-columns: 240px minmax(0, 1fr);
+    }
+
     [data-nac-runtime]:is(.md\:flex-col), [data-nac-runtime] .md\:flex-col {
       flex-direction: column;
     }
@@ -4957,6 +4994,10 @@
 
     [data-nac-runtime]:is(.md\:pt-0), [data-nac-runtime] .md\:pt-0 {
       padding-top: 0;
+    }
+
+    [data-nac-runtime]:is(.md\:pt-4), [data-nac-runtime] .md\:pt-4 {
+      padding-top: calc(var(--spacing) * 4);
     }
 
     [data-nac-runtime]:is(.md\:pt-6), [data-nac-runtime] .md\:pt-6 {

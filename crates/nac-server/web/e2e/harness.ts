@@ -899,7 +899,9 @@ export async function showSidePanel(page: Page) {
   await expect(show.or(open).first()).toBeVisible();
   await expect(async () => {
     if (await open.isVisible()) return;
-    if (await show.isVisible()) await show.click();
+    // Hydrating an open preference may detach Show between the read and click.
+    // Yield to the outer retry so it can observe the now-visible Files tab.
+    if (await show.isVisible()) await show.click({ timeout: 1_000 });
     await expect(open).toBeVisible();
   }).toPass();
 }

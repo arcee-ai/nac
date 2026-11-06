@@ -912,15 +912,32 @@ fn serve_direct_responses(
         std::sync::mpsc::Receiver<()>,
     )>,
 ) -> (String, std::sync::mpsc::Receiver<usize>) {
+    let responses = responses
+        .iter()
+        .map(|text| {
+            serde_json::json!({
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+            })
+        })
+        .collect();
+    serve_direct_json_responses(responses, hold)
+}
+
+fn serve_direct_json_responses(
+    responses: Vec<serde_json::Value>,
+    hold: Option<(
+        usize,
+        std::sync::mpsc::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    )>,
+) -> (String, std::sync::mpsc::Receiver<usize>) {
     use std::io::{Read, Write};
 
     let listener =
         std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind scripted direct model");
     let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let responses = responses
-        .iter()
-        .map(|response| response.to_string())
-        .collect::<Vec<_>>();
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         for (index, text) in responses.into_iter().enumerate() {
@@ -954,12 +971,7 @@ fn serve_direct_responses(
                 arrived.send(()).unwrap();
                 release.recv().unwrap();
             }
-            let body = serde_json::json!({
-                "status": "completed",
-                "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
-                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-            })
-            .to_string();
+            let body = text.to_string();
             let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
@@ -1039,6 +1051,8 @@ mod managed_fault_fixture;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/resume_composition.rs"]
+mod resume_composition;
 
 #[path = "tests/goal_reads.rs"]
 mod goal_reads;
@@ -1052,6 +1066,8 @@ mod presentation;
 mod project_routes;
 #[path = "tests/recovery.rs"]
 mod recovery;
+#[path = "tests/session_integrations.rs"]
+mod session_integrations;
 #[path = "tests/terminals.rs"]
 mod terminals;
 
@@ -1080,6 +1096,10 @@ mod terminal_selection;
 #[path = "tests/terminal_control.rs"]
 mod terminal_control;
 
+#[path = "tests/fresh_allowance.rs"]
+mod fresh_allowance;
+#[path = "tests/fresh_interval_tasks.rs"]
+mod fresh_interval_tasks;
 #[path = "tests/http_transport.rs"]
 mod http_transport;
 #[path = "tests/task_launches.rs"]
@@ -1094,3 +1114,15 @@ mod task_launch_shutdown;
 
 #[path = "tests/desktop_lifecycle.rs"]
 mod desktop_lifecycle;
+#[path = "tests/heartbeats.rs"]
+mod heartbeats;
+#[path = "tests/native_task_launches.rs"]
+mod native_task_launches;
+
+#[path = "tests/attention_delivery.rs"]
+mod attention_delivery;
+
+#[path = "tests/task_followup_delegations.rs"]
+mod task_followup_delegations;
+#[path = "tests/task_followups.rs"]
+mod task_followups;
