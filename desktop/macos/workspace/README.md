@@ -146,7 +146,10 @@ and artifact identities. Do not label scripted events as these observations.
 In an unlocked console, append `--scenario workspace-manual` to the runner
 command using a fresh evidence directory. The fixture creates one direct chat,
 stages the rich response, records `manual_stage_ready`, then stops scripting
-the UI for up to 15 minutes. Use its production controls for the operator checks
+the UI for up to 15 minutes. The runner allows at most five minutes to reach
+that exact ready checkpoint, then the full 15-minute operator window plus
+30 seconds for normal owned cleanup; staging does not consume observation time.
+Use its production controls for the operator checks
 and close its window when finished. Sending `WK_APPROVAL` requests an owned
 external fixture read through the real permission broker. No physical-input
 pass is generated automatically: closing the manual fixture leaves its automatic
