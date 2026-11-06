@@ -187,7 +187,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        #if LOCAL_APP
+        if !stopping { fail("The workspace renderer stopped. Close this window and relaunch NAC.") }
+        #else
         if !stopping { fail("The workspace renderer stopped. Close this window and relaunch the preview.") }
+        #endif
     }
 
     private func fail(_ message: String) {
