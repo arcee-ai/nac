@@ -39,10 +39,19 @@ it does not retire commands or force a new engine launch.
 The Files panel's explicit **Reveal in Finder** control appears only with the
 native Local capability, a matching current session/root and no historical
 revision. It observes cached session eligibility without attaching/recovering a
-session. The existing HTTP client sends a relative path and the root observed in
-the current snapshot to `POST /sessions/{session_id}/workspace/reveal`. Rust
+session. The Files response carries the original path root alongside its relative file
+identities. Selection retains that root in the runtime’s private cache across
+refreshes and panel remounts; legacy listings without a root require a new
+listing and explicit selection before Reveal is available. The HTTP client
+sends this `expected_path_root` and the selected workspace root observed at
+selection to `POST /sessions/{session_id}/workspace/reveal`. Rust
 resolves the current durable session and Git target, rejects SSH and every
-Podman session, and compares the expected root. It opens every relative path
+Podman session, and compares the expected workspace root. It maps the originating file
+coordinates into that selected workspace without rediscovering Git metadata or
+falling back to another coordinate system. Git removal or a newly nested
+repository cannot substitute a nested decoy. The originating root restricts
+interpretation; it never becomes the OS target or widens the selected root.
+Rust opens every relative path
 component with no-follow descriptors, permits only existing regular files or
 directories, and compares pinned device/inode identities before handing the
 path to `/usr/bin/open -R` as an argument. The fixed opener uses the existing
