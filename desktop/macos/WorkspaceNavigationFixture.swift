@@ -69,7 +69,7 @@ private final class Recovery {
         app.nativePaths?.pendingPanel = true
         let priorPathStarts = app.nativePaths?.starts ?? 0
         defer {
-            if expectsPaths && ["blank-finish", "blank-timeout", "nil-start", "off-origin", "stale-engine", "stale-known"].contains(scenario) {
+            if expectsPaths && ["blank-finish", "blank-timeout", "nil-start", "nil-commands", "off-origin", "stale-engine", "stale-known"].contains(scenario) {
                 precondition(app.nativePaths?.navigation === tracked,
                     "unadmitted start stole the path bridge navigation identity")
                 precondition(app.nativePaths?.pendingPanel == false,
@@ -87,6 +87,13 @@ private final class Recovery {
             app.webView.url = URL(string: "about:blank")
             app.webView(app.webView, didStartProvisionalNavigation: foreign)
         case "nil-start": app.webView(app.webView, didStartProvisionalNavigation: nil)
+        case "nil-commands":
+            app.commands = nil
+            app.webView.url = URL(string: "about:blank")
+            app.webView(app.webView, didStartProvisionalNavigation: foreign)
+            precondition(app.activeNavigation === tracked && app.recovery.failures.isEmpty,
+                "unadmitted start with no command owner changed recovery or navigation")
+            print("PASS absent command owner on unadmitted navigation"); return
         case "off-origin":
             app.webView.url = URL(string: "https://example.invalid/")
             app.webView(app.webView, didStartProvisionalNavigation: foreign)
