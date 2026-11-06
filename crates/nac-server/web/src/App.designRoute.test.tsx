@@ -250,17 +250,23 @@ it("keeps import failure local to design and does not automatically retry", asyn
 });
 
 it("keeps the actual complete showcase and its modal local to the selected presentation", async () => {
+  const started = performance.now();
+  const phase = (name: string) =>
+    console.info("[showcase-timing]", name, Math.round(performance.now() - started));
   const current = fixture("showcase", "/design");
   const sibling = fixture("sibling", "/session/other/files");
   fireEvent.change(sibling.ui.getByRole("textbox", { name: "Session draft" }), {
     target: { value: "sibling unsent draft" },
   });
   await current.ui.findByRole("status");
+  phase("cold-import-start");
   const actual = await vi.importActual<{ default: ComponentType }>(
     "./app/components/pages/DesignPreviewPage",
   );
+  phase("cold-import-complete");
   await act(async () => resolvePage(actual));
   await current.ui.findByText("design system");
+  phase("showcase-rendered");
   for (const section of ["Buttons", "Inputs", "Files", "Insights"]) {
     expect(current.ui.getByText(section, { exact: true })).toBeTruthy();
   }
@@ -273,6 +279,7 @@ it("keeps the actual complete showcase and its modal local to the selected prese
   const dialog = await current.ui.findByRole("dialog", {
     name: "Delete session",
   });
+  phase("dialog-open");
   expect(sibling.ui.queryByRole("dialog")).toBeNull();
   expect(sibling.ui.getByRole("textbox", { name: "Session draft" })).toHaveProperty(
     "value",
@@ -280,7 +287,9 @@ it("keeps the actual complete showcase and its modal local to the selected prese
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(current.ui.queryByRole("dialog")).toBeNull());
+  phase("dialog-closed");
   expect(sibling.runtime.isClosed()).toBe(false);
   expect(current.fetch).not.toHaveBeenCalled();
   expect(sibling.fetch).not.toHaveBeenCalled();
+  phase("assertions-complete");
 });
