@@ -237,7 +237,11 @@ function SettingsForm({
   const toast = useToast();
   const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (isMobile && contentRef.current) return observeSettingsFieldVisibility(contentRef.current);
+    const content = contentRef.current;
+    const view = content?.ownerDocument.defaultView;
+    // Flush desktop cards scroll the outer wrapper; phones scroll the inner body.
+    const scope = isMobile ? content : content?.parentElement;
+    if (view && scope instanceof view.HTMLDivElement) return observeSettingsFieldVisibility(scope);
   }, [isMobile]);
   const client = useQueryClient();
   const action = useSetupAction(open);
@@ -769,10 +773,10 @@ function SettingsForm({
                 />
                 <Separator />
                 <TextArea
-                  label="Extra headers (JSON object)"
+                  label="Extra headers"
                   aria-label="Extra headers (JSON object)"
                   textAreaSize={isMobile ? TextAreaSize.Large : TextAreaSize.Medium}
-                  hintText="Blank sends none; header values must be strings."
+                  hintText="Enter a JSON object with string values. Blank sends none."
                   placeholder='{ "X-Title": "NAC" }'
                   value={headers}
                   onChange={(event) => setHeaders(event.target.value)}

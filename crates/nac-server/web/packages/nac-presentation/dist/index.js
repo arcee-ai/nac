@@ -11311,7 +11311,8 @@ function Qh({ open: e, id: t, onClose: n }) {
 function $h({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, summary: a, diagnostics: o, onClose: s }) {
 	let { useSshConnectionStatus: l, sshTargetFromSummary: u } = U().stores.sshConnectionStore, { api: d } = U(), f = L(), p = et(), h = q(null);
 	G(() => {
-		if (f && h.current) return qh(h.current);
+		let e = h.current, t = e?.ownerDocument.defaultView, n = f ? e : e?.parentElement;
+		if (t && n instanceof t.HTMLDivElement) return qh(n);
 	}, [f]);
 	let g = Oi(), _ = ph(e), v = bm(), y = ve(), b = Ht(), [x, S] = J(!1), C = m(), T = C.data ?? null, E = pr(), D = w(), [k] = J(a), [A] = J(i), j = gr(), M = k.title ?? "", [N, P] = J(M), [ee, te] = J(n.model), [ne, re] = J(n.backend), [ie, ae] = J(n.reasoning_effort ?? ""), [, oe] = J(n.base_url), [se, ce] = J(Jh(n.extra_headers)), [le, ue] = J(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), de = q(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), fe = q(!1), pe = q(!1), [me, F] = J(""), [he, ge] = J(null), [_e, ye] = J({
 		mode: r ? "dual" : "single",
@@ -11638,10 +11639,10 @@ function $h({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 									}),
 									/* @__PURE__ */ X(fd, {}),
 									/* @__PURE__ */ X(mu, {
-										label: "Extra headers (JSON object)",
+										label: "Extra headers",
 										"aria-label": "Extra headers (JSON object)",
 										textAreaSize: f ? pu.Large : pu.Medium,
-										hintText: "Blank sends none; header values must be strings.",
+										hintText: "Enter a JSON object with string values. Blank sends none.",
 										placeholder: "{ \"X-Title\": \"NAC\" }",
 										value: se,
 										onChange: (e) => ce(e.target.value),

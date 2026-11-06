@@ -37,7 +37,12 @@ const openingPreset = {
   updated_at: "2026-09-30T00:00:00Z",
 } satisfies ModelConfigurationRecord;
 
+const resizeObserved = vi.fn();
+const resizeDisconnected = vi.fn();
+
 beforeEach(() => {
+  resizeObserved.mockClear();
+  resizeDisconnected.mockClear();
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener: vi.fn(),
@@ -46,8 +51,8 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      observe() {}
-      disconnect() {}
+      observe = resizeObserved;
+      disconnect = resizeDisconnected;
     },
   );
 });
@@ -215,6 +220,15 @@ it.each([false, true])(
         }) as HTMLTextAreaElement;
       expect(headers().tagName).toBe("TEXTAREA");
       expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(screen.getByText(/^Extra headers$/)).toBeTruthy();
+      expect(
+        screen.getByText("Enter a JSON object with string values. Blank sends none.").tagName,
+      ).toBe("P");
+      const body = headers().closest(".paragraph-medium")!;
+      expect(body).not.toBeNull();
+      // matchMedia is desktop: flush cards scroll the outer wrapper, not this inner body.
+      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body.parentElement);
+      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body);
       fireEvent.change(headers(), {
         target: { value: '{"X-Manual":"draft"}' },
       });
@@ -257,6 +271,7 @@ it.each([false, true])(
       );
     } finally {
       view.unmount();
+      expect(resizeDisconnected).toHaveBeenCalled();
       client.clear();
     }
   },
