@@ -80,10 +80,16 @@ impl SessionService {
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
-        let mcp = run_config.agent.mcp_registry();
+        let mcp = run_config.agent.mcp_mounts();
         let terminal_manager = run_config.agent.terminal_manager();
         let user_terminal_context = run_config.agent.user_terminal_runtime().map(|runtime| {
             Arc::new(user_terminals::UserTerminalContext::new(
+                runtime,
+                run_config.client.clone(),
+            ))
+        });
+        let heartbeat_context = run_config.agent.user_terminal_runtime().map(|runtime| {
+            Arc::new(heartbeats::HeartbeatContext::new(
                 runtime,
                 run_config.client.clone(),
             ))
@@ -127,12 +133,14 @@ impl SessionService {
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             published_operation: Arc::new(StdMutex::new(None)),
+            attention: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_threads,
             skills,
             mcp,
             terminal_manager,
             user_terminal_context,
+            heartbeat_context,
             shell_runtime,
             permission_broker,
             sandbox_resource_lease: Arc::new(StdMutex::new(None)),

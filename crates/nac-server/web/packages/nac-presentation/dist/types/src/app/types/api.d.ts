@@ -7,6 +7,7 @@ export type ReasoningEffort = ApiSchema<"ReasoningEffort">;
 export type DispatchWeight = "light" | "heavy";
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
+export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
 /**
  * The optional light worker model. Same shape on records and requests: the
  * credential is always a selector name, never a key value.
@@ -308,3 +309,23 @@ export type ProductNavigationResolution = ApiSchema<"ProductNavigationResolution
 export type QuestionRecord = ApiSchema<"QuestionRecord">;
 export type QuestionAnswer = ApiSchema<"QuestionAnswer">;
 export type QuestionAnswerReceipt = ApiSchema<"QuestionAnswerReceipt">;
+export type HeartbeatSpec = ApiSchema<"HeartbeatSpec">;
+export type HeartbeatCalendarDraft = ApiSchema<"HeartbeatCalendarDraft">;
+export type HeartbeatCalendarPreview = ApiSchema<"HeartbeatCalendarPreview">;
+export type HeartbeatCalendarRule = ApiSchema<"HeartbeatCalendarRule">;
+export type HeartbeatCalendarDays = ApiSchema<"HeartbeatCalendarDays">;
+export type HeartbeatPreviewRequest = ApiSchema<"HeartbeatPreviewRequest">;
+export type HeartbeatSchedule = ApiSchema<"HeartbeatSchedule">;
+export type HeartbeatAction = ApiSchema<"HeartbeatAction">;
+export type HeartbeatReceipt = ApiSchema<"HeartbeatReceipt">;
+export type HeartbeatOccurrence = ApiSchema<"HeartbeatOccurrence">;
+export type HeartbeatInspection = ApiSchema<"HeartbeatInspection">;
+export type HeartbeatControlRequest = ApiSchema<"HeartbeatControlRequest">;
+export type HeartbeatAttentionResult = ApiSchema<"HeartbeatAttentionResult">;
+export type FreshTaskDestination = ApiSchema<"FreshTaskDestination">;
+export type FreshTaskLaunchReceipt = ApiSchema<"FreshTaskLaunchReceipt">;
+export type FreshTaskScheduleControlRequest = ApiSchema<"FreshTaskScheduleControlRequest">;
+export type FreshTaskScheduleInspection = ApiSchema<"FreshTaskScheduleInspection">;
+export type FreshTaskRetainedAllowance = ApiSchema<"FreshTaskRetainedAllowance">;
+export type FreshTaskRetainedAllowanceChange = ApiSchema<"FreshTaskRetainedAllowanceChange">;
+export type FreshTaskRetainedAllowanceReceipt = ApiSchema<"FreshTaskRetainedAllowanceReceipt">;

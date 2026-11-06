@@ -11,6 +11,7 @@ fn installed_pack_is_bounded_and_grounded_without_a_checkout() {
             "session-behaviors",
         ),
         ("Why can't this subagent search?", "web-retrieval"),
+        ("How do I pause heartbeats in this chat?", "heartbeats"),
     ] {
         let hits = guide.search(question, 5).unwrap();
         assert!(

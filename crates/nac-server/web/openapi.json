@@ -9,6 +9,102 @@
     "version": "0.1.4"
   },
   "paths": {
+    "/attention/events": {
+      "get": {
+        "tags": [
+          "native"
+        ],
+        "operationId": "get_attention_events",
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "Engine UUID:projection UUID:sequence cursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "X-NAC-Completion-Cursor",
+            "in": "header",
+            "description": "Native semantic replay: new cutoff or stable store UUID:sequence; independent from current-state baseline",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native-only bounded metadata SSE; baseline is silent",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionFrame"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth": {
       "get": {
         "tags": [
@@ -654,6 +750,52 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/heartbeats": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_heartbeats",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeartbeatSchedule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
             }
@@ -2598,13 +2740,10 @@
         "parameters": [
           {
             "name": "session_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
@@ -3180,6 +3319,217 @@
                   "items": {
                     "$ref": "#/components/schemas/TaskLaunchRecord"
                   }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "get_project_task_schedules",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeartbeatSchedule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/control": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "control_project_task_schedule",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreshTaskScheduleControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/retained-allowance": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "change_project_task_retained_allowance",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreshTaskRetainedAllowanceChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshTaskRetainedAllowanceReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/task-schedules/{schedule_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "operationId": "get_project_task_schedule",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshTaskScheduleInspection"
                 }
               }
             }
@@ -5725,6 +6075,207 @@
         }
       }
     },
+    "/sessions/{session_id}/heartbeats/attention": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "acknowledge",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatAttentionAcknowledgement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/control": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "control",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/preview": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "preview",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatCalendarPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/heartbeats/{schedule_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "inspect",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatInspection"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/inbox": {
       "get": {
         "tags": [
@@ -6031,6 +6582,116 @@
           },
           "500": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/integrations": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_integrations",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable requested revision and process-local application status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMcpRefreshStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/integrations/refresh": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_integrations_refresh",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshSessionIntegrationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Refresh scheduled at each affected agent's next model boundary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMcpRefreshStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision changed",
             "content": {
               "application/json": {
                 "schema": {
@@ -7703,6 +8364,220 @@
           },
           "500": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/task-followup-delegations": {
+      "post": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "post_sessions_session_id_task_followup_delegations",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskFollowupDelegationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Exact human delegation issued or original request reconciled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Policy or scope denies delegation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Caller unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicting identity or current caller owner unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unknown commit outcome; retry identical request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/task-followup-delegations/{delegation_id}": {
+      "get": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "get_sessions_session_id_task_followup_delegations_delegation_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Passive exact delegation evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegation unavailable to this caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "conversation"
+        ],
+        "operationId": "delete_sessions_session_id_task_followup_delegations_delegation_id",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delegation revoked; accepted input and audit evidence retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskFollowupDelegation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delegation unavailable to this caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Admission is stopping",
             "content": {
               "application/json": {
                 "schema": {
@@ -11149,6 +12024,496 @@
         },
         "additionalProperties": false
       },
+      "AttentionAvailabilityDto": {
+        "type": "object",
+        "required": [
+          "work",
+          "questions",
+          "permissions",
+          "reviews",
+          "topology"
+        ],
+        "properties": {
+          "permissions": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "questions": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "reviews": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "topology": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          },
+          "work": {
+            "$ref": "#/components/schemas/AttentionFacetDto"
+          }
+        }
+      },
+      "AttentionChangeDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "snapshot",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source_replaced"
+                ]
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/AttentionSnapshotDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "work",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "work_settled"
+                ]
+              },
+              "work": {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "work_cleared"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "decision",
+              "kind"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/AttentionDecisionDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decision_pending"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "decision",
+              "kind"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/AttentionDecisionDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "decision_resolved"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "session_deleted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "availability",
+              "kind"
+            ],
+            "properties": {
+              "availability": {
+                "$ref": "#/components/schemas/AttentionAvailabilityDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "availability"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "checkpoint"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "AttentionCursor": {
+        "type": "object",
+        "required": [
+          "engine",
+          "epoch",
+          "sequence"
+        ],
+        "properties": {
+          "engine": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AttentionDecisionDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "request_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "permission"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "review_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review"
+                ]
+              },
+              "review_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "request_id",
+              "run_id",
+              "generation",
+              "revision",
+              "kind"
+            ],
+            "properties": {
+              "generation": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "question"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "run_id": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "AttentionDispositionDto": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "continuing",
+          "waiting_for_decision"
+        ]
+      },
+      "AttentionFacetDto": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unknown",
+          "unsupported"
+        ]
+      },
+      "AttentionFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "page",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "completions"
+                ]
+              },
+              "page": {
+                "$ref": "#/components/schemas/CompletionPageDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "boundary",
+              "sources",
+              "reset",
+              "kind"
+            ],
+            "properties": {
+              "boundary": {
+                "$ref": "#/components/schemas/AttentionCursor"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "baseline"
+                ]
+              },
+              "reset": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AttentionResetDto"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AttentionSnapshotDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "boundary",
+              "source",
+              "source_revision",
+              "change",
+              "new_attention",
+              "kind"
+            ],
+            "properties": {
+              "boundary": {
+                "$ref": "#/components/schemas/AttentionCursor"
+              },
+              "change": {
+                "$ref": "#/components/schemas/AttentionChangeDto"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "record"
+                ]
+              },
+              "new_attention": {
+                "type": "boolean"
+              },
+              "source": {
+                "$ref": "#/components/schemas/AttentionSourceDto"
+              },
+              "source_revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reset"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/AttentionResetDto"
+              }
+            }
+          }
+        ],
+        "description": "Current-state baselines are silent. Historical completion pages use their\nown stable store frontier and never infer that a whole session is idle."
+      },
+      "AttentionGoalDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AttentionResetDto": {
+        "type": "string",
+        "enum": [
+          "incarnation",
+          "replay_gap",
+          "invalid_cursor"
+        ]
+      },
+      "AttentionSnapshotDto": {
+        "type": "object",
+        "required": [
+          "source",
+          "revision",
+          "work",
+          "pending",
+          "availability"
+        ],
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/AttentionAvailabilityDto"
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionDecisionDto"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/AttentionSourceDto"
+          },
+          "work": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AttentionSourceDto": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "epoch"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AttentionWorkDto": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "goal",
+          "disposition"
+        ],
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/AttentionDispositionDto"
+          },
+          "goal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionGoalDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
       "AuthStatus": {
         "type": "string",
         "description": "Whether a provider has a usable credential right now, as served by\n`GET /models`. A picker HINT only — it never changes how auth works:\nAPI-key providers still read only the exact `api_key_env` selector and\nmanaged providers still read only their stored credential file.",
@@ -11490,6 +12855,92 @@
           "no_eligible_boundary",
           "already_compacted"
         ]
+      },
+      "CompletionKindDto": {
+        "type": "string",
+        "enum": [
+          "request",
+          "goal"
+        ]
+      },
+      "CompletionOccurrenceDto": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "session_id",
+          "run_id",
+          "behavior",
+          "kind",
+          "goal_id",
+          "mark_version"
+        ],
+        "properties": {
+          "behavior": {
+            "type": "string"
+          },
+          "goal_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CompletionKindDto"
+          },
+          "mark_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CompletionPageDto": {
+        "type": "object",
+        "required": [
+          "store_id",
+          "cursor",
+          "high_water",
+          "baseline",
+          "more",
+          "items"
+        ],
+        "properties": {
+          "baseline": {
+            "type": "boolean"
+          },
+          "cursor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "high_water": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionOccurrenceDto"
+            }
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "store_id": {
+            "type": "string"
+          }
+        }
       },
       "ConfigureMcpOAuthRequest": {
         "type": "object",
@@ -12621,6 +14072,245 @@
           }
         }
       },
+      "FreshTaskDestination": {
+        "type": "object",
+        "description": "Explicit choices are retained; absent model/reasoning choices inherit the\ndestination's defaults when a new occurrence is prepared.",
+        "required": [
+          "project_id",
+          "retained_limit"
+        ],
+        "properties": {
+          "default_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Used only to establish an unbound project's saved default branch.\nAn existing binding cannot be silently replaced by this value."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskLaunchReceipt": {
+        "type": "object",
+        "description": "Durable reservation data. The host allowance counts this row before any\nmaterialization and keeps it after occurrence-history or task deletion.",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "request",
+          "destination",
+          "binding",
+          "session_id",
+          "stop_requested",
+          "created_at_ms"
+        ],
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/HeartbeatBinding"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/FreshTaskDestination"
+          },
+          "first_input_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "initial_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initial_run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskLaunchRequest"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "shared_directory": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "stop_requested": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FreshTaskRetainedAllowance": {
+        "type": "object",
+        "required": [
+          "revision",
+          "retained_limit",
+          "retained_count"
+        ],
+        "properties": {
+          "retained_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Includes partial preparations and deleted tasks, across all projects."
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FreshTaskRetainedAllowanceChange": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_revision",
+          "retained_limit"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskRetainedAllowanceReceipt": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "allowance"
+        ],
+        "properties": {
+          "allowance": {
+            "$ref": "#/components/schemas/FreshTaskRetainedAllowance"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FreshTaskScheduleControlRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "operation"
+        ],
+        "properties": {
+          "creator_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshTaskDestination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "$ref": "#/components/schemas/HeartbeatAction"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshTaskScheduleInspection": {
+        "type": "object",
+        "required": [
+          "heartbeat",
+          "inventory",
+          "host_retained_limit",
+          "host_allowance",
+          "launches"
+        ],
+        "properties": {
+          "heartbeat": {
+            "$ref": "#/components/schemas/HeartbeatInspection"
+          },
+          "host_allowance": {
+            "$ref": "#/components/schemas/FreshTaskRetainedAllowance"
+          },
+          "host_retained_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FreshTaskLaunchReceipt"
+            }
+          },
+          "launches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskLaunchRecord"
+            }
+          }
+        }
+      },
       "FunctionCall": {
         "type": "object",
         "required": [
@@ -12898,6 +14588,916 @@
             "type": "string"
           }
         }
+      },
+      "HeartbeatAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "spec",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create"
+                ]
+              },
+              "spec": {
+                "$ref": "#/components/schemas/HeartbeatSpec"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "spec",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "edit"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/components/schemas/HeartbeatSpec"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "pause"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "resume"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "stop"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "delete"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "schedule_id",
+              "expected_version",
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "run_now"
+                ]
+              },
+              "expected_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "schedule_id": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "HeartbeatAttentionAcknowledgement": {
+        "type": "object",
+        "required": [
+          "through_sequence"
+        ],
+        "properties": {
+          "through_sequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatAttentionResult": {
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "outcome",
+          "sequence",
+          "seen"
+        ],
+        "properties": {
+          "occurrence_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/HeartbeatOutcome"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "seen": {
+            "type": "boolean"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatBinding": {
+        "type": "object",
+        "description": "An authenticated Local store is one owning user's host boundary. The exact\npersisted session/configuration is pinned; a later change requires review.",
+        "required": [
+          "config_version",
+          "cwd",
+          "backend"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "creator_session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "execution_cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Construction-time canonical Local workspace, checked again after\nrestore. Persisted display/relative paths alone are not an identity."
+          },
+          "fresh_task": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FreshTaskDestination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_configuration_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduling_request": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Actual person input or service-issued human configuration intent. It\ngrants only this saved scheduling purpose, never human tool authority."
+          },
+          "seen_through_sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Human attention metadata only; excluded from canonical target binding."
+          }
+        }
+      },
+      "HeartbeatCalendarDays": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "daily"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "days",
+              "kind"
+            ],
+            "properties": {
+              "days": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekdays"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "day",
+              "kind"
+            ],
+            "properties": {
+              "day": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekly"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Selected weekdays use Monday=1 through Sunday=7. Encoding order is canonical\n(ascending); duplicate and unsupported days are rejected rather than lost."
+      },
+      "HeartbeatCalendarDraft": {
+        "type": "object",
+        "description": "Only an unsaved preview may select the currently supported data version.\nCreation saves its resolved rule; durable rules never default the version.",
+        "required": [
+          "zone",
+          "hour",
+          "minute",
+          "days"
+        ],
+        "properties": {
+          "data_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "days": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDays"
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatCalendarPreview": {
+        "type": "object",
+        "description": "A passive projection from the pinned data, separate from retained control\nresponses. The owning rule always travels with its UTC/local instants.",
+        "required": [
+          "calendar",
+          "occurrences"
+        ],
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/HeartbeatCalendarRule"
+          },
+          "next_due": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatCalendarPreviewPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatCalendarPreviewPoint"
+            }
+          }
+        }
+      },
+      "HeartbeatCalendarPreviewPoint": {
+        "type": "object",
+        "required": [
+          "due_ms",
+          "utc",
+          "local"
+        ],
+        "properties": {
+          "due_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "local": {
+            "type": "string"
+          },
+          "utc": {
+            "type": "string"
+          }
+        }
+      },
+      "HeartbeatCalendarRule": {
+        "type": "object",
+        "required": [
+          "zone",
+          "data_version",
+          "hour",
+          "minute",
+          "days"
+        ],
+        "properties": {
+          "data_version": {
+            "type": "string"
+          },
+          "days": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDays"
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "minute": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatControlRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/HeartbeatAction"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatInspection": {
+        "type": "object",
+        "required": [
+          "schedule",
+          "history"
+        ],
+        "properties": {
+          "calendar_preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatCalendarPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatOccurrence"
+            }
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/HeartbeatSchedule"
+          }
+        }
+      },
+      "HeartbeatOccurrence": {
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "schedule_id",
+          "schedule_version",
+          "due_first_ms",
+          "due_last_ms",
+          "coalesced_count",
+          "run_now",
+          "state",
+          "spec",
+          "receipt_id",
+          "revision",
+          "attempt_count"
+        ],
+        "properties": {
+          "attempt_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "coalesced_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "due_first_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "due_last_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_item_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provisional_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_now": {
+            "type": "boolean"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "schedule_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A fresh occurrence acquires its exact execution session at publication."
+          },
+          "settled_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "settlement_sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/HeartbeatSpec"
+          },
+          "started_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HeartbeatOccurrenceState"
+          },
+          "tokens_used": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatOccurrenceState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "admitted",
+          "settled",
+          "withdrawn"
+        ]
+      },
+      "HeartbeatOutcome": {
+        "type": "string",
+        "enum": [
+          "unchanged",
+          "meaningful",
+          "finished",
+          "needs_human_action",
+          "failed",
+          "interrupted",
+          "unknown"
+        ]
+      },
+      "HeartbeatPreviewRequest": {
+        "type": "object",
+        "required": [
+          "calendar"
+        ],
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/HeartbeatCalendarDraft"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "maximum": 16,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "HeartbeatReceipt": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "schedule"
+        ],
+        "properties": {
+          "active_occurrence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence",
+                "description": "Exact already-admitted work. Delete alone never claims cancellation."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeartbeatOccurrence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/HeartbeatSchedule"
+          }
+        }
+      },
+      "HeartbeatSchedule": {
+        "type": "object",
+        "required": [
+          "schedule_id",
+          "version",
+          "state",
+          "binding",
+          "spec",
+          "anchor_ms",
+          "next_due_ms",
+          "starts",
+          "tokens_used",
+          "time_used_ms",
+          "usage_unknown",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "properties": {
+          "anchor_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/HeartbeatBinding"
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_due_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Existing-chat schedules bind a session. Standalone project schedules\nhave no owning execution session; the creator is separate provenance."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/HeartbeatSpec"
+          },
+          "starts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HeartbeatState"
+          },
+          "time_used_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tokens_used": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "usage_unknown": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "HeartbeatSpec": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "instructions",
+              "end_condition"
+            ],
+            "properties": {
+              "calendar": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/HeartbeatCalendarRule"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "end_condition": {
+                "type": "string"
+              },
+              "execution_timeout_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "goal_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "interval_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "max_occurrences": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "name": {
+                "type": "string"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "token_allowance": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "interval_ms"
+                ],
+                "properties": {
+                  "calendar": {
+                    "type": "null"
+                  },
+                  "interval_ms": {
+                    "type": "integer"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "calendar"
+                ],
+                "properties": {
+                  "calendar": {
+                    "$ref": "#/components/schemas/HeartbeatCalendarRule"
+                  },
+                  "interval_ms": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "HeartbeatState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "paused",
+          "suspended",
+          "stopped",
+          "finished",
+          "deleted"
+        ]
       },
       "InboxDelivery": {
         "type": "string",
@@ -13728,6 +16328,22 @@
                 "type": "null"
               }
             ]
+          },
+          "attention_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attention_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeat_results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeartbeatAttentionResult"
+            }
           },
           "lineage": {
             "oneOf": [
@@ -16321,6 +18937,19 @@
           "none"
         ]
       },
+      "RefreshSessionIntegrationsRequest": {
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
       "RegenerateSessionRequest": {
         "type": "object",
         "required": [
@@ -17984,6 +20613,63 @@
           }
         }
       },
+      "SessionMcpRefreshState": {
+        "type": "string",
+        "enum": [
+          "not_requested",
+          "current",
+          "pending",
+          "degraded",
+          "failed",
+          "scheduled_for_workers"
+        ]
+      },
+      "SessionMcpRefreshStatus": {
+        "type": "object",
+        "required": [
+          "revision",
+          "requested_at",
+          "applied_revision",
+          "incarnation_id",
+          "state",
+          "message"
+        ],
+        "properties": {
+          "applied_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Process-local acknowledgement for this direct agent incarnation. An\norchestrator has independent workers and does not claim an aggregate acknowledgement."
+          },
+          "incarnation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SessionMcpRefreshState"
+          }
+        }
+      },
       "SessionMetadata": {
         "type": "object",
         "required": [
@@ -18805,6 +21491,86 @@
             "type": "string"
           }
         }
+      },
+      "TaskFollowupAction": {
+        "type": "string",
+        "enum": [
+          "queue",
+          "steer",
+          "auto"
+        ]
+      },
+      "TaskFollowupDelegation": {
+        "type": "object",
+        "required": [
+          "id",
+          "caller_session_id",
+          "human_request_id",
+          "target_session_id",
+          "action",
+          "issued_config_version",
+          "origin",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TaskFollowupAction"
+          },
+          "caller_session_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "human_request_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issued_config_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskFollowupDelegationRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "target_session_id",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TaskFollowupAction"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "target_session_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "TaskLaunchPhase": {
         "type": "string",

@@ -439,6 +439,7 @@ pub fn delete_project(path: &Path, project_id: &str) -> ProjectResult<Vec<String
     )?;
     for session in &released { super::task_questions::invalidate_questions(&tx,session,None)?; }
     tx.commit()?;
+    for session in &released {super::goal_changes::session_committed(path,session);}
     Ok(released)
 }
 command DeleteProjectCommand {
@@ -518,6 +519,7 @@ pub fn assign_session_to_project(
     )?;
     super::task_questions::invalidate_questions(&tx,session_id,None)?;
     tx.commit()?;
+    super::goal_changes::session_committed(path,session_id);
     Ok(project)
 }
 command AssignSessionToProjectCommand {

@@ -72,7 +72,7 @@ fn answer(q: &QuestionRecord, text: &str) -> QuestionAnswer {
 fn end_run(path: &Path, run: &str, disposition: RunTerminalDisposition) {
     let mut conn = open_runtime_connection(path).unwrap();
     let tx = conn.transaction().unwrap();
-    clear_active_run(&tx, "target", run, disposition).unwrap();
+    clear_active_run(&tx, "target", run, disposition, None).unwrap();
     tx.commit().unwrap();
 }
 fn cleanup(path: &Path) {
@@ -594,6 +594,81 @@ fn exact_read_rejects_reassignment_after_scope_snapshot_without_disclosing_new_o
     assert_eq!(
         load_task_question_scoped(&path, "target", "missing", Some("new-owner")).unwrap(),
         None
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn captured_raw_question_answer_and_transcript_commit_share_one_atomic_boundary() {
+    let (path, q) = fixture(QuestionResponder::Information);
+    end_run(&path, &q.request.run_id, RunTerminalDisposition::Completed);
+    let accepted = answer_task_question(&path, "target", &answer(&q, "CSV"), None, 0)
+        .unwrap()
+        .receipt;
+    let item = load_session_inbox_item(&path, "target", accepted.inbox_item_id).unwrap();
+    let raw = AdmittedInboxPrompt::from(item.clone());
+    let before = load_task_question(&path, "target", &q.request.request_id).unwrap();
+    let recovery = load_run_recovery(&path, "target").unwrap();
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    let expanded = Message::User {
+        content: format!("{}\nExpanded model-only instructions.", item.content),
+    };
+    for fault in ["revision", "content", "run"] {
+        let mut stale = raw.clone();
+        if fault == "revision" {
+            stale.version += 1;
+        }
+        if fault == "content" {
+            stale.content.push_str(" changed");
+        }
+        let run = if fault == "run" {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            accepted.continuation_run_id.clone()
+        };
+        assert!(writer
+            .append_admitted_inbox_run_prompt("target", 1, &expanded, &run, &stale)
+            .is_err());
+        assert_eq!(
+            load_task_question(&path, "target", &q.request.request_id).unwrap(),
+            before
+        );
+        assert_eq!(
+            load_session_inbox_item(&path, "target", item.id).unwrap(),
+            item
+        );
+        assert_eq!(load_run_recovery(&path, "target").unwrap(), recovery);
+        assert_eq!(writer.read_from("target", 0).unwrap().len(), 1);
+    }
+    for _ in 0..2 {
+        writer
+            .append_admitted_inbox_run_prompt(
+                "target",
+                1,
+                &expanded,
+                &accepted.continuation_run_id,
+                &raw,
+            )
+            .unwrap();
+    }
+    let delivered = load_session_inbox_item(&path, "target", item.id).unwrap();
+    assert_eq!(delivered.status, InboxStatus::Delivered);
+    assert_eq!(delivered.content, raw.content);
+    assert_eq!(delivered.version, raw.version + 1);
+    assert_eq!(
+        delivered.delivered_run_id.as_deref(),
+        Some(accepted.continuation_run_id.as_str())
+    );
+    let after = load_task_question(&path, "target", &q.request.request_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.continuation_state.as_deref(), Some("delivered"));
+    assert_eq!(after.answer, Some(accepted));
+    let transcript = writer.read_from("target", 0).unwrap();
+    assert_eq!(transcript.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&transcript[1].1).unwrap(),
+        serde_json::to_value(&expanded).unwrap()
     );
     cleanup(&path);
 }

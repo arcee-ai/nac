@@ -32,6 +32,15 @@ impl PreparedSessionRunConfig {
         &mut self.run_config
     }
 
+    /// Immutable prepared metadata lets an owning launch pin effective defaults
+    /// before publication, while resources still have rollback ownership.
+    pub fn snapshot(&self) -> Option<&sessions::SessionSnapshot> {
+        match &self.run_config.session {
+            OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
+            OrchestratorSession::Picker { .. } => None,
+        }
+    }
+
     pub fn into_parts(self) -> (OrchestratorRunConfig, PreparedSessionResources) {
         (self.run_config, self.resources)
     }
