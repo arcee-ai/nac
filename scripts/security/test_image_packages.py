@@ -18,7 +18,8 @@ def fixture():
         "source.tar.gz": {"url": "https://example.invalid/source.tar.gz", "sha256": "a" * 64},
         "fix.patch": {"url": "https://example.invalid/fix.patch", "sha256": "b" * 64}}}
     versions = {"krb5": ("1.22.2", "1.22.2-r6"), "curl": ("8.23.0", "8.23.0-r2"),
-                "sasl": ("2.1.28", "2.1.28-r59"), "gcc_headers": ("16.2.0", "16.2.0-r2")}
+                "sasl": ("2.1.28", "2.1.28-r59"), "gcc_headers": ("16.2.0", "16.2.0-r2"),
+                "libssh2": ("1.11.1", "1.11.1-r12")}
     for owner, (version, revision) in versions.items():
         pins[owner] = {"version": version, "package_version": revision, "source_commit": "c" * 40,
                        "license": "MIT", "archive": "source.tar.gz", "patches": ["fix.patch"],
@@ -49,7 +50,8 @@ class PackageIntegrityTests(unittest.TestCase):
         read.assert_not_called()
         self.assertEqual(packages.source_package_pins("FROM cgr.dev/chainguard/wolfi-base@sha256:abc", read), pins)
         read.assert_called_once_with(packages.LOCK_PATH)
-        for broken in ({}, {**pins, "downloads": {}}, {k: v for k, v in pins.items() if k != "krb5"}):
+        for broken in ({}, {**pins, "downloads": {}}, {k: v for k, v in pins.items() if k != "krb5"},
+                       {k: v for k, v in pins.items() if k != "libssh2"}, {**pins, "unknown_owner": {}}):
             read.return_value = json.dumps(broken)
             with self.subTest(broken=broken.keys()), self.assertRaises(ValueError):
                 packages.source_package_pins("FROM cgr.dev/chainguard/wolfi-base@sha256:abc", read)
@@ -81,6 +83,17 @@ class PackageIntegrityTests(unittest.TestCase):
             broken["actual_payloads"]["krb5-libs"][path] = signature
             with self.subTest(signature=signature), self.assertRaisesRegex(ValueError, "bytes differ"):
                 packages.package_integrity(broken, pins, artifacts)
+
+    def test_libssh2_payload_and_package_cannot_be_omitted_or_replaced(self):
+        pins, evidence, artifacts = fixture()
+        broken = copy.deepcopy(evidence)
+        broken["records"].pop("libssh2")
+        with self.assertRaisesRegex(ValueError, "owned runtime package"):
+            packages.package_integrity(broken, pins, artifacts)
+        artifact = next(value for value in artifacts if value["name"] == "libssh2")
+        artifact["version"] = "1.11.1-r11"
+        with self.assertRaisesRegex(ValueError, "SBOM"):
+            packages.package_integrity(evidence, pins, artifacts)
 
     def test_source_patch_supplier_archive_and_payload_metadata_cannot_drift(self):
         pins, evidence, artifacts = fixture()

@@ -1,0 +1,117 @@
+--- a/src/publickey.c
++++ b/src/publickey.c
+@@ -463 +463,2 @@
+-                if(session->pkeyInit_data_len >= 8) {
++                if(session->pkeyInit_data_len >=
++                   (size_t)(s - session->pkeyInit_data) + 8) {
+@@ -475,2 +476,2 @@
+-                if(s + descr_len + 4 <=
+-                   session->pkeyInit_data + session->pkeyInit_data_len) {
++                if(session->pkeyInit_data_len >=
++                   (size_t)(s - session->pkeyInit_data) + descr_len + 4) {
+@@ -488,2 +489,2 @@
+-                if(s + lang_len <=
+-                   session->pkeyInit_data + session->pkeyInit_data_len) {
++                if(session->pkeyInit_data_len >=
++                   (size_t)(s - session->pkeyInit_data) + lang_len) {
+@@ -499,2 +500,2 @@
+-                if(s >
+-                    session->pkeyInit_data + session->pkeyInit_data_len) {
++                if(session->pkeyInit_data_len <
++                   (size_t)(s - session->pkeyInit_data)) {
+@@ -902,2 +903,2 @@
+-            if(pkey->listFetch_s + 8 <=
+-               pkey->listFetch_data + pkey->listFetch_data_len) {
++            if(pkey->listFetch_data_len >=
++               (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 8) {
+@@ -915,2 +916,2 @@
+-            if(pkey->listFetch_s + descr_len + 4 <=
+-               pkey->listFetch_data + pkey->listFetch_data_len) {
++            if(pkey->listFetch_data_len >=
++               (size_t)(pkey->listFetch_s - pkey->listFetch_data) + descr_len + 4) {
+@@ -928,2 +929,2 @@
+-            if(pkey->listFetch_s + lang_len <=
+-               pkey->listFetch_data + pkey->listFetch_data_len) {
++            if(pkey->listFetch_data_len >=
++               (size_t)(pkey->listFetch_s - pkey->listFetch_data) + lang_len) {
+@@ -939,2 +940,2 @@
+-            if(pkey->listFetch_s >
+-                pkey->listFetch_data + pkey->listFetch_data_len) {
++            if(pkey->listFetch_data_len <
++               (size_t)(pkey->listFetch_s - pkey->listFetch_data)) {
+@@ -981,2 +982,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -993,2 +994,2 @@
+-                    if(pkey->listFetch_s + comment_len >
+-                       pkey->listFetch_data + pkey->listFetch_data_len) {
++                    if(pkey->listFetch_data_len <
++                       (size_t)(pkey->listFetch_s - pkey->listFetch_data) + comment_len) {
+@@ -1023,2 +1024,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                    pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1034,2 +1035,2 @@
+-                if(pkey->listFetch_s + list[keys].name_len <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].name_len) {
+@@ -1045,2 +1046,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1056,2 +1057,2 @@
+-                if(pkey->listFetch_s + list[keys].blob_len <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].blob_len) {
+@@ -1070,2 +1071,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1081,2 +1082,2 @@
+-                if(pkey->listFetch_s + list[keys].name_len <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].name_len) {
+@@ -1092,2 +1093,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1103,2 +1104,2 @@
+-                if(pkey->listFetch_s + list[keys].blob_len <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].blob_len) {
+@@ -1114,2 +1115,2 @@
+-                if(pkey->listFetch_s + 4 <=
+-                   pkey->listFetch_data + pkey->listFetch_data_len) {
++                if(pkey->listFetch_data_len >=
++                   (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1142,2 +1143,2 @@
+-                        if(pkey->listFetch_s + 4 <=
+-                           pkey->listFetch_data + pkey->listFetch_data_len) {
++                        if(pkey->listFetch_data_len >=
++                           (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1155,2 +1156,2 @@
+-                        if(pkey->listFetch_s + list[keys].attrs[i].name_len <=
+-                           pkey->listFetch_data + pkey->listFetch_data_len) {
++                        if(pkey->listFetch_data_len >=
++                           (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].attrs[i].name_len) {
+@@ -1168,2 +1169,2 @@
+-                        if(pkey->listFetch_s + 4 <=
+-                           pkey->listFetch_data + pkey->listFetch_data_len) {
++                        if(pkey->listFetch_data_len >=
++                           (size_t)(pkey->listFetch_s - pkey->listFetch_data) + 4) {
+@@ -1181,3 +1182,2 @@
+-                        if(pkey->listFetch_s +
+-                           list[keys].attrs[i].value_len <=
+-                           pkey->listFetch_data + pkey->listFetch_data_len) {
++                        if(pkey->listFetch_data_len >=
++                           (size_t)(pkey->listFetch_s - pkey->listFetch_data) + list[keys].attrs[i].value_len) {
