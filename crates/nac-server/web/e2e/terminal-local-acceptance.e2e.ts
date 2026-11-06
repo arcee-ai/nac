@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
@@ -577,14 +577,16 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   });
   // Reproduce the observed CI race: the first live history refresh completes
   // after the drag but before copy. Its empty-state row must not resize xterm.
-  await page.route(`**/sessions/${session}/executions/history`, async (route) => {
+  const historyPattern = `**/sessions/${session}/executions/history`;
+  const holdHistory = async (route: Route) => {
     if (!initialHistory) {
       historyPending();
       await historyReleased;
     }
     initialHistory = false;
     await route.continue();
-  });
+  };
+  await page.route(historyPattern, holdHistory);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   const root = path.join(harness.runRoot, "workspace");
@@ -680,6 +682,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
         expect(afterHistory.rows).toBe(before.rows);
       }),
     ).toBe("SELECT-WHILE-OUTPUT");
+    // The controlled history race is complete. Retire its interception before
+    // timing unrelated production observer traffic; keep all race assertions.
+    await page.unroute(historyPattern, holdHistory);
     const resizedAt = performance.now();
     await page.setViewportSize({ width: 1050, height: 650 });
     await expect
@@ -722,6 +727,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
+    await page.unroute(historyPattern, holdHistory);
     await page.evaluate(() => {
       window.terminalRenderedMarker?.dispose();
       delete window.terminalRenderedMarker;
