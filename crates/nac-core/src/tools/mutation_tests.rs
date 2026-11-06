@@ -1117,3 +1117,92 @@ fn run_python_protocol_exact(
         .unwrap();
     child.wait_with_output().unwrap()
 }
+
+/// The second, context-0 diff `build_result` used to run, kept as the oracle
+/// for ranges recovered from the context-3 patch.
+fn context_zero_changed_ranges(old: &str, new: &str) -> Vec<ChangedRange> {
+    let mut options = DiffOptions::new();
+    options.set_context_len(0);
+    options
+        .create_patch(old, new)
+        .hunks()
+        .iter()
+        .map(|hunk| {
+            let old = hunk.old_range();
+            let new = hunk.new_range();
+            ChangedRange {
+                old_start: old.start(),
+                old_end: old.start().saturating_add(old.len()).saturating_sub(1),
+                new_start: new.start(),
+                new_end: new.start().saturating_add(new.len()).saturating_sub(1),
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn changed_ranges_from_the_context_patch_match_a_context_zero_diff() {
+    const LINES: &[&str] = &[
+        "alpha\n",
+        "beta\n",
+        "gamma\n",
+        "\n",
+        "delta\r\n",
+        "  indented\n",
+        "tail-without-newline",
+    ];
+    let mut state = 0x243f_6a88_85a3_08d3_u64;
+    let mut below = |bound: usize| {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        (state.wrapping_mul(0x2545_f491_4f6c_dd1d) % bound as u64) as usize
+    };
+    for case in 0..4_000 {
+        let base = (0..below(40))
+            .map(|_| LINES[below(LINES.len())])
+            .collect::<Vec<_>>();
+        let mut edited = base.clone();
+        if case % 9 == 0 {
+            // Unrelated texts, including either side empty.
+            edited = (0..below(12)).map(|_| LINES[below(LINES.len())]).collect();
+        } else {
+            // Clustered and scattered edits: some merge into one context-3
+            // hunk, others stay apart; edits at both ends have no context.
+            for _ in 0..below(8) {
+                match below(3) {
+                    0 if !edited.is_empty() => {
+                        let at = below(edited.len());
+                        edited.remove(at);
+                    }
+                    1 => {
+                        let at = below(edited.len() + 1);
+                        edited.insert(at, LINES[below(LINES.len())]);
+                    }
+                    _ if !edited.is_empty() => {
+                        let at = below(edited.len());
+                        edited[at] = LINES[below(LINES.len())];
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let (old, new) = if case % 2 == 0 {
+            (base.concat(), edited.concat())
+        } else {
+            (edited.concat(), base.concat())
+        };
+        let result = build_result("file.txt", old.as_bytes(), new.as_bytes(), None);
+        assert_eq!(
+            result.changed_ranges,
+            context_zero_changed_ranges(&old, &new),
+            "case {case}: {old:?} -> {new:?}"
+        );
+        let mut options = DiffOptions::new();
+        options
+            .set_context_len(3)
+            .set_original_filename("a/file.txt")
+            .set_modified_filename("b/file.txt");
+        assert_eq!(result.diff, options.create_patch(&old, &new).to_string());
+    }
+}
