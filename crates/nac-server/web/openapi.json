@@ -19654,16 +19654,21 @@
         "type": "object",
         "required": [
           "path",
-          "expected_workspace_root"
+          "expected_workspace_root",
+          "expected_path_root"
         ],
         "properties": {
+          "expected_path_root": {
+            "type": "string",
+            "description": "Coordinate root of the originating Files listing. Ordinary directory\ncallers explicitly use their selected workspace root. Never an OS target."
+          },
           "expected_workspace_root": {
             "type": "string",
             "description": "Root observed in the initiating session snapshot; never a target override."
           },
           "path": {
             "type": "string",
-            "description": "Existing Files path: repository-relative for Git workspaces, or relative\nto the selected workspace root for nongit workspaces."
+            "description": "Existing path, relative to the explicitly observed expected_path_root."
           }
         },
         "additionalProperties": false
@@ -23916,6 +23921,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "path_root": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Origin of these repository-relative identities, when locally available.\nA missing legacy/remote/revision context cannot authorize Finder reveal."
           },
           "truncated": {
             "type": "boolean",
