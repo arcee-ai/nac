@@ -47,8 +47,8 @@ enum DesktopStartup {
     }
 
     static func select(executable: URL, identity: EngineIdentity, options: Options,
-                       inherited: [String: String]) async throws -> EngineLaunchConfiguration {
-        let home = inherited["HOME"] ?? NSHomeDirectory()
+                       inherited: [String: String], fallbackHome: String = NSHomeDirectory()) async throws -> EngineLaunchConfiguration {
+        let home = inherited["HOME"] ?? fallbackHome
         guard home.hasPrefix("/") || options.directory?.hasPrefix("/") == true else {
             throw DesktopStartupError.message("HOME is not an absolute directory. Pass --directory with an existing absolute path and relaunch NAC.")
         }
@@ -59,7 +59,11 @@ enum DesktopStartup {
         guard FileManager.default.fileExists(atPath: cwd.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw DesktopStartupError.message("The bootstrap directory is unavailable. Pass --directory with an existing directory and relaunch NAC.")
         }
-        let environment = try CommandEnvironment.resolve(inherited, cwd: cwd, extraPaths: options.commandPaths)
+        // Keep native bootstrap and Rust's configuration/credential discovery
+        // in the same home namespace when LaunchServices omits HOME.
+        var launchEnvironment = inherited
+        launchEnvironment["HOME"] = home
+        let environment = try CommandEnvironment.resolve(launchEnvironment, cwd: cwd, extraPaths: options.commandPaths)
         guard CommandEnvironment.executable("git", in: environment) != nil else {
             throw DesktopStartupError.message("Git was not found in NAC's command search path. Install or configure Git yourself, or pass --command-path with its executable directory, then relaunch NAC. Nothing has been installed automatically.")
         }
