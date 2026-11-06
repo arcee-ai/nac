@@ -1,5 +1,9 @@
+pub(crate) mod attention;
+pub(crate) mod attention_runtime;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
+pub(crate) mod heartbeat_scheduler;
+pub(crate) mod heartbeats;
 pub(crate) mod managed;
 pub(crate) mod model_catalog;
 pub(crate) mod model_configurations;
@@ -10,6 +14,7 @@ pub(crate) mod request_validation;
 pub(crate) mod session_attachment;
 pub(crate) mod session_configuration;
 pub(crate) mod session_creation;
+pub(crate) mod session_integrations;
 pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;
 pub(crate) mod session_terminals;
@@ -35,7 +40,14 @@ pub(crate) mod execution_observation;
 
 pub(crate) mod terminal_control;
 
+pub(crate) mod fresh_task_schedules;
 pub(crate) mod task_launches;
 pub(crate) mod task_preparations;
 
+pub(crate) mod native_task_launches;
+pub(crate) mod peer_goals;
 pub(crate) mod product_context;
+
+pub(crate) mod task_followup_delegations;
+pub(crate) mod task_followups;
+pub(crate) mod task_questions;

@@ -152,6 +152,95 @@ export interface components {
             page_limit: number;
             protocol_version: number;
         };
+        AttentionAvailabilityDto: {
+            permissions: components["schemas"]["AttentionFacetDto"];
+            questions: components["schemas"]["AttentionFacetDto"];
+            reviews: components["schemas"]["AttentionFacetDto"];
+            topology: components["schemas"]["AttentionFacetDto"];
+            work: components["schemas"]["AttentionFacetDto"];
+        };
+        AttentionChangeDto: {
+            kind: "source_replaced";
+            snapshot: components["schemas"]["AttentionSnapshotDto"];
+        } | {
+            kind: "work_settled";
+            work: components["schemas"]["AttentionWorkDto"];
+        } | {
+            kind: "work_cleared";
+        } | {
+            decision: components["schemas"]["AttentionDecisionDto"];
+            kind: "decision_pending";
+        } | {
+            decision: components["schemas"]["AttentionDecisionDto"];
+            kind: "decision_resolved";
+        } | {
+            kind: "session_deleted";
+        } | {
+            availability: components["schemas"]["AttentionAvailabilityDto"];
+            kind: "availability";
+        } | {
+            kind: "checkpoint";
+        };
+        AttentionCursor: {
+            engine: string;
+            epoch: string;
+            sequence: number;
+        };
+        AttentionDecisionDto: {
+            kind: "permission";
+            request_id: string;
+        } | {
+            kind: "review";
+            review_id: string;
+        } | {
+            generation: string;
+            kind: "question";
+            request_id: string;
+            revision: number;
+            run_id: string;
+        };
+        AttentionDispositionDto: "completed" | "continuing" | "waiting_for_decision";
+        AttentionFacetDto: "available" | "unknown" | "unsupported";
+        AttentionFrame: {
+            kind: "completions";
+            page: components["schemas"]["CompletionPageDto"];
+        } | {
+            boundary: components["schemas"]["AttentionCursor"];
+            kind: "baseline";
+            reset: components["schemas"]["AttentionResetDto"] | null;
+            sources: components["schemas"]["AttentionSnapshotDto"][];
+        } | {
+            boundary: components["schemas"]["AttentionCursor"];
+            change: components["schemas"]["AttentionChangeDto"];
+            kind: "record";
+            new_attention: boolean;
+            source: components["schemas"]["AttentionSourceDto"];
+            source_revision: number;
+        } | {
+            kind: "reset";
+            reason: components["schemas"]["AttentionResetDto"];
+        };
+        AttentionGoalDto: {
+            id: string;
+            version: number;
+        };
+        AttentionResetDto: "incarnation" | "replay_gap" | "invalid_cursor";
+        AttentionSnapshotDto: {
+            availability: components["schemas"]["AttentionAvailabilityDto"];
+            pending: components["schemas"]["AttentionDecisionDto"][];
+            revision: number;
+            source: components["schemas"]["AttentionSourceDto"];
+            work: components["schemas"]["AttentionWorkDto"] | null;
+        };
+        AttentionSourceDto: {
+            epoch: string;
+            session_id: string;
+        };
+        AttentionWorkDto: {
+            disposition: components["schemas"]["AttentionDispositionDto"];
+            goal: components["schemas"]["AttentionGoalDto"] | null;
+            run_id: string;
+        };
         AuthenticateMcpOAuthRequest: {
             additional_scopes?: string[];
         };
@@ -186,6 +275,9 @@ export interface components {
         CancelInboxItemRequest: {
             expected_version: number;
         };
+        CancelQuestionRequest: {
+            expected_revision: number;
+        };
         ChangedFileStat: {
             additions?: number | null;
             deletions?: number | null;
@@ -216,6 +308,24 @@ export interface components {
             compaction_id: string;
             reason: components["schemas"]["CompactionSkipReason"];
             status: "unchanged";
+        };
+        CompletionKindDto: "request" | "goal";
+        CompletionOccurrenceDto: {
+            behavior: string;
+            goal_id: string | null;
+            kind: components["schemas"]["CompletionKindDto"];
+            mark_version: number | null;
+            run_id: string;
+            sequence: number;
+            session_id: string;
+        };
+        CompletionPageDto: {
+            baseline: boolean;
+            cursor: number;
+            high_water: number;
+            items: components["schemas"]["CompletionOccurrenceDto"][];
+            more: boolean;
+            store_id: string;
         };
         ConfigureMcpOAuthRequest: {
             authorization_metadata?: components["schemas"]["McpOAuthAuthorizationMetadataRequest"] | null;
@@ -445,6 +555,55 @@ export interface components {
         ForkSessionResponse: {
             session_id: string;
         };
+        FreshTaskDestination: {
+            default_ref?: string | null;
+            model?: string | null;
+            pinned_commit?: string | null;
+            project_id: string;
+            reasoning_effort?: string | null;
+            retained_limit: number;
+        };
+        FreshTaskLaunchReceipt: {
+            binding: components["schemas"]["HeartbeatBinding"];
+            created_at_ms: number;
+            destination: components["schemas"]["FreshTaskDestination"];
+            first_input_id?: number | null;
+            initial_outcome?: components["schemas"]["HeartbeatOccurrence"] | null;
+            initial_run_id?: string | null;
+            occurrence_id: string;
+            request: components["schemas"]["TaskLaunchRequest"];
+            schedule_id: string;
+            session_id: string;
+            shared_directory?: boolean | null;
+            stop_requested: boolean;
+        };
+        FreshTaskRetainedAllowance: {
+            retained_count: number;
+            retained_limit: number;
+            revision: number;
+        };
+        FreshTaskRetainedAllowanceChange: {
+            expected_revision: number;
+            request_id: string;
+            retained_limit: number;
+        };
+        FreshTaskRetainedAllowanceReceipt: {
+            allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+            request_id: string;
+        };
+        FreshTaskScheduleControlRequest: {
+            creator_session_id?: string | null;
+            destination?: components["schemas"]["FreshTaskDestination"] | null;
+            operation: components["schemas"]["HeartbeatAction"];
+            request_id: string;
+        };
+        FreshTaskScheduleInspection: {
+            heartbeat: components["schemas"]["HeartbeatInspection"];
+            host_allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+            host_retained_limit: number;
+            inventory: components["schemas"]["FreshTaskLaunchReceipt"][];
+            launches: components["schemas"]["TaskLaunchRecord"][];
+        };
         FunctionCall: {
             arguments: string;
             name: string;
@@ -504,6 +663,173 @@ export interface components {
         HealthResponse: {
             status: string;
         };
+        HeartbeatAction: {
+            action: "create";
+            spec: components["schemas"]["HeartbeatSpec"];
+        } | {
+            action: "edit";
+            expected_version: number;
+            schedule_id: string;
+            spec: components["schemas"]["HeartbeatSpec"];
+        } | {
+            action: "pause";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "resume";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "stop";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "delete";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "run_now";
+            expected_version: number;
+            schedule_id: string;
+        };
+        HeartbeatAttentionAcknowledgement: {
+            through_sequence: number;
+        };
+        HeartbeatAttentionResult: {
+            occurrence_id: string;
+            outcome: components["schemas"]["HeartbeatOutcome"];
+            run_id?: string | null;
+            schedule_id: string;
+            seen: boolean;
+            sequence: number;
+        };
+        HeartbeatBinding: {
+            backend: string;
+            config_version: number;
+            creator_session_id?: string | null;
+            cwd: string;
+            execution_cwd?: string | null;
+            fresh_task?: components["schemas"]["FreshTaskDestination"] | null;
+            model_configuration_id?: string | null;
+            project_id?: string | null;
+            scheduling_request?: string | null;
+            seen_through_sequence?: number;
+        };
+        HeartbeatCalendarDays: {
+            kind: "daily";
+        } | {
+            days: number[];
+            kind: "weekdays";
+        } | {
+            day: number;
+            kind: "weekly";
+        };
+        HeartbeatCalendarDraft: {
+            data_version?: string | null;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
+        HeartbeatCalendarPreview: {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            next_due?: components["schemas"]["HeartbeatCalendarPreviewPoint"] | null;
+            occurrences: components["schemas"]["HeartbeatCalendarPreviewPoint"][];
+        };
+        HeartbeatCalendarPreviewPoint: {
+            due_ms: number;
+            local: string;
+            utc: string;
+        };
+        HeartbeatCalendarRule: {
+            data_version: string;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
+        HeartbeatControlRequest: {
+            operation: components["schemas"]["HeartbeatAction"];
+            request_id: string;
+        };
+        HeartbeatInspection: {
+            calendar_preview?: components["schemas"]["HeartbeatCalendarPreview"] | null;
+            history: components["schemas"]["HeartbeatOccurrence"][];
+            schedule: components["schemas"]["HeartbeatSchedule"];
+        };
+        HeartbeatOccurrence: {
+            attempt_count: number;
+            coalesced_count: number;
+            due_first_ms: number;
+            due_last_ms: number;
+            evidence?: string | null;
+            generation?: string | null;
+            inbox_item_id?: number | null;
+            occurrence_id: string;
+            outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+            provisional_outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+            receipt_id: string;
+            revision: number;
+            run_id?: string | null;
+            run_now: boolean;
+            schedule_id: string;
+            schedule_version: number;
+            session_id?: string | null;
+            settled_at_ms?: number | null;
+            settlement_sequence?: number | null;
+            spec: components["schemas"]["HeartbeatSpec"];
+            started_at_ms?: number | null;
+            state: components["schemas"]["HeartbeatOccurrenceState"];
+            tokens_used?: number | null;
+        };
+        HeartbeatOccurrenceState: "pending" | "admitted" | "settled" | "withdrawn";
+        HeartbeatOutcome: "unchanged" | "meaningful" | "finished" | "needs_human_action" | "failed" | "interrupted" | "unknown";
+        HeartbeatPreviewRequest: {
+            calendar: components["schemas"]["HeartbeatCalendarDraft"];
+            count?: number | null;
+        };
+        HeartbeatReceipt: {
+            active_occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+            occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+            request_id: string;
+            schedule: components["schemas"]["HeartbeatSchedule"];
+        };
+        HeartbeatSchedule: {
+            anchor_ms: number;
+            binding: components["schemas"]["HeartbeatBinding"];
+            created_at_ms: number;
+            next_due_ms: number;
+            reason?: string | null;
+            schedule_id: string;
+            session_id?: string | null;
+            spec: components["schemas"]["HeartbeatSpec"];
+            starts: number;
+            state: components["schemas"]["HeartbeatState"];
+            time_used_ms: number;
+            tokens_used: number;
+            updated_at_ms: number;
+            usage_unknown: boolean;
+            version: number;
+        };
+        HeartbeatSpec: {
+            calendar?: components["schemas"]["HeartbeatCalendarRule"] | null;
+            end_condition: string;
+            execution_timeout_ms?: number;
+            goal_id?: string | null;
+            instructions: string;
+            interval_ms?: number | null;
+            max_occurrences?: number;
+            name: string;
+            skills?: string[];
+            token_allowance?: number | null;
+        } & ({
+            calendar?: null;
+            interval_ms: number;
+        } | {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            interval_ms?: null;
+        });
+        HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
         InboxDelivery: "steer" | "queue";
         InboxItemResponse: {
             cancelled_at?: string | null;
@@ -665,6 +991,9 @@ export interface components {
         ManagedSessionSummary: {
             active: boolean;
             active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+            attention_revision?: number;
+            attention_updated_at?: string | null;
+            heartbeat_results?: components["schemas"]["HeartbeatAttentionResult"][];
             lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
             summary: components["schemas"]["SessionSummarySnapshot"];
             workspace_diff?: components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1081,6 +1410,42 @@ export interface components {
         PutManagedSecretRequest: {
             value: string;
         };
+        QuestionAnswer: {
+            answer: string;
+            expected_revision: number;
+            generation: string;
+            request_id: string;
+            run_id: string;
+        };
+        QuestionAnswerReceipt: {
+            answer: string;
+            continuation_run_id: string;
+            generation: string;
+            inbox_item_id: number;
+            request_id: string;
+            revision: number;
+            run_id: string;
+            session_id: string;
+        };
+        QuestionRecord: {
+            answer: components["schemas"]["QuestionAnswerReceipt"] | null;
+            continuation_state: string | null;
+            created_at: string;
+            goal_id: string | null;
+            request: components["schemas"]["QuestionRequest"];
+            revision: number;
+            status: string;
+        };
+        QuestionRequest: {
+            choices: string[];
+            generation: string;
+            request_id: string;
+            responder_class: components["schemas"]["QuestionResponder"];
+            run_id: string;
+            session_id: string;
+            text: string;
+        };
+        QuestionResponder: "information" | "human_decision";
         RawSessionConfig: {
             allow_insecure_http: boolean;
             api_key_env: string | null;
@@ -1123,6 +1488,9 @@ export interface components {
             events: components["schemas"]["SessionEventEnvelope"][];
         };
         RecoveryAction: "automatic_retry" | "resume_goal" | "regenerate_with_rewind" | "settings" | "none";
+        RefreshSessionIntegrationsRequest: {
+            expected_revision: number;
+        };
         RegenerateSessionRequest: {
             message_idx: number;
         };
@@ -1384,6 +1752,15 @@ export interface components {
             parent_session_id: string;
             root_session_id: string;
         };
+        SessionMcpRefreshState: "not_requested" | "current" | "pending" | "degraded" | "failed" | "scheduled_for_workers";
+        SessionMcpRefreshStatus: {
+            applied_revision: number | null;
+            incarnation_id: string | null;
+            message: string | null;
+            requested_at: string | null;
+            revision: number;
+            state: components["schemas"]["SessionMcpRefreshState"];
+        };
         SessionMetadata: {
             agents_md_status: string;
             api_key_env?: string | null;
@@ -1550,6 +1927,24 @@ export interface components {
         SwitchBranchRequest: {
             create?: boolean;
             name: string;
+        };
+        TaskFollowupAction: "queue" | "steer" | "auto";
+        TaskFollowupDelegation: {
+            action: components["schemas"]["TaskFollowupAction"];
+            caller_session_id: string;
+            created_at: string;
+            human_request_id: string;
+            id: string;
+            issued_config_version: number;
+            origin: string;
+            revoked_at?: string | null;
+            target_session_id: string;
+        };
+        TaskFollowupDelegationRequest: {
+            action: components["schemas"]["TaskFollowupAction"];
+            project_id?: string | null;
+            request_id: string;
+            target_session_id: string;
         };
         TaskLaunchPhase: "pinned" | "preparing_workspace" | "preparing_runtime" | "ready" | "failed" | "cancelled";
         TaskLaunchRecord: {

@@ -334,6 +334,23 @@ pub fn list_sessions(store_path: &Path) -> Result<Vec<SessionSummarySnapshot>> {
         .map(|sessions| sessions.into_iter().map(Into::into).collect())
 }
 
+coordinated_command! {
+/// Session timestamps and heartbeat attention must share one passive snapshot:
+/// a terminal commit between independent reads could fabricate an unread dot.
+pub fn list_sessions_with_heartbeat_attention(store_path:&Path)->Result<(Vec<SessionSummarySnapshot>,store::HeartbeatAttentionSnapshot)> {
+    let mut conn=store::open_runtime_connection(store_path)?;
+    let tx=conn.transaction()?;
+    let sessions=list_sessions_with_connection(&tx)?;
+    let attention=store::heartbeat_attention_with_connection(&tx)?;
+    tx.commit()?;
+    Ok((sessions,attention))
+}
+command ListSessionsWithHeartbeatAttentionCommand {}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
+
 pub(crate) fn list_sessions_with_connection(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<SessionSummarySnapshot>> {

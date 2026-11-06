@@ -1,7 +1,41 @@
-# MCP disconnect, log out, and revoke
+# MCP refresh, disconnect, log out, and revoke
 
 Disconnect, log out, and revoke are separate actions. Each one changes what
 running sessions may do next.
+
+## Refresh an existing chat
+
+After connecting, adding, replacing, removing or changing an MCP server, open
+**Integrations** in the chat header and choose **Refresh integrations**. NAC
+saves a revision-checked request and applies it before the agent's next model
+request. A tool round already in progress, including one awaiting approval,
+keeps its captured definitions and policy. Refresh never replays a tool call,
+changes the chat's execution backend or grants tool approval.
+
+The control reports the requested revision and, for an attached direct agent,
+the revision applied by its current process incarnation. Before any refresh has
+been requested, status is `not_requested`. Pending means the agent has not
+reached the boundary for a requested refresh yet. Unavailable agents do not report an
+applied revision. Orchestrators schedule refresh for their independently running
+workers at each worker's next model boundary; they do not report an aggregate
+worker acknowledgement. New worker dispatches mount the current configuration.
+Direct-with-orchestrator chats refresh their direct agent. Traditional children
+and managed orchestrators have separate session identities and refresh requests;
+refreshing a parent does not refresh those sessions.
+
+Explicit mount refresh discards obsolete mounts for future requests. Optional
+servers that fail to mount are omitted and status reports degraded integrations;
+a required-server, unreadable or invalid configuration, or concurrent-publication failure blocks the next model request
+and reports failure. Repair/connect the integration and explicitly refresh again.
+Catalog notifications for an unchanged mounted server retain their existing
+last-known-good catalog behavior. Cancellation while loading leaves the request
+pending; restart reconstructs mounts and admits the durable requested revision
+before sending another model request. Neither path resumes or replays tool calls.
+
+The API exposes passive `GET /sessions/{session_id}/integrations` and explicit
+`POST /sessions/{session_id}/integrations/refresh` with
+`{"expected_revision": <revision from GET>}`. A stale revision returns 409; reload
+status before retrying. Status does not attach, recover or wake an agent.
 
 ## Disconnect
 
@@ -12,7 +46,8 @@ Disconnect in MCP settings stops NAC from using a server:
   share the same NAC home.
 - Those sessions also stop refreshing the server's catalogs and stop listening
   for its notifications. After Connect, they can call the server again, but
-  they may no longer receive its catalog changes; a new session does.
+  they may no longer receive its catalog changes; Refresh integrations mounts
+  a fresh connection at the next model boundary.
 - New sessions skip the server. A `required` server blocks new sessions until
   it is connected again.
 - The state is saved in the NAC home and survives a restart. Connect or Reload
@@ -29,7 +64,7 @@ Disconnect in MCP settings stops NAC from using a server:
 - If the saved state cannot be read, every server counts as disconnected and
   MCP settings say so. Connecting a server rewrites the record, admitting only
   that server for new sessions. Sessions that were already running stay
-  blocked from every server; start a new session to use them again.
+  blocked from every server until an explicit refresh admits fresh mounts.
 
 ## Log out
 

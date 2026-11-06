@@ -1,0 +1,762 @@
+use super::*;
+use crate::model::ModelClient;
+use crate::permissions::{PermissionBackend, PermissionBroker, PermissionEffect, PermissionRule};
+use crate::session_service::tests::test_direct_active_service;
+use crate::store::{HeartbeatSpec, HeartbeatState};
+
+fn fixture() -> (SessionServiceParts, PathBuf) {
+    let (parts, path) = test_direct_active_service(
+        &format!("heartbeat_native_{}", Uuid::new_v4()),
+        "session",
+        ModelClient::new_for_test(),
+    );
+    (parts, path)
+}
+fn create() -> HeartbeatAction {
+    HeartbeatAction::Create {
+        spec: HeartbeatSpec {
+            name: "Job check".into(),
+            instructions: "Check the authorized Local result.".into(),
+            skills: Vec::new(),
+            cadence: crate::store::HeartbeatCadence::Interval {
+                interval_ms: 60_000,
+            },
+            end_condition: "Finish when ready.".into(),
+            goal_id: None,
+            execution_timeout_ms: 300_000,
+            max_occurrences: 1_000,
+            token_allowance: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn same_chat_heartbeat_commits_admission_created_inbox_once_with_skills() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use crate::session_service::tests::compaction_response;
+    use crate::skills::{SkillRecord, SkillRegistry};
+
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        compaction_response("Existing chat inspection complete."),
+    )]);
+    let (mut parts, path) = test_direct_active_service(
+        "heartbeat_same_chat_success",
+        "session",
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    );
+    parts.service.skills = Some(Arc::new(SkillRegistry::load_for_test(vec![SkillRecord {
+        name: "verification".into(),
+        description: "Inspect the fixture.".into(),
+        compatibility: None,
+        skill_root_visible: path.parent().unwrap().join("verification"),
+        body: "SAME_CHAT_SKILL_TOKEN: retain the current conversation.".into(),
+        resources: Vec::new(),
+    }])));
+    let broker = Arc::new(PermissionBroker::new(
+        path.clone(),
+        "session".into(),
+        PermissionBackend::Local,
+        parts.service.config_version.unwrap(),
+        vec![
+            PermissionRule::new("heartbeat_manage", "*", PermissionEffect::Allow),
+            PermissionRule::new("heartbeat_run", "*", PermissionEffect::Allow),
+        ],
+    ));
+    parts.service.permission_broker = Some(broker.clone());
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    runtime.skills = parts.service.skills.clone();
+    runtime.permission_broker = Some(broker);
+    parts.service.heartbeat_context = Some(Arc::new(HeartbeatContext::new(
+        runtime,
+        ModelClient::new_for_test_server(server.base_url.clone()),
+    )));
+    let service = &parts.service;
+    let HeartbeatAction::Create { mut spec } = create() else {
+        unreachable!()
+    };
+    spec.instructions = "Inspect this same chat with $verification.".into();
+    spec.skills = vec!["verification".into()];
+    let schedule = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), HeartbeatAction::Create { spec })
+        .await
+        .unwrap()
+        .schedule;
+    let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+        .unwrap()
+        .remove(0);
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    eprintln!(
+        "SAME_CHAT_HEARTBEAT_FIXTURE store={} occurrence={}",
+        path.display(),
+        pending.occurrence_id
+    );
+    let run = service
+        .start_heartbeat_occurrence(pending.clone(), lease)
+        .await
+        .expect("successful same-chat admission must retain its newly created inbox identity")
+        .expect("same-chat heartbeat must acquire its exact run");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while service.has_active_operation() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("same-chat heartbeat did not settle");
+    let inbox = crate::store::list_session_inbox(&path, "session").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Delivered);
+    assert_eq!(inbox[0].version, 1);
+    assert_eq!(
+        inbox[0].delivered_run_id.as_deref(),
+        Some(run.run_id.as_str())
+    );
+    assert!(inbox[0].content.contains("SAME_CHAT_SKILL_TOKEN"));
+    assert_eq!(service.messages_snapshot().await.unwrap().iter().filter(
+        |message| matches!(message, Message::User { content } if content == &inbox[0].content)
+    ).count(), 1);
+    let history = crate::store::heartbeat_history(&path, "session", &schedule.schedule_id).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].session_id.as_deref(), Some("session"));
+    assert_eq!(history[0].run_id.as_deref(), Some(run.run_id.as_str()));
+    assert_eq!(history[0].attempt_count, 1);
+    assert_eq!(
+        history[0].state,
+        crate::store::HeartbeatOccurrenceState::Settled
+    );
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    assert!(String::from_utf8_lossy(&requests[0].body).contains("SAME_CHAT_SKILL_TOKEN"));
+}
+
+#[tokio::test]
+async fn heartbeat_native_preview_uses_prepared_read_policy_and_never_creates_or_wakes() {
+    let (parts, path) = fixture();
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    let snapshot = ToolRegistry::builder()
+        .register(crate::tools::heartbeat::PreviewHeartbeatTool)
+        .finish()
+        .unwrap()
+        .snapshot(["preview_heartbeat"])
+        .unwrap();
+    for effect in [PermissionEffect::Allow, PermissionEffect::Deny] {
+        runtime.permission_broker = Some(Arc::new(PermissionBroker::new(
+            path.clone(),
+            "session".into(),
+            PermissionBackend::Local,
+            parts.service.config_version.unwrap(),
+            vec![PermissionRule::new("heartbeat_read", "*", effect)],
+        )));
+        let result=snapshot.invoke("preview_heartbeat",serde_json::json!({"calendar":{"zone":"America/Los_Angeles","data_version":null,"hour":9,"minute":0,"days":{"kind":"weekdays","days":[1,2,3,4,5],"day":null}},"count":3}),ToolServices{runtime:&runtime,client:&ModelClient::new_for_test()},&ToolCallContext::default()).await;
+        assert_eq!(
+            result.is_error,
+            effect == PermissionEffect::Deny,
+            "{}",
+            result.content
+        );
+        if !result.is_error {
+            let preview: crate::store::HeartbeatCalendarPreview =
+                serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+            assert_eq!(preview.calendar.zone, "America/Los_Angeles");
+            assert_eq!(preview.calendar.data_version, "2026f");
+            assert_eq!(preview.occurrences.len(), 3);
+        }
+        let broker = runtime.permission_broker.as_ref().unwrap();
+        assert!(broker.pending().is_empty());
+        assert!(broker.grants().unwrap().is_empty());
+    }
+    assert!(crate::store::list_heartbeats(&path, None)
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+    assert!(parts.service.active_run().is_none());
+}
+async fn native_control(
+    runtime: &crate::tools::ToolRuntime,
+    operation: HeartbeatAction,
+) -> crate::tools::ToolResult {
+    let snapshot = ToolRegistry::builder()
+        .register(HeartbeatControlTool::native())
+        .finish()
+        .unwrap()
+        .snapshot([CONTROL_HEARTBEAT])
+        .unwrap();
+    snapshot
+        .invoke(
+            CONTROL_HEARTBEAT,
+            serde_json::json!({"request_id":Uuid::new_v4().to_string(),"operation":operation}),
+            ToolServices {
+                runtime,
+                client: &ModelClient::new_for_test(),
+            },
+            &ToolCallContext::default(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn heartbeat_human_control_does_not_wait_for_active_agent_mutex_or_own_run_lease() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let run = service
+        .coordinate_local(|service| service.try_begin_run(None, "hold this exact active run"))
+        .await
+        .unwrap()
+        .unwrap();
+    let _held_agent = service.agent.lock().await;
+    let receipt = tokio::time::timeout(
+        Duration::from_secs(10),
+        service.control_human_heartbeat(Uuid::new_v4().to_string(), create()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(receipt.schedule.state, HeartbeatState::Active);
+    assert_eq!(service.active_run().unwrap().run_id, run.run_id);
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn heartbeat_native_automatic_turn_cannot_create_or_renew_scheduling_authority() {
+    let (parts, path) = fixture();
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    assert!(native_control(&runtime, create()).await.is_error);
+    runtime.heartbeat_human_request =
+        Some("Check this Local job every minute until the result is ready.".into());
+    let created = native_control(&runtime, create()).await;
+    assert!(!created.is_error, "{}", created.content);
+    let created: HeartbeatReceipt =
+        serde_json::from_str(created.content.as_text().unwrap()).unwrap();
+    assert_eq!(
+        created.schedule.binding.scheduling_request,
+        runtime.heartbeat_human_request
+    );
+    runtime.heartbeat_human_request = None;
+    let id = created.schedule.schedule_id;
+    assert!(
+        native_control(
+            &runtime,
+            HeartbeatAction::RunNow {
+                schedule_id: id.clone(),
+                expected_version: 1
+            }
+        )
+        .await
+        .is_error
+    );
+    let paused = native_control(
+        &runtime,
+        HeartbeatAction::Pause {
+            schedule_id: id.clone(),
+            expected_version: 1,
+        },
+    )
+    .await;
+    assert!(
+        paused.is_error,
+        "an unbound automatic turn cannot pause another schedule"
+    );
+    assert!(
+        native_control(
+            &runtime,
+            HeartbeatAction::Resume {
+                schedule_id: id.clone(),
+                expected_version: 1
+            }
+        )
+        .await
+        .is_error
+    );
+    assert_eq!(
+        crate::store::read_heartbeat(&path, "session", &id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+}
+
+#[tokio::test]
+async fn heartbeat_human_submission_skips_ask_but_preserves_configured_deny_and_agent_policy() {
+    let (mut parts, path) = fixture();
+    let mut runtime = parts
+        .service
+        .heartbeat_context
+        .as_ref()
+        .unwrap()
+        .runtime
+        .clone();
+    for effect in [PermissionEffect::Ask, PermissionEffect::Deny] {
+        runtime.permission_broker = Some(Arc::new(PermissionBroker::new(
+            path.clone(),
+            "session".into(),
+            PermissionBackend::Local,
+            parts.service.config_version.unwrap(),
+            vec![PermissionRule::new("heartbeat_manage", "*", effect)],
+        )));
+        parts.service.heartbeat_context = Some(Arc::new(HeartbeatContext::new(
+            runtime.clone(),
+            ModelClient::new_for_test(),
+        )));
+        let human = parts
+            .service
+            .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+            .await;
+        assert_eq!(human.is_ok(), effect == PermissionEffect::Ask);
+        runtime.heartbeat_human_request = Some("Create a heartbeat every minute.".into());
+        assert!(native_control(&runtime, create()).await.is_error);
+        let broker = runtime.permission_broker.as_ref().unwrap();
+        assert!(broker.pending().is_empty());
+        assert!(broker.grants().unwrap().is_empty());
+    }
+    assert_eq!(
+        crate::store::list_heartbeats(&path, Some("session"))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn heartbeat_controls_reject_stale_configuration_and_shutdown_without_waking_any_work() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let original = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap();
+    crate::store::open_runtime_connection(&path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET config_version=config_version+1 WHERE session_id='session'",
+            [],
+        )
+        .unwrap();
+    assert!(service
+        .control_human_heartbeat(
+            Uuid::new_v4().to_string(),
+            HeartbeatAction::RunNow {
+                schedule_id: original.schedule.schedule_id,
+                expected_version: 1
+            }
+        )
+        .await
+        .is_err());
+    service.stop_run_admission().await.unwrap();
+    assert!(service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .is_err());
+    assert!(!service.has_active_operation());
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn heartbeat_native_registry_controls_all_actions_inside_an_executing_turn() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let run = service
+        .coordinate_local(|service| {
+            service.try_begin_run(None, "human asked for scheduling controls")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let _agent = service.agent.lock().await;
+    let mut runtime = service.heartbeat_context.as_ref().unwrap().runtime.clone();
+    runtime.heartbeat_human_request = Some(
+        "Create this job check, run it now, pause, resume, edit the cadence, stop and delete it."
+            .into(),
+    );
+    let first = native_control(&runtime, create()).await;
+    assert!(!first.is_error, "{}", first.content);
+    let receipt: HeartbeatReceipt = serde_json::from_str(first.content.as_text().unwrap()).unwrap();
+    let mut schedule = receipt.schedule;
+    for action in ["run_now", "pause", "resume", "edit", "stop", "delete"] {
+        let id = schedule.schedule_id.clone();
+        let expected = schedule.version;
+        let operation = match action {
+            "run_now" => HeartbeatAction::RunNow {
+                schedule_id: id,
+                expected_version: expected,
+            },
+            "pause" => HeartbeatAction::Pause {
+                schedule_id: id,
+                expected_version: expected,
+            },
+            "resume" => HeartbeatAction::Resume {
+                schedule_id: id,
+                expected_version: expected,
+            },
+            "edit" => {
+                let HeartbeatAction::Create { mut spec } = create() else {
+                    unreachable!()
+                };
+                spec.cadence = crate::store::HeartbeatCadence::Interval {
+                    interval_ms: 120_000,
+                };
+                HeartbeatAction::Edit {
+                    schedule_id: id,
+                    expected_version: expected,
+                    spec,
+                }
+            }
+            "stop" => HeartbeatAction::Stop {
+                schedule_id: id,
+                expected_version: expected,
+            },
+            _ => HeartbeatAction::Delete {
+                schedule_id: id,
+                expected_version: expected,
+            },
+        };
+        let result =
+            tokio::time::timeout(Duration::from_secs(10), native_control(&runtime, operation))
+                .await
+                .unwrap();
+        assert!(!result.is_error, "{action}: {}", result.content);
+        let receipt: HeartbeatReceipt =
+            serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+        schedule = receipt.schedule;
+        assert_eq!(service.active_run().unwrap().run_id, run.run_id);
+    }
+    assert_eq!(schedule.state, HeartbeatState::Deleted);
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn heartbeat_automatic_relinquishing_control_is_bound_to_own_occurrence_and_pinned_version() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let first = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap()
+        .schedule;
+    let other = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap()
+        .schedule;
+    let pending =
+        crate::store::materialize_heartbeats(&path, first.next_due_ms.max(other.next_due_ms))
+            .unwrap()
+            .into_iter()
+            .find(|o| o.schedule_id == first.schedule_id)
+            .unwrap();
+    let run = Uuid::new_v4().to_string();
+    let generation = Uuid::new_v4().to_string();
+    let cwd = service.heartbeat_context.as_ref().unwrap().execution_cwd();
+    crate::store::admit_heartbeat(
+        &path,
+        "session",
+        &pending.occurrence_id,
+        pending.revision,
+        &run,
+        &generation,
+        "automatic input",
+        &cwd,
+        first.next_due_ms.max(other.next_due_ms),
+    )
+    .unwrap()
+    .unwrap();
+    let mut runtime = service.heartbeat_context.as_ref().unwrap().runtime.clone();
+    runtime.heartbeat_execution = true;
+    runtime.heartbeat_human_request = None;
+    assert!(runtime.active_threads.begin_run(&run));
+    assert!(
+        native_control(
+            &runtime,
+            HeartbeatAction::Pause {
+                schedule_id: other.schedule_id.clone(),
+                expected_version: other.version
+            }
+        )
+        .await
+        .is_error
+    );
+    let paused = native_control(
+        &runtime,
+        HeartbeatAction::Pause {
+            schedule_id: first.schedule_id.clone(),
+            expected_version: first.version,
+        },
+    )
+    .await;
+    assert!(!paused.is_error, "{}", paused.content);
+    let paused: HeartbeatReceipt = serde_json::from_str(paused.content.as_text().unwrap()).unwrap();
+    let resumed = service
+        .control_human_heartbeat(
+            Uuid::new_v4().to_string(),
+            HeartbeatAction::Resume {
+                schedule_id: first.schedule_id.clone(),
+                expected_version: paused.schedule.version,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        native_control(
+            &runtime,
+            HeartbeatAction::Pause {
+                schedule_id: first.schedule_id.clone(),
+                expected_version: resumed.schedule.version
+            }
+        )
+        .await
+        .is_error
+    );
+    assert_eq!(
+        crate::store::read_heartbeat(&path, "session", &first.schedule_id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+    assert_eq!(
+        crate::store::read_heartbeat(&path, "session", &other.schedule_id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+}
+
+#[tokio::test]
+async fn heartbeat_deferred_or_invalid_admission_does_not_retain_a_session_operation_lease() {
+    for invalidated in [false, true] {
+        let (parts, path) = fixture();
+        let service = &parts.service;
+        let schedule = service
+            .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+            .await
+            .unwrap()
+            .schedule;
+        let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+            .unwrap()
+            .remove(0);
+        if invalidated {
+            service
+                .control_human_heartbeat(
+                    Uuid::new_v4().to_string(),
+                    HeartbeatAction::Pause {
+                        schedule_id: schedule.schedule_id,
+                        expected_version: schedule.version,
+                    },
+                )
+                .await
+                .unwrap();
+        } else {
+            crate::store::create_person_session_inbox_item(
+                &path,
+                "session",
+                crate::store::InboxDelivery::Queue,
+                "Queued human input wins",
+                None,
+                None,
+                "Queued human input wins",
+            )
+            .unwrap();
+        }
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        let result = service.start_heartbeat_occurrence(pending, lease).await;
+        if invalidated {
+            assert!(result.is_err());
+        } else {
+            assert!(result.unwrap().is_none());
+        }
+        assert!(!service.has_active_operation());
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session")
+            .expect("a deferred or invalidated occurrence must release the operation lease");
+        let human_service = service.clone();
+        let human = crate::store::spawn_blocking_store_caller(move || {
+            human_service.try_begin_run_with_lease(
+                None,
+                "Later explicit human run",
+                Some(lease),
+                RunAdmissionKind::default(),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(service.active_run().unwrap().run_id, human.run_id);
+    }
+}
+
+#[tokio::test]
+async fn heartbeat_workspace_conflict_defers_without_consuming_transient_retry_allowance() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let schedule = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap()
+        .schedule;
+    let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+        .unwrap()
+        .remove(0);
+    let identity = crate::workspace::GitTarget::local(
+        service.heartbeat_context.as_ref().unwrap().execution_cwd(),
+    )
+    .lease_identity();
+    let mutation = sessions::WorkspaceMutationLease::try_acquire(&path, &identity).unwrap();
+    for _ in 0..5 {
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        assert!(service
+            .start_heartbeat_occurrence(pending.clone(), lease)
+            .await
+            .unwrap()
+            .is_none());
+    }
+    let history = crate::store::heartbeat_history(&path, "session", &schedule.schedule_id).unwrap();
+    assert_eq!(history[0].attempt_count, 0);
+    assert_eq!(
+        history[0].state,
+        crate::store::HeartbeatOccurrenceState::Pending
+    );
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        crate::store::read_heartbeat(&path, "session", &schedule.schedule_id)
+            .unwrap()
+            .state,
+        HeartbeatState::Active
+    );
+    drop(mutation);
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    drop(lease);
+}
+
+#[tokio::test]
+async fn heartbeat_question_deferral_releases_exact_service_lease_without_goal_authority() {
+    let (parts, path) = fixture();
+    let service = &parts.service;
+    let schedule = service
+        .control_human_heartbeat(Uuid::new_v4().to_string(), create())
+        .await
+        .unwrap()
+        .schedule;
+    let pending = crate::store::materialize_heartbeats(&path, schedule.next_due_ms)
+        .unwrap()
+        .remove(0);
+    let snapshot = sessions::load_session(&path, "session").unwrap();
+    let run = Uuid::new_v4().to_string();
+    crate::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "session",
+            snapshot.messages.len() as u64,
+            &crate::types::Message::User {
+                content: "Choose a result".into(),
+            },
+            &run,
+        )
+        .unwrap();
+    let question = crate::store::create_task_question(
+        &path,
+        &crate::store::QuestionRequest {
+            session_id: "session".into(),
+            request_id: "heartbeat-gate".into(),
+            run_id: run.clone(),
+            generation: run.clone(),
+            text: "CSV or JSON?".into(),
+            choices: vec!["CSV".into(), "JSON".into()],
+            responder_class: crate::store::QuestionResponder::HumanDecision,
+        },
+        service.config_version.unwrap(),
+    )
+    .unwrap();
+    {
+        let mut conn = crate::store::open_runtime_connection(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        crate::store::clear_active_run(
+            &tx,
+            "session",
+            &run,
+            crate::store::RunTerminalDisposition::Completed,
+            None,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    for _ in 0..2 {
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+        assert!(service
+            .start_heartbeat_occurrence(pending.clone(), lease)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!service.has_active_operation());
+        assert_eq!(
+            crate::store::heartbeat_history(&path, "session", &schedule.schedule_id).unwrap(),
+            vec![pending.clone()]
+        );
+        assert_eq!(
+            crate::store::pending_task_question(&path, "session").unwrap(),
+            Some(question.clone())
+        );
+    }
+    assert!(crate::store::list_session_inbox(&path, "session")
+        .unwrap()
+        .is_empty());
+    assert!(crate::store::load_session_goal(&path, "session")
+        .unwrap()
+        .is_none());
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    // Automatic deferral does not retain the run/workspace lease or prevent
+    // a later explicit human turn from using the ordinary admission path.
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    let human_service = service.clone();
+    let human = crate::store::spawn_blocking_store_caller(move || {
+        human_service.try_begin_run_with_lease(
+            None,
+            "Human guidance while deciding",
+            Some(lease),
+            RunAdmissionKind::default(),
+        )
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(service.active_run().unwrap().run_id, human.run_id);
+}

@@ -1,4 +1,5 @@
 **/target/
+/.nac-ci-incremental-cache/
 .github/scripts/node_modules/
 .env
 images/nac
@@ -15,3 +16,8 @@ crates/nac-core/src/model/client_local.rs
 !/working_docs/.gitkeep
 # Local repository goal prompt retained for possible future use.
 /.agents/skills/goal-prompt/
+# Same-run browser CI artifacts and static selection metadata are not source.
+/browser-binary-upload/
+/browser-binary-download/
+/browser-binary-runtime/
+/crates/nac-server/web/browser-inventory/

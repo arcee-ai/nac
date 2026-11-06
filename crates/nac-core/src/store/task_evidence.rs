@@ -164,7 +164,7 @@ pub(crate) fn record_run_outcome_with_connection(
     disposition: RunOutcomeDisposition,
     result: Option<&str>,
     failure: Option<&crate::run_failure::RunFailure>,
-) -> Result<()> {
+) -> Result<bool> {
     let (excerpt, truncated) = match result {
         Some(result) => {
             let redacted = crate::model::redact_credentials(result, &[]);
@@ -180,7 +180,7 @@ pub(crate) fn record_run_outcome_with_connection(
         .map(serde_json::to_string)
         .transpose()
         .context("failed to serialize run outcome failure")?;
-    conn.execute(
+    let inserted = conn.execute(
         "INSERT OR IGNORE INTO session_run_outcomes
          (session_id, run_id, disposition, result_excerpt, result_truncated, failure_json, finished_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -199,7 +199,8 @@ pub(crate) fn record_run_outcome_with_connection(
         "session_run_outcomes",
         session_id,
         RETAINED_RUN_OUTCOMES,
-    )
+    )?;
+    Ok(inserted == 1)
 }
 
 /// Retains the final state of a goal row the caller is about to delete.

@@ -2,11 +2,14 @@ pub(crate) mod contracts;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod error;
+pub(crate) mod fresh_task_schedules;
+pub(crate) mod heartbeats;
 pub(crate) mod managed_secrets;
 pub(crate) mod model_configurations;
 pub(crate) mod project_folders;
 pub(crate) mod projects;
 pub(crate) mod server;
+pub(crate) mod session_integrations;
 pub(crate) mod session_lifecycle;
 pub(crate) mod session_runs;
 pub(crate) mod session_state;
@@ -32,3 +35,9 @@ pub(crate) mod task_launches;
 mod http_listener;
 
 pub(crate) mod product_context;
+
+pub(crate) mod task_followup_delegations;
+pub(crate) mod task_questions;
+
+pub(crate) mod attention;
+mod attention_contracts;
