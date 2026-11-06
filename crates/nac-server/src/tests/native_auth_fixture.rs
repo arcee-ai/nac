@@ -79,6 +79,18 @@ async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before
         .route("/{*route}", get(handler.clone()).post(handler))
         .layer(middleware::from_fn(fence));
     for (method, path) in [
+        (Method::POST, "/app"),
+        (Method::POST, "/app?document=fixture"),
+        (Method::PUT, "/app"),
+        (Method::PATCH, "/app"),
+        (Method::DELETE, "/app"),
+        (Method::OPTIONS, "/app"),
+        (Method::GET, "/app/"),
+        (Method::HEAD, "/app/"),
+        (Method::GET, "/app/anything"),
+        (Method::HEAD, "/app/anything"),
+        (Method::GET, "/application"),
+        (Method::GET, "/app%2Fanything"),
         (Method::POST, "/sessions"),
         (Method::POST, "/sessions?workspace_stats=true"),
         (Method::PUT, "/sessions"),
@@ -127,12 +139,27 @@ async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before
         assert_eq!(&body[..], expected_body);
     }
     assert_eq!(effects.load(Ordering::SeqCst), 0);
-    let request = axum::http::Request::builder()
-        .uri("/ui-config")
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::OK);
-    assert_eq!(effects.load(Ordering::SeqCst), 1);
+    for (method, path) in [
+        (Method::GET, "/ui-config"),
+        (Method::GET, "/app"),
+        (Method::GET, "/app?document=fixture"),
+        (Method::HEAD, "/app"),
+        (Method::HEAD, "/app?document=fixture"),
+    ] {
+        let expected_body: &[u8] = if method == Method::HEAD { b"" } else { b"effect" };
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 16)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], expected_body);
+    }
+    assert_eq!(effects.load(Ordering::SeqCst), 5);
     for method in [Method::GET, Method::DELETE] {
         assert!(allowed(
             &method,
