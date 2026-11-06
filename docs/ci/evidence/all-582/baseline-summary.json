@@ -1,0 +1,34 @@
+{
+  "run_id": 41936374012,
+  "attempt": 1,
+  "url": "https://github.com/arcee-ai/nac/actions/runs/41936374012",
+  "event": "push",
+  "branch_head_sha": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+  "candidate_sha": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+  "status": "completed",
+  "conclusion": "success",
+  "processing_seconds": 2516.0,
+  "event_to_green_seconds": 2519.0,
+  "observed_prepare_to_result_seconds": 2516.0,
+  "observed_event_to_result_seconds": 2519.0,
+  "initial_wait_seconds": 3.0,
+  "metric_eligible": true,
+  "ordinary_first_attempt_metric": false,
+  "cohort_qualified": false,
+  "cohort_remaining": [
+    "consecutive ordinary run sequence",
+    "at least five meaningful source SHAs",
+    "representative backend/managed/frontend/docs cases",
+    "controlled cold-cache evidence",
+    "complete coverage matrix and negative controls",
+    "cache/resources/cost disclosure"
+  ],
+  "completed_job_seconds_by_runner": {
+    "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5441.0,
+    "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 1026.0
+  },
+  "completed_job_seconds": 6467.0,
+  "incomplete_compute_job_ids": [],
+  "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+  "ineligible_reasons": []
+}

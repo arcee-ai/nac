@@ -8,6 +8,7 @@ import { LeftSidebar } from "@/app/components/LeftSidebar";
 import DesignPreviewPage from "@/app/components/pages/DesignPreviewPage";
 import ProjectRedirectPage from "@/app/components/pages/ProjectRedirectPage";
 import ProjectsListPage from "@/app/components/pages/ProjectsListPage";
+import ProjectTaskSchedulesPage from "@/app/features/heartbeats/fresh/ProjectTaskSchedulesPage";
 import SessionPage from "@/app/components/pages/SessionPage";
 import { routes } from "@/app/lib/routes";
 import { ProjectActionsProvider } from "@/app/providers/ProjectActionsProvider";
@@ -52,6 +53,11 @@ export default function App() {
                   <Route element={<AppShell />}>
                     <Route path="/" element={<ProjectsListPage />} />
                     <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                    <Route
+                      path="/project/:projectId/task-schedules"
+                      element={<ProjectTaskSchedulesPage />}
+                    />
+                    <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
                     <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
                   </Route>
                   <Route path="/design" element={<DesignRoute />} />

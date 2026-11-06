@@ -9,9 +9,6 @@ ARG RUST_VERSION=1.98.0
 ARG CARGO_BUILD_JOBS=5
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-ARG NAC_BUILD_TRACK=dev
-ARG NAC_BUILD_ID
-ARG NAC_SOURCE_REVISION
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
@@ -33,8 +30,32 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && cargo --version
 
 WORKDIR /src/nac
+# External dependencies are keyed by the exact workspace manifests and lockfile.
+# Local placeholders are never allowed to supply the final product artifacts.
+COPY Cargo.toml Cargo.lock ./
+COPY crates/nac-catalog-gen/Cargo.toml crates/nac-catalog-gen/Cargo.toml
+COPY crates/nac-contracts/Cargo.toml crates/nac-contracts/Cargo.toml
+COPY crates/nac-core/Cargo.toml crates/nac-core/Cargo.toml
+COPY crates/nac-credential-store/Cargo.toml crates/nac-credential-store/Cargo.toml
+COPY crates/nac-managed/Cargo.toml crates/nac-managed/Cargo.toml
+COPY crates/nac-process/Cargo.toml crates/nac-process/Cargo.toml
+COPY crates/nac-server/Cargo.toml crates/nac-server/Cargo.toml
+RUN for crate in crates/*; do mkdir -p "$crate/src"; printf '\n' > "$crate/src/lib.rs"; done \
+    && printf 'fn main() {}\n' > crates/nac-catalog-gen/src/main.rs \
+    && printf 'fn main() {}\n' > crates/nac-server/src/main.rs \
+    && printf 'fn main() {}\n' > crates/nac-contracts/build.rs \
+    && printf 'fn main() {}\n' > crates/nac-server/build.rs \
+    && cargo build --release --locked -p nac-server --bin nac-web
 COPY . .
-RUN NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
+# Candidate identity belongs only to the source build. Declaring these earlier
+# also invalidates unrelated RUN layers when a PR candidate changes.
+ARG NAC_BUILD_TRACK=dev
+ARG NAC_BUILD_ID
+ARG NAC_SOURCE_REVISION
+# Clear every local workspace artifact after the real source arrives, even when
+# checkout timestamps predate the dependency build. External dependencies remain.
+RUN cargo clean --release --locked --offline --workspace \
+    && NAC_BUILD_TRACK="${NAC_BUILD_TRACK}" \
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" \
     NAC_BUILD_ID="${NAC_BUILD_ID}" \
     NAC_SOURCE_REVISION="${NAC_SOURCE_REVISION}" \

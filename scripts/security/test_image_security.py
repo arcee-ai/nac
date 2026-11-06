@@ -405,6 +405,26 @@ class DriverTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rescan.select_run([run], {12: [dict(artifact, expired=True)]}, jobs, NOW)
 
+    def test_current_producer_precedes_legacy_without_hiding_missing_evidence(self):
+        newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
+                  "created_at": "2026-10-21T08:00:00Z", "head_sha": "a" * 40,
+                  "head_repository": {"full_name": "arcee-ai/nac"}}
+        old = dict(newest, id=1, head_sha="b" * 40)
+        current = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
+            {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
+        legacy = dict(current, name=rescan.LEGACY_INVENTORY_JOB)
+        jobs = {2: [current], 1: [legacy]}
+        artifacts = {2: [{"name": "managed-image-security-" + "a" * 40, "expired": False}],
+                     1: [{"name": "managed-image-security-" + "b" * 40, "expired": False}]}
+        self.assertEqual(rescan.select_run([newest, old], artifacts, jobs, NOW)[0]["id"], 2)
+        self.assertEqual(rescan.select_run([old], artifacts, jobs, NOW)[0]["id"], 1)
+        for invalid in ([], [dict(artifacts[2][0], expired=True)]):
+            with self.assertRaises(ValueError):
+                rescan.select_run([newest, old], artifacts | {2: invalid}, jobs, NOW)
+        for ambiguous in ([current, current], [current, legacy]):
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                rescan.select_run([newest, old], artifacts, jobs | {2: ambiguous}, NOW)
+
     def test_latest_red_inventory_cannot_fall_back_to_older_green(self):
         newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
                   "conclusion": "failure", "created_at": "2026-10-21T08:00:00Z", "head_sha": "a" * 40,

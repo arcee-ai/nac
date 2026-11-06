@@ -1,5 +1,16 @@
 use super::*;
 
+/// Inbox edits and cancellation require a nonnegative expected revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NegativeInboxVersion;
+
+impl std::fmt::Display for NegativeInboxVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("inbox item version must not be negative")
+    }
+}
+impl std::error::Error for NegativeInboxVersion {}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -89,6 +100,46 @@ pub struct SessionInboxRecord {
     pub delivered_at: Option<String>,
     pub cancelled_at: Option<String>,
     pub version: i64,
+}
+
+/// Immutable delivery identity captured before model-only prompt expansion.
+/// The transcript transaction still compares the original pending bytes and
+/// revision; expanded skill instructions never replace that durable authority.
+#[derive(Debug, Clone)]
+pub(crate) struct AdmittedInboxPrompt {
+    pub(crate) id: i64,
+    pub(crate) session_id: String,
+    pub(crate) content: String,
+    pub(crate) version: i64,
+}
+
+impl From<SessionInboxRecord> for AdmittedInboxPrompt {
+    fn from(record: SessionInboxRecord) -> Self {
+        Self {
+            id: record.id,
+            session_id: record.session_id,
+            content: record.content,
+            version: record.version,
+        }
+    }
+}
+
+/// Existing queued input retains captured raw authority. A same-chat heartbeat
+/// instead creates its already-expanded input inside its own admission; only
+/// that transaction's identified result may use the established literal path.
+#[derive(Debug, Clone)]
+pub(crate) enum RunInboxPrompt {
+    CapturedRaw(AdmittedInboxPrompt),
+    AdmissionCreatedHeartbeat(i64),
+}
+
+impl RunInboxPrompt {
+    pub(crate) fn id(&self) -> i64 {
+        match self {
+            Self::CapturedRaw(input) => input.id,
+            Self::AdmissionCreatedHeartbeat(id) => *id,
+        }
+    }
 }
 
 pub(crate) const INBOX_RECORD_COLUMNS: &str =
@@ -301,6 +352,8 @@ fn create_inbox_item(
             admission.review_intent,
         ],
     )?;
+    // The pending item is committed even if the following row read/ack fails.
+    super::goal_changes::session_committed(path, session_id);
     load_session_inbox_item_with_connection(&connection, session_id, connection.last_insert_rowid())
 }
 
@@ -369,6 +422,7 @@ pub fn next_pending_session_inbox_item(
             &format!(
                 "SELECT {INBOX_RECORD_COLUMNS} FROM session_inbox
                  WHERE session_id = ?1 AND status = 'pending'
+                   AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)
                  ORDER BY id ASC LIMIT 1"
             ),
             params![session_id],
@@ -394,18 +448,20 @@ pub fn update_pending_session_inbox_item(
     target_run_id: Option<&str>,
 ) -> Result<SessionInboxRecord> {
     if expected_version < 0 {
-        return Err(anyhow!("inbox item version must not be negative"));
+        return Err(NegativeInboxVersion.into());
     }
     if delivery == InboxDelivery::Queue && target_run_id.is_some() {
         return Err(anyhow!("queued inbox input cannot target an active run"));
     }
     let connection = open_runtime_connection(path)?;
+    super::task_questions::require_question_queue(&connection,session_id,item_id,delivery)?;
     let changed = connection.execute(
         "UPDATE session_inbox
          SET delivery = ?1, target_run_id = ?2, updated_at = ?3,
              version = version + 1
          WHERE session_id = ?4 AND id = ?5 AND status = 'pending'
-           AND version = ?6",
+           AND version = ?6
+           AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)",
         params![
             delivery.as_str(),
             target_run_id,
@@ -445,27 +501,33 @@ pub fn cancel_pending_session_inbox_item(
     expected_version: i64,
 ) -> Result<SessionInboxRecord> {
     if expected_version < 0 {
-        return Err(anyhow!("inbox item version must not be negative"));
+        return Err(NegativeInboxVersion.into());
     }
-    let connection = open_runtime_connection(path)?;
+    let mut connection = open_runtime_connection(path)?;
+    let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = now_utc();
-    let changed = connection.execute(
+    let changed = transaction.execute(
         "UPDATE session_inbox
          SET status = 'cancelled', cancelled_at = ?1, updated_at = ?1,
              target_run_id = NULL, version = version + 1
          WHERE session_id = ?2 AND id = ?3 AND status = 'pending'
-           AND version = ?4",
+           AND version = ?4
+           AND NOT EXISTS (SELECT 1 FROM heartbeat_occurrences h WHERE h.inbox_item_id = session_inbox.id)",
         params![now, session_id, item_id, expected_version],
     )?;
     if changed != 1 {
         return Err(pending_update_error(
-            &connection,
+            &transaction,
             session_id,
             item_id,
             expected_version,
         ));
     }
-    load_session_inbox_item_with_connection(&connection, session_id, item_id)
+    super::task_questions::cancel_question_inbox(&transaction,session_id,item_id)?;
+    let item=load_session_inbox_item_with_connection(&transaction,session_id,item_id)?;
+    transaction.commit()?;
+    super::goal_changes::session_committed(path, session_id);
+    Ok(item)
 }
 command CancelPendingSessionInboxItemCommand {
     session_id: String = session_id.to_owned(),
@@ -483,6 +545,9 @@ fn pending_update_error(
     item_id: i64,
     expected_version: i64,
 ) -> anyhow::Error {
+    if connection.query_row("SELECT EXISTS(SELECT 1 FROM heartbeat_occurrences WHERE session_id=?1 AND inbox_item_id=?2)",params![session_id,item_id],|row|row.get::<_,bool>(0)).unwrap_or(true) {
+        return anyhow!("admitted heartbeat input is immutable; control its schedule or stop its exact occurrence");
+    }
     match load_session_inbox_item_with_connection(connection, session_id, item_id) {
         Err(error) => error,
         Ok(item) if item.status != InboxStatus::Pending => {
@@ -506,6 +571,44 @@ mod tests {
                 uuid::Uuid::new_v4()
             ))
             .join("store.db")
+    }
+
+    #[test]
+    fn negative_inbox_versions_are_typed_before_lookup_without_mutation() {
+        let path = temp_store_path("negative-version");
+        initialize(&path).unwrap();
+        insert_test_session(&path, "session");
+        let item = create_session_inbox_item(
+            &path,
+            "session",
+            InboxDelivery::Queue,
+            "retain input",
+            None,
+            None,
+        )
+        .unwrap();
+        for id in [item.id, 9223372036854775800] {
+            for error in [
+                update_pending_session_inbox_item(
+                    &path,
+                    "session",
+                    id,
+                    -1,
+                    InboxDelivery::Queue,
+                    Some("also-invalid-target"),
+                )
+                .unwrap_err(),
+                cancel_pending_session_inbox_item(&path, "session", id, -1).unwrap_err(),
+            ] {
+                assert!(error.downcast_ref::<NegativeInboxVersion>().is_some());
+                assert_eq!(error.to_string(), "inbox item version must not be negative");
+                assert_eq!(
+                    list_session_inbox(&path, "session").unwrap(),
+                    vec![item.clone()]
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

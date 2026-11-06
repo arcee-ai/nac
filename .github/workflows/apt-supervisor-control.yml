@@ -1,0 +1,26 @@
+name: Private privileged APT lifecycle control
+on:
+  push:
+    branches: [codex/all-582-apt-supervisor-control]
+permissions:
+  contents: read
+jobs:
+  root-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Exercise owned UID0 timeout, interruptions and parent loss without packages
+        run: python3 .github/scripts/browser-apt-root-control.py driver --state "$RUNNER_TEMP/browser-apt-root-control"
+      - name: Preserve every first-attempt result and cleanup receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-apt-root-control-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/browser-apt-root-control/
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error

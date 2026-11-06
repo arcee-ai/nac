@@ -284,6 +284,16 @@ impl From<anyhow::Error> for ApiError {
             return Self::new(mapped.status, error.to_string());
         }
 
+        if let Some(question) = error.downcast_ref::<nac_core::store::QuestionError>() {
+            use nac_core::store::QuestionError;
+            let status = match question {
+                QuestionError::Invalid => StatusCode::BAD_REQUEST,
+                QuestionError::NotFound => StatusCode::NOT_FOUND,
+                QuestionError::HumanRequired | QuestionError::Denied => StatusCode::FORBIDDEN,
+                QuestionError::Conflict | QuestionError::Unavailable => StatusCode::CONFLICT,
+            };
+            return Self::new(status, error.to_string());
+        }
         let message = error.to_string();
         // A typed uncertain admission remains a reconciliation failure even when
         // its retained SQLite cause is BUSY/LOCKED. Only precommit contention is 409.
@@ -338,6 +348,17 @@ impl From<anyhow::Error> for ApiError {
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")
         {
+            StatusCode::BAD_REQUEST
+        } else if error
+            .downcast_ref::<nac_core::store::PersistenceAdmissionError>()
+            .is_none()
+            && (error.root_cause().is::<nac_core::store::EmptyGoalUpdate>()
+                || error
+                    .root_cause()
+                    .is::<nac_core::store::NegativeInboxVersion>())
+        {
+            // Ordinary context retains the owner's validation identity. A marker
+            // used as context around a real store failure is not input validation.
             StatusCode::BAD_REQUEST
         } else if message.contains("was not found")
             || message.contains("not found")

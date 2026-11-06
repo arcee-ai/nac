@@ -1012,7 +1012,7 @@ mod tests {
                 let transaction = connection
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .unwrap();
-                clear_active_run(&transaction, "child", "run-1", expected).unwrap();
+                clear_active_run(&transaction, "child", "run-1", expected, None).unwrap();
                 transaction.commit().unwrap();
             }
 

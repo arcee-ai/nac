@@ -1,3 +1,4 @@
+import { HeartbeatAttentionController } from "@/app/features/heartbeats/HeartbeatAttentionController";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "../../App";
@@ -47,6 +48,7 @@ function RuntimePresentation({
   return (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={runtime.queryClient}>
+        <HeartbeatAttentionController />
         {theme ? theme(view) : <ThemeProvider local>{view}</ThemeProvider>}
       </QueryClientProvider>
     </RuntimeContext.Provider>

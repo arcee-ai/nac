@@ -300,6 +300,52 @@ fn transcript_append_run_prompt_retry_is_atomic_with_recovery_and_owner_fenced()
 }
 
 #[test]
+fn attention_goal_free_bound_prompt_needs_postcommit_admission_invalidation() {
+    for phase in [
+        AppendFault::BeforeCommit,
+        AppendFault::Statements,
+        AppendFault::AfterCommitBeforeAck,
+        AppendFault::UncertainCommit,
+    ] {
+        let (_dir, path) = setup();
+        let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+        let writer = TranscriptLogWriter::for_run(&path, "session", "run", &lease).unwrap();
+        let mut observation = AttentionStoreObservation::subscribe(&path);
+        *writer.append_fault.lock().unwrap() = Some((phase, 1));
+        let initial = writer.append_run_prompt("session", 0, &message("prompt"), "run");
+        let committed = matches!(
+            phase,
+            AppendFault::AfterCommitBeforeAck | AppendFault::UncertainCommit
+        );
+        assert_eq!(observation.try_changed().unwrap().is_some(), committed);
+        assert_eq!(
+            initial.is_ok(),
+            matches!(phase, AppendFault::UncertainCommit)
+        );
+        writer
+            .append_run_prompt("session", 0, &message("prompt"), "run")
+            .unwrap();
+        assert_eq!(
+            load_run_recovery(&path, "session").unwrap().unwrap().run_id,
+            "run"
+        );
+        assert_eq!(observation.try_changed().unwrap().is_some(), !committed);
+        writer
+            .append_run_prompt("session", 0, &message("prompt"), "run")
+            .unwrap();
+        writer
+            .append("session", 1, &message("ordinary delta"))
+            .unwrap();
+        assert_eq!(observation.try_changed().unwrap(), None);
+        drop(lease);
+        assert!(writer
+            .append_run_prompt("session", 0, &message("prompt"), "run")
+            .is_err());
+        assert_eq!(observation.try_changed().unwrap(), None);
+    }
+}
+
+#[test]
 fn transcript_append_generation_change_rejects_even_the_same_run_id() {
     let (_dir, path) = setup();
     insert_test_session(&path, "parent");
