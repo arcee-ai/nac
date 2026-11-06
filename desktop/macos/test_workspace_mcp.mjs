@@ -70,3 +70,20 @@ test('an ignored click cannot satisfy the disabled readback', () => {
     assert.equal(f.probe(false), false);
   } finally { f.close(); }
 });
+
+// Modal uses a 150ms fade. The maintained waitJS may probe repeatedly; it
+// must not click until the exact owned surface is visible, or re-enable it.
+test('opening modal waits for full visibility before its one idempotent disable', () => {
+  const f = fixture(dialog(form));
+  try {
+    const modal = f.document.querySelector('[role=dialog]');
+    modal.style.opacity = '0.5';
+    assert.throws(() => f.probe(true));
+    assert.deepEqual(f.clicks, []);
+    modal.style.opacity = '1';
+    assert.equal(f.probe(true), true);
+    assert.equal(f.probe(true), true);
+    assert.equal(f.probe(false), true);
+    assert.deepEqual(f.clicks, ['enabled']);
+  } finally { f.close(); }
+});
