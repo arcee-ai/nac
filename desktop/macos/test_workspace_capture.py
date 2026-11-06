@@ -18,7 +18,7 @@ class WorkspaceCaptureTests(unittest.TestCase):
         print(result.stdout, end='')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_declared_visible_page_delta_preserves_approval_and_entire_snapshot(self):
+    def test_declared_deltas_preserve_approval_and_remaining_snapshot(self):
         """Source preservation only; this does not execute Swift or native paint."""
         source = self.source('WorkspaceSmoke.swift')
         script = re.search(r'static let captureReadinessScript = #"""\n([\s\S]*?)\n    """#', source)[1]
@@ -31,7 +31,8 @@ class WorkspaceCaptureTests(unittest.TestCase):
                '        sessionState.message_page?.total === 2 && sessionState.message_page?.has_older === false')
         self.assertIn(old, original)
         self.assertEqual(re.search(pattern, script)[0], original.replace(old, new))
-        prefix = source[source.index('    func captureReadiness('):source.index('        guard var value = try await')]
+        capture_start = source.index('    func captureReadiness(')
+        prefix = source[capture_start:source.index('        guard var value = try await', capture_start)]
         canonical = prefix[prefix.index('            canonicalState ='):prefix.index('            arguments["sessionState"]')]
         self.assertIn("'?include_sessions=false'", canonical)
         self.assertIn('Canonical snapshot owner differs', canonical)
@@ -49,6 +50,34 @@ class WorkspaceCaptureTests(unittest.TestCase):
                                     '        if target != nil && !painting {\n', 1)
         snapshot = snapshot.replace('        if !ready || !afterSurface {\n',
                                     '        if target != nil && (!ready || !afterSurface) {\n', 1)
+        # Preserve all capture checks/ordering except the explicit paint commit
+        # repair. Behavioral fault coverage executes the entire exact method.
+        declaration = '    func snapshot(_ name: String, expecting target: CaptureTarget? = nil) async throws {\n'
+        snapshot = snapshot.replace(declaration, declaration + '''        var targetedCaptureCompleted = false
+        defer {
+            if target != nil && !targetedCaptureCompleted {
+                checks["visible-paint"] = ["status": "unavailable", "detail": "Requested snapshot did not complete all capture and identity checks; inspect retained diagnostics"]
+                record(["paint_diagnostics": paintDiagnostics, "checks": checks])
+            }
+        }
+''', 1)
+        old_pass = '''        } else if target != nil && checks["visible-paint"] == nil {
+            checks["visible-paint"] = ["status": "pass", "detail": "Fresh animation frame and revealed transcript before native snapshot; inspect retained PNGs"]
+'''
+        self.assertEqual(snapshot.count(old_pass), 1)
+        snapshot = snapshot.replace(old_pass, '')
+        final_guard = '''            throw PreviewError.message("Capture \\(name) did not reach and retain requested visible content")
+        }
+'''
+        self.assertEqual(snapshot.count(final_guard), 1)
+        snapshot = snapshot.replace(final_guard, final_guard + '''        if target != nil {
+            if checks["visible-paint"] == nil {
+                checks["visible-paint"] = ["status": "pass", "detail": "Fresh frame, retained PNG and requested content/identity checks completed; inspect retained PNGs"]
+            }
+            targetedCaptureCompleted = true
+            record(["paint_diagnostics": paintDiagnostics, "checks": checks])
+        }
+''', 1)
         self.assertEqual(source[source.index('    func snapshot('):], snapshot)
 
     def test_goal_dependency_source_blocks_all_actions_without_changing_the_success_branch(self):
