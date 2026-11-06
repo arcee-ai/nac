@@ -6,6 +6,193 @@ fn backend() -> Arc<ExecutionBackend> {
     })
 }
 
+struct HeldModelEof {
+    state: crate::terminal::collector::CollectorState,
+    directory: PathBuf,
+}
+
+impl Drop for HeldModelEof {
+    fn drop(&mut self) {
+        self.state.hold_finish_for_test(false);
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+#[cfg(unix)]
+async fn model_with_held_eof(command: &str) -> (TerminalManager, String, HeldModelEof) {
+    use crate::sandbox::ssh_command::shell_quote;
+    let manager = TerminalManager::for_direct();
+    let name = manager.next_session_name();
+    let directory = std::env::temp_dir().join(format!("nac-model-eof-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&directory).unwrap();
+    let release = directory.join("release");
+    let command = format!(
+        "while [ ! -e {} ]; do sleep 0.01; done; {command}",
+        shell_quote(&release.to_string_lossy())
+    );
+    let environment = nac_contracts::CommandEnvironmentSnapshot::from_parts(
+        std::collections::BTreeMap::new(),
+        vec!["exact-pty-secret".into()],
+    );
+    manager
+        .create_sanitized(
+            name.clone(),
+            &command,
+            None,
+            80,
+            24,
+            &backend(),
+            None,
+            &[],
+            environment,
+        )
+        .await
+        .unwrap();
+    let state = manager
+        .sessions
+        .lock()
+        .await
+        .get(&name)
+        .unwrap()
+        .collector_state();
+    state.hold_finish_for_test(true);
+    (manager, name, HeldModelEof { state, directory })
+}
+
+#[cfg(unix)]
+async fn release_model_and_observe_exit(
+    manager: &TerminalManager,
+    name: &str,
+    hold: &HeldModelEof,
+) {
+    std::fs::write(hold.directory.join("release"), b"release").unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let mut sessions = manager.sessions.lock().await;
+            let session = sessions.get_mut(name).unwrap();
+            session.refresh_status();
+            if session.exit_code() == Some(0) {
+                assert!(!session.output_complete());
+                // Wake an already registered preview only after process exit.
+                session.output_notify().notify_waiters();
+                session.output_notify().notify_one();
+                break;
+            }
+            drop(sessions);
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("gated exact command did not exit");
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn completed_model_preview_waits_for_safe_collector_suffix() {
+    let (manager, name, hold) = model_with_held_eof("printf exact-pty").await;
+    let preview = manager.write_stdin(&name, "", 2_000, 100, None);
+    tokio::pin!(preview);
+    tokio::select! {
+        biased;
+        result = &mut preview => panic!("unreleased command returned early: {result:?}"),
+        _ = std::future::ready(()) => {}
+    }
+    release_model_and_observe_exit(&manager, &name, &hold).await;
+    tokio::select! {
+        biased;
+        result = &mut preview => panic!("process exit overtook held output collection: {result:?}"),
+        _ = std::future::ready(()) => {}
+    }
+    hold.state.hold_finish_for_test(false);
+    let output = tokio::time::timeout(Duration::from_secs(2), &mut preview)
+        .await
+        .expect("safe suffix remained stuck after collector release")
+        .unwrap();
+    assert_eq!(output.content_preview, "exact-pty");
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.session_name.is_none());
+    assert!(manager.get(&name).await.is_none());
+    manager.remove_all().await.unwrap();
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn completed_empty_model_preview_does_not_require_output_bytes() {
+    let (manager, name, hold) = model_with_held_eof("true").await;
+    release_model_and_observe_exit(&manager, &name, &hold).await;
+    let preview = manager.write_stdin(&name, "", 2_000, 100, None);
+    tokio::pin!(preview);
+    tokio::select! {
+        biased;
+        result = &mut preview => panic!("process exit overtook held empty EOF: {result:?}"),
+        _ = std::future::ready(()) => {}
+    }
+    hold.state.hold_finish_for_test(false);
+    let output = tokio::time::timeout(Duration::from_secs(2), &mut preview)
+        .await
+        .expect("empty output must not require a nonempty suffix")
+        .unwrap();
+    assert!(output.content_preview.is_empty());
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.session_name.is_none());
+    manager.remove_all().await.unwrap();
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn model_preview_observes_exit_without_external_status_or_output_notifications() {
+    let (manager, name, hold) = model_with_held_eof("printf exact-pty").await;
+    hold.state.hold_finish_for_test(false);
+    let preview = manager.write_stdin(&name, "", 10_000, 100, None);
+    tokio::pin!(preview);
+    tokio::select! {
+        biased;
+        result = &mut preview => panic!("unreleased command returned early: {result:?}"),
+        _ = std::future::ready(()) => {}
+    }
+    // Do not query/refresh status or inject a notification: the safe prefix
+    // produces no append notification until EOF. The preview must notice exit.
+    std::fs::write(hold.directory.join("release"), b"release").unwrap();
+    let output = tokio::time::timeout(Duration::from_secs(2), &mut preview)
+        .await
+        .expect("preview waited for the full yield instead of observing root exit")
+        .unwrap();
+    assert_eq!(output.content_preview, "exact-pty");
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.session_name.is_none());
+    manager.remove_all().await.unwrap();
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn model_preview_deadline_preserves_late_safe_output_for_paging() {
+    let (manager, name, hold) = model_with_held_eof("printf exact-pty").await;
+    release_model_and_observe_exit(&manager, &name, &hold).await;
+    let output = tokio::time::timeout(
+        Duration::from_secs(1),
+        manager.write_stdin(&name, "", 0, 100, None),
+    )
+    .await
+    .expect("zero-yield preview waited for held EOF")
+    .unwrap();
+    assert!(output.content_preview.is_empty());
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.session_name.is_none());
+    hold.state.hold_finish_for_test(false);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !hold.state.complete() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("late safe output did not finish after held EOF was released");
+    let retained = manager
+        .read_output(&output.output_id, OutputStream::Combined, 0, 100)
+        .unwrap();
+    assert_eq!(retained.content, "exact-pty");
+    manager.remove_all().await.unwrap();
+}
+
 #[tokio::test]
 #[cfg(unix)]
 async fn retained_agent_natural_exit_is_cached_without_reap_archive_or_preview_reads() {
