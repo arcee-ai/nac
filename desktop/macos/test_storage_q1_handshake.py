@@ -29,7 +29,8 @@ class Q1HandshakeTests(unittest.TestCase):
             identity = dict(pid=17, launch_time=1)
             state = dict(apps=[identity], frontmost=identity)
 
-            def record(_path):
+            def record(_path, *, publication_changes):
+                self.assertTrue(publication_changes)
                 if clock[0] < pending_after:
                     return {}
                 return dict(profile_open_pending=not (root / 'profile-open-release').exists(),
