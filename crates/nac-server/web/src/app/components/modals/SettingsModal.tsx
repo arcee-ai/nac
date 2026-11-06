@@ -770,6 +770,7 @@ function SettingsForm({
                 <Separator />
                 <TextArea
                   label="Extra headers (JSON object)"
+                  aria-label="Extra headers (JSON object)"
                   textAreaSize={isMobile ? TextAreaSize.Large : TextAreaSize.Medium}
                   hintText="Blank sends none; header values must be strings."
                   placeholder='{ "X-Title": "NAC" }'

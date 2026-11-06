@@ -11639,6 +11639,7 @@ function $h({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 									/* @__PURE__ */ X(fd, {}),
 									/* @__PURE__ */ X(mu, {
 										label: "Extra headers (JSON object)",
+										"aria-label": "Extra headers (JSON object)",
 										textAreaSize: f ? pu.Large : pu.Medium,
 										hintText: "Blank sends none; header values must be strings.",
 										placeholder: "{ \"X-Title\": \"NAC\" }",

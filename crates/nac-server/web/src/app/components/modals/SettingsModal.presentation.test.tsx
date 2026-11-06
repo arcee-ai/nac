@@ -187,7 +187,7 @@ function renderReadySettings({
 }
 
 it.each([false, true])(
-  "retains edited headers/context across picker presentations (matching preset: %s)",
+  "names native headers and retains edits across picker presentations (matching preset: %s)",
   async (matchingPreset) => {
     const record = openingPreset;
     vi.spyOn(api, "listModelConfigs").mockResolvedValue({
@@ -208,7 +208,14 @@ it.each([false, true])(
       );
       fireEvent.click(screen.getByText("Advanced execution settings"));
       fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
-      fireEvent.change(document.querySelector("textarea")!, {
+      const dialog = screen.getByRole("dialog", { name: "Session settings" });
+      const headers = () =>
+        screen.getByRole("textbox", {
+          name: "Extra headers (JSON object)",
+        }) as HTMLTextAreaElement;
+      expect(headers().tagName).toBe("TEXTAREA");
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      fireEvent.change(headers(), {
         target: { value: '{"X-Manual":"draft"}' },
       });
       fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
@@ -220,11 +227,9 @@ it.each([false, true])(
           false,
         ),
       );
-      await waitFor(() =>
-        expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
-          '{"X-Manual":"draft"}',
-        ),
-      );
+      await waitFor(() => expect(headers().value).toBe('{"X-Manual":"draft"}'));
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(update).not.toHaveBeenCalled();
       expect(
         (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
       ).toBe("444");
@@ -237,9 +242,9 @@ it.each([false, true])(
       expect(
         (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
       ).toBe("444");
-      expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
-        '{"X-Manual":"draft"}',
-      );
+      expect(headers().value).toBe('{"X-Manual":"draft"}');
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(update).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await waitFor(() =>
         expect(update).toHaveBeenCalledExactlyOnceWith(
