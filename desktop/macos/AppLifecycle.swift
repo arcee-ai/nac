@@ -121,7 +121,7 @@ final class AppLifecycle {
 
     /// A UI deadline does not establish process exit or persistence drain and
     /// must not signal anything. Retain the original stop callback until the
-    /// existing engine owner settles it; no AppKit handshake is outstanding.
+    /// existing engine owner settles it after the UI declines that wait.
     @discardableResult
     func shutdownTimedOut(_ wait: Wait) -> Bool {
         guard phase == .stopping(wait) else { return false }
@@ -144,6 +144,17 @@ final class AppLifecycle {
             return .ignored
         }
     }
+
+    #if ATTENTION_SMOKE
+    /// Explicit cleanup of the already-owned fixture, not an idle observation
+    /// or a product Quit decision. Reuse the original stop if one is pending.
+    func beginAttentionFixtureCleanup() -> Wait? {
+        switch phase {
+        case .running, .confirming: return beginStop()
+        case .stopping, .shutdownFailed, .finished: return nil
+        }
+    }
+    #endif
 
     private func beginStop() -> Wait {
         let stop = Stop(launch: launch)

@@ -1,4 +1,5 @@
-"""Complete AppQuit source with inert UI doubles; never native activation evidence."""
+"""Complete AppQuit with inert boundaries; compiler/runtime require allocation."""
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,28 +9,77 @@ OWNER = Path(__file__).parent
 
 
 class QuitPresentationTests(unittest.TestCase):
-    def test_owned_quit_requests_activation_before_presenting_one_sheet(self):
-        source = (OWNER / 'AppQuit.swift').read_text()
-        self.assertEqual(source.count('import AppKit'), 1)
-        source = source.replace('import AppKit', 'import Foundation')
-        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text()
+    def compile_control(self, path, owner, fixture, flags=()):
+        self.assertEqual(owner.count('import AppKit'), 1)
         self.assertEqual(fixture.count('// APP_QUIT_OWNER'), 1)
-        fixture = fixture.replace('// APP_QUIT_OWNER', source)
+        swift = path / 'QuitPresentation.swift'
+        swift.write_text(fixture.replace('// APP_QUIT_OWNER', owner.replace('import AppKit', 'import Foundation')))
         compiler = subprocess.check_output(['xcrun', '--find', 'swiftc'], text=True).strip()
         sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-        with tempfile.TemporaryDirectory(prefix='nac-quit-presentation-') as directory:
-            path = Path(directory)
-            swift = path / 'QuitPresentation.swift'
-            swift.write_text(fixture)
-            binary = path / 'quit-presentation-controls'
-            compiled = subprocess.run([compiler, '-sdk', sdk, '-swift-version', '5',
-                '-target', 'arm64-apple-macosx14.0', '-warnings-as-errors', '-Onone',
-                str(OWNER / 'AppLifecycle.swift'), str(swift), '-o', str(binary)],
-                text=True, capture_output=True, timeout=120, check=False)
-            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-            executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=15, check=False)
-            self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
-            print(executed.stdout, end='')
+        binary = path / 'quit-presentation-controls'
+        compiled = subprocess.run([compiler, '-sdk', sdk, '-swift-version', '5',
+            '-target', 'arm64-apple-macosx14.0', '-warnings-as-errors', '-Onone', *flags,
+            str(OWNER / 'AppLifecycle.swift'), str(swift), '-o', str(binary)],
+            text=True, capture_output=True, timeout=60, check=False)
+        self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+        return binary
+
+    def test_original_boundaries_and_originating_transaction(self):
+        owner = (OWNER / 'AppQuit.swift').read_text()
+        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text()
+        for name, flags in [('ordinary', ()),
+                            ('attention', ('-D', 'PREVIEW_SMOKE', '-D', 'ATTENTION_SMOKE'))]:
+            with self.subTest(role=name), tempfile.TemporaryDirectory(prefix='nac-quit-presentation-') as directory:
+                binary = self.compile_control(Path(directory), owner, fixture, flags)
+                executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=35, check=False)
+                self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+                print(executed.stdout, end='')
+
+    @unittest.skipUnless(os.environ.get('NAC_QUIT_RED_SOURCE'), 'Explicit immutable preimage needed for original RED')
+    def test_original_owner_reproduces_premature_termination_cancel(self):
+        owner = Path(os.environ['NAC_QUIT_RED_SOURCE']).read_text()
+        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text().split('@main struct QuitPresentationControls')[0]
+        # Only the inert global application changes type for the older owner;
+        # the complete original AppQuit bytes are inserted without rewriting it.
+        fixture = fixture.replace('@MainActor let NSApp = NACApplication()', '@MainActor let NSApp = Application()')
+        fixture += '''@main struct OriginalReplyControl {
+            @MainActor static func main() {
+                let app = PreviewApp()
+                withExtendedLifetime(app) {
+                    precondition(app.quit.shouldTerminate() == .terminateLater,
+                                 "Original owner aborts originating transaction")
+                }
+            }
+        }
+        '''
+        with tempfile.TemporaryDirectory(prefix='nac-quit-original-red-') as directory:
+            binary = self.compile_control(Path(directory), owner, fixture)
+            executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=5, check=False)
+            self.assertNotEqual(executed.returncode, 0)
+            self.assertIn('Original owner aborts originating transaction', executed.stdout + executed.stderr)
+
+    @unittest.skipUnless(os.environ.get('NAC_QUIT_FENCE_RED_SOURCE'), 'Exact prior Later owner needed for fence RED')
+    def test_prior_later_owner_admits_os_first_native_duplicate(self):
+        owner = Path(os.environ['NAC_QUIT_FENCE_RED_SOURCE']).read_text()
+        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text().split('@main struct QuitPresentationControls')[0]
+        fixture += '''@main struct PriorFenceControl {
+            @MainActor static func main() {
+                let app = PreviewApp(); NSApp.delegate = app
+                withExtendedLifetime(app) {
+                    precondition(app.quit.shouldTerminate() == .terminateLater)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                    NSApp.terminate(nil)
+                    precondition(NSApp.publicAdmissions == 0,
+                                 "Prior call-stack guard admitted OS-first native duplicate")
+                }
+            }
+        }
+        '''
+        with tempfile.TemporaryDirectory(prefix='nac-quit-prior-fence-red-') as directory:
+            binary = self.compile_control(Path(directory), owner, fixture)
+            executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=5, check=False)
+            self.assertNotEqual(executed.returncode, 0)
+            self.assertIn('Prior call-stack guard admitted OS-first native duplicate', executed.stdout + executed.stderr)
 
 
 if __name__ == '__main__':
