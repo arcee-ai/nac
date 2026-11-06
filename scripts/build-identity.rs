@@ -23,9 +23,11 @@ pub fn configure() {
     println!("cargo:rustc-env=NAC_BUILD_TRACK={build_track}");
 
     println!("cargo:rerun-if-env-changed=NAC_SOURCE_REVISION");
-    let source_revision = std::env::var("NAC_SOURCE_REVISION")
+    let explicit_source_revision = std::env::var("NAC_SOURCE_REVISION")
         .ok()
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| !value.trim().is_empty());
+    let source_revision = explicit_source_revision
+        .clone()
         .or_else(|| git(&["rev-parse", "HEAD"]))
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=NAC_SOURCE_REVISION={source_revision}");
@@ -40,17 +42,43 @@ pub fn configure() {
     let revision = source_revision.get(..12).unwrap_or(&source_revision);
     println!("cargo:rustc-env=NAC_BUILD_REVISION={revision}");
 
-    // Re-run this script when the revision moves, otherwise incremental
-    // rebuilds keep a stale embedded revision. `--git-path` resolves HEAD in
-    // the per-worktree git directory while resolving refs and packed-refs in
-    // the common git directory shared by all worktrees.
+    // An explicit candidate revision is the source of truth for release/image
+    // builds. Git metadata cannot change that identity.
+    if explicit_source_revision.is_none() {
+        watch_git_identity();
+    }
+}
+
+fn watch_git_identity() {
+    // HEAD belongs to this worktree; refs and packed-refs may belong to the
+    // shared Git directory. Watch only the files used to resolve this HEAD.
+    // A missing rerun-if-changed path makes Cargo rebuild on EVERY invocation.
     if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
-        let head = std::path::PathBuf::from(head);
-        println!("cargo:rerun-if-changed={}", head.display());
-        watch_git_path("packed-refs");
-        if let Ok(contents) = std::fs::read_to_string(&head) {
-            if let Some(reference) = contents.trim().strip_prefix("ref: ") {
-                watch_git_path(reference);
+        let mut path = std::path::PathBuf::from(head);
+        let mut visited = std::collections::HashSet::new();
+        while visited.insert(path.clone()) {
+            watch_existing_path_or_parent(&path);
+            match std::fs::read_to_string(&path) {
+                Ok(contents) => {
+                    let Some(reference) = contents.trim().strip_prefix("ref: ") else {
+                        break;
+                    };
+                    let Some(reference_path) = git(&["rev-parse", "--git-path", reference]) else {
+                        break;
+                    };
+                    path = std::path::PathBuf::from(reference_path);
+                }
+                Err(_) => {
+                    // The loose ref can be absent because it is packed (or
+                    // unborn). Its existing parent detects a new loose ref;
+                    // packed-refs detects packed updates. Conversely, packing
+                    // a previously loose ref removes its watched file, which
+                    // reruns this script and selects these dependencies.
+                    if let Some(packed) = git(&["rev-parse", "--git-path", "packed-refs"]) {
+                        watch_existing_path_or_parent(std::path::Path::new(&packed));
+                    }
+                    break;
+                }
             }
         }
     }
@@ -71,11 +99,16 @@ fn assert_stable_version(version: &str) {
     );
 }
 
-/// Tells Cargo to watch a path after Git resolves its worktree-aware location.
-fn watch_git_path(path: &str) {
-    if let Some(path) = git(&["rev-parse", "--git-path", path]) {
-        println!("cargo:rerun-if-changed={path}");
+/// Watch creation of an absent ref without giving Cargo a nonexistent path.
+fn watch_existing_path_or_parent(path: &std::path::Path) {
+    let mut existing = path;
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else {
+            return;
+        };
+        existing = parent;
     }
+    println!("cargo:rerun-if-changed={}", existing.display());
 }
 
 /// Runs git with the given arguments and returns its trimmed stdout, or `None`

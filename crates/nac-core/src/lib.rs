@@ -14,6 +14,9 @@ pub mod managed_fault_fixture;
 mod mcp;
 pub mod model;
 pub mod orchestration_control;
+pub mod peer_goal_control;
+pub mod task_followups;
+pub mod task_launch_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.
@@ -66,7 +69,8 @@ pub mod mcp_configurations {
         McpProbeResult, McpProbedTool, McpProtocolSelection, McpRuntimeManager, McpRuntimeState,
         McpRuntimeStatus, McpServerConfig, McpServerConfigurationRecord,
         McpServerConfigurationStoreError, McpToolApproval, McpToolMetadata, McpTransportConfig,
-        MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI, MCP_OAUTH_STATE_TTL, MCP_TRANSPORT_STDIO,
+        SessionMcpRefreshState, SessionMcpRefreshStatus, MCP_OAUTH_CALLBACK_PATH,
+        MCP_OAUTH_REDIRECT_URI, MCP_OAUTH_STATE_TTL, MCP_TRANSPORT_STDIO,
         MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }

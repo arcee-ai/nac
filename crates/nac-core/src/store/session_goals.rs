@@ -1,4 +1,16 @@
+use super::goal_changes::{committed, GoalChangeKind};
 use super::*;
+
+/// A decoded goal edit contains no requested change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmptyGoalUpdate;
+
+impl std::fmt::Display for EmptyGoalUpdate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("goal update is empty")
+    }
+}
+impl std::error::Error for EmptyGoalUpdate {}
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -263,13 +275,41 @@ pub fn create_session_goal(
     token_budget: Option<u64>,
     active_run: Option<&GoalRunBaseline>,
 ) -> Result<SessionGoalRecord> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let (goal, retired) = create_with_connection(&transaction, session_id, objective, token_budget, active_run)?;
+    transaction.commit()?;
+    if let Some(retired) = retired {
+        committed(path, &retired, GoalChangeKind::Replaced);
+    }
+    committed(path, &goal, GoalChangeKind::Current);
+    Ok(goal)
+}
+command CreateSessionGoalCommand {
+    session_id: String = session_id.to_owned(),
+    objective: String = objective.to_owned(),
+    token_budget: Option<u64> = token_budget,
+    active_run: Option<GoalRunBaseline> = active_run.cloned(),
+}
+call |command| (&command.session_id, &command.objective, command.token_budget, command.active_run.as_ref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+/// Shared atomic creation owner. Callers hold an immediate transaction so
+/// request receipts and retained evidence commit with the new goal.
+pub(super) fn create_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    objective: &str,
+    token_budget: Option<u64>,
+    active_run: Option<&GoalRunBaseline>,
+) -> Result<(SessionGoalRecord, Option<SessionGoalRecord>)> {
     let objective = validate_objective(objective)?;
     let token_budget = validate_budget(token_budget)?;
-    let mut connection = open_runtime_connection(path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    require_direct_session(&transaction, session_id)?;
-    if let Some(existing) = load_with_connection(&transaction, session_id)? {
+    require_direct_session(connection, session_id)?;
+    let mut retired = None;
+    if let Some(existing) = load_with_connection(connection, session_id)? {
         if existing.status.is_unfinished() {
             return Err(anyhow!(
                 "session already has an unfinished goal '{}'",
@@ -277,15 +317,17 @@ pub fn create_session_goal(
             ));
         }
         super::task_evidence::retain_goal_outcome_with_connection(
-            &transaction,
+            connection,
             &existing,
             super::task_evidence::GoalRetirement::Replaced,
         )?;
-        transaction.execute(
+        retired = Some(existing);
+        connection.execute(
             "DELETE FROM session_goals WHERE session_id = ?1",
             params![session_id],
         )?;
     }
+    super::task_questions::invalidate_questions(connection, session_id, None)?;
     let goal_id = uuid::Uuid::new_v4().to_string();
     let now = now_utc();
     let (run_id, baseline, started_at, continuation) = match active_run {
@@ -297,7 +339,7 @@ pub fn create_session_goal(
         ),
         None => (None, None, None, None),
     };
-    transaction.execute(
+    connection.execute(
         "INSERT INTO session_goals
          (session_id, goal_id, objective, status, token_budget, accounting_run_id,
           accounting_token_baseline, accounting_started_at_epoch_ms,
@@ -315,25 +357,43 @@ pub fn create_session_goal(
             now
         ],
     )?;
-    let goal = load_with_connection(&transaction, session_id)?
+    let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("inserted session goal could not be reloaded"))?;
+    if let Some(run) = goal.accounting_run_id.as_deref() {
+        super::completion_occurrences::goal_participated(connection, session_id, run)?;
+    }
+    Ok((goal, retired))
+}
+coordinated_command! {
+pub fn update_session_goal_by_user(
+    path: &Path,
+    session_id: &str,
+    goal_id: &str,
+    expected_version: i64,
+    update: UserGoalUpdate,
+) -> Result<SessionGoalRecord> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let goal = update_with_connection(&transaction, session_id, goal_id, expected_version, update)?;
     transaction.commit()?;
+    committed(path, &goal, GoalChangeKind::Current);
     Ok(goal)
 }
-command CreateSessionGoalCommand {
+command UpdateSessionGoalByUserCommand {
     session_id: String = session_id.to_owned(),
-    objective: String = objective.to_owned(),
-    token_budget: Option<u64> = token_budget,
-    active_run: Option<GoalRunBaseline> = active_run.cloned(),
+    goal_id: String = goal_id.to_owned(),
+    expected_version: i64 = expected_version,
+    update: UserGoalUpdate = update,
 }
-call |command| (&command.session_id, &command.objective, command.token_budget, command.active_run.as_ref())
+call |command| (&command.session_id, &command.goal_id, command.expected_version, command.update)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
 port public;
 }
 
-coordinated_command! {
-pub fn update_session_goal_by_user(
-    path: &Path,
+/// Existing human mutation owner, shared by the narrow authorized peer control
+/// after that caller checks its stricter permitted transition in the same tx.
+pub(super) fn update_with_connection(
+    connection: &Connection,
     session_id: &str,
     goal_id: &str,
     expected_version: i64,
@@ -356,13 +416,10 @@ pub fn update_session_goal_by_user(
         .transpose()?;
     let budget = update.token_budget.map(validate_budget).transpose()?;
     if objective.is_none() && budget.is_none() && update.status.is_none() {
-        return Err(anyhow!("goal update is empty"));
+        return Err(EmptyGoalUpdate.into());
     }
-    let mut connection = open_runtime_connection(path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    require_direct_session(&transaction, session_id)?;
-    let current = load_with_connection(&transaction, session_id)?
+    require_direct_session(connection, session_id)?;
+    let current = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("session '{session_id}' has no goal"))?;
     if current.goal_id != goal_id {
         return Err(anyhow!("goal '{goal_id}' is no longer current"));
@@ -389,7 +446,7 @@ pub fn update_session_goal_by_user(
     } else {
         requested_status
     };
-    transaction.execute(
+    connection.execute(
         "UPDATE session_goals
          SET objective = ?1, token_budget = ?2, status = ?3,
              consecutive_transient_failures = 0, next_attempt_at_epoch_ms = NULL,
@@ -406,22 +463,13 @@ pub fn update_session_goal_by_user(
             expected_version
         ],
     )?;
-    let goal = load_with_connection(&transaction, session_id)?
+    let goal = load_with_connection(connection, session_id)?
         .ok_or_else(|| anyhow!("updated session goal could not be reloaded"))?;
-    transaction.commit()?;
+    if current.status != GoalStatus::Complete && goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(connection, &goal)?;
+    }
     Ok(goal)
 }
-command UpdateSessionGoalByUserCommand {
-    session_id: String = session_id.to_owned(),
-    goal_id: String = goal_id.to_owned(),
-    expected_version: i64 = expected_version,
-    update: UserGoalUpdate = update,
-}
-call |command| (&command.session_id, &command.goal_id, command.expected_version, command.update)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
-}
-
 coordinated_command! {
 pub fn update_session_goal_by_model(
     path: &Path,
@@ -434,9 +482,11 @@ pub fn update_session_goal_by_model(
             "the model may only mark a goal blocked or complete"
         ));
     }
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
-    let changed = connection.execute(
+    let mut connection = open_runtime_connection(path)?;
+    let transaction=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    require_direct_session(&transaction, session_id)?;
+    anyhow::ensure!(super::task_questions::pending_with_connection(&transaction,session_id)?.is_none(),"answer the pending structured question before completing or blocking its goal");
+    let changed = transaction.execute(
         "UPDATE session_goals
          SET status = ?1, updated_at = ?2, version = version + 1
          WHERE session_id = ?3 AND goal_id = ?4 AND status != 'complete'",
@@ -445,7 +495,14 @@ pub fn update_session_goal_by_model(
     if changed != 1 {
         return Err(anyhow!("goal '{goal_id}' is no longer active"));
     }
-    load_with_connection(&connection, session_id)?.ok_or_else(|| anyhow!("goal disappeared"))
+    let goal = load_with_connection(&transaction, session_id)?
+        .ok_or_else(|| anyhow!("goal disappeared"))?;
+    if goal.status == GoalStatus::Complete {
+        super::completion_occurrences::goal_marked(&transaction, &goal)?;
+    }
+    transaction.commit()?;
+    committed(path, &goal, GoalChangeKind::Current);
+    Ok(goal)
 }
 command UpdateSessionGoalByModelCommand {
     session_id: String = session_id.to_owned(),
@@ -481,7 +538,9 @@ pub fn clear_session_goal(
          WHERE session_id = ?1 AND goal_id = ?2 AND version = ?3",
         params![session_id, goal_id, expected_version],
     )?;
+    super::task_questions::invalidate_questions(&transaction,session_id,None)?;
     transaction.commit()?;
+    committed(path, &current, GoalChangeKind::Cleared);
     Ok(())
 }
 command ClearSessionGoalCommand {
@@ -500,8 +559,32 @@ pub fn bind_session_goal_run(
     session_id: &str,
     baseline: &GoalRunBaseline,
 ) -> Result<Option<SessionGoalRecord>> {
-    let connection = open_runtime_connection(path)?;
-    require_direct_session(&connection, session_id)?;
+    let mut connection = open_runtime_connection(path)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let goal = bind_session_goal_run_with_connection(&transaction, session_id, baseline)?;
+    transaction.commit()?;
+    if let Some(goal) = &goal {
+        committed(path, goal, GoalChangeKind::Current);
+    }
+    Ok(goal)
+}
+command BindSessionGoalRunCommand {
+    session_id: String = session_id.to_owned(),
+    baseline: GoalRunBaseline = baseline.clone(),
+}
+call |command| (&command.session_id, &command.baseline)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port public;
+}
+
+/// Share the exact accounting bind with occurrence admission's transaction.
+/// The outer transaction owner publishes the returned goal only after commit.
+pub(crate) fn bind_session_goal_run_with_connection(
+    connection: &Connection,
+    session_id: &str,
+    baseline: &GoalRunBaseline,
+) -> Result<Option<SessionGoalRecord>> {
+    require_direct_session(connection, session_id)?;
     let baseline_tokens = checked_integer(baseline.billable_tokens, "run token baseline")?;
     let started_at = checked_integer(baseline.started_at_epoch_ms, "run start time")?;
     let continuation = baseline.continuation.then_some(baseline.run_id.as_str());
@@ -524,15 +607,8 @@ pub fn bind_session_goal_run(
     if changed == 0 {
         return Ok(None);
     }
-    load_with_connection(&connection, session_id)
-}
-command BindSessionGoalRunCommand {
-    session_id: String = session_id.to_owned(),
-    baseline: GoalRunBaseline = baseline.clone(),
-}
-call |command| (&command.session_id, &command.baseline)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
+    super::completion_occurrences::goal_participated(connection, session_id, &baseline.run_id)?;
+    load_with_connection(connection, session_id)
 }
 
 coordinated_command! {
@@ -576,20 +652,9 @@ pub fn settle_session_goal_run_with_failure(
     disposition: GoalRunDisposition,
     failure: Option<&crate::run_failure::RunFailure>,
 ) -> Result<Option<SessionGoalRecord>> {
-    let mut connection = open_runtime_connection(path)?;
-    let transaction =
-        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let goal = settle_session_goal_run_with_connection(
-        &transaction,
-        session_id,
-        run_id,
-        final_billable_tokens,
-        terminal_at_epoch_ms,
-        disposition,
-        failure,
-    )?;
-    transaction.commit()?;
-    Ok(goal)
+    Ok(settle_session_goal_run_with_provenance(
+        path, session_id, run_id, final_billable_tokens, terminal_at_epoch_ms, disposition, failure,
+    )?.0)
 }
 command SettleSessionGoalRunWithFailureCommand {
     session_id: String = session_id.to_owned(),
@@ -602,6 +667,53 @@ command SettleSessionGoalRunWithFailureCommand {
 call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition, command.failure.as_ref())
 correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
 port public;
+}
+
+coordinated_command! {
+/// Keep exact settled-run provenance in the same transaction as accounting.
+/// The public current-row result alone does not imply participation by this run.
+pub(crate) fn settle_session_goal_run_with_provenance(
+    path: &Path,
+    session_id: &str,
+    run_id: &str,
+    final_billable_tokens: u64,
+    terminal_at_epoch_ms: u64,
+    disposition: GoalRunDisposition,
+    failure: Option<&crate::run_failure::RunFailure>,
+) -> Result<(Option<SessionGoalRecord>, Option<String>)> {
+    let mut connection = open_runtime_connection(path)?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let goal = settle_session_goal_run_with_connection(
+        &transaction,
+        session_id,
+        run_id,
+        final_billable_tokens,
+        terminal_at_epoch_ms,
+        disposition,
+        failure,
+    )?;
+    let last_run = transaction.query_row(
+        "SELECT last_run_id FROM session_goals WHERE session_id=?1", [session_id],
+        |row| row.get::<_, Option<String>>(0),
+    ).optional()?.flatten();
+    transaction.commit()?;
+    if let Some(goal) = &goal {
+        committed(path, goal, GoalChangeKind::Current);
+    }
+    Ok((goal, last_run))
+}
+command SettleSessionGoalRunWithProvenanceCommand {
+    session_id: String = session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    final_billable_tokens: u64 = final_billable_tokens,
+    terminal_at_epoch_ms: u64 = terminal_at_epoch_ms,
+    disposition: GoalRunDisposition = disposition,
+    failure: Option<crate::run_failure::RunFailure> = failure.cloned(),
+}
+call |command| (&command.session_id, &command.run_id, command.final_billable_tokens, command.terminal_at_epoch_ms, command.disposition, command.failure.as_ref())
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)).with_run(Some(&command.run_id));
+port internal;
 }
 
 pub(crate) fn settle_session_goal_run_with_connection(
@@ -839,7 +951,11 @@ pub fn reconcile_session_goal_run(
          WHERE session_id = ?2 AND accounting_run_id IS NOT NULL",
         params![now_utc(), session_id],
     )?;
-    load_with_connection(&connection, session_id)
+    let goal = load_with_connection(&connection, session_id)?;
+    if let Some(goal) = &goal {
+        committed(path, goal, GoalChangeKind::Current);
+    }
+    Ok(goal)
 }
 command ReconcileSessionGoalRunCommand {
     session_id: String = session_id.to_owned(),
@@ -868,6 +984,49 @@ mod tests {
         std::env::temp_dir()
             .join(format!("nac-session-goal-{label}-{}", uuid::Uuid::new_v4()))
             .join("store.db")
+    }
+
+    #[test]
+    fn empty_goal_update_is_typed_before_lookup_and_never_mutates_records() {
+        let path = test_path("empty-update");
+        initialize(&path).unwrap();
+        direct_session(&path, "direct");
+        let goal = create_session_goal(&path, "direct", "retain work", Some(500), None).unwrap();
+        for id in [
+            goal.goal_id.as_str(),
+            "00000000-0000-0000-0000-000000000000",
+        ] {
+            let error = update_session_goal_by_user(
+                &path,
+                "direct",
+                id,
+                goal.version,
+                UserGoalUpdate::default(),
+            )
+            .unwrap_err();
+            assert!(error.downcast_ref::<EmptyGoalUpdate>().is_some());
+            assert_eq!(error.to_string(), "goal update is empty");
+            assert_eq!(
+                load_session_goal(&path, "direct").unwrap(),
+                Some(goal.clone())
+            );
+            assert!(list_session_inbox(&path, "direct").unwrap().is_empty());
+        }
+        let cleared = update_session_goal_by_user(
+            &path,
+            "direct",
+            &goal.goal_id,
+            goal.version,
+            UserGoalUpdate {
+                token_budget: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.token_budget, None);
+        assert_eq!(cleared.objective, goal.objective);
+        assert_eq!(cleared.version, goal.version + 1);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

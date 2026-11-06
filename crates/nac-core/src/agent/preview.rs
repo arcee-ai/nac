@@ -159,6 +159,11 @@ pub(crate) fn key_arg_preview(
         "read_task" => get_str("session_id")
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
+        "launch_task" => get_str("title")
+            .map(|value| truncate_string(&value, 120))
+            .unwrap_or_default(),
+        "list_projects" => get_str("query").unwrap_or_else(|| "saved projects".into()),
+        "task_launch_status" => get_str("request_id").unwrap_or_default(),
         "update_goal" => get_str("status")
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
@@ -249,6 +254,26 @@ pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
     if name == "exec_command" {
         if let Some(summary) = preview_exec_command_result(trimmed) {
             return preview(&summary, 160);
+        }
+    }
+    if matches!(name, "launch_task" | "task_launch_status") {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some(launch) = value.get("launch") {
+                let title = launch
+                    .pointer("/request/title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Separate task");
+                let phase = launch
+                    .get("phase")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let failure = launch
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .map(|e| format!(": {e}"))
+                    .unwrap_or_default();
+                return preview(&format!("{title}: {phase}{failure}"), 160);
+            }
         }
     }
     if matches!(name, "read" | "write" | "edit") {

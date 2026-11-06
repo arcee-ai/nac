@@ -1,27 +1,47 @@
-# Temporary block-buffer advisory exception
+# block-buffer advisory correction and proposed exception removal
 
-This is a temporary, evidence-backed acceptance of
-`GHSA-qwgh-2vcv-g2f7` for `crates.io:block-buffer` in `Cargo.lock`.
-The accountable owner is `@allisoneer`; it expires at
-**2026-11-03T14:00:00Z**. [ALL-496] tracks permanent resolution and removal.
-It does not clear managed-image findings or establish general memory safety.
+**Proposed removal; fresh scan qualification is pending.** The temporary
+`GHSA-qwgh-2vcv-g2f7` acceptance for `crates.io:block-buffer` in `Cargo.lock`
+expired at **2026-11-03T14:00:00Z**. Its accountable owner was `@allisoneer`.
+The proposed policy removes that sole entry; it does not extend or replace it.
+[ALL-496] remains open until removal and fresh complete scanning are qualified.
+No passing source-policy PR, trusted landing or managed-image clearance is
+claimed by this proposal.
 
-## Exact dependency and finding
+## Exact dependency and historical finding
 
-The reviewed lock contains `block-buffer 0.10.4`, checksum
+The reviewed lock contains only `block-buffer 0.10.4`, checksum
 `3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71`.
 The [raw scan artifact] binds the original finding to source candidate
 `0e5c673ea377a91569efd640b3854879c66cbc39` on post-Insights dev
 `2c486741cc853e29c7ce6c0fff84acc66223e874`: all three locked inputs scanned,
-one blocking match, zero exceptions, no scanner errors.
+one blocking match, zero exceptions, no scanner errors. This is historical
+evidence, not a fresh result for the removal candidate.
 
-The raw advisory spells its package `block_buffer` and declares versions
-below `0.12.1` affected. The normalized table omits a fixed version because
-the spelling differs; the raw advisory does identify `0.12.1` as fixed.
-The exception uses the scanner's actual finding identity,
+The original raw advisory spelled its package `block_buffer` and declared
+versions below `0.12.1` affected. The normalized table omitted a fixed version
+because the spelling differed; the raw advisory identified `0.12.1` as fixed.
+The interim exception used the scanner's actual finding identity,
 `crates.io:block-buffer`.
 
-## Applicability evidence and limits
+## Corrected upstream range
+
+The [reviewed GitHub advisory] and [OSV record] now identify the affected
+interval as **`>=0.11.0, <0.12.1`**. The retained official OSV JSON has
+`introduced: 0.11.0`, `fixed: 0.12.1`, modification time
+`2026-10-30T15:45:11.580215361Z`, and SHA-256
+`347d0624dc0fc4dcfc669a8498aab5200725831b2dffd6f2e14237b97f53dfb4`.
+Its `block_buffer` spelling corresponds to Cargo's `block-buffer` identity;
+scanner matching and the wrapper's exact finding identity remain unchanged.
+No name rewrite, version filtering or scanner patch is proposed.
+
+Locked `0.10.4` is outside that corrected interval. Corrected upstream data
+therefore provides a removal route without a dependency or parent upgrade for
+this advisory, subject to fresh pinned-scanner confirmation. This does not
+clear other advisories or establish general memory safety. A stale database,
+new finding or scanner/coverage error must remain a failed qualification.
+
+## Historical applicability evidence and limits
 
 The [maintainer advisory] describes a callback overwriting a cursor stored
 inside the data block, followed by a caught panic and reuse. Its
@@ -31,7 +51,7 @@ The [exact 0.10.4 upstream source], identified by the published crate's
 `.cargo_vcs_info.json`, stores the buffer and `pos: u8` separately.
 `digest_blocks` writes the data buffer; `get_pos` reads the separate field.
 There is no `ReadBuffer` type. The analogous generator method builds a
-temporary block before publishing it. This supports an overbroad affected
+temporary block before publishing it. This supported an overbroad affected
 range for this version, rather than invalidating the advisory itself.
 
 An independent locked/offline debug reproduction exercised all 256 byte
@@ -42,44 +62,60 @@ the original source and test provenance. Miri was unavailable; these checks
 do not prove the absence of unrelated memory-safety or hashing defects.
 
 `digest 0.10.7` requires `block-buffer 0.10`. Replacing it with `0.12.1`
-is not a compatible lockfile bump. A permanent parent upgrade needs
-coordinated SHA-2 and OAuth/RMCP compatibility qualification.
+is not a compatible lockfile bump. A parent-upgrade alternative would require
+coordinated SHA-2 and OAuth/RMCP compatibility qualification; the corrected
+range makes that alternative unnecessary for this advisory if fresh scanning
+confirms applicability. The proposed removal changes no dependency graph.
 
-## Scope, expiry and removal
+## Expiry and proposed qualification
 
-The existing policy format matches exactly **advisory + package + context**;
-it does not constrain the package version. This acceptance is justified only
-for the reviewed version and checksum. Reassess any dependency change before
-relying on it. Other advisories, packages, lockfiles and `managed-image`
-remain outside the exception. Expiry fails the entire policy closed.
+The policy format matches exactly **advisory + package + context**, without
+a version constraint. The interim acceptance was justified only for the
+reviewed version and checksum. Other advisories, packages, lockfiles and
+`managed-image` were never included. Production expiry still fails the entire
+policy closed; it is the recorded cause of the November 3 source/image policy
+failures. Those failures remain failures, not cancelled or passing checks.
+No extension, renewal, reachability waiver or broader exclusion is proposed.
 
-Before expiry, resolve the affected-range discrepancy or qualify a supported
-dependency upgrade, remove this one entry, and retain a fresh complete source
-scan that passes without it. ALL-496 remains open after the interim exception
-lands. Any extension requires a new explicit reviewed decision; there is no
-automatic renewal. No upstream messages have been sent by this work.
+Before permanent removal is called complete, retain the corrected upstream
+record and exact source/policy/lockfile identities, run existing security
+contracts with the checksum-verified OSV-Scanner 2.7.0 and live safe/vulnerable
+fixtures, and obtain fresh complete reports for all three locked inputs.
+The normal wrapper must retain bundled-npm supplemental coverage, zero
+blocking findings, zero exceptions and no scanner/coverage errors. Every other
+finding remains subject to the unchanged gate. No fresh scanner or contract
+test result is claimed by this document update.
 
-## Landing and verification
+The earlier interim verification checked one match excepted, neighboring
+identities still blocking, exact-expiry rejection and policy trust. Those
+historical results remain attributed to the interim candidate. Existing tests
+use their own policies; the retained-image rescan test has an isolated empty
+policy fixture. Removal requires no production-clock fixture adjustment and
+must not weaken expiry, exact-context, publication or managed-image tests.
 
-The [existing reviewed-policy boundary] remains effective. A PR cannot
-authorize its own exception: scanning against trusted dev must reject this
-policy difference. That expected rejection is not a passing source check.
-The documented landing path requires separate human review and Allison's
-audited PR-only override; agents must never invoke that override. Once landed,
-dependent candidates must rebase onto the trusted policy and pass fresh scans.
+## Human landing and downstream verification
 
-Verification uses the existing security-policy, source-security and publication
-contract tests, plus the retained raw finding to check this exact candidate:
-one match is excepted; neighboring advisory/package/context findings remain
-blocking; evaluation at the exact expiry rejects the policy. No scanner,
-workflow, dependency, trusted-source rule or managed-image exception changes.
-The retained-image rescan unit test uses its own empty policy fixture, so an
-unrelated production exception's expiry does not change that test's scenario.
-Production scans still reject expired entries.
+The [existing reviewed-policy boundary] remains effective for deletions as
+well as additions. A candidate cannot authorize its own policy difference.
+With the expired trusted base, validation fails at that expiry before policy
+equality can be evaluated; otherwise a differing candidate policy is rejected.
+Neither expected rejection is a green source check. Do not relabel the candidate
+policy as trusted or use publication mode for an ordinary policy PR.
+
+Landing requires separate human review and Allison's deliberate audited
+PR-only override. **Agents must never invoke that override.** After actual
+reviewed landing, dependent candidates must rebase or refresh onto the new
+trusted policy and pass fresh normal all-three-input scans and required CI.
+The removal candidate and affected managed-image path also need their actual
+fresh required checks; source applicability alone clears no image finding.
+ALL-496 must not be closed from the doc/range evidence or an expected policy-PR
+failure alone. No upstream messages have been sent by this work.
 
 [ALL-496]: https://linear.app/arcee/issue/ALL-496/resolve-block-buffer-advisory-applicability-and-remove-the-temporary
 [raw scan artifact]: https://github.com/arcee-ai/nac/actions/runs/40446997021/artifacts/12708587530
 [maintainer advisory]: https://github.com/RustCrypto/utils/security/advisories/GHSA-qwgh-2vcv-g2f7
+[reviewed GitHub advisory]: https://github.com/advisories/GHSA-qwgh-2vcv-g2f7
+[OSV record]: https://osv.dev/vulnerability/GHSA-qwgh-2vcv-g2f7
 [accepted repair]: https://github.com/RustCrypto/utils/pull/1487
 [exact 0.10.4 upstream source]: https://github.com/RustCrypto/utils/blob/6d35952d3d3b124bc1049ad6fb406b42b1ce4bfe/block-buffer/src/lib.rs
 [The investigation]: https://github.com/arcee-ai/nac/pull/420#issuecomment-6433444720
