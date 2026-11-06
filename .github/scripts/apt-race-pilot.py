@@ -209,6 +209,9 @@ class Pilot:
     def guard(self):
         if time.monotonic() >= self.deadline:
             raise BudgetNotExecuted('controller budget exhausted; no result')
+        self.resource_guard()
+
+    def resource_guard(self):
         require(shutil.disk_usage(self.root).free >= 13*1024**3, '13GiB free-space fence')
         total = tree_bytes(self.root)+tree_bytes(self.output)
         require(total <= TOTAL_CAP, 'owned total byte fence')
@@ -384,17 +387,22 @@ class Pilot:
         # timeout for an already admitted native operation. Its worker retains
         # the full 900s clock and own cleanup inside the admitted deadline.
         while self.active and time.monotonic() < self.deadline+8:
+            self.resource_guard()
             for worker in list(self.active):
                 try:
                     self.result(worker)
                 except BudgetNotExecuted:
                     pass
+            self.resource_guard()
             time.sleep(.025)
 
     def finish(self):
         failures = []
         if self.report.get('budget_not_executed'):
-            self.drain_budget()
+            try:
+                self.drain_budget()
+            except BaseException as error:
+                failures.append('budget drain failed: '+str(error))
         for worker in list(self.active):
             try:
                 self.cancel(worker, 'controller-stop')

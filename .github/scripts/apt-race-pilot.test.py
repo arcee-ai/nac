@@ -192,6 +192,28 @@ class Boundary(unittest.TestCase):
         with self.assertRaises(OSError):
             worker.stop(path, 'a'*32)
 
+    def test_cancel_race_requires_matching_owned_signal_reap_and_start(self):
+        identity = {'pid': 123, 'start': 456}
+        for code in (-signal.SIGSEGV, -signal.SIGKILL, -signal.SIGTERM):
+            cleanup = {'signals': [], 'reaped': [{'pid': 123, 'exit': code}], 'remaining': []}
+            self.assertEqual(worker.cancellation_reason(identity, code, cleanup), 'failed')
+        cleanup = {'signals': [{'pid': 123, 'start': 456, 'signal': int(signal.SIGKILL)}],
+                   'reaped': [{'pid': 123, 'exit': -signal.SIGKILL}], 'remaining': []}
+        self.assertEqual(worker.cancellation_reason(identity, -signal.SIGKILL, cleanup), 'winner-cancelled')
+        for changed in [dict(identity, pid=124), dict(identity, start=457), None]:
+            self.assertEqual(worker.cancellation_reason(changed, -signal.SIGKILL, cleanup), 'failed')
+        for changes in [{'reaped': []}, {'reaped': [{'pid': 124, 'exit': -signal.SIGKILL}]},
+                        {'reaped': [{'pid': 123, 'exit': -signal.SIGTERM}]},
+                        {'signals': [{'pid': 123, 'start': 456, 'signal': int(signal.SIGTERM)}]},
+                        {'remaining': [{'pid': 99}]}]:
+            self.assertEqual(worker.cancellation_reason(identity, -signal.SIGKILL, dict(cleanup, **changes)), 'failed')
+        self.assertEqual(worker.cancellation_reason(identity, 100, cleanup), 'failed')
+        self.assertEqual(worker.cancellation_reason(identity, 0, dict(cleanup, signals=[])), 'completed')
+        self.assertEqual(worker.cancellation_reason(identity, 0, dict(cleanup, remaining=[{'pid': 99}])), 'failed')
+        term = {'signals': [{'pid': 123, 'start': 456, 'signal': int(signal.SIGTERM)}],
+                'reaped': [{'pid': 123, 'exit': -signal.SIGTERM}], 'remaining': []}
+        self.assertEqual(worker.cancellation_reason(identity, -signal.SIGTERM, term), 'winner-cancelled')
+
     def test_foreign_root_replacement_not_removed_and_resource_fences(self):
         with patch.dict(os.environ, {'RUNNER_TEMP': str(self.root), 'PILOT_JOB_STARTED': str(time.time())}):
             controller = pilot.Pilot(self.root/'output')
@@ -227,6 +249,7 @@ class Boundary(unittest.TestCase):
         controller = object.__new__(pilot.Pilot)
         controller.deadline = time.monotonic()+1
         controller.active = ['already-admitted']
+        controller.resource_guard = lambda: None
         calls = []
         def completed(value):
             calls.append(value)
@@ -236,6 +259,40 @@ class Boundary(unittest.TestCase):
         controller.cancel = lambda *_args: self.fail('budget refusal shortened an admitted operation')
         controller.drain_budget()
         self.assertEqual(calls, ['already-admitted', 'already-admitted'])
+
+    def test_resource_growth_during_budget_drain_is_independent_failure(self):
+        with patch.dict(os.environ, {'RUNNER_TEMP': str(self.root), 'PILOT_JOB_STARTED': str(time.time())}):
+            controller = pilot.Pilot(self.root/'drain-output')
+        controller.active = ['already-admitted']
+        def grows(_value):
+            (controller.root/'growing-partial').write_bytes(b'xx')
+            controller.active.clear()
+        controller.result = grows
+        try:
+            with patch.object(pilot, 'TOTAL_CAP', 1):
+                with self.assertRaisesRegex(ValueError, 'owned total'):
+                    controller.drain_budget()
+        finally:
+            controller.active.clear()
+            controller.finish()
+
+    def test_resource_failure_during_drain_stops_owned_worker_and_preserves_failure(self):
+        with patch.dict(os.environ, {'RUNNER_TEMP': str(self.root), 'PILOT_JOB_STARTED': str(time.time())}):
+            controller = pilot.Pilot(self.root/'finish-drain-output')
+        controller.active = ['owned-admitted-worker']
+        controller.report['budget_not_executed'] = True
+        controller.result = lambda _value: (controller.root/'growth').write_bytes(b'xx')
+        cancellations = []
+        def cancel(value, why):
+            cancellations.append((value, why))
+            controller.active.remove(value)
+        controller.cancel = cancel
+        with patch.object(pilot, 'TOTAL_CAP', 1):
+            controller.finish()
+        self.assertEqual(cancellations, [('owned-admitted-worker', 'controller-stop')])
+        self.assertEqual(controller.report['status'], 'failed')
+        self.assertIn('owned total', controller.report['cleanup_failures'][0])
+        self.assertTrue(controller.report['private_root_removed'])
 
 
 @unittest.skipUnless(sys.platform == 'linux', 'actual Linux subreaper/pidfd controls run in private hosted VM only')

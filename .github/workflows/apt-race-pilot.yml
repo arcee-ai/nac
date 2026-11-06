@@ -32,10 +32,12 @@ jobs:
           npm --prefix crates/nac-server/web ci
           npm --prefix .github/scripts ci
       - name: Offline admission, result-rule and actual GNU lease controls
+        shell: bash
         timeout-minutes: 2
         env:
           APT_RACE_CONTROL_EVIDENCE: ${{ runner.temp }}/apt-race-controls
         run: |
+          set -euo pipefail
           mkdir "$APT_RACE_CONTROL_EVIDENCE"
           python3 .github/scripts/apt-race-pilot.test.py -v 2>&1 | tee "$APT_RACE_CONTROL_EVIDENCE/python.log"
           node --test .github/scripts/apt-race-workflow.test.mjs 2>&1 | tee "$APT_RACE_CONTROL_EVIDENCE/workflow.log"

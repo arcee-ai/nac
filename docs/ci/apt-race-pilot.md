@@ -56,6 +56,13 @@ identity, resource, worker or cleanup failures fail the comparison even when
 another arm could supply bytes. Native `Ign`/internal retry output is retained;
 it is not rewritten as a separate passing operation or attributed without timing.
 
+Cancellation additionally requires the original owned child PID/start, a recorded
+teardown signal for that exact identity and a matching reap/TERM-or-KILL exit.
+Independent crashes or signals without that evidence fail, including a child
+that dies between stop observation and teardown. During budget draining all
+archive/index/total/text/free-space fences stay active; a separate resource
+violation stops the failed experiment rather than granting a clock exception.
+
 ## Process and resource ownership
 
 Each GNU acquisition worker is an ordinary-UID Linux child subreaper. It reuses
@@ -126,6 +133,12 @@ GNU controls, then runs:
 python3 .github/scripts/apt-race-pilot.py --source "$GITHUB_SHA" \
   --output "$RUNNER_TEMP/apt-race-evidence"
 ```
+
+The control step explicitly selects Bash and enables `set -euo pipefail`.
+[GitHub's shell contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepsshell)
+distinguishes unspecified Linux shell behavior from explicit Bash. A real local
+execution of the parsed step with failing Python/Node stubs proves pipeline
+failure stops later work; this is shell behavior, not GNU/native APT coverage.
 
 Raw native stdout/stderr, UTC command intervals, worker exits/cleanup and child
 usage, signed authority, source/tool/runner/run/attempt identities, full plans,

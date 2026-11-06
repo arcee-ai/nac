@@ -35,6 +35,19 @@ def stop(path, nonce):
     return value['reason']
 
 
+def cancellation_reason(identity, exit_code, cleanup):
+    if cleanup['remaining']:
+        return 'failed'
+    if exit_code == 0:
+        return 'completed'
+    if not identity or exit_code not in (-signal.SIGTERM, -signal.SIGKILL):
+        return 'failed'
+    sent = any(row['pid'] == identity['pid'] and row['start'] == identity['start'] and
+               row['signal'] == -exit_code for row in cleanup['signals'])
+    reaped = any(row['pid'] == identity['pid'] and row['exit'] == exit_code for row in cleanup['reaped'])
+    return 'winner-cancelled' if sent and reaped else 'failed'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state', required=True, type=Path)
@@ -64,6 +77,7 @@ def main():
     supervisor.require(0 < args.file_limit <= 128*1024**2, 'native file bound')
     resource.setrlimit(resource.RLIMIT_FSIZE, (args.file_limit, args.file_limit))
     child = None
+    child_identity = None
     reason, error, rows = '', None, []
     started = time.monotonic()
     try:
@@ -76,7 +90,9 @@ def main():
             child = subprocess.Popen(command[1:], cwd=args.cwd, env=env, stdout=out, stderr=err,
                                      start_new_session=True)
             operation_started = time.monotonic()
-            supervisor.publish(fd, 'ready.json', {'nonce': args.nonce, 'child': supervisor.process(child.pid)})
+            child_identity = supervisor.process(child.pid)
+            supervisor.require(child_identity and child_identity['ppid'] == os.getpid(), 'missing owned child identity')
+            supervisor.publish(fd, 'ready.json', {'nonce': args.nonce, 'child': child_identity})
             while True:
                 rows.extend(supervisor.reaped(child))
                 supervisor.require(shutil.disk_usage(args.state).free >= 13*1024**3, '13GiB free-space fence')
@@ -104,11 +120,10 @@ def main():
     finally:
         cleanup = supervisor.settle(child)
         cleanup['reaped'] = rows+cleanup['reaped']
-        if reason == 'winner-cancelled' and child and child.returncode is not None and child.returncode >= 0:
-            # A command that really returned an error during the cancellation
-            # race remains failed; only signal termination is redundant cancel.
-            reason = 'failed' if child.returncode else 'completed'
+        if reason == 'winner-cancelled':
+            reason = cancellation_reason(child_identity, child.returncode if child else None, cleanup)
         supervisor.publish(fd, 'result.json', {'nonce': args.nonce, 'reason': reason, 'error': error,
+            'child_identity': child_identity,
             'exit': child.returncode if child else None, 'seconds': time.monotonic()-started,
             'cleanup': cleanup, 'signals': signals, 'affinity': affinity,
             'usage_children': list(resource.getrusage(resource.RUSAGE_CHILDREN))})
