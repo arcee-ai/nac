@@ -1,0 +1,1649 @@
+{
+  "ticket": "ALL-582",
+  "strategy_reference": "S07",
+  "recorded_at_utc": "2026-11-05T03:40:46.410628+00:00",
+  "delivery": {
+    "kind": "required portable documentation of an already completed local experiment",
+    "base_revision": "2a4a52e2044eb6db14c93f97ea83a36b79a1f61c",
+    "managed_applicable_expected": false,
+    "additional_optimization_count": 0,
+    "ordinary_cohort_samples": 0,
+    "hosted_acceptance": false,
+    "additive_whole_ci_savings_claim": false,
+    "security_clearance": false
+  },
+  "scope": "Two real immutable successor pairs with identical production Rust/manifests/lock; unchanged Dockerfile within each pair; isolated cache per pair, no imports or publication",
+  "environment": {
+    "target": "linux/amd64",
+    "base": "Wolfi pinned digest76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b",
+    "host": "ARM64 macOS, x86 emulation",
+    "vm_memory_bytes": 8317267968,
+    "builder_image": "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea",
+    "builder_version": "v0.33.1",
+    "cpu_quota_cores": 4,
+    "memory_and_memory_swap_bytes": 6442450944,
+    "cargo_build_jobs": 2,
+    "hosted_cargo_jobs": 5,
+    "automatic_buildkit_gc": false,
+    "max_parallelism": 2,
+    "last_parent_authorized_hard_docker_budget_gib": 20,
+    "last_early_docker_estimate_or_raw_growth_gib": 19,
+    "hard_min_host_free_gib": 12,
+    "early_min_host_free_gib": 13,
+    "host_cpu_count": 18,
+    "host_ram_bytes": 38654705664,
+    "host_os_minor_version": "Not retained in the original S07 preflight; no current packaging-host observation substituted.",
+    "docker_vm": {
+      "ServerVersion": "29.7.2",
+      "Architecture": "aarch64",
+      "OSType": "linux",
+      "NCPU": 18,
+      "MemTotal": 8317267968,
+      "Driver": "overlayfs",
+      "DriverStatus": [
+        [
+          "driver-type",
+          "io.containerd.snapshotter.v1"
+        ]
+      ]
+    },
+    "docker_buildx_version": "v0.36.1-desktop.1",
+    "buildkit_commit": "8c91502cf280bd70a0c50912ce251c46a8881d9f",
+    "base_pin": "cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b",
+    "frontend_materials": [
+      {
+        "uri": "pkg:docker/cgr.dev/chainguard/wolfi-base?digest=sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b&platform=linux%2Famd64",
+        "digest": {
+          "sha256": "76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b"
+        }
+      },
+      {
+        "uri": "pkg:docker/docker/dockerfile@1.7",
+        "digest": {
+          "sha256": "a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"
+        }
+      }
+    ],
+    "rust_distribution_manifest": {
+      "manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.98.0.toml",
+      "manifest_sha256": "3f7d139b73bbbd0004ef6e58b430831c68cdad2b1f64ee2eb35d54c09199489a",
+      "checksum_match": true,
+      "scope": "Expected official pinned distribution manifest retained; actual installed components/binaries still require post-build proof"
+    },
+    "unchanged_Dockerfile_ARG_defaults": {
+      "RUST_VERSION": "1.98.0",
+      "CARGO_BUILD_JOBS": "5",
+      "RUSTUP_VERSION": "1.29.0",
+      "RUSTUP_SHA256": "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10",
+      "NAC_BUILD_TRACK": "dev",
+      "NAC_BUILD_ID": "",
+      "NAC_SOURCE_REVISION": "",
+      "NODE_VERSION": "24.22.1",
+      "NODE_SHA256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+      "GO_VERSION": "1.27.3",
+      "GO_SHA256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
+      "GH_VERSION": "2.103.0",
+      "GH_SHA256": "fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786",
+      "GIT_LFS_VERSION": "3.8.0",
+      "GIT_LFS_MODULE_SUM": "h1:D0WiUyq5J3ZOv/9bvCcPToHqHF+WIQQKF5BK8bxlc5o=",
+      "GIT_LFS_REVISION": "aece9221f8c09221a14395d964806b956289bc07",
+      "NPM_VERSION": "11.21.1",
+      "NPM_SHA256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b",
+      "UV_VERSION": "0.13.4",
+      "UV_SHA256": "2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f"
+    },
+    "actual_scanner_tools_on_host": {
+      "syft": {
+        "version": "1.55.0",
+        "archive_sha256": "1217c258bd5eb91ef3189cf22a82e02f9cac07e4ce934350f428e93aff674625",
+        "binary_sha256": "55a63db797b2a060aa56c7a03991bb11084e01ed4e3863df12370d74e84b4821",
+        "platform": "darwin_arm64"
+      },
+      "grype": {
+        "version": "0.121.0",
+        "archive_sha256": "7be39d3a0428c664ce0183e4aba31ed9accffce9eda7e7f6fa84e9c512285f27",
+        "binary_sha256": "4fc87cd48bc1d85bb46f6d61dc3ff8f9f2730e3e51cb94423adee1a3a47d11ba",
+        "platform": "darwin_arm64"
+      }
+    },
+    "scanner_tool_trust": "Pinned archive bytes verified on every install; native Darwin ARM64 scanners read the exact Linux AMD64 inventory. Each image used a new DB directory and real live scan; no verdict reuse."
+  },
+  "source_pairs": {
+    "before": {
+      "candidates": [
+        {
+          "sha": "928379d67b56d706489acdc1c884c6af0284ffb1",
+          "crates_tree": "dda21ba29061af610819dcbee36dea3a5bcb4a45",
+          "dockerfile_sha256": "e4e7817503cb62c7007d86cc5e50526830296907499ef1109651d806f5dff5a2",
+          "inputs": {
+            "Cargo.toml": "577ee00e0503e4a709d56142b186e4f5065a9461b6eb1cf0efd42f903c2ae5b1",
+            "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+            "scripts/build-identity.rs": "f550fb3c9b5ee6ee63c894de5428366fed5ab7ae5b63ca2a626b989f38f848b2",
+            "scripts/smoke-managed-image.sh": "d36e59add095ffa0f74916a3d3d3e3940b37a4c160dd614111f214f20e8bcff6",
+            "scripts/security/image_scan.py": "3a8426ea8eb39b5aa6e18e965ef0f1dd1e12261ac7d651893ec90af5dda7ca20",
+            "scripts/security/image_inventory.py": "ac3e6f4b9986ef93bd6b2444cdf978dd49669d9d5a80d1164f7c1f770ec42ac7",
+            "scripts/security/image_ci_report.py": "df7ba2fcff7e625a4964e3415f395187d30ad28969a2329dc2b3698b3d6fdc8f",
+            "scripts/security/image_qualify.py": "d4e3c5dad4399bdb9e1016f9d2af98196eee96d30003f5a0a07317d9d49d16e2",
+            "scripts/security/image-tools.json": "db84bc211966575dd72ea597485780585cf84fae43777f82806ad769c7f7621b",
+            "docker/managed/entrypoint.sh": "4281416174fba5d5fa91a23a18b4cac320dc58a536f9de06759debaecc33ad85",
+            "docker/managed/packages/sources.lock.json": "29779bec2ded93b8c346d4513e1614712972839ff832a52ba27ec0b94e9ac8ed",
+            ".github/security/exceptions.json": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+            "version.txt": "8a3dad16d348c163566a456fcf650d85d7aeeda5e53d01ee1fa8dc15212915a7"
+          }
+        },
+        {
+          "sha": "51444e1d3ee856b47be1acabea66c0bc883ef153",
+          "crates_tree": "dda21ba29061af610819dcbee36dea3a5bcb4a45",
+          "dockerfile_sha256": "e4e7817503cb62c7007d86cc5e50526830296907499ef1109651d806f5dff5a2",
+          "inputs": {
+            "Cargo.toml": "577ee00e0503e4a709d56142b186e4f5065a9461b6eb1cf0efd42f903c2ae5b1",
+            "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+            "scripts/build-identity.rs": "f550fb3c9b5ee6ee63c894de5428366fed5ab7ae5b63ca2a626b989f38f848b2",
+            "scripts/smoke-managed-image.sh": "d36e59add095ffa0f74916a3d3d3e3940b37a4c160dd614111f214f20e8bcff6",
+            "scripts/security/image_scan.py": "3a8426ea8eb39b5aa6e18e965ef0f1dd1e12261ac7d651893ec90af5dda7ca20",
+            "scripts/security/image_inventory.py": "ac3e6f4b9986ef93bd6b2444cdf978dd49669d9d5a80d1164f7c1f770ec42ac7",
+            "scripts/security/image_ci_report.py": "df7ba2fcff7e625a4964e3415f395187d30ad28969a2329dc2b3698b3d6fdc8f",
+            "scripts/security/image_qualify.py": "d4e3c5dad4399bdb9e1016f9d2af98196eee96d30003f5a0a07317d9d49d16e2",
+            "scripts/security/image-tools.json": "db84bc211966575dd72ea597485780585cf84fae43777f82806ad769c7f7621b",
+            "docker/managed/entrypoint.sh": "4281416174fba5d5fa91a23a18b4cac320dc58a536f9de06759debaecc33ad85",
+            "docker/managed/packages/sources.lock.json": "29779bec2ded93b8c346d4513e1614712972839ff832a52ba27ec0b94e9ac8ed",
+            ".github/security/exceptions.json": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+            "version.txt": "8a3dad16d348c163566a456fcf650d85d7aeeda5e53d01ee1fa8dc15212915a7"
+          }
+        }
+      ],
+      "diff_paths": [
+        ".github/scripts/pr-build-identity.test.mjs"
+      ],
+      "original_worktree_locator": "/Users/allison/.codex/worktrees/all-582-s07-before/allison-demo",
+      "root_trees": {
+        "A": {
+          "sha": "928379d67b56d706489acdc1c884c6af0284ffb1",
+          "tree": "fb77b5abaf6fbb795fe2fc2a1a00d1e452a65b52"
+        },
+        "B": {
+          "sha": "51444e1d3ee856b47be1acabea66c0bc883ef153",
+          "tree": "eee779f42425b0a317d79fef6a96981508116b7b"
+        },
+        "full_patch_sha256": "213a1210d709697f4d1c2d0ae44d257d9f2fcc55db6026947850f6bc18081c3a",
+        "protected_build_inputs_unchanged": true
+      }
+    },
+    "after": {
+      "candidates": [
+        {
+          "sha": "7a80821ffcbfacba72a707312e50ad6414e65999",
+          "crates_tree": "dda21ba29061af610819dcbee36dea3a5bcb4a45",
+          "dockerfile_sha256": "9a489070ccc928932701a372e6d882a802065d7120f78d6acb5e47cd13e48740",
+          "inputs": {
+            "Cargo.toml": "577ee00e0503e4a709d56142b186e4f5065a9461b6eb1cf0efd42f903c2ae5b1",
+            "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+            "scripts/build-identity.rs": "f550fb3c9b5ee6ee63c894de5428366fed5ab7ae5b63ca2a626b989f38f848b2",
+            "scripts/smoke-managed-image.sh": "d36e59add095ffa0f74916a3d3d3e3940b37a4c160dd614111f214f20e8bcff6",
+            "scripts/security/image_scan.py": "3a8426ea8eb39b5aa6e18e965ef0f1dd1e12261ac7d651893ec90af5dda7ca20",
+            "scripts/security/image_inventory.py": "ac3e6f4b9986ef93bd6b2444cdf978dd49669d9d5a80d1164f7c1f770ec42ac7",
+            "scripts/security/image_ci_report.py": "df7ba2fcff7e625a4964e3415f395187d30ad28969a2329dc2b3698b3d6fdc8f",
+            "scripts/security/image_qualify.py": "d4e3c5dad4399bdb9e1016f9d2af98196eee96d30003f5a0a07317d9d49d16e2",
+            "scripts/security/image-tools.json": "db84bc211966575dd72ea597485780585cf84fae43777f82806ad769c7f7621b",
+            "docker/managed/entrypoint.sh": "4281416174fba5d5fa91a23a18b4cac320dc58a536f9de06759debaecc33ad85",
+            "docker/managed/packages/sources.lock.json": "29779bec2ded93b8c346d4513e1614712972839ff832a52ba27ec0b94e9ac8ed",
+            ".github/security/exceptions.json": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+            "version.txt": "8a3dad16d348c163566a456fcf650d85d7aeeda5e53d01ee1fa8dc15212915a7"
+          }
+        },
+        {
+          "sha": "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+          "crates_tree": "dda21ba29061af610819dcbee36dea3a5bcb4a45",
+          "dockerfile_sha256": "9a489070ccc928932701a372e6d882a802065d7120f78d6acb5e47cd13e48740",
+          "inputs": {
+            "Cargo.toml": "577ee00e0503e4a709d56142b186e4f5065a9461b6eb1cf0efd42f903c2ae5b1",
+            "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+            "scripts/build-identity.rs": "f550fb3c9b5ee6ee63c894de5428366fed5ab7ae5b63ca2a626b989f38f848b2",
+            "scripts/smoke-managed-image.sh": "d36e59add095ffa0f74916a3d3d3e3940b37a4c160dd614111f214f20e8bcff6",
+            "scripts/security/image_scan.py": "3a8426ea8eb39b5aa6e18e965ef0f1dd1e12261ac7d651893ec90af5dda7ca20",
+            "scripts/security/image_inventory.py": "ac3e6f4b9986ef93bd6b2444cdf978dd49669d9d5a80d1164f7c1f770ec42ac7",
+            "scripts/security/image_ci_report.py": "df7ba2fcff7e625a4964e3415f395187d30ad28969a2329dc2b3698b3d6fdc8f",
+            "scripts/security/image_qualify.py": "d4e3c5dad4399bdb9e1016f9d2af98196eee96d30003f5a0a07317d9d49d16e2",
+            "scripts/security/image-tools.json": "db84bc211966575dd72ea597485780585cf84fae43777f82806ad769c7f7621b",
+            "docker/managed/entrypoint.sh": "4281416174fba5d5fa91a23a18b4cac320dc58a536f9de06759debaecc33ad85",
+            "docker/managed/packages/sources.lock.json": "29779bec2ded93b8c346d4513e1614712972839ff832a52ba27ec0b94e9ac8ed",
+            ".github/security/exceptions.json": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+            "version.txt": "8a3dad16d348c163566a456fcf650d85d7aeeda5e53d01ee1fa8dc15212915a7"
+          }
+        }
+      ],
+      "diff_paths": [
+        ".github/scripts/ci-timings.py",
+        ".github/scripts/ci-timings.test.py",
+        ".github/scripts/pr-checks.mjs",
+        ".github/scripts/pr-ci-efficiency.test.mjs",
+        ".github/scripts/pr-server-parallel.test.mjs",
+        ".github/workflows/managed-quality.yml",
+        ".github/workflows/stable-release.yml",
+        "docs/ci/ci-efficiency.md",
+        "docs/ci/ci-timings.md",
+        "docs/ci/evidence/all-582/baseline-jobs.csv",
+        "docs/ci/evidence/all-582/baseline-run-usage.json",
+        "docs/ci/evidence/all-582/baseline-steps.csv",
+        "docs/ci/evidence/all-582/baseline-summary.json",
+        "docs/ci/evidence/all-582/profile-strategy.json"
+      ],
+      "original_worktree_locator": "/Users/allison/.codex/worktrees/all-582-s07-after/allison-demo",
+      "root_trees": {
+        "A": {
+          "sha": "7a80821ffcbfacba72a707312e50ad6414e65999",
+          "tree": "2649b69d783dea84f11fd25ec0f7134ba568fa6f"
+        },
+        "B": {
+          "sha": "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+          "tree": "5e79ca701c9adf66df46da939a0846af265ea620"
+        },
+        "full_patch_sha256": "9398622b6ad20c1595d75cc7564f835a976684f3e0e3dd0cea2831931ff1bad3",
+        "protected_build_inputs_unchanged": true
+      }
+    }
+  },
+  "measurements": [
+    {
+      "label": "before-A",
+      "source_revision": "928379d67b56d706489acdc1c884c6af0284ffb1",
+      "image_id": "sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+      "build_wall_seconds": 1591.2438729169662,
+      "build_client_exit": 0,
+      "builder_cgroup_cpu_seconds": 3622.530666,
+      "cpu_scope": "Owned builder cgroup includes BuildKit and disk telemetry; start/end counter delta, not Cargo-only",
+      "builder_lifetime_memory_peak_bytes": 6442459136,
+      "memory_peak_scope": "Builder lifetime; warm afterB shares its builder lifetime with afterA",
+      "oom_kills_at_end": 0,
+      "source_phase": {
+        "vertex": 14,
+        "cache_hit": false,
+        "wall_seconds": 828.5,
+        "local_compile_events": [
+          "nac-contracts",
+          "nac-credential-store",
+          "nac-process",
+          "nac-server",
+          "nac-core",
+          "nac-managed"
+        ],
+        "external_compile_event_count": 305,
+        "all_compile_event_count": 311
+      },
+      "dependency_phase": null,
+      "min_observed_host_free_build_bytes": 24743878656,
+      "peak_observed_owned_builder_plus_3_3GiB_image_estimate_bytes": 14836908851,
+      "peak_observed_Docker_raw_growth_from_original_campaign_baseline_bytes": 9037930496,
+      "smoke_wall_seconds": 18.124366708972957,
+      "inventory_wall_seconds": 17.111488250026014,
+      "inventory_status": "inventoried",
+      "fresh_db_scan_wall_seconds": 61.43476425000699,
+      "strict_scan_exit": 1,
+      "security": {
+        "status": "blocked",
+        "image": "sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+        "scanned_at": "2026-11-05T02:24:09.980357+00:00",
+        "blocking": 32,
+        "findings": 55
+      },
+      "db": {
+        "built": "2026-11-04T06:20:59Z",
+        "age_seconds": 72180.656359,
+        "schema": "v6.1.10",
+        "sha256": "a31a8c9346f97f5e6f015ed6bd6ec5fe47fdef2a5222bacd068f511df032f529"
+      },
+      "image_evidence_file": "before-A-image.json",
+      "build_command_log_record": "before-A.json",
+      "started_at_utc": "2026-11-05T01:52:10.795886+00:00",
+      "ended_at_utc": "2026-11-05T02:18:42.051893+00:00",
+      "original_cwd": "/Users/allison/.codex/worktrees/all-582-s07-before/allison-demo",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-before-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:before-a-928379d67-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-928379d67b56d706489acdc1c884c6af0284ffb1",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=928379d67b56d706489acdc1c884c6af0284ffb1",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-A-buildkit.json",
+        "."
+      ],
+      "full_build_identity": {
+        "build_id": "dev-928379d67b56d706489acdc1c884c6af0284ffb1",
+        "product_version": "0.1.4",
+        "source_revision": "928379d67b56d706489acdc1c884c6af0284ffb1",
+        "track": "dev"
+      },
+      "actual_commands": {
+        "smoke": [
+          "env",
+          "MANAGED_IMAGE=sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+          "MANAGED_IMAGE_SKIP_BUILD=1",
+          "CONTAINER_RUNTIME=docker",
+          "sh",
+          "scripts/smoke-managed-image.sh"
+        ],
+        "inventory-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+          "--source-revision",
+          "928379d67b56d706489acdc1c884c6af0284ffb1",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-A-inventory",
+          "--inventory-only",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-pair-fresh-db"
+        ],
+        "security-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--bundle",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-A-inventory",
+          "--image",
+          "sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+          "--source-revision",
+          "928379d67b56d706489acdc1c884c6af0284ffb1",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-A-security",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-pair-fresh-db"
+        ]
+      },
+      "actual_identity_argv": [
+        "docker",
+        "run",
+        "--rm",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=64",
+        "--entrypoint=/usr/local/bin/nac-web",
+        "sha256:bcbbeb4010fe96d195ac96a22f857682ee630dc0821fe6c8e68341fb7c12f887",
+        "guide",
+        "skills",
+        "discovery"
+      ],
+      "NAC_binary_sha256": "961462728eb44f888b1ac4b7769d27b51f0a14e69f385bd94aeb680528f874f4"
+    },
+    {
+      "label": "before-B",
+      "source_revision": "51444e1d3ee856b47be1acabea66c0bc883ef153",
+      "image_id": "sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+      "build_wall_seconds": 818.9191486249911,
+      "build_client_exit": 0,
+      "builder_cgroup_cpu_seconds": 1535.181825,
+      "cpu_scope": "Owned builder cgroup includes BuildKit and disk telemetry; start/end counter delta, not Cargo-only",
+      "builder_lifetime_memory_peak_bytes": 6442450944,
+      "memory_peak_scope": "Builder lifetime; warm afterB shares its builder lifetime with afterA",
+      "oom_kills_at_end": 0,
+      "source_phase": {
+        "vertex": 12,
+        "cache_hit": false,
+        "wall_seconds": 786.8,
+        "local_compile_events": [
+          "nac-contracts",
+          "nac-credential-store",
+          "nac-process",
+          "nac-server",
+          "nac-core",
+          "nac-managed"
+        ],
+        "external_compile_event_count": 305,
+        "all_compile_event_count": 311
+      },
+      "dependency_phase": null,
+      "min_observed_host_free_build_bytes": 20565155840,
+      "peak_observed_owned_builder_plus_3_3GiB_image_estimate_bytes": 19430138675,
+      "peak_observed_Docker_raw_growth_from_original_campaign_baseline_bytes": 12441063424,
+      "smoke_wall_seconds": 17.105761541984975,
+      "inventory_wall_seconds": 16.088011583022308,
+      "inventory_status": "inventoried",
+      "fresh_db_scan_wall_seconds": 62.447538208041806,
+      "strict_scan_exit": 1,
+      "security": {
+        "status": "blocked",
+        "image": "sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+        "scanned_at": "2026-11-05T02:53:27.061360+00:00",
+        "blocking": 32,
+        "findings": 55
+      },
+      "db": {
+        "built": "2026-11-04T06:20:59Z",
+        "age_seconds": 73937.3219,
+        "schema": "v6.1.10",
+        "sha256": "a31a8c9346f97f5e6f015ed6bd6ec5fe47fdef2a5222bacd068f511df032f529"
+      },
+      "image_evidence_file": "before-B-image.json",
+      "build_command_log_record": "before-B.json",
+      "started_at_utc": "2026-11-05T02:35:33.723804+00:00",
+      "ended_at_utc": "2026-11-05T02:49:12.649064+00:00",
+      "original_cwd": "/Users/allison/.codex/worktrees/all-582-s07-before/allison-demo",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-before-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:before-b-51444e1d3-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-buildkit.json",
+        "."
+      ],
+      "full_build_identity": {
+        "build_id": "dev-51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "product_version": "0.1.4",
+        "source_revision": "51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "track": "dev"
+      },
+      "actual_commands": {
+        "smoke": [
+          "env",
+          "MANAGED_IMAGE=sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+          "MANAGED_IMAGE_SKIP_BUILD=1",
+          "CONTAINER_RUNTIME=docker",
+          "sh",
+          "scripts/smoke-managed-image.sh"
+        ],
+        "inventory-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+          "--source-revision",
+          "51444e1d3ee856b47be1acabea66c0bc883ef153",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-fresh-db",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-inventory",
+          "--inventory-only"
+        ],
+        "security-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+          "--source-revision",
+          "51444e1d3ee856b47be1acabea66c0bc883ef153",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-fresh-db",
+          "--bundle",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-inventory",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-security"
+        ]
+      },
+      "actual_identity_argv": [
+        "docker",
+        "run",
+        "--rm",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=64",
+        "--entrypoint=/usr/local/bin/nac-web",
+        "sha256:aa3dc14d06ba472475791a41d1c630ae34b7c929db55c5e095e864c655e06ef4",
+        "guide",
+        "skills",
+        "discovery"
+      ],
+      "NAC_binary_sha256": "9d2852bbf7e01e44540e1b81e578be28699a925060a9d75bb7bc073d83db692d"
+    },
+    {
+      "label": "after-A",
+      "source_revision": "7a80821ffcbfacba72a707312e50ad6414e65999",
+      "image_id": "sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+      "build_wall_seconds": 1682.2947503749747,
+      "build_client_exit": 0,
+      "builder_cgroup_cpu_seconds": 3653.843101,
+      "cpu_scope": "Owned builder cgroup includes BuildKit and disk telemetry; start/end counter delta, not Cargo-only",
+      "builder_lifetime_memory_peak_bytes": 6442455040,
+      "memory_peak_scope": "Builder lifetime; warm afterB shares its builder lifetime with afterA",
+      "oom_kills_at_end": 0,
+      "source_phase": {
+        "vertex": 27,
+        "cache_hit": false,
+        "wall_seconds": 313.6,
+        "local_compile_events": [
+          "nac-contracts",
+          "nac-credential-store",
+          "nac-process",
+          "nac-server",
+          "nac-core",
+          "nac-managed"
+        ],
+        "external_compile_event_count": 0,
+        "all_compile_event_count": 6
+      },
+      "dependency_phase": {
+        "vertex": 21,
+        "cache_hit": false,
+        "wall_seconds": 533.8,
+        "local_compile_events": [
+          "nac-contracts",
+          "nac-credential-store",
+          "nac-process",
+          "nac-server",
+          "nac-core",
+          "nac-managed"
+        ],
+        "external_compile_event_count": 305,
+        "all_compile_event_count": 311
+      },
+      "min_observed_host_free_build_bytes": 24705028096,
+      "peak_observed_owned_builder_plus_3_3GiB_image_estimate_bytes": 14835876659,
+      "peak_observed_Docker_raw_growth_from_original_campaign_baseline_bytes": 8647753728,
+      "smoke_wall_seconds": 18.1240587499924,
+      "inventory_wall_seconds": 17.103799082979094,
+      "inventory_status": "inventoried",
+      "fresh_db_scan_wall_seconds": 63.44035291601904,
+      "strict_scan_exit": 1,
+      "security": {
+        "status": "blocked",
+        "image": "sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+        "scanned_at": "2026-11-05T03:26:10.674798+00:00",
+        "blocking": 32,
+        "findings": 55
+      },
+      "db": {
+        "built": "2026-11-04T06:20:59Z",
+        "age_seconds": 75901.081191,
+        "schema": "v6.1.10",
+        "sha256": "2d13102f97b3e821abc4e786e0666126ab34356880ad59522c277ccd6b79e856"
+      },
+      "image_evidence_file": "after-A-image.json",
+      "build_command_log_record": "after-A.json",
+      "started_at_utc": "2026-11-05T02:54:58.286001+00:00",
+      "ended_at_utc": "2026-11-05T03:23:00.594121+00:00",
+      "original_cwd": "/Users/allison/.codex/worktrees/all-582-s07-after/allison-demo",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-after-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:after-a-7a80821ff-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-7a80821ffcbfacba72a707312e50ad6414e65999",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=7a80821ffcbfacba72a707312e50ad6414e65999",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-buildkit.json",
+        "."
+      ],
+      "full_build_identity": {
+        "build_id": "dev-7a80821ffcbfacba72a707312e50ad6414e65999",
+        "product_version": "0.1.4",
+        "source_revision": "7a80821ffcbfacba72a707312e50ad6414e65999",
+        "track": "dev"
+      },
+      "actual_commands": {
+        "smoke": [
+          "env",
+          "MANAGED_IMAGE=sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+          "MANAGED_IMAGE_SKIP_BUILD=1",
+          "CONTAINER_RUNTIME=docker",
+          "sh",
+          "scripts/smoke-managed-image.sh"
+        ],
+        "inventory-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+          "--source-revision",
+          "7a80821ffcbfacba72a707312e50ad6414e65999",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-fresh-db",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-inventory",
+          "--inventory-only"
+        ],
+        "security-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+          "--source-revision",
+          "7a80821ffcbfacba72a707312e50ad6414e65999",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-fresh-db",
+          "--bundle",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-inventory",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-A-security"
+        ]
+      },
+      "actual_identity_argv": [
+        "docker",
+        "run",
+        "--rm",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=64",
+        "--entrypoint=/usr/local/bin/nac-web",
+        "sha256:de93152bd2b6c5069e671202605477702e682afa58ecc48aebfd9a0a5ce414e7",
+        "guide",
+        "skills",
+        "discovery"
+      ],
+      "NAC_binary_sha256": "9da847fdd3ad047a6955acfa8126c81597451b81c3b74562243aae71b4e90682"
+    },
+    {
+      "label": "after-B",
+      "source_revision": "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+      "image_id": "sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+      "build_wall_seconds": 322.2148600000073,
+      "build_client_exit": 0,
+      "builder_cgroup_cpu_seconds": 581.750245,
+      "cpu_scope": "Owned builder cgroup includes BuildKit and disk telemetry; start/end counter delta, not Cargo-only",
+      "builder_lifetime_memory_peak_bytes": 6442455040,
+      "memory_peak_scope": "Builder lifetime; warm afterB shares its builder lifetime with afterA",
+      "oom_kills_at_end": 0,
+      "source_phase": {
+        "vertex": 21,
+        "cache_hit": false,
+        "wall_seconds": 288.4,
+        "local_compile_events": [
+          "nac-contracts",
+          "nac-credential-store",
+          "nac-process",
+          "nac-server",
+          "nac-core",
+          "nac-managed"
+        ],
+        "external_compile_event_count": 0,
+        "all_compile_event_count": 6
+      },
+      "dependency_phase": {
+        "vertex": 19,
+        "cache_hit": true,
+        "wall_seconds": null,
+        "local_compile_events": [],
+        "external_compile_event_count": 0,
+        "all_compile_event_count": 0
+      },
+      "min_observed_host_free_build_bytes": 31467659264,
+      "peak_observed_owned_builder_plus_3_3GiB_image_estimate_bytes": 16976032563,
+      "peak_observed_Docker_raw_growth_from_original_campaign_baseline_bytes": 11503353856,
+      "smoke_wall_seconds": 17.08658129198011,
+      "inventory_wall_seconds": 16.0893005420221,
+      "inventory_status": "inventoried",
+      "fresh_db_scan_wall_seconds": 61.46225120901363,
+      "strict_scan_exit": 1,
+      "security": {
+        "status": "blocked",
+        "image": "sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+        "scanned_at": "2026-11-05T03:37:31.824111+00:00",
+        "blocking": 32,
+        "findings": 55
+      },
+      "db": {
+        "built": "2026-11-04T06:20:59Z",
+        "age_seconds": 76583.029863,
+        "schema": "v6.1.10",
+        "sha256": "a31a8c9346f97f5e6f015ed6bd6ec5fe47fdef2a5222bacd068f511df032f529"
+      },
+      "image_evidence_file": "after-B-image.json",
+      "build_command_log_record": "after-B.json",
+      "started_at_utc": "2026-11-05T03:27:56.851142+00:00",
+      "ended_at_utc": "2026-11-05T03:33:19.068455+00:00",
+      "original_cwd": "/Users/allison/.codex/worktrees/all-582-s07-after/allison-demo",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-after-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:after-b-7446e4337-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-7446e4337200cdd8d90944f6dcc594309ba56eb6",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=7446e4337200cdd8d90944f6dcc594309ba56eb6",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-buildkit.json",
+        "."
+      ],
+      "full_build_identity": {
+        "build_id": "dev-7446e4337200cdd8d90944f6dcc594309ba56eb6",
+        "product_version": "0.1.4",
+        "source_revision": "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+        "track": "dev"
+      },
+      "actual_commands": {
+        "smoke": [
+          "env",
+          "MANAGED_IMAGE=sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+          "MANAGED_IMAGE_SKIP_BUILD=1",
+          "CONTAINER_RUNTIME=docker",
+          "sh",
+          "scripts/smoke-managed-image.sh"
+        ],
+        "inventory-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+          "--source-revision",
+          "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-fresh-db",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-inventory",
+          "--inventory-only"
+        ],
+        "security-command": [
+          "python3",
+          "scripts/security/image_scan.py",
+          "--image",
+          "sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+          "--source-revision",
+          "7446e4337200cdd8d90944f6dcc594309ba56eb6",
+          "--trusted-policy",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/trusted-policy-b955.json",
+          "--candidate-policy",
+          ".github/security/exceptions.json",
+          "--tool-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S05/tools-cold",
+          "--db-cache",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-fresh-db",
+          "--bundle",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-inventory",
+          "--output",
+          "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/after-B-security"
+        ]
+      },
+      "actual_identity_argv": [
+        "docker",
+        "run",
+        "--rm",
+        "--read-only",
+        "--network=none",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=64",
+        "--entrypoint=/usr/local/bin/nac-web",
+        "sha256:9612789811abbc76687019ae0d6e33756da05434f46819c65271cc45a98c6b07",
+        "guide",
+        "skills",
+        "discovery"
+      ],
+      "NAC_binary_sha256": "824a5f83b91a961a6f172c259dcb3a89f65cd45304ec1f8f38c4e85c1e50d9c2"
+    }
+  ],
+  "deltas": {
+    "warm_build_wall_seconds_saved": 496.70428862498375,
+    "warm_build_wall_decrease_percent": 60.65364199371535,
+    "warm_builder_cpu_seconds_saved": 953.4315799999999,
+    "warm_builder_cpu_decrease_percent": 62.10544995215794,
+    "cold_build_wall_seconds_increase": 91.05087745800847,
+    "cold_build_wall_increase_percent": 5.7219939072632435,
+    "two_successful_build_pair_wall_seconds_saved": 405.6534111669753,
+    "two_successful_build_pair_wall_decrease_percent": 16.83095324014428
+  },
+  "failed_attempts": [
+    {
+      "file": "interrupted-before-A/before-A.json",
+      "elapsed_seconds": 567.9937417919864,
+      "actual_client_exit": 130,
+      "guard_stop": "owned builder + loaded-image reservation above11GiB early-stop margin (hard budget12GiB)",
+      "exact_cpu_seconds": null,
+      "cpu_gap": "No final cgroup sample survived owned-container stop; wall and configured4CPU limit retained. Not counted successful.",
+      "started_at_utc": "2026-11-05T01:39:47.627851+00:00",
+      "ended_at_utc": "2026-11-05T01:49:15.625506+00:00",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-before-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:before-a-928379d67-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-928379d67b56d706489acdc1c884c6af0284ffb1",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=928379d67b56d706489acdc1c884c6af0284ffb1",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-A-buildkit.json",
+        "."
+      ],
+      "last_owned_builder_bytes": 8314867712,
+      "min_observed_host_free_bytes": 23815663616,
+      "max_observed_Docker_raw_growth_bytes": 3744645120
+    },
+    {
+      "file": "interrupted-before-B-15/before-B.json",
+      "elapsed_seconds": 447.7220956250094,
+      "actual_client_exit": 130,
+      "guard_stop": "owned builder + loaded-image reservation above15GiB early-stop margin (hard budget16GiB)",
+      "exact_cpu_seconds": null,
+      "cpu_gap": "No final cgroup sample survived owned-container stop; wall and configured4CPU limit retained. Not counted successful.",
+      "started_at_utc": "2026-11-05T02:25:43.489753+00:00",
+      "ended_at_utc": "2026-11-05T02:33:11.215842+00:00",
+      "actual_build_argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "nac-all582-s07-before-01a1a901",
+        "--platform",
+        "linux/amd64",
+        "--file",
+        "docker/managed/Dockerfile",
+        "--tag",
+        "nac-all582-s07:before-b-51444e1d3-01a1a901",
+        "--build-arg",
+        "CARGO_BUILD_JOBS=2",
+        "--build-arg",
+        "NAC_BUILD_TRACK=dev",
+        "--build-arg",
+        "NAC_BUILD_ID=dev-51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "--build-arg",
+        "NAC_SOURCE_REVISION=51444e1d3ee856b47be1acabea66c0bc883ef153",
+        "--load",
+        "--provenance=false",
+        "--sbom=false",
+        "--metadata-file",
+        "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/before-B-buildkit.json",
+        "."
+      ],
+      "last_owned_builder_bytes": 12570320896,
+      "min_observed_host_free_bytes": 24255975424,
+      "max_observed_Docker_raw_growth_bytes": 9474469888
+    }
+  ],
+  "comparability": {
+    "same_production_crates_tree": "dda21ba29061af610819dcbee36dea3a5bcb4a45",
+    "same_actual_six_toolchain_hashes": {
+      "/usr/local/rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin/rustc": "3690cc576ede140504698405d5d8fa3826aaadbe71699c6c4ed0a565d6f493e2",
+      "/usr/local/rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin/cargo": "ff3022fcbd13b08434ea7afde9a0ef9d5b3f5c17b5fc7a40031be3ee000a6a24",
+      "/usr/local/rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin/rustfmt": "5005cdcd39ded526dca8fa6ccd716d42fc7da54469034e055dbf54649bec7877",
+      "/usr/local/rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin/cargo-clippy": "12791107557fba5debf183769ac3edd47b901fcfd03f6cd194ddb8e043b94f48",
+      "/usr/local/bin/node": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+      "/usr/local/go/bin/go": "5f5eb6d0b2fb6aa0bb5d5f8c5f1c944e0de955c925f0111af92a9d8f79680b5b"
+    },
+    "all_four_NAC_binaries_distinct_and_full_identities_verified": true,
+    "all_four_base_frontend_materials_equal": true,
+    "actual_runtime_apk_rows": {
+      "count": 121,
+      "columns": [
+        "package",
+        "version",
+        "origin",
+        "architecture"
+      ],
+      "file": "runtime-packages.tsv",
+      "file_sha256": "06415d3d4e2852c6ac16ed0041c98e4feeced18917c7a566d82d9a8726767658",
+      "all_four_equal": true
+    },
+    "actual_cold_apk_install_upgrade_rows_by_stage": {
+      "build": {
+        "same": true,
+        "count": 59,
+        "sha256": "acf5ca4ca1478b8c027e5a2ea1f1ce6958200ae344e015ee2ebb3a84bc538c6e"
+      },
+      "runtime": {
+        "same": true,
+        "count": 107,
+        "sha256": "3d5faa92f9ba1049ee7cbdd4a3c6173306bfb4bd034cb01382a68521727940a8"
+      },
+      "runtime-package-sdk": {
+        "same": true,
+        "count": 114,
+        "sha256": "936dd2a1949e63abad10f96554558ccfbe8fec492162f2772c5857c9f69a9e71"
+      },
+      "runtime-packages": {
+        "same": true,
+        "count": 20,
+        "sha256": "68ded3596e8f01f09c87f9638568066a90f1d50cb8963c33cc20775aa48e378e"
+      }
+    },
+    "workspace_manifest_and_lock_sha256": {
+      "Cargo.toml": "577ee00e0503e4a709d56142b186e4f5065a9461b6eb1cf0efd42f903c2ae5b1",
+      "Cargo.lock": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+      "crates/nac-catalog-gen/Cargo.toml": "e65e68e6d0bc20b5bf5c50aff2e3fc1c23a2665f806c2aa71629234b71ad7fc7",
+      "crates/nac-contracts/Cargo.toml": "1408b6937471ca5149b8e3cfe3165a2a5451fee4186717b9fdc670e52e9ee62d",
+      "crates/nac-core/Cargo.toml": "2aa0f1ef1419a6a6dc538c0f498c07a6ae175d28e4cc5f24206f9badeaa5c6bc",
+      "crates/nac-credential-store/Cargo.toml": "618d9b0e064c18c6fcbe2d76116576e1c4d40fe7110831ce290d304c50da3c73",
+      "crates/nac-managed/Cargo.toml": "c648dd4772956692e36c12a9b3fe91a11e8669a269cb811179d7ded29ce9125c",
+      "crates/nac-process/Cargo.toml": "4756879437f2d7e3b0b561d2a3bfcc134c771649f5ffa3e7ecc473d1d89b6595",
+      "crates/nac-server/Cargo.toml": "fc9ff1296d613b06a79452baed182ddac10c7285613380030e0ae915aea1437c"
+    }
+  },
+  "negative_controls": {
+    "linux_target_graph": {
+      "scope": "Read-only host Cargo graph for actual Linux/amd64 target; no compilation or image timing credit",
+      "actual_source": "7a80821ffcbfacba72a707312e50ad6414e65999",
+      "results": [
+        {
+          "label": "actual-owned-source",
+          "cwd": "/Users/allison/.codex/worktrees/all-582-s07-after/allison-demo",
+          "command": [
+            "cargo",
+            "tree",
+            "--locked",
+            "--offline",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "-p",
+            "nac-server",
+            "--edges",
+            "normal,build",
+            "--prefix",
+            "none",
+            "--format",
+            "{p} {f}"
+          ],
+          "exit_code": 0,
+          "elapsed_seconds": 0.6308044999605045,
+          "rows": 836,
+          "normalized_sha256": "caed38f913457bda13a197dd5f7eb6860fdae76a36180a13cd0214f255fdb4a9"
+        },
+        {
+          "label": "exact-recipe-skeleton",
+          "cwd": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison/linux-graph-skeleton",
+          "command": [
+            "cargo",
+            "tree",
+            "--locked",
+            "--offline",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "-p",
+            "nac-server",
+            "--edges",
+            "normal,build",
+            "--prefix",
+            "none",
+            "--format",
+            "{p} {f}"
+          ],
+          "exit_code": 0,
+          "elapsed_seconds": 0.19424158398760483,
+          "rows": 836,
+          "normalized_sha256": "caed38f913457bda13a197dd5f7eb6860fdae76a36180a13cd0214f255fdb4a9"
+        }
+      ],
+      "equality": true,
+      "workspace_manifest_count": 8,
+      "crate_manifest_count": 7,
+      "lockfile_count": 1,
+      "all_workspace_manifests_and_lock_byte_equal": true,
+      "negative_missing_workspace_manifest": {
+        "path": "crates/nac-managed/Cargo.toml",
+        "exit_code": 101,
+        "failed_closed": true
+      },
+      "negative_changed_existing_dependency_feature": {
+        "mutation": "Only owned graph fixture adds existing Tokio test-util feature; no production edits/dependency package added",
+        "exit_code": 0,
+        "normalized_sha256": "ba43b4253ab17906ebbfcbda95272eedf0844ad6a2c267225ecc3d9828eec1c7",
+        "graph_changed_detected": true
+      }
+    },
+    "old_timestamp_stub": {
+      "strategy": "S07",
+      "scope": "Tiny actual Cargo1.98 release cleanup control; not full NAC image timing",
+      "commands": [
+        {
+          "command": [
+            "cargo",
+            "generate-lockfile",
+            "--offline"
+          ],
+          "elapsed_s": 0.06612337497062981,
+          "status": 0
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "-vv"
+          ],
+          "elapsed_s": 0.3889344170456752,
+          "status": 0
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "-vv"
+          ],
+          "elapsed_s": 0.03234691696707159,
+          "status": 0
+        },
+        {
+          "command": [
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/cleanup-probe/target/release/probe-consumer"
+          ],
+          "elapsed_s": 0.1101596659864299,
+          "status": 0
+        },
+        {
+          "command": [
+            "cargo",
+            "clean",
+            "--release",
+            "--locked",
+            "--offline",
+            "--workspace"
+          ],
+          "elapsed_s": 0.028309208049904555,
+          "status": 0
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "-vv"
+          ],
+          "elapsed_s": 0.19994320801924914,
+          "status": 0
+        },
+        {
+          "command": [
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/cleanup-probe/target/release/probe-consumer"
+          ],
+          "elapsed_s": 0.11396458302624524,
+          "status": 0
+        }
+      ],
+      "unclean_old_timestamp_output": "stub",
+      "cleaned_old_timestamp_output": "actual 17",
+      "external_itoa_artifact_retained": true,
+      "all_local_lib_bin_artifacts_removed": true,
+      "start_utc": "2026-11-05T00:15:26.936546+00:00",
+      "resources": "Tiny 2-package workspace + cached itoa1.0.18; no full NAC/Cargo concurrency"
+    }
+  },
+  "policy_origin": {
+    "revision": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+    "path": ".github/security/exceptions.json",
+    "sha256": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+    "retrieval": "git show from owned comparison worktree object database; immutable dev baseline policy",
+    "candidate_policy_bytes_equal": true
+  },
+  "cache_and_resource_procedure": {
+    "cold": "Fresh isolated BuildKit builder/cache per recipe; no cache imports, no shared builder use. First beforeA abort was discarded and its owned builder/cache recreated before successful coldA.",
+    "warm": "Same builder/cache inside each immutable successor pair; same Dockerfile within pair; no synthetic commits. BEFORE B retry already had its real-source COPY cached, but recompiled all305 external and6 local events after the failed RUN.",
+    "trust": "Workflow retains shared cache export only for human-approved dev/main pushes; unprivileged PRs do not export. Local builds used no shared cache import/export or publication. Trusted push population is still needed for a hosted warm-layer comparison.",
+    "buildkit_config": "debug = false\n[worker.oci]\n  gc = false\n  max-parallelism = 2\n",
+    "buildkit_driver_options": {
+      "image": "moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea",
+      "memory": "6g",
+      "memory-swap": "6g",
+      "cpu-quota": "400000",
+      "cpu-period": "100000",
+      "env.NAC_ALL582_OWNER": "image_workflow",
+      "env.NAC_ALL582_THREAD": "01a1a901"
+    },
+    "builder_names": [
+      "nac-all582-s07-before-01a1a901",
+      "nac-all582-s07-after-01a1a901"
+    ],
+    "resource_revisions": [
+      {
+        "max_additional_docker_bytes": 12884901888,
+        "min_host_free_bytes": 12884901888,
+        "early_stop_owned_or_raw_growth_gib": 11,
+        "early_stop_host_free_gib": 13,
+        "poll_seconds": 1,
+        "data_telemetry_seconds": 10
+      },
+      {
+        "at_utc": "2026-11-05T01:51:55.604622+00:00",
+        "host_free_bytes": 30929035264,
+        "prior_hard_budget_gib": 12,
+        "revised_hard_budget_gib": 16,
+        "revised_early_stop_owned_or_raw_growth_gib": 15,
+        "unchanged_min_host_free_gib": 12,
+        "unchanged_early_host_free_gib": 13,
+        "authority": "Parent explicit grant after S08 cleanup on2026-11-05; original coldA guard already stopped; recreate only owned builder and restart truly cold",
+        "cold_restart_required": true
+      },
+      {
+        "at_utc": "2026-11-05T02:29:55.773108+00:00",
+        "authority": "Parent explicit20GiB cap/19GiB early stop increase on2026-11-05 due active-snapshot du conservatism; independent physicalraw and host guards retained",
+        "host_free_bytes_now": 24602828800,
+        "current_last_original_guard_sample": {
+          "utc": "2026-11-05T02:29:55.221200+00:00",
+          "seconds": 251.727,
+          "host_free_bytes": 24602972160,
+          "docker_raw_growth_bytes": 9136574464,
+          "owned_builder_bytes": 11830566912,
+          "reserved_loaded_image_bytes": 3543348019,
+          "owned_docker_upper_estimate_bytes": 15373914931
+        },
+        "new_hard_owned_and_physical_added_gib": 20,
+        "new_early_owned_including3_3reserve_and_physical_added_gib": 19,
+        "min_host_free_gib": 12,
+        "early_host_free_gib": 13,
+        "unchanged_cpu_memory_platform_sources": true,
+        "inflight_guard_hot_reload_supported": false,
+        "next_step": "Attach independent strict revised observer before disabling old observer; retain observer continuity/limitations explicitly; never alter resource measurements",
+        "actual_application": "New invocation only; no attached observer or remote execution hook installed. Original stricter beforeB observer aborted; unsuccessful attempt retained, then retry used20/19 controller with actual client exit/timing.",
+        "decision_receipt": "observer-migration-decision.json"
+      }
+    ],
+    "poll_seconds": 1,
+    "owned_du_interval_seconds": 10,
+    "owned_du_telemetry_unavailable_limit_seconds": 45,
+    "per_build_timeout_seconds": 7200,
+    "loaded_image_reservation_gib": 3.3,
+    "stop_scope": "SIGINT only owned client process group, then stop exact owned BuildKit container; never shared prune.",
+    "observer_change": "No in-flight observer injection/pause or exit-status substitution; retained stricter observer abort, then new guarded invocation.",
+    "measurement_boundary": "Build timers include load/export; source/runtime checks and scanner command times are separate. Not a complete workflow timing.",
+    "cleanup": "Images/DBs/cache removed only after corresponding retained evidence; owned builder cleanup serialized pairs. All raw logs/SBOM/provenance/findings/receipts retained. No shared pruning."
+  },
+  "limitations": [
+    "One local pair per recipe under ARM-host AMD64 emulation with4CPU/6GiB/Cargo2, not hosted CI5 or statistical/ordinary-cohort acceptance.",
+    "BEFORE B was a successful retry after old15GiB observer guard; its real source COPY was already cached, but raw log proves full third-party dependency download/compile restarted. Failure and COPY-cache caveat retained.",
+    "Initial BEFORE cold attempt hit old11GiB estimate guard; deleted only owned builder/cache and recreated truly empty cache for successful coldA.",
+    "Parent raised conservative caps12\u219216\u219220GiB as active du overcount became evident; successful builds kept same platform/toolchain/CPU/memory/release flags/features. No observer injection/pause or hidden exit-status substitution.",
+    "Cold total regressed5.72%; unchanged final-runtime step254.0s versus128.2s and other network/resource variance prevent assigning cold wall difference to dependency split.",
+    "Real hosted warm benefit needs trusted dev/main push cache population; unprivileged PR shared-cache export remains disabled.",
+    "Scanner qualification job/full quality/whole-run CI were not executed by this local image-only experiment; existing live fixture evidence and mandatory workflow contracts remain unchanged.",
+    "All four fresh strict scans blocked32/55 findings with0exceptions. No security clearance, no waiver or advisory-wrapper masking."
+  ],
+  "raw_report_archive": {
+    "public_artifact_url": null,
+    "availability": "Full raw reports remain on the original host only; no public download URL has been published. This directory carries portable measurements, commands, package rows and integrity locators, not a claim of public raw-log availability.",
+    "original_local_root": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/S07/full-comparison",
+    "copied_manifest": "raw-report-manifest.json",
+    "copied_manifest_sha256": "ef862eedb6e15f05e719833e27ddbc500464d4ab0bd09a579a158425c5d70f85",
+    "relative_locator_rule": "Resolve raw names against original_local_root. Absolute historical paths record the original execution; they are not required portable path dependencies. Reproductions use owned source, output, policy and pinned-tool locations.",
+    "supplemental_artifacts": [
+      {
+        "relative_name": "before-A.json",
+        "sha256": "b2fcb7ce2509624dd20cc1eb52af36bea052dbc656caef12e618ddff9584b2e6",
+        "bytes": 1417
+      },
+      {
+        "relative_name": "before-A.log",
+        "sha256": "906669274305da704244e72810de6607a11ca6dfc4e1b4d84e0c65f220749861",
+        "bytes": 1572637
+      },
+      {
+        "relative_name": "before-A-buildkit.json",
+        "sha256": "7f6f3f3e4ae35a439cac7c2d0c7a22800b5346415fd11af9dcc46dadbff49436",
+        "bytes": 2788
+      },
+      {
+        "relative_name": "before-A-actual-toolchain.txt",
+        "sha256": "db9a903e13aa2a5965b2c58f8406dc0ad7b6087aa7806aea49e8d8e7193304f0",
+        "bytes": 1123
+      },
+      {
+        "relative_name": "before-A-guide.json",
+        "sha256": "a2b4fa808510121a7f30c615a809122820e1316b0320df4c59b15ff1f8133511",
+        "bytes": 1987
+      },
+      {
+        "relative_name": "before-A-inventory/runtime.json",
+        "sha256": "54fe63c127f7b99754388866906483dae3d785d78878cd761638981c63a21eb2",
+        "bytes": 268425
+      },
+      {
+        "relative_name": "before-A-inventory/sbom.syft.json",
+        "sha256": "dde466472bb9219fe18ccc6a0f1dd04335fb1eb415d94fa719ad8339acdbf019",
+        "bytes": 16273242
+      },
+      {
+        "relative_name": "before-A-security/result.json",
+        "sha256": "6238370b553eedb45b33c2cf8884ad4b9c2f40191a2f5a9f335a8ad102cc6a2e",
+        "bytes": 200
+      },
+      {
+        "relative_name": "before-A-security/report.md",
+        "sha256": "30899950f4d7e400c517fefc7fcdfa6cafef4f89cfc6cf21ede9ca257b60ba0e",
+        "bytes": 5237
+      },
+      {
+        "relative_name": "before-B.json",
+        "sha256": "3d577563b4b6f0edbf045e8b6cd7db0e394eba22c79cb68b05e5252bc53d183d",
+        "bytes": 1418
+      },
+      {
+        "relative_name": "before-B.log",
+        "sha256": "c9f900704563184ee7385816e887586a7401879b7e68a63a22058ff774451f6e",
+        "bytes": 39154
+      },
+      {
+        "relative_name": "before-B-buildkit.json",
+        "sha256": "917562b3a13dc65c6087ae22296c54047c5209df884b0991f41b5162d1427cda",
+        "bytes": 2788
+      },
+      {
+        "relative_name": "before-B-actual-toolchain.txt",
+        "sha256": "78163cba4afef3803143a81d2bf581f2f1e555b2282dc9294fd5eb91fafd51df",
+        "bytes": 1595
+      },
+      {
+        "relative_name": "before-B-guide.json",
+        "sha256": "0069f22534ac32a3e9d51f83803f5e80240c03654cf2698a4713bf611d473955",
+        "bytes": 1987
+      },
+      {
+        "relative_name": "before-B-inventory/runtime.json",
+        "sha256": "e032055d685067bd4b5c8a886e0fe7520ebe4b27d8aeb3089c9d434da14c7911",
+        "bytes": 268425
+      },
+      {
+        "relative_name": "before-B-inventory/sbom.syft.json",
+        "sha256": "0e26aef2eefe67813bdc8d97148c48c7fbb00329c44c1b7b5935297c6630b051",
+        "bytes": 16273246
+      },
+      {
+        "relative_name": "before-B-security/result.json",
+        "sha256": "62c40635a444f7d734d72b0d5d9663811cd0d65059e8da23c7c4f8bac1288232",
+        "bytes": 200
+      },
+      {
+        "relative_name": "before-B-security/report.md",
+        "sha256": "f13a5cec331f93b08e63af3d750cdfad81462352b20fe699daa8583ab60eb082",
+        "bytes": 5237
+      },
+      {
+        "relative_name": "after-A.json",
+        "sha256": "654a1907b21da9f9c9aa456de06068809c055d54fbdcbd3a60bba1059575d7ee",
+        "bytes": 1412
+      },
+      {
+        "relative_name": "after-A.log",
+        "sha256": "a1d4d57ac314cdac9a549557ca6f9d9e58e9124d002ee552390d481fe1e6b844",
+        "bytes": 1584093
+      },
+      {
+        "relative_name": "after-A-buildkit.json",
+        "sha256": "304f1364526bafbaa8b99c8d57d7c15e3dcef9a5900ada20d9100c3c9311e3a1",
+        "bytes": 2785
+      },
+      {
+        "relative_name": "after-A-actual-toolchain.txt",
+        "sha256": "83f97f452897d8c8d4b5283f87f9d16b8be3c6ae6baf873ca4111d49ef8f1d8c",
+        "bytes": 1595
+      },
+      {
+        "relative_name": "after-A-guide.json",
+        "sha256": "7824bf94b9f3eda4578377ecc4f02a03d304dee779c4c9e83090960e252dcc26",
+        "bytes": 1987
+      },
+      {
+        "relative_name": "after-A-inventory/runtime.json",
+        "sha256": "fe91bcd125b548be8e70276ca8e40366393874cccf5731a307ab4143a006f85e",
+        "bytes": 268425
+      },
+      {
+        "relative_name": "after-A-inventory/sbom.syft.json",
+        "sha256": "99ac62fe40d6f5623210dac2fc644d5e9848ccfcb4472e052ddf1360acbbb2d6",
+        "bytes": 16273245
+      },
+      {
+        "relative_name": "after-A-security/result.json",
+        "sha256": "839f0493c8499e6dfe61d795732f4dba9cbcd213143c0dc9ff676e197b8094b5",
+        "bytes": 200
+      },
+      {
+        "relative_name": "after-A-security/report.md",
+        "sha256": "519719e5fc0886657fec5276565b9cf340b745fb6395212c54ae3842147db38a",
+        "bytes": 5237
+      },
+      {
+        "relative_name": "after-B.json",
+        "sha256": "9477a7a993ba4d9c8968a29cc365f718f7e5ff02e520a0e5c26998d83789669d",
+        "bytes": 1413
+      },
+      {
+        "relative_name": "after-B.log",
+        "sha256": "74527d79e838c61fc5255b35dc3906fdc7c932225f35dfcf88444652bb8df8e0",
+        "bytes": 14738
+      },
+      {
+        "relative_name": "after-B-buildkit.json",
+        "sha256": "8b579dd0401d2938fdd4b84223cd248fc519c51b09397d35029bcd10148e71af",
+        "bytes": 2785
+      },
+      {
+        "relative_name": "after-B-actual-toolchain.txt",
+        "sha256": "ab8ae2a481bd28f60861b10e8d58557ee038c1eebc629dee086a618822778c91",
+        "bytes": 1595
+      },
+      {
+        "relative_name": "after-B-guide.json",
+        "sha256": "4d381411358e3a4be31824a6d9f8bb3c27a2122cb127d49c077663a5b5e4f704",
+        "bytes": 1987
+      },
+      {
+        "relative_name": "after-B-inventory/runtime.json",
+        "sha256": "1e9f56334d6bbbddfb574ec2587fdcffbb4742c2701b90251b7518e788757663",
+        "bytes": 268425
+      },
+      {
+        "relative_name": "after-B-inventory/sbom.syft.json",
+        "sha256": "75afb809ff8d8b3586c7b5d9e783879077d2ee329cf975d8f862a993740e67eb",
+        "bytes": 16273245
+      },
+      {
+        "relative_name": "after-B-security/result.json",
+        "sha256": "e5d117f33a9757a92e1f498e23de36df193696036061a2e6861e3bf9ea881faa",
+        "bytes": 200
+      },
+      {
+        "relative_name": "after-B-security/report.md",
+        "sha256": "bf61d007b41b77b25d7e703a2f2216eb9805c6045ace1fb7afc7991cee3aa1d1",
+        "bytes": 5237
+      },
+      {
+        "relative_name": "before-A-smoke.json",
+        "sha256": "28c5e10166539ed6fd688964cb117f900060ad62f69ed60f102165920df101c0",
+        "bytes": 889
+      },
+      {
+        "relative_name": "before-A-inventory-command.json",
+        "sha256": "626d7b20dc1666e236933cb92d06fb754fc56023b3710be077dd3e43e7c3901a",
+        "bytes": 1627
+      },
+      {
+        "relative_name": "before-A-security-command.json",
+        "sha256": "25932962729789cfb3d9d17fad707a0c14b7cc0b316785b5373390461ab5d874",
+        "bytes": 1763
+      },
+      {
+        "relative_name": "before-A-cgroup-end.txt",
+        "sha256": "1d3ea5556f378d4cf186a7ff8a8235adde10b7d6e7fdab695e1ef7c43fab3d14",
+        "bytes": 258
+      },
+      {
+        "relative_name": "before-A-cpu-start.txt",
+        "sha256": "cd2f298e8177b9bb6dc68c9fa6f85bfb6c88e6c4ae4274a12cdf2ef4bd04ee30",
+        "bytes": 134
+      },
+      {
+        "relative_name": "before-B-smoke.json",
+        "sha256": "893bfdc7207fd473faf9c3cdd33355b99aa3f3eee4beebfa0a2c3bceb1917cab",
+        "bytes": 886
+      },
+      {
+        "relative_name": "before-B-inventory-command.json",
+        "sha256": "47c8955ffb008fbfaf2b4a288aa50d39b110bb74d247ca9a62613277c3fb94da",
+        "bytes": 1621
+      },
+      {
+        "relative_name": "before-B-security-command.json",
+        "sha256": "122853008a734acfaebfe0161d419d5303074229ecc318ac3a4827fb2459d416",
+        "bytes": 1758
+      },
+      {
+        "relative_name": "before-B-cgroup-end.txt",
+        "sha256": "f379b38b70868333a46f3f6c814de9cc736a6f883172be49992399e6644e1881",
+        "bytes": 250
+      },
+      {
+        "relative_name": "before-B-cgroup-start.txt",
+        "sha256": "d1f18da8f6eba45dab79a6d822d3a13be17f1cfa31d8d58c21261e8289a1ca63",
+        "bytes": 223
+      },
+      {
+        "relative_name": "after-A-smoke.json",
+        "sha256": "a80bc3dd1b8d859e9807316dc23914a592cb3aab88978b968a24e74a8e5fad35",
+        "bytes": 885
+      },
+      {
+        "relative_name": "after-A-inventory-command.json",
+        "sha256": "5b3fb16a7e254fdf87bcea10f902281e00b163e247ee742fa50f55d38acf51a8",
+        "bytes": 1620
+      },
+      {
+        "relative_name": "after-A-security-command.json",
+        "sha256": "87cfdf417f2b6ddc97b39ad260353f11cb699970680d2c3f4eec7491aab298ad",
+        "bytes": 1755
+      },
+      {
+        "relative_name": "after-A-cgroup-end.txt",
+        "sha256": "14e1adec20f7ee2aad568115ba3347d3b74870fa78987d4c87952d5e123340be",
+        "bytes": 258
+      },
+      {
+        "relative_name": "after-A-cgroup-start.txt",
+        "sha256": "b3f97a25287bfed084eeef49ee945ca9249292474bd402488efb80467c1b02c7",
+        "bytes": 223
+      },
+      {
+        "relative_name": "after-B-smoke.json",
+        "sha256": "9a6b0992e5bd5ab7f25a135f384deb02b7bd1333e62856a82dc618eac7c53f53",
+        "bytes": 884
+      },
+      {
+        "relative_name": "after-B-inventory-command.json",
+        "sha256": "86c8427abc01b3f026b8aad56406c74065f68777bdb8c2a30e8566627c03a44c",
+        "bytes": 1615
+      },
+      {
+        "relative_name": "after-B-security-command.json",
+        "sha256": "70a756fda611205f24bc09755f097737a870dc99a5fa0d4d6b5f058b39ee4483",
+        "bytes": 1752
+      },
+      {
+        "relative_name": "after-B-cgroup-end.txt",
+        "sha256": "941e332dfb37d27fc548d95476a47d88450a24c6888241ddc339251d9da9c6b2",
+        "bytes": 258
+      },
+      {
+        "relative_name": "after-B-cgroup-start.txt",
+        "sha256": "1dd87ebc5f9eb9b077cdf790360c2fc6de3576689663c03ef7125aae72290864",
+        "bytes": 258
+      },
+      {
+        "relative_name": "interrupted-before-A/before-A.json",
+        "sha256": "2533e33e8add0bee84a9cc153ac12426a2a4f31067c582bd09fd57d7a1031c98",
+        "bytes": 1504
+      },
+      {
+        "relative_name": "interrupted-before-A/before-A.log",
+        "sha256": "2ba62955c8d9fcf29b6a72a10167e7cba8fecb929c7046dc323333b825136fc4",
+        "bytes": 1096025
+      },
+      {
+        "relative_name": "interrupted-before-A/before-A.telemetry.jsonl",
+        "sha256": "03a3c54b546f96c421888ea84310dc675b4c6267da4c73e7f500c80e846e29de",
+        "bytes": 30035
+      },
+      {
+        "relative_name": "interrupted-before-B-15/before-B.json",
+        "sha256": "ce8d9097faeedbf99929c5fe49aad476020e18809b34ba1182637d47e1abbaf2",
+        "bytes": 1505
+      },
+      {
+        "relative_name": "interrupted-before-B-15/before-B.log",
+        "sha256": "2dfb17d80c6879d13c706ab446784678deabfd179a7570430e584dca549f64fb",
+        "bytes": 28049
+      },
+      {
+        "relative_name": "interrupted-before-B-15/before-B.telemetry.jsonl",
+        "sha256": "9383b91e4fb465c8bd16e1aed89752fdc62ff8f95d25cd32ba79c393bb97c849",
+        "bytes": 23833
+      },
+      {
+        "relative_name": "before-A-inventory/tools.json",
+        "sha256": "4e520cccb4a80245552a2e6a6de8800600d564b0cbc436d16446d0027f24c8cc",
+        "bytes": 255
+      },
+      {
+        "relative_name": "before-A-security/tools.json",
+        "sha256": "af96b772f561ecf68287c91d0eeef243b0fb58dc4953265ae68df447a91a15b1",
+        "bytes": 257
+      },
+      {
+        "relative_name": "before-B-inventory/tools.json",
+        "sha256": "4e520cccb4a80245552a2e6a6de8800600d564b0cbc436d16446d0027f24c8cc",
+        "bytes": 255
+      },
+      {
+        "relative_name": "before-B-security/tools.json",
+        "sha256": "af96b772f561ecf68287c91d0eeef243b0fb58dc4953265ae68df447a91a15b1",
+        "bytes": 257
+      },
+      {
+        "relative_name": "after-A-inventory/tools.json",
+        "sha256": "4e520cccb4a80245552a2e6a6de8800600d564b0cbc436d16446d0027f24c8cc",
+        "bytes": 255
+      },
+      {
+        "relative_name": "after-A-security/tools.json",
+        "sha256": "af96b772f561ecf68287c91d0eeef243b0fb58dc4953265ae68df447a91a15b1",
+        "bytes": 257
+      },
+      {
+        "relative_name": "after-B-inventory/tools.json",
+        "sha256": "4e520cccb4a80245552a2e6a6de8800600d564b0cbc436d16446d0027f24c8cc",
+        "bytes": 255
+      },
+      {
+        "relative_name": "after-B-security/tools.json",
+        "sha256": "af96b772f561ecf68287c91d0eeef243b0fb58dc4953265ae68df447a91a15b1",
+        "bytes": 257
+      }
+    ]
+  },
+  "cleanup_receipts": {
+    "before-pair-cleanup-complete.json": {
+      "at_utc": "2026-11-05T02:54:05.535233+00:00",
+      "removed_only_owned_tag": "nac-all582-s07:before-b-51444e1d3-01a1a901",
+      "removed_only_owned_builder": "nac-all582-s07-before-01a1a901",
+      "all_evidence_retained": true,
+      "host_free_bytes": 30595993600
+    },
+    "after-pair-cleanup-complete.json": {
+      "at_utc": "2026-11-05T03:38:56.304684+00:00",
+      "removed_only_owned_tag": "nac-all582-s07:after-b-7446e4337-01a1a901",
+      "removed_only_owned_builder": "nac-all582-s07-after-01a1a901",
+      "all_evidence_retained": true,
+      "host_free_bytes": 42370605056,
+      "all_s07_builds_scanners_smoke_finished": true,
+      "heavy_slot_released": true
+    }
+  }
+}

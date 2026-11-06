@@ -355,7 +355,23 @@ for (const mobile of [false, true]) {
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
       if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       await page.getByRole("button", { name: /^MCP servers/ }).click();
-      if (mobile) await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
+      if (mobile) {
+        await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
+        // Field values are available before the phone panel finishes sliding in.
+        const reopened = page.getByRole("dialog", { name: "renamed_fixture", exact: true });
+        await expect(reopened).toHaveClass(/\btranslate-x-0\b/);
+        await expect
+          .poll(() =>
+            reopened.evaluate((surface) =>
+              surface
+                .getAnimations()
+                .every((animation: { playState: string }) =>
+                  ["finished", "idle"].includes(animation.playState),
+                ),
+            ),
+          )
+          .toBe(true);
+      }
       await expect(page.getByPlaceholder("my_server")).toHaveValue("renamed_fixture");
       await page.getByRole("button", { name: "Delete server", exact: true }).click();
       await expect
@@ -364,6 +380,12 @@ for (const mobile of [false, true]) {
             (await (await request.get(`${harness.baseUrl}/mcp_library/servers`)).json()).servers,
         )
         .toEqual([]);
+      expect(
+        fixture.calls.filter(
+          (call) =>
+            call.method === "DELETE" && call.path === "/mcp_library/servers/renamed_fixture",
+        ),
+      ).toHaveLength(1);
       expect(
         fixture.calls.filter(
           (call) => call.method === "POST" && call.path === "/mcp_library/servers/test",

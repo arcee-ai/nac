@@ -11,11 +11,24 @@ pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]
 pub(crate) mod coordinated_commands;
+mod heartbeats;
+pub use heartbeats::*;
+mod attention;
+mod completion_occurrences;
+pub use attention::{
+    read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal, AttentionStoredRun,
+    AttentionStoredSession, ATTENTION_METADATA_BYTES, ATTENTION_SOURCE_LIMIT,
+};
+pub use completion_occurrences::{
+    read_completion_page, CompletionCursor, CompletionKind, CompletionOccurrence, CompletionPage,
+    COMPLETION_PAGE_BYTES, COMPLETION_PAGE_ROWS,
+};
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;
 mod model_configurations;
 pub(crate) mod orchestrator_compaction;
+pub(crate) mod peer_goals;
 mod permission_grants;
 mod projects;
 mod render;
@@ -24,6 +37,7 @@ mod run_recovery;
 mod schema;
 mod session_forks;
 mod session_goals;
+pub use peer_goals::{PeerGoalStart, PeerGoalStartReceipt};
 mod session_inbox;
 mod session_mcp_refresh;
 mod shell_commands;
@@ -31,10 +45,20 @@ pub use shell_commands::recent_shell_commands;
 pub(crate) use shell_commands::{
     accept_shell_command, list_shell_commands, lookup_shell_command, start_shell_command,
 };
+pub(crate) mod native_task_launches;
 mod ssh_configurations;
 mod steering;
 mod task_discovery;
 mod task_evidence;
+mod task_followup_delegations;
+pub(crate) mod task_followups;
+pub(crate) use task_followup_delegations::issue_task_followup_delegation;
+#[cfg(test)]
+pub(crate) use task_followup_delegations::issue_test_task_followup_delegation;
+pub use task_followup_delegations::{
+    load_task_followup_delegation, revoke_task_followup_delegation, TaskFollowupDelegation,
+    TaskFollowupDelegationRequest,
+};
 pub(crate) mod task_questions;
 #[cfg(test)]
 pub(crate) use task_questions::create_task_question;
@@ -47,6 +71,10 @@ pub use task_questions::{
     QuestionRecord, QuestionRequest, QuestionResponder,
 };
 pub(crate) mod task_launches;
+pub use native_task_launches::{
+    load_native_task_launch, reconcile_native_task_launches, reserve_native_task_launch,
+    update_native_task_admission_error, update_native_task_launch,
+};
 mod terminal_cleanups;
 mod terminal_selection;
 mod thread_events;
@@ -105,6 +133,10 @@ pub(crate) use task_evidence::record_run_outcome_with_connection;
 pub use task_evidence::{
     GoalOutcomeRecord, GoalRetirement, RunOutcomeDisposition, RunOutcomeRecord,
     RETAINED_GOAL_OUTCOMES, RETAINED_RUN_OUTCOMES, RUN_RESULT_EXCERPT_CHARS,
+};
+pub use task_followups::{
+    admit_task_followup, inspect_task_followup_receipt, load_task_followup_receipt,
+    TaskFollowupAction, TaskFollowupError, TaskFollowupReceipt, TaskFollowupRequest,
 };
 pub use task_launches::{
     list_task_launches, load_project_git_source, load_task_launch, reconcile_task_launches,
@@ -648,3 +680,6 @@ pub(crate) use transcript_selection::{
 
 #[cfg(test)]
 pub(crate) use transcript_selection::seed_selection_provenance_history_for_test;
+
+#[cfg(test)]
+mod completion_occurrences_tests;

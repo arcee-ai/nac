@@ -211,3 +211,95 @@ fn genuine_terminal_cleanup_failure_remains_internal() {
         StatusCode::INTERNAL_SERVER_ERROR
     );
 }
+
+#[test]
+fn goal_and_inbox_validation_identity_survives_ordinary_context() {
+    for error in [
+        anyhow::Error::new(nac_core::store::EmptyGoalUpdate),
+        anyhow::Error::new(nac_core::store::NegativeInboxVersion),
+    ] {
+        let error = error.context("requested edit not found in local UI state");
+        let mapped = ApiError::from(error);
+        assert_eq!(mapped.status, StatusCode::BAD_REQUEST);
+        assert_eq!(mapped.message, "requested edit not found in local UI state");
+    }
+}
+
+#[test]
+fn validation_like_text_and_markers_wrapping_store_failures_remain_internal() {
+    for message in [
+        "goal update is empty",
+        "inbox item version must not be negative",
+    ] {
+        assert_eq!(
+            ApiError::from(anyhow::anyhow!(message)).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+    let db = rusqlite::Connection::open_in_memory()
+        .unwrap()
+        .execute("INSERT INTO missing_table VALUES(1)", [])
+        .unwrap_err();
+    let serialization = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+    for error in [anyhow::Error::new(db), anyhow::Error::new(serialization)] {
+        assert_eq!(
+            ApiError::from(error.context(nac_core::store::EmptyGoalUpdate)).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}
+
+#[test]
+fn typed_admission_uncertainty_and_store_wrappers_precede_goal_validation() {
+    for error in [
+        anyhow::Error::new(nac_core::store::EmptyGoalUpdate)
+            .context(nac_core::store::TranscriptAppendError::CommitUncertain),
+        anyhow::Error::new(nac_core::store::NegativeInboxVersion)
+            .context(nac_core::store::TerminalSelectionAdmissionError::CommitUncertain),
+        anyhow::Error::new(sessions::SessionConfigUpdateError::Store(
+            anyhow::Error::new(nac_core::store::EmptyGoalUpdate),
+        )),
+        anyhow::Error::new(human_store_error(anyhow::Error::new(
+            nac_core::store::NegativeInboxVersion,
+        ))),
+    ] {
+        assert_eq!(
+            ApiError::from(error).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+    for admission in [
+        nac_core::store::PersistenceAdmissionError::Overloaded,
+        nac_core::store::PersistenceAdmissionError::CallerOverloaded,
+        nac_core::store::PersistenceAdmissionError::ExecutorStopped,
+        nac_core::store::PersistenceAdmissionError::ShuttingDown,
+    ] {
+        let expected = ApiError::from(anyhow::Error::new(admission)).status;
+        let wrapped = anyhow::Error::new(nac_core::store::EmptyGoalUpdate).context(admission);
+        assert_eq!(ApiError::from(wrapped).status, expected);
+    }
+    for (cause, status) in [
+        (
+            sessions::SessionConfigUpdateError::NotFound("missing session".into()),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            sessions::SessionConfigUpdateError::Conflict("changed session".into()),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        assert_eq!(
+            ApiError::from(anyhow::Error::new(nac_core::store::EmptyGoalUpdate).context(cause))
+                .status,
+            status
+        );
+    }
+    for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+        let error = anyhow::Error::new(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+        .context(nac_core::store::NegativeInboxVersion);
+        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
+    }
+}

@@ -136,16 +136,38 @@ impl Identity {
         }
     }
     pub fn live(&self) -> io::Result<bool> {
-        match self.0.send_signal(0) {
-            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => return Ok(false),
-            Err(error) => return Err(error),
-            Ok(()) => {}
-        }
-        let Some(row) = read(self.pid())? else {
-            return Ok(false);
-        };
-        Ok(row.metadata.start_time == self.0.metadata.start_time && row.live)
+        live_with(
+            self.0.metadata.start_time,
+            || self.0.send_signal(0),
+            || read(self.pid()),
+        )
     }
+}
+
+// Both probes must use the same retained original capability. A proc read
+// racing with death is conclusive only after that capability reports ESRCH.
+fn live_with(
+    expected_start: u64,
+    mut probe_original: impl FnMut() -> io::Result<()>,
+    read_row: impl FnOnce() -> io::Result<Option<Row>>,
+) -> io::Result<bool> {
+    match probe_original() {
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => return Ok(false),
+        Err(error) => return Err(error),
+        Ok(()) => {}
+    }
+    let row = match read_row() {
+        Ok(row) => row,
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
+            return match probe_original() {
+                Err(death) if death.raw_os_error() == Some(libc::ESRCH) => Ok(false),
+                Err(probe_error) => Err(probe_error),
+                Ok(()) => Err(error),
+            };
+        }
+        Err(error) => return Err(error),
+    };
+    Ok(row.is_some_and(|row| row.metadata.start_time == expected_start && row.live))
 }
 
 pub(super) fn preflight() -> io::Result<()> {
@@ -222,6 +244,161 @@ mod tests {
             let _ = self.0.wait();
         }
     }
+    #[test]
+    fn proc_esrch_requires_conclusive_original_capability_death() {
+        let trace = std::cell::RefCell::new(Vec::new());
+        let mut probes = [Ok(()), Err(io::Error::from_raw_os_error(libc::ESRCH))].into_iter();
+        let alive = live_with(
+            7,
+            || {
+                trace.borrow_mut().push("original capability");
+                probes.next().expect("at most one death bookend")
+            },
+            || {
+                trace.borrow_mut().push("proc stat");
+                Err(io::Error::from_raw_os_error(libc::ESRCH))
+            },
+        )
+        .unwrap();
+        assert!(!alive);
+        assert_eq!(
+            *trace.borrow(),
+            ["original capability", "proc stat", "original capability"]
+        );
+        assert!(probes.next().is_none());
+    }
+
+    #[test]
+    fn proc_esrch_does_not_declare_a_live_original_capability_dead() {
+        let probes = std::cell::Cell::new(0);
+        let error = live_with(
+            7,
+            || {
+                probes.set(probes.get() + 1);
+                Ok(())
+            },
+            || Err(io::Error::from_raw_os_error(libc::ESRCH)),
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::ESRCH));
+        assert_eq!(probes.get(), 2);
+    }
+
+    #[test]
+    fn proc_esrch_preserves_denied_or_unknown_original_capability() {
+        for probe_error in [
+            io::Error::from_raw_os_error(libc::EPERM),
+            io::Error::new(io::ErrorKind::WouldBlock, "original identity uncertain"),
+            io::Error::other("original identity unavailable"),
+        ] {
+            let expected = (
+                probe_error.kind(),
+                probe_error.raw_os_error(),
+                probe_error.to_string(),
+            );
+            let mut probes = [Ok(()), Err(probe_error)].into_iter();
+            let error = live_with(
+                7,
+                || probes.next().expect("at most one death bookend"),
+                || Err(io::Error::from_raw_os_error(libc::ESRCH)),
+            )
+            .unwrap_err();
+            assert_eq!(
+                (error.kind(), error.raw_os_error(), error.to_string()),
+                expected
+            );
+            assert!(probes.next().is_none());
+        }
+    }
+
+    #[test]
+    fn unrelated_proc_errors_are_unchanged_without_a_second_probe() {
+        for proc_error in [
+            io::Error::from_raw_os_error(libc::EACCES),
+            io::Error::new(io::ErrorKind::InvalidData, "invalid PTY process stat"),
+            io::Error::other("proc inspection unavailable"),
+        ] {
+            let expected = (
+                proc_error.kind(),
+                proc_error.raw_os_error(),
+                proc_error.to_string(),
+            );
+            let probes = std::cell::Cell::new(0);
+            let error = live_with(
+                7,
+                || {
+                    probes.set(probes.get() + 1);
+                    Ok(())
+                },
+                || Err(proc_error),
+            )
+            .unwrap_err();
+            assert_eq!(
+                (error.kind(), error.raw_os_error(), error.to_string()),
+                expected
+            );
+            assert_eq!(probes.get(), 1);
+        }
+    }
+
+    #[test]
+    fn original_capability_result_precedes_any_numeric_pid_read() {
+        for outcome in [
+            Err(io::Error::from_raw_os_error(libc::ESRCH)),
+            Err(io::Error::from_raw_os_error(libc::EPERM)),
+        ] {
+            let expected_errno = outcome.as_ref().unwrap_err().raw_os_error();
+            let mut outcomes = [outcome].into_iter();
+            let result = live_with(
+                7,
+                || outcomes.next().expect("one original capability probe"),
+                || panic!("dead or denied original must not inspect a recycled PID"),
+            );
+            if expected_errno == Some(libc::ESRCH) {
+                assert!(!result.unwrap());
+            } else {
+                assert_eq!(result.unwrap_err().raw_os_error(), expected_errno);
+            }
+            assert!(outcomes.next().is_none());
+        }
+    }
+
+    #[test]
+    fn successful_proc_rows_preserve_start_time_and_live_checks() {
+        for (observed, expected_alive) in [
+            (Some((7, true)), true),
+            (Some((8, true)), false),
+            (Some((7, false)), false),
+            (None, false),
+        ] {
+            let probes = std::cell::Cell::new(0);
+            let alive = live_with(
+                7,
+                || {
+                    probes.set(probes.get() + 1);
+                    Ok(())
+                },
+                || {
+                    Ok(observed.map(|(start_time, live)| Row {
+                        pid: 123,
+                        ppid: 1,
+                        sid: 123,
+                        live,
+                        metadata: crate::ProcessMetadata {
+                            pid: 123,
+                            ppid: 1,
+                            pgrp: 123,
+                            start_time,
+                        },
+                    }))
+                },
+            )
+            .unwrap();
+            assert_eq!(alive, expected_alive);
+            assert_eq!(probes.get(), 1);
+        }
+    }
+
     #[test]
     fn foreign_child_of_recycled_parent_identity_is_not_adopted() {
         let fixture = Fixture(Command::new("/bin/sleep").arg("30").spawn().unwrap());

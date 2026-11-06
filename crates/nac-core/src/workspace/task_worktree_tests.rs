@@ -273,6 +273,35 @@ fn configured_deny_prevents_materialization_without_agent_approval() {
 }
 
 #[test]
+fn scheduled_preparation_requires_allow_and_preserves_human_ask_semantics() {
+    use crate::permissions::{PermissionEffect, PermissionRule};
+    let (root, project, request) = fixture();
+    let path = root.join("store.db");
+    let source = resolve_source(&project, &request, None, None).unwrap();
+    let launch = store::reserve_task_launch(&path, request, source).unwrap();
+    for (effect, scheduled_allowed, human_allowed) in [
+        (PermissionEffect::Allow, true, true),
+        (PermissionEffect::Ask, false, true),
+        (PermissionEffect::Deny, false, false),
+    ] {
+        let mut config = crate::runtime::NacConfig::default();
+        config.permissions.rules = vec![PermissionRule::new("*", "*", effect)];
+        assert_eq!(
+            authorize_scheduled_preparation(&launch, &config, &path).is_ok(),
+            scheduled_allowed,
+            "scheduled {effect:?}"
+        );
+        assert_eq!(
+            authorize_human_preparation(&launch, &config, &path).is_ok(),
+            human_allowed,
+            "human {effect:?}"
+        );
+        assert!(!launch.workspace_path.exists());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn preparation_does_not_execute_checkout_filters_or_hooks() {
     let (root, project, request) = fixture();
     let repo = root.join("repo");

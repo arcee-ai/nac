@@ -25,14 +25,58 @@ fn openapi_31_responses_keep_required_descriptions_after_dependency_upgrades() {
     }
 }
 
+#[test]
+fn product_context_session_id_is_an_optional_query_parameter() {
+    let document = serde_json::to_value(openapi_document()).unwrap();
+    let operation = &document["paths"]["/product-context"]["get"];
+    assert_eq!(operation["operationId"], "get_product_context");
+    assert_eq!(
+        operation["parameters"],
+        serde_json::json!([
+            {
+                "name": "session_id",
+                "in": "query",
+                "required": false,
+                "schema": { "type": "string" }
+            },
+            {
+                "name": "X-NAC-Presentation-Incarnation",
+                "in": "header",
+                "description": "Optional standalone presentation lifetime fence; grants no authority",
+                "required": false,
+                "schema": { "type": ["string", "null"] }
+            }
+        ])
+    );
+}
+
 const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/product-context"),
     ("POST", "/product-destinations/resolve"),
+    ("GET", "/heartbeats"),
+    ("GET", "/sessions/{session_id}/heartbeats/{schedule_id}"),
+    ("POST", "/sessions/{session_id}/heartbeats/control"),
+    ("POST", "/sessions/{session_id}/heartbeats/preview"),
+    ("POST", "/sessions/{session_id}/heartbeats/attention"),
+    ("GET", "/sessions/{session_id}/integrations"),
+    ("POST", "/sessions/{session_id}/integrations/refresh"),
+    ("GET", "/attention/events"),
+
+    ("POST", "/sessions/{session_id}/task-followup-delegations"),
+    ("GET", "/sessions/{session_id}/task-followup-delegations/{delegation_id}"),
+    ("DELETE", "/sessions/{session_id}/task-followup-delegations/{delegation_id}"),
     ("POST", "/task-launches"),
     ("GET", "/task-launches/{request_id}"),
     ("POST", "/task-launches/{request_id}/cancel"),
     ("GET", "/projects/{project_id}/task-launches"),
     ("GET", "/projects/{project_id}/task-launch-source"),
+    ("GET", "/projects/{project_id}/task-schedules"),
+    ("GET", "/projects/{project_id}/task-schedules/{schedule_id}"),
+    ("POST", "/projects/{project_id}/task-schedules/control"),
+    (
+        "POST",
+        "/projects/{project_id}/task-schedules/retained-allowance",
+    ),
     (
         "GET",
         "/sessions/{session_id}/executions/{execution_id}/input-control",
