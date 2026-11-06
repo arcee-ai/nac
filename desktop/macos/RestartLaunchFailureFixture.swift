@@ -4,6 +4,9 @@ private struct EngineLaunchConfiguration: Equatable { let store: URL }
 private struct LaunchIdentity { let track = "dev" }
 private final class Button { var isHidden = true; var isEnabled = false }
 private final class Status { var stringValue = "" }
+// The attention layer adds this inert retirement collaborator to the real
+// restart method embedded below. This fixture does not qualify notifications.
+private final class Attention { func suspend() {} }
 // Inert UI/timer adapters. No AppKit/WK object, wall-clock timeout or process.
 private struct NSRect {
     let width: CGFloat
@@ -84,6 +87,7 @@ private struct FixtureDeadline {
     let storeConflictRetry = StoreConflictRetry()
     var storeRetryButton: Button? = Button()
     var recovery: Recovery!
+    var attention: Attention?
     var starts = 0
     var fatalFailures = 0
     var selectedConfigurations: [EngineLaunchConfiguration] = []
