@@ -34,7 +34,7 @@ def console_state():
 
 
 def verify_native_quit_completion(stopped):
-    assert stopped['application_class'] == 'NSApplication', stopped
+    assert stopped['application_class'] == 'NACApplication', stopped
     assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
     assert stopped['quit_cancel_choices'] == stopped['quit_stop_completions'] == 1, stopped
     invocation = stopped['native_duplicate_invocation']
