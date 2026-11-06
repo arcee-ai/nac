@@ -136,12 +136,13 @@ final class RecoverySmoke {
           const actual = window.fetch.bind(window), rows = [];
           const q1 = __NAC_Q1_FETCH_CONFIGURATION__, engineOrigin = location.origin;
           const fetchRows = [], fetchFailures = [];
-          let started = 0, settled = 0, errors = 0, active = 0, overflow = false;
+          let started = 0, settled = 0, errors = 0, cancelled = 0, active = 0, overflow = false;
           let drop = false, settledCapture = null;
           const storagePosts = []; let storagePostOverflow = false;
           const snapshot = () => ({version: 1, nonce: q1.nonce, provider: q1.provider, selector: q1.selector, engineOrigin,
-            started, settled, errors, active, overflow,
-            rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null}))});
+            started, settled, errors, cancelled, active, overflow,
+            rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null,
+              cancellation: row.cancellation ? {...row.cancellation} : null}))});
           const metadata = (url, method, init) => {
             if (method !== 'POST' || url?.pathname !== '/providers/models') return null;
             const facts = {kind: 'unknown', canonicalJSON: false, exactKeys: false,
@@ -215,7 +216,7 @@ final class RecoverySmoke {
             if (q1) {
               started += 1; active += 1;
               row = {sequence: started, method: null, origin: null, path: null,
-                state: 'active', status: null, error: false, metadata: null};
+                state: 'active', status: null, error: false, metadata: null, cancellation: null};
               try {
                 const url = new URL(input instanceof Request ? input.url : String(input), location.href);
                 row.method = (init?.method || input?.method || 'GET').toUpperCase();
@@ -245,14 +246,21 @@ final class RecoverySmoke {
               return response;
             } catch (error) {
               if (row) {
-                if (row.state === 'active') settled += 1;
-                row.state = 'error'; row.error = true; errors += 1;
                 let signal = init?.signal;
                 if (signal === undefined) signal = input instanceof Request ? input.signal : null;
-                if (fetchFailures.length < 128) fetchFailures.push({sequence: row.sequence,
+                const failure = {sequence: row.sequence,
                   name: error instanceof DOMException && error.name === 'AbortError' ? 'AbortError' :
                     error instanceof TypeError ? 'TypeError' : 'other',
-                  signalObserved: signal instanceof AbortSignal, signalAborted: signal?.aborted === true});
+                  signalObserved: signal instanceof AbortSignal, signalAborted: signal?.aborted === true};
+                const cancelledRead = row.state === 'active' && row.status === null && row.method === 'GET' &&
+                  row.origin === engineOrigin && failure.name === 'AbortError' && failure.signalObserved && failure.signalAborted;
+                if (row.state === 'active') settled += 1;
+                row.state = cancelledRead ? 'cancelled' : 'error'; row.error = true; errors += 1;
+                if (cancelledRead) {
+                  cancelled += 1;
+                  row.cancellation = {name: failure.name, signalObserved: true, signalAborted: true};
+                }
+                if (fetchFailures.length < 128) fetchFailures.push(failure);
                 else overflow = true;
               }
               throw error;

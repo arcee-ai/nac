@@ -86,7 +86,7 @@ def q1_fetch_reads(snapshot, expected, provider):
             not address.username and not address.password and address.path == '' and
             not address.query and not address.fragment, 'foreign fixture provider')
     keys = {'version', 'nonce', 'provider', 'engineOrigin', 'started', 'settled', 'errors',
-            'active', 'overflow', 'rows', 'document', 'selector'}
+            'active', 'overflow', 'rows', 'document', 'selector', 'cancelled'}
     require(type(snapshot) is dict and set(snapshot) == keys, 'missing complete fetch witness')
     require(type(snapshot['version']) is int and snapshot['version'] == 1, 'fetch witness version')
     require(snapshot['nonce'] == expected['nonce'] and snapshot['provider'] == provider and
@@ -95,21 +95,31 @@ def q1_fetch_reads(snapshot, expected, provider):
     require(snapshot['document'] == {k: expected[k] for k in ('launch', 'view', 'document')},
             'stale fetch document')
     require(all(type(snapshot[k]) is int and snapshot[k] >= 0 for k in
-                ('started', 'settled', 'errors', 'active')), 'fetch counter types')
+                ('started', 'settled', 'errors', 'cancelled', 'active')), 'fetch counter types')
     rows = snapshot['rows']
     require(type(rows) is list and snapshot['overflow'] is False and len(rows) <= 128 and
             snapshot['started'] == snapshot['settled'] == len(rows) and
-            snapshot['errors'] == snapshot['active'] == 0, 'incomplete/error/overflow fetch witness')
-    failures = []; blocked = []
+            snapshot['active'] == 0 and snapshot['errors'] == snapshot['cancelled'],
+            'incomplete/error/overflow fetch witness')
+    failures = []; blocked = []; cancelled_reads = []
     flags = {'canonicalJSON', 'exactKeys', 'backendFixture', 'namedFixtureKey', 'noInlineKey',
              'fixtureEndpoint', 'safeHTTPPolicy', 'exactRoute'}
     for sequence, row in enumerate(rows, 1):
         require(type(row) is dict and set(row) == {'sequence', 'method', 'origin', 'path', 'state',
-                'status', 'error', 'metadata'}, 'fetch row shape')
+                'status', 'error', 'metadata', 'cancellation'}, 'fetch row shape')
         require(type(row['sequence']) is int and row['sequence'] == sequence and
-                row['origin'] == expected['endpoint'] and row['state'] == 'settled' and
-                row['error'] is False and type(row['status']) is int and 100 <= row['status'] <= 599 and
+                row['origin'] == expected['endpoint'] and
                 type(row['path']) is str and row['path'].startswith('/'), 'unknown/foreign/error fetch')
+        if row['state'] == 'cancelled':
+            require(row['method'] == 'GET' and row['error'] is True and row['status'] is None and
+                    row['metadata'] is None and row['cancellation'] == dict(name='AbortError',
+                        signalObserved=True, signalAborted=True) and
+                    all(type(row['cancellation'][key]) is bool for key in ('signalObserved', 'signalAborted')),
+                    'unproven or non-read cancellation')
+            cancelled_reads.append(dict(sequence=sequence, path=row['path']))
+            continue
+        require(row['state'] == 'settled' and row['error'] is False and row['cancellation'] is None and
+                type(row['status']) is int and 100 <= row['status'] <= 599, 'unqualified fetch outcome')
         if row['method'] == 'GET':
             require(row['metadata'] is None, 'foreign GET classification')
         else:
@@ -126,8 +136,10 @@ def q1_fetch_reads(snapshot, expected, provider):
                 require(set(metadata) == flags | {'kind'} and metadata['kind'] == 'fixture-provider-models' and
                         all(metadata[k] is True for k in flags), 'unproven metadata or executable write')
             if row['status'] >= 400: failures.append(dict(sequence=sequence, status=row['status']))
+    require(len(cancelled_reads) == snapshot['cancelled'], 'inconsistent cancelled/error counters')
     return dict(scope='complete observed fetch prefix at capture', metadataFailures=failures,
-                metadataSuccessClaimed=False, locallyBlockedMetadata=blocked, overflow=False)
+                metadataSuccessClaimed=False, locallyBlockedMetadata=blocked, overflow=False,
+                cancelledReads=cancelled_reads, cancelledReadSuccessClaimed=False, unexpectedErrors=0)
 
 
 def frame(record, nonce):
