@@ -1,0 +1,206 @@
+import contextlib
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+from workspace import run_case
+
+
+class WorkspaceRunnerTests(unittest.TestCase):
+    def test_launcher_or_native_cleanup_failure_cannot_inherit_a_pass(self):
+        for code, reaped, removed in [(42, True, True), (0, False, True), (0, True, False)]:
+            with self.subTest(code=code, reaped=reaped, removed=removed), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+                for path in [app, output, relocation]:
+                    path.mkdir()
+                evidence = output / 'workspace-direct.json'
+                launcher = Mock(returncode=code)
+
+                def finished(**_):
+                    evidence.write_text(json.dumps({'passed': True, 'engine_reaped': reaped,
+                                                    'profile_removed': removed}))
+                    return code
+
+                launcher.wait.side_effect = finished
+                with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                        patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                        patch('workspace.subprocess.Popen', return_value=launcher), \
+                        patch('workspace.cleanup_failed_case'), contextlib.redirect_stdout(io.StringIO()):
+                    result = run_case(app, output, 'workspace-direct')
+                self.assertFalse(result['passed'])
+                self.assertEqual(result['launcher_exit_code'], code)
+                self.assertIn('runner_error', result)
+
+    def test_missing_ownership_preserves_bundle_and_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+            for path in [app, output, relocation]:
+                path.mkdir()
+            (app / 'sentinel').write_text('owned fixture')
+            launcher = Mock(returncode=0)
+            launcher.wait.return_value = 0
+            launcher.poll.return_value = 0
+            with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                    patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                    patch('workspace.subprocess.Popen', return_value=launcher), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result = run_case(app, output, 'workspace-direct')
+            self.assertFalse(result['passed'])
+            self.assertIn('runner_error', result)
+            self.assertTrue(Path(result['relocated_app']).exists())
+            self.assertEqual(json.loads((output / 'workspace-direct.json').read_text()), result)
+            launcher.terminate.assert_not_called()
+
+    def test_interrupt_retains_partial_checks_and_records_owned_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+            for path in [app, output, relocation]:
+                path.mkdir()
+            evidence = output / 'workspace-direct.json'
+            evidence.write_text(json.dumps({'checks': {'direct': {'status': 'pass'}}}))
+            # run_case refuses preexisting evidence: write it only after launch.
+            initial = evidence.read_text()
+            evidence.unlink()
+            launcher = Mock(returncode=0)
+            launcher.poll.return_value = 0
+
+            def interrupted(**_):
+                evidence.write_text(initial)
+                raise KeyboardInterrupt()
+
+            launcher.wait.side_effect = interrupted
+            with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                    patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                    patch('workspace.subprocess.Popen', return_value=launcher), \
+                    patch('workspace.cleanup_failed_case') as cleanup, \
+                    self.assertRaises(KeyboardInterrupt):
+                run_case(app, output, 'workspace-direct')
+            result = json.loads(evidence.read_text())
+            self.assertFalse(result['passed'])
+            self.assertTrue(result['runner_cleanup_attempted'])
+            self.assertEqual(result['checks']['direct']['status'], 'pass')
+            cleanup.assert_called_once_with(evidence, Path(result['relocated_app']))
+
+
+class WorkspaceBuilderTests(unittest.TestCase):
+    """Exercise shell composition with inert writers; never compile or launch NAC."""
+
+    def build_fixture(self, directory, *, fail_mode='', ordinary_marker='ordinary fixture'):
+        import os
+        import subprocess
+
+        root = Path(directory)
+        owner = root / 'desktop/macos'
+        owner.mkdir(parents=True)
+        (owner / 'workspace.sh').write_bytes((Path(__file__).parent / 'workspace.sh').read_bytes())
+        builder = owner / 'preview.sh'
+        builder.write_text('''#!/bin/bash
+set -euo pipefail
+echo "$1" >> "$NAC_MAC_OUTPUT/calls"
+if [[ "$1" == "$FAIL_MODE" ]]; then exit 17; fi
+case "$1" in
+build) name='NAC Development Preview.app'; text="$ORDINARY_MARKER" ;;
+smoke-build) name='NAC Development Preview Smoke.app'; text='WK_RICH_COMPLETE smoke fixture' ;;
+*) exit 99 ;;
+esac
+mkdir -p "$NAC_MAC_OUTPUT/$name/Contents/MacOS"
+printf '%s' "$text" > "$NAC_MAC_OUTPUT/$name/Contents/MacOS/NACPreview"
+''')
+        builder.chmod(0o755)
+        # This writer records only which test bundle was selected, not real provenance.
+        (owner / 'workspace.py').write_text('''import json, sys
+from pathlib import Path
+assert sys.argv[1] == 'capture-build'
+app = Path(sys.argv[2])
+(app.parent / 'capture.json').write_text(json.dumps({'app': app.name}))
+''')
+        output = root / 'output'
+        output.mkdir()
+        fake_bin = root / 'bin'
+        fake_bin.mkdir()
+        for command in ('xcrun', 'cargo'):
+            blocked = fake_bin / command
+            blocked.write_text('#!/bin/sh\nexit 99\n')
+            blocked.chmod(0o755)
+        result = subprocess.run(['bash', str(owner / 'workspace.sh')], cwd=root,
+                                env={**os.environ, 'PATH': str(fake_bin) + ':' + os.environ['PATH'],
+                                     'NAC_MAC_ENGINE': 'inert-unused-fixture', 'NAC_MAC_OUTPUT': str(output),
+                                     'FAIL_MODE': fail_mode, 'ORDINARY_MARKER': ordinary_marker},
+                                capture_output=True, text=True, timeout=10)
+        return result, output
+
+    def test_current_writer_keeps_normal_and_smoke_bundles_separate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, output = self.build_fixture(temporary)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((output / 'calls').read_text().splitlines(), ['build', 'smoke-build'])
+            ordinary = output / 'NAC Development Preview.app/Contents/MacOS/NACPreview'
+            smoke = output / 'NAC Development Preview Smoke.app/Contents/MacOS/NACPreview'
+            self.assertEqual(ordinary.read_text(), 'ordinary fixture')
+            self.assertEqual((output / 'normal-preview').read_bytes(), ordinary.read_bytes())
+            self.assertIn('WK_RICH_COMPLETE', smoke.read_text())
+            self.assertEqual(json.loads((output / 'capture.json').read_text()),
+                             {'app': 'NAC Development Preview Smoke.app'})
+
+    def test_failed_build_or_ordinary_instrumentation_never_captures_a_candidate(self):
+        for fail_mode, marker, calls in [('build', 'ordinary', ['build']),
+                                         ('smoke-build', 'ordinary', ['build', 'smoke-build']),
+                                         ('', 'WK_RICH_COMPLETE', ['build'])]:
+            with self.subTest(fail_mode=fail_mode, marker=marker), tempfile.TemporaryDirectory() as temporary:
+                result, output = self.build_fixture(temporary, fail_mode=fail_mode, ordinary_marker=marker)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((output / 'calls').read_text().splitlines(), calls)
+                self.assertFalse((output / 'capture.json').exists())
+
+    def test_current_builder_limits_workspace_sources_to_preview_smoke_modes(self):
+        import subprocess
+
+        source = (Path(__file__).parent / 'preview.sh').read_text()
+        selection = source[source.index('local_app=0'):source.index('[[ "$(uname -s)"')]
+        arrays = source[source.index('sources=('):source.index('receipt_inputs=')]
+        workspace = {'WorkspaceSmoke.swift', 'WorkspaceFixture.swift',
+                     'WorkspaceJourneys.swift', 'WorkspaceLegacy.swift'}
+        for mode in ('build', 'smoke', 'smoke-build', 'app-build', 'startup-build',
+                     'instance-build', 'lifecycle-build', 'auth-build', 'attention-build'):
+            with self.subTest(mode=mode):
+                # Evaluate only the current writer's array declarations and mode tests.
+                probe = ('mode=$1\n' + selection + arrays +
+                         '\nprintf "%s\\n" "${sources[@]}" __FLAGS__ "${flags[@]}"\n')
+                result = subprocess.run(['bash', '-c', probe, 'source-list', mode],
+                                        capture_output=True, text=True, timeout=5, check=True)
+                names, flags = result.stdout.split('__FLAGS__\n')
+                names = {Path(value).name for value in names.splitlines()}
+                self.assertEqual(names.intersection(workspace), workspace if mode.startswith('smoke') else set())
+                self.assertIn('NativeCommands.swift', names)
+                self.assertIn('WorkspaceRecovery.swift', names)
+                self.assertIn('WorkspaceStorage.swift', names)
+                if mode in ('app-build', 'startup-build', 'instance-build', 'lifecycle-build', 'auth-build', 'attention-build'):
+                    self.assertIn('LOCAL_APP', flags.splitlines())
+                    self.assertFalse(names.intersection({'PreviewProfile.swift', 'FixtureProvider.swift',
+                                                         'FixtureBootstrap.swift', 'PreviewSmoke.swift'}))
+                if mode == 'app-build':
+                    self.assertNotIn('PREVIEW_SMOKE', flags.splitlines())
+                    self.assertEqual(len(names), 39)
+                if mode == 'lifecycle-build':
+                    self.assertEqual(len(names), 41)
+                if mode == 'auth-build':
+                    self.assertIn('NATIVE_AUTH_FIXTURE', flags.splitlines())
+                    self.assertIn('DeviceAuthSmoke.swift', names)
+                if mode == 'attention-build':
+                    self.assertEqual(len(names), 41)
+                    self.assertIn('ATTENTION_SMOKE', flags.splitlines())
+                    self.assertIn('AttentionFixtureGuard.swift', names)
+                if 'LOCAL_APP' in flags.splitlines():
+                    self.assertIn('UserNotifications', flags.splitlines())
+        self.assertNotIn('xcrun', (Path(__file__).parent / 'workspace.sh').read_text())
+
+
+if __name__ == '__main__':
+    unittest.main()
