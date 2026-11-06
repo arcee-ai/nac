@@ -28,7 +28,7 @@ export function ManagedUpgradePanel() {
   const snapshot = upgrade.snapshot;
   const requiresFreshSnapshot = managedUpgradeRequiresFreshSnapshot(snapshot.error);
 
-  if (snapshot.isLoading) {
+  if (snapshot.isPending) {
     return (
       <FormSection title="Managed NAC upgrade" className="border-t border-basic pt-6">
         <div role="status" className="flex items-center gap-3 text-small text-basic-secondary">

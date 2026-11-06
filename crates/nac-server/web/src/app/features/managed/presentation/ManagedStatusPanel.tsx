@@ -15,7 +15,7 @@ export function StatusDot({ ready }: { ready: boolean }) {
 
 export function ManagedStatusPanel() {
   const status = useManagedHostStatus();
-  if (status.isLoading) {
+  if (status.isPending) {
     return (
       <div role="status" className="flex items-center gap-3 text-small text-basic-secondary">
         <Loader size={LoaderSize.Small} />

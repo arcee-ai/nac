@@ -80,7 +80,7 @@ it.each(deniedReads)("keeps cached host details during a denial: %s", (_label, e
 });
 
 it("names checking and unavailable states rather than showing an empty surface", () => {
-  fakes.status = { isLoading: true };
+  fakes.status = { isLoading: true, isPending: true };
   const view = render(<ManagedStatusPanel />);
   expect(screen.getByRole("status").textContent).toContain("Checking managed host");
   fakes.status = { isLoading: false, data: null, error: { status: 403 } };
