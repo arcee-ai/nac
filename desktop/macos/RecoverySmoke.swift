@@ -135,7 +135,7 @@ final class RecoverySmoke {
           if (window !== window.top) return;
           const actual = window.fetch.bind(window), rows = [];
           const q1 = __NAC_Q1_FETCH_CONFIGURATION__, engineOrigin = location.origin;
-          const fetchRows = [];
+          const fetchRows = [], fetchFailures = [];
           let started = 0, settled = 0, errors = 0, active = 0, overflow = false;
           let drop = false, settledCapture = null;
           const storagePosts = []; let storagePostOverflow = false;
@@ -203,6 +203,7 @@ final class RecoverySmoke {
               } catch (_) { storagePostOverflow = true; return false; }
             } : undefined,
             q1Snapshot: q1 ? snapshot : undefined,
+            q1Failures: q1 ? () => fetchFailures.map(row => ({...row})) : undefined,
             q1SettledSnapshot: q1 ? () => {
               if (active === 0) return Promise.resolve(snapshot());
               if (settledCapture) return Promise.reject(new TypeError('Q1 capture already pending'));
@@ -246,6 +247,13 @@ final class RecoverySmoke {
               if (row) {
                 if (row.state === 'active') settled += 1;
                 row.state = 'error'; row.error = true; errors += 1;
+                let signal = init?.signal;
+                if (signal === undefined) signal = input instanceof Request ? input.signal : null;
+                if (fetchFailures.length < 128) fetchFailures.push({sequence: row.sequence,
+                  name: error instanceof DOMException && error.name === 'AbortError' ? 'AbortError' :
+                    error instanceof TypeError ? 'TypeError' : 'other',
+                  signalObserved: signal instanceof AbortSignal, signalAborted: signal?.aborted === true});
+                else overflow = true;
               }
               throw error;
             } finally {
@@ -420,7 +428,7 @@ final class RecoverySmoke {
       // The existing external capture/action deadline owns this wait. Never sample active work as complete.
       fetch = {...await evidence.q1SettledSnapshot(), document: bootstrap.document};
     }
-    return {requests: evidence?.rows(), fetch,
+    return {requests: evidence?.rows(), fetch, fetchErrors: evidence?.q1Failures?.(),
       runtime: document.querySelector('[data-nac-runtime]')?.getAttribute('data-nac-runtime'),
       route: location.hash, storage_capability: typeof window.__nacDesktopStorage === 'object'};
     """#
