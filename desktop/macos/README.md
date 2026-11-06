@@ -308,11 +308,18 @@ descendant and store cleanup under its existing 20-second watchdog. The existing
 owned-engine fallback remains 23 seconds. A later 26-second UI wait can report
 pending cleanup, but cannot claim cleanup, restart the retired
 workspace or send another stop. Quit again waits on that original shutdown.
-Unsettled AppKit termination requests return Cancel immediately while one
-asynchronous confirmation/cleanup episode stays owned by the app. Reentrant
-native and OS requests share that episode. Only settled Stop requests ordinary
-termination again; no terminateLater modal handshake or public-entry guard spans
-the confirmation or engine drain.
+Unsettled AppKit termination retains the originating request with terminateLater,
+including a logout, restart or shutdown request. Cancel completes that request
+with false; Stop completes it with true after owned shutdown completion. A native
+duplicate is fenced before entering AppKit using the delegate-owned transaction
+and the original public call. Presentation, replies and the 26-second UI wait
+remain serviceable in the modal run-loop mode. Timeout declines that wait without
+resending engine control; a late completion does not implicitly authorize exit.
+The builder and main explicitly select NACApplication for LOCAL_APP; disposable
+preview continues to use NSApplication. ATTENTION_SMOKE's explicit test-only
+cleanup completes an already-pending transaction, or requests local exit after
+owned cleanup when no interactive transaction exists. Its cleanup intent survives
+the UI deadline without another stop, activation or manufactured success.
 
 `preview.sh lifecycle-build` builds separate test instrumentation around the
 normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT
