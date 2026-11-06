@@ -228,7 +228,11 @@ fn active_prune_preserves_original_parent_arc_in_pending_obligation() {
     root.authority
         .pending_capture
         .insert(key, (row, Evidence::Parent(Arc::clone(&parent))));
+    #[cfg(target_os = "macos")]
+    let signal_trace = super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, 0);
     parent.signal(libc::SIGKILL).unwrap();
+    #[cfg(target_os = "macos")]
+    drop(signal_trace);
     drop(parent);
     let deadline = Instant::now() + Duration::from_secs(3);
     while root.authority.members.contains_key(&key) {

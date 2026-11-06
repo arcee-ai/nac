@@ -1,4 +1,4 @@
-//! Scoped diagnostics for the existing FD-stress test; never an authority source.
+//! Scoped diagnostics for owned native PTY fixture signals; never an authority source.
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{self, Write};
