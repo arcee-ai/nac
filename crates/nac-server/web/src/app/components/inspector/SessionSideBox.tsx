@@ -1,3 +1,4 @@
+import { HeartbeatPanel } from "@/app/features/heartbeats/HeartbeatPanel";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -193,6 +194,7 @@ export function SessionSideBox({
       {active === "terminal" && direct && !delegatedTranscript ? (
         <TerminalWorkspace sessionId={sessionId} />
       ) : null}
+      {active === "heartbeats" ? <HeartbeatPanel sessionId={sessionId} /> : null}
       {active === "worksets" ? (
         <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
       ) : null}

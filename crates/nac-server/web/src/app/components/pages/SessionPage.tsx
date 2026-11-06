@@ -169,10 +169,20 @@ export default function SessionPage() {
     navigate(routes.session(id, target), { replace: true });
   }, [effectivePanel, id, navigate, panel, routedPanel, selectInsight, selectedThread, snapshot]);
 
+  const heartbeatResultsThrough =
+    entry?.summary.session_id === id
+      ? (entry.heartbeat_results ?? []).reduce(
+          (maximum, result) => Math.max(maximum, result.sequence),
+          0,
+        )
+      : 0;
   useEffect(() => {
-    if (id) clearAttention(id);
+    if (id) clearAttention(id, heartbeatResultsThrough);
+  }, [clearAttention, id, heartbeatResultsThrough]);
+
+  useEffect(() => {
     resetSessionSelection();
-  }, [clearAttention, id, resetSessionSelection]);
+  }, [id, resetSessionSelection]);
 
   // A focused panel belongs to the session it was focused on: another session,
   // or leaving the page, finds the split again. A phone's dialog is left to its
