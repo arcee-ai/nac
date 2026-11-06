@@ -47,6 +47,11 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
     () =>
       runtime.productNavigation?.connect({
         currentSession: () => sessionId,
+        openNotificationSessionTarget: (targetSession) => {
+          // Explicit native response; SessionPage remains the ordinary shared
+          // owner for canonical snapshot/interactive subscription/recovery.
+          navigate(routes.session(targetSession));
+        },
         open: (resolution) => {
           const target = resolution.target.destination;
           switch (target) {
