@@ -20,8 +20,9 @@ extension WorkspaceSmoke {
     if (dialogs.length !== 1) throw Error('Expected one visible owned MCP dialog');
     const names=[...dialogs[0].querySelectorAll('input[placeholder="my_server"]')].filter(visible);
     if (names.length !== 1 || names[0].value !== 'wk_disabled_fixture') throw Error('Expected the owned MCP fixture form');
-    const row=names[0].parentElement?.parentElement;
-    const labels=[...row.querySelectorAll('.label-small')].filter(e => e.textContent.trim() === 'Enabled' && visible(e));
+    // Input/InputWrapper add nested divs. The unique owned active dialog
+    // already scopes this form; do not infer its row from a fixed depth.
+    const labels=[...dialogs[0].querySelectorAll('.label-small')].filter(e => e.textContent.trim() === 'Enabled' && visible(e));
     const control=labels.length === 1 ? labels[0].parentElement.nextElementSibling : null;
     if (!control || control.getAttribute('role') !== 'switch' || !visible(control) ||
         control.matches(':disabled,[aria-disabled="true"]')) throw Error('Expected one actionable owned Enabled switch');
