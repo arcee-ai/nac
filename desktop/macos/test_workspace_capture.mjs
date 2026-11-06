@@ -429,3 +429,30 @@ test('unfiltered modeled canonical history cannot satisfy the separate visible-p
  assert.equal(richObservation().ready,true);
  assert.deepEqual(canonical,original);
 });
+
+// Data probe controls only: no WKWebView, network or native acceptance.
+const assetScript = swift.match(/static let assetEvidenceScript = #"""\n([\s\S]*?)\n    """#/)[1];
+function assetSample(resources, errors, inter = true) {
+  return Function('window', 'performance', 'document', 'location', assetScript)(
+    { __previewEvidence: errors === null ? undefined : { errors } },
+    { timeOrigin: 1, getEntriesByType: () => resources.map(name => ({ name })) },
+    { fonts: { check: () => inter } }, { origin: 'http://127.0.0.1:351' });
+}
+const localAssets = ['http://127.0.0.1:351/mathjax-fixture.woff',
+  ...['a','b','c'].map(x => 'http://127.0.0.1:351/assets/dist/assets/' + x + '.js')];
+test('first-document error/nonlocal sample survives a clean new document', () => {
+  const errors = ['first document script error'];
+  const first = assetSample([...localAssets, 'https://outside.invalid/font.woff'], errors);
+  errors.length = 0;
+  const second = assetSample(localAssets, []);
+  assert.equal(first.offline_ok, false);
+  assert.deepEqual(first.errors, ['first document script error']);
+  assert(first.resources.includes('https://outside.invalid/font.woff'));
+  assert.equal(second.offline_ok, true);
+  // Native aggregate must retain both observations; a last-document sample cannot replace first.
+});
+test('asset probe refuses missing observer and missing first-load fonts/chunks', () => {
+  assert.equal(assetSample(localAssets, null).offline_ok, false);
+  assert.equal(assetSample(localAssets.slice(0, 2), []).fonts_chunks_ok, false);
+  assert.equal(assetSample(localAssets, [], false).fonts_chunks_ok, false);
+});
