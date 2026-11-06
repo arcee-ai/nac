@@ -1052,6 +1052,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     getWorkspaceFiles: (id: string, revision: number | null, signal?: AbortSignal) => Promise<{
         files: string[];
+        path_root?: string | null;
         truncated: boolean;
     }>;
     getWorkspaceFile: (id: string, path: string, revision: number | null, signal?: AbortSignal) => Promise<{
@@ -1067,7 +1068,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         opened: string;
     }>;
     /** Explicit existing Local target only; never opens a missing parent. */
-    revealWorkspacePath: (id: string, path: string, expectedWorkspaceRoot: string, signal?: AbortSignal) => Promise<{
+    revealWorkspacePath: (id: string, path: string, expectedWorkspaceRoot: string, expectedPathRoot: string, signal?: AbortSignal) => Promise<{
         fell_back_to_parent: boolean;
         opened: string;
     }>;
