@@ -19,7 +19,7 @@ from instance_smoke import AppJourney, engine_settled, verify_embedded_assets, w
 from quit_fixture import QuitWorkspaceFixture, TRANSCRIPT, request
 from smoke import session_lock_state
 from instance_console import require_console
-from lifecycle_renderer import exercise_hidden_renderer
+from lifecycle_renderer import approval_origin, exercise_hidden_renderer, verify_renderer_store
 
 
 def console_state():
@@ -132,13 +132,14 @@ def run_contract(bundle, destination, observer):
                 capture('work-ready')
                 fixture.retire_streams() # The real WK document now owns the interactive observer.
                 fixture.assert_work_running()
+                origin = approval_origin(fixture) if scenario == 'renderer-hidden' else None
                 journey.command_file('close')
                 closed = journey.stage('closed')
                 assert closed['close_retained_owners'] and not engine_settled(moved, ready_pid)
                 fixture.assert_work_running()
                 assert request(ready['base_url'], '/sessions/' + fixture.approval_session + '/permissions')['requests']
                 if scenario == 'renderer-hidden':
-                    stopped, started = exercise_hidden_renderer(journey, fixture)
+                    stopped, started, renderer_observations = exercise_hidden_renderer(journey, fixture, origin)
                 else:
                     # LaunchServices sends the app's real reopen event to this same
                     # bundle. It does not create or adopt another engine instance.
@@ -187,6 +188,9 @@ def run_contract(bundle, destination, observer):
                     verify_native_quit_completion(stopped)
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
+                if scenario == 'renderer-hidden':
+                    after['renderer_work_observations'] = renderer_observations
+                    after['renderer_approval_outcome'] = verify_renderer_store(store, origin, renderer_observations[-1])
                 replacement = OwnedEngine(moved / 'Contents/Resources/nac-web', profile, store, environment, desktop=True)
                 replacement.ready()
                 messages = request(replacement.endpoint, '/sessions/' + fixture.session + '/messages?include_system=true&limit=200')
