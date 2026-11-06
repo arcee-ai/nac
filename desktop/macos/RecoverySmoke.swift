@@ -138,6 +138,7 @@ final class RecoverySmoke {
           const fetchRows = [];
           let started = 0, settled = 0, errors = 0, active = 0, overflow = false;
           let drop = false, settledCapture = null;
+          const storagePosts = []; let storagePostOverflow = false;
           const snapshot = () => ({version: 1, nonce: q1.nonce, provider: q1.provider, selector: q1.selector, engineOrigin,
             started, settled, errors, active, overflow,
             rows: fetchRows.map(row => ({...row, metadata: row.metadata ? {...row.metadata} : null}))});
@@ -184,6 +185,23 @@ final class RecoverySmoke {
           };
           window.__nacRecoveryEvidence = Object.freeze({
             rows: () => rows.slice(), dropCommandResponse: () => { drop = true; },
+            q1StoragePosts: q1 ? () => ({overflow: storagePostOverflow,
+              rows: storagePosts.map(row => ({...row, drafts: row.drafts.map(draft => [...draft])}))}) : undefined,
+            q1StoragePost: q1 ? message => {
+              if (message.kind !== 'write' || message.namespace !== 'drafts') return false;
+              try {
+                const drafts = message.value === null ? [] : JSON.parse(message.value).drafts;
+                if (!Number.isSafeInteger(message.sequence) || message.sequence <= 0 ||
+                    !['launch', 'view', 'document'].every(key => typeof message[key] === 'string') ||
+                    !Array.isArray(drafts) || drafts.length > 2 || !drafts.every(row => Array.isArray(row) &&
+                      [2, 3].includes(row.length) && row.every(value => typeof value === 'string' && value.length <= 4096)))
+                  throw new TypeError('Unbounded Q1 storage post');
+                if (storagePosts.length >= 64) { storagePostOverflow = true; return false; }
+                storagePosts.push({launch: message.launch, view: message.view, document: message.document,
+                  sequence: message.sequence, drafts});
+                return true;
+              } catch (_) { storagePostOverflow = true; return false; }
+            } : undefined,
             q1Snapshot: q1 ? snapshot : undefined,
             q1SettledSnapshot: q1 ? () => {
               if (active === 0) return Promise.resolve(snapshot());
@@ -466,7 +484,16 @@ final class RecoverySmoke {
         WorkspaceStorage.smokeQ1Event = { [weak self, weak view] event, raw in
             guard let self, event["profile"] as? String == profile else { return }
             let current = self.app.commands?.smokeSnapshot["binding"] as? [String: Any]
-            let live = view != nil && self.app.webView === view && self.app.canRecoverWorkspace &&
+            let confirming: Bool = {
+                guard !self.app.stopping, self.app.failure == nil,
+                      self.app.quit.launch == q1QuitLaunch, self.storageQ1Owner != nil,
+                      event["owner"] as? String == self.storageQ1Owner else { return false }
+                if case .confirming = self.app.quit.lifecycle.phase { return true }
+                return false
+            }()
+            // Observation remains live during the originating Quit sheet. This
+            // grants no command/write/recovery authority during confirmation.
+            let live = view != nil && self.app.webView === view && (self.app.canRecoverWorkspace || confirming) &&
                 self.app.recovery.documentGeneration == generation && self.app.engine.pid == enginePID &&
                 self.app.engine.receipt?.incarnation == receipt.incarnation &&
                 self.app.engine.receipt?.kind == receipt.kind && self.app.engine.receipt?.version == receipt.version &&
@@ -583,6 +610,21 @@ final class RecoverySmoke {
         else acks.push(ack);
       }
     });
+    const posts = () => {
+      const value = window.__nacRecoveryEvidence?.q1StoragePosts?.();
+      check(value && !value.overflow, 'Missing/overflow Q1 storage posts');
+      return value.rows.filter(same);
+    };
+    const latestWrite = () => Math.max(0, ...posts().map(row => row.sequence));
+    const awaitDraft = async (id, text, after) => {
+      const post = await until(() => posts().find(row => row.sequence > after &&
+        row.drafts.every(draft => [plan.a, plan.b].includes(draft[0])) &&
+        (text === '' ? !row.drafts.some(draft => draft[0] === id) :
+          row.drafts.some(draft => draft.length === 2 && draft[0] === id && draft[1] === text))));
+      await until(() => acks.some(ack => ack.sequence === post.sequence));
+      check(acks.find(ack => ack.sequence === post.sequence).durable === true,
+        'Final draft acknowledgement failed');
+    };
     const input = () => document.querySelector('textarea[role="combobox"][aria-label="Message"]');
     const go = async id => {
       const target = '#/session/' + id + '/files', previous = input(), oldRoute = location.hash;
@@ -593,10 +635,13 @@ final class RecoverySmoke {
     };
     const fill = async text => {
       const element = input(); check(element, 'Missing current composer');
+      const after = latestWrite(), id = location.hash.split('/')[2];
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(element, text);
       element.dispatchEvent(new Event('input', {bubbles: true}));
       await until(() => input()?.value === text);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await awaitDraft(id, text, after);
+      check(input()?.value === text, 'Composer reverted before durable acknowledgement');
     };
     const button = name => [...document.querySelectorAll('button')].find(element =>
       element.getAttribute('aria-label') === name || element.textContent.trim() === name);
@@ -629,8 +674,10 @@ final class RecoverySmoke {
         check(input().value === fresh, 'Cold review overwrote a fresh draft');
         await fill('');
         await until(() => restore() && !restore().disabled);
+        const after = latestWrite();
         restore().click();
         await until(() => input().value === plan.aText && !delivery());
+        await awaitDraft(plan.a, plan.aText, after);
       }
       check(!acknowledgementOverflow, 'Storage acknowledgement evidence overflow');
       check(!acks.some(ack => ack.durable !== true), 'Observed native storage durability failure');
