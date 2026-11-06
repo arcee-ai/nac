@@ -8,7 +8,9 @@ const require = createRequire(new URL('../../crates/nac-server/web/package.json'
 const { JSDOM } = require('jsdom');
 const swift = fs.readFileSync(new URL('WorkspaceJourneys.swift', import.meta.url), 'utf8');
 const script = swift.match(/static let disabledMcpFixtureScript = #"""\n([\s\S]*?)\n    """#/)[1];
-const form = `<div><div><input placeholder="my_server" value="wk_disabled_fixture"></div>
+// McpServerForm Name field -> InputWrapper -> input-wrapper -> UIInput.
+// Keep both atom wrappers: a fixed two-parent lookup cannot reach Enabled.
+const form = `<div><div><div><div class="label-small">Name*</div></div><div class="flex text-left flex-col gap-1"><div class="input-wrapper relative w-full h-fit"><input placeholder="my_server" value="wk_disabled_fixture"></div></div></div>
   <div><div><div><div class="label-small">Enabled</div></div><button id="enabled" role="switch" aria-checked="true"></button>
   <div><div class="label-small">Required</div></div><button id="required" role="switch" aria-checked="true"></button></div></div></div>`;
 const dialog = body => `<div role="dialog" aria-label="MCP servers" data-modal-open="true">${body}</div>`;
