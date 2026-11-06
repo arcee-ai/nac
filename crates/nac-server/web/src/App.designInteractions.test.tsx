@@ -123,7 +123,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function fixture(owner: string, route: string) {
+async function fixture(owner: string, route: string) {
   const fetch = vi.fn();
   const runtime = createRuntime({
     scope: {
@@ -138,14 +138,19 @@ function fixture(owner: string, route: string) {
     client: createClient({ endpoint: "/test", fetch }),
   });
   runtimes.push(runtime);
-  const view = render(
-    <NativePresentationRoot
-      runtime={runtime}
-      className={`presentation-${owner}`}
-      theme={(child) => child}
-      router={(child) => <MemoryRouter initialEntries={[route]}>{child}</MemoryRouter>}
-    />,
-  );
+  let view!: ReturnType<typeof render>;
+  await act(async () => {
+    view = render(
+      <NativePresentationRoot
+        runtime={runtime}
+        className={`presentation-${owner}`}
+        theme={(child) => child}
+        router={(child) => <MemoryRouter initialEntries={[route]}>{child}</MemoryRouter>}
+      />,
+    );
+    // Settle the actual route import and Suspense commit before functional assertions.
+    await import("@/app/components/pages/DesignPreviewPage");
+  });
   return { runtime, view, fetch, ui: within(view.container) };
 }
 
@@ -179,8 +184,8 @@ vi.mock("./app/components/pages/design-preview/FilesAtomsSection", async () => {
 it.each(["Cancel", "Escape", "overlay"] as const)(
   "keeps actual showcase sections and editor state settled when the modal closes through %s",
   async (dismiss) => {
-    const current = fixture("modal-owner", "/design");
-    const sibling = fixture("modal-sibling", "/session/other/files");
+    const current = await fixture("modal-owner", "/design");
+    const sibling = await fixture("modal-sibling", "/session/other/files");
     const siblingDraft = sibling.ui.getByRole("textbox", { name: "Session draft" });
     fireEvent.change(siblingDraft, { target: { value: "sibling retained draft" } });
     await current.ui.findByText("design system");
