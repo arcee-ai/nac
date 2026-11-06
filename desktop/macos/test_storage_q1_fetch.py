@@ -100,7 +100,7 @@ class FetchReadWitnessControls(unittest.TestCase):
             const vm = await import('node:vm');
             function harness(script = producer) {
               const actual = [], pending = [];
-              const context = {URL, Request, Response, TextEncoder, Promise, TypeError,
+              const context = {URL, Request, Response, TextEncoder, Promise, TypeError, DOMException, AbortSignal,
                 location: {origin: 'http://127.0.0.1:12001', href: 'http://127.0.0.1:12001/', hash: '#/session/a/files'},
                 document: {querySelector: () => ({getAttribute: () => 'native'})},
                 __nacDesktopStorage: {open: async () => ({document: {launch: 'launch', view: 'view', document: 'document'}})},
@@ -142,6 +142,25 @@ class FetchReadWitnessControls(unittest.TestCase):
             await flight;
             const failedResult = await failedCapture;
             assert.equal(failedResult.fetch.active, 0); assert.equal(failedResult.fetch.errors, 1);
+            assert.deepEqual(JSON.parse(JSON.stringify(failedResult.fetchErrors)),
+              [{sequence: 1, name: 'TypeError', signalObserved: false, signalAborted: false}]);
+            const aborted = harness(), cancellation = new AbortController();
+            const abortedRead = aborted.context.fetch('/sessions/a', {signal: cancellation.signal}).catch(() => null);
+            cancellation.abort();
+            aborted.pending.shift().reject(new DOMException('do not copy exception text', 'AbortError'));
+            await abortedRead;
+            const abortedResult = await aborted.take();
+            assert.equal(abortedResult.fetch.errors, 1); // Diagnostic only: the acceptance gate is unchanged.
+            assert.deepEqual(JSON.parse(JSON.stringify(abortedResult.fetchErrors)),
+              [{sequence: 1, name: 'AbortError', signalObserved: true, signalAborted: true}]);
+            assert.equal(JSON.stringify(abortedResult).includes('do not copy exception text'), false);
+            const override = harness();
+            const requestWithSignal = new Request('http://127.0.0.1:12001/sessions/a', {signal: cancellation.signal});
+            const overrideRead = override.context.fetch(requestWithSignal, {signal: null}).catch(() => null);
+            override.pending.shift().reject(new TypeError('inert network failure'));
+            await overrideRead;
+            assert.deepEqual(JSON.parse(JSON.stringify((await override.take()).fetchErrors)),
+              [{sequence: 1, name: 'TypeError', signalObserved: false, signalAborted: false}]);
             const denied = harness();
             const forbidden = [
               ['/sessions/a/runs', {method: 'POST', body: '{}'}],
