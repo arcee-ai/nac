@@ -10,7 +10,7 @@ async fn workspace_reveal_http_keeps_path_session_and_transport_denials() {
     for (session, body, status) in [
         (
             "missing",
-            serde_json::json!({"path":"file", "expected_workspace_root": expected}),
+            serde_json::json!({"path":"file", "expected_path_root": expected, "expected_workspace_root": expected}),
             StatusCode::NOT_FOUND,
         ),
         (
@@ -20,27 +20,37 @@ async fn workspace_reveal_http_keeps_path_session_and_transport_denials() {
         ),
         (
             "local",
-            serde_json::json!({"path":"file", "expected_workspace_root": expected, "grant":true}),
+            serde_json::json!({"path":"file", "expected_workspace_root": expected}),
             StatusCode::BAD_REQUEST,
         ),
         (
             "local",
-            serde_json::json!({"path":"file", "expected_workspace_root": root.join("stale")}),
+            serde_json::json!({"path":"file", "expected_workspace_root": expected, "expected_path_root":""}),
             StatusCode::BAD_REQUEST,
         ),
         (
             "local",
-            serde_json::json!({"path":"../outside", "expected_workspace_root": expected}),
+            serde_json::json!({"path":"file", "expected_path_root": expected, "expected_workspace_root": expected, "grant":true}),
             StatusCode::BAD_REQUEST,
         ),
         (
             "local",
-            serde_json::json!({"path":"/tmp/absolute", "expected_workspace_root": expected}),
+            serde_json::json!({"path":"file", "expected_path_root": expected, "expected_workspace_root": root.join("stale")}),
             StatusCode::BAD_REQUEST,
         ),
         (
             "local",
-            serde_json::json!({"path":"missing/child", "expected_workspace_root": expected}),
+            serde_json::json!({"path":"../outside", "expected_path_root": expected, "expected_workspace_root": expected}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "local",
+            serde_json::json!({"path":"/tmp/absolute", "expected_path_root": expected, "expected_workspace_root": expected}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "local",
+            serde_json::json!({"path":"missing/child", "expected_path_root": expected, "expected_workspace_root": expected}),
             StatusCode::BAD_REQUEST,
         ),
     ] {
@@ -66,7 +76,7 @@ async fn workspace_reveal_http_keeps_path_session_and_transport_denials() {
             app.clone(),
             "/sessions/local/workspace/reveal",
             serde_json::json!({
-                "path":"outside", "expected_workspace_root": expected
+                "path":"outside", "expected_path_root": expected, "expected_workspace_root": expected
             }),
         )
         .await;
@@ -80,7 +90,7 @@ async fn workspace_reveal_http_keeps_path_session_and_transport_denials() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::ORIGIN, "https://untrusted.example")
                 .body(Body::from(
-                    serde_json::json!({"path":"store.db", "expected_workspace_root":expected})
+                    serde_json::json!({"path":"store.db", "expected_path_root":expected, "expected_workspace_root":expected})
                         .to_string(),
                 ))
                 .unwrap(),

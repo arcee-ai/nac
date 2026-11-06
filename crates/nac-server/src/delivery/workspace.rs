@@ -45,11 +45,13 @@ pub struct OpenWorkspacePathRequest {
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RevealWorkspacePathRequest {
-    /// Existing Files path: repository-relative for Git workspaces, or relative
-    /// to the selected workspace root for nongit workspaces.
+    /// Existing path, relative to the explicitly observed expected_path_root.
     pub path: String,
     /// Root observed in the initiating session snapshot; never a target override.
     pub expected_workspace_root: String,
+    /// Coordinate root of the originating Files listing. Ordinary directory
+    /// callers explicitly use their selected workspace root. Never an OS target.
+    pub expected_path_root: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
@@ -170,7 +172,12 @@ pub(crate) async fn reveal_workspace_path(
     Ok(Json(
         manager
             .workspace()
-            .reveal_workspace_path(&session_id, request.path, request.expected_workspace_root)
+            .reveal_workspace_path(
+                &session_id,
+                request.path,
+                request.expected_workspace_root,
+                request.expected_path_root,
+            )
             .await?,
     ))
 }

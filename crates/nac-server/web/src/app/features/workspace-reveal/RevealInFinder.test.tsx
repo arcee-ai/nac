@@ -14,6 +14,12 @@ const snapshot = {
   metadata: { session_id: "local", workspace_host_path: "/tmp/日本語 space" },
   workspace: { host_root: "/tmp/日本語 space" },
 } as SessionSnapshotResponse;
+const origin = (path: string) => ({
+  sessionId: "local",
+  selectedRoot: "/tmp/日本語 space",
+  pathRoot: "/tmp/日本語 space",
+  path,
+});
 const entries = [
   { summary: { session_id: "local", sandboxed: false, ssh_host: null } },
 ] as ManagedSessionSummary[];
@@ -61,9 +67,17 @@ function fixture(native = true) {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     </RuntimeContext.Provider>
   );
-  const view = render(<RevealInFinder sessionId="local" snapshot={snapshot} path="one.txt" />, {
-    wrapper,
-  });
+  const view = render(
+    <RevealInFinder
+      sessionId="local"
+      snapshot={snapshot}
+      path="one.txt"
+      origin={origin("one.txt")}
+    />,
+    {
+      wrapper,
+    },
+  );
   return { view, client };
 }
 
@@ -87,9 +101,21 @@ it("binds one reveal to its selected file and aborts it on replacement without r
     fireEvent.click(screen.getByRole("button", { name: "Reveal in Finder" }));
     fireEvent.click(screen.getByRole("button", { name: "Reveal in Finder" }));
     expect(reveal).toHaveBeenCalledOnce();
-    const signal = reveal.mock.calls[0]![3]!;
-    expect(reveal.mock.calls[0]!.slice(0, 3)).toEqual(["local", "one.txt", "/tmp/日本語 space"]);
-    view.rerender(<RevealInFinder sessionId="local" snapshot={snapshot} path="two.txt" />);
+    const signal = reveal.mock.calls[0]![4]!;
+    expect(reveal.mock.calls[0]!.slice(0, 4)).toEqual([
+      "local",
+      "one.txt",
+      "/tmp/日本語 space",
+      "/tmp/日本語 space",
+    ]);
+    view.rerender(
+      <RevealInFinder
+        sessionId="local"
+        snapshot={snapshot}
+        path="two.txt"
+        origin={origin("two.txt")}
+      />,
+    );
     expect(signal.aborted).toBe(true);
     pending.reject(new Error("late failure"));
     await waitFor(() => expect(screen.queryByText("late failure")).toBeNull());
@@ -109,6 +135,56 @@ it("reports a rejection and permits only an explicit subsequent invocation", asy
     fireEvent.click(screen.getByRole("button", { name: "Reveal in Finder" }));
     expect(await screen.findByText("Workspace changed")).toBeTruthy();
     expect(reveal).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("aborts a pending request when explicit reselection changes only its coordinate root", async () => {
+  const pending = Promise.withResolvers<{ opened: string; fell_back_to_parent: boolean }>();
+  const reveal = vi.spyOn(api, "revealWorkspacePath").mockImplementation(() => pending.promise);
+  const { view, client } = fixture();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Reveal in Finder" }));
+    const signal = reveal.mock.calls[0]![4]!;
+    view.rerender(
+      <RevealInFinder
+        sessionId="local"
+        snapshot={snapshot}
+        path="one.txt"
+        origin={{ ...origin("one.txt"), pathRoot: "/tmp" }}
+      />,
+    );
+    expect(signal.aborted).toBe(true);
+    pending.reject(new Error("old coordinate failure"));
+    await waitFor(() => expect(screen.queryByText("old coordinate failure")).toBeNull());
+    expect(reveal).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("hides an unbound or stale selection instead of reinterpreting its path", () => {
+  const { view, client } = fixture();
+  try {
+    for (const selectedOrigin of [
+      null,
+      { ...origin("one.txt"), sessionId: "other" },
+      { ...origin("one.txt"), selectedRoot: "/changed" },
+      origin("other.txt"),
+    ]) {
+      view.rerender(
+        <RevealInFinder
+          sessionId="local"
+          snapshot={snapshot}
+          path="one.txt"
+          origin={selectedOrigin}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Reveal in Finder" })).toBeNull();
+    }
   } finally {
     view.unmount();
     client.clear();
