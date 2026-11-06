@@ -33,6 +33,13 @@ next continuation. A failed run marks it blocked. An explicit user cancellation
 accounts the partial run and pauses the goal, so cancelled work does not
 immediately restart. Resume is explicit.
 
+In plain direct sessions on Local, a pending structured question also gates
+autonomous continuation. The goal stays `active`; waiting for an answer does
+not complete, block or pause it. The question survives restart. Ordinary human
+guidance remains deliverable and leaves the question open. One exact accepted
+answer reserves one continuation through the existing inbox; it never steers
+an unrelated active run. See [structured questions](independent-tasks.md#structured-questions).
+
 Each participating run is bound to the current goal generation. Creating a
 goal during an already-running turn records the current token and time baseline,
 so earlier work is not charged to the goal. Run settlement adds only later
@@ -60,3 +67,10 @@ a default budget. The update tool can mark only `complete` or genuinely
 authority. Goal operations still pass through the native prepared-tool and
 permission boundary, and never alter the selected local, Podman, or SSH
 execution backend.
+
+
+An explicitly authorized coordinator can also use the native
+[`task_goal` peer controls](independent-tasks.md#explicit-peer-goal-controls) on an
+independent plain direct Local task. Each peer action needs a separate manual
+human authorization and ordinary permission evaluation. This adds no authority
+to the target's own `update_goal` tool or to traditional child sessions.

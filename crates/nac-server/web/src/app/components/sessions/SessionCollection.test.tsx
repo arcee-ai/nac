@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -154,4 +154,50 @@ describe("global session collection", () => {
     expect(screen.getByText("Run finished")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^finished-run, Run finished/ })).toBeTruthy();
   });
+});
+
+it("keeps an unchanged heartbeat quiet in the real session list while ordinary and failed work remains visible", () => {
+  const quiet = session("quiet-heartbeat", "one");
+  quiet.summary.updated_at = "2026-09-22T13:00:00Z";
+  quiet.attention_revision = 10;
+  quiet.attention_updated_at = "2026-09-22T12:00:00Z";
+  quiet.heartbeat_results = [
+    {
+      occurrence_id: "quiet",
+      schedule_id: "schedule",
+      run_id: "quiet-heartbeat-run",
+      outcome: "unchanged",
+      sequence: 1,
+      seen: false,
+    },
+  ];
+  sessionNavigationStore.setState({ lastViewedAt: { "quiet-heartbeat": "2026-09-22T12:30:00Z" } });
+  const running = {
+    ...quiet,
+    active_run: { run_id: "quiet-heartbeat-run", prompt_preview: "check", started_at_epoch_ms: 1 },
+    heartbeat_results: [],
+    attention_revision: 9,
+  };
+  trackAttention([running], "one-active");
+  trackAttention([quiet], "one-active");
+  renderCollection([quiet]);
+  expect(
+    screen.getByRole("button", { name: "quiet-heartbeat" }).getAttribute("aria-label"),
+  ).not.toMatch(/Run finished|Updated|updated since last viewed/);
+  const failed = {
+    ...quiet,
+    attention_revision: 11,
+    heartbeat_results: [
+      {
+        ...quiet.heartbeat_results[0],
+        occurrence_id: "failed",
+        run_id: "failed-run",
+        outcome: "failed" as const,
+        sequence: 2,
+      },
+    ],
+  };
+  act(() => trackAttention([failed], "one-active"));
+
+  expect(screen.getByRole("button", { name: /quiet-heartbeat, Run finished/ })).toBeTruthy();
 });

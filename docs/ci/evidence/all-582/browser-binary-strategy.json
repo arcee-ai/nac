@@ -1,0 +1,1179 @@
+{
+  "strategy_id": "S09",
+  "source_base": "71842cbede5f6f1ded2ed66ac1680a68dc25981b",
+  "status": "reviewable production candidate; hosted artifact pipeline and timing acceptance pending",
+  "changes": [
+    "one mandatory exact-source dev/debug0 producer",
+    "authenticated per-ID same-run digest-verified consumers",
+    "fully validated prior-attempt source fallback; corrupt/missing old artifacts fail",
+    "pinned Rust retained and CARGO_INCREMENTAL0 explicit",
+    "original goal proof plus same chosen binary binding",
+    "producer explicitly required in browser and final aggregates"
+  ],
+  "shard_refinement": {
+    "strategy_id": "S02",
+    "new_strategy": false,
+    "ordinary_shards": 8,
+    "workers_per_machine": 1,
+    "fully_parallel": false,
+    "retries": 0,
+    "complete_selected": 205,
+    "proof_selected": 2,
+    "ordinary_part_counts": [
+      31,
+      21,
+      27,
+      24,
+      44,
+      9,
+      22,
+      25
+    ],
+    "all_parts_nonempty": true,
+    "complete_disjoint_union_cli": "Verified complete disjoint browser partition: 205 tests in 9 parts"
+  },
+  "inventory_commands": [
+    "playwright test --list --reporter=json",
+    "playwright test exact-goal-wait.e2e.ts --list --reporter=json",
+    "playwright test --grep-invert=exact-goal-wait.e2e.ts --shard=N/8 --list --reporter=json",
+    "python3 .github/scripts/browser-inventory.py --complete complete.json --part proof.json --part ordinary-1.json ... --part ordinary-8.json"
+  ],
+  "inventory_scope": "Static selection only; no test execution or hosted end-to-end timing is inferred. Runtime E2E files/config remain unchanged.",
+  "inventory_parts": [
+    {
+      "part": "complete",
+      "count": 205,
+      "raw_report_sha256": "91f402f25c7982c56c75ed1bd150e67cf27dd1ae8615c7eb8b15df6825acc5df",
+      "tests": []
+    },
+    {
+      "part": "proof",
+      "count": 2,
+      "raw_report_sha256": "99afa8e78bfba4cd5f8ca7b29bf0d4e0fa4e52a75e3c1bf4170bf5eb04e2d4df",
+      "tests": [
+        {
+          "id": "5fbb03f65bd28298e09c-667d3528d9b0769c80d4",
+          "test": "exact-goal-wait.e2e.ts:222:1 \u203a ALL471-G1 exact completed goal stays quiet through settlement, clear and restart",
+          "expected_status": "passed"
+        },
+        {
+          "id": "5fbb03f65bd28298e09c-42ea5b6ef750ec7005fe",
+          "test": "exact-goal-wait.e2e.ts:426:1 \u203a ALL471-G2 input interruption and human pause preserve exact goal and independent run",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-1",
+      "count": 31,
+      "raw_report_sha256": "845e0172f726c9873ea4fa9554a8bea35f88ff90c96184e89ebf01d904e9161e",
+      "tests": [
+        {
+          "id": "39e0809334cd2b85b6d7-324f5f65d0eb766fbb65",
+          "test": "button-targets.e2e.ts:7:3 \u203a btn-tertiary preserves the small icon pointer target without painting a box",
+          "expected_status": "passed"
+        },
+        {
+          "id": "39e0809334cd2b85b6d7-a005d57b106df769b7a1",
+          "test": "button-targets.e2e.ts:7:3 \u203a btn-tertiary-accent preserves the small icon pointer target without painting a box",
+          "expected_status": "passed"
+        },
+        {
+          "id": "39e0809334cd2b85b6d7-26a2634a9a913cf0bde6",
+          "test": "button-targets.e2e.ts:7:3 \u203a btn-tertiary-destructive preserves the small icon pointer target without painting a box",
+          "expected_status": "passed"
+        },
+        {
+          "id": "de008f29849e07c35983-7d37ec08b4c4f94ad37a",
+          "test": "direct-workflow.e2e.ts:22:3 \u203a direct workflow production lifecycle desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "de008f29849e07c35983-2ffe3f150c7efd9aa920",
+          "test": "direct-workflow.e2e.ts:22:3 \u203a direct workflow production lifecycle mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-884240ee90a956f45b49",
+          "test": "embedded.e2e.ts:47:1 \u203a serves the production-embedded application and hashed assets",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-6a2fdf1d399b0450be2e",
+          "test": "embedded.e2e.ts:70:1 \u203a runs a direct session through the loopback scripted Responses provider",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-95218351ae794640533d",
+          "test": "embedded.e2e.ts:137:1 \u203a round-trips a native tool result through the scripted Responses provider",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-8eb94f614cf31805a0bc",
+          "test": "embedded.e2e.ts:176:1 \u203a terminates one exact live terminal through the ordinary session API",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-6230387352a663072b91",
+          "test": "embedded.e2e.ts:233:3 \u203a keeps rich direct primary tool details through live settlement and reload",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-f4f8c18c0c8dcf79b4f2",
+          "test": "embedded.e2e.ts:233:3 \u203a keeps rich direct-with-orchestrator primary tool details through live settlement and reload",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-4133851abef15fdf2124",
+          "test": "embedded.e2e.ts:304:1 \u203a renders a per-call command deadline distinctly through settlement and reload",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-eecb9fc9167f0e6a542b",
+          "test": "embedded.e2e.ts:354:1 \u203a keeps approval state and actions reachable with many remembered permissions",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-d75988d6fa87749b4e22",
+          "test": "embedded.e2e.ts:473:1 \u203a persists session auto-approval, drains pending asks, and restores manual mode",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-f220327bbc3fe78015ae",
+          "test": "embedded.e2e.ts:577:1 \u203a applies parent auto-approval to child agents and identifies manual child requests",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-24182228c1cc32f690d0",
+          "test": "embedded.e2e.ts:714:1 \u203a renders an unknown primary tool failure safely after reload",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-0eee911683a6e27b1864",
+          "test": "embedded.e2e.ts:766:1 \u203a asks for immutable behavior on every first and new chat",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-f52dd1dca5813a50c2d8",
+          "test": "embedded.e2e.ts:924:1 \u203a shows and persists the optional light model for every chat behavior",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-5bdd6baa933d51c421ad",
+          "test": "embedded.e2e.ts:991:1 \u203a uses the unified catalog for a cross-provider New Chat override",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-ba26b9bbe19120a6f494",
+          "test": "embedded.e2e.ts:1019:1 \u203a switches the active chat across configured providers from the unified composer picker",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-06def1f2d58dd46e42b3",
+          "test": "embedded.e2e.ts:1058:1 \u203a uses an Advanced saved provider account from the unified composer without exposing its key",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-b5793fed4bae1f4f9892",
+          "test": "embedded.e2e.ts:1127:1 \u203a uses an Advanced saved provider account for the light model without exposing its key",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-0ccb70d63e2be9ff4ee4",
+          "test": "embedded.e2e.ts:1186:1 \u203a converges concurrent required-first-chat tabs and refreshes deleted ownership",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-a50da919e4e2ad1702c3",
+          "test": "embedded.e2e.ts:1230:1 \u203a steers an active direct run from the ordinary composer",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-b729426f8df0b43843c5",
+          "test": "embedded.e2e.ts:1286:1 \u203a steers an active classic orchestrator from the ordinary composer",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-5902ba7aeec74630b285",
+          "test": "embedded.e2e.ts:1337:1 \u203a queues, edits, cancels pending input, and stops an active direct run",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-17910dd6852ae0b54033",
+          "test": "embedded.e2e.ts:1382:1 \u203a interprets literal goal commands before launching goal continuation",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-07d05b412d2c32fb0b9b",
+          "test": "embedded.e2e.ts:1447:1 \u203a replaces a completed durable goal from the production dialog",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-5af43a1cf4dcb6f8d5f1",
+          "test": "embedded.e2e.ts:1548:1 \u203a shows live background delegated work, terminal events, cancellation, and generation 2",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-065cadb9fce6b6ada160",
+          "test": "embedded.e2e.ts:1710:1 \u203a navigates to read-only child and managed-orchestrator transcripts",
+          "expected_status": "passed"
+        },
+        {
+          "id": "704cfec7542260022b74-8c95f78c984731086241",
+          "test": "embedded.e2e.ts:108:3 \u203a exposes native web retrieval in the production direct-agent request",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-2",
+      "count": 21,
+      "raw_report_sha256": "917db54b77f1c265294c56f6160a53854a4645377af32b6ca41642b0270962fc",
+      "tests": [
+        {
+          "id": "1d9b98e7c14118e1299d-6f7e41be82030d9a3cce",
+          "test": "exact-task-wait.e2e.ts:8:1 \u203a native exact wait returns approval and human navigation revalidates it",
+          "expected_status": "passed"
+        },
+        {
+          "id": "1d9b98e7c14118e1299d-ef05f93a47a0d25b077d",
+          "test": "exact-task-wait.e2e.ts:160:1 \u203a ordinary coordinator input interrupts native wait and leaves the target running",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-c269624db9b4a2b3a58f",
+          "test": "hosted-surfaces.e2e.ts:61:3 \u203a injected files, captured history and Git settlement desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-fe656ccf00bdeca63fa2",
+          "test": "hosted-surfaces.e2e.ts:206:3 \u203a injected session settings uncertainty and replacement desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-dadc1cca4c51004953b5",
+          "test": "hosted-surfaces.e2e.ts:287:3 \u203a injected outgoing MCP CRUD, test and runtime status desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-d1d1e0889f6a8999c3f4",
+          "test": "hosted-surfaces.e2e.ts:382:3 \u203a injected saved configuration CRUD and write-only key desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-b5c6b5c0fb51fc7660d0",
+          "test": "hosted-surfaces.e2e.ts:61:3 \u203a injected files, captured history and Git settlement mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-a155a6f2addd03b1d31f",
+          "test": "hosted-surfaces.e2e.ts:206:3 \u203a injected session settings uncertainty and replacement mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-b6d0c50d8c27667a4aaa",
+          "test": "hosted-surfaces.e2e.ts:287:3 \u203a injected outgoing MCP CRUD, test and runtime status mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b13d66f91a43e3d53fe3-24cd9b082bff0251b620",
+          "test": "hosted-surfaces.e2e.ts:382:3 \u203a injected saved configuration CRUD and write-only key mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23dcf3e89fc250c9b5d4-677ae05eadbebcd7946e",
+          "test": "hosted.e2e.ts:7:3 \u203a native injected presentation lifecycle desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23dcf3e89fc250c9b5d4-e114f9d658b79a0a189f",
+          "test": "hosted.e2e.ts:7:3 \u203a native injected presentation lifecycle mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23a4a5a7cd7a67625f9a-e5a66bd9b7a7073cae3e",
+          "test": "human-shell-terminal.e2e.ts:8:1 \u203a user commands, live terminal and explicit queued selection share one session without sharing authority",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23a4a5a7cd7a67625f9a-98a3248b89a9d46e57a7",
+          "test": "human-shell-terminal.e2e.ts:98:1 \u203a trusted pointer reports retain the public renderer's literal PTY encoding",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23a4a5a7cd7a67625f9a-dca92e5381d9c989aaf7",
+          "test": "human-shell-terminal.e2e.ts:147:1 \u203a manual human terminal freezes accepted uncertain input until acknowledgement without replay",
+          "expected_status": "passed"
+        },
+        {
+          "id": "23a4a5a7cd7a67625f9a-06633ab2892422ae4428",
+          "test": "human-shell-terminal.e2e.ts:263:1 \u203a reattach observation sends no retained terminal-query replies before focused input",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a87c16341c71553d9149-d681260ff23bfbb5dca0",
+          "test": "human-shell.e2e.ts:8:3 \u203a human shell command lifecycle desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a87c16341c71553d9149-9f75951d8f20a35f5770",
+          "test": "human-shell.e2e.ts:8:3 \u203a human shell command lifecycle mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a87c16341c71553d9149-8e693e1bc9f30a4e3c52",
+          "test": "human-shell.e2e.ts:66:3 \u203a human shell uncertain response keeps the same identity for an explicit retry (connection loss)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a87c16341c71553d9149-4d7536a97df5a22b1c67",
+          "test": "human-shell.e2e.ts:66:3 \u203a human shell uncertain response keeps the same identity for an explicit retry (HTTP 500)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a87c16341c71553d9149-a82c828fc78dcf6991fe",
+          "test": "human-shell.e2e.ts:152:1 \u203a escaped leading bang remains literal model input and never invokes a user command",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-3",
+      "count": 27,
+      "raw_report_sha256": "18a116127fdb35d40a88eaa058e0225da4b19c929f1a5c64caff59d50bd120a9",
+      "tests": [
+        {
+          "id": "dc653cde627d5aff0350-d962c3571a562ab5d9af",
+          "test": "inherited-exa.e2e.ts:439:1 \u203a missing parent credentials grant neither traditional nor managed subagents native web",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-8d263cb4bd7ccb63c54d",
+          "test": "inherited-exa.e2e.ts:15:7 \u203a direct traditional child foreground invokes both tools and continues",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-8ce6b01cbe425a070961",
+          "test": "inherited-exa.e2e.ts:15:7 \u203a direct traditional child background invokes both tools and continues",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-f147b8e7768cadf6493b",
+          "test": "inherited-exa.e2e.ts:15:7 \u203a direct-with-orchestrator traditional child foreground invokes both tools and continues",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-c321a11d25e2bfda584f",
+          "test": "inherited-exa.e2e.ts:15:7 \u203a direct-with-orchestrator traditional child background invokes both tools and continues",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-a9694f83dfeac02395d9",
+          "test": "inherited-exa.e2e.ts:60:3 \u203a restart reattaches through the parent, rotates generation 2 and revokes generation 3",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-261644a45b31a9ad8545",
+          "test": "inherited-exa.e2e.ts:119:3 \u203a steering keeps the current child generation and admitted native web tools",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-0d84d25d6e309fcda9b1",
+          "test": "inherited-exa.e2e.ts:184:3 \u203a cancels an inherited child request without retaining its key",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-bf33cd750b97b4cb25f9",
+          "test": "inherited-exa.e2e.ts:219:3 \u203a expires an inherited native request and closes its connection without retaining its key",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-5134c58d0b2530700ded",
+          "test": "inherited-exa.e2e.ts:269:7 \u203a managed orchestrator inherits both tools and forwards only its admitted snapshot to a worker",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc653cde627d5aff0350-61cf036296101a767f79",
+          "test": "inherited-exa.e2e.ts:269:7 \u203a managed orchestrator inherits both tools and forwards only its admitted snapshot to a worker",
+          "expected_status": "passed"
+        },
+        {
+          "id": "214d04b38d73cbdee815-0af97d2ef3ee498a7e57",
+          "test": "insights.e2e.ts:22:1 \u203a opens old Threads links in Insights on the stored thread",
+          "expected_status": "passed"
+        },
+        {
+          "id": "214d04b38d73cbdee815-79d07d30df874d3a1e1e",
+          "test": "insights.e2e.ts:112:1 \u203a opens a transcript group in Insights from its badge",
+          "expected_status": "passed"
+        },
+        {
+          "id": "214d04b38d73cbdee815-f10d7bc143d1884beb4b",
+          "test": "insights.e2e.ts:192:1 \u203a opens a launched session in Subagents and on its own page from its card",
+          "expected_status": "passed"
+        },
+        {
+          "id": "45d1af831058647956f6-294e7b5dd0a5c05751bc",
+          "test": "managed-exa.e2e.ts:18:3 \u203a runs real worker search/fetch and retains malformed errors without the credential",
+          "expected_status": "passed"
+        },
+        {
+          "id": "45d1af831058647956f6-1a35eb63c1694c77416a",
+          "test": "managed-exa.e2e.ts:91:3 \u203a cancels a hanging worker request and reaps its background descendant",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-07669b943bfed50d3ef3",
+          "test": "managed.e2e.ts:424:1 \u203a completes the managed first-run, write-only secret, and clone journey",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-28a275cac5872ea2b090",
+          "test": "managed.e2e.ts:490:1 \u203a keeps GitHub Connected visible after device authorization and reopening settings",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-f1954d6eb776986170c7",
+          "test": "managed.e2e.ts:521:1 \u203a runs and reload-recovers a durable latest-beta upgrade through the same-origin facade",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-5453168bf51fa70b737b",
+          "test": "managed.e2e.ts:561:1 \u203a retries a retained failed upgrade as a new explicit intent",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-e600a25f317b1ccaed3b",
+          "test": "managed.e2e.ts:580:1 \u203a explains managed upgrade authorization, incarnation, and availability recovery",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-201d1d2b269247fb6e4f",
+          "test": "managed.e2e.ts:611:1 \u203a keeps device authorization and repository selection usable at 390 by 844",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4d14725a267910d692e3-68e55827c613ddfa380b",
+          "test": "managed.e2e.ts:639:1 \u203a cancels an in-progress managed clone without publishing a Project",
+          "expected_status": "passed"
+        },
+        {
+          "id": "8b9c280f068708da0319-9e0e365d2bc40ea96c23",
+          "test": "mcp-arguments.e2e.ts:198:3 \u203a stdio arguments by keyboard and clipboard desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "8b9c280f068708da0319-459f183b9d7dd8629fdd",
+          "test": "mcp-arguments.e2e.ts:336:3 \u203a header helper arguments run, save and reopen in order desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "8b9c280f068708da0319-57068c6db3781f5dff18",
+          "test": "mcp-arguments.e2e.ts:198:3 \u203a stdio arguments by keyboard and clipboard mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "8b9c280f068708da0319-f5d7220b74705a7fe420",
+          "test": "mcp-arguments.e2e.ts:336:3 \u203a header helper arguments run, save and reopen in order mobile",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-4",
+      "count": 24,
+      "raw_report_sha256": "8cb78271ee54b0cbcc729a1a15eb4176f83c0c84a72375ac8fb8aa016c58d516",
+      "tests": [
+        {
+          "id": "dc79f1863a873d6cb5b8-fd80b0caaa29c496238b",
+          "test": "mobile-menu.e2e.ts:4:3 \u203a closes phone navigation when selecting the current standalone chat",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc79f1863a873d6cb5b8-eacf2c5f1bbc8f7b50f7",
+          "test": "mobile-menu.e2e.ts:4:3 \u203a closes phone navigation when selecting the current project chat",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc00a7d215b5bed7ccd4-6ec805ac3124d3e54211",
+          "test": "nac-guide-context.e2e.ts:27:3 \u203a joined installed guide and scoped navigation on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "dc00a7d215b5bed7ccd4-3569c0d0550d5333994f",
+          "test": "nac-guide-context.e2e.ts:27:3 \u203a joined installed guide and scoped navigation on phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "857fc261ba92bb7db421-a6efdbc33a32cf45e546",
+          "test": "nac-guide.e2e.ts:43:3 \u203a release-local guide: direct: mcp",
+          "expected_status": "passed"
+        },
+        {
+          "id": "857fc261ba92bb7db421-9be84aeb02edb4f9c7da",
+          "test": "nac-guide.e2e.ts:43:3 \u203a release-local guide: direct: skills",
+          "expected_status": "passed"
+        },
+        {
+          "id": "857fc261ba92bb7db421-dcd4e3ae12394a318298",
+          "test": "nac-guide.e2e.ts:43:3 \u203a release-local guide: direct-with-orchestrator: session-behaviors",
+          "expected_status": "passed"
+        },
+        {
+          "id": "857fc261ba92bb7db421-66e5050aa7cac71baeea",
+          "test": "nac-guide.e2e.ts:43:3 \u203a release-local guide: orchestrator: web-retrieval",
+          "expected_status": "passed"
+        },
+        {
+          "id": "857fc261ba92bb7db421-2e2be7b4ae5726dfee30",
+          "test": "nac-guide.e2e.ts:194:1 \u203a generic NAC coding request preserves ordinary prompt without guide expansion",
+          "expected_status": "passed"
+        },
+        {
+          "id": "36c115eca1a294dc6fef-5bdc58ea2f829a0bc342",
+          "test": "native-task-launch.e2e.ts:63:1 \u203a native saved-project launches open independent named-skill tasks across Git and non-Git projects",
+          "expected_status": "passed"
+        },
+        {
+          "id": "b37230e54716335aa713-4fb06791f67b1ccdd375",
+          "test": "navigation-header.e2e.ts:7:1 \u203a delegated phone header retains intrinsic change counts and its parent route",
+          "expected_status": "passed"
+        },
+        {
+          "id": "ff6fc7113eba06e15897-1b4d04dd4e2e69eabde8",
+          "test": "navigation.e2e.ts:94:1 \u203a project navigation, overflow, phone actions and notification feedback",
+          "expected_status": "passed"
+        },
+        {
+          "id": "ff6fc7113eba06e15897-c706a379a149e91214ba",
+          "test": "navigation.e2e.ts:288:1 \u203a phone navigation and project actions remain reachable at real 200 percent browser zoom",
+          "expected_status": "passed"
+        },
+        {
+          "id": "033fbc9d9cb0925a0786-28bb10448e6bf9772eec",
+          "test": "overlay-isolation.e2e.ts:7:1 \u203a embedded dialogs retain local Tab, dismissal, hints and shortcuts across two runtimes",
+          "expected_status": "passed"
+        },
+        {
+          "id": "033fbc9d9cb0925a0786-551816c461033d34ec8e",
+          "test": "overlay-isolation.e2e.ts:129:1 \u203a touch-emulated phone and 200-percent layout equivalent preserve reduced-motion rename and delete",
+          "expected_status": "passed"
+        },
+        {
+          "id": "3dc6fb47f8cba8788a37-a014757d918117e04ec3",
+          "test": "packed-presentation.e2e.ts:7:3 \u203a packed native presentation with caller router/style isolation desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "3dc6fb47f8cba8788a37-2b3635be4a6c8216849a",
+          "test": "packed-presentation.e2e.ts:7:3 \u203a packed native presentation with caller router/style isolation mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "3dc6fb47f8cba8788a37-d937573c4cc17526057a",
+          "test": "packed-presentation.e2e.ts:196:1 \u203a standalone native formula keeps its existing font and hoisted style behavior",
+          "expected_status": "passed"
+        },
+        {
+          "id": "08a17423814cfa7a4422-d74b072d888bed7afcce",
+          "test": "permission-queue.e2e.ts:8:3 \u203a consolidates scoped parent and child approvals desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "08a17423814cfa7a4422-efe4ce805d317d8c4554",
+          "test": "permission-queue.e2e.ts:8:3 \u203a consolidates scoped parent and child approvals mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "08a17423814cfa7a4422-9d933bfc1680f7145df0",
+          "test": "permission-queue.e2e.ts:252:1 \u203a last-client disconnect dismisses queued access without executing it",
+          "expected_status": "passed"
+        },
+        {
+          "id": "21b6ec416d3ada4b8b26-2b6189e6a92dc50136f7",
+          "test": "pilot-overlays.e2e.ts:8:1 \u203a rename and delete preserve the responsive pilot journey and accessibility",
+          "expected_status": "passed"
+        },
+        {
+          "id": "21b6ec416d3ada4b8b26-38da0c752f6eb39e79d2",
+          "test": "pilot-overlays.e2e.ts:266:3 \u203a pending rename survives exit and keyboard reopen on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "21b6ec416d3ada4b8b26-39a9a7a9f45765f7edbc",
+          "test": "pilot-overlays.e2e.ts:266:3 \u203a pending rename survives exit and keyboard reopen on phone",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-5",
+      "count": 44,
+      "raw_report_sha256": "8cb91737cf1dbd52399d6faf067eb9d40030bbdf83a2b720eef04b55bd02aae6",
+      "tests": [
+        {
+          "id": "0fdd2e66aabddb903725-05ec9e97d7a4d85c5f75",
+          "test": "product-context.e2e.ts:25:3 \u203a scoped product context and explicit destinations on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0fdd2e66aabddb903725-0deb30c5f0dbc278a654",
+          "test": "product-context.e2e.ts:25:3 \u203a scoped product context and explicit destinations on phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0fdd2e66aabddb903725-a0386d414686be72358d",
+          "test": "product-context.e2e.ts:154:1 \u203a native context tools resolve an explicit headless destination without executing Markdown",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0fdd2e66aabddb903725-b8255efb5e17a682e95c",
+          "test": "product-context.e2e.ts:205:1 \u203a replacing an injected runtime discards a pending navigation for the same session",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0fdd2e66aabddb903725-398b8b455923a5b341b7",
+          "test": "product-context.e2e.ts:254:1 \u203a an old standalone document cannot read or navigate a replacement server at the same origin/build",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0fdd2e66aabddb903725-c4fd48e4b5f117370da4",
+          "test": "product-context.e2e.ts:291:1 \u203a a delayed old navigation receipt cannot open UI after a same-origin serving replacement",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2b25622e3d6bde707734-92607ffa2b0db3cd7f00",
+          "test": "prompt-drafts.e2e.ts:8:3 \u203a preserves exact primary drafts through navigation and reload on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2b25622e3d6bde707734-07b64e6c131799f4f7bc",
+          "test": "prompt-drafts.e2e.ts:8:3 \u203a preserves exact primary drafts through navigation and reload on mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2b25622e3d6bde707734-471ceeb06ac309bf6534",
+          "test": "prompt-drafts.e2e.ts:69:1 \u203a isolates persisted primary drafts after same-origin serving-instance replacement",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2b25622e3d6bde707734-4772dae5a7fe2a0e8409",
+          "test": "prompt-drafts.e2e.ts:94:1 \u203a keeps a pending primary send guarded through navigation and preserves newer text",
+          "expected_status": "passed"
+        },
+        {
+          "id": "3696156e233300562f78-f3a1633740146bbe1f83",
+          "test": "reasoning-zoom.e2e.ts:10:1 \u203a reasoning reading controls work at actual 200 percent tab zoom",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-c9bc3c8bef7bf45926b3",
+          "test": "reasoning.e2e.ts:12:3 \u203a reasoning canary preserves reading choice at 1440px",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-112b86b1293728b9b2af",
+          "test": "reasoning.e2e.ts:12:3 \u203a reasoning canary preserves reading choice at 768px",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-21704ce81418c3e066ef",
+          "test": "reasoning.e2e.ts:12:3 \u203a reasoning canary preserves reading choice at 390px",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-3d012f16ed75cbd1515a",
+          "test": "reasoning.e2e.ts:174:1 \u203a empty reasoning stays absent and settled long reasoning has one scroll owner",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-9d4d4c7fdf75b37a37cc",
+          "test": "reasoning.e2e.ts:230:3 \u203a partial reasoning retains cancel semantics",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-3575b2ef4feee286388c",
+          "test": "reasoning.e2e.ts:230:3 \u203a partial reasoning retains failure semantics",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-c8cd0796072a201fedd8",
+          "test": "reasoning.e2e.ts:276:3 \u203a settlement preserves the reader's open",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-f7d855b625e441c20311",
+          "test": "reasoning.e2e.ts:276:3 \u203a settlement preserves the reader's focus",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4494254f51d48d63e08e-1fe21ebe1a23acd6df5c",
+          "test": "reasoning.e2e.ts:276:3 \u203a settlement preserves the reader's selection",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6b2967cc6dc491c993c7-381b23d69f8052f9f22a",
+          "test": "retained-task.e2e.ts:14:3 \u203a Local UI opens and steers two pinned retained tasks after restart",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6b2967cc6dc491c993c7-29013a87b29d6f7a5e31",
+          "test": "retained-task.e2e.ts:14:3 \u203a Local UI opens and steers two pinned retained tasks after restart without randomUUID",
+          "expected_status": "passed"
+        },
+        {
+          "id": "93de665c05c201593f96-9c9c39b1f2c83a9ed207",
+          "test": "review.e2e.ts:25:1 \u203a reviews eligible requests, returns blocked actions and reviews an authorized retry again",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-0ab1993b00e6cb22a189",
+          "test": "session-names.e2e.ts:304:1 \u203a extreme current name, rename, navigation and deletion lifetimes",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-0d1bd47ea416f49b82ec",
+          "test": "session-names.e2e.ts:369:1 \u203a embedded consumers keep full-name layers and keyboard ownership isolated",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-f0deb1a8bd13bc649f07",
+          "test": "session-names.e2e.ts:403:3 \u203a parent names preserve lineage and navigation 1440",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-69538aea4712e86ceae9",
+          "test": "session-names.e2e.ts:403:3 \u203a parent names preserve lineage and navigation 390",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-4ee68d19bcb600ed9656",
+          "test": "session-names.e2e.ts:442:3 \u203a retained tab strip and session collection 1440",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-93bd5f6ad5f243c9a77b",
+          "test": "session-names.e2e.ts:442:3 \u203a retained tab strip and session collection 768",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-e4d33645e67c77e80b47",
+          "test": "session-names.e2e.ts:442:3 \u203a retained tab strip and session collection 390",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-5f7a9d264c831295c696",
+          "test": "session-names.e2e.ts:527:1 \u203a full names at real 200 percent browser zoom",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-4dada3f739a5c26a3158",
+          "test": "session-names.e2e.ts:583:1 \u203a running full-name headings keep their visible shimmer text",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-56af939d1c6cd33ee2aa",
+          "test": "session-names.e2e.ts:635:3 \u203a orphan cards disclose names without nested controls 1440",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-41bce8b01ecb08ccd797",
+          "test": "session-names.e2e.ts:635:3 \u203a orphan cards disclose names without nested controls 390",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-1ba30ca953d141bdb6f5",
+          "test": "session-names.e2e.ts:677:1 \u203a packed full-name view stays inside the hosted frame and preserves caller styles",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-24b32e195a14e6e9bf62",
+          "test": "session-names.e2e.ts:729:1 \u203a full-name view is viewport-bounded with an oversized presentation ancestor",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-21182d2b30615ac6d26b",
+          "test": "session-names.e2e.ts:757:3 \u203a narrow delegated detail headers reveal the current full name 768",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-f5e41feb35edd9cc6076",
+          "test": "session-names.e2e.ts:757:3 \u203a narrow delegated detail headers reveal the current full name 390",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-30db2545a653e56af7a0",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 1440 dark",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-e3871af9d47bc973683e",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 1440 light",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-6367e8a99219f3484d11",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 768 dark",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-b194bf54de480ac75e2a",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 768 light",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-57e60b4332a6b2c82cb9",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 390 dark",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e75cd8a6a960584bd22b-bd9cd34d2ee443bd7cfd",
+          "test": "session-names.e2e.ts:169:7 \u203a full names on navigation 390 light",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-6",
+      "count": 9,
+      "raw_report_sha256": "e9e47a192f224da271e6831492e0317813c2af4226a90ad688772697c1f32d1a",
+      "tests": [
+        {
+          "id": "04112e385ebecfea2240-bace7e917c28141bcbeb",
+          "test": "setup.e2e.ts:7:3 \u203a reviews inherited direct setup, session-only settings and failed saves (desktop)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04112e385ebecfea2240-37a27a13d661e835bfbc",
+          "test": "setup.e2e.ts:108:3 \u203a connects Codex alongside Arcee and updates available models without changing project (desktop)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04112e385ebecfea2240-a981f10d7a718e572cb4",
+          "test": "setup.e2e.ts:7:3 \u203a reviews inherited direct setup, session-only settings and failed saves (mobile)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04112e385ebecfea2240-9eaf6f53ee28dbe65679",
+          "test": "setup.e2e.ts:108:3 \u203a connects Codex alongside Arcee and updates available models without changing project (mobile)",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04112e385ebecfea2240-e22628db8a8c8dfa5e62",
+          "test": "setup.e2e.ts:232:1 \u203a explicitly updates a saved project default while existing children keep creation snapshots and future children inherit the accepted parent",
+          "expected_status": "passed"
+        },
+        {
+          "id": "805cfd9c46078d14202c-4918dc5557c3d4c844d8",
+          "test": "subagent-message-recovery.e2e.ts:8:5 \u203a recovers an uncertain child message with pointer controls on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "805cfd9c46078d14202c-90010c676c8668dfbc18",
+          "test": "subagent-message-recovery.e2e.ts:8:5 \u203a recovers an uncertain child message with pointer controls on phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "805cfd9c46078d14202c-59393754503a97cc34ee",
+          "test": "subagent-message-recovery.e2e.ts:8:5 \u203a recovers an uncertain orchestrator message with pointer controls on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "805cfd9c46078d14202c-a37e82a5f7939ff345ef",
+          "test": "subagent-message-recovery.e2e.ts:8:5 \u203a recovers an uncertain orchestrator message with pointer controls on phone",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-7",
+      "count": 22,
+      "raw_report_sha256": "0e4c57b10d42de9c7b5bbab249e98467d2071017b43904a67b274592aeed1b2a",
+      "tests": [
+        {
+          "id": "657717a2dbfd1cdcad8e-630e6869cd5084a71849",
+          "test": "subagent-orchestrators.e2e.ts:9:3 \u203a continues, steers and deliberately stops an existing managed orchestrator on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "657717a2dbfd1cdcad8e-93c0b1cfc93a0409fe09",
+          "test": "subagent-orchestrators.e2e.ts:9:3 \u203a continues, steers and deliberately stops an existing managed orchestrator on phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4bdf6d3f5831518996b3-ddee89562a1f407b1c08",
+          "test": "subagents-panel.e2e.ts:18:3 \u203a keeps a failed Subagents load explained and retryable from the tablet list",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4bdf6d3f5831518996b3-3591854cf3b22593deaa",
+          "test": "subagents-panel.e2e.ts:18:3 \u203a keeps a failed Subagents load explained and retryable from the phone list",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4bdf6d3f5831518996b3-ffeaecbc688a2228a656",
+          "test": "subagents-panel.e2e.ts:89:3 \u203a continues an existing child from the panel composer after a transcript round trip on desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "4bdf6d3f5831518996b3-abfe156685a53e9022cb",
+          "test": "subagents-panel.e2e.ts:89:3 \u203a continues an existing child from the panel composer after a transcript round trip on phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2bcbd48160a824c1eea1-221f8e64303cd78e8bd5",
+          "test": "task-question-coordination.e2e.ts:48:1 \u203a ALL472-D4 human cancellation after settled question wakes once without answering",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2bcbd48160a824c1eea1-5efde27883f3ff54e9c8",
+          "test": "task-question-coordination.e2e.ts:277:1 \u203a ALL472-D5 exact native and human responses preserve isolation and fail closed",
+          "expected_status": "passed"
+        },
+        {
+          "id": "2bcbd48160a824c1eea1-25d81c013a19cda18920",
+          "test": "task-question-coordination.e2e.ts:563:1 \u203a ALL472-D6 composed question wait, human interruption, restart and approval stay distinct",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6cd303378a0cc796fcb5-0cd9fcf6d9984ac700cf",
+          "test": "task-questions.e2e.ts:6:1 \u203a native information answer resolves a dormant exact owner after restart",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6cd303378a0cc796fcb5-6f0bc2c931d34284462e",
+          "test": "task-questions.e2e.ts:95:1 \u203a exact human question survives restart, gates a goal, and resumes its reserved continuation once",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6cd303378a0cc796fcb5-6ef7194db93bfa19e182",
+          "test": "task-questions.e2e.ts:357:1 \u203a native coordinator answers only exact authorized information and does not transfer approval authority",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0bc729fa5e97e33b3fca-7a4048e6d7bc603b1cae",
+          "test": "terminal-control.e2e.ts:9:3 \u203a same-process terminal input control desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "0bc729fa5e97e33b3fca-2781dbff510bbaecbb9f",
+          "test": "terminal-control.e2e.ts:9:3 \u203a same-process terminal input control mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6388aad5b420871c8dcd-d173374ec78d4ce60019",
+          "test": "terminal-history.e2e.ts:5:1 \u203a retained terminal history reopens without input, expires independently and survives restart as canonical previews",
+          "expected_status": "passed"
+        },
+        {
+          "id": "6388aad5b420871c8dcd-d6e134a34a01ecfb8c77",
+          "test": "terminal-history.e2e.ts:163:1 \u203a production history preserves exact byte gaps and requires reset before retained tail",
+          "expected_status": "passed"
+        },
+        {
+          "id": "d99266fe809f6f16d85b-fd54b45c7dfd963c54f9",
+          "test": "terminal-local-acceptance.e2e.ts:154:1 \u203a connected native shell, less resize, and trusted browser bracketed UTF-8 paste return to the same shell",
+          "expected_status": "passed"
+        },
+        {
+          "id": "d99266fe809f6f16d85b-449b022c3b9eef89cd95",
+          "test": "terminal-local-acceptance.e2e.ts:297:1 \u203a pane disposal releases observer seats and connected OSC52/OSC8 stays within browser policy",
+          "expected_status": "passed"
+        },
+        {
+          "id": "d99266fe809f6f16d85b-4cf164df070cb1e52675",
+          "test": "terminal-local-acceptance.e2e.ts:405:1 \u203a actual Python build and unittest consume active agent edits in the shell workspace",
+          "expected_status": "passed"
+        },
+        {
+          "id": "d99266fe809f6f16d85b-fd7ec9ae691d372481d9",
+          "test": "terminal-local-acceptance.e2e.ts:477:1 \u203a passive history growth, omission, errors and eviction preserve live copy selection and grid",
+          "expected_status": "passed"
+        },
+        {
+          "id": "d99266fe809f6f16d85b-f71bf89ee5c14631de05",
+          "test": "terminal-local-acceptance.e2e.ts:563:1 \u203a connected renderer keeps copy selection, input, resize and Ctrl-C responsive under finite noisy output",
+          "expected_status": "passed"
+        },
+        {
+          "id": "557595370f89c98b56bc-e61fa38a70ae24894914",
+          "test": "terminal-managed-screen.e2e.ts:12:1 \u203a managed full-screen APP masking holds a split prefix and exposes its real cursor-width effect",
+          "expected_status": "passed"
+        }
+      ]
+    },
+    {
+      "part": "ordinary-8",
+      "count": 25,
+      "raw_report_sha256": "119b06ae997c20081e2e66b786a8b42784848f7d1d4a7879612b8ef0a5e417e1",
+      "tests": [
+        {
+          "id": "84be35a0b7391abe1a87-9b0a01aeeb2d8793f36e",
+          "test": "remote-auth.e2e.ts:10:3 \u203a redeems one portal launch into a host-only owner context",
+          "expected_status": "passed"
+        },
+        {
+          "id": "84be35a0b7391abe1a87-6354cb583256305c1b43",
+          "test": "remote-auth.e2e.ts:82:3 \u203a preserves BasicAuth through the same context factory",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04c1567da8261fb2a75f-0acdddd194e06fd22d39",
+          "test": "terminal-menu.e2e.ts:5:3 \u203a terminal options keep keyboard focus in an expanded panel",
+          "expected_status": "passed"
+        },
+        {
+          "id": "04c1567da8261fb2a75f-b4328f8c64c68052b8cc",
+          "test": "terminal-menu.e2e.ts:5:3 \u203a terminal options keep keyboard focus on a phone",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a79487a9cc0a0236d567-f774ff3fb2c166f08f3b",
+          "test": "terminal-pane.e2e.ts:9:3 \u203a embedded terminal pane desktop uses the session shell",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a79487a9cc0a0236d567-0994739b3fce238c54d4",
+          "test": "terminal-pane.e2e.ts:9:3 \u203a embedded terminal pane mobile uses the session shell",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a79487a9cc0a0236d567-60457f7f78f0e2a8a178",
+          "test": "terminal-pane.e2e.ts:114:1 \u203a embedded pane resets and replays an actual retention gap",
+          "expected_status": "passed"
+        },
+        {
+          "id": "a79487a9cc0a0236d567-dc6a6f79537faa04bcc4",
+          "test": "terminal-pane.e2e.ts:201:3 \u203a edits a real Vim buffer through resize and returns to the same shell",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e6aefc673c7600ff1903-14876d4aaa70a5299904",
+          "test": "terminal-protocol.e2e.ts:36:1 \u203a human terminal and active agents share files without sharing cancellation or observation",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e6aefc673c7600ff1903-f77a3207d7b0b64e6290",
+          "test": "terminal-protocol.e2e.ts:157:1 \u203a human file changes retain agent revision checks and shell loss is honest after restart",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e5d1b2e5cbd46b012fdc-ea06d095c9f4e0269ba6",
+          "test": "terminal-selection.e2e.ts:54:3 \u203a real selected terminal evidence desktop requires review and explicit same-intent Send",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e5d1b2e5cbd46b012fdc-75f64ea1386ca2b17ad6",
+          "test": "terminal-selection.e2e.ts:54:3 \u203a real selected terminal evidence mobile requires review and explicit same-intent Send",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e5d1b2e5cbd46b012fdc-13fd6ca7660291b33d10",
+          "test": "terminal-selection.e2e.ts:267:1 \u203a real selection offers explicit busy queue and exact displayed-run steer with literal delivery",
+          "expected_status": "passed"
+        },
+        {
+          "id": "e5d1b2e5cbd46b012fdc-e2331f2060a2e9ce5a86",
+          "test": "terminal-selection.e2e.ts:361:1 \u203a queued attachment waits for an exact human command outcome and follows its canonical card once",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-17bbd5c647be4dc54752",
+          "test": "ui-policy.e2e.ts:250:1 \u203a switches on-off-on after restart with the same binary and seeded store",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-50cd0b193fa79eccf0b4",
+          "test": "ui-policy.e2e.ts:29:7 \u203a preserves identities and creates direct from hidden history desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-cee79e3426f11b2f33aa",
+          "test": "ui-policy.e2e.ts:29:7 \u203a preserves identities and creates direct from hidden history mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-bc10a90caa2ec6ec0e45",
+          "test": "ui-policy.e2e.ts:182:5 \u203a empty project keyboard creation retains first-chat duplicate prevention",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-79d0ba01644d08c4d49a",
+          "test": "ui-policy.e2e.ts:29:7 \u203a preserves identities and creates direct from hidden history desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-d46cd04b59011a8a812e",
+          "test": "ui-policy.e2e.ts:29:7 \u203a preserves identities and creates direct from hidden history mobile",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-79ab331809e36a3ea945",
+          "test": "ui-policy.e2e.ts:182:5 \u203a empty project keyboard creation retains first-chat duplicate prevention",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-44c6ce083938e46dc530",
+          "test": "ui-policy.e2e.ts:216:3 \u203a restores orchestration panels and all creation choices",
+          "expected_status": "passed"
+        },
+        {
+          "id": "fbbbe161e8e22b13db66-59653066d0c48cc176be",
+          "test": "ui-policy.e2e.ts:241:3 \u203a fails closed with an actionable restart diagnostic",
+          "expected_status": "passed"
+        },
+        {
+          "id": "eb18a745bbf2e0e1fc1d-b6ac1aeaef6f70388fea",
+          "test": "unified-terminal.e2e.ts:10:3 \u203a unified existing terminal sources desktop",
+          "expected_status": "passed"
+        },
+        {
+          "id": "eb18a745bbf2e0e1fc1d-aeacae5caa4ea3d6279b",
+          "test": "unified-terminal.e2e.ts:10:3 \u203a unified existing terminal sources mobile",
+          "expected_status": "passed"
+        }
+      ]
+    }
+  ],
+  "prior_local_mechanism": {
+    "source": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+    "platform": "macOS arm64,18logicalCPU,36GiB RAM",
+    "binary_profile": "dev default debug2; differs from this dev-debug0 candidate",
+    "binary_bytes": 267786312,
+    "gzip_archive_bytes": 50716384,
+    "producer_seconds": 3.440739458,
+    "five_local_consumer_seconds": [
+      0.303059625,
+      0.299949167,
+      0.30462025,
+      0.30286575,
+      0.321334958
+    ],
+    "network_transfer": "not measured; these are warm local file operations",
+    "cpu_cost_usd": "not captured; no paid resources provisioned"
+  },
+  "qualification": "No latency claim. Producer/build/setup/download/verify/test/aggregation waits and total runner time must be measured across actual hosted runs; retain/revert on full outcome.",
+  "local_validation": {
+    "browser_binary_cli_tests": 36,
+    "s09_workflow_tests": 5,
+    "selected_boundary_suite": {
+      "tests": 40,
+      "command": "node --test .github/scripts/pr-browser-binary.test.mjs .github/scripts/pr-browser-sharding.test.mjs .github/scripts/pr-ci-efficiency.test.mjs .github/scripts/pr-checks.test.mjs .github/scripts/pr-managed-fault.test.mjs .github/scripts/pr-server-parallel.test.mjs",
+      "note": "The added pre-download guard test passed in the subsequent five-test S09 run."
+    },
+    "workflow_lint": "Pinned actionlint1.7.12/ShellCheck0.11.0 passed all tracked workflows/scripts/embeddedblocks",
+    "workflow_negative_controls": 10,
+    "managed_image_contract": "passed; no Docker executed",
+    "source_size": "1757trackedhuman-sourcefileswithin2000physical-lineceiling",
+    "diff_check": "passed",
+    "unchanged_from_source_base": [
+      "E2EtestsourceandPlaywrightconfig",
+      "managedfault/image/quality/rescanworkflowfiles"
+    ],
+    "unrun": [
+      "hosted sharedartifactpipeline",
+      "heavyCargo",
+      "Dockerbuild"
+    ]
+  }
+}

@@ -131,6 +131,16 @@ export function invokedSkillNames(content: string | null | undefined): string[] 
  */
 export function displayPromptFromMessageText(content: string | null | undefined): string {
   const text = String(content ?? "");
+  const heartbeat =
+    /^Heartbeat check: ("[^\n]*")\n<nac_heartbeat>\n[\s\S]*\n<\/nac_heartbeat>$/.exec(text);
+  if (heartbeat) {
+    try {
+      const name: unknown = JSON.parse(heartbeat[1]);
+      if (typeof name === "string") return `Heartbeat check: ${name}`;
+    } catch {
+      /* A literal or incomplete envelope retains its exact text. */
+    }
+  }
   const collapsed = invokedSkillsDisplayPrompt(text);
   if (collapsed != null) return collapsed;
   const mcpPrompt = invokedMcpPromptDisplayPrompt(text);

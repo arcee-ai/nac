@@ -67,7 +67,7 @@ export declare const queryKeys: {
     managedOrchestrators: (id: string) => readonly ["session", string, "orchestrators"];
     workspaceDiff: (id: string, path: string, stage: WorkspaceDiffStage | "all", context: number, revision: number | null) => readonly ["session", string, "workspace-diff", {
         readonly path: string;
-        readonly stage: "all" | WorkspaceDiffStage;
+        readonly stage: WorkspaceDiffStage | "all";
         readonly context: number;
         readonly revision: number | null;
     }];

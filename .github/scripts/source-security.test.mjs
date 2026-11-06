@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -42,7 +44,10 @@ function workspace(t) {
   for (const input of INPUTS) {
     mkdirSync(join(root, dirname(input)), { recursive: true });
     copyFileSync(
-      join(fixtures, "safe", input === INPUTS[0] ? "Cargo.lock" : "package-lock.json"),
+      join(
+        fixtures, "safe",
+        input === INPUTS[0] ? "Cargo.lock.fixture" : "package-lock.json.fixture",
+      ),
       join(root, input),
     );
   }
@@ -82,10 +87,48 @@ function workspace(t) {
 
 function vulnerable(w, context) {
   copyFileSync(
-    join(fixtures, "vulnerable", context === INPUTS[0] ? "Cargo.lock" : "package-lock.json"),
+    join(
+      fixtures, "vulnerable",
+      context === INPUTS[0] ? "Cargo.lock.fixture" : "package-lock.json.fixture",
+    ),
     join(w.root, context),
   );
 }
+
+test("fixture data preserves reviewed bytes and materializes only canonical temporary inputs", (t) => {
+  const digests = {
+    safe: {
+      "Cargo.lock.fixture": "7077f40e1fb0a855dbc3faa96f4ea2798dc775edc44a14219e7b5f78eec7db1d",
+      "package-lock.json.fixture": "6f36b5162b2dac270363ef50b19ddd694739bad5d50cbd877fed8aefd87654c6",
+    },
+    vulnerable: {
+      "Cargo.lock.fixture": "d73d0d44a8497302bd768643d555d979a2e936cd0965f21cd5cbf6eb3f7d1be7",
+      "package-lock.json.fixture": "2dfa22095c29182f2142400079eaa232a7c18a2fcfa63dfaf0863a194533f6f0",
+    },
+  };
+  // Canonical manifest names belong only in the isolated workspace, never in committed data.
+  assert.deepEqual(
+    readdirSync(fixtures, { recursive: true }).sort(),
+    [
+      "safe",
+      "vulnerable",
+      ...Object.entries(digests).flatMap(([kind, files]) =>
+        Object.keys(files).map((name) => `${kind}/${name}`),
+      ),
+    ].sort(),
+  );
+  const w = workspace(t);
+  assert.equal(dirname(w.directory), tmpdir());
+  for (const [kind, files] of Object.entries(digests)) {
+    for (const context of INPUTS) {
+      if (kind === "vulnerable") vulnerable(w, context);
+      const name = context === INPUTS[0] ? "Cargo.lock.fixture" : "package-lock.json.fixture";
+      const source = readFileSync(join(fixtures, kind, name));
+      assert.equal(createHash("sha256").update(source).digest("hex"), files[name]);
+      assert.deepEqual(readFileSync(join(w.root, context)), source);
+    }
+  }
+});
 
 test("safe locked Rust and both npm inputs pass with explicit central config and full graph flags", (t) => {
   const w = workspace(t);
@@ -155,7 +198,7 @@ for (const failure of [
       writeFileSync(join(w.trustedRoot, CONFIG), "[[PackageOverrides]]\nignore = true\n");
     if (failure === "symlink input") {
       rmSync(join(w.root, INPUTS[0]));
-      symlinkSync(join(fixtures, "safe/Cargo.lock"), join(w.root, INPUTS[0]));
+      symlinkSync(join(fixtures, "safe/Cargo.lock.fixture"), join(w.root, INPUTS[0]));
     }
     const report = scanSources(w);
     assert.equal(report.passed, false);
@@ -259,7 +302,7 @@ test(
       assert.deepEqual(report.errors, []);
       assert.ok(report.blocking.some((finding) => finding.context === context));
       copyFileSync(
-        join(fixtures, "safe", context === INPUTS[0] ? "Cargo.lock" : "package-lock.json"),
+        join(fixtures, "safe", context === INPUTS[0] ? "Cargo.lock.fixture" : "package-lock.json.fixture"),
         join(w.root, context),
       );
     }
