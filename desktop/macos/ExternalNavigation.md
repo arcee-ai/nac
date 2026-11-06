@@ -139,6 +139,17 @@ default browser, close unrelated tabs or qualify a real vendor. Its common
 builder/PreviewSmoke hook is included; hosted execution remains an integration
 gate.
 
+`native-auth-browser.yml` supplies a focused macOS26 integration of these
+existing drivers through `ci_native_auth.py`. Before launch it binds the actual
+live GitHub-hosted job and candidate merge parents, observes an unlocked console
+and no running main browser, and records the unchanged default browser. The
+dedicated disposable runner account supplies the browser profile. Tokens stay
+in controller memory and are removed from every child environment. Cleanup
+targets only the newly observed exact browser incarnation. The job also runs
+the existing marked-engine owner/Origin contract. A green result establishes
+only the named local-double journeys on that host; it does not establish real
+vendor, physical-input, offline, minimum-OS or distribution qualification.
+
 ## Closed device-owner fixture
 
 `native-auth-fixture` is an explicit, nondefault server Cargo feature. It uses
