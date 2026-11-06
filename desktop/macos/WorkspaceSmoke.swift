@@ -14,6 +14,7 @@ final class WorkspaceSmoke {
     var checks: [String: [String: Any]] = [:]
     var paintDiagnostics: [String: Any] = [:]
     var sessionID = ""
+    var assetDocuments: [[String: Any]] = []
 
     init(app: PreviewApp, scenario: String, output: URL, record: @escaping ([String: Any]) -> Void) {
         self.app = app
@@ -170,6 +171,32 @@ final class WorkspaceSmoke {
     func navigate(_ panel: String) async throws {
         _ = try await js("location.hash = '/session/' + \(quote(sessionID)) + '/' + \(quote(panel)); return true;")
         try await waitJS("panel \(panel)", "return location.hash.endsWith('/' + \(quote(panel))) && !!document.querySelector('[role=combobox][aria-label=Message]');")
+    }
+
+    // Native-owned observations survive a WK document reload; each raw sample stays intact.
+    static let assetEvidenceScript = #"""
+    const resources = performance.getEntriesByType('resource').map(e => e.name);
+    const complete = Array.isArray(window.__previewEvidence?.errors);
+    const errors = complete ? window.__previewEvidence.errors.map(String) : [];
+    return {complete, resources, errors, origin:location.origin, time_origin:performance.timeOrigin,
+      fonts_chunks_ok:document.fonts.check('16px Inter') && resources.some(name=>/mathjax.*woff/i.test(name)) &&
+        resources.filter(name=>name.includes('/assets/dist/assets/') && name.endsWith('.js')).length >= 3,
+      offline_ok:complete && errors.length === 0 && resources.every(name=>new URL(name).origin === location.origin)};
+    """#
+
+    func recordAssetDocument(_ phase: String) async throws {
+        guard var value = try await js(Self.assetEvidenceScript) as? [String: Any] else {
+            throw PreviewError.message("Missing document asset observation")
+        }
+        value["phase"] = phase
+        assetDocuments.append(value)
+        record(["asset_documents": assetDocuments])
+    }
+
+    func assetDocumentsPass(_ predicate: String) -> Bool {
+        let phases = Set(assetDocuments.compactMap { $0["phase"] as? String })
+        return phases.contains("before-reload") && phases.contains("after-reload") &&
+            assetDocuments.allSatisfy { $0["complete"] as? Bool == true && $0[predicate] as? Bool == true }
     }
 
     enum CaptureTarget {
