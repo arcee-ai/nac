@@ -270,6 +270,183 @@ impl crate::peer_goal_control::PeerGoalController for NativeController {
     }
 }
 
+// Test-only fault at the existing native controller reply boundary. The real
+// service commits Start; this adapter never returns that first success to tool.
+struct LoseFirstNativeStartReply {
+    service: std::sync::Weak<SessionService>,
+    lose_once: std::sync::atomic::AtomicBool,
+    controller_calls: std::sync::atomic::AtomicUsize,
+    committed_starts: std::sync::atomic::AtomicUsize,
+    lost_replies: std::sync::atomic::AtomicUsize,
+    admitted: std::sync::Mutex<Option<store::PeerGoalStartReceipt>>,
+}
+impl crate::peer_goal_control::PeerGoalController for LoseFirstNativeStartReply {
+    fn control<'a>(
+        &'a self,
+        request: AuthorizedPeerGoal,
+    ) -> futures_util::future::BoxFuture<'a, Result<PeerGoalOutcome>> {
+        Box::pin(async move {
+            use std::sync::atomic::Ordering::SeqCst;
+            self.controller_calls.fetch_add(1, SeqCst);
+            let service = self
+                .service
+                .upgrade()
+                .ok_or_else(|| anyhow::anyhow!("test owner stopped"))?;
+            let outcome = service.control_peer_goal(request, None).await?;
+            if let PeerGoalOutcome::Started { receipt } = &outcome {
+                self.committed_starts.fetch_add(1, SeqCst);
+                *self.admitted.lock().unwrap() = Some(receipt.clone());
+                if self.lose_once.swap(false, SeqCst) {
+                    self.lost_replies.fetch_add(1, SeqCst);
+                    // Fault BEFORE PeerGoalTool receives/serializes Started.
+                    // No receipt is included in this error; it is not wake_error.
+                    return Err(anyhow::anyhow!(
+                        "fixture-first-start-reply-lost-after-commit"
+                    ));
+                }
+            }
+            Ok(outcome)
+        })
+    }
+}
+
+#[tokio::test]
+async fn peer_goals_native_first_start_reply_loss_replays_one_admission_headlessly() {
+    use crate::permissions::{PermissionBackend, PermissionBroker};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+    let (service, path) = fixture();
+    let service = Arc::new(service);
+    store::open_runtime_connection(&path).unwrap().execute("UPDATE sessions SET behavior='direct', backend='openai-chat-completions' WHERE session_id='caller'", []).unwrap();
+    // Existing active-target owner fixture: no model/provider turn is started.
+    let active = service.try_begin_run(None, "already running task").unwrap();
+    service
+        .goal_runtime
+        .as_ref()
+        .unwrap()
+        .begin_run(active.run_id.as_str());
+    let inbox_before =
+        serde_json::to_value(store::list_session_inbox(&path, "target").unwrap()).unwrap();
+    let controller = Arc::new(LoseFirstNativeStartReply {
+        service: Arc::downgrade(&service),
+        lose_once: AtomicBool::new(true), // RED control changes ONLY this to false.
+        controller_calls: AtomicUsize::new(0),
+        committed_starts: AtomicUsize::new(0),
+        lost_replies: AtomicUsize::new(0),
+        admitted: std::sync::Mutex::new(None),
+    });
+    crate::peer_goal_control::register_controller(path.clone(), controller.clone());
+    let mut runtime = crate::tools::test_runtime();
+    runtime.store_path = path.clone();
+    runtime.session_id = Some("caller".into());
+    let broker = Arc::new(PermissionBroker::new(
+        path.clone(),
+        "caller".into(),
+        PermissionBackend::Local,
+        0,
+        Vec::new(),
+    ));
+    runtime.permission_broker = Some(broker.clone());
+    let bus = crate::events::SessionEventBus::new(Some("caller".into()));
+    let human = bus.subscribe_assistant_deltas();
+    let mut events = bus.subscribe();
+    broker.attach_event_bus(bus);
+    let start = json!({"action":"start","session_id":"target","project_id":"project","request_id":"first-start-reply-loss","objective":"finite native task","token_budget":100,"goal_id":null,"expected_version":null});
+    // Reuse the existing real native permission/reply helper. Caller obtains
+    // only unavailable, never an already-returned Started ACK that is ignored.
+    let first = native_with_human_reply(&runtime, &broker, &mut events, start.clone()).await;
+    let first_error = first.is_error;
+    let first_wire = first.content.as_text().unwrap().to_owned();
+    let first_value: serde_json::Value = serde_json::from_str(&first_wire).unwrap();
+    let admitted = controller.admitted.lock().unwrap().clone().unwrap();
+    let before = store::load_session_goal(&path, "target").unwrap().unwrap();
+    // Ordinary policy still applies; a reconstructed broker has no approver.
+    runtime.permission_broker = Some(Arc::new(PermissionBroker::new(
+        path.clone(),
+        "caller".into(),
+        PermissionBackend::Local,
+        0,
+        Vec::new(),
+    )));
+    let replay = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        crate::tools::execute_tool(
+            "task_goal",
+            start.clone(),
+            &runtime,
+            &ModelClient::new_for_test(),
+        ),
+    )
+    .await
+    .expect("headless replay bound");
+    let replay_error = replay.is_error;
+    let replayed: serde_json::Value =
+        serde_json::from_str(replay.content.as_text().unwrap()).unwrap();
+    let after = store::load_session_goal(&path, "target").unwrap().unwrap();
+    let active_after = service.active_run().unwrap().run_id;
+    let inbox_after =
+        serde_json::to_value(store::list_session_inbox(&path, "target").unwrap()).unwrap();
+    let conn = store::open_runtime_connection(&path).unwrap();
+    let goals: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM session_goals WHERE session_id='target'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let receipts: i64 = conn.query_row("SELECT count(*) FROM peer_goal_starts WHERE caller_session_id='caller' AND request_id='first-start-reply-loss'", [], |r| r.get(0)).unwrap();
+    drop(conn);
+    let mut changed = start;
+    changed["objective"] = json!("changed arguments must conflict");
+    let conflict = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        crate::tools::execute_tool("task_goal", changed, &runtime, &ModelClient::new_for_test()),
+    )
+    .await
+    .expect("conflict bound");
+    let conflict_error = conflict.is_error;
+    let conflict_value: serde_json::Value =
+        serde_json::from_str(conflict.content.as_text().unwrap()).unwrap();
+    let calls = controller.controller_calls.load(SeqCst);
+    let starts = controller.committed_starts.load(SeqCst);
+    let losses = controller.lost_replies.load(SeqCst);
+    // This active-target fixture starts no provider or queued successor.
+    // Drop the actual owner before removing its private operation-scoped store.
+    drop(runtime);
+    drop(events);
+    drop(human);
+    drop(broker);
+    drop(service);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    // Semantic assertions follow cleanup, including the intentional RED check.
+    assert!(
+        first_error,
+        "RED control: first native caller already observed success"
+    );
+    assert_eq!(first_value["status"], "unavailable");
+    assert!(first_wire.contains("fixture-first-start-reply-lost-after-commit"));
+    assert!(!first_wire.contains("admitted_goal"));
+    assert!(first_value.get("receipt").is_none());
+    assert_eq!((calls, starts, losses), (1, 1, 1));
+    assert!(!replay_error);
+    assert_eq!(replayed["status"], "replayed");
+    let mut expected_receipt = serde_json::to_value(&admitted).unwrap();
+    expected_receipt["request"]["objective_truncated"] = json!(false);
+    expected_receipt["admitted_goal"]["objective_truncated"] = json!(false);
+    assert_eq!(replayed["receipt"], expected_receipt);
+    assert_eq!(before, after);
+    assert_eq!(after.goal_id, admitted.admitted_goal.goal_id);
+    assert_eq!(
+        after.accounting_run_id.as_deref(),
+        Some(active.run_id.as_str())
+    );
+    assert_eq!(active_after, active.run_id);
+    assert_eq!((goals, receipts), (1, 1));
+    assert_eq!(inbox_before, inbox_after);
+    assert!(conflict_error);
+    assert_eq!(conflict_value["status"], "conflict");
+}
+
 #[tokio::test]
 async fn peer_goals_native_authorization_reaches_real_target_owner_and_replays_after_lost_ack() {
     use crate::permissions::{PermissionBackend, PermissionBroker};
