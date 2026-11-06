@@ -25,6 +25,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private let storeConflictRetry = StoreConflictRetry()
     private var storeRetryButton: NSButton?
     private var launchIdentity: EngineIdentity?
+    private var failedViewRetainedEngine = false
     #endif
     #if PREVIEW_SMOKE
     #if LIFECYCLE_SMOKE
@@ -240,7 +241,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         guard webView === self.webView else { return }
         if !stopping {
             #if LOCAL_APP
-            fail("The workspace renderer stopped. Quit NAC and relaunch.")
+            fail("The workspace renderer stopped.")
             #else
             fail("The workspace renderer stopped. Close this window and relaunch the preview.")
             #endif
@@ -248,7 +249,8 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     private func engineFailed(_ reason: EngineFailure) {
-        guard !stopping, failure == nil else { return }
+        guard !stopping else { return }
+        if failure != nil { fail(reason.localizedDescription); return }
         #if LOCAL_APP
         if reason == .storeOwned, let configuration = launchConfiguration, let identity = launchIdentity {
             let conflict = StoreConflict(canonicalStore: configuration.store.path, track: identity.track)
@@ -293,7 +295,27 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #endif
 
     private func fail(_ message: String) {
-        guard !stopping, failure == nil else { return }
+        guard !stopping else { return }
+        if failure != nil {
+            #if LOCAL_APP
+            // A later channel failure/exit invalidates the prior continuation
+            // claim. EngineRun still owns its original cleanup; do not resend it.
+            if failedViewRetainedEngine, engine.receipt == nil {
+                let next = engine.pid > 0
+                    ? "The background service is unavailable. Cleanup may still be finishing. Choose Quit NAC before relaunching."
+                    : "The background service has stopped. Quit NAC and relaunch after correcting the reported problem."
+                status.stringValue = "NAC could not continue\n\n\(message)\n\n\(next)"
+            }
+            #endif
+            return
+        }
+        #if LOCAL_APP
+        // A failed view is not an instruction to cancel running work. Engine
+        // failures invalidate their receipt before this callback; those still
+        // use normal cleanup. Only a verified launch with a live Quit owner stays.
+        let retainingEngine = engine.pid > 0 && engine.receipt?.kind == "ready" && quit.launch != nil
+        failedViewRetainedEngine = retainingEngine
+        #endif
         failure = message
         commands.retire()
         webView.stopLoading()
@@ -303,7 +325,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         storeRetryButton?.isHidden = true
         storeRetryButton?.isEnabled = false
         let store = launchConfiguration.map { "\n\nSelected store: \($0.store.path)" } ?? ""
-        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\nQuit NAC and relaunch after correcting the reported problem."
+        let next = retainingEngine
+            ? "Your running work continues. Choose Quit NAC to review activity and stop it before relaunching."
+            : "Quit NAC and relaunch after correcting the reported problem."
+        status.stringValue = "NAC could not continue\n\n\(message)\(store)\n\n\(next)"
         #else
         status.stringValue = "NAC preview could not continue\n\n\(message)\n\nClose this window to clean up the disposable fixture.\n\n\(engine.log.suffix(4000))"
         #endif
@@ -311,6 +336,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         provider.stop()
         #endif
         #if LOCAL_APP
+        if retainingEngine { return }
         let launch = quit.launch
         engine.stop { [weak self] in
             if let launch { self?.quit.childExited(launch) }
@@ -349,6 +375,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         status.isHidden = false
         status.stringValue = message
     }
+
+    #if LIFECYCLE_SMOKE
+    var lifecycleFailureStatus: String { status.stringValue }
+    #endif
 
     func beginShutdown(completion: @escaping () -> Void) {
         guard !stopping else { return }
