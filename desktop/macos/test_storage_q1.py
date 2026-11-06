@@ -19,6 +19,38 @@ from storage_q1_witness import TABLES, assert_durable
 
 
 class Q1Controls(unittest.TestCase):
+    def test_foreign_seed_configuration_is_rejected_before_any_api_write(self):
+        saved = dict(backend='openai-responses', base_url='http://127.0.0.1:18080',
+                     model='gpt-5.6-sol', api_key_env='service-issued-exact-selector')
+        provider = SimpleNamespace(endpoint=saved['base_url'])
+        for field, value in [('backend', 'managed'), ('base_url', 'http://foreign'),
+                             ('model', 'foreign-model'), ('api_key_env', ''),
+                             ('api_key_env', None), ('api_key_env', True)]:
+            with self.subTest(field=field, value=value), patch.object(q1, 'request') as request:
+                with self.assertRaises(ValueError):
+                    q1.empty_pair('http://engine', Path('/inert'), provider, 100,
+                                  {**saved, field: value})
+                request.assert_not_called()
+
+    def test_seed_uses_exact_saved_selector_and_rejects_changed_readback(self):
+        saved = dict(backend='openai-responses', base_url='http://127.0.0.1:18080',
+                     model='gpt-5.6-sol', api_key_env='service-issued-exact-selector')
+        provider = SimpleNamespace(endpoint=saved['base_url'])
+        calls = []
+        def request(endpoint, path, body=None, **kwargs):
+            calls.append((path, body))
+            if path == '/projects': return dict(project_id='p')
+            return dict(metadata=dict(session_id=str(len(calls)), api_key_env=body['api_key_env']))
+        with patch.object(q1, 'request', request), patch.object(q1.time, 'monotonic', return_value=0):
+            self.assertEqual(len(q1.empty_pair('http://engine', Path('/inert'), provider, 100, saved)), 2)
+        seeds = [body for path, body in calls if path == '/sessions']
+        self.assertEqual([body['api_key_env'] for body in seeds], [saved['api_key_env']] * 2)
+        with patch.object(q1, 'request', side_effect=[dict(project_id='p'),
+                dict(metadata=dict(session_id='s', api_key_env='OPENAI_API_KEY'))]), \
+                patch.object(q1.time, 'monotonic', return_value=0):
+            with self.assertRaises(ValueError):
+                q1.empty_pair('http://engine', Path('/inert'), provider, 100, saved)
+
     def test_current_source_import_and_absolute_deadline_edges(self):
         # Current8af has engine_settled but no remaining export. Module loading
         # defines the adapter only; it must not create a provider/app or reset a clock.
@@ -149,7 +181,7 @@ class Q1CompositionControls(unittest.TestCase):
                 session = str(uuid.UUID(int=count))
                 with closing(sqlite3.connect(store)) as db, db:
                     db.execute('INSERT INTO sessions VALUES (?,"direct",0,"[]",0)', [session])
-                return dict(metadata=dict(session_id=session))
+                return dict(metadata=dict(session_id=session, api_key_env=body['api_key_env']))
             raise AssertionError('Unexpected API action: ' + path)
 
         def pump(owner=None):
