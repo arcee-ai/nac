@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, showSidePanel, test } from "./harness";
 
 for (const mobile of [false, true]) {
   test(`embedded terminal pane ${mobile ? "mobile" : "desktop"} uses the session shell`, async ({
@@ -16,10 +16,7 @@ for (const mobile of [false, true]) {
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
     if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else {
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      if (await show.isVisible()) await show.click();
-    }
+    else await showSidePanel(page);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await expect(pane).toBeVisible();
     await pane.getByRole("button", { name: /^New shell$/i }).click();
