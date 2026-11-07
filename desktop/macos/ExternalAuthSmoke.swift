@@ -24,6 +24,37 @@ final class ExternalAuthSmoke {
         app.webView?.customUserAgent = "NACExternalAuthWK/ALL348 AppleWebKit/605.1.15"
     }
 
+    // Fixture preparation only. A ready WK document alone does not mean the
+    // asynchronous Create chat navigation and its modal teardown have settled.
+    private static let sessionReadyScript = #"""
+    const composer=document.querySelector('[role=combobox][aria-label=Message]');
+    const bounds=composer?.getBoundingClientRect();
+    return /^#\/session\/[^/]+(?:\/|$)/.test(location.hash) &&
+      (!expectedRoute || location.hash===expectedRoute) &&
+      !!bounds && bounds.width>0 && bounds.height>0 && !document.querySelector('[role=dialog]');
+    """#
+
+    private static let seedScript = #"""
+    const post = async(path, body) => {
+      const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if (!r.ok) throw new Error('Auth fixture setup rejected'); return r.json();
+    };
+    const credential = await post('/credentials',{value:'local-fixture-client'});
+    await post('/mcp_library/servers',{name:'external-auth-fixture',enabled:false,transport:'streamable_http',
+      url:fixture+'/mcp',headers:{},args:[],env:{}});
+    return credential.name;
+    """#
+
+    private static let configureScript = #"""
+    const r=await fetch('/mcp_library/servers/external-auth-fixture/oauth/configure',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        registration:{type:'pre_registered',client_id_credential:credential},scopes:['fixture:read'],
+        authorization_metadata:{authorization_endpoint:fixture+'/oauth/authorize/'+mode,
+          token_endpoint:fixture+'/oauth/token',issuer:fixture,response_types_supported:['code'],
+          code_challenge_methods_supported:['S256']}})});
+    if(!r.ok)throw new Error('Fixture OAuth configure rejected');return true;
+    """#
+
     private var currentDocument: NativeDocumentBinding? {
         guard let view = app.webView else { return nil }
         return app.commands?.currentDocument(in: view)
@@ -35,25 +66,34 @@ final class ExternalAuthSmoke {
             try await self.js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled)") as? Bool == true
         }
         try await clickButton("Create chat")
-        try await wait("current workspace document") { self.currentDocument != nil }
-        // Seed only a disabled local MCP fixture and its fake public client ID.
-        // Authorization URLs remain in the existing React panel; Swift never
-        // receives or serializes state/code/token-bearing URLs.
-        let seed = try await js(#"""
-        const post = async(path, body) => {
-          const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-          if (!r.ok) throw new Error('Auth fixture setup rejected'); return r.json();
-        };
-        const credential = await post('/credentials',{value:'local-fixture-client'});
-        await post('/mcp_library/servers',{name:'external-auth-fixture',enabled:false,transport:'streamable_http',
-          url:fixture+'/mcp',headers:{},args:[],env:{}});
-        window.__externalAuthFixture = {fixture, credential:credential.name};
-        return true;
-        """#, arguments: ["fixture": fixture.absoluteString]) as? Bool
-        guard seed == true else { throw PreviewError.message("Auth fixture setup did not complete") }
+        try await wait("created session route and production composer") {
+            try await self.js(Self.sessionReadyScript, arguments: ["expectedRoute": ""]) as? Bool == true
+        }
+        guard let sessionRoute = try await js("return location.hash") as? String else {
+            throw PreviewError.message("Created session route is unavailable")
+        }
+        // Seed only the disabled local fixture and fake public client. The only
+        // value returned to Swift is its opaque name, never a credential value
+        // or a state/code/token-bearing authorization URL.
+        guard let credential = try await js(Self.seedScript, arguments: ["fixture": fixture.absoluteString]) as? String,
+              !credential.isEmpty, let before = currentDocument, let view = app.webView else {
+            throw PreviewError.message("Auth fixture setup did not complete")
+        }
+        let enginePID = app.engine.pid
+        // Direct fixture writes bypass React mutation invalidation. Reload the
+        // real document so the already-warm empty MCP cache cannot hide them.
+        view.reload()
+        try await wait("fresh document after auth fixture setup") {
+            guard let current = self.currentDocument else { return false }
+            return current.launch == before.launch && current.view == before.view &&
+                current.document != before.document && self.app.engine.pid == enginePID
+        }
+        try await wait("same created session after fixture setup") {
+            try await self.js(Self.sessionReadyScript, arguments: ["expectedRoute": sessionRoute]) as? Bool == true
+        }
         var results: [String: Any] = ["physical_input_qualified": false, "device_server_owner_qualified": false]
         for mode in ["success", "denied", "wrong-state", "hold"] {
-            try await configure(mode)
+            try await configure(mode, credential: credential)
             try await openPanel()
             try await clickButton("Authenticate")
             try await wait("production authorization link") {
@@ -99,17 +139,9 @@ final class ExternalAuthSmoke {
         return results
     }
 
-    private func configure(_ mode: String) async throws {
-        _ = try await js(#"""
-        const f=window.__externalAuthFixture;
-        const r=await fetch('/mcp_library/servers/external-auth-fixture/oauth/configure',{method:'POST',
-          headers:{'Content-Type':'application/json'},body:JSON.stringify({
-            registration:{type:'pre_registered',client_id_credential:f.credential},scopes:['fixture:read'],
-            authorization_metadata:{authorization_endpoint:f.fixture+'/oauth/authorize/'+mode,
-              token_endpoint:f.fixture+'/oauth/token',issuer:f.fixture,response_types_supported:['code'],
-              code_challenge_methods_supported:['S256']}})});
-        if(!r.ok)throw new Error('Fixture OAuth configure rejected');return true;
-        """#, arguments: ["mode": mode])
+    private func configure(_ mode: String, credential: String) async throws {
+        _ = try await js(Self.configureScript, arguments: ["mode": mode,
+            "fixture": fixture.absoluteString, "credential": credential])
     }
 
     private func openPanel() async throws {
