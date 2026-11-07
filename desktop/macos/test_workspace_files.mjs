@@ -14,8 +14,8 @@ const row = '<button title="workspace.ts" aria-pressed="true">workspace.ts</butt
 const header = '<div class="header-sm"><span title="workspace.ts">workspace.ts</span></div>';
 const code = '<div><span>1</span><span class="code">export const workspaceFileFixture = 351;</span></div>';
 const pane = header + '<div class="overflow-auto">' + code + '</div>';
-function fixture(html = row + pane, hash = '#/session/session/files') {
-  const dom = new JSDOM('<style>*{opacity:1;visibility:visible}.overflow-auto{overflow:auto}</style>' + composer + html, {
+function fixture(html = row + pane, hash = '#/session/session/files', chat = '') {
+  const dom = new JSDOM('<style>*{opacity:1;visibility:visible}.overflow-auto{overflow:auto}</style>' + composer + '<section>' + chat + '</section><div id=panel><div id=detail>' + html + '</div></div>', {
     url:'http://127.0.0.1:351/' + hash, runScripts:'outside-only', pretendToBeVisual:true,
   });
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
@@ -80,4 +80,12 @@ test('offscreen code/header and overflow clipping cannot qualify a file image', 
     row + pane.replace('class="overflow-auto"','class="overflow-auto" data-clip-height="10"'),
     row + '<div style="overflow:hidden" data-clip-width="50">' + pane + '</div>',
   ]) assert.equal(check(html).ready,false);
+});
+
+test('chat snapshot selection is outside the owning Files panel', () => {
+  const f = fixture(row + pane, '#/session/session/files', row);
+  try { const result=f.probe(); assert.equal(result.ready,true); assert.equal(result.selected_count,1); }
+  finally { f.close(); }
+  const foreign = fixture(pane, '#/session/session/files', row);
+  try { assert.equal(foreign.probe().ready,false); } finally { foreign.close(); }
 });
