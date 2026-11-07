@@ -51,6 +51,13 @@ export function reverseNativeQualification(workflow) {
   assert.equal(aggregate.name, nativeExcludedName(original));
   aggregate.name = original;
   const steps = workflow.jobs['workflow-lint'].steps;
+  // This upper slice adds one required portable capture-contract step. Check
+  // its complete AST before recovering the predecessor's ordinary-CI proof.
+  assert.deepEqual(steps.at(-2), {
+    name: 'Check instance capture evidence contracts without native execution',
+    run: "python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v",
+  });
+  steps.splice(steps.length - 2, 1);
   assert.deepEqual(steps.at(-2), {
     name: 'Check portable path adapter contracts without native execution',
     run: "python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v",
