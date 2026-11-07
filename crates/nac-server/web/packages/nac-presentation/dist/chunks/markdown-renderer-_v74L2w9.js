@@ -1,5 +1,5 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { Ir as r, Ji as i, Ki as a, Yi as o, ai as s, ar as c, ci as l, ir as u, n as d, o as f, oi as p, or as m, r as h, t as g, zr as _ } from "./PerfProfiler-DYSbVnI6.js";
+import { Ir as r, Ji as i, Xi as a, Zi as o, ai as s, ar as c, ci as l, ir as u, n as d, o as f, oi as p, or as m, r as h, t as g, zr as _ } from "./PerfProfiler-DWuz5EPI.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6521,13 +6521,13 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-DhB0ncuo.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-Bv5fY9ud.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
 }
 function _l(e) {
-	return o(e) ? e : i(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
+	return o(e) ? e : a(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
 }
 function vl(e) {
 	if (!E(e)) return "plaintext";
@@ -6690,13 +6690,13 @@ function kl(e) {
 	return !1;
 }
 var Al = D(function({ children: e, streaming: t = !1 }) {
-	a("Markdown");
+	i("Markdown");
 	let [n, r] = k(t);
 	t && !n && r(!0);
-	let i = t || n && !kl(e);
+	let a = t || n && !kl(e);
 	return /* @__PURE__ */ M(g, {
 		id: "markdown",
-		children: i ? el(e).map((e, t) => /* @__PURE__ */ M(Dl, { source: e }, t)) : /* @__PURE__ */ M(Tl, {
+		children: a ? el(e).map((e, t) => /* @__PURE__ */ M(Dl, { source: e }, t)) : /* @__PURE__ */ M(Tl, {
 			source: e,
 			streaming: !1
 		})

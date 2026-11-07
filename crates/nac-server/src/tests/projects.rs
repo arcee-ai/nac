@@ -80,6 +80,222 @@ async fn project_http_create_list_patch_and_location_conflict() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+// These are real HTTP/storage/session paths: creating a first chat does not
+// start a run or contact the configured model endpoint.
+#[cfg(unix)]
+#[tokio::test]
+async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
+    use std::os::unix::fs::MetadataExt;
+
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("literal_local_path_session");
+    let selected = root.join("Project 日本語 ");
+    let sibling = root.join("Project 日本語");
+    for (path, marker) in [(&selected, "selected"), (&sibling, "sibling")] {
+        std::fs::create_dir(path).unwrap();
+        std::fs::write(path.join("identity.txt"), marker).unwrap();
+    }
+    let selected = selected.canonicalize().unwrap();
+    let sibling = sibling.canonicalize().unwrap();
+    let identity = |path: &std::path::Path| {
+        let stat = std::fs::metadata(path).unwrap();
+        (stat.dev(), stat.ino())
+    };
+    assert_ne!(identity(&selected), identity(&sibling));
+    println!(
+        "selected={selected:?} {:?}; sibling={sibling:?} {:?}",
+        identity(&selected),
+        identity(&sibling)
+    );
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("literal-path-test-key"));
+    let manager = test_manager(&root);
+    let store_path = root.join("store.db");
+    let endpoint = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    endpoint.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}/v1", endpoint.local_addr().unwrap());
+    model_configurations::insert_model_configuration(
+        &store_path,
+        "literal-path-default",
+        model_configurations::NewModelConfiguration {
+            name: "Literal path default".into(),
+            backend: "openai-responses".into(),
+            model: "gpt-5.2".into(),
+            base_url: base_url.clone(),
+            allow_insecure_http: true,
+            api_key_env: Some("OPENAI_API_KEY".into()),
+            reasoning_effort: None,
+            extra_headers: BTreeMap::new(),
+            orchestrator_compaction_threshold: None,
+            initial_prompt: None,
+            light_model: None,
+        },
+    )
+    .unwrap();
+    let app = router(manager.clone());
+    // Registering the unspaced sibling first must not steal the selected path.
+    let sibling_response = post_json(
+        app.clone(),
+        "/projects",
+        serde_json::json!({"cwd": sibling}),
+    )
+    .await;
+    assert_eq!(sibling_response.status(), StatusCode::CREATED);
+    let response = post_json(
+        app.clone(),
+        "/projects",
+        serde_json::json!({
+            "cwd": selected, "default_model_config_id": "literal-path-default"
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let project: ProjectRecord = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(project.cwd, selected);
+    assert_eq!(identity(&project.cwd), identity(&selected));
+    assert_eq!(
+        std::fs::read_to_string(project.cwd.join("identity.txt")).unwrap(),
+        "selected"
+    );
+    let stored_project = manager
+        .projects()
+        .list()
+        .unwrap()
+        .into_iter()
+        .find(|item| item.project_id == project.project_id)
+        .unwrap();
+    assert_eq!(stored_project.cwd, selected);
+    assert_eq!(manager.projects().list().unwrap().len(), 2);
+
+    let response = post_json(
+        app,
+        "/sessions",
+        serde_json::json!({
+            "first_chat": true, "project_id": project.project_id
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    let session_id = created["metadata"]["session_id"].as_str().unwrap();
+    let stored = sessions::load_session(&store_path, session_id).unwrap();
+    assert_eq!(
+        stored.project_id.as_deref(),
+        Some(project.project_id.as_str())
+    );
+    assert_eq!(stored.cwd, selected);
+    assert_eq!(identity(&stored.cwd), identity(&selected));
+    assert!(stored.ssh.is_none());
+    assert!(stored.sandbox_spec.is_none());
+    assert_eq!(created["metadata"]["cwd"], selected.to_str().unwrap());
+    assert_eq!(
+        created["metadata"]["workspace_host_path"],
+        selected.to_str().unwrap()
+    );
+    assert_eq!(created["metadata"]["sandbox_status"], "off");
+    assert_eq!(stored.model, "gpt-5.2");
+    assert_eq!(stored.base_url, base_url);
+    assert!(stored.token_usages.is_empty());
+    assert!(stored.last_response_duration_ms.is_none());
+    assert_eq!(
+        endpoint.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "first-chat admission must not contact the configured model endpoint"
+    );
+    manager.cancel_local_active_runs_for_shutdown().await;
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn literal_local_path_browse_and_project_never_fall_back_to_a_sibling() {
+    let root = temp_root("literal_local_path_browse");
+    let root = root.canonicalize().unwrap();
+    let selected = root.join("Project 日本語 ");
+    let sibling = root.join("Project 日本語");
+    std::fs::create_dir(&sibling).unwrap();
+    std::fs::create_dir(sibling.join("decoy-only")).unwrap();
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let browse_url = |path: Option<&std::path::Path>| {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        if let Some(path) = path {
+            query.append_pair("path", path.to_str().unwrap());
+        }
+        format!("/fs/browse?{}", query.finish())
+    };
+    // A missing literal path must fail even though its trimmed sibling exists.
+    let missing = get_response(app.clone(), &browse_url(Some(&selected)), None).await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let missing = post_json(
+        app.clone(),
+        "/projects",
+        serde_json::json!({"cwd": selected}),
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert!(manager.projects().list().unwrap().is_empty());
+    assert!(manager
+        .session_catalog()
+        .list(false)
+        .await
+        .unwrap()
+        .is_empty());
+    std::fs::create_dir(&selected).unwrap();
+    std::fs::create_dir(selected.join("selected-only")).unwrap();
+    for path in [&selected, &sibling] {
+        let response = get_response(app.clone(), &browse_url(Some(path)), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let listing: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(listing["path"], path.to_str().unwrap());
+        let marker = if path == &selected {
+            "selected-only"
+        } else {
+            "decoy-only"
+        };
+        assert_eq!(listing["entries"][0]["name"], marker);
+    }
+    // The spaced path also works without any unspaced sibling present.
+    std::fs::remove_dir_all(&sibling).unwrap();
+    let response = post_json(
+        app.clone(),
+        "/projects",
+        serde_json::json!({"cwd": selected}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    for name in ["ordinary", "manual interior space 日本語", " leading"] {
+        let path = root.join(name);
+        std::fs::create_dir(&path).unwrap();
+        let response = post_json(app.clone(), "/projects", serde_json::json!({"cwd": path})).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let project: ProjectRecord =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(project.cwd, path);
+        let response = get_response(app.clone(), &browse_url(Some(&path)), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    for blank in ["", "   ", "\t\n"] {
+        let response = get_response(
+            app.clone(),
+            &browse_url(Some(std::path::Path::new(blank))),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let listing: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        assert_eq!(listing["path"], root.to_str().unwrap());
+        let response = post_json(app.clone(), "/projects", serde_json::json!({"cwd": blank})).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let response = get_response(app, &browse_url(None), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn project_session_materializes_defaults_and_filters_membership() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();

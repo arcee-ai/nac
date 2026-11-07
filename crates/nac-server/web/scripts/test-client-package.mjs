@@ -109,7 +109,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 175);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 176);
 assert.deepEqual(Object.keys(NAC_API_SURFACE).sort(), ${JSON.stringify(operationKeys)});
 assert.equal(NAC_API_SURFACE["GET /attention/events"], "private:native opt-in metadata attention stream");
 assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/heartbeats/preview"], "private:passive existing-chat calendar preview");
@@ -131,6 +131,7 @@ for (const owner of Object.values(NAC_API_SURFACE)) {
 for (const [method, owner] of [
   ["GET /product-context", "api.getProductContext"],
   ["POST /product-destinations/resolve", "api.resolveProductDestination"],
+  ["POST /sessions/{session_id}/workspace/reveal", "api.revealWorkspacePath"],
   ["GET /sessions/{session_id}/executions/{execution_id}/input-control", "api.getTerminalInputControl"],
   ["POST /sessions/{session_id}/executions/{execution_id}/input-control", "api.transferTerminalInputControl"],
   ["POST /sessions/{session_id}/executions/{execution_id}/input", "api.inputControlledTerminal"],
@@ -146,11 +147,15 @@ const productApi = createNacApi(createNacClient({
 }));
 await productApi.getProductContext("session /scope");
 await productApi.resolveProductDestination({ destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
+await productApi.revealWorkspacePath("session /scope", "日本語 space/file.txt", "/workspace current", "/workspace origin");
 assert.equal(productCalls[0].url, "https://nac.example/runtime/v1/product-context?session_id=session%20%2Fscope");
 assert.equal(productCalls[0].method, "GET");
 assert.equal(productCalls[1].url, "https://nac.example/runtime/v1/product-destinations/resolve");
 assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
+assert.equal(productCalls[2].url, "https://nac.example/runtime/v1/sessions/session%20%2Fscope/workspace/reveal");
+assert.equal(productCalls[2].method, "POST");
+assert.deepEqual(JSON.parse(productCalls[2].body), { path: "日本語 space/file.txt", expected_workspace_root: "/workspace current", expected_path_root: "/workspace origin" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
 assert.equal("sessionIntegrations" in api, false);
@@ -212,6 +217,11 @@ assert.deepEqual(context, {
 const client = createNacClient({ endpoint: "/nac", credentials: "same-origin" });
 const api = createNacApi(client);
 const projects: Promise<ProjectRecord> = api.createProject({ name: "typed", cwd: "/repo" });
+void api.revealWorkspacePath("session", "relative file", "/workspace", "/repository", new AbortController().signal);
+// @ts-expect-error both selected and originating coordinate roots are required for Finder reveal
+void api.revealWorkspacePath("session", "relative file");
+// @ts-expect-error coordinate root is required even with a selected workspace root
+void api.revealWorkspacePath("session", "relative file", "/workspace");
 const goal: Promise<SessionGoalRecord | null> = api.getGoal("session");
 const permissions: Promise<PermissionStateResponse> = api.getPermissions("session");
 const command: Promise<ShellCommandSnapshot> = api.submitShellCommand("session", { request_id: "command", command: "printf evidence" });

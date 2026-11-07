@@ -11,7 +11,7 @@
 //! see a checkout frozen at the end of some earlier run, and they never touch
 //! the disk at all.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,11 @@ pub struct WorkspaceFileList {
     pub files: Vec<String>,
     /// The repository has more files than were returned.
     pub truncated: bool,
+    /// Origin of these repository-relative identities, when locally available.
+    /// A missing legacy/remote/revision context cannot authorize Finder reveal.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub path_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,18 +56,50 @@ pub struct WorkspaceFileContent {
 /// ones it is told to ignore. Paths are relative to the repository root, which
 /// is what `git status --porcelain` reports too, so the two line up.
 pub fn list_files(target: &GitTarget) -> Result<WorkspaceFileList> {
-    let raw = run_git(
-        target,
-        target.root(),
-        &[
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            "--full-name",
-        ],
-    )?;
+    let path_root = target
+        .local_path()
+        .map(|_| target.repo_root())
+        .transpose()?;
+    let git_dir = if let Some(root) = &path_root {
+        Some(
+            String::from_utf8(run_git(
+                target,
+                root,
+                "rev-parse",
+                &["rev-parse", "--absolute-git-dir"],
+            )?)
+            .context("git directory is not valid UTF-8")?,
+        )
+    } else {
+        None
+    };
+    let mut args = Vec::new();
+    if let (Some(root), Some(directory)) = (&path_root, &git_dir) {
+        // One LF frames Git's record. Every preceding byte is literal path data.
+        let directory = directory.strip_suffix('\n').unwrap_or(directory);
+        if !root.is_absolute() || !Path::new(directory).is_absolute() {
+            bail!("Git file coordinates require absolute roots");
+        }
+        args.extend([
+            "--git-dir",
+            directory,
+            "--work-tree",
+            root.to_str()
+                .context("Git worktree root is not valid UTF-8")?,
+        ]);
+    }
+    // Keep the selected cwd and its listing scope. Explicit Git/worktree roots
+    // prevent a metadata disappearance or nested repository from changing the
+    // coordinate basis between discovery and this command.
+    args.extend([
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--full-name",
+    ]);
+    let raw = run_git(target, target.root(), "ls-files", &args)?;
 
     let mut files: Vec<String> = raw
         .split(|byte| *byte == 0)
@@ -75,7 +112,11 @@ pub fn list_files(target: &GitTarget) -> Result<WorkspaceFileList> {
     let truncated = files.len() > MAX_LISTED_FILES;
     files.truncate(MAX_LISTED_FILES);
 
-    Ok(WorkspaceFileList { files, truncated })
+    Ok(WorkspaceFileList {
+        files,
+        truncated,
+        path_root,
+    })
 }
 
 /// Working-tree contents of one file, refusing anything that is not plain text
@@ -147,6 +188,7 @@ pub fn list_revision_files(target: &GitTarget, commit: &str) -> Result<Workspace
     let raw = run_git(
         target,
         &repo_root,
+        "ls-tree",
         &["ls-tree", "-r", "-z", "--full-tree", commit],
     )?;
 
@@ -161,7 +203,11 @@ pub fn list_revision_files(target: &GitTarget, commit: &str) -> Result<Workspace
     let truncated = files.len() > MAX_LISTED_FILES;
     files.truncate(MAX_LISTED_FILES);
 
-    Ok(WorkspaceFileList { files, truncated })
+    Ok(WorkspaceFileList {
+        files,
+        truncated,
+        path_root: None,
+    })
 }
 
 /// Contents of one file as of a captured revision.
@@ -183,10 +229,15 @@ pub fn read_revision_file(
         bail!("invalid path: '{relpath}' is not a regular file");
     }
 
-    let size = String::from_utf8_lossy(&run_git(target, &repo_root, &["cat-file", "-s", &object])?)
-        .trim()
-        .parse::<u64>()
-        .with_context(|| format!("cannot measure '{relpath}'"))?;
+    let size = String::from_utf8_lossy(&run_git(
+        target,
+        &repo_root,
+        "cat-file",
+        &["cat-file", "-s", &object],
+    )?)
+    .trim()
+    .parse::<u64>()
+    .with_context(|| format!("cannot measure '{relpath}'"))?;
     if size > MAX_FILE_BYTES {
         return Ok(WorkspaceFileContent {
             path: relpath,
@@ -197,7 +248,12 @@ pub fn read_revision_file(
         });
     }
 
-    let bytes = run_git(target, &repo_root, &["cat-file", "blob", &object])?;
+    let bytes = run_git(
+        target,
+        &repo_root,
+        "cat-file",
+        &["cat-file", "blob", &object],
+    )?;
     let binary = bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0);
     let content = if binary {
         None
@@ -226,7 +282,7 @@ fn parse_tree_blob_path(record: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&record[tab + 1..]).into_owned())
 }
 
-fn run_git(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
+fn run_git(target: &GitTarget, cwd: &Path, operation: &str, args: &[&str]) -> Result<Vec<u8>> {
     let output = target.output(cwd, args)?;
     if !output.status.success() {
         if let Some(reason) = target.unavailable_reason(&output) {
@@ -234,7 +290,7 @@ fn run_git(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
         }
         bail!(
             "git {} failed: {}",
-            args[0],
+            operation,
             first_stderr_line(&output.stderr)
         );
     }
@@ -313,4 +369,42 @@ fn open_resolved(
         opened: canonical.display().to_string(),
         fell_back_to_parent,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_listing_binds_literal_coordinates_without_widening_selected_scope() {
+        for suffix in [" ", "\t", "\r", "\n"] {
+            let parent =
+                std::env::temp_dir().join(format!("nac-files-origin-{}", uuid::Uuid::new_v4()));
+            let repo = parent.join(format!("repo 日本語{suffix}"));
+            let selected = repo.join("packages/app");
+            std::fs::create_dir_all(&selected).unwrap();
+            std::fs::write(selected.join("file.txt"), "selected").unwrap();
+            std::fs::write(repo.join("outside.txt"), "outside selected scope").unwrap();
+            std::fs::write(repo.join(".gitignore"), "ignored.txt\n").unwrap();
+            std::fs::write(selected.join("ignored.txt"), "ignored").unwrap();
+            assert!(std::process::Command::new("git")
+                .args(["init", "--quiet"])
+                .arg(&repo)
+                .status()
+                .unwrap()
+                .success());
+            let listing = list_files(&GitTarget::local(selected)).unwrap();
+            assert_eq!(listing.path_root, Some(repo.canonicalize().unwrap()));
+            assert_eq!(listing.files, ["packages/app/file.txt"]);
+            assert!(!listing.truncated);
+            std::fs::remove_dir_all(parent).unwrap();
+        }
+    }
+
+    #[test]
+    fn legacy_listing_has_no_invented_coordinate_origin() {
+        let listing: WorkspaceFileList =
+            serde_json::from_str(r#"{"files":["file"],"truncated":false}"#).unwrap();
+        assert_eq!(listing.path_root, None);
+    }
 }
