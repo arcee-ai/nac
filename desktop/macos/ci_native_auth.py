@@ -153,6 +153,10 @@ def main():
             receipt = json.loads((app / 'Contents/Resources/build-receipt.json').read_text())
             require(receipt['source_head'] == source and not receipt['source_dirty'], 'Producer source drift')
             save(mode + '-receipt.json', receipt)
+            if mode == 'auth-build':
+                run('native-bootstrap-contract', [sys.executable, '-B', 'desktop/macos/device_auth_contract.py',
+                    '--startup-only', str(app / 'Contents/Resources/nac-web'),
+                    str(evidence / 'native-bootstrap-contract')], environment=clean_environment(os.environ), limit=90)
             run(driver, [sys.executable, '-B', 'desktop/macos/' + driver, str(app), str(evidence / mode),
                 '--console-observer', str(observer)],
                 environment=clean_environment(os.environ), limit=600)
