@@ -246,6 +246,21 @@ message as appropriate. Runtime execution, actual SDK result format admission,
 image review and current-head checks remain unqualified until separately run;
 this source entry alone establishes no native acceptance or full ALL-354 pass.
 
+The startup collector also admits the optional failure-only attachment
+`nac342-query-diagnostic-v1-onboarding` for onboarding and configured-local
+failures. Its closed JSON is bounded to 8 KiB and binds the selected failed
+test, actual P/Q/H and configuration/source/native identities, owned app
+incarnation and exact window. Twelve fixed queries expose only bounded counts
+and known-target comparison flags, with at most four candidates per query and
+eight total. Raw accessibility attributes and arbitrary attribute hashes are
+rejected. These limits bound the retained projection; they do not bound SDK
+query materialization or call latency. A final elapsed time of 5,000 ms or more
+is partial; clock-invalid and count/candidate truncation states remain explicit.
+Missing or rejected diagnostics preserve the original case failure. Retained
+complete or partial diagnostics never satisfy the ordinary observation, PNG,
+dispatch, cleanup, input-completion or pass gates. Producer nomination and actual
+full-SDK export qualification require separate verification.
+
 `all-343-macos26` adds the exact corrected instance fixture
 `f4832ed44f948a88170f5d3bc25322852dbce347`, using the same strict macOS 26
 envelope. The earlier `0d78ee38` hosted qualification failed, as detailed below.
