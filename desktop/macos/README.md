@@ -386,7 +386,7 @@ and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
 ### ALL-347 path adapter (source contract; native qualification pending)
 
 `all-347-paths-macos26` selects only product
-`528b7986f1abbf7e47228d15a48c0492af2c0669` and the ordered fresh-profile cases
+`7013a96f2f2fdf3046c6976e018c9bf988eebfe0` and the ordered fresh-profile cases
 `paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
 references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
 T `NativePathJourney.swift` (SHA-256
@@ -394,6 +394,12 @@ T `NativePathJourney.swift` (SHA-256
 `NATIVE_UI_TESTS`. No helper copy, standalone extraction or fabricated xctestrun
 is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
 their compiler-input, engine identity and output hashes are checked.
+
+The product owner and coordinator froze this supplier on the final UI foundation
+`a6098e3655119075a349a8c923ef82f37f25bee4`. The unchanged helper hash is not
+runtime acceptance. Relative to the original producer, it adds `expected_path_root`
+to its denial probe; its phase schema, ordered transitions and helper interface
+remain unchanged. Actual picker/Finder execution and captures remain **UNRUN**.
 
 The later `ci.py --qualification all-347-paths-macos26 --expected-sha <H>
 --source-root <canonical-T-checkout> --output <absent-private-output>` invocation
@@ -403,7 +409,14 @@ version 1, H, T, both ordered cases, `source_preflight=true`,
 `native_eligibility=true`, one allocation ID, original start/deadline epochs
 (maximum 2340 queue-inclusive seconds), and zero retries. Exclusive `.consumed` creation prevents
 reusing it. The maintained manual selector transports the optional `paths_custody` JSON
-through `macos-qualification.yml`; its path-only step validates the original
+through `macos-qualification.yml`. The additional native-only dispatcher uses
+`native-qualification=all-347-paths-macos26` and `native-paths-custody`; it validates
+the original capsule on an Ubuntu admission job before requesting a Mac. Ordinary
+CI and the legacy underscore input remain separate, unchanged interfaces. Its
+skipped aggregate has a distinct name and cannot supply `Required PR checks`.
+Both actual path xcodebuild calls use the shared runner environment filter,
+removing ambient managed configuration, tokens and API keys while preserving
+selected Xcode/SDK, private fixture and locale plumbing. The path-only step validates the original
 contract and writes those exact bytes into a fresh private runner directory,
 then sets `NAC_PATHS_CUSTODY` for the existing CLI. Missing, stale, foreign or
 reused handoffs fail closed. The runner creates no eligibility or deadline,

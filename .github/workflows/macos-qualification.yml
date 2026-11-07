@@ -24,6 +24,7 @@ permissions:
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.target.outputs.source_sha }}
       test_source_sha: ${{ steps.target.outputs.test_source_sha }}

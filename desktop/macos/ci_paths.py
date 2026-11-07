@@ -17,7 +17,8 @@ from ci_paths_protocol import CASES, Cursor, PRODUCT, HELPER, decode, final_reco
 from ci_paths_attachments import TESTS, collect
 from ci_qualifications import require_checkout
 from ci_xctest import (authorization_policy, observe_prerequisites, relocation_directory,
-                       require_generated_runner, require_settled, observe_process_status, result_receipt)
+                       require_generated_runner, require_settled, observe_process_status, result_receipt,
+                       runner_environment)
 from ci_xctest_attachments import AttachmentTool, bounded_file, digest
 from ci_xctest_project import materialize_project
 
@@ -194,7 +195,7 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
                      '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
                      '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(config_path),
                      'NAC_PATH_HARNESS_SHA=' + harness_sha, 'NAC_PATH_CONFIGURATION_SHA256=' + config_hash],
-                    folder / 'build.log', min(240, helper_build_limit))
+                    folder / 'build.log', min(240, helper_build_limit), env=runner_environment())
                 runners = list((derived / 'Build/Products').glob('*.xctestrun'))
                 require(len(runners) == 1, 'actual generated runner count')
                 data = bounded_file(runners[0], 256 * 1024)
@@ -223,7 +224,8 @@ def run_case(raw, product, app, selection, harness_sha, scenario, run, command, 
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
                  '-only-testing:NACPathUITests/PathJourneys/' + TESTS[CASES.index(scenario)]],
-                folder / 'test.log', min(480,deadline-(budget.monotonic() if budget else time.time())))
+                folder / 'test.log', min(480,deadline-(budget.monotonic() if budget else time.time())),
+                env=runner_environment())
             final_record(read_record(evidence, evidence_dir), scenario)
             proof['product_passed'] = True
         except BaseException as error:
