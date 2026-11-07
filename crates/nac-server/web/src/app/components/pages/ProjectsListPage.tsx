@@ -531,7 +531,7 @@ export default function ProjectsListPage() {
     return (
       <div className="flex h-full min-h-0">
         {isMobile ? null : <LeftSidebar variant="projects" />}
-        <div className="min-h-0 min-w-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           {!managed.isManaged && (
             <div className="p-4">
               <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>

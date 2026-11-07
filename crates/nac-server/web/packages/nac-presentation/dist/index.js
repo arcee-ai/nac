@@ -4980,20 +4980,21 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 	let { provider: r, signedIn: i } = df(e), { state: a, start: o, cancel: s } = uf(void 0, r), l = je(), u = St(e, !!r && i);
 	if (!r) return null;
 	let d = Zn(r), f = a.status === "failed", p = i && u.isError, m = f || p || n, h = a.status === "waiting", g = i && !m, _ = n && i, v = h ? /* @__PURE__ */ Z("div", {
-		className: "flex items-center gap-2",
+		className: "flex flex-wrap items-center gap-2",
 		children: [
 			/* @__PURE__ */ X(mn, { size: Ar.XSmall }),
 			a.prompt.user_code ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X("span", {
-				className: "text-micro text-basic-muted",
+				className: "text-small !leading-[22px] text-basic-secondary",
 				children: "Code"
 			}), /* @__PURE__ */ X("span", {
 				className: "label-small text-basic-primary tabular-nums",
 				children: a.prompt.user_code
 			})] }) : /* @__PURE__ */ X("span", {
-				className: "text-micro text-basic-muted",
+				className: "text-small !leading-[22px] text-basic-secondary",
 				children: "Waiting for the browser"
 			}),
 			/* @__PURE__ */ Z(V, {
+				className: "min-h-11 max-w-full !whitespace-normal",
 				variant: I.Ghost,
 				size: B.Medium,
 				content: c.IconRight,
@@ -5001,6 +5002,7 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 				children: [/* @__PURE__ */ Z("span", { children: ["Open ", d] }), /* @__PURE__ */ X(H, { iconName: z.External })]
 			}),
 			/* @__PURE__ */ X(V, {
+				className: "min-h-11 max-w-full !whitespace-normal",
 				variant: I.Ghost,
 				size: B.Medium,
 				content: c.Text,
@@ -5009,7 +5011,7 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 			})
 		]
 	}) : g ? /* @__PURE__ */ Z("div", {
-		className: "flex items-center gap-2",
+		className: "flex flex-wrap items-center gap-2",
 		children: [/* @__PURE__ */ Z("div", {
 			className: "flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4",
 			children: [/* @__PURE__ */ X(H, {
@@ -5020,6 +5022,7 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 				children: "Signed in"
 			})]
 		}), /* @__PURE__ */ X(V, {
+			className: "min-h-11 max-w-full !whitespace-normal",
 			variant: I.Ghost,
 			size: B.Medium,
 			content: c.Text,
@@ -5028,6 +5031,7 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 			children: "Sign out"
 		})]
 	}) : /* @__PURE__ */ Z(V, {
+		className: "min-h-11 max-w-full !whitespace-normal",
 		variant: I.Primary,
 		size: B.Medium,
 		content: c.IconRight,
@@ -5036,26 +5040,27 @@ function pf({ backend: e, className: t = "", rejected: n = !1 }) {
 		children: [/* @__PURE__ */ X("span", { children: _ ? `Sign in to ${d} again` : `Sign in with ${d}` }), /* @__PURE__ */ X(H, { iconName: z.External })]
 	}), y = h ? `Approve the request on ${d}, then return here.` : g ? "NAC holds this login and every session on this provider uses it." : `This provider authenticates with ${d} in your browser instead of with an API key.`;
 	return /* @__PURE__ */ Z("div", {
-		className: R("flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:items-center md:justify-between md:gap-4", m ? "border-error-primary" : "border-muted", t),
+		className: R("flex min-w-0 flex-col gap-4 rounded-lg border p-4 md:flex-row md:flex-wrap md:items-center md:justify-between", m ? "border-error-primary" : "border-muted", t),
 		children: [/* @__PURE__ */ Z("div", {
-			className: "flex items-start gap-2 min-w-0",
+			className: "flex min-w-0 items-start gap-3 md:flex-1 md:basis-60",
 			children: [/* @__PURE__ */ X(H, {
 				iconName: ff[r],
 				className: R("shrink-0", m ? "text-error-primary" : "text-basic-secondary")
 			}), /* @__PURE__ */ Z("div", {
-				className: "flex flex-col gap-0.5 min-w-0",
+				className: "flex min-w-0 flex-col gap-1",
 				children: [/* @__PURE__ */ Z("span", {
 					className: R("label-small", m ? "text-error-primary" : "text-basic-primary"),
 					children: [d, " sign-in"]
 				}), /* @__PURE__ */ X("span", {
-					className: "text-micro text-basic-muted",
+					className: "text-small !leading-[22px] text-basic-secondary",
 					children: y
 				})]
 			})]
 		}), /* @__PURE__ */ Z("div", {
-			className: "flex flex-col items-stretch md:items-end gap-1 shrink-0",
+			className: "flex min-w-0 flex-col items-stretch gap-2 md:ml-auto md:items-end",
 			children: [v, f || p || l.isError ? /* @__PURE__ */ X("p", {
-				className: "label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70",
+				role: "alert",
+				className: "text-small !leading-[22px] text-error-primary max-w-full break-words md:max-w-[320px] md:text-right pt-1",
 				children: nf(f ? a.message : l.isError ? l.error : u.error, e)
 			}) : null]
 		})]
@@ -9028,11 +9033,12 @@ function Wm() {
 // src/app/features/managed/presentation/ManagedModelCredentialStatus.tsx
 function Gm({ ready: e }) {
 	return /* @__PURE__ */ X(Ld, {
+		presentation: "form",
 		label: "Credential",
 		verticalOnMobile: !0,
 		hint: "This managed host supplies the credential securely; it is not stored in this configuration or exposed to commands.",
 		control: /* @__PURE__ */ Z("div", {
-			className: R("flex items-center gap-1.5 rounded-[4px] py-2 pl-2 pr-4", e ? "bg-success-secondary" : "bg-error-tertiary"),
+			className: R("flex items-center gap-2 rounded-[4px] py-2 pl-2 pr-4", e ? "bg-success-secondary" : "bg-error-tertiary"),
 			children: [/* @__PURE__ */ X(H, {
 				iconName: e ? z.CheckCircle : z.Repair,
 				className: e ? "text-success-primary" : "text-error-primary"
@@ -9780,10 +9786,10 @@ function rh({ initial: e, inheritSavedDefault: t = !1, existingSession: n = !1, 
 function ih() {
 	return /* @__PURE__ */ Z("section", {
 		"aria-label": "Provider connections",
-		className: "flex flex-col gap-3",
+		className: "flex flex-col gap-4",
 		children: [
 			/* @__PURE__ */ X("p", {
-				className: "text-micro text-basic-muted",
+				className: "text-small !leading-[22px] text-basic-secondary",
 				children: "Connect another account without changing this chat or signing out of your current provider. API keys and custom endpoints are available in Advanced provider setup."
 			}),
 			/* @__PURE__ */ X(pf, { backend: "arcee-auth" }),
@@ -16788,7 +16794,7 @@ function By({ item: e, selected: t, attention: n, onOpen: i, onDelete: a, onTogg
 function Vy({ onStart: e, onAddRepository: t, onManagedSettings: n, modelReady: r, githubConnected: i, mobile: a }) {
 	let o = t != null;
 	return /* @__PURE__ */ X("div", {
-		className: R("flex h-full flex-col items-center justify-center py-16", a ? "px-4" : "px-6"),
+		className: R("flex min-h-full flex-col items-center justify-center py-16", a ? "px-4" : "px-6"),
 		children: /* @__PURE__ */ Z("div", {
 			className: "flex w-[420px] max-w-full flex-col items-center gap-6",
 			children: [
@@ -17140,7 +17146,7 @@ function Xy() {
 	if (!T && !E && M.length === 0) return /* @__PURE__ */ Z("div", {
 		className: "flex h-full min-h-0",
 		children: [a ? null : /* @__PURE__ */ X(t_, { variant: "projects" }), /* @__PURE__ */ Z("div", {
-			className: "min-h-0 min-w-0 flex-1",
+			className: "min-h-0 min-w-0 flex-1 overflow-y-auto",
 			children: [!s.isManaged && /* @__PURE__ */ X("div", {
 				className: "p-4",
 				children: /* @__PURE__ */ X(V, {
@@ -30405,8 +30411,15 @@ function Ij() {
 		})
 	});
 }
+// src/app/features/managed/presentation/managedErrorText.ts
+function Lj(e) {
+	return e instanceof pn && e.status === 403 ? "GitHub access was denied for this host. Ask the host owner to check access to the GitHub App." : nf(Ud(e));
+}
+function Rj(e) {
+	return typeof e == "object" && e && "status" in e && e.status === 403 ? "Access to this managed host was denied. Ask the host owner to check access." : nf(Ud(e));
+}
 // src/app/features/managed/presentation/ManagedGitHubPanel.tsx
-function Lj({ onConnected: e }) {
+function zj({ onConnected: e }) {
 	let { api: t } = U(), n = et(), r = Oi(), i = ci(), [a, o] = J(null), [s, l] = J(""), [u, d] = J(!1);
 	G(() => {
 		if (!a) return;
@@ -30424,7 +30437,7 @@ function Lj({ onConnected: e }) {
 						return;
 					}
 				} catch (e) {
-					s.signal.aborted || l(nf(Ud(e)));
+					s.signal.aborted || l(Lj(e));
 					return;
 				}
 				await new Promise((e) => setTimeout(e, 1e3));
@@ -30444,7 +30457,7 @@ function Lj({ onConnected: e }) {
 		try {
 			o(await t.startManagedGitHubLogin());
 		} catch (e) {
-			l(nf(Ud(e)));
+			l(Lj(e));
 		} finally {
 			d(!1);
 		}
@@ -30458,206 +30471,243 @@ function Lj({ onConnected: e }) {
 			d(!1);
 		}
 	};
-	return i.isLoading ? /* @__PURE__ */ X(mn, { size: Ar.Medium }) : /* @__PURE__ */ Z("div", {
-		className: "flex flex-col gap-5",
+	return i.isPending ? /* @__PURE__ */ Z("div", {
+		role: "status",
+		className: "flex flex-wrap items-center gap-3 text-small text-basic-secondary",
+		children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), "Checking GitHub connection…"]
+	}) : /* @__PURE__ */ X("div", {
 		"data-testid": "managed-github-settings",
-		children: [
-			/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("p", {
-				className: "header-xl text-basic-primary",
-				children: "GitHub"
-			}), /* @__PURE__ */ X("p", {
-				className: "text-small text-basic-tertiary",
-				children: "Connect the private Arcee GitHub App. Tokens are never shown in NAC."
-			})] }),
-			i.data?.connected ? /* @__PURE__ */ Z("div", {
-				className: "rounded-lg border border-basic p-4",
-				children: [/* @__PURE__ */ Z("div", {
-					className: "flex items-center gap-3",
+		children: /* @__PURE__ */ Z(xp, {
+			title: "GitHub",
+			description: "Connect the private Arcee GitHub App. Tokens are never shown in NAC.",
+			children: [
+				i.error ? /* @__PURE__ */ Z("div", {
+					className: "flex flex-col items-start gap-3 text-small !leading-[22px] text-error-primary",
+					children: [/* @__PURE__ */ X("p", {
+						role: "alert",
+						children: Lj(i.error)
+					}), /* @__PURE__ */ X(V, {
+						className: "min-h-11",
+						variant: I.Secondary,
+						content: c.Text,
+						onClick: () => void i.refetch(),
+						loading: i.isFetching,
+						children: "Retry connection check"
+					})]
+				}) : null,
+				!i.error && i.data?.configured === !1 ? /* @__PURE__ */ X("p", {
+					role: "status",
+					className: "text-small !leading-[22px] text-basic-secondary",
+					children: "GitHub App is not configured on this host."
+				}) : null,
+				!i.error && i.data?.connected ? /* @__PURE__ */ Z("div", {
+					className: "border-y border-basic py-4",
+					children: [/* @__PURE__ */ Z("div", {
+						className: "flex flex-wrap items-center gap-3",
+						children: [
+							i.data.avatar_url ? /* @__PURE__ */ X("img", {
+								src: i.data.avatar_url,
+								alt: "",
+								className: "h-10 w-10 rounded-full"
+							}) : /* @__PURE__ */ X(H, { iconName: z.Github }),
+							/* @__PURE__ */ Z("div", {
+								className: "min-w-0 flex-1",
+								children: [/* @__PURE__ */ X("p", {
+									className: "label-medium text-basic-primary break-words",
+									children: i.data.name ?? i.data.login
+								}), /* @__PURE__ */ Z("p", {
+									className: "text-small !leading-[22px] text-basic-secondary break-words",
+									children: ["@", i.data.login]
+								})]
+							}),
+							/* @__PURE__ */ Z("span", {
+								className: "flex shrink-0 items-center gap-1.5 label-small text-success-primary",
+								children: [/* @__PURE__ */ X(H, {
+									iconName: z.CheckCircle,
+									"aria-hidden": "true"
+								}), "Connected"]
+							})
+						]
+					}), i.data.git_name && i.data.git_email ? /* @__PURE__ */ Z("p", {
+						className: "mt-3 text-small !leading-[22px] text-basic-secondary",
+						children: [
+							"Git commits: ",
+							i.data.git_name,
+							" · ",
+							i.data.git_email
+						]
+					}) : null]
+				}) : null,
+				a ? /* @__PURE__ */ Z("div", {
+					className: "rounded-lg border border-basic p-4",
+					"data-testid": "github-device-code",
 					children: [
-						i.data.avatar_url ? /* @__PURE__ */ X("img", {
-							src: i.data.avatar_url,
-							alt: "",
-							className: "h-10 w-10 rounded-full"
-						}) : /* @__PURE__ */ X(H, { iconName: z.Github }),
+						/* @__PURE__ */ X("p", {
+							className: "label-medium text-basic-primary",
+							children: "Authorize this host on GitHub"
+						}),
+						/* @__PURE__ */ X("p", {
+							className: "mt-1 text-small !leading-[22px] text-basic-secondary",
+							children: "Open GitHub and enter this code. Returning here will preserve this pending login."
+						}),
 						/* @__PURE__ */ Z("div", {
-							className: "min-w-0 flex-1",
-							children: [/* @__PURE__ */ X("p", {
-								className: "label-medium text-basic-primary truncate",
-								children: i.data.name ?? i.data.login
-							}), /* @__PURE__ */ Z("p", {
-								className: "text-small text-basic-tertiary truncate",
-								children: ["@", i.data.login]
+							className: "mt-4 flex flex-wrap items-center gap-2",
+							children: [/* @__PURE__ */ X("code", {
+								className: "min-w-0 flex-1 basis-32 break-all rounded bg-elevation-level-2 px-4 py-3 text-center text-xl tracking-[0.2em] text-basic-primary",
+								children: a.user_code
+							}), /* @__PURE__ */ X(C, {
+								className: "min-h-11 min-w-11",
+								value: a.user_code,
+								title: "Copy device code"
 							})]
 						}),
-						/* @__PURE__ */ Z("span", {
-							className: "flex shrink-0 items-center gap-1.5 label-small text-success-primary",
-							children: [/* @__PURE__ */ X(H, {
-								iconName: z.CheckCircle,
-								"aria-hidden": "true"
-							}), "Connected"]
+						/* @__PURE__ */ Z("div", {
+							className: "mt-3 flex flex-wrap gap-2",
+							children: [/* @__PURE__ */ Z(V, {
+								className: "min-h-11 max-w-full !whitespace-normal",
+								variant: I.Primary,
+								content: c.IconRight,
+								onClick: () => window.open(a.verification_uri, "_blank", "noopener"),
+								children: ["Open GitHub ", /* @__PURE__ */ X(H, { iconName: z.External })]
+							}), /* @__PURE__ */ X(V, {
+								className: "min-h-11 max-w-full !whitespace-normal",
+								variant: I.Tertiary,
+								content: c.Text,
+								onClick: () => {
+									t.cancelManagedGitHubLogin(a.login_id), o(null);
+								},
+								children: "Cancel"
+							})]
 						})
 					]
-				}), i.data.git_name && i.data.git_email ? /* @__PURE__ */ Z("p", {
-					className: "mt-3 text-small text-basic-tertiary",
-					children: [
-						"Git commits: ",
-						i.data.git_name,
-						" · ",
-						i.data.git_email
-					]
-				}) : null]
-			}) : null,
-			a ? /* @__PURE__ */ Z("div", {
-				className: "rounded-lg border border-info-primary p-4",
-				"data-testid": "github-device-code",
-				children: [
-					/* @__PURE__ */ X("p", {
-						className: "label-medium text-basic-primary",
-						children: "Authorize this host on GitHub"
-					}),
-					/* @__PURE__ */ X("p", {
-						className: "mt-1 text-small text-basic-tertiary",
-						children: "Open GitHub and enter this code. Returning here will preserve this pending login."
-					}),
-					/* @__PURE__ */ Z("div", {
-						className: "mt-4 flex items-center gap-2",
-						children: [/* @__PURE__ */ X("code", {
-							className: "flex-1 rounded bg-elevation-level-2 px-4 py-3 text-center text-xl tracking-[0.2em] text-basic-primary",
-							children: a.user_code
-						}), /* @__PURE__ */ X(C, {
-							value: a.user_code,
-							title: "Copy device code"
-						})]
-					}),
-					/* @__PURE__ */ Z("div", {
-						className: "mt-3 flex flex-wrap gap-2",
-						children: [/* @__PURE__ */ Z(V, {
-							variant: I.Primary,
-							content: c.IconRight,
-							onClick: () => window.open(a.verification_uri, "_blank", "noopener"),
-							children: ["Open GitHub ", /* @__PURE__ */ X(H, { iconName: z.External })]
-						}), /* @__PURE__ */ X(V, {
-							variant: I.Tertiary,
-							content: c.Text,
-							onClick: () => {
-								t.cancelManagedGitHubLogin(a.login_id), o(null);
-							},
-							children: "Cancel"
-						})]
-					})
-				]
-			}) : null,
-			s ? /* @__PURE__ */ X("p", {
-				className: "text-small text-error-primary",
-				children: s
-			}) : null,
-			a ? null : /* @__PURE__ */ Z("div", {
-				className: "flex gap-2",
-				children: [/* @__PURE__ */ X(V, {
-					variant: I.Primary,
-					content: c.Text,
-					onClick: () => void f(),
-					loading: u,
-					children: i.data?.connected ? "Reconnect GitHub" : "Connect GitHub"
-				}), i.data?.connected ? /* @__PURE__ */ X(V, {
-					variant: I.SecondaryDestructive,
-					content: c.Text,
-					onClick: () => void p(),
-					disabled: u,
-					children: "Disconnect"
-				}) : null]
-			})
-		]
+				}) : null,
+				s ? /* @__PURE__ */ X("p", {
+					role: "alert",
+					className: "text-small !leading-[22px] text-error-primary",
+					children: s
+				}) : null,
+				!a && !i.error ? /* @__PURE__ */ Z("div", {
+					className: "flex flex-wrap gap-2",
+					children: [/* @__PURE__ */ X(V, {
+						className: "min-h-11 max-w-full !whitespace-normal",
+						variant: I.Primary,
+						content: c.Text,
+						onClick: () => void f(),
+						loading: u,
+						children: i.data?.connected ? "Reconnect GitHub" : "Connect GitHub"
+					}), i.data?.connected ? /* @__PURE__ */ X(V, {
+						className: "min-h-11 max-w-full !whitespace-normal",
+						variant: I.SecondaryDestructive,
+						content: c.Text,
+						onClick: () => void p(),
+						disabled: u,
+						children: "Disconnect"
+					}) : null]
+				}) : null
+			]
+		})
 	});
 }
 // src/app/features/managed/presentation/ManagedSecretsPanel.tsx
-function Rj() {
-	let e = le(), t = ie(), n = De(), r = et(), [i, a] = J(""), [o, s] = J(""), [l, u] = J(!1), d = K(() => l ? Jt(i) : "", [l, i]), f = async () => {
-		if (u(!0), !(Jt(i) || o.length === 0)) try {
+function Bj() {
+	let e = le(), t = ie(), n = De(), r = et(), [i, a] = J(""), [o, s] = J(""), [l, u] = J(!1), d = q(0), f = K(() => l ? Jt(i) : "", [l, i]), p = async () => {
+		if (u(!0), Jt(i) || o.length === 0) return;
+		let e = d.current;
+		try {
 			await t.mutateAsync({
 				name: i,
 				value: o
-			}), a(""), s(""), u(!1), r.success("Secret saved for future command spawns");
+			}), d.current === e && (d.current += 1, a(""), s(""), u(!1)), r.success("Secret saved for future command spawns");
 		} catch (e) {
 			r.error(`Secret was not saved: ${Te(Ud(e))}`);
 		}
 	};
 	return /* @__PURE__ */ Z("div", {
-		className: "flex flex-col gap-5",
+		className: "flex min-w-0 flex-col gap-6",
 		"data-testid": "managed-secrets-settings",
-		children: [
-			/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("p", {
-				className: "header-xl text-basic-primary",
-				children: "Host secrets"
-			}), /* @__PURE__ */ X("p", {
-				className: "text-small text-basic-tertiary",
-				children: "Values are write-only and are injected into every newly spawned agent command on this single-owner host. Running processes keep their existing snapshot."
-			})] }),
-			/* @__PURE__ */ X("div", {
-				className: "rounded-lg border border-warning-primary p-4 text-small text-basic-secondary",
-				children: "Agents have arbitrary shell access and can print injected values. Add only secrets trusted across every Project and agent on this host."
-			}),
-			/* @__PURE__ */ Z("div", {
-				className: "grid grid-cols-1 gap-3 sm:grid-cols-2",
-				children: [/* @__PURE__ */ X($, {
-					inputSize: Q.Large,
-					label: "Variable name",
-					"aria-label": "Variable name",
-					placeholder: "SERVICE_TOKEN",
-					value: i,
-					onChange: (e) => {
-						a(e.target.value), u(!1);
-					},
-					validation: !!d,
-					validationText: d,
-					autoCapitalize: "none",
-					spellCheck: !1
-				}), /* @__PURE__ */ X($, {
-					inputSize: Q.Large,
-					label: "New value",
-					"aria-label": "New value",
-					placeholder: "Write-only value",
-					type: "password",
-					value: o,
-					onChange: (e) => s(e.target.value),
-					validation: l && o.length === 0,
-					validationText: "Enter a value.",
-					autoComplete: "new-password"
-				})]
-			}),
-			/* @__PURE__ */ X("div", { children: /* @__PURE__ */ X(V, {
-				variant: I.Primary,
-				content: c.Text,
-				onClick: () => void f(),
-				loading: t.isPending,
-				children: "Save secret"
-			}) }),
-			/* @__PURE__ */ X(fd, {}),
-			/* @__PURE__ */ Z("div", {
-				className: "flex flex-col gap-2",
-				children: [
-					/* @__PURE__ */ X("p", {
-						className: "label-medium text-basic-primary",
-						children: "Stored names"
-					}),
-					e.isLoading ? /* @__PURE__ */ X(mn, { size: Ar.Small }) : null,
-					e.data?.secrets.length === 0 ? /* @__PURE__ */ X("p", {
-						className: "text-small text-basic-tertiary",
+		children: [/* @__PURE__ */ Z(xp, {
+			title: "Host secrets",
+			description: "Values are write-only and are injected into every newly spawned agent command on this single-owner host. Running processes keep their existing snapshot.",
+			children: [
+				/* @__PURE__ */ X("div", {
+					className: "border-l-2 border-warning-primary pl-4 text-small !leading-[22px] text-basic-secondary",
+					children: "Agents have arbitrary shell access and can print injected values. Add only secrets trusted across every Project and agent on this host."
+				}),
+				/* @__PURE__ */ Z("div", {
+					className: "grid grid-cols-1 gap-4 sm:grid-cols-2",
+					children: [/* @__PURE__ */ X($, {
+						inputSize: Q.Large,
+						label: "Variable name",
+						"aria-label": "Variable name",
+						placeholder: "SERVICE_TOKEN",
+						value: i,
+						onChange: (e) => {
+							d.current += 1, a(e.target.value), u(!1);
+						},
+						validation: !!f,
+						validationText: f,
+						autoCapitalize: "none",
+						spellCheck: !1
+					}), /* @__PURE__ */ X($, {
+						inputSize: Q.Large,
+						label: "New value",
+						"aria-label": "New value",
+						placeholder: "Write-only value",
+						type: "password",
+						value: o,
+						onChange: (e) => {
+							d.current += 1, s(e.target.value);
+						},
+						validation: l && o.length === 0,
+						validationText: "Enter a value.",
+						autoComplete: "new-password"
+					})]
+				}),
+				/* @__PURE__ */ X("div", { children: /* @__PURE__ */ X(V, {
+					className: "min-h-11",
+					variant: I.Primary,
+					content: c.Text,
+					onClick: () => void p(),
+					loading: t.isPending,
+					children: "Save secret"
+				}) })
+			]
+		}), /* @__PURE__ */ Z(xp, {
+			title: "Stored names",
+			description: "Saved values stay hidden. Removing a secret affects future command spawns.",
+			className: "border-t border-basic pt-6",
+			children: [
+				e.isLoading ? /* @__PURE__ */ Z("div", {
+					role: "status",
+					className: "flex items-center gap-3 text-small text-basic-secondary",
+					children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), "Loading stored names…"]
+				}) : null,
+				e.error ? /* @__PURE__ */ Z("p", {
+					role: "alert",
+					className: "text-small !leading-[22px] text-error-primary",
+					children: ["Stored secret names are unavailable. ", Te(Ud(e.error))]
+				}) : null,
+				/* @__PURE__ */ Z("div", {
+					className: "divide-y divide-basic",
+					children: [e.data?.secrets.length === 0 ? /* @__PURE__ */ X("p", {
+						className: "text-small !leading-[22px] text-basic-secondary",
 						children: "No host secrets saved."
-					}) : null,
-					e.data?.secrets.map((e) => /* @__PURE__ */ Z("div", {
-						className: "flex items-center gap-3 rounded-lg border border-basic p-3",
+					}) : null, e.data?.secrets.map((e) => /* @__PURE__ */ Z("div", {
+						className: "flex min-w-0 items-start gap-3 py-3",
 						children: [
 							/* @__PURE__ */ X(H, { iconName: z.Key }),
-							/* @__PURE__ */ X("code", {
-								className: "min-w-0 flex-1 truncate text-basic-primary",
-								children: e.name
-							}),
-							/* @__PURE__ */ X("span", {
-								className: "text-small text-basic-muted",
-								children: "value hidden"
+							/* @__PURE__ */ Z("div", {
+								className: "min-w-0 flex-1",
+								children: [/* @__PURE__ */ X("code", {
+									className: "break-all code-small text-basic-primary",
+									children: e.name
+								}), /* @__PURE__ */ X("p", {
+									className: "mt-1 text-small text-basic-secondary",
+									children: "value hidden"
+								})]
 							}),
 							/* @__PURE__ */ X(V, {
+								className: "min-h-11 min-w-11",
 								variant: I.Ghost,
 								size: B.Small,
 								content: c.Icon,
@@ -30673,49 +30723,49 @@ function Rj() {
 								children: /* @__PURE__ */ X(H, { iconName: z.Trash })
 							})
 						]
-					}, e.name))
-				]
-			})
-		]
+					}, e.name))]
+				})
+			]
+		})]
 	});
 }
 // src/app/features/managed/controller/useManagedUpgrade.ts
-function zj() {
+function Vj() {
 	return `nac-upgrade-${globalThis.crypto.randomUUID()}`;
 }
-function Bj(e) {
+function Hj(e) {
 	if (!e) throw Error("managed upgrade action target is unavailable");
 	return e;
 }
-async function Vj(e, t) {
+async function Uj(e, t) {
 	if (!t.actionable || t.action === "wait" || !t.target) throw Error("managed upgrade blocker is wait-only");
 	let n = t.target;
 	switch (t.action) {
 		case "cancel_active_run": {
-			let t = Bj(n.session_id), r = Bj(n.run_id);
+			let t = Hj(n.session_id), r = Hj(n.run_id);
 			await e.cancelExactRun(t, r);
 			return;
 		}
 		case "cancel_traditional_child":
-			await e.cancelTraditionalChild(Bj(n.session_id), Bj(n.child_session_id));
+			await e.cancelTraditionalChild(Hj(n.session_id), Hj(n.child_session_id));
 			return;
 		case "cancel_managed_orchestrator":
-			await e.cancelManagedOrchestrator(Bj(n.session_id), Bj(n.orchestrator_session_id));
+			await e.cancelManagedOrchestrator(Hj(n.session_id), Hj(n.orchestrator_session_id));
 			return;
 		case "terminate_terminal":
-			await e.terminateTerminal(Bj(n.session_id), Bj(n.terminal_id));
+			await e.terminateTerminal(Hj(n.session_id), Hj(n.terminal_id));
 			return;
 		case "cancel_clone_operation":
-			await e.cancelManagedClone(Bj(n.clone_operation_id));
+			await e.cancelManagedClone(Hj(n.clone_operation_id));
 			return;
 	}
 }
-function Hj(e, t, n) {
+function Wj(e, t, n) {
 	if (!t) return !1;
 	let r = t.target_release ?? t.desired_release;
 	return !r || !jr(r, n) ? !1 : !e || t.operation_id !== e.operation_id || t.state !== e.state || t.updated_at !== e.updated_at;
 }
-function Uj() {
+function Gj() {
 	let { api: e } = U(), t = _t(), n = br(), r = q(null), a = t.data?.operation?.operation_id ?? null, [o, s] = J(!1), [c, l] = J(""), [u, d] = J({}), f = q(a);
 	G(() => {
 		if (f.current !== a) {
@@ -30734,14 +30784,14 @@ function Uj() {
 		n.isPending || (s(!1), l(""));
 	}, [n.isPending]), h = W(async () => {
 		if (n.isPending) return;
-		let e = r.current ?? zj(), a = t.data?.operation ?? null, o = t.data?.preview.latest_beta;
+		let e = r.current ?? Vj(), a = t.data?.operation ?? null, o = t.data?.preview.latest_beta;
 		r.current = e, l("");
 		try {
 			await n.mutateAsync(e), r.current = null, s(!1);
 		} catch (e) {
 			l(i(e).message), Lt(e) && (r.current = null, s(!1));
 			let n = await t.refetch();
-			!Lt(e) && !n.error && o && Hj(a, n.data?.operation, o) && (r.current = null, l(""), s(!1));
+			!Lt(e) && !n.error && o && Wj(a, n.data?.operation, o) && (r.current = null, l(""), s(!1));
 		}
 	}, [t, n]), g = W(async (n) => {
 		d((e) => ({
@@ -30749,7 +30799,7 @@ function Uj() {
 			[n.selection_key]: "requesting"
 		}));
 		try {
-			await Vj(e, n), d((e) => ({
+			await Uj(e, n), d((e) => ({
 				...e,
 				[n.selection_key]: "settling"
 			})), await t.refetch();
@@ -30773,136 +30823,128 @@ function Uj() {
 	};
 }
 // src/app/features/managed/presentation/ManagedUpgradePanel.tsx
-function Wj() {
-	let e = Uj(), t = e.snapshot, n = hn(t.error);
-	if (t.isLoading) return /* @__PURE__ */ Z("section", {
-		"aria-labelledby": "managed-upgrade-heading",
-		className: "rounded-lg border border-basic p-4",
-		children: [/* @__PURE__ */ X("h2", {
-			id: "managed-upgrade-heading",
-			className: "label-medium text-basic-primary",
-			children: "Managed NAC upgrade"
-		}), /* @__PURE__ */ X("div", {
-			className: "mt-3",
-			children: /* @__PURE__ */ X(mn, { size: Ar.Small })
-		})]
+function Kj() {
+	let e = Gj(), t = e.snapshot, n = hn(t.error);
+	if (t.isPending) return /* @__PURE__ */ X(xp, {
+		title: "Managed NAC upgrade",
+		className: "border-t border-basic pt-6",
+		children: /* @__PURE__ */ Z("div", {
+			role: "status",
+			className: "flex items-center gap-3 text-small text-basic-secondary",
+			children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), " Checking upgrade status…"]
+		})
 	});
 	if (!t.data || n) {
 		let e = i(t.error);
-		return /* @__PURE__ */ Z("section", {
-			"aria-labelledby": "managed-upgrade-heading",
-			className: "rounded-lg border border-basic p-4",
+		return /* @__PURE__ */ X("div", {
 			"data-testid": "managed-upgrade-unavailable",
-			children: [
-				/* @__PURE__ */ X("h2", {
-					id: "managed-upgrade-heading",
-					className: "label-medium text-basic-primary",
-					children: "Managed NAC upgrade"
-				}),
-				/* @__PURE__ */ X("p", {
-					className: "mt-1 text-small text-error-primary",
+			children: /* @__PURE__ */ Z(xp, {
+				title: "Managed NAC upgrade",
+				className: "border-t border-basic pt-6",
+				children: [/* @__PURE__ */ X("p", {
+					role: "alert",
+					className: "text-small !leading-[22px] text-error-primary",
 					children: e.message
-				}),
-				e.retryLabel ? /* @__PURE__ */ X(V, {
-					className: "mt-3",
+				}), e.retryLabel ? /* @__PURE__ */ X("div", { children: /* @__PURE__ */ X(V, {
+					className: "min-h-11",
 					size: B.Small,
 					variant: I.Secondary,
 					content: c.Text,
 					onClick: () => void t.refetch(),
 					loading: t.isFetching,
 					children: e.retryLabel
-				}) : null
-			]
+				}) }) : null]
+			})
 		});
 	}
 	let { preview: r, operation: a } = t.data, o = a ? Vt(a.state) : !1, s = r.upgrade_available && !o, l = a?.target_release, u = l && !jr(l, r.latest_beta);
-	return /* @__PURE__ */ Z("section", {
-		"aria-labelledby": "managed-upgrade-heading",
-		className: "rounded-lg border border-basic p-4",
+	return /* @__PURE__ */ X("div", {
 		"data-testid": "managed-upgrade",
-		children: [
-			/* @__PURE__ */ Z("div", {
-				className: "flex flex-wrap items-start justify-between gap-3",
-				children: [/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("h2", {
-					id: "managed-upgrade-heading",
-					className: "label-medium text-basic-primary",
-					children: "Managed NAC upgrade"
-				}), /* @__PURE__ */ X("p", {
-					className: "mt-1 text-small text-basic-tertiary",
-					children: Mt(r.distance?.accepted_releases ?? null)
-				})] }), s ? /* @__PURE__ */ X(V, {
-					size: B.Small,
-					variant: I.Primary,
-					content: c.Text,
-					onClick: e.requestStart,
-					children: a?.state === "failed" ? "Retry upgrade to latest beta" : "Upgrade to latest beta"
-				}) : !r.upgrade_available && !o ? /* @__PURE__ */ X("span", {
-					className: "rounded-full bg-success-secondary px-3 py-1 text-small text-success-primary",
-					children: "Up to date"
-				}) : null]
-			}),
-			/* @__PURE__ */ Z("div", {
-				className: "mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2",
-				children: [
-					/* @__PURE__ */ X(Gj, {
-						label: "Current",
-						release: r.current
-					}),
-					/* @__PURE__ */ X(Gj, {
-						label: "Latest beta",
-						release: r.latest_beta
-					}),
-					u ? /* @__PURE__ */ X(Gj, {
-						label: "Accepted target",
-						release: l,
-						className: "lg:col-span-2"
-					}) : null
-				]
-			}),
-			a ? /* @__PURE__ */ X(Kj, {
-				operation: a,
-				settlements: e.settlements,
-				onSettle: (t) => void e.requestSettlement(t)
+		children: /* @__PURE__ */ Z(xp, {
+			title: "Managed NAC upgrade",
+			description: Mt(r.distance?.accepted_releases ?? null),
+			className: "border-t border-basic pt-6",
+			action: s ? /* @__PURE__ */ X(V, {
+				className: "min-h-11",
+				size: B.Small,
+				variant: I.Primary,
+				content: c.Text,
+				onClick: e.requestStart,
+				children: a?.state === "failed" ? "Retry upgrade to latest beta" : "Upgrade to latest beta"
+			}) : !r.upgrade_available && !o ? /* @__PURE__ */ X("span", {
+				className: "rounded-full bg-success-secondary px-3 py-1 text-small text-success-primary",
+				children: "Up to date"
 			}) : null,
-			/* @__PURE__ */ Z(v, {
-				open: e.confirmationOpen,
-				onClose: e.cancelStart,
-				title: "Upgrade Managed NAC?",
-				size: dt.Small,
-				footer: /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(V, {
-					variant: I.Tertiary,
-					content: c.Text,
-					onClick: e.cancelStart,
-					disabled: e.startPending,
-					children: "Cancel"
-				}), /* @__PURE__ */ X(V, {
-					variant: I.Primary,
-					content: c.Text,
-					onClick: () => void e.confirmStart(),
-					loading: e.startPending,
-					children: "Start upgrade"
-				})] }),
-				children: [/* @__PURE__ */ Z("p", {
-					className: "text-small text-basic-secondary",
+			children: [
+				/* @__PURE__ */ Z("div", {
+					className: "grid grid-cols-1 gap-4 lg:grid-cols-2",
 					children: [
-						"Upgrade from ",
-						/* @__PURE__ */ X("strong", { children: r.current.product_version }),
-						" to the exact accepted latest beta, ",
-						/* @__PURE__ */ X("strong", { children: r.latest_beta.product_version }),
-						". Active work must finish or be explicitly stopped before this host is replaced. The page may disconnect briefly while NAC starts and verifies the replacement."
+						/* @__PURE__ */ X(qj, {
+							label: "Current",
+							release: r.current
+						}),
+						/* @__PURE__ */ X(qj, {
+							label: "Latest beta",
+							release: r.latest_beta
+						}),
+						u ? /* @__PURE__ */ X(qj, {
+							label: "Accepted target",
+							release: l,
+							className: "lg:col-span-2"
+						}) : null
 					]
-				}), e.startError ? /* @__PURE__ */ X("p", {
-					role: "alert",
-					className: "mt-3 text-small text-error-primary",
-					children: e.startError
-				}) : null]
-			})
-		]
+				}),
+				a ? /* @__PURE__ */ X(Jj, {
+					operation: a,
+					settlements: e.settlements,
+					onSettle: (t) => void e.requestSettlement(t)
+				}) : null,
+				/* @__PURE__ */ Z(v, {
+					open: e.confirmationOpen,
+					onClose: e.cancelStart,
+					title: "Upgrade Managed NAC?",
+					size: dt.Small,
+					bodyClassName: "pb-32 md:pb-4",
+					footer: /* @__PURE__ */ Z("div", {
+						className: "flex w-full flex-wrap justify-end gap-2",
+						children: [/* @__PURE__ */ X(V, {
+							className: "min-h-11",
+							variant: I.Tertiary,
+							content: c.Text,
+							onClick: e.cancelStart,
+							disabled: e.startPending,
+							children: "Cancel"
+						}), /* @__PURE__ */ X(V, {
+							className: "min-h-11",
+							variant: I.Primary,
+							content: c.Text,
+							onClick: () => void e.confirmStart(),
+							loading: e.startPending,
+							children: "Start upgrade"
+						})]
+					}),
+					children: [/* @__PURE__ */ Z("p", {
+						className: "text-small text-basic-secondary",
+						children: [
+							"Upgrade from ",
+							/* @__PURE__ */ X("strong", { children: r.current.product_version }),
+							" to the exact accepted latest beta, ",
+							/* @__PURE__ */ X("strong", { children: r.latest_beta.product_version }),
+							". Active work must finish or be explicitly stopped before this host is replaced. The page may disconnect briefly while NAC starts and verifies the replacement."
+						]
+					}), e.startError ? /* @__PURE__ */ X("p", {
+						role: "alert",
+						className: "mt-3 text-small text-error-primary",
+						children: e.startError
+					}) : null]
+				})
+			]
+		})
 	});
 }
-function Gj({ label: e, release: t, className: n = "" }) {
+function qj({ label: e, release: t, className: n = "" }) {
 	return /* @__PURE__ */ Z("div", {
-		className: `min-w-0 rounded-lg bg-elevation-level-2 p-3 ${n}`,
+		className: `min-w-0 border-l border-basic pl-4 ${n}`,
 		children: [
 			/* @__PURE__ */ X("p", {
 				className: "label-small text-basic-secondary",
@@ -30913,7 +30955,7 @@ function Gj({ label: e, release: t, className: n = "" }) {
 				children: t.product_version
 			}),
 			/* @__PURE__ */ Z("dl", {
-				className: "mt-2 grid grid-cols-[auto,minmax(0,1fr)] gap-x-3 gap-y-1 text-small",
+				className: "mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-small",
 				children: [
 					/* @__PURE__ */ X("dt", {
 						className: "text-basic-tertiary",
@@ -30952,10 +30994,10 @@ function Gj({ label: e, release: t, className: n = "" }) {
 		]
 	});
 }
-function Kj({ operation: e, settlements: t, onSettle: n }) {
+function Jj({ operation: e, settlements: t, onSettle: n }) {
 	let r = e.blockers ?? [], i = e.state === "failed", a = e.state === "succeeded";
 	return /* @__PURE__ */ Z("div", {
-		className: `mt-4 rounded-lg border p-4 ${i ? "border-error-primary" : a ? "border-success-primary" : "border-basic"}`,
+		className: `mt-2 border-l-2 pl-4 ${i ? "border-error-primary" : a ? "border-success-primary" : "border-basic"}`,
 		"aria-live": "polite",
 		"data-testid": "managed-upgrade-operation",
 		children: [/* @__PURE__ */ Z("div", {
@@ -30964,10 +31006,10 @@ function Kj({ operation: e, settlements: t, onSettle: n }) {
 				className: "label-medium text-basic-primary",
 				children: Ze(e.state)
 			}), e.message ? /* @__PURE__ */ X("p", {
-				className: "mt-1 text-small text-basic-tertiary",
+				className: "mt-1 text-small !leading-[22px] text-basic-secondary",
 				children: e.message
 			}) : null] }), /* @__PURE__ */ X("span", {
-				className: "code-small break-all text-basic-muted",
+				className: "code-small break-all text-basic-secondary",
 				children: e.operation_id
 			})]
 		}), r.length > 0 ? /* @__PURE__ */ Z("div", {
@@ -30980,7 +31022,7 @@ function Kj({ operation: e, settlements: t, onSettle: n }) {
 				children: r.map((e) => {
 					let r = t[e.selection_key];
 					return /* @__PURE__ */ X("li", {
-						className: "rounded-lg bg-elevation-level-2 p-3",
+						className: "border-t border-basic py-4",
 						children: /* @__PURE__ */ Z("div", {
 							className: "flex flex-wrap items-center justify-between gap-3",
 							children: [/* @__PURE__ */ Z("div", {
@@ -30989,17 +31031,18 @@ function Kj({ operation: e, settlements: t, onSettle: n }) {
 									className: "text-small text-basic-primary",
 									children: e.message
 								}), e.actionable ? r === "settling" ? /* @__PURE__ */ X("p", {
-									className: "mt-1 text-small text-basic-tertiary",
+									className: "mt-1 text-small !leading-[22px] text-basic-secondary",
 									children: "Stop requested. Waiting for cleanup to finish."
 								}) : r === "failed" ? /* @__PURE__ */ X("p", {
 									role: "alert",
-									className: "mt-1 text-small text-error-primary",
+									className: "mt-2 text-small !leading-[22px] text-error-primary",
 									children: "The stop request failed. Refresh status or try again."
 								}) : null : /* @__PURE__ */ X("p", {
-									className: "mt-1 text-small text-basic-tertiary",
+									className: "mt-1 text-small !leading-[22px] text-basic-secondary",
 									children: "Wait for this work to finish safely."
 								})]
 							}), e.actionable ? /* @__PURE__ */ X(V, {
+								className: "min-h-11",
 								size: B.Small,
 								variant: I.SecondaryDestructive,
 								content: c.Text,
@@ -31008,7 +31051,7 @@ function Kj({ operation: e, settlements: t, onSettle: n }) {
 								disabled: r === "settling",
 								children: r === "settling" ? "Waiting for cleanup" : r === "failed" ? `Try again: ${_e(e.action)}` : _e(e.action)
 							}) : /* @__PURE__ */ X("span", {
-								className: "rounded-full border border-basic px-2 py-1 text-small text-basic-tertiary",
+								className: "text-small !leading-[22px] text-basic-secondary",
 								children: "Wait only"
 							})]
 						})
@@ -31019,167 +31062,185 @@ function Kj({ operation: e, settlements: t, onSettle: n }) {
 	});
 }
 // src/app/features/managed/presentation/ManagedStatusPanel.tsx
-function qj({ ready: e }) {
+function Yj({ ready: e }) {
 	return /* @__PURE__ */ X("span", {
 		"aria-hidden": !0,
-		className: `inline-block h-2 w-2 rounded-full ${e ? "bg-success-primary" : "bg-warning-primary"}`
+		className: `inline-block h-2 w-2 shrink-0 rounded-full ${e ? "bg-success-primary" : "bg-warning-primary"}`
 	});
 }
-function Jj() {
+function Xj() {
 	let e = m();
-	if (e.isLoading) return /* @__PURE__ */ X(mn, { size: Ar.Medium });
-	if (!e.data) return /* @__PURE__ */ X("p", {
-		className: "text-error-primary",
-		children: "Managed host status is unavailable."
+	if (e.isPending) return /* @__PURE__ */ Z("div", {
+		role: "status",
+		className: "flex items-center gap-3 text-small text-basic-secondary",
+		children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), "Checking managed host…"]
+	});
+	if (!e.data) return /* @__PURE__ */ Z("p", {
+		role: "alert",
+		className: "text-small text-error-primary",
+		children: ["Managed host status is unavailable. ", e.error ? Rj(e.error) : ""]
 	});
 	let t = e.data;
 	return /* @__PURE__ */ Z("div", {
-		className: "flex flex-col gap-5",
+		className: "flex min-w-0 flex-col gap-6",
 		"data-testid": "managed-host-status",
 		children: [
-			/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("p", {
-				className: "header-xl text-basic-primary",
-				children: t.logical_host_id
-			}), /* @__PURE__ */ Z("p", {
-				className: "text-small text-basic-tertiary",
-				children: ["Managed NAC · ", t.public_hostname]
-			})] }),
-			/* @__PURE__ */ X(Wj, {}),
-			/* @__PURE__ */ Z("div", {
-				className: "grid grid-cols-1 gap-2 sm:grid-cols-2",
+			e.error ? /* @__PURE__ */ Z("p", {
+				role: "alert",
+				className: "text-small !leading-[22px] text-error-primary",
 				children: [
-					/* @__PURE__ */ X(Yj, {
-						label: t.model.display_name,
-						value: t.model_ready ? t.model.id : "Needs attention",
-						ready: t.model_ready
-					}),
-					/* @__PURE__ */ X(Yj, {
-						label: "GitHub",
-						value: t.github_status.replace("-", " "),
-						ready: t.github_status === "connected"
-					}),
-					/* @__PURE__ */ X(Yj, {
-						label: "Projects",
-						value: String(t.project_count),
-						ready: !0
-					}),
-					/* @__PURE__ */ X(Yj, {
-						label: "Host secrets",
-						value: String(t.secret_count),
-						ready: !0
-					})
+					"Host status could not be refreshed. Last known status is shown below.",
+					" ",
+					Rj(e.error)
 				]
+			}) : null,
+			/* @__PURE__ */ X(xp, {
+				title: t.logical_host_id,
+				description: `Managed NAC · ${t.public_hostname}`,
+				children: /* @__PURE__ */ Z("dl", {
+					className: "grid grid-cols-1 gap-4 border-y border-basic py-4 sm:grid-cols-2",
+					children: [
+						/* @__PURE__ */ X(Zj, {
+							label: t.model.display_name,
+							value: t.model_ready ? t.model.id : "Needs attention",
+							ready: t.model_ready
+						}),
+						/* @__PURE__ */ X(Zj, {
+							label: "GitHub",
+							value: t.github_status.replaceAll("-", " "),
+							ready: t.github_status === "connected"
+						}),
+						/* @__PURE__ */ X(Zj, {
+							label: "Projects",
+							value: String(t.project_count)
+						}),
+						/* @__PURE__ */ X(Zj, {
+							label: "Host secrets",
+							value: String(t.secret_count)
+						})
+					]
+				})
 			}),
-			/* @__PURE__ */ Z("div", {
-				className: "rounded-lg bg-elevation-level-2 p-4",
-				children: [
-					/* @__PURE__ */ X("p", {
-						className: "label-small text-basic-secondary",
-						children: "Managed model endpoint"
-					}),
-					/* @__PURE__ */ X("p", {
-						className: "code-small mb-3 break-all text-basic-primary",
-						children: t.model.endpoint
-					}),
-					/* @__PURE__ */ X("p", {
-						className: "label-small text-basic-secondary",
-						children: "Repository root"
-					}),
-					/* @__PURE__ */ X("p", {
-						className: "code-small break-all text-basic-primary",
-						children: t.repository_root
-					})
-				]
-			}),
-			/* @__PURE__ */ Z("div", {
-				className: "flex flex-col gap-2",
-				children: [/* @__PURE__ */ Z("div", {
-					className: "flex items-center justify-between",
-					children: [/* @__PURE__ */ X("p", {
-						className: "label-medium text-basic-primary",
-						children: "Readiness"
-					}), /* @__PURE__ */ Z("span", {
-						className: "text-small text-basic-tertiary",
-						children: [
-							"v",
-							t.version,
-							" · schema ",
-							t.schema_version
-						]
-					})]
-				}), t.checks.map((e) => /* @__PURE__ */ Z("div", {
-					className: "flex items-start gap-2 rounded-lg border border-basic p-3",
-					children: [/* @__PURE__ */ X("span", {
-						className: "mt-2",
-						children: /* @__PURE__ */ X(qj, { ready: e.ready })
-					}), /* @__PURE__ */ Z("div", {
-						className: "min-w-0",
-						children: [/* @__PURE__ */ X("p", {
-							className: "label-small text-basic-primary",
-							children: e.name
-						}), /* @__PURE__ */ X("p", {
-							className: "text-small text-basic-tertiary break-words",
-							children: e.detail
+			/* @__PURE__ */ X(xp, {
+				title: "Readiness",
+				description: "Checks reported by this host.",
+				children: /* @__PURE__ */ X("ul", {
+					className: "divide-y divide-basic",
+					children: t.checks.map((e) => /* @__PURE__ */ Z("li", {
+						className: "flex items-start gap-3 py-3 first:pt-0 last:pb-0",
+						children: [/* @__PURE__ */ X("span", {
+							className: "mt-1.5",
+							children: /* @__PURE__ */ X(Yj, { ready: e.ready })
+						}), /* @__PURE__ */ Z("div", {
+							className: "min-w-0 flex-1",
+							children: [/* @__PURE__ */ Z("div", {
+								className: "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1",
+								children: [/* @__PURE__ */ X("p", {
+									className: "label-small text-basic-primary",
+									children: e.name
+								}), /* @__PURE__ */ X("span", {
+									className: `text-small ${e.ready ? "text-success-primary" : "text-warning-primary"}`,
+									children: e.ready ? "Ready" : "Needs attention"
+								})]
+							}), /* @__PURE__ */ X("p", {
+								className: "mt-1 text-small !leading-[22px] text-basic-secondary break-words",
+								children: e.detail
+							})]
 						})]
-					})]
-				}, e.name))]
-			})
+					}, e.name))
+				})
+			}),
+			/* @__PURE__ */ X(xp, {
+				title: "Host details",
+				className: "border-t border-basic pt-6",
+				children: /* @__PURE__ */ Z("dl", {
+					className: "flex min-w-0 flex-col gap-4",
+					children: [
+						/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("dt", {
+							className: "text-small text-basic-secondary",
+							children: "Managed model endpoint"
+						}), /* @__PURE__ */ X("dd", {
+							className: "mt-1 code-small break-all text-basic-primary",
+							children: t.model.endpoint
+						})] }),
+						/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("dt", {
+							className: "text-small text-basic-secondary",
+							children: "Repository root"
+						}), /* @__PURE__ */ X("dd", {
+							className: "mt-1 code-small break-all text-basic-primary",
+							children: t.repository_root
+						})] }),
+						/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("dt", {
+							className: "text-small text-basic-secondary",
+							children: "NAC version"
+						}), /* @__PURE__ */ Z("dd", {
+							className: "mt-1 text-small text-basic-primary",
+							children: [
+								"v",
+								t.version,
+								" · schema ",
+								t.schema_version
+							]
+						})] })
+					]
+				})
+			}),
+			/* @__PURE__ */ X(Kj, {})
 		]
 	});
 }
-function Yj({ label: e, value: t, ready: n }) {
+function Zj({ label: e, value: t, ready: n }) {
 	return /* @__PURE__ */ Z("div", {
-		className: "rounded-lg border border-basic p-4",
-		children: [/* @__PURE__ */ X("p", {
-			className: "text-small text-basic-tertiary",
+		className: "min-w-0",
+		children: [/* @__PURE__ */ X("dt", {
+			className: "text-small text-basic-secondary",
 			children: e
-		}), /* @__PURE__ */ Z("div", {
-			className: "mt-1 flex items-center gap-2",
-			children: [/* @__PURE__ */ X(qj, { ready: n }), /* @__PURE__ */ X("p", {
-				className: "label-medium capitalize text-basic-primary",
-				children: t
-			})]
+		}), /* @__PURE__ */ Z("dd", {
+			className: "mt-1 flex items-center gap-2 label-small text-basic-primary break-words",
+			children: [n === void 0 ? null : /* @__PURE__ */ X(Yj, { ready: n }), t]
 		})]
 	});
 }
 // src/app/features/managed/presentation/ManagedHostModal.tsx
-function Xj({ open: e, onClose: t, tab: n, onTabChange: r, onGitHubConnected: i }) {
+function Qj({ open: e, onClose: t, tab: n, onTabChange: r, onGitHubConnected: i }) {
 	return /* @__PURE__ */ X(v, {
 		open: e,
 		onClose: t,
 		title: "Managed host",
 		size: dt.Large,
 		flush: !0,
-		className: "h-[min(760px,calc(100vh-32px))]",
+		className: "h-[min(760px,calc(100vh-32px))] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11",
 		bodyClassName: "min-h-0",
 		children: /* @__PURE__ */ Z("div", {
 			className: "flex h-full min-h-0 flex-col md:flex-row",
 			children: [/* @__PURE__ */ X("nav", {
+				"aria-label": "Managed host sections",
 				className: "flex shrink-0 gap-1 overflow-x-auto border-b border-basic md:w-44 md:flex-col md:border-b-0 md:border-r p-2",
 				children: rr.map((e) => /* @__PURE__ */ X("button", {
 					type: "button",
-					className: `rounded px-3 py-2 text-left label-small capitalize ${n === e ? "bg-elevation-level-2 text-basic-primary" : "text-basic-tertiary"}`,
+					"aria-current": n === e ? "page" : void 0,
+					className: `min-h-11 shrink-0 rounded-lg px-3 py-3 text-left label-small capitalize md:py-2 ${n === e ? "bg-elevation-level-2 text-basic-primary" : "text-basic-secondary hover:bg-elevation-level-1"}`,
 					onClick: () => r(e),
 					children: e === "github" ? "GitHub" : e
 				}, e))
 			}), /* @__PURE__ */ Z("div", {
-				className: "min-h-0 flex-1 overflow-auto p-4 md:p-6",
+				className: "min-h-0 min-w-0 flex-1 overflow-auto p-4 md:p-6",
 				children: [
-					n === "status" ? /* @__PURE__ */ X(Jj, {}) : null,
-					n === "github" ? /* @__PURE__ */ X(Lj, { onConnected: i }) : null,
-					n === "secrets" ? /* @__PURE__ */ X(Rj, {}) : null
+					n === "status" ? /* @__PURE__ */ X(Xj, {}) : null,
+					n === "github" ? /* @__PURE__ */ X(zj, { onConnected: i }) : null,
+					n === "secrets" ? /* @__PURE__ */ X(Bj, {}) : null
 				]
 			})]
 		})
 	});
 }
 // src/app/features/managed/presentation/ManagedBranchPicker.tsx
-function Zj(e, t) {
+function $j(e, t) {
 	return e.toLowerCase().localeCompare(t.toLowerCase()) || e.localeCompare(t);
 }
-function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a }) {
+function eM({ branches: e, value: t, onValueChange: n, isLoading: i, error: a }) {
 	let [o, s] = J(!1), [c, l] = J(""), [u, d] = J(null), f = q(null), p = q(null), m = vi(), h = L(), g = K(() => {
-		let t = c.trim().toLowerCase(), n = [...e].sort(Zj);
+		let t = c.trim().toLowerCase(), n = [...e].sort($j);
 		return t ? n.filter((e) => e.toLowerCase().includes(t)) : n;
 	}, [e, c]), _ = u === null ? -1 : g.indexOf(u), v = (e = !0) => {
 		s(!1), l(""), d(null), e && f.current?.focus();
@@ -31188,7 +31249,7 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 			v();
 			return;
 		}
-		let n = [...e].sort(Zj);
+		let n = [...e].sort($j);
 		d(t || n[0] || null), s(!0);
 	};
 	G(() => {
@@ -31207,7 +31268,8 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 		let t = u === null ? -1 : g.indexOf(u), n = t < 0 ? e > 0 ? 0 : g.length - 1 : (t + e + g.length) % g.length;
 		d(g[n] ?? null);
 	}, S = (e) => {
-		switch (e.key) {
+		if (e.nativeEvent.isComposing || e.keyCode === 229) e.key === "Escape" && e.stopPropagation();
+		else switch (e.key) {
 			case "ArrowDown":
 				e.preventDefault(), x(1);
 				break;
@@ -31233,7 +31295,7 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 		}
 	}, C = i ? /* @__PURE__ */ Z("div", {
 		role: "status",
-		className: "flex items-center gap-2 p-3 text-small text-basic-tertiary",
+		className: "flex items-center gap-2 p-3 text-small !leading-[22px] text-basic-secondary",
 		children: [/* @__PURE__ */ X(mn, {
 			size: Ar.Small,
 			variant: nr.Neutral
@@ -31244,11 +31306,11 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 		children: a
 	}) : e.length === 0 ? /* @__PURE__ */ X("p", {
 		role: "status",
-		className: "p-3 text-small text-basic-tertiary",
+		className: "p-3 text-small !leading-[22px] text-basic-secondary",
 		children: "No branches found."
 	}) : g.length === 0 ? /* @__PURE__ */ Z("p", {
 		role: "status",
-		className: "p-3 text-small text-basic-tertiary",
+		className: "p-3 text-small !leading-[22px] text-basic-secondary",
 		children: [
 			"No branches match \"",
 			c.trim(),
@@ -31256,7 +31318,7 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 		]
 	}) : null;
 	return /* @__PURE__ */ Z("div", {
-		className: "flex min-w-0 flex-col gap-1 text-small text-basic-secondary",
+		className: "flex min-w-0 flex-col gap-2 label-small text-basic-primary",
 		children: [/* @__PURE__ */ X("span", { children: "Branch" }), /* @__PURE__ */ X(Ge, {
 			open: o,
 			onClose: () => v(),
@@ -31281,7 +31343,7 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 					"aria-activedescendant": _ >= 0 ? `${m}-option-${_}` : void 0,
 					value: c,
 					onChange: (t) => {
-						let n = t.target.value, r = n.trim().toLowerCase(), i = [...e].sort(Zj).filter((e) => !r || e.toLowerCase().includes(r));
+						let n = t.target.value, r = n.trim().toLowerCase(), i = [...e].sort($j).filter((e) => !r || e.toLowerCase().includes(r));
 						l(n), d(i[0] ?? null);
 					},
 					onKeyDown: S
@@ -31297,7 +31359,7 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 						tabIndex: -1,
 						size: h ? qi.Large : qi.Medium,
 						active: e === u,
-						className: "shrink-0",
+						className: "min-h-11 shrink-0 md:min-h-9",
 						onMouseEnter: () => d(e),
 						onMouseDown: (e) => e.preventDefault(),
 						onClick: () => b(e),
@@ -31315,14 +31377,14 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 			children: /* @__PURE__ */ Z("button", {
 				ref: f,
 				type: "button",
-				className: "btn btn-medium btn-secondary btn-icon-right w-full max-w-full overflow-hidden",
+				className: "btn btn-medium btn-secondary btn-icon-right min-h-11 w-full max-w-full overflow-hidden",
 				"aria-label": `Branch: ${t || "Select a branch"}`,
 				"aria-haspopup": "listbox",
 				"aria-expanded": o,
 				"aria-controls": o ? m : void 0,
 				onClick: y,
 				onKeyDown: (e) => {
-					[
+					e.nativeEvent.isComposing || e.keyCode === 229 || [
 						"ArrowDown",
 						"ArrowUp",
 						"Enter",
@@ -31335,26 +31397,28 @@ function Qj({ branches: e, value: t, onValueChange: n, isLoading: i, error: a })
 					children: t || "Select a branch"
 				}), /* @__PURE__ */ X(H, {
 					iconName: z.Down,
-					className: `shrink-0 transition-transform duration-150 ${o ? "rotate-180" : "rotate-0"}`
+					className: `shrink-0 transition-transform duration-150 motion-reduce:transition-none ${o ? "rotate-180" : "rotate-0"}`
 				})]
 			})
 		})]
 	});
 }
 // src/app/features/managed/presentation/ManagedRepositoryModal.tsx
-function $j({ open: e, onClose: t, onConnect: n }) {
-	let { api: r } = U(), i = Li(), a = et(), o = Oi(), s = m(), l = ci(e), [u, d] = J(""), [f, p] = J(null), [h, g] = J(""), [_, y] = J(""), [b, x] = J(""), [S, C] = J(null), [w, T] = J(""), [E, D] = J(!1), O = Di({
+function tM({ open: e, onClose: t, onConnect: n }) {
+	let { api: r } = U(), i = Li(), a = et(), o = Oi(), s = m(), l = ci(e), [u, d] = J(""), [f, p] = J(null), [h, g] = J(""), [_, y] = J(""), [b, x] = J(""), [S, C] = J(null), [w, T] = J(""), [E, D] = J(!1), [O, k] = J(null), [A, j] = J(e), N = q(0), P = Di({
 		queryKey: ["managed-github-repositories"],
 		queryFn: ({ signal: e }) => r.listManagedGitHubRepositories(e),
 		enabled: e && l.data?.connected === !0,
 		retry: !1
-	}), k = Tr(f?.full_name), A = Di({
+	}), ee = Tr(f?.full_name), te = Di({
 		queryKey: ["managed-github-branches", f?.full_name],
-		queryFn: ({ signal: e }) => r.listManagedGitHubBranches(k[0], k[1], e),
-		enabled: e && k !== null,
+		queryFn: ({ signal: e }) => r.listManagedGitHubBranches(ee[0], ee[1], e),
+		enabled: e && ee !== null,
 		retry: !1
-	});
-	G(() => {
+	}), ne = l.data?.connected === !0 && !l.error, re = P.isSuccess && (ee === null || te.isSuccess), ie = P.fetchStatus === "idle" && (ee === null || te.fetchStatus === "idle"), ae = ne && re && (O === null || O === "refreshing" && ie);
+	A !== e && (j(e), k(null)), O === "refreshing" && ne && ie && k(null), G(() => () => {
+		N.current += 1;
+	}, [e]), G(() => {
 		if (!S || !xr(S)) return;
 		let e = !1, n = new AbortController();
 		return (async () => {
@@ -31382,11 +31446,30 @@ function $j({ open: e, onClose: t, onConnect: n }) {
 		a,
 		r
 	]);
-	let j = K(() => {
-		let e = u.trim().toLowerCase(), t = O.data?.repositories ?? [];
+	let oe = K(() => {
+		let e = u.trim().toLowerCase(), t = P.data?.repositories ?? [];
 		return e ? t.filter((t) => t.full_name.toLowerCase().includes(e)) : t;
-	}, [O.data, u]), N = async () => {
-		if (f && h && _.trim() && b.trim()) {
+	}, [P.data, u]), se = async () => {
+		let e = ++N.current;
+		k("checking");
+		let t = await l.refetch();
+		if (N.current !== e) return;
+		if (t.error || t.data?.connected !== !0) {
+			k(null);
+			return;
+		}
+		let n = Promise.all([o.refetchQueries({
+			queryKey: ["managed-github-repositories"],
+			exact: !0,
+			type: "active"
+		}), o.refetchQueries({
+			queryKey: ["managed-github-branches", f?.full_name],
+			exact: !0,
+			type: "active"
+		})]);
+		k("refreshing"), await n;
+	}, ce = async () => {
+		if (ae && f && h && _.trim() && b.trim()) {
 			D(!0), T("");
 			try {
 				C(await r.startManagedClone({
@@ -31403,114 +31486,161 @@ function $j({ open: e, onClose: t, onConnect: n }) {
 				D(!1);
 			}
 		}
-	}, P = async () => {
+	}, le = async () => {
 		if (S && xr(S)) try {
 			C(await r.cancelManagedClone(S.operation_id));
 		} catch (e) {
 			T(Te(Ud(e)));
 		}
-	}, ee = E || xr(S), te = A.error ? nf(Ud(A.error)) : null;
+	}, ue = E || xr(S), de = te.error ? Lj(te.error) : null, fe = P.isLoading || O !== null && P.isFetching;
 	return /* @__PURE__ */ X(v, {
 		open: e,
-		onClose: ee ? void 0 : t,
+		onClose: ue ? void 0 : t,
 		title: "Add repository",
 		size: dt.Large,
 		flush: !0,
-		className: "h-[min(760px,calc(100vh-32px))]",
-		bodyClassName: "min-h-0",
+		className: "h-[min(760px,calc(100vh-32px))] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11",
+		bodyClassName: "min-h-0 pb-32 md:pb-0",
 		footer: S?.status === "running" ? /* @__PURE__ */ X(V, {
+			className: "min-h-11",
 			variant: I.SecondaryDestructive,
 			content: c.Text,
-			onClick: () => void P(),
+			onClick: () => void le(),
 			children: "Cancel clone"
-		}) : /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ X(V, {
-			variant: I.Tertiary,
-			content: c.Text,
-			onClick: t,
-			children: "Cancel"
-		}), /* @__PURE__ */ X(V, {
-			variant: I.Primary,
-			content: c.Text,
-			onClick: () => void N(),
-			disabled: !f || !h || !_.trim() || !b.trim(),
-			loading: E,
-			children: "Clone repository"
-		})] }),
+		}) : /* @__PURE__ */ Z("div", {
+			className: "flex w-full flex-wrap justify-end gap-2",
+			children: [/* @__PURE__ */ X(V, {
+				className: "min-h-11",
+				variant: I.Tertiary,
+				content: c.Text,
+				onClick: t,
+				children: "Cancel"
+			}), /* @__PURE__ */ X(V, {
+				className: "min-h-11",
+				variant: I.Primary,
+				content: c.Text,
+				onClick: () => void ce(),
+				disabled: !ae || !f || !h || !_.trim() || !b.trim(),
+				loading: E,
+				children: "Clone repository"
+			})]
+		}),
 		children: /* @__PURE__ */ Z("div", {
-			className: "flex h-full min-h-0 flex-col gap-4 overflow-auto p-4 md:p-6",
+			className: "flex h-full min-h-0 flex-col gap-6 overflow-auto p-4 md:p-6",
 			"data-testid": "managed-repository-modal",
 			children: [
-				l.data?.connected ? null : /* @__PURE__ */ Z("div", {
-					className: "flex flex-col items-start gap-3 rounded-lg border border-basic p-4",
+				l.isPending ? /* @__PURE__ */ Z("div", {
+					role: "status",
+					className: "flex items-center gap-3 text-small text-basic-secondary",
+					children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), " Checking GitHub connection…"]
+				}) : l.error ? /* @__PURE__ */ Z("div", {
+					className: "flex flex-col items-start gap-3 text-small text-error-primary",
+					children: [/* @__PURE__ */ X("p", {
+						role: "alert",
+						children: Lj(l.error)
+					}), /* @__PURE__ */ X(V, {
+						className: "min-h-11",
+						variant: I.Secondary,
+						content: c.Text,
+						onClick: () => void se(),
+						loading: l.isFetching,
+						children: "Retry connection check"
+					})]
+				}) : l.data?.connected ? null : /* @__PURE__ */ Z("div", {
+					className: "flex flex-col items-start gap-4",
 					children: [/* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("p", {
 						className: "label-medium text-basic-primary",
 						children: "Connect GitHub to browse Arcee repositories"
 					}), /* @__PURE__ */ X("p", {
-						className: "text-small text-basic-tertiary",
+						className: "text-small !leading-[22px] text-basic-secondary",
 						children: "You can still create a Project through NAC's existing local or SSH flow."
 					})] }), /* @__PURE__ */ X(V, {
+						className: "min-h-11",
 						variant: I.Primary,
 						content: c.Text,
 						onClick: n,
 						children: "Connect GitHub"
 					})]
 				}),
-				l.data?.connected && !S ? /* @__PURE__ */ Z(Y, { children: [
-					/* @__PURE__ */ X($, {
+				ne && ie && !re ? /* @__PURE__ */ X(V, {
+					className: "min-h-11 self-start",
+					variant: I.Secondary,
+					content: c.Text,
+					onClick: () => void se(),
+					loading: O === "checking",
+					children: "Retry repository checks"
+				}) : null,
+				ne && !S ? /* @__PURE__ */ Z(Y, { children: [/* @__PURE__ */ Z(xp, {
+					title: "Repository",
+					description: "Choose a repository available to this GitHub connection.",
+					children: [/* @__PURE__ */ X($, {
 						inputSize: Q.Large,
 						label: "Find repository",
 						"aria-label": "Find repository",
 						placeholder: "Search accessible repositories",
 						value: u,
 						onChange: (e) => d(e.target.value)
-					}),
-					/* @__PURE__ */ Z("div", {
+					}), /* @__PURE__ */ Z("div", {
 						className: "min-h-[140px] max-h-60 overflow-auto rounded-lg border border-basic p-1",
 						children: [
-							O.isLoading ? /* @__PURE__ */ X("div", {
-								className: "p-4",
-								children: /* @__PURE__ */ X(mn, { size: Ar.Small })
+							fe ? /* @__PURE__ */ Z("div", {
+								role: "status",
+								className: "flex items-center gap-3 p-4 text-small text-basic-secondary",
+								children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), " Loading repositories…"]
 							}) : null,
-							O.error ? /* @__PURE__ */ X("p", {
-								className: "p-4 text-small text-error-primary",
-								children: nf(Ud(O.error))
+							!fe && P.error ? /* @__PURE__ */ X("p", {
+								role: "alert",
+								className: "p-4 text-small !leading-[22px] text-error-primary",
+								children: Lj(P.error)
 							}) : null,
-							j.map((e) => /* @__PURE__ */ Z("button", {
+							oe.map((e) => /* @__PURE__ */ Z("button", {
 								type: "button",
-								className: `flex w-full items-center gap-3 rounded p-3 text-left ${f?.id === e.id ? "bg-elevation-level-2" : "hover:bg-elevation-level-1"}`,
+								"aria-pressed": f?.id === e.id,
+								className: `grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 rounded p-3 text-left sm:flex sm:gap-3 ${f?.id === e.id ? "bg-elevation-level-2" : "hover:bg-elevation-level-1"}`,
 								onClick: () => {
 									p(e), g(e.default_branch), y(e.name), x(e.name), T("");
 								},
 								children: [
-									/* @__PURE__ */ X(H, { iconName: e.private ? z.Lock : z.Github }),
+									/* @__PURE__ */ X(H, {
+										iconName: e.private ? z.Lock : z.Github,
+										"aria-hidden": "true"
+									}),
 									/* @__PURE__ */ Z("span", {
-										className: "min-w-0 flex-1",
+										className: "col-span-2 row-start-2 min-w-0 sm:flex-1",
 										children: [/* @__PURE__ */ X("span", {
-											className: "block label-small text-basic-primary truncate",
+											className: "block label-small text-basic-primary break-words",
 											children: e.full_name
 										}), /* @__PURE__ */ Z("span", {
-											className: "block text-small text-basic-tertiary",
+											className: "block text-small !leading-[22px] text-basic-secondary break-words",
 											children: ["Default branch: ", e.default_branch]
 										})]
 									}),
-									f?.id === e.id ? /* @__PURE__ */ X(H, { iconName: z.CheckCircle }) : null
+									f?.id === e.id ? /* @__PURE__ */ X(H, {
+										iconName: z.CheckCircle,
+										"aria-hidden": "true",
+										className: "col-start-2 row-start-1 justify-self-end"
+									}) : null
 								]
 							}, e.id)),
-							!O.isLoading && j.length === 0 ? /* @__PURE__ */ X("p", {
-								className: "p-4 text-small text-basic-tertiary",
+							!fe && oe.length === 0 ? /* @__PURE__ */ X("p", {
+								className: "p-4 text-small !leading-[22px] text-basic-secondary",
 								children: "No repositories match."
 							}) : null
 						]
-					}),
-					f ? /* @__PURE__ */ Z("div", {
-						className: "grid grid-cols-1 gap-3 sm:grid-cols-2",
+					})]
+				}), f ? /* @__PURE__ */ X(xp, {
+					title: "Checkout",
+					description: "Choose the branch and where this Project will live on the host.",
+					className: "border-t border-basic pt-6",
+					children: /* @__PURE__ */ Z("div", {
+						className: "grid grid-cols-1 gap-4 sm:grid-cols-2",
 						children: [
-							/* @__PURE__ */ X(Qj, {
-								branches: A.data?.branches ?? [],
+							/* @__PURE__ */ X(eM, {
+								branches: te.data?.branches ?? [],
 								value: h,
 								onValueChange: g,
-								isLoading: A.isLoading,
-								error: te
+								isLoading: te.isLoading || O !== null && te.isFetching,
+								error: de
 							}, f.full_name),
 							/* @__PURE__ */ X($, {
 								inputSize: Q.Large,
@@ -31529,18 +31659,19 @@ function $j({ open: e, onClose: t, onConnect: n }) {
 								hintText: `${s.data?.repository_root ?? "Repository root"}/${_ || "directory"}`
 							})
 						]
-					}) : null
-				] }) : null,
+					})
+				}) : null] }) : null,
 				S ? /* @__PURE__ */ Z("div", {
-					className: "flex flex-col gap-4 rounded-lg border border-basic p-4",
+					className: "flex flex-col gap-4 border-t border-basic pt-4",
 					children: [
 						/* @__PURE__ */ Z("div", {
 							className: "flex items-center gap-3",
-							children: [S.status === "running" ? /* @__PURE__ */ X(mn, { size: Ar.Small }) : /* @__PURE__ */ X(H, { iconName: S.status === "completed" ? z.CheckCircle : z.Danger }), /* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ X("p", {
+							children: [S.status === "running" ? /* @__PURE__ */ X(mn, { size: Ar.Small }) : /* @__PURE__ */ X(H, { iconName: S.status === "completed" ? z.CheckCircle : z.Danger }), /* @__PURE__ */ Z("div", { children: [/* @__PURE__ */ Z("p", {
+								role: "status",
 								className: "label-medium text-basic-primary capitalize",
-								children: S.status
+								children: ["Clone ", S.status]
 							}), /* @__PURE__ */ Z("p", {
-								className: "text-small text-basic-tertiary break-all",
+								className: "text-small !leading-[22px] text-basic-secondary break-all",
 								children: [
 									S.repository,
 									" · ",
@@ -31553,13 +31684,15 @@ function $j({ open: e, onClose: t, onConnect: n }) {
 							children: S.progress || "Preparing clone…"
 						}),
 						S.error ? /* @__PURE__ */ X("p", {
-							className: "text-small text-error-primary",
+							role: "alert",
+							className: "text-small !leading-[22px] text-error-primary",
 							children: S.error
 						}) : null
 					]
 				}) : null,
 				w ? /* @__PURE__ */ X("p", {
-					className: "text-small text-error-primary",
+					role: "alert",
+					className: "text-small !leading-[22px] text-error-primary",
 					children: w
 				}) : null
 			]
@@ -31567,7 +31700,7 @@ function $j({ open: e, onClose: t, onConnect: n }) {
 	});
 }
 // src/app/features/managed/controller/ManagedHostProvider.tsx
-function eM({ children: e }) {
+function nM({ children: e }) {
 	let t = m(), [n, r] = J(!1), [i, a] = J("status"), [o, s] = J(!1), [c, l] = J(!1), u = t.data ?? null, d = W(() => {
 		l(!1), a("status"), r(!0);
 	}, []), f = W(() => {
@@ -31590,7 +31723,7 @@ function eM({ children: e }) {
 		value: g,
 		children: [
 			e,
-			/* @__PURE__ */ X(Xj, {
+			/* @__PURE__ */ X(Qj, {
 				open: n,
 				tab: i,
 				onTabChange: a,
@@ -31599,7 +31732,7 @@ function eM({ children: e }) {
 				},
 				onGitHubConnected: h
 			}),
-			o ? /* @__PURE__ */ X($j, {
+			o ? /* @__PURE__ */ X(tM, {
 				open: !0,
 				onClose: () => s(!1),
 				onConnect: f
@@ -31608,21 +31741,21 @@ function eM({ children: e }) {
 	});
 }
 // src/App.tsx
-function tM() {
+function rM() {
 	let { sessionId: e } = Ri();
 	return /* @__PURE__ */ Z("section", {
 		className: "relative flex h-full min-h-0 overflow-hidden bg-elevation-ground",
 		children: [/* @__PURE__ */ X(t_, {}), /* @__PURE__ */ X(Ij, {}, e)]
 	});
 }
-function nM() {
+function iM() {
 	return w().orchestrationEnabled ? /* @__PURE__ */ X(ky, {}) : /* @__PURE__ */ X(Ai, {
 		to: Gn.list(),
 		replace: !0
 	});
 }
-function rM() {
-	return /* @__PURE__ */ X(vm, { children: /* @__PURE__ */ X(fe, { children: /* @__PURE__ */ X(tg, { children: /* @__PURE__ */ X(zh, { children: /* @__PURE__ */ X(eM, { children: /* @__PURE__ */ X(mm, { children: /* @__PURE__ */ Z(Ni, { children: [
+function aM() {
+	return /* @__PURE__ */ X(vm, { children: /* @__PURE__ */ X(fe, { children: /* @__PURE__ */ X(tg, { children: /* @__PURE__ */ X(zh, { children: /* @__PURE__ */ X(nM, { children: /* @__PURE__ */ X(mm, { children: /* @__PURE__ */ Z(Ni, { children: [
 		/* @__PURE__ */ Z(Mi, {
 			element: /* @__PURE__ */ X(Xg, {}),
 			children: [
@@ -31644,13 +31777,13 @@ function rM() {
 				}),
 				/* @__PURE__ */ X(Mi, {
 					path: "/session/:sessionId/:panel?",
-					element: /* @__PURE__ */ X(tM, {})
+					element: /* @__PURE__ */ X(rM, {})
 				})
 			]
 		}),
 		/* @__PURE__ */ X(Mi, {
 			path: "/design",
-			element: /* @__PURE__ */ X(nM, {})
+			element: /* @__PURE__ */ X(iM, {})
 		}),
 		/* @__PURE__ */ X(Mi, {
 			path: "*",
@@ -31662,74 +31795,74 @@ function rM() {
 	] }) }) }) }) }) }) });
 }
 // src/app/providers/ThemeProvider.tsx
-var iM = [
+var oM = [
 	"light",
 	"dark",
 	"system"
-], aM = "nac-theme", oM = "dark", sM = pi(null), cM = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
-function lM(e) {
-	return oM;
+], sM = "nac-theme", cM = "dark", lM = pi(null), uM = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
+function dM(e) {
+	return cM;
 }
-function uM() {
+function fM() {
 	let e = document.documentElement;
-	e.setAttribute("data-theme", oM), e.classList.remove("light", "dark"), e.classList.add(oM), e.style.colorScheme = oM;
+	e.setAttribute("data-theme", cM), e.classList.remove("light", "dark"), e.classList.add(cM), e.style.colorScheme = cM;
 }
-function dM() {
-	let e = localStorage.getItem(aM);
-	return e && iM.includes(e) ? e : cM() ? "dark" : "light";
+function pM() {
+	let e = localStorage.getItem(sM);
+	return e && oM.includes(e) ? e : uM() ? "dark" : "light";
 }
-var fM = ({ children: e, local: t = !1 }) => {
-	let [n, r] = J(() => t ? "dark" : dM()), i = W((e) => {
-		iM.includes(e) && (r(e), t || (localStorage.setItem(aM, e), uM()));
+var mM = ({ children: e, local: t = !1 }) => {
+	let [n, r] = J(() => t ? "dark" : pM()), i = W((e) => {
+		oM.includes(e) && (r(e), t || (localStorage.setItem(sM, e), fM()));
 	}, [t]), a = W(() => {
 		r((e) => {
 			let n = e === "light" ? "dark" : e === "dark" ? "system" : "light";
-			return t || (localStorage.setItem(aM, n), uM()), n;
+			return t || (localStorage.setItem(sM, n), fM()), n;
 		});
 	}, [t]);
 	return G(() => {
-		t || uM();
-	}, [t]), /* @__PURE__ */ X(sM.Provider, {
+		t || fM();
+	}, [t]), /* @__PURE__ */ X(lM.Provider, {
 		value: {
 			theme: n,
-			resolved: lM(n),
+			resolved: dM(n),
 			setTheme: i,
 			toggleTheme: a
 		},
 		children: e
 	});
 };
-function pM() {
-	let e = _i(sM);
+function hM() {
+	let e = _i(lM);
 	if (!e) throw Error("useTheme must be used within a ThemeProvider");
 	return e;
 }
 // src/app/runtime/NativePresentationRoot.tsx
-function mM(e) {
-	return /* @__PURE__ */ X(hM, { ...e }, e.runtime.id);
+function gM(e) {
+	return /* @__PURE__ */ X(_M, { ...e }, e.runtime.id);
 }
-function hM({ runtime: e, router: t, theme: n, className: r, styles: i, globalKeyboard: a }) {
+function _M({ runtime: e, router: t, theme: n, className: r, styles: i, globalKeyboard: a }) {
 	if (G(() => e.retain(), [e]), bi(e.subscribe, e.isClosed, e.isClosed)) return null;
-	let o = /* @__PURE__ */ X(gM, {
+	let o = /* @__PURE__ */ X(vM, {
 		runtime: e,
 		className: r,
 		styles: i,
 		globalKeyboard: a,
-		children: t(/* @__PURE__ */ X(rM, {}))
+		children: t(/* @__PURE__ */ X(aM, {}))
 	});
 	return /* @__PURE__ */ X(sr.Provider, {
 		value: e,
 		children: /* @__PURE__ */ Z(xi, {
 			client: e.queryClient,
-			children: [/* @__PURE__ */ X(Hi, {}), n ? n(o) : /* @__PURE__ */ X(fM, {
+			children: [/* @__PURE__ */ X(Hi, {}), n ? n(o) : /* @__PURE__ */ X(mM, {
 				local: !0,
 				children: o
 			})]
 		})
 	});
 }
-function gM({ runtime: e, className: t, styles: n, globalKeyboard: r, children: i }) {
-	let { resolved: a } = pM();
+function vM({ runtime: e, className: t, styles: n, globalKeyboard: r, children: i }) {
+	let { resolved: a } = hM();
 	return /* @__PURE__ */ Z("div", {
 		className: `${t ?? "nac-presentation h-full min-h-0"} ${a}`,
 		style: { contain: "layout paint" },
@@ -31741,4 +31874,4 @@ function gM({ runtime: e, className: t, styles: n, globalKeyboard: r, children: 
 		})]
 	});
 }
-export { mM as NativePresentationRoot, rn as NativeRuntime, sr as RuntimeContext, Kn as createNativeRuntime, U as useNativeRuntime };
+export { gM as NativePresentationRoot, rn as NativeRuntime, sr as RuntimeContext, Kn as createNativeRuntime, U as useNativeRuntime };
