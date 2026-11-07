@@ -1,14 +1,14 @@
 {
-  "scope": "ff8-hosted-normal-package-only",
-  "P": "9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3",
+  "scope": "p10-hosted-normal-package-only",
+  "P": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
   "H_tools": "9863b7714c32ed77bd66867973de6d5b02a753f8",
-  "Q": "04c073bbbead6f4077da0199bacd542e45cf4e57",
-  "q_contract_sha256": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
-  "q_swift_sha256": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1",
+  "Q": "993102af913b94acfcf0f4f866f9350e6ca3650b",
+  "q_contract_sha256": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
+  "q_swift_sha256": "5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471",
   "host_image": "20261102.0473.1",
   "rust_version": "1.98.0",
   "node_version": "v24.22.1",
-  "P_parent": "4f2a14149558271842a58c6a1591c2b6ffc61306",
-  "P_native_base": "84c25942f848eccdfa8e7c60c9bcaa37133e418a",
-  "source_context": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8"
+  "P_parent": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "P_native_base": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "source_context": "42231f447fef5d9d63d82943ae35e8c0d6c424b6"
 }

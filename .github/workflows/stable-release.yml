@@ -1,5 +1,5 @@
-name: PRIVATE NEVERMERGE hosted post648 package
-run-name: PRIVATE NEVERMERGE hosted package only
+name: PRIVATE NEVERMERGE hosted post657 P10 package
+run-name: PRIVATE NEVERMERGE hosted P10 package only
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   package:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-q-host-package-post648' && github.run_attempt == 1
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-q-host-package-post657-p10' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 40
     env:
@@ -36,7 +36,7 @@ jobs:
               assert report['actual_image'] == report['expected_image'], 'unexpected/unknown hosted image; no checkout/bootstrap'
               a = json.loads(os.environ['ROOT_PACKAGE_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','clock'}
-              assert a['scope'] == 'ff8-hosted-normal-package-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['scope'] == 'p10-hosted-normal-package-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
               assert re.fullmatch('[0-9a-f]{40}', a['controller_sha'])
               assert re.fullmatch('[A-Za-z0-9_-]{1,100}', a['allocation_id'])
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
@@ -70,7 +70,7 @@ jobs:
           spec=importlib.util.spec_from_file_location('route',f); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
           m.admit(json.loads(os.environ['ROOT_PACKAGE_ADMISSION']),os.environ)
           p=json.loads(f.with_name('pair.json').read_text())
-          assert p['P']=='9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3'
+          assert p['P']=='ef2cce9141973f37bf35e33d113e35eaa7a91f19'
           assert p['H_tools']=='9863b7714c32ed77bd66867973de6d5b02a753f8'
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('P='+p['P']+'\nH='+p['H_tools']+'\n')

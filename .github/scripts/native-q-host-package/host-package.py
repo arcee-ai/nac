@@ -14,8 +14,8 @@ import stat
 import sys
 import time
 
-BRANCH = 'refs/heads/codex/experimental-native-q-host-package-post648'
-SCOPE = 'ff8-hosted-normal-package-only'
+BRANCH = 'refs/heads/codex/experimental-native-q-host-package-post657-p10'
+SCOPE = 'p10-hosted-normal-package-only'
 STOP = []
 CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'restore-cache': 2}
 
@@ -142,7 +142,7 @@ def inspect_only(pair, product, output):
     source = product/'desktop/macos/startup_xctest/contract.py'
     need(digest(source) == pair['q_contract_sha256'] and
          digest(product/'desktop/macos/startup_xctest/StartupJourneys.swift') == pair['q_swift_sha256'], 'exact current Q source')
-    spec = importlib.util.spec_from_file_location('Q04c_package_only', source)
+    spec = importlib.util.spec_from_file_location('Q_package_only', source)
     contract = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(contract)
     proof = contract.inspect_normal_package(str(output/'normal/manifest.json'),

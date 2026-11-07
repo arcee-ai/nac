@@ -37,10 +37,10 @@ class ClockRouting(unittest.TestCase):
 
     def test_retries_other_sources_and_nonmanual_routes_fail_closed(self):
         a,e=self.values()
-        for key,value in [('scope','onboarding'),('controller_sha','b'*40),('attempt',2),('retries',1),('extra',True)]:
+        for key,value in [('scope','onboarding'),('scope','ff8-hosted-normal-package-only'),('controller_sha','b'*40),('attempt',2),('retries',1),('extra',True)]:
             with self.subTest(key=key),self.assertRaises(RuntimeError):
                 m.admit({**a,key:value},e,now=1001)
-        for key,value in [('GITHUB_REF','refs/heads/dev'),('GITHUB_REF','refs/heads/codex/experimental-native-q-host-package'),('GITHUB_EVENT_NAME','push'),('GITHUB_RUN_ATTEMPT','2')]:
+        for key,value in [('GITHUB_REF','refs/heads/dev'),('GITHUB_REF','refs/heads/codex/experimental-native-q-host-package-post648'),('GITHUB_REF','refs/heads/codex/experimental-native-q-host-package'),('GITHUB_EVENT_NAME','push'),('GITHUB_RUN_ATTEMPT','2')]:
             with self.subTest(key=key),self.assertRaises(RuntimeError):
                 m.admit(a,{**e,key:value},now=1001)
 
@@ -81,12 +81,12 @@ class ClockRouting(unittest.TestCase):
             self.assertEqual(argv[2],'/P/desktop/macos/packaging/package.py')
             self.assertFalse(any(x in argv for x in ['fixture','smoke','app-run','xcodebuild','test-without-building','distribution-plan']))
         pair=json.loads((HERE/'pair.json').read_text())
-        self.assertEqual(pair['P'],'9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3')
-        self.assertEqual(pair['P_parent'],'4f2a14149558271842a58c6a1591c2b6ffc61306')
-        self.assertEqual(pair['P_native_base'],'84c25942f848eccdfa8e7c60c9bcaa37133e418a')
-        self.assertEqual(pair['source_context'],'4b852f065e2200f46c194b4ad2c5ace3fbd766a8')
+        self.assertEqual(pair['P'],'ef2cce9141973f37bf35e33d113e35eaa7a91f19')
+        self.assertEqual(pair['P_parent'],'7325c48b3c9ec7036e255a6bd92f31c1a98c1607')
+        self.assertEqual(pair['P_native_base'],'7325c48b3c9ec7036e255a6bd92f31c1a98c1607')
+        self.assertEqual(pair['source_context'],'42231f447fef5d9d63d82943ae35e8c0d6c424b6')
         self.assertEqual(pair['H_tools'],'9863b7714c32ed77bd66867973de6d5b02a753f8')
-        self.assertEqual(pair['Q'],'04c073bbbead6f4077da0199bacd542e45cf4e57')
+        self.assertEqual(pair['Q'],'993102af913b94acfcf0f4f866f9350e6ca3650b')
 
     def test_initial_image_gate_records_and_rejects_before_bootstrap(self):
         text=(HERE.parents[1]/'workflows/stable-release.yml').read_text()
