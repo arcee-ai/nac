@@ -166,6 +166,14 @@ crosses into the actor; its value and authorization state/code/token URLs do not
 Configuration after reload uses that explicit fixture identity, without old
 page globals. Browser sequencing controls do not establish native browser handoff.
 
+The marked fixture keeps the explicit POSIX bootstrap spelling before Rust
+admission. Foundation can rewrite an existing Darwin `/private/tmp` path to its
+`/tmp` alias; that alias is deliberately refused by the closed Rust fixture.
+Normal startup retains its existing path handling. The hosted controller checks
+the actual Foundation/Rust preflight with both missing and existing fixture
+stores before device UI journeys, preserving store bytes and testing unchanged
+wrong-HOME and alias denials. This preflight launches no app, browser or server.
+
 ## Closed device-owner fixture
 
 `native-auth-fixture` is an explicit, nondefault server Cargo feature. It uses
