@@ -82,5 +82,72 @@ class FinalDraftAcknowledgementControls(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_native_live_row_and_actual_ui_predicate_distinguish_cold_recovery(self):
+        import re
+        import tempfile
+        source = Path(__file__).with_name('RecoverySmoke.swift').read_text()
+        start = source.index('fact["bPresent"] = rows.contains {')
+        opening = source.index('{', start)
+        depth = 1
+        closing = opening + 1
+        while depth:
+            if source[closing] == '{': depth += 1
+            if source[closing] == '}': depth -= 1
+            closing += 1
+        predicate = source[opening + 1:closing - 1]
+        cases = [
+            dict(name='live', rows=[['b', 'B']], native=True, ui=True),
+            dict(name='cold-review', rows=[['b', 'B', 'unreviewed']], native=False, ui=False),
+            dict(name='live-a-cold-b', rows=[['a', 'A'], ['b', 'B', 'unreviewed']], native=False, ui=False),
+            dict(name='empty', rows=[], native=False, ui=False),
+            dict(name='absent', rows=None, native=None, ui=False),
+            dict(name='malformed-row', rows=[None], native=None, ui=False),
+            dict(name='missing-text', rows=[['b']], native=False, ui=False),
+            dict(name='wrong-id', rows=[['a', 'B']], native=False, ui=False),
+            dict(name='wrong-text-type', rows=[['b', 7]], native=False, ui=False),
+            dict(name='empty-text', rows=[['b', '']], native=False, ui=False),
+            dict(name='extra-field', rows=[['b', 'B', 'unreviewed', 'extra']], native=False, ui=False),
+            dict(name='different-live-text', rows=[['b', 'other']], native=True, ui=False),
+            dict(name='wrong-id-type', rows=[[7, 'B']], native=False, ui=False),
+            dict(name='not-array', rows={'b': 'B'}, native=None, ui=False),
+        ]
+        # Execute the actual Swift collector closure, not a translated JS copy.
+        program = '''import Foundation
+        @main enum Controls {
+          static func main() throws {
+            let cases = try JSONSerialization.jsonObject(with: Data(#"__DATA__"#.utf8)) as! [[String: Any]]
+            let sessionB = "b"
+            let results: [Any] = cases.map { item in
+              guard let rows = item["rows"] as? [[Any]] else { return NSNull() }
+              return rows.contains { __PREDICATE__ }
+            }
+            let bytes = try JSONSerialization.data(withJSONObject: results)
+            print(String(decoding: bytes, as: UTF8.self))
+          }
+        }'''.replace('__DATA__', json.dumps(cases)).replace('__PREDICATE__', predicate)
+        with tempfile.TemporaryDirectory(prefix='nac-q1-live-row-inert-') as temporary:
+            swift, binary = Path(temporary) / 'Controls.swift', Path(temporary) / 'controls'
+            swift.write_text(program)
+            built = subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-target',
+                                    'arm64-apple-macosx14.0', '-parse-as-library', str(swift), '-o', str(binary)],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            actual = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(actual.returncode, 0, actual.stdout + actual.stderr)
+            self.assertEqual(json.loads(actual.stdout), [c['native'] for c in cases])
+        script = source.split('private static let storageQ1Script = #"""', 1)[1].split('"""#', 1)[0]
+        matched = re.search(r'posts\(\)\.find\(row => ([\s\S]*?)\)\);', script)
+        self.assertIsNotNone(matched)
+        # The live-presence witness accepts any nonempty text. The UI content
+        # oracle additionally requires the expected value, tested separately.
+        js = '''const actual = new Function('row','after','plan','id','text', 'return ('+__PREDICATE__+');');
+        const cases=__DATA__;
+        const result=cases.map(c=>{try{return actual({sequence:1,drafts:c.rows},0,{a:'a',b:'b'},'b','B')===true;}catch{return false;}});
+        console.log(JSON.stringify(result));'''.replace('__PREDICATE__', json.dumps(matched.group(1))).replace('__DATA__', json.dumps(cases))
+        actual = subprocess.run(['node', '-e', js], capture_output=True, text=True, timeout=10)
+        self.assertEqual(actual.returncode, 0, actual.stdout + actual.stderr)
+        self.assertEqual(json.loads(actual.stdout), [c['ui'] for c in cases])
+
+
 if __name__ == '__main__':
     unittest.main()
