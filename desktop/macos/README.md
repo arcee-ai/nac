@@ -130,6 +130,14 @@ Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases an
 protocol supplier remain unchanged; failed episodes and spent allocations are
 not renewed.
 
+The query supplier is `04c073bbbead6f4077da0199bacd542e45cf4e57`, with
+`StartupJourneys.swift` SHA-256 `0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1`.
+All four supplier files remain immutable. The separate SDK-only receipt measured
+harness `9863b7714c32ed77bd66867973de6d5b02a753f8` with this P/Q pair;
+it proves that compiler gate only. This updated harness has no execution receipt.
+The default four cases, protocol R, future-store promise and spent runtime caps
+remain unchanged; source integration does not renew an execution allocation.
+
 ## Private launch contract (ALL-341)
 
 The builder asks the exact bundled executable for `__desktop-identity` and saves
