@@ -8066,7 +8066,7 @@
 
 /* Pointer capability and viewport width are independent on tablets and hybrid devices. */
 @media (hover: none) {
-  [data-nac-runtime]:is(.session-name-row-actions), [data-nac-runtime] .session-name-row-actions {
+  [data-nac-runtime]:is(.group > .session-name-row-actions), [data-nac-runtime] .group > .session-name-row-actions {
     clip-path: none;
     white-space: normal;
     width: auto;
@@ -8077,12 +8077,12 @@
     overflow: visible;
   }
 
-  [data-nac-runtime]:is(.session-name-tab-actions), [data-nac-runtime] .session-name-tab-actions {
+  [data-nac-runtime]:is(.chat-session-tab > .session-name-tab-actions), [data-nac-runtime] .chat-session-tab > .session-name-tab-actions {
     opacity: 1;
     pointer-events: auto;
   }
 
-  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+  [data-nac-runtime]:is(.chat-session-tab > .session-name-tab-trigger), [data-nac-runtime] .chat-session-tab > .session-name-tab-trigger {
     padding-right: 56px;
   }
 }
@@ -8114,7 +8114,7 @@
 }
 
 @media (hover: none) and (max-width: 767.98px) {
-  [data-nac-runtime]:is(.session-name-tab-trigger), [data-nac-runtime] .session-name-tab-trigger {
+  [data-nac-runtime]:is(.chat-session-tab > .session-name-tab-trigger), [data-nac-runtime] .chat-session-tab > .session-name-tab-trigger {
     padding-right: 64px;
   }
 }

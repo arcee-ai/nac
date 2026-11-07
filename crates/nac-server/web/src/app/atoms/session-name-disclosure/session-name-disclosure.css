@@ -4,7 +4,7 @@
 
 /* Pointer capability and viewport width are independent on tablets and hybrid devices. */
 @media (hover: none) {
-  .session-name-row-actions {
+  .group > .session-name-row-actions {
     clip-path: none;
     white-space: normal;
     width: auto;
@@ -15,12 +15,12 @@
     overflow: visible;
   }
 
-  .session-name-tab-actions {
+  .chat-session-tab > .session-name-tab-actions {
     opacity: 1;
     pointer-events: auto;
   }
 
-  .session-name-tab-trigger {
+  .chat-session-tab > .session-name-tab-trigger {
     padding-right: 56px;
   }
 }
@@ -50,7 +50,7 @@
 }
 
 @media (hover: none) and (max-width: 767.98px) {
-  .session-name-tab-trigger {
+  .chat-session-tab > .session-name-tab-trigger {
     padding-right: 64px;
   }
 }
