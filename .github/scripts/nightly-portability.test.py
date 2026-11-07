@@ -46,7 +46,47 @@ tests::persistence_load::owned_persistence_load_scenario
 '''.splitlines()
 
 
+def cancellation_fixture_pids(ready, log, deadline):
+    while time.monotonic() < deadline:
+        # The producer writes the complete PID receipt before flushing this
+        # marker. A PID file alone does not establish output to retain.
+        if ready.exists() and log.exists() and 'ready' in log.read_text():
+            pids = [int(pid) for pid in ready.read_text().split()]
+            if len(pids) != 2 or len(set(pids)) != 2 or min(pids) <= 0:
+                raise AssertionError('expected distinct positive root and child PIDs')
+            return pids
+        time.sleep(.02)
+    raise AssertionError('child never reached PID and output readiness barrier')
+
+
 class Controls(unittest.TestCase):
+    def test_cancellation_readiness_waits_for_actual_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            log.write_text('')
+            def release_producer(_):
+                self.assertEqual(log.read_text(), '')
+                log.write_text('ready\n')
+            with patch.object(time, 'sleep', side_effect=release_producer) as poll:
+                self.assertEqual(cancellation_fixture_pids(ready, log, time.monotonic() + 1), [101, 102])
+            poll.assert_called_once_with(.02)
+
+    def test_cancellation_readiness_rejects_missing_output_and_invalid_pids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            with patch.object(time, 'monotonic', side_effect=[0, 1]):
+                with patch.object(time, 'sleep'):
+                    with self.assertRaisesRegex(AssertionError, 'output readiness'):
+                        cancellation_fixture_pids(ready, log, 1)
+            log.write_text('ready\n')
+            for receipt in ('', '101', '101 101', '0 102', '101 102 103', 'invalid 102'):
+                with self.subTest(receipt=receipt):
+                    ready.write_text(receipt)
+                    with self.assertRaises((AssertionError, ValueError)):
+                        cancellation_fixture_pids(ready, log, time.monotonic() + 1)
+
     def test_signal_permission_failure_remains_closed_for_live_group(self):
         with patch.object(runner.os, 'killpg', side_effect=PermissionError('denied')):
             with patch.object(runner, 'live_group_members', return_value=[{'pid': 123, 'group': 123, 'state': 'T'}]):
@@ -133,17 +173,29 @@ class Controls(unittest.TestCase):
         runner.verify_inventory(historical, [c for c in inventory if c['name'] in RETAINED_IGNORED])
         heartbeat = ('application::heartbeat_scheduler::tests::'
                      'heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention')
-        case = next(c for c in inventory if c['name'] == heartbeat)
-        self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
-        self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
+        calendar = ('application::heartbeat_scheduler::tests::'
+                    'heartbeat_calendar_measure_1_10_100_with_two_owners_and_seven_day_downtime')
+        for name in (heartbeat, calendar):
+            case = next(c for c in inventory if c['name'] == name)
+            self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
+            self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
         owner = runner.ROOT / 'crates/nac-server/src/application/heartbeat_scheduler/tests.rs'
-        self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]',
-                      owner.read_text())
-        self.assertIn('for n in [1, 10, 100]', owner.read_text())
+        source = owner.read_text()
+        for name in (heartbeat, calendar):
+            self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]\n'
+                          + 'async fn ' + name.rsplit('::', 1)[1] + '()', source)
+        self.assertIn('#[tokio::test]\nasync fn heartbeat_calendar_scheduler_two_owners_bound_missed_range_and_admit_once()', source)
+        self.assertIn('for n in [1, 10, 100]', source)
         with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_new:
             runner.verify_inventory(historical, inventory)
         self.assertIn(heartbeat, str(missing_new.exception))
-        reviewed_names = [*RETAINED_IGNORED, heartbeat]
+        self.assertIn(calendar, str(missing_new.exception))
+        # Preserve the prior 21-name receipt as a counterexample too.
+        previous = '\n'.join(name + ': test' for name in [*RETAINED_IGNORED, heartbeat])
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_calendar:
+            runner.verify_inventory(previous, inventory)
+        self.assertIn(calendar, str(missing_calendar.exception))
+        reviewed_names = [*RETAINED_IGNORED, heartbeat, calendar]
         listing = '\n'.join(name + ': test' for name in reviewed_names)
         runner.verify_inventory(listing, inventory)
         # Every removal/rename, including the new manual case, still fails closed.
@@ -335,12 +387,11 @@ else:
             wrapper_log = wrapper_output.open('w')
             process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
                                        stdout=wrapper_log, stderr=subprocess.STDOUT)
+            cancel_sent = False
             try:
-                deadline = time.monotonic() + 10
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(.02)
-                self.assertTrue(ready.exists(), 'child never reached readiness barrier')
-                pids = [int(p) for p in ready.read_text().split()]
+                pids = cancellation_fixture_pids(ready, root / 'nightly-portability/build.log',
+                                                 time.monotonic() + 10)
+                cancel_sent = True
                 process.send_signal(signal.SIGINT)
                 code = process.wait(timeout=10)
                 wrapper_log.flush()
@@ -358,8 +409,15 @@ else:
                 self.assertIn('ready', (evidence / 'build.log').read_text())
             finally:
                 if process.poll() is None:
-                    process.kill()
-                    process.wait()
+                    if not cancel_sent:
+                        process.send_signal(signal.SIGINT)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                        wrapper_log.close()
+                        self.fail('cancellation fixture required forced supervisor cleanup')
                 wrapper_log.close()
 
 

@@ -8,7 +8,7 @@ import { type ReactNode } from "react";
  * phone opens on the list, the way its tab bar does, and a row pushes the
  * detail over it.
  */
-export declare function PanelSplit({ list, listToolbar, listHeader, listClassName, listTitle, title, titleAction, actions, children, }: {
+export declare function PanelSplit({ list, listToolbar, listHeader, listClassName, listTitle, title, titleAction, actions, phoneHeaderInFlow, phoneListToolbarInFlow, children, }: {
     list: ReactNode;
     /**
      * The list's own controls, staying put while it scrolls: a bar above it on a
@@ -32,6 +32,10 @@ export declare function PanelSplit({ list, listToolbar, listHeader, listClassNam
     titleAction?: ReactNode;
     /** Panel's own controls, trailing the narrow header. */
     actions?: ReactNode;
+    /** Selected phone child details can keep their controls above the scroll viewport. */
+    phoneHeaderInFlow?: boolean;
+    /** Files controls wrap below the phone list title without covering content. */
+    phoneListToolbarInFlow?: boolean;
     children: ReactNode;
 }): import("react").JSX.Element;
 /**

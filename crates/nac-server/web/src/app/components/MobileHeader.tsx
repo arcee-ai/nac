@@ -41,8 +41,8 @@ export function MobileHeader() {
 
   return (
     <>
-      <header className="fade-from-top fixed inset-x-0 top-0 z-10 flex items-center gap-2 p-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <header className="@container fade-from-top relative z-10 w-full min-w-0 shrink-0 p-2">
+        <div className="flex flex-wrap items-center gap-1 @min-[356px]:gap-2">
           <StickyButton
             content={ButtonContent.Icon}
             className="!size-11 shrink-0"
@@ -52,33 +52,35 @@ export function MobileHeader() {
           >
             <Logo markOnly height={24} className="icon" />
           </StickyButton>
+          <div className="order-last min-w-0 basis-full @min-[356px]:order-none @min-[356px]:flex-1 @min-[356px]:basis-0">
+            {sessionId ? (
+              <SessionHeading sessionId={sessionId} />
+            ) : (
+              <p className="header-md min-w-0 truncate text-basic-primary">All Projects</p>
+            )}
+          </div>
           {sessionId ? (
-            <SessionHeading sessionId={sessionId} />
-          ) : (
-            <p className="header-md min-w-0 flex-1 truncate text-basic-primary">All Projects</p>
-          )}
-        </div>
-        {sessionId ? (
+            <StickyButton
+              content={ButtonContent.Icon}
+              className="!size-11 shrink-0"
+              buttonClassName="!size-11"
+              aria-label="Open panel"
+              onClick={() => openSidePanelList()}
+            >
+              <Icon iconName={IconName.ShowSidePanel} />
+            </StickyButton>
+          ) : null}
           <StickyButton
             content={ButtonContent.Icon}
             className="!size-11 shrink-0"
             buttonClassName="!size-11"
-            aria-label="Open panel"
-            onClick={() => openSidePanelList()}
+            aria-label="Open the menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
           >
-            <Icon iconName={IconName.ShowSidePanel} />
+            <Icon iconName={IconName.MenuVertical} />
           </StickyButton>
-        ) : null}
-        <StickyButton
-          content={ButtonContent.Icon}
-          className="!size-11 shrink-0"
-          buttonClassName="!size-11"
-          aria-label="Open the menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen(true)}
-        >
-          <Icon iconName={IconName.MenuVertical} />
-        </StickyButton>
+        </div>
       </header>
       <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
     </>
@@ -120,8 +122,8 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
       name={sessionTitle(entry?.summary)}
       running={running}
       className={cn(
-        "text-sm leading-5 font-medium min-w-0 flex-1 truncate text-left",
-        "text-btn-secondary-pressed",
+        "text-sm leading-5 font-medium truncate text-left text-btn-secondary-pressed",
+        lineage ? "min-h-11 min-w-11 flex-1 basis-16" : "min-w-0 flex-1",
       )}
     />
   );
@@ -129,12 +131,12 @@ function SessionHeading({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       {lineage ? (
-        <div className="flex w-full items-center gap-1">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-1">
           {parentDisclosure.hint(
             <Button
               variant={ButtonVariant.Tertiary}
               size={ButtonSize.Medium}
-              className="min-w-0 max-w-16 shrink-0"
+              className="!min-h-11 !min-w-11 max-w-16 shrink-0"
               aria-label={`${parentTitle}, parent chat`}
               onClick={() => navigate(routes.session(lineage.parent_session_id, "delegated"))}
             >

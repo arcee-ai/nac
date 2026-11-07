@@ -78,10 +78,12 @@ export function ArgsEditor({
   return (
     <div className="flex flex-col gap-2">
       <FieldLabel label={label} />
-      <p className="label-small text-basic-tertiary">
+      <p className="text-small !leading-[22px] text-basic-secondary">
         Each field is one argument. Values are passed in this order.
       </p>
-      {rows.length === 0 ? <p className="label-small text-basic-tertiary">No arguments.</p> : null}
+      {rows.length === 0 ? (
+        <p className="text-small !leading-[22px] text-basic-secondary">No arguments.</p>
+      ) : null}
       {rows.map((row, index) => (
         <div key={row.id} className="flex items-center gap-2">
           <Input
@@ -118,11 +120,11 @@ export function ArgsEditor({
         <TabButton
           type="button"
           size={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
-          className="!border !border-tertiary !border-dashed"
+          className="!border !border-tertiary !border-dashed max-md:min-w-0 max-md:max-w-full max-md:!h-auto max-md:min-h-11 max-md:!whitespace-normal max-md:!py-3"
           onClick={add}
         >
           <Icon iconName={IconName.Add} />
-          Add argument
+          <span className="min-w-0 whitespace-normal break-words">Add argument</span>
         </TabButton>
       </div>
     </div>

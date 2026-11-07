@@ -61,6 +61,7 @@ function Row({
     <TabButton
       type="button"
       size={isMobile ? TabButtonSize.Large : TabButtonSize.Small}
+      className="!h-auto !min-h-9 !py-2 max-md:!min-h-11"
       active={active}
       disabled={disabled}
       title={title}
@@ -75,7 +76,7 @@ function Row({
 /** A line of panel status, with a spinner while something is in flight. */
 function Status({ busy, children }: { busy?: boolean; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
+    <div className="flex items-center gap-2 p-2 text-xs leading-4 text-basic-tertiary">
       {busy ? <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} /> : null}
       {children}
     </div>
@@ -251,7 +252,7 @@ export function BranchPicker({
       ) : (
         <button
           type="button"
-          className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost"
+          className="flex items-center gap-[6px] min-w-0 pl-1 pr-3 py-1 rounded-[4px] btn-ghost max-md:min-h-11 max-md:min-w-11"
           aria-expanded={open}
           aria-label={`Branch: ${branch}`}
           onClick={toggle}

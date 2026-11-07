@@ -295,3 +295,60 @@ it.each(["Select preset threshold 222", "Select preset with compaction disabled"
     }
   },
 );
+
+vi.mock("@/app/components/modals/SshConnectionBox", () => ({
+  SshConnectionBox: ({
+    onConnectionChange,
+  }: {
+    onConnectionChange: (
+      target: { ssh_host: string; ssh_port: null; ssh_identity_file: null },
+      home: string,
+    ) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onConnectionChange(
+          { ssh_host: "literal-build-alias", ssh_port: null, ssh_identity_file: null },
+          "/home/fixture/workspace",
+        )
+      }
+    >
+      Connect fixture SSH
+    </button>
+  ),
+}));
+
+it("launches once through the connected SSH project without restating location or adding a sandbox", async () => {
+  const { client, view } = renderModal();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "SSH" }));
+    expect(api.createProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Connect fixture SSH" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    const launch = screen.getByRole("button", { name: "Create Project" });
+    fireEvent.click(launch);
+    fireEvent.click(launch);
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledTimes(1));
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.createProject).mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/home/fixture/workspace",
+      ssh_host: "literal-build-alias",
+      ssh_port: null,
+      ssh_identity_file: null,
+    });
+    const request = vi.mocked(api.createSession).mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      project_id: "created-project",
+      behavior: "orchestrator",
+      model: "gpt-5.2",
+      orchestrator_compaction_threshold: 222,
+    });
+    expect(request).not.toHaveProperty("sandbox");
+    expect(request).not.toHaveProperty("cwd");
+    expect(request).not.toHaveProperty("ssh_host");
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

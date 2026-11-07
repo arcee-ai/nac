@@ -524,16 +524,19 @@ impl TerminalManager {
             if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
                 return Err(anyhow!("terminal command cancelled"));
             }
-            let alive = {
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let (alive, output_complete) = {
                 let mut sessions = self.sessions.lock().await;
                 let session = sessions
                     .get_mut(name)
                     .ok_or_else(|| anyhow!("terminal session vanished"))?;
                 session.refresh_status();
-                session.is_alive()
+                (session.is_alive(), session.output_complete())
             };
             let end = self.output_registry.stats(output_id)?.combined_bytes;
-            if !alive || Instant::now() >= deadline {
+            if (!alive && output_complete) || Instant::now() >= deadline {
                 return Ok(());
             }
             if end > start_cursor {
@@ -549,8 +552,11 @@ impl TerminalManager {
                         std::future::pending::<()>().await;
                     }
                 } => return Err(anyhow!("terminal command cancelled")),
-                _ = notify.notified() => {}
-                _ = sleep(remaining) => return Ok(()),
+                _ = notified => {}
+                // Model PTYs retain a slave until confirmed root exit. With
+                // no new output notification, observe exit within the same
+                // original yield deadline and let the collector finish.
+                _ = sleep(remaining.min(PROCESS_POLL_INTERVAL)) => {},
             }
         }
     }
