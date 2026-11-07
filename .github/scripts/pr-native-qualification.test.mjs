@@ -203,3 +203,17 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
   reverseNativeApp(native);
   assert.deepEqual(Object.keys(native.jobs), ['native']);
 });
+
+test("startup catalog binds the delivered product and four-file query supplier", () => {
+  const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
+  assert.equal(startup.source_sha, "ff8c9609abf7bf7ddabe983c96ff31cf80362956");
+  assert.equal(startup.test_source_sha, "04c073bbbead6f4077da0199bacd542e45cf4e57");
+  assert.deepEqual(startup.test_files, {
+    "README.md": "b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24",
+    "StartupJourneys.swift": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1",
+    "contract.py": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
+    "test_contract.py": "47f75f1067d0741925c4fa1d7130620194bbbb987a7f19e979238aed71868187",
+  });
+  assert.equal(startup.protocol_source_sha, "25046f450110d1b795d529d046d2c1deee880877");
+  assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
+});
