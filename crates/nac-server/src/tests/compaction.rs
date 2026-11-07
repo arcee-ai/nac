@@ -156,6 +156,257 @@ impl BlockedTwoRequestModelServer {
     }
 }
 
+// A private runtime lets synchronous unwind settle the ORIGINAL client handle.
+// Aborting only the HTTP waiter would leave the admitted core compaction alive.
+struct CompactionCase {
+    runtime: Option<tokio::runtime::Runtime>,
+    endpoint: ControlledCompactionEndpoint,
+    compact: Option<tokio::task::JoinHandle<Result<CompactSessionResponse, CompactSessionError>>>,
+}
+
+impl CompactionCase {
+    fn start(root: &std::path::Path) -> (Self, SessionManager) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let endpoint = ControlledCompactionEndpoint::start(
+            "400 Bad Request",
+            r#"{"error":{"message":"controlled compaction failure"}}"#.to_string(),
+        );
+        point_session_at_base_url(root, "session", &endpoint.base_url);
+        let manager = {
+            let _entered = runtime.enter();
+            test_manager(root)
+        };
+        let compactor = manager.clone();
+        let compact = runtime.spawn(async move { compactor.compact_session("session").await });
+        (
+            Self {
+                runtime: Some(runtime),
+                endpoint,
+                compact: Some(compact),
+            },
+            manager,
+        )
+    }
+
+    fn run<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.runtime.as_ref().unwrap().block_on(future)
+    }
+
+    fn finish_client(&mut self) -> Result<CompactSessionResponse, CompactSessionError> {
+        let task = self.compact.as_mut().unwrap();
+        let result =
+            self.runtime.as_ref().unwrap().block_on(async {
+                tokio::time::timeout(Duration::from_secs(120), &mut *task).await
+            });
+        // Keep the original handle on timeout: Drop aborts AND joins it before
+        // shutting down the runtime (including the admitted model task).
+        let result = result.expect("failed model request should resolve compaction");
+        self.compact.take();
+        result.unwrap()
+    }
+}
+
+impl Drop for CompactionCase {
+    fn drop(&mut self) {
+        self.endpoint.release();
+        let mut cleanup_error = None;
+        if let Some(mut task) = self.compact.take() {
+            // Keep driving settlement after an assertion unwinds. Dropping the
+            // runtime immediately can discard the core task's cleanup future.
+            cleanup_error = self.run(async {
+                match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(error)) => Some(format!("original client failed: {error}")),
+                    Err(_) => {
+                        task.abort();
+                        let joined = task.await;
+                        Some(format!(
+                            "original client cleanup timed out; abort joined: {joined:?}"
+                        ))
+                    }
+                }
+            });
+        }
+        // Runtime shutdown also cancels/joins any remaining core model tasks.
+        // The endpoint is still bound throughout both original async owners.
+        drop(self.runtime.take());
+        if let Some(error) = cleanup_error {
+            if std::thread::panicking() {
+                eprintln!("compaction cleanup also failed: {error}");
+            } else {
+                panic!("compaction cleanup failed: {error}");
+            }
+        }
+    }
+}
+
+// One test-owned endpoint: the original listener stays bound after the worker
+// responds, until its caller has observed compaction's terminal result.
+struct ControlledCompactionEndpoint {
+    base_url: String,
+    listener: Option<std::net::TcpListener>,
+    state: Arc<(Mutex<CompactionEndpointState>, Condvar)>,
+    worker: Option<std::thread::JoinHandle<Option<String>>>,
+}
+
+#[derive(Default)]
+struct CompactionEndpointState {
+    request_seen: bool,
+    reading: bool,
+    release: bool,
+    stop: bool,
+    socket: Option<std::net::TcpStream>,
+}
+
+impl ControlledCompactionEndpoint {
+    fn start(status: &'static str, body: String) -> Self {
+        Self::from_listener(
+            std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap(),
+            status,
+            body,
+        )
+    }
+
+    fn from_listener(listener: std::net::TcpListener, status: &'static str, body: String) -> Self {
+        listener.set_nonblocking(true).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let acceptor = listener.try_clone().unwrap();
+        let state = Arc::new((
+            Mutex::new(CompactionEndpointState::default()),
+            Condvar::new(),
+        ));
+        let worker_state = Arc::clone(&state);
+        let worker = std::thread::spawn(move || {
+            let (lock, changed) = &*worker_state;
+            let mut stream = loop {
+                if lock.lock().unwrap().stop {
+                    return None;
+                }
+                match acceptor.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        let guard = lock.lock().unwrap();
+                        if guard.stop {
+                            return None;
+                        }
+                        drop(
+                            changed
+                                .wait_timeout(guard, Duration::from_millis(10))
+                                .unwrap(),
+                        );
+                    }
+                    Err(error) => panic!("accept controlled compaction request: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            {
+                let mut state = lock.lock().unwrap();
+                if state.stop {
+                    return None;
+                }
+                // Shutdown of this clone interrupts a blocked request read/write
+                // on assertion unwind; no owner lock is held during socket I/O.
+                state.socket = Some(stream.try_clone().unwrap());
+            }
+            // Hold the first request unread, matching the old hanging helper's
+            // socket lifetime in the released-address counterexample.
+            assert!(stream.peek(&mut [0_u8; 1]).unwrap() > 0);
+            let mut state = lock.lock().unwrap();
+            state.request_seen = true;
+            changed.notify_all();
+            while !state.release && !state.stop {
+                state = changed.wait(state).unwrap();
+            }
+            if state.stop {
+                return None;
+            }
+            state.reading = true;
+            changed.notify_all();
+            drop(state);
+            let request = read_model_request(&mut stream);
+            write_model_response(&mut stream, status, &body);
+            drop(lock.lock().unwrap().socket.take());
+            Some(request)
+        });
+        Self {
+            base_url,
+            listener: Some(listener),
+            state,
+            worker: Some(worker),
+        }
+    }
+
+    fn address(&self) -> std::net::SocketAddr {
+        self.listener.as_ref().unwrap().local_addr().unwrap()
+    }
+
+    async fn wait_for_request(&self) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !self.state.0.lock().unwrap().request_seen {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("controlled compaction request was not observed");
+    }
+
+    fn release(&self) {
+        self.state.0.lock().unwrap().release = true;
+        self.state.1.notify_all();
+    }
+
+    fn stop_join(&mut self) -> std::thread::Result<Option<String>> {
+        let shutdown_error = {
+            let mut state = self
+                .state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.stop = true;
+            state.socket.take().and_then(|socket| {
+                socket
+                    .shutdown(std::net::Shutdown::Both)
+                    .err()
+                    .filter(|error| error.kind() != std::io::ErrorKind::NotConnected)
+            })
+        };
+        self.state.1.notify_all();
+        let result = self.worker.take().map_or(Ok(None), |worker| worker.join());
+        // The worker has relinquished its cloned listener before this original
+        // reservation is dropped, including on the early-stop counterexample.
+        drop(self.listener.take());
+        if let Some(error) = shutdown_error {
+            if std::thread::panicking() {
+                eprintln!("controlled compaction cleanup: socket shutdown also failed: {error}");
+            } else {
+                panic!("controlled compaction cleanup: socket shutdown failed: {error}");
+            }
+        }
+        result
+    }
+}
+
+impl Drop for ControlledCompactionEndpoint {
+    fn drop(&mut self) {
+        if let Err(error) = self.stop_join() {
+            if std::thread::panicking() {
+                eprintln!("controlled compaction cleanup: worker also panicked: {error:?}");
+            } else {
+                panic!("controlled compaction cleanup: worker panicked: {error:?}");
+            }
+        }
+    }
+}
+
 fn compaction_model_response(summary: &str) -> String {
     serde_json::json!({
         "status": "completed",
@@ -382,8 +633,8 @@ async fn active_run_conflicts_with_compact_route() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-#[tokio::test]
-async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
+#[test]
+fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("compaction_coordination");
     let nac_home = root.join("nac-home");
@@ -394,95 +645,257 @@ async fn active_compaction_blocks_route_patch_delete_and_independent_manager() {
         "2026-01-01 00:00:00.000000000",
         compactable_server_messages(),
     );
-    let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
-    let manager = test_manager(&root);
-    let independent = test_manager(&root);
-    let service = manager.attach_session("session").await.unwrap();
-    let compact_manager = manager.clone();
-    let compact = tokio::spawn(async move { compact_manager.compact_session("session").await });
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while service.active_compaction().is_none() {
-            tokio::task::yield_now().await;
+    let (mut case, manager) = CompactionCase::start(&root);
+    let independent = case.run(async { test_manager(&root) });
+    let service = case.run(manager.attach_session("session")).unwrap();
+    case.run(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while service.active_compaction().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("compaction should be admitted synchronously");
+        case.endpoint.wait_for_request().await;
+
+        let response = post_compact(router(manager.clone()), "session", None).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(response).await,
+            serde_json::json!({"error": "session is busy"})
+        );
+        assert_eq!(
+            independent.compact_session("session").await,
+            Err(CompactSessionError::Busy)
+        );
+        let response = post_compact(router(independent.clone()), "session", None).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response_json(response).await,
+            serde_json::json!({"error": "session is busy"})
+        );
+        for error in [
+            independent
+                .submit_prompt(
+                    "session",
+                    SubmitPromptRequest {
+                        prompt: "must not start".to_string(),
+                    },
+                    nac_core::store::InputOrigin::Automation,
+                )
+                .await
+                .unwrap_err(),
+            independent.delete_session("session").await.unwrap_err(),
+        ] {
+            assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
         }
-    })
-    .await
-    .expect("compaction should be admitted synchronously");
-
-    let response = post_compact(router(manager.clone()), "session", None).await;
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert_eq!(
-        response_json(response).await,
-        serde_json::json!({"error": "session is busy"})
-    );
-    assert_eq!(
-        independent.compact_session("session").await,
-        Err(CompactSessionError::Busy)
-    );
-    let response = post_compact(router(independent.clone()), "session", None).await;
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert_eq!(
-        response_json(response).await,
-        serde_json::json!({"error": "session is busy"})
-    );
-    for error in [
         independent
-            .submit_prompt(
+            .update_session_config("session", UpdateConfigRequest::default())
+            .await
+            .expect("empty PATCH is a universal no-op even during compaction");
+
+        let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        let patch_error = tokio::time::timeout(
+            Duration::from_secs(1),
+            manager.update_session_config(
                 "session",
-                SubmitPromptRequest {
-                    prompt: "must not start".to_string(),
+                UpdateConfigRequest {
+                    model: RequestField::Value("must-not-commit".to_string()),
+                    ..UpdateConfigRequest::default()
                 },
-                nac_core::store::InputOrigin::Automation,
-            )
-            .await
-            .unwrap_err(),
-        independent.delete_session("session").await.unwrap_err(),
-    ] {
-        assert_eq!(ApiError::from(error).status, StatusCode::CONFLICT);
-    }
-    independent
-        .update_session_config("session", UpdateConfigRequest::default())
+            ),
+        )
         .await
-        .expect("empty PATCH is a universal no-op even during compaction");
+        .expect("PATCH must not wait for model I/O")
+        .unwrap_err();
+        assert!(patch_error.to_string().contains("active operation"));
+        assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
 
-    let before = sessions::load_session(&root.join("store.db"), "session").unwrap();
-    let patch_error = tokio::time::timeout(
-        Duration::from_secs(1),
-        manager.update_session_config(
-            "session",
-            UpdateConfigRequest {
-                model: RequestField::Value("must-not-commit".to_string()),
-                ..UpdateConfigRequest::default()
-            },
-        ),
-    )
-    .await
-    .expect("PATCH must not wait for model I/O")
-    .unwrap_err();
-    assert!(patch_error.to_string().contains("active operation"));
-    assert_eq!(ApiError::from(patch_error).status, StatusCode::CONFLICT);
-
-    let delete_error =
-        tokio::time::timeout(Duration::from_secs(1), manager.delete_session("session"))
-            .await
-            .expect("delete must not wait for or abort compaction")
-            .unwrap_err();
-    assert!(delete_error.to_string().contains("manual compaction"));
-    assert_eq!(ApiError::from(delete_error).status, StatusCode::CONFLICT);
-    let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
-    assert_eq!(after.model, before.model);
-    assert_eq!(after.config_version, before.config_version);
-    assert!(service.active_compaction().is_some());
-
-    endpoint.abort();
-    // The failed model request is retried up to 10 times with jittered
-    // 200ms*2^n backoff capped at 30s, so natural exhaustion can take ~90s.
-    let result = tokio::time::timeout(Duration::from_secs(120), compact)
-        .await
-        .expect("failed model request should resolve compaction")
-        .unwrap();
-    assert_eq!(result, Err(CompactSessionError::Failed));
+        let delete_error =
+            tokio::time::timeout(Duration::from_secs(1), manager.delete_session("session"))
+                .await
+                .expect("delete must not wait for or abort compaction")
+                .unwrap_err();
+        assert!(delete_error.to_string().contains("manual compaction"));
+        assert_eq!(ApiError::from(delete_error).status, StatusCode::CONFLICT);
+        let after = sessions::load_session(&root.join("store.db"), "session").unwrap();
+        assert_eq!(after.model, before.model);
+        assert_eq!(after.config_version, before.config_version);
+        assert!(service.active_compaction().is_some());
+    });
+    // A terminal model error tests failed settlement without releasing the URL
+    // to another nextest process while the production client still retries.
+    case.endpoint.release();
+    assert_eq!(case.finish_client(), Err(CompactSessionError::Failed));
     assert!(!service.has_active_operation());
-    let _ = std::fs::remove_dir_all(root);
+    drop(case);
+    drop(service);
+    drop(independent);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn seed_compaction_case(name: &str) -> PathBuf {
+    let root = temp_root(name);
+    seed_session_with_messages(
+        &root,
+        "session",
+        "2026-01-01 00:00:00.000000000",
+        compactable_server_messages(),
+    );
+    root
+}
+
+#[test]
+fn released_compaction_endpoint_can_accept_a_foreign_summary() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = seed_compaction_case("compaction_released_endpoint");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let (mut case, manager) = CompactionCase::start(&root);
+    case.run(case.endpoint.wait_for_request());
+    let address = case.endpoint.address();
+    // Deliberately violate ownership, matching the OLD test: release the held,
+    // unread request and exact address before the production client returns.
+    assert!(case.endpoint.stop_join().unwrap().is_none());
+    case.endpoint = ControlledCompactionEndpoint::from_listener(
+        std::net::TcpListener::bind(address).expect("rebind exact released address"),
+        "200 OK",
+        compaction_model_response("foreign fixture summary"),
+    );
+    case.run(case.endpoint.wait_for_request());
+    case.endpoint.release();
+    assert!(matches!(
+        case.finish_client(),
+        Ok(CompactSessionResponse::Compacted { .. })
+    ));
+    let request = case.endpoint.stop_join().unwrap().unwrap();
+    assert!(request.starts_with("POST /v1/responses "));
+    assert!(request.contains("old request"));
+    eprintln!(
+        "old-policy takeover: address={address}, foreign_summary_requests=1, result=Compacted"
+    );
+    case.run(async {
+        manager.quiesce_persistence_callers().await;
+        manager.drain_persistence().await.unwrap();
+    });
+    drop(case);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn controlled_compaction_endpoint_excludes_takeover_until_failure_returns() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = seed_compaction_case("compaction_owned_endpoint");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let (mut case, manager) = CompactionCase::start(&root);
+    let address = case.endpoint.address();
+    case.run(case.endpoint.wait_for_request());
+    assert_eq!(
+        std::net::TcpListener::bind(address).unwrap_err().kind(),
+        std::io::ErrorKind::AddrInUse
+    );
+    case.endpoint.release();
+    assert_eq!(case.finish_client(), Err(CompactSessionError::Failed));
+    assert_eq!(
+        std::net::TcpListener::bind(address).unwrap_err().kind(),
+        std::io::ErrorKind::AddrInUse
+    );
+    let request = case.endpoint.stop_join().unwrap().unwrap();
+    assert!(request.starts_with("POST /v1/responses "));
+    eprintln!("owned-policy: address={address}, terminal_error_requests=1, result=Failed, takeover=excluded");
+    drop(std::net::TcpListener::bind(address).expect("release after original client returned"));
+    case.run(async {
+        manager.quiesce_persistence_callers().await;
+        manager.drain_persistence().await.unwrap();
+    });
+    drop(case);
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn controlled_compaction_unwind_joins_original_client_before_releasing_address() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for held in [false, true] {
+        let root = seed_compaction_case("compaction_unwind");
+        let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+        let (case, manager) = CompactionCase::start(&root);
+        let address = case.endpoint.address();
+        let state = Arc::clone(&case.endpoint.state);
+        let original_client = case.compact.as_ref().unwrap().abort_handle();
+        let service = held.then(|| case.run(manager.attach_session("session")).unwrap());
+        let started = std::time::Instant::now();
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            if held {
+                case.run(case.endpoint.wait_for_request());
+            } else {
+                assert!(!case.endpoint.state.0.lock().unwrap().request_seen);
+            }
+            let _owned = case;
+            panic!("primary coordination assertion");
+        }))
+        .unwrap_err();
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"primary coordination assertion")
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            original_client.is_finished(),
+            "original client must be joined"
+        );
+        assert!(state.0.lock().unwrap().stop);
+        if let Some(service) = service {
+            assert!(
+                !service.has_active_operation(),
+                "admitted model task must retire"
+            );
+        }
+        drop(std::net::TcpListener::bind(address).expect("unwind released joined owners"));
+        drop(manager);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn controlled_compaction_stop_interrupts_partial_request_io() {
+    for partial in [
+        b"POST /v1/responses HTTP/1.1\r\n".as_slice(),
+        b"POST /v1/responses HTTP/1.1\r\nContent-Length: 20\r\n\r\n{".as_slice(),
+    ] {
+        let mut endpoint = ControlledCompactionEndpoint::start("400 Bad Request", "{}".to_string());
+        let address = endpoint.address();
+        let mut socket = std::net::TcpStream::connect(address).unwrap();
+        socket.write_all(partial).unwrap();
+        endpoint.release();
+        let (lock, changed) = &*endpoint.state;
+        let (state, wait) = changed
+            .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(2), |s| !s.reading)
+            .unwrap();
+        assert!(
+            !wait.timed_out(),
+            "worker must enter original partial request reader"
+        );
+        drop(state);
+        let started = std::time::Instant::now();
+        // Existing request reader reports interrupted EOF as a panic. Observe
+        // that original worker result explicitly, rather than discarding it.
+        let error = endpoint
+            .stop_join()
+            .expect_err("partial request must remain an I/O failure");
+        let primary = error.downcast_ref::<&str>().copied();
+        assert!(
+            matches!(
+                primary,
+                Some("model request ended before headers" | "model request body ended early")
+            ),
+            "unexpected worker failure: {error:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(socket);
+        drop(std::net::TcpListener::bind(address).expect("partial I/O worker joined"));
+    }
 }
 
 #[tokio::test]
