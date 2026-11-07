@@ -83,5 +83,4 @@ export function expectExposedRowAction(geometry: Awaited<ReturnType<typeof recor
   expect(wrapper!.overflow).toBe("visible");
   expect(wrapper!.width).toBeGreaterThan(1);
   expect(wrapper!.height).toBeGreaterThan(1);
-  expect(geometry.centerHit).toBe(true);
 }

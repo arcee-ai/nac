@@ -336,10 +336,14 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await recordSessionAction(pin, info, `${label}-pin-before-hover`);
   if (phone) {
     await pin.tap({ timeout: 5000 });
+    // At effective 195px, an ordinary tap may use the visible part of a
+    // partly clipped button. Preserve that input oracle and report its center.
     expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-tap`));
   } else {
     await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
-    expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-hover`));
+    const geometry = await recordSessionAction(pin, info, `${label}-pin-after-hover`);
+    expectExposedRowAction(geometry);
+    expect(geometry.centerHit).toBe(true);
     await capture(page, info, `${label}-packed-pin-target`);
     await pin.click({ timeout: 5000 });
   }
@@ -627,7 +631,9 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     const pin = right.getByRole("button", { name: /^Pin / }).first();
     await recordSessionAction(pin, info, "lifetime-pin-before-hover");
     await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
-    expectExposedRowAction(await recordSessionAction(pin, info, "lifetime-pin-after-hover"));
+    const geometry = await recordSessionAction(pin, info, "lifetime-pin-after-hover");
+    expectExposedRowAction(geometry);
+    expect(geometry.centerHit).toBe(true);
     await capture(page, info, "lifetime-packed-pin-target");
     await pin.click();
     const notices = right.getByRole("region", { name: "Notifications", exact: true });
