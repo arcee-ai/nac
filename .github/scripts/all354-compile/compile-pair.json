@@ -1,35 +1,11 @@
 {
-  "version": 1,
-  "H": "0736e5a338acff3a4571135bfee46ae027f3337c",
-  "T": "7013a96f2f2fdf3046c6976e018c9bf988eebfe0",
   "host_image": "20261102.0473.1",
   "rust_version": "1.98.0",
   "node_version": "v24.22.1",
-  "h_writer_sha256": "ecccb16eabcc823631bf07bb1252d956133673e410eb82ac9c6deb9283ec2879",
-  "h_smoke_sources": [
-    "main.swift",
-    "PreviewApp.swift",
-    "PreviewEngine.swift",
-    "EngineProtocol.swift",
-    "PreviewProfile.swift",
-    "FixtureProvider.swift",
-    "FixtureBootstrap.swift",
-    "PreviewSmoke.swift",
-    "CITerminal.swift"
-  ],
-  "h_smoke_flags": [
-    "-swift-version",
-    "5",
-    "-target",
-    "arm64-apple-macosx14.0",
-    "-O",
-    "-D",
-    "PREVIEW_SMOKE",
-    "-framework",
-    "AppKit",
-    "-framework",
-    "WebKit",
-    "-framework",
-    "Network"
-  ]
+  "version": 2,
+  "scope": "current-Q-actor-SDK-only-NOT-RUNTIME",
+  "H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
+  "T": "ff8c9609abf7bf7ddabe983c96ff31cf80362956",
+  "Q": "04c073bbbead6f4077da0199bacd542e45cf4e57",
+  "q_swift_sha256": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1"
 }

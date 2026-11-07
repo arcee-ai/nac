@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One frozen H/T compile control. No app, XCTest or input execution."""
+"""PRIVATE NEVERMERGE: one frozen current-Q SDK actor build; no app/test/input execution."""
 import hashlib
 import json
 import math
@@ -62,7 +62,7 @@ def bootstrap_minutes(environment, cap, *, now=None):
 
 
 def bootstrap_gate(phase):
-    caps = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-T': 2}
+    caps = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-T': 2, 'checkout-Q': 2}
     require(phase in caps, 'fixed bootstrap phase')
     evidence = Path(os.environ['RUNNER_TEMP']) / 'nac-compile-gate'
     require(evidence.is_dir() and evidence.resolve() == evidence, 'existing canonical gate evidence')
@@ -92,31 +92,29 @@ def main():
     evidence.mkdir(mode=0o700)
     report = dict(status='FAIL', compile_only=True, native_acceptance=False,
                   app_started=False, tests_executed=False, input_actor_started=False,
-                  allocation_consumed=False, started_epoch=time.time(), phases=[], engines={})
+                  allocation_consumed=False, started_epoch=time.time(), phases=[], actor_sdk_only=True, package_acceptance=False)
     budget = None
     try:
         pair_path = Path(__file__).with_name('compile-pair.json')
         pair = json.loads(pair_path.read_text())
         report.update(pair=pair, pair_sha256=digest(pair_path), wrapper_sha256=digest(__file__))
-        require(all(re.fullmatch('[0-9a-f]{40}', str(pair.get(key))) for key in ('H', 'T')),
+        require(all(re.fullmatch('[0-9a-f]{40}', str(pair.get(key))) for key in ('H', 'T', 'Q')),
                 'T is UNBOUND: exact Native handoff and Root pair admission required')
         start, work, cleanup, hard = clock_inputs(os.environ)
         report['original_clock'] = dict(start=start, work=work, cleanup=cleanup, hard=hard)
-        H, T = [Path(os.environ[key + '_ROOT']) for key in ('H', 'T')]
-        require(all(p.is_absolute() and p.resolve() == p for p in (H, T)), 'canonical sources')
+        H, T, Q = [Path(os.environ[key + '_ROOT']) for key in ('H', 'T', 'Q')]
+        require(all(p.is_absolute() and p.resolve() == p for p in (H, T, Q)), 'canonical sources')
         require(not any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
-                        for a, b in ((H, T), (H, output), (T, output))), 'disjoint sources/output')
+                        for a, b in ((H, T), (H, Q), (T, Q), (H, output), (T, output), (Q, output))), 'disjoint sources/output')
         require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Apple Silicon macOS')
         require(os.environ.get('GITHUB_RUN_ATTEMPT') == '1'
                 and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
-                and os.environ.get('GITHUB_REF') == 'refs/heads/codex/all-354-xcode-environment-20261107',
+                and os.environ.get('GITHUB_REF') == 'refs/heads/codex/native-startup-sdk-only-20261107',
                 'first explicit isolated diagnostic dispatch only')
         sys.path.insert(0, str(H / 'desktop/macos'))
         import ci
         from ci_paths_budget import Bound, using
-        from ci_paths_protocol import PRODUCT, HELPER
         from ci_qualifications import require_checkout
-        from ci_paths import verify_build
         from ci_xctest_project import materialize_project
         from ci_xctest import runner_environment, require_generated_runner
         from ci_support import qualify_toolchain
@@ -175,11 +173,11 @@ def main():
                 save()
 
         with using(budget.work):
-            require(pair['T'] == PRODUCT, 'T differs from maintained PRODUCT; explicit reviewed H binding required')
+            require(pair['scope'] == 'current-Q-actor-SDK-only-NOT-RUNTIME', 'fixed diagnostic scope')
             require_checkout(H, pair['H'])
             require_checkout(T, pair['T'])
-            require(digest(H / 'desktop/macos/preview.sh') == pair['h_writer_sha256'], 'H writer changed')
-            require(digest(T / 'desktop/macos/NativePathJourney.swift') == HELPER, 'actual helper changed')
+            require_checkout(Q, pair['Q'])
+
             expected = json.loads((H / 'desktop/macos/ci-toolchain.json').read_text())
             actual = dict(developer_directory=os.environ.get('DEVELOPER_DIR'),
                           xcode=command(['xcodebuild', '-version']),
@@ -209,71 +207,33 @@ def main():
             base.update(CARGO_BUILD_JOBS='2', CARGO_PROFILE_DEV_DEBUG='0',
                         CARGO_TARGET_DIR=str(output / 'shared-cargo'), GIT_OPTIONAL_LOCKS='0',
                         RUSTUP_AUTO_INSTALL='0', RUSTUP_TOOLCHAIN=pair['rust_version'])
-            engines = output / 'engines'
-            engines.mkdir(mode=0o700)
-            # All target mutations are sequential. Cargo retains its own fingerprint decisions.
-            for label, root in (('H', H), ('T', T)):
-                sha = pair[label]
-                env = dict(base, NAC_SOURCE_REVISION=sha, NAC_BUILD_TRACK='dev', NAC_BUILD_ID='dev-' + sha)
-                run(label + '-setup', ['make', 'setup'], root, env, 600)
-                require_checkout(root, sha)
-                run(label + '-engine', ['cargo', 'build', '--locked', '-p', 'nac-server', '--bin', 'nac-web'],
-                    root, env, 1200)
-                copied = engines / (label + '-nac-web')
-                shutil.copy2(output / 'shared-cargo/debug/nac-web', copied)
-                copied.chmod(0o500)
-                identity = json.loads(command([str(copied), '__desktop-identity'], cwd=root))
-                require(identity.get('source_revision') == sha and identity.get('track') == 'dev'
-                        and identity.get('build_id') == 'dev-' + sha, label + ' copied engine identity differs')
-                report['engines'][label] = dict(path=str(copied), sha256=digest(copied), identity=identity)
-                save()
-                modes = ('build',) if label == 'H' else ('app-build', 'smoke-build')
-                app_output = output / (label + '-apps')
-                env.update(NAC_MAC_ENGINE=str(copied), NAC_MAC_SKIP_ENGINE_BUILD='1', NAC_MAC_OUTPUT=str(app_output))
-                for mode in modes:
-                    run(label + '-' + mode, ['bash', 'desktop/macos/preview.sh', mode], root, env, 300)
-                for previous, engine in report['engines'].items():
-                    require(digest(engine['path']) == engine['sha256'], previous + ' copied engine was mutated')
-
-            h_native = output / 'H-apps/NAC Development Preview.app'
-            h_sources = [H / 'desktop/macos' / p for p in pair['h_smoke_sources']]
-            h_smoke = output / 'H-smoke-link'
-            h_smoke.mkdir()
-            run('H-smoke-link', ['xcrun', 'swiftc', *pair['h_smoke_flags'],
-                                *[str(p) for p in h_sources], '-o', str(h_smoke / 'NACPreview')], H, base, 300)
-            report['H_roles'] = dict(writer_sha256=digest(H / 'desktop/macos/preview.sh'),
-                smoke_flags=pair['h_smoke_flags'], smoke_sources={str(p): digest(p) for p in h_sources},
-                smoke_binary_sha256=digest(h_smoke / 'NACPreview'),
-                ordinary_flags=pair['h_smoke_flags'][:5] + pair['h_smoke_flags'][7:],
-                ordinary_sources={str(p): digest(p) for p in h_sources[:7]},
-                ordinary={name: digest(h_native / relative) for name, relative in (
-                    ('native', 'Contents/MacOS/NACPreview'), ('engine', 'Contents/Resources/nac-web'),
-                    ('plist', 'Contents/Info.plist'), ('identity', 'Contents/Resources/engine-identity.json'))})
-            require(report['H_roles']['ordinary']['engine'] == report['engines']['H']['sha256'], 'H bundle engine changed')
-            require(json.loads((h_native / 'Contents/Resources/engine-identity.json').read_text())
-                    == report['engines']['H']['identity'], 'H bundled identity changed')
-            report['T_builds'] = {mode: verify_build(T, output / 'T-apps' / app, mode)
-                for mode, app in (('app-build', 'NAC.app'), ('smoke-build', 'NAC Development Preview Smoke.app'))}
-            require(all(row['engine_sha256'] == report['engines']['T']['sha256']
-                        and row['engine_identity'] == report['engines']['T']['identity']
-                        for row in report['T_builds'].values()), 'T bundled engine identity changed')
-            selection = materialize_project(H, pair['H'], paths_root=T, paths_sha=pair['T'], output=output / 'path-project')
+            # Dependency setup only: no Rust engine or app build is selected.
+            for label, root in (('H', H), ('T', T), ('Q', Q)):
+                run(label + '-setup', ['make', 'setup'], root, base, 600)
+                require_checkout(root, pair[label])
+            selection = materialize_project(H, pair['H'], startup_root=Q, startup_sha=pair['Q'],
+                startup_source_sha256=pair['q_swift_sha256'], output=output / 'startup-project')
             report['selection'] = selection['receipt']
             config = output / 'compile-only-configuration.json'
-            write(config, dict(version=1, scenario='compile-only-NOT-AUTHORIZED', product_sha=pair['T'],
-                harness_sha=pair['H'], helper_sha256=HELPER, compiler_sources=selection['receipt']['sources']))
+            write(config, dict(version=1, scenario='compile-only-NOT-AUTHORIZED', product_sha=pair['T'], test_sha=pair['Q'],
+                harness_sha=pair['H'], execution_authorized=False,
+                compiler_sources=selection['receipt']['sources']))
             config_hash = digest(config)
-            derived = output / 'path-derived'
+            derived = output / 'startup-derived'
             argv = ['xcodebuild', 'build-for-testing', '-project', selection['project'], '-scheme', selection['scheme'],
                     '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
-                    '-jobs', '2', '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(config),
-                    'NAC_PATH_HARNESS_SHA=' + pair['H'], 'NAC_PATH_CONFIGURATION_SHA256=' + config_hash]
-            run('paths-build-for-testing', argv, H, base, 300)
+                    '-jobs', '2', '-parallel-testing-enabled', 'NO',
+                    'CODE_SIGNING_ALLOWED=NO', 'CODE_SIGNING_REQUIRED=NO', 'DEVELOPMENT_TEAM=',
+                    'NAC_UI_FIXTURE=' + str(config),
+                    'NAC_STARTUP_PRODUCT_SHA=' + pair['T'], 'NAC_STARTUP_TEST_SHA=' + pair['Q'],
+                    'NAC_STARTUP_HARNESS_SHA=' + pair['H'], 'NAC_STARTUP_CONFIGURATION_SHA256=' + config_hash]
+            run('startup-build-for-testing', argv, H, base, 240)
             runners = list((derived / 'Build/Products').glob('*.xctestrun'))
             require(len(runners) == 1 and runners[0].stat().st_size <= 256 * 1024, 'one bounded actual xctestrun')
             encoded = runners[0].read_bytes()
-            report['generated_target'] = require_generated_runner(plistlib.loads(encoded), config, 'NACPathUITests',
-                project_selection=selection['receipt'], paths_binding=dict(harness_sha=pair['H'], configuration_sha256=config_hash))
+            report['generated_target'] = require_generated_runner(plistlib.loads(encoded), config, 'NACStartupUITests',
+                project_selection=selection['receipt'], startup_binding=dict(product_sha=pair['T'], test_sha=pair['Q'],
+                    harness_sha=pair['H'], configuration_sha256=config_hash))
             target = report['generated_target']
 
             def build_path(value, host=''):
@@ -298,7 +258,7 @@ def main():
             report['compiled_xctest_outputs'] = artifacts
             project = Path(selection['project'])
             require(digest(project / 'project.pbxproj') == selection['receipt']['generated_project_sha256']
-                    and digest(project / 'xcshareddata/xcschemes/NACPathUITests.xcscheme')
+                    and digest(project / 'xcshareddata/xcschemes/NACStartupUITests.xcscheme')
                     == selection['receipt']['selected_scheme_sha256'], 'generated compiler project changed')
             require(digest(config) == config_hash, 'compile-only configuration changed')
             (evidence / 'generated.xctestrun').write_bytes(encoded)
@@ -307,6 +267,7 @@ def main():
                 require(digest(path) == expected_hash, 'selected source changed during build')
             require_checkout(H, pair['H'])
             require_checkout(T, pair['T'])
+            require_checkout(Q, pair['Q'])
             require(not budget.failed, 'compile clock/cleanup failed')
             report['status'] = 'PASS'
     except BaseException as error:

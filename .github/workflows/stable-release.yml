@@ -1,5 +1,5 @@
 name: Stable release
-run-name: ALL-354 fixed-pair compile-only control
+run-name: PRIVATE NEVERMERGE current-Q actor SDK-only control
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ permissions:
 
 jobs:
   compile:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/all-354-xcode-environment-20261107' && github.run_attempt == 1
-    name: Compile full H and T apps and generated path XCTest without execution
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/native-startup-sdk-only-20261107' && github.run_attempt == 1
+    name: Build only current Q startup XCTest actor without execution
     runs-on: macos-26
     timeout-minutes: 40
     env:
@@ -83,9 +83,9 @@ jobs:
               receipt['pair'] = pair
               receipt['files'] = {name: hashlib.sha256((root/name).read_bytes()).hexdigest()
                                  for name in ('compile-only.py', 'compile-pair.json')}
-              assert all(re.fullmatch('[0-9a-f]{40}', str(pair[key])) for key in ('H', 'T')), 'T is UNBOUND'
+              assert all(re.fullmatch('[0-9a-f]{40}', str(pair[key])) for key in ('H', 'T', 'Q')), 'T is UNBOUND'
               with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-                  for key in ('H', 'T'): stream.write(key + '=' + pair[key] + '\n')
+                  for key in ('H', 'T', 'Q'): stream.write(key + '=' + pair[key] + '\n')
               with open(os.environ['GITHUB_ENV'], 'a') as stream:
                   for key, value in environment.items(): stream.write(key + '=' + value + '\n')
               receipt['status'] = 'PASS'
@@ -133,10 +133,21 @@ jobs:
           ref: ${{ steps.pair.outputs.T }}
           path: source-T
           persist-credentials: false
-      - name: Compile once with sequential shared Cargo target and retained copied engines
+      - name: Revalidate remaining original budget for Q checkout
+        id: q_budget
+        timeout-minutes: 1
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py --bootstrap-budget checkout-Q
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.q_budget.outputs.minutes) }}
+        with:
+          ref: ${{ steps.pair.outputs.Q }}
+          path: source-Q
+          persist-credentials: false
+      - name: Build only the fixed current-Q startup actor with the maintained materializer
         env:
           H_ROOT: ${{ github.workspace }}/source-H
           T_ROOT: ${{ github.workspace }}/source-T
+          Q_ROOT: ${{ github.workspace }}/source-Q
           OUTPUT_ROOT: ${{ runner.temp }}/nac-compile-output
         run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py
       - name: Bound evidence upload to the original hard deadline
