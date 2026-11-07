@@ -10,12 +10,14 @@ private copy. Both require clean committed source, including no untracked files.
 No build output may masquerade as a reviewed or qualified revision.
 
 Preview output is a development fixture containing the disposable profile/provider.
-This startup-Q prerequisite proposes an owning-only carry on Native parent
-7013a96f2f2fdf3046c6976e018c9bf988eebfe0, retaining its canonical builder,
+The original startup-Q carry used Native parent
+7013a96f2f2fdf3046c6976e018c9bf988eebfe0. The post-OAuth integration uses Native
+parent e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1 on landed dev
+4b852f065e2200f46c194b4ad2c5ace3fbd766a8, with the same canonical builder,
 lifecycle, assets and receipt writers. It adds no new app or frontend writer.
-The resulting package child must be clean and committed before preparation;
-its actual full SHA, not the parent or an old package SHA, binds every artifact.
-This source proposal is not a build nomination or native acceptance.
+The package child must be clean and committed before preparation; its actual
+full SHA, not the parent or an old package SHA, binds every artifact. A separate
+finite build allocation is required; source composition is not native acceptance.
 The ec69215d/ff289b0b closed39 source review, f2539dd/normal28, prior
 4cbaf624/H584a6aa1, finalS 1f8bf49e and supplier 6c74dc2d retain their historical
 source/control identities. The normal contract
