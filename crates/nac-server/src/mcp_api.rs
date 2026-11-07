@@ -337,35 +337,60 @@ static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowS
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
 #[cfg(test)]
-static CALLBACK_SNAPSHOT_BARRIERS: LazyLock<
-    std::sync::Mutex<HashMap<OAuthFlowKey, std::sync::Arc<tokio::sync::Barrier>>>,
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub(crate) enum CallbackTestPhase {
+    Snapshot,
+    PendingFailureRead,
+}
+#[cfg(test)]
+pub(crate) struct CallbackTestGate {
+    pub entered: tokio::sync::Notify,
+    pub release: tokio::sync::Barrier,
+}
+#[cfg(test)]
+type CallbackTestKey = (OAuthFlowKey, CallbackTestPhase);
+#[cfg(test)]
+static CALLBACK_TEST_GATES: LazyLock<
+    std::sync::Mutex<HashMap<CallbackTestKey, std::sync::Arc<CallbackTestGate>>>,
 > = LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
-
 #[cfg(test)]
-pub(crate) struct CallbackSnapshotBarrier(OAuthFlowKey);
+pub(crate) struct CallbackTestGuard(CallbackTestKey);
 #[cfg(test)]
-impl Drop for CallbackSnapshotBarrier {
+impl Drop for CallbackTestGuard {
     fn drop(&mut self) {
-        CALLBACK_SNAPSHOT_BARRIERS.lock().unwrap().remove(&self.0);
+        CALLBACK_TEST_GATES.lock().unwrap().remove(&self.0);
     }
 }
 #[cfg(test)]
-pub(crate) fn callback_snapshot_barrier_for_test(
+pub(crate) fn callback_test_gate(
     manager: &SessionManager,
     name: &str,
-) -> CallbackSnapshotBarrier {
-    let key = oauth_flow_key(manager, name);
-    assert!(CALLBACK_SNAPSHOT_BARRIERS
+    phase: CallbackTestPhase,
+) -> (CallbackTestGuard, std::sync::Arc<CallbackTestGate>) {
+    let key = (oauth_flow_key(manager, name), phase);
+    let gate = std::sync::Arc::new(CallbackTestGate {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Barrier::new(2),
+    });
+    assert!(CALLBACK_TEST_GATES
         .lock()
         .unwrap()
-        .insert(
-            key.clone(),
-            std::sync::Arc::new(tokio::sync::Barrier::new(2))
-        )
+        .insert(key.clone(), gate.clone())
         .is_none());
-    CallbackSnapshotBarrier(key)
+    (CallbackTestGuard(key), gate)
 }
-
+#[cfg(test)]
+async fn callback_test_checkpoint(key: &OAuthFlowKey, phase: CallbackTestPhase) {
+    let gate = CALLBACK_TEST_GATES
+        .lock()
+        .unwrap()
+        .get(&(key.clone(), phase))
+        .cloned();
+    if let Some(gate) = gate {
+        gate.entered.notify_one();
+        gate.release.wait().await;
+    }
+}
 pub const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
 enum OAuthCallbackTarget {
@@ -1699,10 +1724,7 @@ pub async fn oauth_callback_handler(
             }
         };
         #[cfg(test)]
-        {
-            let barrier=CALLBACK_SNAPSHOT_BARRIERS.lock().unwrap().get(&flow_key).cloned();
-            if let Some(barrier)=barrier { barrier.wait().await; }
-        }
+        callback_test_checkpoint(&flow_key,CallbackTestPhase::Snapshot).await;
         let completion = mcp::complete_mcp_oauth_authorization(
             manager.root_cwd(),
             &server_name,
@@ -1721,7 +1743,6 @@ pub async fn oauth_callback_handler(
                 Ok::<_, ApiError>(())
             }
             Err(error) => {
-                let owned_failure=mcp::mcp_oauth_callback_failure_was_owned(&error);
                 let pending_authorization_url = mcp::mcp_oauth_pending_authorization_url(
                     manager.root_cwd(),
                     &server_name,
@@ -1730,8 +1751,10 @@ pub async fn oauth_callback_handler(
                 .map_err(|_| {
                     oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
                 })?;
+                #[cfg(test)]
+                callback_test_checkpoint(&flow_key,CallbackTestPhase::PendingFailureRead).await;
                 let owned_completion = completion_authorization_url.as_ref().filter(|url| {
-                    owned_failure && mcp::mcp_oauth_authorization_is_current(
+                    mcp::mcp_oauth_authorization_is_current(
                         manager.root_cwd(), &server_name, &endpoint, url,
                     ).unwrap_or(false)
                 });
@@ -1748,17 +1771,18 @@ pub async fn oauth_callback_handler(
                     &callback_url,
                 )
                 .unwrap_or(false);
-                if (callback_reports_oauth_error(&callback_url) || !retryable)
-                    && matches_current
+                if let Some(expected) = expected_authorization_url.filter(|_|
+                    (callback_reports_oauth_error(&callback_url) || !retryable) && matches_current)
                 {
-                    match mcp::fail_mcp_oauth_authorization(
+                    match mcp::fail_mcp_oauth_callback(
                         manager.root_cwd(),
                         &server_name,
                         &endpoint,
-                        expected_authorization_url,
+                        expected,
+                        &error,
                     ) {
                         Ok(true) => { flows.insert(flow_key, OAuthFlowState::Failed); }
-                        Ok(false) => { flows.remove(&flow_key); }
+                        Ok(false) => {}
                         Err(error) => eprintln!(
                             "MCP server '{server_name}': failed to clear rejected OAuth authorization: {error:#}"
                         ),

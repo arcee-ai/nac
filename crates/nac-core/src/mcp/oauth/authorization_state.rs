@@ -255,6 +255,34 @@ pub fn fail_mcp_oauth_authorization(
     endpoint: &str,
     expected_authorization_url: Option<&str>,
 ) -> Result<bool> {
+    fail_authorization(cwd, server_name, endpoint, expected_authorization_url, true)
+}
+
+/// Rejecting an unclaimed callback may only retire still-pending state.
+/// Ownership and retirement are checked in the same credential transaction.
+pub fn fail_mcp_oauth_callback(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    authorization_url: &str,
+    failure: &anyhow::Error,
+) -> Result<bool> {
+    fail_authorization(
+        cwd,
+        server_name,
+        endpoint,
+        Some(authorization_url),
+        failure.downcast_ref::<ClaimedCallbackFailure>().is_some(),
+    )
+}
+
+fn fail_authorization(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    expected_authorization_url: Option<&str>,
+    allow_completion: bool,
+) -> Result<bool> {
     edit_store(&oauth_store_path(cwd)?, |store| {
         let profile = store
             .profiles
@@ -263,6 +291,7 @@ pub fn fail_mcp_oauth_authorization(
         validate_profile_binding(profile, endpoint)?;
         if expected_authorization_url
             .is_some_and(|expected| profile.pending_authorization_url.as_deref() != Some(expected))
+            || (!allow_completion && !pending_authorization_is_live(profile))
         {
             return Ok(false);
         }
@@ -297,9 +326,4 @@ pub(super) fn callback_failure(
     } else {
         error
     }
-}
-
-/// Only the callback that consumed state may retire its failed completion.
-pub fn mcp_oauth_callback_failure_was_owned(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<ClaimedCallbackFailure>().is_some()
 }

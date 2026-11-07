@@ -77,8 +77,8 @@ pub use lifecycle::{McpRuntimeManager, McpRuntimeState, McpRuntimeStatus};
 pub use oauth::{
     begin_mcp_oauth_authorization, clear_mcp_oauth, complete_mcp_oauth_authorization,
     configure_mcp_oauth, delete_mcp_oauth_profile, discard_mcp_oauth_pending_authorization,
-    fail_mcp_oauth_authorization, has_mcp_oauth_profile, mcp_oauth_authorization_is_current,
-    mcp_oauth_callback_failure_was_owned, mcp_oauth_callback_is_retryable,
+    fail_mcp_oauth_authorization, fail_mcp_oauth_callback, has_mcp_oauth_profile,
+    mcp_oauth_authorization_is_current, mcp_oauth_callback_is_retryable,
     mcp_oauth_completion_is_pending, mcp_oauth_pending_authorization_url, mcp_oauth_status,
     rename_mcp_oauth_profile, set_mcp_oauth_redirect_uri, McpOAuthAuthorizationMetadata,
     McpOAuthAuthorizationSession, McpOAuthConfiguration, McpOAuthRegistration, McpOAuthStatus,

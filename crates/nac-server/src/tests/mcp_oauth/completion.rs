@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 enum Outcome {
     Success,
     ConcurrentCallback,
+    ConcurrentInvalidIssuer,
     ScopeUpgrade,
     RetryScopes,
     TokenFailure,
@@ -51,6 +52,11 @@ async fn authenticate_retry_preserves_pending_only_scopes() {
 #[tokio::test]
 async fn a_rejected_concurrent_callback_cannot_retire_the_winning_http_flow() {
     complete(Outcome::ConcurrentCallback).await;
+}
+
+#[tokio::test]
+async fn a_rejected_issuer_cannot_retire_state_claimed_between_failure_reads() {
+    complete(Outcome::ConcurrentInvalidIssuer).await;
 }
 
 async fn complete(outcome: Outcome) {
@@ -197,22 +203,28 @@ async fn complete(outcome: Outcome) {
         .append_pair("state", &state)
         .finish();
     let replay_query = query.clone();
-    let race_barrier = matches!(outcome, Outcome::ConcurrentCallback)
-        .then(|| crate::mcp_api::callback_snapshot_barrier_for_test(&manager, "slack"));
-    let racing_callback = if matches!(outcome, Outcome::ConcurrentCallback) {
-        let app = app.clone();
-        let query = query.clone();
-        Some(tokio::spawn(async move {
-            get_response(
-                app,
-                &format!("/mcp_library/servers/slack/oauth/callback?{query}"),
-                None,
-            )
-            .await
-        }))
-    } else {
-        None
-    };
+    let race_barrier = matches!(outcome, Outcome::ConcurrentCallback).then(|| {
+        crate::mcp_api::callback_test_gate(
+            &manager,
+            "slack",
+            crate::mcp_api::CallbackTestPhase::Snapshot,
+        )
+        .0
+    });
+    let mut invalid_snapshot = matches!(outcome, Outcome::ConcurrentInvalidIssuer).then(|| {
+        crate::mcp_api::callback_test_gate(
+            &manager,
+            "slack",
+            crate::mcp_api::CallbackTestPhase::Snapshot,
+        )
+    });
+    let mut invalid_failure = matches!(outcome, Outcome::ConcurrentInvalidIssuer).then(|| {
+        crate::mcp_api::callback_test_gate(
+            &manager,
+            "slack",
+            crate::mcp_api::CallbackTestPhase::PendingFailureRead,
+        )
+    });
     let callback = {
         let app = app.clone();
         tokio::spawn(async move {
@@ -224,9 +236,52 @@ async fn complete(outcome: Outcome) {
             .await
         })
     };
+    let racing_callback = if matches!(outcome, Outcome::ConcurrentInvalidIssuer) {
+        let (guard, snapshot) = invalid_snapshot.take().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), snapshot.entered.notified())
+            .await
+            .unwrap();
+        drop(guard);
+        let app = app.clone();
+        let query = format!("{replay_query}&iss=https%3A%2F%2Fwrong.example.test%2F");
+        let other = tokio::spawn(async move {
+            get_response(
+                app,
+                &format!("/mcp_library/servers/slack/oauth/callback?{query}"),
+                None,
+            )
+            .await
+        });
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            invalid_failure.as_ref().unwrap().1.entered.notified(),
+        )
+        .await
+        .unwrap();
+        snapshot.release.wait().await;
+        Some(other)
+    } else if matches!(outcome, Outcome::ConcurrentCallback) {
+        let app = app.clone();
+        let query = replay_query.clone();
+        Some(tokio::spawn(async move {
+            get_response(
+                app,
+                &format!("/mcp_library/servers/slack/oauth/callback?{query}"),
+                None,
+            )
+            .await
+        }))
+    } else {
+        None
+    };
     tokio::time::timeout(Duration::from_secs(5), entered.notified())
         .await
         .expect("token endpoint was not entered");
+    if let Some((guard, gate)) = invalid_failure.take() {
+        gate.release.wait().await;
+        drop(guard);
+    }
+
     if let Some(other) = racing_callback.as_ref() {
         tokio::time::timeout(Duration::from_secs(5), async {
             while !callback.is_finished() && !other.is_finished() {
@@ -350,7 +405,7 @@ async fn complete(outcome: Outcome) {
     );
     assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
     match outcome {
-        Outcome::ConcurrentCallback => {
+        Outcome::ConcurrentCallback | Outcome::ConcurrentInvalidIssuer => {
             let statuses = [callback_status, racing_status.unwrap()];
             assert_eq!(
                 statuses

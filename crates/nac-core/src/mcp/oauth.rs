@@ -16,9 +16,8 @@ use authorization_state::{
     CompletingAuthorization, CompletionOwnership,
 };
 pub use authorization_state::{
-    discard_mcp_oauth_pending_authorization, fail_mcp_oauth_authorization,
-    mcp_oauth_authorization_is_current, mcp_oauth_callback_failure_was_owned,
-    mcp_oauth_completion_is_pending,
+    discard_mcp_oauth_pending_authorization, fail_mcp_oauth_authorization, fail_mcp_oauth_callback,
+    mcp_oauth_authorization_is_current, mcp_oauth_completion_is_pending,
 };
 use base64::Engine;
 #[cfg(test)]
