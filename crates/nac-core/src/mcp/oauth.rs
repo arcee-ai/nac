@@ -17,7 +17,8 @@ use authorization_state::{
 };
 pub use authorization_state::{
     discard_mcp_oauth_pending_authorization, fail_mcp_oauth_authorization,
-    mcp_oauth_authorization_is_current, mcp_oauth_completion_is_pending,
+    mcp_oauth_authorization_is_current, mcp_oauth_callback_failure_was_owned,
+    mcp_oauth_completion_is_pending,
 };
 use base64::Engine;
 #[cfg(test)]
@@ -878,7 +879,12 @@ async fn manager_and_profile(
     server_name: &str,
     endpoint: &str,
     save_mode: CredentialSaveMode,
-) -> Result<(AuthorizationManager, OAuthProfile, AuthorizationMetadata)> {
+) -> Result<(
+    AuthorizationManager,
+    OAuthProfile,
+    AuthorizationMetadata,
+    CompletionOwnership,
+)> {
     let path = oauth_store_path(cwd)?;
     let store = read_store(&path)?;
     let profile = store
@@ -896,6 +902,7 @@ async fn manager_and_profile(
         save_mode,
         logout_generation: profile.logout_generation,
     };
+    let completion = adapter.completion.clone();
     let mut manager = AuthorizationManager::new(endpoint)
         .await
         .context("MCP OAuth metadata client initialization failed")?;
@@ -931,7 +938,7 @@ async fn manager_and_profile(
         }
     }
     manager.set_metadata(metadata.clone());
-    Ok((manager, profile, metadata))
+    Ok((manager, profile, metadata, completion))
 }
 
 fn active_scopes(profile: &OAuthProfile) -> Vec<String> {
@@ -978,7 +985,7 @@ pub async fn begin_mcp_oauth_authorization(
     additional_scopes: &[String],
 ) -> Result<McpOAuthAuthorizationSession> {
     let redirect_uri = validate_https_url(redirect_uri, "MCP OAuth redirect URI", true)?;
-    let (mut manager, profile, metadata) =
+    let (mut manager, profile, metadata, _) =
         manager_and_profile(cwd, server_name, endpoint, CredentialSaveMode::Independent).await?;
     let registration = resolve_registration(&profile.registration)?;
     match &registration {
@@ -1290,7 +1297,7 @@ pub async fn complete_mcp_oauth_authorization(
 ) -> Result<()> {
     let callback = rmcp::transport::auth::AuthorizationCallback::from_redirect_url(callback_url)
         .context("MCP OAuth callback was rejected")?;
-    let (mut manager, profile, _) =
+    let (mut manager, profile, _, completion) =
         manager_and_profile(cwd, server_name, endpoint, CredentialSaveMode::Independent).await?;
     let redirect_uri = profile
         .redirect_uri
@@ -1313,7 +1320,9 @@ pub async fn complete_mcp_oauth_authorization(
             callback.issuer.as_deref(),
         )
         .await
-        .context("MCP OAuth callback was rejected")?;
+        .map_err(|error| {
+            authorization_state::callback_failure(error, &completion, &callback.csrf_token)
+        })?;
     Ok(())
 }
 
@@ -1362,7 +1371,7 @@ pub(super) async fn authorized_manager_with_generation(
     server_name: &str,
     endpoint: &str,
 ) -> Result<(AuthorizationManager, u64)> {
-    let (mut manager, profile, _) = manager_and_profile(
+    let (mut manager, profile, _, _) = manager_and_profile(
         cwd,
         server_name,
         endpoint,
@@ -1903,7 +1912,7 @@ mod tests {
             },
         )
         .unwrap();
-        let (_, _, metadata) = manager_and_profile(
+        let (_, _, metadata, _) = manager_and_profile(
             Path::new("/workspace"),
             "cimd",
             endpoint,
@@ -1959,7 +1968,7 @@ mod tests {
             },
         )
         .unwrap();
-        let (_, _, metadata) = manager_and_profile(
+        let (_, _, metadata, _) = manager_and_profile(
             Path::new("/workspace"),
             "slack",
             endpoint,

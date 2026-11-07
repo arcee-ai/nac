@@ -336,6 +336,36 @@ type OAuthFlowKey = (PathBuf, String);
 static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowState>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+static CALLBACK_SNAPSHOT_BARRIERS: LazyLock<
+    std::sync::Mutex<HashMap<OAuthFlowKey, std::sync::Arc<tokio::sync::Barrier>>>,
+> = LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+#[cfg(test)]
+pub(crate) struct CallbackSnapshotBarrier(OAuthFlowKey);
+#[cfg(test)]
+impl Drop for CallbackSnapshotBarrier {
+    fn drop(&mut self) {
+        CALLBACK_SNAPSHOT_BARRIERS.lock().unwrap().remove(&self.0);
+    }
+}
+#[cfg(test)]
+pub(crate) fn callback_snapshot_barrier_for_test(
+    manager: &SessionManager,
+    name: &str,
+) -> CallbackSnapshotBarrier {
+    let key = oauth_flow_key(manager, name);
+    assert!(CALLBACK_SNAPSHOT_BARRIERS
+        .lock()
+        .unwrap()
+        .insert(
+            key.clone(),
+            std::sync::Arc::new(tokio::sync::Barrier::new(2))
+        )
+        .is_none());
+    CallbackSnapshotBarrier(key)
+}
+
 pub const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
 enum OAuthCallbackTarget {
@@ -1668,6 +1698,11 @@ pub async fn oauth_callback_handler(
                 _ => None,
             }
         };
+        #[cfg(test)]
+        {
+            let barrier=CALLBACK_SNAPSHOT_BARRIERS.lock().unwrap().get(&flow_key).cloned();
+            if let Some(barrier)=barrier { barrier.wait().await; }
+        }
         let completion = mcp::complete_mcp_oauth_authorization(
             manager.root_cwd(),
             &server_name,
@@ -1685,7 +1720,8 @@ pub async fn oauth_callback_handler(
                 }
                 Ok::<_, ApiError>(())
             }
-            Err(_) => {
+            Err(error) => {
+                let owned_failure=mcp::mcp_oauth_callback_failure_was_owned(&error);
                 let pending_authorization_url = mcp::mcp_oauth_pending_authorization_url(
                     manager.root_cwd(),
                     &server_name,
@@ -1695,7 +1731,7 @@ pub async fn oauth_callback_handler(
                     oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
                 })?;
                 let owned_completion = completion_authorization_url.as_ref().filter(|url| {
-                    mcp::mcp_oauth_authorization_is_current(
+                    owned_failure && mcp::mcp_oauth_authorization_is_current(
                         manager.root_cwd(), &server_name, &endpoint, url,
                     ).unwrap_or(false)
                 });

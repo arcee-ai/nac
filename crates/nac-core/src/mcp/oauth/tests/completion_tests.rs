@@ -100,7 +100,7 @@ async fn concurrent_callback_claims_allow_one_token_request_and_no_late_save() {
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let mut tasks = Vec::new();
     for code in ["first-code", "second-code"] {
-        let (mut manager, _, _) = manager_and_profile(
+        let (mut manager, _, _, _) = manager_and_profile(
             Path::new("/workspace"),
             "slack",
             endpoint,

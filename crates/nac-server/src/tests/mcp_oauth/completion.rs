@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 #[derive(Clone, Copy, Debug)]
 enum Outcome {
     Success,
+    ConcurrentCallback,
     ScopeUpgrade,
     RetryScopes,
     TokenFailure,
@@ -45,6 +46,11 @@ async fn flowless_scope_upgrade_stays_connecting_during_exchange() {
 #[tokio::test]
 async fn authenticate_retry_preserves_pending_only_scopes() {
     complete(Outcome::RetryScopes).await;
+}
+
+#[tokio::test]
+async fn a_rejected_concurrent_callback_cannot_retire_the_winning_http_flow() {
+    complete(Outcome::ConcurrentCallback).await;
 }
 
 async fn complete(outcome: Outcome) {
@@ -191,6 +197,22 @@ async fn complete(outcome: Outcome) {
         .append_pair("state", &state)
         .finish();
     let replay_query = query.clone();
+    let race_barrier = matches!(outcome, Outcome::ConcurrentCallback)
+        .then(|| crate::mcp_api::callback_snapshot_barrier_for_test(&manager, "slack"));
+    let racing_callback = if matches!(outcome, Outcome::ConcurrentCallback) {
+        let app = app.clone();
+        let query = query.clone();
+        Some(tokio::spawn(async move {
+            get_response(
+                app,
+                &format!("/mcp_library/servers/slack/oauth/callback?{query}"),
+                None,
+            )
+            .await
+        }))
+    } else {
+        None
+    };
     let callback = {
         let app = app.clone();
         tokio::spawn(async move {
@@ -205,6 +227,17 @@ async fn complete(outcome: Outcome) {
     tokio::time::timeout(Duration::from_secs(5), entered.notified())
         .await
         .expect("token endpoint was not entered");
+    if let Some(other) = racing_callback.as_ref() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !callback.is_finished() && !other.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the rejected callback did not settle before the held token response");
+    }
+    drop(race_barrier);
+
     assert!(
         nac_core::mcp_configurations::mcp_oauth_pending_authorization_url(
             manager.root_cwd(),
@@ -288,6 +321,17 @@ async fn complete(outcome: Outcome) {
         .unwrap()
         .unwrap()
         .status();
+    let racing_status = if let Some(other) = racing_callback {
+        Some(
+            tokio::time::timeout(Duration::from_secs(5), other)
+                .await
+                .unwrap()
+                .unwrap()
+                .status(),
+        )
+    } else {
+        None
+    };
     let completed = response_json(
         get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
     )
@@ -306,6 +350,24 @@ async fn complete(outcome: Outcome) {
     );
     assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
     match outcome {
+        Outcome::ConcurrentCallback => {
+            let statuses = [callback_status, racing_status.unwrap()];
+            assert_eq!(
+                statuses
+                    .iter()
+                    .filter(|status| **status == StatusCode::OK)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                statuses
+                    .iter()
+                    .filter(|status| **status == StatusCode::BAD_REQUEST)
+                    .count(),
+                1
+            );
+            assert_eq!(completed["status"], "connected");
+        }
         Outcome::Success | Outcome::ScopeUpgrade | Outcome::RetryScopes => {
             assert_eq!(callback_status, StatusCode::OK);
             assert_eq!(completed["status"], "connected");

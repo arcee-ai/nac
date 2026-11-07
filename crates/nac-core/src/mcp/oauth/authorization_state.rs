@@ -273,3 +273,33 @@ pub fn fail_mcp_oauth_authorization(
         Ok(true)
     })
 }
+
+#[derive(Debug)]
+struct ClaimedCallbackFailure;
+impl std::fmt::Display for ClaimedCallbackFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MCP OAuth callback failed after claiming its state")
+    }
+}
+impl std::error::Error for ClaimedCallbackFailure {}
+
+pub(super) fn callback_failure(
+    error: AuthError,
+    completion: &CompletionOwnership,
+    state: &str,
+) -> anyhow::Error {
+    let error = anyhow!(error).context("MCP OAuth callback was rejected");
+    if completion
+        .current()
+        .is_ok_and(|owned| owned.as_deref() == Some(state))
+    {
+        error.context(ClaimedCallbackFailure)
+    } else {
+        error
+    }
+}
+
+/// Only the callback that consumed state may retire its failed completion.
+pub fn mcp_oauth_callback_failure_was_owned(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<ClaimedCallbackFailure>().is_some()
+}
