@@ -46,11 +46,14 @@ with a different output directory. Both can reuse the same private engine.
 `normal` invokes the sole native builder's `app-build` mode and consumes its
 `Contents/Resources/build-receipt.json`. The original startup-Q carry used
 Native snapshot `7013a96f2f2fdf3046c6976e018c9bf988eebfe0`. The post-OAuth
-integration uses Native parent `e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1`
+integration uses Native parent `84c25942f848eccdfa8e7c60c9bcaa37133e418a`
 on landed dev `4b852f065e2200f46c194b4ad2c5ace3fbd766a8`. Its canonical normal
 builder supplies the same closed39 receipt contract. The carry adds only the
 existing packaging owner; it does not import an old product tree or change the
 builder, track factory, lifecycle, generated web outputs or test actor.
+The parent includes the reviewed startup error guidance and Q1 draft-classification
+corrections. Earlier package `6c578a2` and failed hosted producer01 retain their
+original identities and cannot qualify this candidate.
 The resulting packaging child must be clean and committed before preparation.
 Its actual full source SHA/tree binds engine, native output, package identity
 and post-sign manifest; neither this parent nor an old package SHA may be used

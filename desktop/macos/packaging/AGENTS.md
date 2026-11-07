@@ -12,9 +12,12 @@ No build output may masquerade as a reviewed or qualified revision.
 Preview output is a development fixture containing the disposable profile/provider.
 The original startup-Q carry used Native parent
 7013a96f2f2fdf3046c6976e018c9bf988eebfe0. The post-OAuth integration uses Native
-parent e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1 on landed dev
+parent 84c25942f848eccdfa8e7c60c9bcaa37133e418a on landed dev
 4b852f065e2200f46c194b4ad2c5ace3fbd766a8, with the same canonical builder,
-lifecycle, assets and receipt writers. It adds no new app or frontend writer.
+lifecycle, assets and receipt writers. This parent includes the reviewed startup
+error guidance and Q1 draft-classification corrections; it adds no new app or
+frontend writer. Earlier package 6c578a2 and failed hosted producer01 retain
+their original identities and cannot qualify this source.
 The package child must be clean and committed before preparation; its actual
 full SHA, not the parent or an old package SHA, binds every artifact. A separate
 finite build allocation is required; source composition is not native acceptance.
