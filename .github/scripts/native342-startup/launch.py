@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private one-case launcher: original clocks and ordinary exact artifact custody."""
+"""Private four-case/R launcher: original clocks and ordinary exact artifact custody."""
 import importlib.util
 import json
 import math
@@ -11,16 +11,16 @@ import sys
 import time
 import urllib.request
 
-spec = importlib.util.spec_from_file_location('one_onboarding', Path(__file__).with_name('one-onboarding.py'))
+spec = importlib.util.spec_from_file_location('four_startup', Path(__file__).with_name('four-startup.py'))
 case = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(case)
 REPOSITORY = 'arcee-ai/nac'
-CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'checkout-Q': 2,
+CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'checkout-Q': 2, 'checkout-R': 2,
         'metadata': 2, 'download': 2, 'prepare': 2}
 
 
 def inputs():
-    value = json.loads(os.environ['ROOT_ONBOARDING_ADMISSION'])
+    value = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
     case.admit(value, os.environ['GITHUB_SHA'])
     case.require(os.environ.get('GITHUB_REF') == case.BRANCH
         and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
@@ -32,9 +32,9 @@ def inputs():
 def minutes(value, phase, *, now=None):
     stamp = time.time() if now is None else now
     case.admit(value, value['controller_sha'], now=stamp)
-    if phase == 'case':
-        # Bound the case plus its ORIGINAL cleanup; leave retention for upload.
-        deadline, cap = value['clock']['CLEANUP_DEADLINE'], 21
+    if phase == 'episode':
+        # Bound the episode plus its ORIGINAL cleanup; leave retention for upload.
+        deadline, cap = value['clock']['CLEANUP_DEADLINE'], 58
     else:
         case.require(phase in CAPS, 'fixed launcher phase')
         deadline, cap = value['clock']['WORK_DEADLINE'], CAPS[phase]
@@ -48,7 +48,7 @@ def retention_minutes(value, *, now=None):
     clock = value['clock']
     start, hard = clock['STARTED'], clock['HARD_DEADLINE']
     case.require(all(type(x) in (int, float) and math.isfinite(x) for x in (start, hard))
-        and start <= stamp < hard and 0 < hard - start <= 1380, 'original retention clock')
+        and start <= stamp < hard and 0 < hard - start <= 3600, 'original retention clock')
     return max(0, min(2, math.floor((hard - stamp - 15) / 60)))
 
 
@@ -105,8 +105,8 @@ def handoff_files(root, value, product):
 
 def main():
     phase = sys.argv[1]
-    gate = Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-onboarding-gate'
-    value = json.loads(os.environ['ROOT_ONBOARDING_ADMISSION'])
+    gate = Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-startup-gate'
+    value = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
     if phase == '--retention':
         try:
             n = retention_minutes(value)
@@ -124,7 +124,7 @@ def main():
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('minutes=' + str(n) + '\n')
             if name == 'checkout-H':
-                for key in ('H', 'P', 'Q'):
+                for key in ('H', 'P', 'Q', 'R'):
                     stream.write(key + '=' + pair[key] + '\n')
             if name == 'download':
                 for key in ('run_id', 'artifact_id'):

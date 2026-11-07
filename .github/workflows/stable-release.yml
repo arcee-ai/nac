@@ -1,11 +1,11 @@
-name: PRIVATE NEVERMERGE post648 one onboarding
-run-name: PRIVATE NEVERMERGE exact current Q onboarding
+name: PRIVATE NEVERMERGE post657 four startup with R
+run-name: PRIVATE NEVERMERGE exact P10 Q9931 H1c9 R four startup
 
 on:
   workflow_dispatch:
     inputs:
-      onboarding_admission:
-        description: Root exact one-case source/producer/artifact/original-clock admission
+      startup_admission:
+        description: Root exact four-case/R source/producer/artifact/original-clock admission
         required: true
         type: string
 
@@ -14,17 +14,18 @@ permissions:
   actions: read
 
 jobs:
-  onboarding:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-onboarding-post648-p9' && github.run_attempt == 1
+  four_startup:
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-four-startup-post657-p10' && github.run_attempt == 1
     runs-on: macos-26
-    timeout-minutes: 23
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       PYTHONDONTWRITEBYTECODE: "1"
-      ROOT_ONBOARDING_ADMISSION: ${{ inputs.onboarding_admission }}
+      ROOT_STARTUP_ADMISSION: ${{ inputs.startup_admission }}
       H_ROOT: ${{ github.workspace }}/harness
       P_ROOT: ${{ github.workspace }}/product
       Q_ROOT: ${{ github.workspace }}/query
+      R_ROOT: ${{ github.workspace }}/protocol
     steps:
       - name: Admit original clock and exact image before checkout or bootstrap
         id: initial
@@ -32,24 +33,24 @@ jobs:
         run: |
           python3 -B - <<'PYCODE'
           import json, math, os, pathlib, time
-          gate = pathlib.Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-onboarding-gate'
+          gate = pathlib.Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-startup-gate'
           gate.mkdir(mode=0o700)
           report = dict(status='FAIL', observed_image=os.environ.get('ImageVersion'), compile=False, runtime=False)
           try:
-              a = json.loads(os.environ['ROOT_ONBOARDING_ADMISSION'])
+              a = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','manifest_sha256','clock','producer'}
-              assert a['scope'] == 'Q04c-on-final-post648-P-onboarding-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['scope'] == 'P10-Q9931-H1c9-R2504-four-startup' and a['controller_sha'] == os.environ['GITHUB_SHA']
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
               c = a['clock']; keys = ('STARTED','WORK_DEADLINE','CLEANUP_DEADLINE','HARD_DEADLINE')
               assert set(c) == set(keys) and all(type(c[k]) in (int,float) for k in keys)
               start,work,cleanup,hard = [c[k] for k in keys]; now = time.time()
               assert all(math.isfinite(x) for x in (start,work,cleanup,hard))
-              assert start <= now < work < cleanup < hard and hard-start <= 1380 and work-start <= 900
-              assert cleanup-work >= 360 and hard-cleanup >= 120
+              assert start <= now < work < cleanup < hard and hard-start <= 3600 and work-start <= 2880
+              assert cleanup-work >= 600 and hard-cleanup >= 120
               assert os.environ.get('ImageVersion') == '20261102.0473.1', 'different fleet image: unavailable, no fallback/retry'
               minutes = min(1, math.floor((work-now-60)/60)); assert minutes >= 1
               with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as f:
-                  for name,suffix in (('DOWNLOAD_ROOT','native342-download'), ('PACKAGE_ROOT','native342-package'), ('OUTPUT_ROOT','native342-case')):
+                  for name,suffix in (('DOWNLOAD_ROOT','native342-download'), ('PACKAGE_ROOT','native342-package'), ('OUTPUT_ROOT','native342-episode')):
                       path = str(gate.parent / suffix)
                       assert '\n' not in path and '\r' not in path, 'single-line canonical runner path'
                       f.write(name+'='+path+'\n')
@@ -70,7 +71,7 @@ jobs:
       - name: Bound Rust bootstrap
         id: rust
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate rust
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate rust
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         timeout-minutes: ${{ fromJSON(steps.rust.outputs.minutes) }}
         with:
@@ -79,7 +80,7 @@ jobs:
       - name: Bound Node bootstrap
         id: node
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate node
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate node
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.node.outputs.minutes) }}
         with:
@@ -87,7 +88,7 @@ jobs:
       - name: Bound H source checkout
         id: checkout_H
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate checkout-H
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-H
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.checkout_H.outputs.minutes) }}
         with:
@@ -97,7 +98,7 @@ jobs:
       - name: Bound P source checkout
         id: checkout_P
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate checkout-P
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-P
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.checkout_P.outputs.minutes) }}
         with:
@@ -107,26 +108,36 @@ jobs:
       - name: Bound Q source checkout
         id: checkout_Q
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate checkout-Q
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-Q
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.checkout_Q.outputs.minutes) }}
         with:
           ref: ${{ steps.checkout_H.outputs.Q }}
           path: query
           persist-credentials: false
+      - name: Bound independent R source checkout
+        id: checkout_R
+        timeout-minutes: 1
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-R
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.checkout_R.outputs.minutes) }}
+        with:
+          ref: ${{ steps.checkout_H.outputs.R }}
+          path: protocol
+          persist-credentials: false
       - name: Bound metadata from original clock
         id: metadata
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate metadata
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate metadata
       - name: Verify exact successful producer run and artifact identity
         timeout-minutes: ${{ fromJSON(steps.metadata.outputs.minutes) }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --metadata
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --metadata
       - name: Bound download from original clock
         id: download
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate download
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate download
       - name: Download only the Root-bound same-repository run and artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         timeout-minutes: ${{ fromJSON(steps.download.outputs.minutes) }}
@@ -140,17 +151,17 @@ jobs:
       - name: Bound prepare from original clock
         id: prepare
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate prepare
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate prepare
       - name: Verify sealed original manifest ZIP and extract without rebuilding
         timeout-minutes: ${{ fromJSON(steps.prepare.outputs.minutes) }}
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --prepare
-      - name: Bound case from original clock
-        id: case
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --prepare
+      - name: Bound required R and four cases from original clock
+        id: episode
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-onboarding/launch.py --gate case
-      - name: Run exactly one maintained onboarding case with original cleanup reserve
-        timeout-minutes: ${{ fromJSON(steps.case.outputs.minutes) }}
-        run: python3 -B controller/.github/scripts/native342-onboarding/one-onboarding.py
+        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate episode
+      - name: Run maintained R and four serial startup cases with original cleanup reserve
+        timeout-minutes: ${{ fromJSON(steps.episode.outputs.minutes) }}
+        run: python3 -B controller/.github/scripts/native342-startup/four-startup.py
       - name: Bound always-retention to the original hard deadline
         id: retention
         if: always()
@@ -160,22 +171,22 @@ jobs:
           import json, math, os, time
           minutes = 0
           try:
-              c = json.loads(os.environ['ROOT_ONBOARDING_ADMISSION'])['clock']
+              c = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])['clock']
               start,hard = c['STARTED'],c['HARD_DEADLINE']; now = time.time()
               assert all(type(x) in (int,float) and math.isfinite(x) for x in (start,hard))
-              assert start <= now < hard and 0 < hard-start <= 1380
+              assert start <= now < hard and 0 < hard-start <= 3600
               minutes = max(0,min(2,math.floor((hard-now-15)/60)))
           except (KeyError,TypeError,ValueError,AssertionError): pass
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('minutes='+str(minutes)+'\n')
           PYCODE
-      - name: Retain only bounded case and gate evidence
+      - name: Retain only bounded episode and gate evidence
         if: always() && steps.retention.outputs.minutes != '' && steps.retention.outputs.minutes != '0'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: ${{ fromJSON(steps.retention.outputs.minutes) }}
         with:
-          name: post648-onboarding-${{ github.run_id }}-${{ github.run_attempt }}
+          name: post657-startup4-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/native342-onboarding-gate
-            ${{ runner.temp }}/native342-case/evidence
+            ${{ runner.temp }}/native342-startup-gate
+            ${{ runner.temp }}/native342-episode/evidence
           if-no-files-found: error
           retention-days: 3

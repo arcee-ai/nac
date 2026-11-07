@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('launch', Path(__file__).with_name('launch.py'))
 launch = importlib.util.module_from_spec(spec)
@@ -15,20 +16,35 @@ class LauncherControls(unittest.TestCase):
     def admission(self):
         return dict(scope=launch.case.SCOPE, controller_sha='a' * 40, allocation_id='Root-one',
             attempt=1, retries=0, manifest_sha256='b' * 64,
-            producer=dict(run_id=123, artifact_id=456, controller_sha='c' * 40,
-                          branch='codex/experimental-producer-post648', artifact_name='package-123-1'),
-            clock=dict(STARTED=1000, WORK_DEADLINE=1900, CLEANUP_DEADLINE=2260, HARD_DEADLINE=2380))
+            producer=dict(run_id=123, artifact_id=456, controller_sha=launch.case.PRODUCER,
+                          branch=launch.case.PRODUCER_BRANCH, artifact_name='package-123-1'),
+            clock=dict(STARTED=1000, WORK_DEADLINE=3880, CLEANUP_DEADLINE=4480, HARD_DEADLINE=4600))
 
     def test_phase_timeouts_keep_original_work_cleanup_and_retention(self):
         value = self.admission()
         self.assertEqual(launch.minutes(value, 'download', now=1700), 2)
-        self.assertEqual(launch.minutes(value, 'case', now=1800), 6)
-        for phase in ('rust', 'node', 'download', 'metadata', 'prepare', 'case'):
+        self.assertEqual(launch.minutes(value, 'episode', now=1800), 43)
+        for phase in ('rust', 'node', 'download', 'metadata', 'prepare', 'episode', 'checkout-R'):
             with self.subTest(phase=phase), self.assertRaises(RuntimeError):
-                launch.minutes(value, phase, now=1900)
-        self.assertEqual(launch.retention_minutes(value, now=2260), 1)
-        self.assertEqual(value['clock']['WORK_DEADLINE'], 1900)
-        self.assertEqual(value['clock']['CLEANUP_DEADLINE'], 2260)
+                launch.minutes(value, phase, now=3880)
+        self.assertEqual(launch.retention_minutes(value, now=4480), 1)
+        self.assertEqual(value['clock']['WORK_DEADLINE'], 3880)
+        self.assertEqual(value['clock']['CLEANUP_DEADLINE'], 4480)
+
+    def test_new_branch_admission_rejects_old_onboarding_ref_and_legacy_producer(self):
+        value = self.admission()
+        env = dict(ROOT_STARTUP_ADMISSION=json.dumps(value), GITHUB_SHA='a' * 40,
+            GITHUB_REF=launch.case.BRANCH, GITHUB_EVENT_NAME='workflow_dispatch',
+            GITHUB_RUN_ATTEMPT='1', GITHUB_REPOSITORY=launch.REPOSITORY)
+        with patch.dict(launch.os.environ, env), patch.object(launch.time, 'time', return_value=1001):
+            self.assertEqual(launch.inputs(), value)
+            for changed in (dict(GITHUB_REF='refs/heads/codex/experimental-native342-onboarding-post648-p9'),
+                            dict(GITHUB_RUN_ATTEMPT='2'), dict(GITHUB_EVENT_NAME='push')):
+                with patch.dict(launch.os.environ, changed), self.assertRaises(RuntimeError):
+                    launch.inputs()
+            old = {**value, 'producer': {**value['producer'], 'controller_sha': 'c' * 40}}
+            with patch.dict(launch.os.environ, ROOT_STARTUP_ADMISSION=json.dumps(old)), self.assertRaises(RuntimeError):
+                launch.inputs()
 
     def identity(self):
         value = self.admission()
@@ -62,21 +78,21 @@ class LauncherControls(unittest.TestCase):
             archive = root / 'NAC-normal-arm64.zip'
             archive.write_bytes(b'inert bytes, never extracted')
             manifest = root / 'manifest.json'
-            manifest.write_text(json.dumps(dict(identity=dict(source=dict(revision='e' * 40)),
+            manifest.write_text(json.dumps(dict(identity=dict(source=dict(revision='ef2cce9141973f37bf35e33d113e35eaa7a91f19')),
                 container=dict(name=archive.name, size=archive.stat().st_size, sha256=launch.case.digest(archive)))))
             value['manifest_sha256'] = launch.case.digest(manifest)
             receipt = dict(status='PASS', runtime=False, SDK_actor=False, producer_attempts=1, retries=0,
-                pair=dict(P='e' * 40), admission=dict(controller_sha=value['producer']['controller_sha']),
+                pair=dict(P='ef2cce9141973f37bf35e33d113e35eaa7a91f19'), admission=dict(controller_sha=value['producer']['controller_sha']),
                 handoff={f.name: dict(sha256=launch.case.digest(f), bytes=f.stat().st_size) for f in (manifest, archive)})
             sink = root / 'host-package.json'
             sink.write_text(json.dumps(receipt))
-            self.assertEqual(launch.handoff_files(root, value, 'e' * 40), (manifest, archive))
+            self.assertEqual(launch.handoff_files(root, value, 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'), (manifest, archive))
             bad = copy.deepcopy(receipt)
-            bad['pair']['P'] = 'f' * 40
+            bad['pair']['P'] = '9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3'
             sink.write_text(json.dumps(bad))
             with self.assertRaises(RuntimeError):
-                launch.handoff_files(root, value, 'e' * 40)
+                launch.handoff_files(root, value, 'ef2cce9141973f37bf35e33d113e35eaa7a91f19')
             sink.write_text(json.dumps(receipt))
             archive.write_bytes(b'tampered')
             with self.assertRaises(RuntimeError):
-                launch.handoff_files(root, value, 'e' * 40)
+                launch.handoff_files(root, value, 'ef2cce9141973f37bf35e33d113e35eaa7a91f19')

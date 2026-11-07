@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEVERMERGE experiment. Root must separately admit exactly one real case."""
+"""NEVERMERGE experiment. Root must separately admit the exact four-case/R episode."""
 import hashlib
 import json
 import math
@@ -13,8 +13,11 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native342-onboarding-post648-p9'
-SCOPE = 'Q04c-on-final-post648-P-onboarding-only'
+BRANCH = 'refs/heads/codex/experimental-native342-four-startup-post657-p10'
+SCOPE = 'P10-Q9931-H1c9-R2504-four-startup'
+CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
+PRODUCER = '7239e61a0ebc0ee01b28f9d3cb9c1262132a8627'
+PRODUCER_BRANCH = 'codex/experimental-native-q-host-package-post657-p10'
 
 
 def require(condition, reason):
@@ -50,6 +53,8 @@ def admit(value, controller_sha, *, now=None):
             and re.fullmatch('[0-9a-f]{40}', str(producer['controller_sha']))
             and re.fullmatch('codex/[A-Za-z0-9_./-]{1,150}', str(producer['branch']))
             and re.fullmatch('[A-Za-z0-9_.-]{1,200}', str(producer['artifact_name'])), 'exact named producer run/artifact/source')
+    require(producer['controller_sha'] == PRODUCER and producer['branch'] == PRODUCER_BRANCH,
+            'only the reviewed current P10 producer source; actual run/artifact remain Root-bound')
     clock = value['clock']
     keys = ('STARTED', 'WORK_DEADLINE', 'CLEANUP_DEADLINE', 'HARD_DEADLINE')
     require(set(clock) == set(keys) and all(type(clock[k]) in (int, float) for k in keys),
@@ -58,29 +63,62 @@ def admit(value, controller_sha, *, now=None):
     stamp = time.time() if now is None else now
     require(all(math.isfinite(x) for x in (start, work, cleanup, hard, stamp))
             and start <= stamp < work < cleanup < hard
-            and 0 < hard - start <= 1380 and work - start <= 900
-            and cleanup - work >= 360 and hard - cleanup >= 120,
-            'original queue-inclusive <=23m clock, <=15m work, >=6m cleanup, >=2m retention')
+            and 0 < hard - start <= 3600 and work - start <= 2880
+            and cleanup - work >= 600 and hard - cleanup >= 120,
+            'original queue-inclusive <=60m clock, <=48m work, >=10m cleanup, >=2m retention')
     return start, work, cleanup, hard
 
 
-def selected_case(startup, *, folder, profiles, app, manifest, product, tests, harness_sha,
-                  selection, observer, image_reader, run, command, native_report):
-    # No qualify(), protocol executable, CASES loop, or other scenario admission.
-    proof = startup.run_case(folder=folder, profiles=profiles, scenario='onboarding', app=app,
-        manifest=manifest, product=product, tests=tests, harness_sha=harness_sha,
-        selection=selection, observer=observer, image_reader=image_reader,
-        run=run, command=command, native_report=native_report)
-    require(proof.get('scenario') == 'onboarding' and proof.get('passed') is True
-            and proof.get('public_test_requested') is True
-            and proof.get('input_completion_unknown') is False
-            and proof.get('attachments_complete') is True
-            and all(key in proof for key in ('live_api', 'image', 'actual_result'))
-            and proof.get('cleanup', {}).get('owned_processes_settled') is True
-            and proof.get('profile_removed') is True
-            and proof.get('persistent_authorization_policy_unchanged') is True,
-            'one actual onboarding case with positive cleanup and unchanged policy')
-    return proof
+def selected_episode(startup, protocol, clock, using, *, evidence, profiles, app, manifest,
+                     product, tests, protocol_root, harness_sha, package_admission, selection,
+                     observer, image_reader, run, command, native_report, progress):
+    """Reuse maintained R and case owners, serially; no product build or fallback."""
+    require(tuple(startup.CASES) == CASES, 'exact maintained four-case order')
+    cases = []
+    try:
+        clock.require_phase('required-R-build-and-four-records', 1155)
+        with using(clock.work):
+            private, runner = protocol.build(protocol_root, evidence / 'startup-protocol-runner', run)
+            process = protocol.verify(private, runner, app, manifest, package_admission,
+                                      evidence / 'startup-protocol', run)
+        # verify owns all typed records, engine identity/digest, integrity and
+        # retirement checks. A missing/failed R never reaches any UI case.
+        require(isinstance(process, dict) and process.get('R') == startup.PROTOCOL_SOURCE
+                and process.get('P') == startup.PRODUCT
+                and tuple(row.get('scenario') for row in process.get('observations', [])) == tuple(protocol.SCENARIOS)
+                and all(row.get('owner_cleanup') is True and row.get('preserved_store_config') is True
+                        for row in process['observations']), 'required complete maintained R receipt')
+        progress(protocol=process)
+        for scenario in CASES:
+            clock.require_phase('case-' + scenario, 615)
+            progress(requested=scenario)
+            folder = evidence / ('startup-' + scenario)
+            with using(clock.cleanup):
+                proof = startup.run_case(folder=folder, profiles=profiles, scenario=scenario, app=app,
+                    manifest=manifest, product=product, tests=tests, harness_sha=harness_sha,
+                    selection=selection, observer=observer, image_reader=image_reader,
+                    run=run, command=command, native_report=native_report)
+            require(proof.get('scenario') == scenario and proof.get('passed') is True
+                    and proof.get('public_test_requested') is True
+                    and proof.get('input_completion_unknown') is False
+                    and proof.get('attachments_complete') is True
+                    and all(key in proof for key in ('image', 'actual_result', 'integrity', 'provider'))
+                    and (scenario not in ('onboarding', 'configuredLocal') or 'live_api' in proof)
+                    and (scenario != 'configuredLocal' or 'persisted_api' in proof)
+                    and proof.get('cleanup', {}).get('owned_processes_settled') is True
+                    and proof.get('profile_removed') is True
+                    and proof.get('persistent_authorization_policy_unchanged') is True,
+                    'actual case with positive ownership, evidence, integrity and policy')
+            clock.work.check()  # Successful cleanup never renews or revives work.
+            cases.append(dict(scenario=scenario, passed=True,
+                              receipt=str((folder / 'case.json').relative_to(evidence)),
+                              sha256=digest(folder / 'case.json')))
+            progress(cases=list(cases))
+        return process, cases
+    except BaseException:
+        clock.fail('required protocol or serial startup case failed/unknown')
+        clock.cleaning = True
+        raise
 
 
 def make_clock(epochs, Bound):
@@ -97,13 +135,20 @@ def make_clock(epochs, Bound):
             self.cleanup = Bound(self, self.mono + cleanup - self.epoch, 'cleanup')
             self.retention = Bound(self, self.mono + hard - self.epoch, 'retention')
 
+        def require_phase(self, label, seconds):
+            self.work.check()
+            if self.work.deadline - self.monotonic() < seconds:
+                self.fail('work: insufficient remaining allowance for ' + label)
+                self.work.check()
+
         def fail(self, reason):
             if reason not in self.failed:
                 self.failed.append(reason)
 
         def observe(self):
             before, epoch, after = time.monotonic(), time.time(), time.monotonic()
-            if not self.epoch + before - self.mono - 1 <= epoch <= self.epoch + after - self.mono + 1:
+            if (not all(math.isfinite(x) for x in (before, epoch, after)) or after < before
+                    or not self.epoch + before - self.mono - 1 <= epoch <= self.epoch + after - self.mono + 1):
                 self.fail('clock discontinuity')
             if STOP:
                 self.fail('signal requested stop')
@@ -117,14 +162,15 @@ def main():
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'actual arm64 macOS host')
     require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
             and os.environ.get('GITHUB_REF') == BRANCH
-            and os.environ.get('GITHUB_RUN_ATTEMPT') == '1', 'one explicit experimental dispatch')
+            and os.environ.get('GITHUB_RUN_ATTEMPT') == '1'
+            and os.environ.get('GITHUB_REPOSITORY') == 'arcee-ai/nac', 'one explicit experimental dispatch')
     controller = Path(__file__).resolve().parents[3]
     pair_path = Path(__file__).with_name('pair.json')
     pair = json.loads(pair_path.read_text())
     require(pair['scope'] == SCOPE, 'fixed source scope')
-    admission = json.loads(os.environ['ROOT_ONBOARDING_ADMISSION'])
+    admission = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
     start, work, cleanup, hard = admit(admission, os.environ['GITHUB_SHA'])
-    roots = {key: Path(os.environ[key + '_ROOT']) for key in ('H', 'P', 'Q')}
+    roots = {key: Path(os.environ[key + '_ROOT']) for key in ('H', 'P', 'Q', 'R')}
     package, output = Path(os.environ['PACKAGE_ROOT']), Path(os.environ['OUTPUT_ROOT'])
     paths = [controller, *roots.values(), package, output]
     require(all(p.is_absolute() and p.resolve() == p for p in paths), 'canonical explicit roots')
@@ -140,15 +186,16 @@ def main():
     exported.mkdir(mode=0o700)
     report = dict(status='FAIL', scope=SCOPE, pair=pair, pair_sha256=digest(pair_path),
         wrapper_sha256=digest(__file__), admission=admission, controller_sha=os.environ['GITHUB_SHA'],
-        runtime_attempts=0, retries=0, full_four_case_run=False, protocol_executed=False,
+        runtime_attempts=0, cases_requested=[], retries=0, full_four_case_run=False, protocol_executed=False, cases=[],
         prefix_binary_acceptance=False, final_integrated_native_acceptance=False,
         historical_four_Q_failures_preserved=True, prior_SDK_actual_allocation_consumed=True,
         lifecycle531_spent=1, allocation_consumed=True, phases=[])
-    write(evidence / 'one-onboarding.json', report)
-    write(exported / 'one-onboarding.json', report)  # Initial FAIL survives an import/preflight failure.
+    write(evidence / 'four-startup.json', report)
+    write(exported / 'four-startup.json', report)  # Initial FAIL survives an import/preflight failure.
     sys.path.insert(0, str(roots['H'] / 'desktop/macos'))
     import ci
     import ci_startup as startup
+    import ci_startup_protocol as protocol
     from ci_paths_budget import Bound, active, using
     from ci_qualifications import require_checkout
     from ci_support import export_evidence, qualify_toolchain, redact_values, require_console
@@ -158,11 +205,13 @@ def main():
     clock = make_clock((start, work, cleanup, hard), Bound)
     # Each work callback is independently clamped below; permit the maintained
     # case's result/owner cleanup callbacks to use the original cleanup reserve.
-    ci.RUN_DEADLINE = min(ci.RUN_DEADLINE, clock.cleanup.deadline)
+    # ci's default is a separate 30m relative ceiling. This adapter supplies the
+    # single reviewed original absolute cleanup bound; active work is stricter.
+    ci.RUN_DEADLINE = clock.cleanup.deadline
 
     def save():
         with using(clock.retention):
-            write(evidence / 'one-onboarding.json', report)
+            write(evidence / 'four-startup.json', report)
 
     def bound():
         current = active()
@@ -212,8 +261,9 @@ def main():
                     'actual runtime compiled binary absent')
             outputs[label] = dict(binary_sha256=digest(binary), info_sha256=digest(info))
         require(digest(config) == binding['configuration_sha256'], 'runtime configuration changed')
-        report['runtime_build'] = dict(outputs=outputs, binding=binding, xctestrun_sha256=digest(runners[0]))
-        write(evidence / 'runtime-build.json', report['runtime_build'])
+        receipt = dict(outputs=outputs, binding=binding, xctestrun_sha256=digest(runners[0]))
+        report.setdefault('runtime_builds', {})[derived.parent.name] = receipt
+        write(derived.parent / 'runtime-build.json', receipt)
 
     def run(argv, log, cap, cwd=roots['H'], *, env=None, abort=None):
         phase = dict(argv=argv, cap_seconds=cap, started_epoch=time.time(), status='RUNNING')
@@ -221,6 +271,8 @@ def main():
         save()
         try:
             operation = clock.work if any(x in argv for x in ('build-for-testing', 'test-without-building')) else bound()
+            if operation.kind == 'work':
+                clock.require_phase('helper-' + Path(str(argv[0])).name, cap + 15)
             with using(operation):
                 ci.run(argv, log, cap, cwd=cwd, env=env,
                        abort=lambda: bool(STOP) or (abort is not None and abort()))
@@ -228,12 +280,11 @@ def main():
                     runtime_build_receipt(argv)
             phase['status'] = 'PASS'
         except BaseException:
+            clock.fail('helper failed/unknown')
             clock.cleaning = True
             phase['status'] = 'FAIL'
             raise
         finally:
-            if 'test-without-building' in argv:
-                clock.cleaning = True
             phase['ended_epoch'] = time.time()
             save()
 
@@ -243,7 +294,9 @@ def main():
             for key, root in roots.items():
                 require_checkout(root, pair[key])
             require(startup.PRODUCT == pair['P'] and startup.TEST_SOURCE == pair['Q']
-                    and startup.TEST_FILES['StartupJourneys.swift'] == pair['q_swift_sha256'], 'actual H/P/Q pins')
+                    and startup.TEST_FILES['StartupJourneys.swift'] == pair['q_swift_sha256']
+                    and startup.PROTOCOL_SOURCE == pair['R'] == protocol.REVISION, 'actual H/P/Q/R pins')
+            protocol.sources(roots['R'])
             expected = json.loads((roots['H'] / 'desktop/macos/ci-toolchain.json').read_text())
             actual = dict(developer_directory=os.environ.get('DEVELOPER_DIR'),
                 xcode=command(['xcodebuild', '-version']), sdk=command(['xcrun', '--sdk', 'macosx', '--show-sdk-version']),
@@ -280,14 +333,21 @@ def main():
             report['console_before'] = console('before')
         profiles = output / 'profiles'
         profiles.mkdir(mode=0o700)
-        report['runtime_attempts'] = 1
-        save()
+        def progress(**updates):
+            if 'requested' in updates:
+                report['cases_requested'].append(updates.pop('requested'))
+            if 'protocol' in updates:
+                report.update(process_protocol=updates.pop('protocol'), protocol_executed=True)
+            report.update(updates)
+            report['runtime_attempts'] = len(report['cases_requested'])
+            save()
+        process, cases = selected_episode(startup, protocol, clock, using, evidence=evidence, profiles=profiles,
+            app=app, manifest=manifest, product=roots['P'], tests=roots['Q'], protocol_root=roots['R'],
+            harness_sha=pair['H'], package_admission={'provenance': report['package_before']},
+            selection=selection, observer=observer, image_reader=image_reader, run=run, command=command,
+            native_report=native_report, progress=progress)
+        report.update(full_four_case_run=True, process_protocol=process, cases=cases)
         with using(clock.cleanup):
-            report['case'] = selected_case(startup, folder=evidence / 'onboarding', profiles=profiles,
-                app=app, manifest=manifest, product=roots['P'], tests=roots['Q'], harness_sha=pair['H'],
-                selection=selection, observer=observer, image_reader=image_reader,
-                run=run, command=command, native_report=native_report)
-            clock.cleaning = True
             report['console_after'] = console('after')
             report['package_after'] = startup.package_contract(contract, 'inspect_normal_package',
                 [str(manifest), str(app), str(roots['P'])], dict(product_sha=pair['P']),
@@ -301,6 +361,8 @@ def main():
             require(not clock.failed and not STOP, 'clock/ownership failure remains latched')
             report['status'] = 'PASS'
     except BaseException as error:
+        clock.fail('episode failed/unknown')
+        clock.cleaning = True
         report.update(error_type=type(error).__name__, error='selected experiment failed; retain stage evidence')
         raise
     finally:

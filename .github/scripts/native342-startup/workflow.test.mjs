@@ -9,9 +9,9 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const YAML = require('yaml'); // Existing locked workflow-tooling dependency.
 const workflow = YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml', 'utf8'));
-const job = workflow.jobs.onboarding;
+const job = workflow.jobs.four_startup;
 const initial = job.steps[0].run.split('\n').slice(1, -2).join('\n');
-const roots = { DOWNLOAD_ROOT: 'native342-download', PACKAGE_ROOT: 'native342-package', OUTPUT_ROOT: 'native342-case' };
+const roots = { DOWNLOAD_ROOT: 'native342-download', PACKAGE_ROOT: 'native342-package', OUTPUT_ROOT: 'native342-episode' };
 
 function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempName = 'runner temp', alias = false } = {}) {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'nac-workflow-context-'));
@@ -22,18 +22,18 @@ function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempNa
     if (alias) fs.symlinkSync(actualTemp, runnerTemp);
     const environment = path.join(fixture, 'github-env');
     const output = path.join(fixture, 'github-output');
-    const admission = { scope: 'Q04c-on-final-post648-P-onboarding-only', controller_sha: 'a'.repeat(40),
+    const admission = { scope: 'P10-Q9931-H1c9-R2504-four-startup', controller_sha: 'a'.repeat(40),
       allocation_id: 'inert-workflow-source-control', attempt: 1, retries: 0, manifest_sha256: 'b'.repeat(64),
-      producer: {}, clock: { STARTED: 1000, WORK_DEADLINE: 1900, CLEANUP_DEADLINE: 2260, HARD_DEADLINE: 2380, ...clock } };
+      producer: {}, clock: { STARTED: 1000, WORK_DEADLINE: 3880, CLEANUP_DEADLINE: 4480, HARD_DEADLINE: 4600, ...clock } };
     // Execute only the actual initial inline Python, with a fixed wall clock.
     // No checkout, compiler, network, H import, app, or case is invoked.
     const result = spawnSync('python3', ['-B', '-c', `import time; time.time=lambda: ${now}; exec(${JSON.stringify(initial)})`], {
       encoding: 'utf8', timeout: 5000,
       env: { ...process.env, RUNNER_TEMP: runnerTemp, GITHUB_ENV: environment, GITHUB_OUTPUT: output,
-        GITHUB_SHA: admission.controller_sha, ImageVersion: image, ROOT_ONBOARDING_ADMISSION: JSON.stringify(admission) },
+        GITHUB_SHA: admission.controller_sha, ImageVersion: image, ROOT_STARTUP_ADMISSION: JSON.stringify(admission) },
     });
     assert.equal(result.error, undefined);
-    const report = JSON.parse(fs.readFileSync(path.join(actualTemp, 'native342-onboarding-gate/initial.json'), 'utf8'));
+    const report = JSON.parse(fs.readFileSync(path.join(actualTemp, 'native342-startup-gate/initial.json'), 'utf8'));
     const exports = fs.existsSync(environment) ? fs.readFileSync(environment, 'utf8') : '';
     return { status: result.status, stderr: result.stderr, report, exports,
       canonicalTemp: fs.realpathSync(actualTemp), output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
@@ -42,7 +42,7 @@ function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempNa
   }
 }
 
-test('admitted initial gate exports the three unchanged canonical roots for later steps', () => {
+test('admitted initial gate exports the three fixed canonical roots for later steps', () => {
   for (const alias of [false, true]) {
     const result = initialGate({ alias });
     assert.equal(result.status, 0, result.stderr);
@@ -58,8 +58,8 @@ test('admitted initial gate exports the three unchanged canonical roots for late
 });
 
 test('rejected image, original clock, or multiline root never exports launch roots', () => {
-  for (const input of [{ image: '20261026.0455.2' }, { image: '' }, { now: 1900 },
-    { clock: { CLEANUP_DEADLINE: 2259 } }, { tempName: 'runner\ninjected' }]) {
+  for (const input of [{ image: '20261026.0455.2' }, { image: '' }, { now: 3880 },
+    { clock: { CLEANUP_DEADLINE: 4479 } }, { tempName: 'runner\ninjected' }]) {
     const result = initialGate(input);
     assert.notEqual(result.status, 0);
     assert.equal(result.exports, '');
@@ -68,4 +68,21 @@ test('rejected image, original clock, or multiline root never exports launch roo
     assert.equal(result.report.compile, false);
     assert.equal(result.report.runtime, false);
   }
+});
+
+
+test('only the new manual four-case source is reachable and independent R is checked out', () => {
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(workflow.jobs), ['four_startup']);
+  assert.match(job.if, /refs\/heads\/codex\/experimental-native342-four-startup-post657-p10/);
+  assert.match(job.if, /github.run_attempt == 1/);
+  assert.equal(job['timeout-minutes'], 60);
+  assert.equal(job.env.ROOT_STARTUP_ADMISSION, '${{ inputs.startup_admission }}');
+  assert.equal(job.env.R_ROOT, '${{ github.workspace }}/protocol');
+  const checkouts = job.steps.filter(s => s.uses?.startsWith('actions/checkout@'));
+  assert.deepEqual(checkouts.map(s => s.with.path), ['controller', 'harness', 'product', 'query', 'protocol']);
+  assert.equal(checkouts[4].with.ref, '${{ steps.checkout_H.outputs.R }}');
+  assert.ok(checkouts.every(s => s.with['persist-credentials'] === false));
+  assert.ok(job.steps.some(s => s.run?.endsWith('/four-startup.py')));
+  assert.ok(!job.steps.some(s => /qualify\(|prepare-engine|rust-cache|one-onboarding.py/.test(s.run || s.uses || '')));
 });

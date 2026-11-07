@@ -1,0 +1,19 @@
+{
+  "scope": "P10-Q9931-H1c9-R2504-four-startup",
+  "H": "1c9f31786763b5b51aa03e2ef04f5369576d8ad4",
+  "P": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
+  "Q": "993102af913b94acfcf0f4f866f9350e6ca3650b",
+  "product_parent": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "source_context_dev": "42231f447fef5d9d63d82943ae35e8c0d6c424b6",
+  "sdk_controller": "2cee2f42074a6d7948ca94133ff0e743368a8ae5",
+  "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
+  "q_swift_sha256": "5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471",
+  "host_image": "20261102.0473.1",
+  "H_preparation_parent": "d11b34dc9f8b7fa6ae98b092622cb5e5da58d56e",
+  "native_boundary": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
+  "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",
+  "R": "25046f450110d1b795d529d046d2c1deee880877",
+  "producer_source": "7239e61a0ebc0ee01b28f9d3cb9c1262132a8627",
+  "producer_branch": "codex/experimental-native-q-host-package-post657-p10"
+}
