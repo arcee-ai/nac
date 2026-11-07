@@ -78,6 +78,9 @@ export function usePathPicker({
   // generation still waiting, so a second click cannot start a second check.
   const generation = useRef(0);
   const inFlight = useRef<number | null>(null);
+  // Counts every edit of the draft and every navigation, so work begun before
+  // one of them can tell that the person has moved on since.
+  const moves = useRef(0);
 
   // Both hooks are called every render, as hooks must be; the one that is not
   // the source of this listing is disabled and never fetches.
@@ -112,6 +115,7 @@ export function usePathPicker({
   }, [binding]);
 
   const goTo = (path: string) => {
+    moves.current += 1;
     supersede();
     setFailure(null);
     setDirectory(path);
@@ -120,9 +124,15 @@ export function usePathPicker({
   };
 
   const setDraft = (value: string) => {
+    moves.current += 1;
     supersede();
     setFailure(null);
     setDraftValue(value);
+  };
+
+  const fence = () => {
+    const mark = moves.current;
+    return () => moves.current === mark;
   };
 
   // What Select would apply right now. A cleared draft falls back to the
@@ -164,11 +174,15 @@ export function usePathPicker({
   };
 
   return {
+    /** Identifies this opening and source; answers made under another are stale. */
+    binding,
     pickingFile,
     directory,
     draft,
     setDraft,
     goTo,
+    /** Starts a check that holds until the draft is next edited or the picker navigates. */
+    fence,
     file,
     chooseFile: setFile,
     hidden,

@@ -818,7 +818,7 @@ fn mutate_mounted_locked(
 }
 
 #[cfg(unix)]
-fn open_parent_beneath(
+pub(crate) fn open_parent_beneath(
     root: &Path,
     relative: &Path,
     create_parents: bool,
@@ -883,7 +883,7 @@ fn c_string(bytes: &[u8]) -> io::Result<CString> {
 }
 
 #[cfg(unix)]
-fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
+pub(crate) fn open_directory_at(directory: &File, name: &CString) -> io::Result<File> {
     // SAFETY: `directory` is a live descriptor and `name` is a NUL-terminated
     // relative component; the flags request a no-follow directory descriptor.
     let descriptor = unsafe {

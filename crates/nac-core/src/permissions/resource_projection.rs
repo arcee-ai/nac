@@ -31,20 +31,13 @@ fn resolved_file_resources(
     mutating: bool,
 ) -> Vec<PermissionResource> {
     let display = resolved_path.display().to_string();
-    let mut resource = PermissionResource::new(action, display.clone())
-        .with_display(display.clone())
-        .with_save_resource(display.clone());
-
-    if mutating {
-        if path_contains_component(&resolved_path, ".git") {
-            resource = resource.with_hard_denial(
-                "direct file mutation of Git metadata is blocked; use a non-destructive Git command",
-            );
-        } else if backend.workspace_cwd_is_local() && is_store_path(&resolved_path, store_path) {
-            resource = resource
-                .with_hard_denial("direct mutation of the active NAC session store is blocked");
-        }
-    }
+    let resource = path_resource(
+        action,
+        &resolved_path,
+        backend.workspace_cwd_is_local(),
+        store_path,
+        mutating,
+    );
 
     let workspace = match backend {
         ExecutionBackend::Local { .. } => {
@@ -64,6 +57,52 @@ fn resolved_file_resources(
         );
     }
     resources
+}
+
+/// One exact path resource with the native hard denials every mutation of it
+/// carries. `local_store` says whether the path lives on the machine holding
+/// the active session store, which only a remote backend's paths do not.
+fn path_resource(
+    action: &str,
+    resolved_path: &Path,
+    local_store: bool,
+    store_path: &Path,
+    mutating: bool,
+) -> PermissionResource {
+    let display = resolved_path.display().to_string();
+    let resource = PermissionResource::new(action, display.clone())
+        .with_display(display.clone())
+        .with_save_resource(display);
+    if !mutating {
+        return resource;
+    }
+    if path_contains_component(resolved_path, ".git") {
+        resource.with_hard_denial(
+            "direct file mutation of Git metadata is blocked; use a non-destructive Git command",
+        )
+    } else if local_store && is_store_path(resolved_path, store_path) {
+        resource.with_hard_denial("direct mutation of the active NAC session store is blocked")
+    } else {
+        resource
+    }
+}
+
+/// Project a directory a person creates under a parent they browsed, whose
+/// canonical location has already been bound on its backend. That parent is the
+/// whole scope, so no external-directory resource applies; the native mutation
+/// denials still do.
+pub(crate) fn human_directory_resources(
+    target: &Path,
+    backend: PermissionBackend,
+    store_path: &Path,
+) -> Vec<PermissionResource> {
+    vec![path_resource(
+        "edit",
+        target,
+        !matches!(backend, PermissionBackend::Ssh),
+        store_path,
+        true,
+    )]
 }
 
 /// Re-resolve every path-bearing resource immediately before authorization.
@@ -259,6 +298,11 @@ pub(super) fn is_store_path(path: &Path, store_path: &Path) -> bool {
     let Some(name) = store.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
+    // Session operation leases live beside the store; anything planted in that
+    // directory under a lease's name makes the session's operations fail.
+    if path.starts_with(store.with_file_name(format!("{name}.run-locks"))) {
+        return true;
+    }
     path.parent() == store.parent()
         && path
             .file_name()

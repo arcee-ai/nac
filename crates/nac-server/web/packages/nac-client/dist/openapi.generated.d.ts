@@ -236,6 +236,13 @@ export interface components {
             input_tokens_above: number;
             output: number;
         };
+        CreatedFolder: {
+            path: string;
+        };
+        CreateFolderRequest: {
+            name: string;
+            parent: string;
+        };
         CreateGoalRequest: {
             objective: string;
             token_budget?: number | null;
@@ -314,6 +321,13 @@ export interface components {
         CreateSshConfigurationRequest: {
             name: string;
             ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSshFolderRequest: {
+            name: string;
+            parent: string;
+            ssh_host?: string | null;
             ssh_identity_file?: string | null;
             ssh_port?: number | null;
         };

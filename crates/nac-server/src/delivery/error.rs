@@ -252,6 +252,30 @@ impl From<runtime::RemoteBrowseError> for ApiError {
     }
 }
 
+impl From<nac_core::project_folders::NewFolderError> for ApiError {
+    fn from(error: nac_core::project_folders::NewFolderError) -> Self {
+        use nac_core::project_folders::NewFolderError;
+        let status = match &error {
+            NewFolderError::InvalidName(_)
+            | NewFolderError::InvalidRequest(_)
+            | NewFolderError::ParentNotADirectory(_) => StatusCode::BAD_REQUEST,
+            NewFolderError::Denied { .. } | NewFolderError::Refused { .. } => StatusCode::FORBIDDEN,
+            NewFolderError::ParentNotFound(_) => StatusCode::NOT_FOUND,
+            NewFolderError::AlreadyExists(_) | NewFolderError::ParentChanged(_) => {
+                StatusCode::CONFLICT
+            }
+            // Only these two leave the outcome unknown; clients look before
+            // they offer a retry.
+            NewFolderError::Unreachable { .. } => StatusCode::BAD_GATEWAY,
+            NewFolderError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<RequestConfigurationError> for ApiError {
     fn from(error: RequestConfigurationError) -> Self {
         Self {

@@ -6,6 +6,7 @@ pub(crate) mod fresh_task_schedules;
 pub(crate) mod heartbeats;
 pub(crate) mod managed_secrets;
 pub(crate) mod model_configurations;
+pub(crate) mod project_folders;
 pub(crate) mod projects;
 pub(crate) mod server;
 pub(crate) mod session_integrations;

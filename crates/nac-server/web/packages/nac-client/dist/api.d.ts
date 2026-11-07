@@ -307,6 +307,18 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         path: string;
         truncated: boolean;
     }>;
+    /**
+     * Creates one named folder inside a listed local directory. Never retried
+     * here: a lost answer leaves the outcome unknown, so the caller looks
+     * before it offers to try again.
+     */
+    createFolder: (parent: string, name: string) => Promise<{
+        path: string;
+    }>;
+    /** The same, on the SSH host the picker is browsing — never locally. */
+    createSshFolder: (target: SshTarget, parent: string, name: string) => Promise<{
+        path: string;
+    }>;
     /** Validates the key as a side effect: a bad key cannot list models. */
     listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) => Promise<{
         base_url: string;
