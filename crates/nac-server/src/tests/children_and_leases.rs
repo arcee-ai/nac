@@ -1314,18 +1314,25 @@ async fn cancelled_workspace_request_keeps_leases_until_blocking_git_settles() {
     release_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if let Ok(workspace) =
-                sessions::WorkspaceActivityLease::try_acquire(&store_path, &workspace_identity)
-            {
-                drop(workspace);
-                break;
+            match sessions::WorkspaceActivityLease::try_acquire(&store_path, &workspace_identity) {
+                Ok(workspace) => {
+                    match sessions::SessionOperationLease::try_acquire(&store_path, "session") {
+                        Ok(session) => {
+                            drop((workspace, session));
+                            break;
+                        }
+                        Err(sessions::SessionOperationLeaseError::Busy(_)) => {}
+                        Err(error) => panic!("session settlement probe failed: {error}"),
+                    }
+                }
+                Err(sessions::SessionOperationLeaseError::Busy(_)) => {}
+                Err(error) => panic!("workspace settlement probe failed: {error}"),
             }
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("blocking mutation should eventually release its leases");
-    drop(sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap());
     let _ = std::fs::remove_dir_all(root);
 }
 
