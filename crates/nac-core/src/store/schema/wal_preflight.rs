@@ -1,6 +1,8 @@
 use anyhow::Result;
-use std::io::Read;
+use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 const SQLITE_HEADER_LENGTH: usize = 64;
 const SQLITE_PAGE_SIZE_OFFSET: usize = 16;
@@ -142,6 +144,29 @@ fn sqlite_io_result(code: i32) -> std::io::Result<()> {
     }
 }
 
+/// The committed prefix of one WAL generation that a previous preflight has
+/// already verified. SQLite never rewrites a committed frame until it restarts
+/// the log, and a restart writes a new header (salt-1 always changes), so a
+/// later preflight that reads an identical header resumes after `end` instead
+/// of re-reading and re-checksumming every frame on each open.
+#[derive(Clone, Copy)]
+struct VerifiedWal {
+    header: [u8; WAL_HEADER_LENGTH],
+    /// Offset just past the last verified commit frame.
+    end: u64,
+    checksum: [u32; 2],
+    page_one: Option<i64>,
+}
+
+static VERIFIED_WALS: LazyLock<Mutex<HashMap<PathBuf, VerifiedWal>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn verified_wals() -> std::sync::MutexGuard<'static, HashMap<PathBuf, VerifiedWal>> {
+    VERIFIED_WALS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Return page one's user_version from the latest valid committed WAL frame.
 fn read_wal_schema_version(path: &Path, main_page_size: Option<usize>) -> Result<Option<i64>> {
     let wal_path = sidecar_path(path, "-wal");
@@ -182,13 +207,29 @@ fn read_wal_schema_version(path: &Path, main_page_size: Option<usize>) -> Result
 
     let salts = &header[16..24];
     let frame_size = FRAME_HEADER_LENGTH + page_size;
-    let frame_count = wal
-        .metadata()?
-        .len()
-        .saturating_sub(WAL_HEADER_LENGTH as u64)
-        / frame_size as u64;
-    let mut candidate_page_one = None;
+    let wal_len = wal.metadata()?.len();
+    let mut end = WAL_HEADER_LENGTH as u64;
     let mut committed_page_one = None;
+    let resumed = verified_wals()
+        .get(&wal_path)
+        .copied()
+        .filter(|verified| verified.header == header && verified.end <= wal_len);
+    if let Some(verified) = resumed {
+        wal.seek(SeekFrom::Start(verified.end))?;
+        end = verified.end;
+        rolling_checksum = verified.checksum;
+        committed_page_one = verified.page_one;
+    }
+    // Page one seen since the last commit; at a commit boundary it equals the
+    // committed value, which is where a resumed scan starts.
+    let mut candidate_page_one = committed_page_one;
+    let mut verified = VerifiedWal {
+        header,
+        end,
+        checksum: rolling_checksum,
+        page_one: committed_page_one,
+    };
+    let frame_count = wal_len.saturating_sub(end) / frame_size as u64;
     let mut frame = vec![0_u8; frame_size];
     for _ in 0..frame_count {
         wal.read_exact(&mut frame)?;
@@ -209,6 +250,7 @@ fn read_wal_schema_version(path: &Path, main_page_size: Option<usize>) -> Result
             break;
         }
         rolling_checksum = frame_checksum;
+        end += frame_size as u64;
         if read_be_u32(&frame_header[0..4]) == 1 {
             candidate_page_one = Some(i64::from(read_be_u32(
                 &page[USER_VERSION_OFFSET..USER_VERSION_OFFSET + 4],
@@ -216,8 +258,15 @@ fn read_wal_schema_version(path: &Path, main_page_size: Option<usize>) -> Result
         }
         if read_be_u32(&frame_header[4..8]) != 0 {
             committed_page_one = candidate_page_one;
+            verified = VerifiedWal {
+                header,
+                end,
+                checksum: rolling_checksum,
+                page_one: committed_page_one,
+            };
         }
     }
+    verified_wals().insert(wal_path, verified);
     Ok(committed_page_one)
 }
 
