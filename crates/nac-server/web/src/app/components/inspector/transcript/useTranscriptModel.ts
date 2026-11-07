@@ -17,7 +17,7 @@ import type { SessionSnapshotResponse, SubmittedUserMessageSnapshot } from "@/ap
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
+    if (turn.kind === "delegated-completion" || turn.kind === "goal-continuation") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;

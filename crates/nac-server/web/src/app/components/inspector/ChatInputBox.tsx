@@ -24,6 +24,7 @@ import {
   ComposerIconButton,
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
+import { isGoalContinuationEnvelope } from "@/app/features/goals/continuation";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalComposer, GoalFlag } from "@/app/components/inspector/GoalComposer";
@@ -368,7 +369,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const sentPrompts = useMemo(() => {
     const prompts: string[] = [];
     for (const message of snapshot?.messages ?? []) {
-      if (message.role !== "user") continue;
+      // A goal continuation is NAC's control message, not something typed.
+      if (message.role !== "user" || isGoalContinuationEnvelope(message.content)) continue;
       prompts.push(displayPromptFromMessageText(message.content));
     }
     return prompts.reverse();

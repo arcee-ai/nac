@@ -17,6 +17,8 @@ import type {
   ToolCall,
 } from "@/app/types/api";
 
+import fixture from "../../../../../../fixtures/goal-continuation-format.json";
+
 interface DispatchSpec {
   name: string;
   callId: string;
@@ -487,3 +489,43 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
     });
   },
 );
+
+describe("goal continuation turns", () => {
+  const goalFixture = fixture.vectors.find((vector) => vector.name === "budget-above-slider");
+  const message = goalFixture?.message ?? "";
+
+  it("shows the objective and goal instead of the control prompt", () => {
+    const turns = buildTranscript(
+      snapshot([
+        { role: "user", content: message },
+        { role: "assistant", content: "first step" },
+        { role: "user", content: message },
+      ]),
+      {},
+    );
+    expect(turns.map((turn) => turn.kind)).toEqual([
+      "goal-continuation",
+      "model",
+      "goal-continuation",
+    ]);
+    expect(turns[0]).toMatchObject({
+      goalId: "goal-2",
+      objective: "finish the migration",
+      first: true,
+      messageIndex: 0,
+    });
+    expect(turns[2]).toMatchObject({ first: false, messageIndex: 2 });
+    expect(JSON.stringify(turns)).not.toContain("get_goal");
+    expect(JSON.stringify(turns)).not.toContain("nac_goal_continuation");
+  });
+
+  it("does not call a goal's run its first while older messages are unloaded", () => {
+    const value = snapshot([{ role: "user", content: message }]);
+    value.message_page = { start: 4, end: 5, total: 5, has_older: true };
+    expect(buildTranscript(value, {})[0]).toMatchObject({
+      kind: "goal-continuation",
+      first: false,
+      messageIndex: 4,
+    });
+  });
+});

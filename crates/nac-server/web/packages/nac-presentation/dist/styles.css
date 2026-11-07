@@ -959,6 +959,13 @@
     overflow: hidden;
   }
 
+[data-nac-runtime]:is(.line-clamp-4), [data-nac-runtime] .line-clamp-4 {
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    display: -webkit-box;
+    overflow: hidden;
+  }
+
 [data-nac-runtime]:is(.block), [data-nac-runtime] .block {
     display: block;
   }
@@ -1506,8 +1513,16 @@
     width: calc(var(--spacing) * 32);
   }
 
+[data-nac-runtime]:is(.w-40), [data-nac-runtime] .w-40 {
+    width: calc(var(--spacing) * 40);
+  }
+
 [data-nac-runtime]:is(.w-\[52px\]), [data-nac-runtime] .w-\[52px\] {
     width: 52px;
+  }
+
+[data-nac-runtime]:is(.w-\[132px\]), [data-nac-runtime] .w-\[132px\] {
+    width: 132px;
   }
 
 [data-nac-runtime]:is(.w-\[180px\]), [data-nac-runtime] .w-\[180px\] {
@@ -3702,6 +3717,10 @@
 
 [data-nac-runtime]:is(.underline), [data-nac-runtime] .underline {
     text-decoration-line: underline;
+  }
+
+[data-nac-runtime]:is(.underline-offset-2), [data-nac-runtime] .underline-offset-2 {
+    text-underline-offset: 2px;
   }
 
 [data-nac-runtime]:is(.accent-\[var\(--color-fill-accent-primary\)\]), [data-nac-runtime] .accent-\[var\(--color-fill-accent-primary\)\] {

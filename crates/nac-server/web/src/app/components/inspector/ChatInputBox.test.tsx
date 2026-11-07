@@ -1028,7 +1028,7 @@ describe("direct inbox and goal journeys", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
         target: { value: "unsaved objective" },
       });
-      fireEvent.keyDown(screen.getByRole("slider", { name: "Token budget" }), {
+      fireEvent.keyDown(screen.getByRole("slider", { name: "Token budget slider" }), {
         key: "ArrowRight",
       });
 
@@ -1037,14 +1037,14 @@ describe("direct inbox and goal journeys", () => {
         (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
       ).toBe("unsaved objective");
       expect(
-        screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow"),
+        screen.getByRole("slider", { name: "Token budget slider" }).getAttribute("aria-valuenow"),
       ).toBe("600");
       resizeComposer(phone);
       expect(
         (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
       ).toBe("unsaved objective");
       expect(
-        screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow"),
+        screen.getByRole("slider", { name: "Token budget slider" }).getAttribute("aria-valuenow"),
       ).toBe("600");
       fireEvent.click(screen.getByRole("button", { name: "Update" }));
       await waitFor(() =>
@@ -1100,9 +1100,9 @@ describe("direct inbox and goal journeys", () => {
     expect(
       (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
     ).toBe("existing objective");
-    expect(screen.getByRole("slider", { name: "Token budget" }).getAttribute("aria-valuenow")).toBe(
-      "500",
-    );
+    expect(
+      screen.getByRole("slider", { name: "Token budget slider" }).getAttribute("aria-valuenow"),
+    ).toBe("500");
     expect(fakes.updateGoal).not.toHaveBeenCalled();
   });
 });

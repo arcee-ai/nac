@@ -8,14 +8,22 @@ default for old and omitted session behavior values.
 
 Open the flag control beside the direct-session composer to create a goal. An
 objective is required; the token budget is optional and has no implicit
-default. The same panel edits the objective or budget and lets the user pause,
-resume, clear, or apply `usage limited` and `budget limited` states. Clearing
-removes the current generation. Once a goal is complete, creating another goal
-starts a fresh ID and zeroed accounting rather than reusing the old generation;
-the completed-goal panel labels that action **Replace and start**. A cleared or
-replaced goal keeps its ID, final status, version and accounting as bounded
-evidence (the last 8 per session) for [independent task
-reads](independent-tasks.md).
+default. New goals start with **No token limit**, and the request carries no
+budget unless the user turns the budget on. An enabled budget is the total
+billable tokens across all of the goal's runs (the accounting below), not the
+model's context size and not a cost guarantee. Its slider reaches one million
+tokens for convenience; the number field accepts any whole amount the server
+accepts, and a stored amount outside the slider's range is kept as is,
+including when only the objective is edited. Edits are versioned against the
+goal the panel loaded, so an objective or budget changed elsewhere is rejected
+rather than overwritten. The same panel edits the objective or budget and lets
+the user pause, resume, clear, or apply `usage limited` and `budget limited`
+states. Clearing removes the current generation. Once a goal is complete,
+creating another goal starts a fresh ID and zeroed accounting rather than
+reusing the old generation; the completed-goal panel labels that action
+**Replace and start**. A cleared or replaced goal keeps its ID, final status,
+version and accounting as bounded evidence (the last 8 per session) for
+[independent task reads](independent-tasks.md).
 
 The direct composer also implements literal goal commands. `/goal <objective>`
 creates and activates a new goal, while `/goal edit`, `/goal pause`, `/goal
@@ -39,6 +47,13 @@ not complete, block or pause it. The question survives restart. Ordinary human
 guidance remains deliverable and leaves the question open. One exact accepted
 answer reserves one continuation through the existing inbox; it never steers
 an unrelated active run. See [structured questions](independent-tasks.md#structured-questions).
+
+The transcript marks each continuation with a goal card instead of a user
+message: **Goal started** for the goal's first run and **Goal continued** for
+later ones, with the goal's short ID, its current status, and the objective
+the user wrote (long objectives are clamped until expanded). The control
+instructions NAC wraps around the objective for the model are never shown, and
+a continuation cannot be resent as if a person had typed it.
 
 Each participating run is bound to the current goal generation. Creating a
 goal during an already-running turn records the current token and time baseline,
