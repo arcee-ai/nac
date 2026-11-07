@@ -1,3 +1,4 @@
+import { reverseStartupConsole } from './native-qualification-wiring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -31,5 +32,22 @@ test('failed or skipped workflow-lint blocks actual required aggregation', () =>
   requireComplete(needs, 'false', sha);
   for (const result of ['failure', 'skipped', 'cancelled']) {
     assert.throws(() => requireComplete({ ...needs, 'workflow-lint': { result } }, 'false', sha), /workflow-lint/);
+  }
+});
+
+test('ordinary-CI projection removes only the exact reviewed three-step contract', () => {
+  const original = structuredClone(workflow), projected = structuredClone(workflow);
+  const index = original.jobs['workflow-lint'].steps.findIndex(s => s.id === 'startup-console-source');
+  original.jobs['workflow-lint'].steps.splice(index, 3);
+  reverseStartupConsole(projected);
+  assert.deepEqual(projected, original);
+  for (const mutate of [
+    w => { w.jobs['workflow-lint'].steps[index + 1].with.ref = 'foreign'; },
+    w => { w.jobs['workflow-lint'].steps[index + 2]['continue-on-error'] = true; },
+    w => { w.jobs['workflow-lint'].steps[index + 2].if = 'false'; },
+    w => { w.jobs['workflow-lint'].steps.splice(index, 1); },
+  ]) {
+    const changed = structuredClone(workflow); mutate(changed);
+    assert.throws(() => reverseStartupConsole(changed));
   }
 });
