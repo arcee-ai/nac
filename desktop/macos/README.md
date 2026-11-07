@@ -130,11 +130,11 @@ Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases an
 protocol supplier remain unchanged; failed episodes and spent allocations are
 not renewed.
 
-The query supplier is `04c073bbbead6f4077da0199bacd542e45cf4e57`, with
-`StartupJourneys.swift` SHA-256 `0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1`.
+The query supplier is final post-657 `993102af913b94acfcf0f4f866f9350e6ca3650b`, with
+`StartupJourneys.swift` SHA-256 `5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471`.
 All four supplier files remain immutable. The separate SDK-only receipt measured
 harness `9863b7714c32ed77bd66867973de6d5b02a753f8` with historical
-P `ff8c9609abf7bf7ddabe983c96ff31cf80362956` and this unchanged Q;
+P `ff8c9609abf7bf7ddabe983c96ff31cf80362956` and historical Q04c;
 it proves that compiler gate only, not the current product. This updated harness
 and final post-648 product have no execution receipt.
 The default four cases, protocol R, future-store promise and spent runtime caps
