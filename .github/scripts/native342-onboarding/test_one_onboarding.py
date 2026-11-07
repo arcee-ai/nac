@@ -14,6 +14,8 @@ class SourceControls(unittest.TestCase):
     def admission(self):
         return dict(scope=controller.SCOPE, controller_sha='a' * 40, allocation_id='Root-named-one',
                     attempt=1, retries=0, manifest_sha256='b' * 64,
+                    producer=dict(run_id=123, artifact_id=456, controller_sha='c' * 40,
+                                  branch='codex/experimental-producer', artifact_name='one-package-123-1'),
                     clock=dict(STARTED=1000, WORK_DEADLINE=1900, CLEANUP_DEADLINE=2260, HARD_DEADLINE=2380))
 
     def test_original_clock_includes_queue_without_renewal(self):

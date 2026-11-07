@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native342-onboarding'
-SCOPE = 'Q04c-on-Pff8-T7013-onboarding-only'
+BRANCH = 'refs/heads/codex/experimental-native342-onboarding-post648'
+SCOPE = 'Q04c-on-final-post648-P-onboarding-only'
 
 
 def require(condition, reason):
@@ -36,7 +36,7 @@ def write(path, value):
 def admit(value, controller_sha, *, now=None):
     """Validate a declaration; this function never issues execution authority."""
     require(set(value) == {'scope', 'controller_sha', 'allocation_id', 'attempt', 'retries',
-                          'manifest_sha256', 'clock'}, 'exact admission fields')
+                          'manifest_sha256', 'clock', 'producer'}, 'exact admission fields')
     require(value['scope'] == SCOPE and value['controller_sha'] == controller_sha
             and re.fullmatch('[0-9a-f]{40}', controller_sha), 'frozen controller binding')
     require(type(value['attempt']) is int and value['attempt'] == 1
@@ -44,6 +44,12 @@ def admit(value, controller_sha, *, now=None):
     require(isinstance(value['allocation_id'], str)
             and re.fullmatch('[A-Za-z0-9_-]{1,100}', value['allocation_id']), 'named Root allocation')
     require(re.fullmatch('[0-9a-f]{64}', str(value['manifest_sha256'])), 'exact retained package manifest')
+    producer = value['producer']
+    require(set(producer) == {'run_id', 'artifact_id', 'controller_sha', 'branch', 'artifact_name'}
+            and all(type(producer[k]) is int and producer[k] > 0 for k in ('run_id', 'artifact_id'))
+            and re.fullmatch('[0-9a-f]{40}', str(producer['controller_sha']))
+            and re.fullmatch('codex/[A-Za-z0-9_./-]{1,150}', str(producer['branch']))
+            and re.fullmatch('[A-Za-z0-9_.-]{1,200}', str(producer['artifact_name'])), 'exact named producer run/artifact/source')
     clock = value['clock']
     keys = ('STARTED', 'WORK_DEADLINE', 'CLEANUP_DEADLINE', 'HARD_DEADLINE')
     require(set(clock) == set(keys) and all(type(clock[k]) in (int, float) for k in keys),
@@ -75,6 +81,35 @@ def selected_case(startup, *, folder, profiles, app, manifest, product, tests, h
             and proof.get('persistent_authorization_policy_unchanged') is True,
             'one actual onboarding case with positive cleanup and unchanged policy')
     return proof
+
+
+def make_clock(epochs, Bound):
+    _, work, cleanup, hard = epochs
+    class Clock:
+        # The SDK2cee adapter, using the same maintained Bound/ci.run owner.
+        # Convert once; phases and cleanup never create a replacement clock.
+        monotonic = staticmethod(time.monotonic)
+
+        def __init__(self):
+            self.mono, self.epoch = time.monotonic(), time.time()
+            self.failed, self.cleaning = [], False
+            self.work = Bound(self, self.mono + work - self.epoch, 'work')
+            self.cleanup = Bound(self, self.mono + cleanup - self.epoch, 'cleanup')
+            self.retention = Bound(self, self.mono + hard - self.epoch, 'retention')
+
+        def fail(self, reason):
+            if reason not in self.failed:
+                self.failed.append(reason)
+
+        def observe(self):
+            before, epoch, after = time.monotonic(), time.time(), time.monotonic()
+            if not self.epoch + before - self.mono - 1 <= epoch <= self.epoch + after - self.mono + 1:
+                self.fail('clock discontinuity')
+            if STOP:
+                self.fail('signal requested stop')
+            require(not self.failed, 'original clock stopped: ' + ', '.join(self.failed))
+
+    return Clock()
 
 
 def main():
@@ -120,31 +155,7 @@ def main():
     from ci_xctest import require_generated_runner, runner_environment
     from ci_xctest_project import materialize_project
 
-    class Clock:
-        # The SDK2cee adapter, using the same maintained Bound/ci.run owner.
-        # Convert once; phases and cleanup never create a replacement clock.
-        monotonic = staticmethod(time.monotonic)
-
-        def __init__(self):
-            self.mono, self.epoch = time.monotonic(), time.time()
-            self.failed, self.cleaning = [], False
-            self.work = Bound(self, self.mono + work - self.epoch, 'work')
-            self.cleanup = Bound(self, self.mono + cleanup - self.epoch, 'cleanup')
-            self.retention = Bound(self, self.mono + hard - self.epoch, 'retention')
-
-        def fail(self, reason):
-            if reason not in self.failed:
-                self.failed.append(reason)
-
-        def observe(self):
-            before, epoch, after = time.monotonic(), time.time(), time.monotonic()
-            if not self.epoch + before - self.mono - 1 <= epoch <= self.epoch + after - self.mono + 1:
-                self.fail('clock discontinuity')
-            if STOP:
-                self.fail('signal requested stop')
-            require(not self.failed, 'original clock stopped: ' + ', '.join(self.failed))
-
-    clock = Clock()
+    clock = make_clock((start, work, cleanup, hard), Bound)
     # Each work callback is independently clamped below; permit the maintained
     # case's result/owner cleanup callbacks to use the original cleanup reserve.
     ci.RUN_DEADLINE = min(ci.RUN_DEADLINE, clock.cleanup.deadline)
