@@ -110,13 +110,35 @@ def run_case(app, output, scenario, *, slow_start=False, provenance=None):
                 cleanup_failed_case(evidence, relocated)
             record['launcher_exit_code'] = code
         except BaseException as error:
-            if evidence.exists():
-                cleanup_failed_case(evidence, relocated)
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=5)
-            record = json.loads(evidence.read_text()) if evidence.exists() else {}
+            # Bind the original failure before cleanup: a second failure must not
+            # discard the receipt or imply that the launcher/native owner exited.
+            try:
+                record = json.loads(evidence.read_text()) if evidence.exists() else {}
+            except (OSError, ValueError):
+                record = {}
             record.update(passed=False, runner_error=f'{type(error).__name__}: {error}')
+            cleanup_errors = []
+            if evidence.exists():
+                try:
+                    cleanup_failed_case(evidence, relocated)
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(f'native: {type(cleanup_error).__name__}: {cleanup_error}')
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=5)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(f'launcher: {type(cleanup_error).__name__}: {cleanup_error}')
+            # The app may publish newer partial/cleanup facts while shutdown runs.
+            try:
+                if evidence.exists():
+                    record.update(json.loads(evidence.read_text()))
+            except (OSError, ValueError, TypeError):
+                pass
+            record.update(passed=False, runner_error=f'{type(error).__name__}: {error}')
+            record['launcher_reaped'] = process.poll() is not None
+            if cleanup_errors:
+                record['runner_cleanup_errors'] = cleanup_errors
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
                 record.update(runner_cleanup_attempted=evidence.exists(),
                               relocated_app=str(relocated))
@@ -135,7 +157,9 @@ def run_case(app, output, scenario, *, slow_start=False, provenance=None):
     record['console_before_launch'] = console
     record['relocated_app'] = str(relocated)
     if record.get('profile') and Path(record['profile']).exists():
-        record.update(passed=False, runner_error='Fixture profile survived cleanup')
+        record['passed'] = False
+        record.setdefault('runner_error', 'Fixture profile survived cleanup')
+        record.setdefault('runner_cleanup_errors', []).append('Fixture profile survived cleanup')
     pid = record.get('engine_pid', 0)
     if pid:
         try:
@@ -143,12 +167,15 @@ def run_case(app, output, scenario, *, slow_start=False, provenance=None):
         except ProcessLookupError:
             pass
         else:
-            record.update(passed=False, runner_error='Engine identity survived cleanup')
+            record['passed'] = False
+            record.setdefault('runner_error', 'Engine identity survived cleanup')
+            record.setdefault('runner_cleanup_errors', []).append('Engine identity survived cleanup')
     evidence.write_text(json.dumps(record, indent=2) + '\n')
     try:
         write_critical_receipts(output, scenario, record, provenance or {})
     finally:
-        if record.get('engine_reaped') and record.get('profile_removed') and process.returncode == 0:
+        if (record.get('engine_reaped') and record.get('profile_removed') and process.returncode == 0
+                and not record.get('runner_cleanup_errors')):
             shutil.rmtree(temporary)
     print(json.dumps({'scenario': scenario, 'passed': record.get('passed'),
                       'checks': {k: v['status'] for k, v in record.get('checks', {}).items()}}), flush=True)
