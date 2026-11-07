@@ -403,7 +403,7 @@ class AttachmentPolicyTests(unittest.TestCase):
                'client_type': 0, 'auth_value': 2}
         policy = {'xcode_helper_accessibility_rows': [row], 'developer_status': 'Developer mode enabled.',
                   'automation_status': 'DOES NOT REQUIRE authentication.'}
-        def run(argv, log, timeout):
+        def run(argv, log, timeout, *, env):
             if 'build-for-testing' in argv:
                 derived = Path(argv[argv.index('-derivedDataPath') + 1]) / 'Build/Products'
                 derived.mkdir(parents=True)
