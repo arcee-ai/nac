@@ -338,13 +338,13 @@ static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowS
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
 static OAUTH_START_LOCKS: LazyLock<
-    std::sync::Mutex<HashMap<OAuthFlowKey, Weak<tokio::sync::Mutex<()>>>>,
-> = LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+    tokio::sync::Mutex<HashMap<OAuthFlowKey, Weak<tokio::sync::Mutex<()>>>>,
+> = LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
 // Serialize preparation/publication/task replacement only for the same owner.
 // Weak entries do not retain completed flows or their callback sockets.
-fn oauth_start_lock(key: &OAuthFlowKey) -> Arc<tokio::sync::Mutex<()>> {
-    let mut locks = OAUTH_START_LOCKS.lock().unwrap();
+async fn oauth_start_lock(key: &OAuthFlowKey) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = OAUTH_START_LOCKS.lock().await;
     locks.retain(|_, lock| lock.strong_count() > 0);
     if let Some(lock) = locks.get(key).and_then(Weak::upgrade) {
         return lock;
@@ -1567,7 +1567,7 @@ pub async fn authenticate_oauth_handler(
     let flow_key = oauth_flow_key(&manager, &server_name);
     let request = payload.map(|Json(value)| value).unwrap_or_default();
     let callback = oauth_callback_target(&manager, &server_name)?;
-    let start_lock = oauth_start_lock(&flow_key);
+    let start_lock = oauth_start_lock(&flow_key).await;
     #[cfg(test)]
     if start_lock.try_lock().is_err() {
         callback_test_checkpoint(&flow_key, CallbackTestPhase::WaitingReplacement).await;
