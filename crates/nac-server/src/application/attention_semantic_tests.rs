@@ -88,6 +88,228 @@ async fn retire_feed(
     })
     .await
 }
+// Failure-only, descriptor-relative census of this fixture's owned root.
+// Never resolve a discovered directory through its pathname after opening it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn cleanup_directory(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+struct CleanupDirectory(*mut libc::DIR);
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl CleanupDirectory {
+    fn open(file: std::fs::File) -> std::io::Result<Self> {
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        let fd = file.into_raw_fd();
+        // SAFETY: fd is a live, exclusively owned directory descriptor. On
+        // success fdopendir takes ownership, released by closedir below.
+        let stream = unsafe { libc::fdopendir(fd) };
+        if stream.is_null() {
+            let error = std::io::Error::last_os_error();
+            // SAFETY: fdopendir failed and did not consume the descriptor.
+            drop(unsafe { std::fs::File::from_raw_fd(fd) });
+            Err(error)
+        } else {
+            Ok(Self(stream))
+        }
+    }
+
+    fn next_name(&mut self) -> std::io::Result<Option<std::ffi::CString>> {
+        #[cfg(target_os = "linux")]
+        // SAFETY: libc returns this thread's live errno storage.
+        let errno = unsafe { libc::__errno_location() };
+        #[cfg(target_os = "macos")]
+        // SAFETY: libc returns this thread's live errno storage.
+        let errno = unsafe { libc::__error() };
+        loop {
+            // SAFETY: the DIR is exclusively owned, and errno is thread-local.
+            let entry = unsafe {
+                *errno = 0;
+                libc::readdir(self.0)
+            };
+            if entry.is_null() {
+                // SAFETY: errno remains valid on this same thread.
+                let code = unsafe { *errno };
+                return if code == 0 {
+                    Ok(None)
+                } else {
+                    Err(std::io::Error::from_raw_os_error(code))
+                };
+            }
+            // SAFETY: readdir returned a live dirent with a NUL-terminated name.
+            // Copy it before any subsequent readdir call invalidates the entry.
+            let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_owned();
+            if name.to_bytes() != b"." && name.to_bytes() != b".." {
+                return Ok(Some(name));
+            }
+        }
+    }
+
+    fn metadata(&self, name: &std::ffi::CStr) -> std::io::Result<libc::stat> {
+        let mut metadata = std::mem::MaybeUninit::uninit();
+        // SAFETY: the DIR and copied name remain live, metadata is writable,
+        // and AT_SYMLINK_NOFOLLOW returns metadata for the link itself.
+        let result = unsafe {
+            libc::fstatat(
+                libc::dirfd(self.0),
+                name.as_ptr(),
+                metadata.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: successful fstatat initialized the entire stat value.
+        Ok(unsafe { metadata.assume_init() })
+    }
+
+    fn child(&self, name: &std::ffi::CStr) -> std::io::Result<std::fs::File> {
+        use std::os::fd::FromRawFd;
+        // SAFETY: the directory and copied name are live. O_NOFOLLOW rejects a
+        // replacement link; relative lookup stays bound to this owned directory.
+        let fd = unsafe {
+            libc::openat(
+                libc::dirfd(self.0),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            Err(std::io::Error::last_os_error())
+        }
+        // SAFETY: successful openat returned a new, exclusively owned descriptor.
+        else {
+            Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl Drop for CleanupDirectory {
+    fn drop(&mut self) {
+        // SAFETY: this object exclusively owns the live stream and its fd.
+        unsafe {
+            libc::closedir(self.0);
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn cleanup_census(directory: std::fs::File) -> serde_json::Value {
+    use std::os::unix::ffi::OsStrExt;
+    const MAX_ENTRIES: usize = 32;
+    const MAX_DEPTH: usize = 3;
+    let mut pending = vec![(directory, std::path::PathBuf::new(), 0)];
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    while let Some((directory, relative, depth)) = pending.pop() {
+        if entries.len() == MAX_ENTRIES {
+            truncated = true;
+            break;
+        }
+        let mut directory = match CleanupDirectory::open(directory) {
+            Ok(directory) => directory,
+            Err(error) => {
+                entries.push(serde_json::json!({"path":relative.to_string_lossy(),"stage":"fdopendir","error":error.to_string()}));
+                continue;
+            }
+        };
+        loop {
+            // Do not fetch an unbounded extra entry just to classify truncation.
+            if entries.len() == MAX_ENTRIES {
+                truncated = true;
+                break;
+            }
+            let name = match directory.next_name() {
+                Ok(Some(name)) => name,
+                Ok(None) => break,
+                Err(error) => {
+                    entries.push(serde_json::json!({"path":relative.to_string_lossy(),"stage":"readdir","error":error.to_string()}));
+                    break;
+                }
+            };
+            let path = relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+            let metadata = match directory.metadata(&name) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    entries.push(serde_json::json!({"path":path.to_string_lossy(),"stage":"fstatat_nofollow","error":error.to_string()}));
+                    continue;
+                }
+            };
+            let mode = metadata.st_mode as u32;
+            let kind = match mode & libc::S_IFMT as u32 {
+                value if value == libc::S_IFLNK as u32 => "symlink",
+                value if value == libc::S_IFDIR as u32 => "directory",
+                value if value == libc::S_IFREG as u32 => "file",
+                _ => "other",
+            };
+            entries.push(serde_json::json!({"path":path.to_string_lossy(),"kind":kind,"inode":metadata.st_ino,"mode":mode,"bytes":metadata.st_size}));
+            if kind == "directory" {
+                if depth + 1 == MAX_DEPTH {
+                    truncated = true;
+                } else {
+                    match directory.child(&name) {
+                        Ok(owned) => pending.push((owned, path, depth + 1)),
+                        Err(error) => {
+                            *entries.last_mut().unwrap() = serde_json::json!({"path":path.to_string_lossy(),"stage":"openat_nofollow","error":error.to_string()});
+                        }
+                    }
+                }
+            }
+        }
+        if entries.len() == MAX_ENTRIES {
+            break;
+        }
+    }
+    serde_json::json!({"entries":entries,"truncated":truncated,"max_entries":MAX_ENTRIES,"max_depth":MAX_DEPTH})
+}
+
+fn cleanup_failure(
+    root: &std::path::Path,
+    error: &std::io::Error,
+    receipts: serde_json::Value,
+) -> serde_json::Value {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let census = match cleanup_directory(root) {
+        Ok(directory) => cleanup_census(directory),
+        Err(error) => serde_json::json!({"stage":"open_root_nofollow","error":error.to_string()}),
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let census = serde_json::json!({"unavailable":"no descriptor-bound census on this platform"});
+    serde_json::json!({
+        "operation":"remove_dir_all", "root":root.to_string_lossy(), "error":error.to_string(),
+        "error_kind":format!("{:?}",error.kind()), "raw_os_error":error.raw_os_error(),
+        "failed_descendant":"not supplied by std::fs::remove_dir_all",
+        "receipts":receipts, "remaining_owned_entries":census,
+    })
+}
+
+fn remove_semantic_root(
+    root: &std::path::Path,
+    receipts: serde_json::Value,
+) -> std::io::Result<()> {
+    // Exactly the original operation, once. A failed census cannot replace the
+    // primary deletion error, and no removal/cleanup retry runs after failure.
+    let result = std::fs::remove_dir_all(root);
+    if let Err(error) = &result {
+        use std::io::Write;
+        // A diagnostic-output failure must not mask the original removal error.
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "semantic-g2-cleanup-failure {}",
+            cleanup_failure(root, error, receipts)
+        );
+    }
+    result
+}
+
 async fn frame(body: &mut Feed, stage: &str) -> serde_json::Value {
     eprintln!(
         "semantic-g2-stage {}",
@@ -401,14 +623,28 @@ async fn interleave(behavior: &str) {
         })
     );
     retire_feed(&manager, replay).await.unwrap();
+    let service_active_after_replay = service.has_active_operation();
     drop(barrier);
     drop(service);
     drop(app);
     manager.quiesce_persistence_callers().await;
     manager.drain_persistence().await.unwrap();
+    let physical_seat_after_drain = manager.inner.attention.0.lock().unwrap().seat.is_some();
     drop(manager);
     provider.stop().await;
-    std::fs::remove_dir_all(root).unwrap();
+    remove_semantic_root(
+        &root,
+        serde_json::json!({
+            "behavior":behavior,"session":id,"run_a":a,"run_b":b,
+            "original_feed_retirement_returned":true,"replay_feed_retirement_returned":true,
+            "service_active_after_replay":service_active_after_replay,
+            "quiesce_returned":true,"typed_drain_acknowledged":true,
+            "physical_seat_after_drain":physical_seat_after_drain,
+            "provider_listener_abort_join_returned":true,
+            "original_run_task_join":"not observed by this fixture",
+        }),
+    )
+    .unwrap();
 }
 async fn canonical_a(
     manager: &SessionManager,
@@ -580,4 +816,91 @@ async fn semantic_fixture_teardown_waits_for_accepted_read_after_sqlite_returns(
         pending,
         "SEMANTIC_TEARDOWN_RETURNED_BEFORE_ACCEPTED_READ_RETIRED"
     );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn semantic_cleanup_census_is_bounded_and_does_not_follow_replaced_roots_or_children() {
+    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+    let root = std::env::temp_dir().join(format!("nac-semantic-census-{}", Uuid::new_v4()));
+    let inside = root.join("inside");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(inside.join("nested")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(inside.join("nested/owned"), "fixture").unwrap();
+    std::fs::write(
+        outside.join("OUTSIDE_MUST_NOT_BE_ENUMERATED"),
+        "private fixture canary",
+    )
+    .unwrap();
+    symlink(&outside, inside.join("child-link")).unwrap();
+    let malformed = std::fs::write(
+        inside.join(std::ffi::OsString::from_vec(vec![0xff])),
+        "non-UTF8 filename",
+    );
+    #[cfg(target_os = "linux")]
+    malformed.unwrap();
+    // Darwin rejects this filename before it reaches directory enumeration.
+    #[cfg(target_os = "macos")]
+    assert_eq!(malformed.unwrap_err().raw_os_error(), Some(libc::EILSEQ));
+    let original = cleanup_directory(&inside).unwrap();
+    // The original open handle must retain its directory when the path itself
+    // is replaced by a link. Discovered child links are metadata-only as well.
+    std::fs::rename(&inside, root.join("original")).unwrap();
+    symlink(&outside, &inside).unwrap();
+    assert!(cleanup_directory(&inside).is_err());
+    let census = cleanup_census(original);
+    let text = census.to_string();
+    assert!(text.contains("nested/owned"), "{census}");
+    assert!(
+        text.contains("child-link") && text.contains("symlink"),
+        "{census}"
+    );
+    assert!(!text.contains("OUTSIDE_MUST_NOT_BE_ENUMERATED"), "{census}");
+    assert!(!text.contains("private fixture canary"), "{census}");
+    #[cfg(target_os = "linux")]
+    assert!(
+        text.contains('\u{fffd}'),
+        "non-UTF8 names must not panic: {census}"
+    );
+    for i in 0..40 {
+        std::fs::write(root.join("original").join(format!("entry-{i}")), "").unwrap();
+    }
+    let bounded = cleanup_census(cleanup_directory(&root.join("original")).unwrap());
+    assert!(bounded["entries"].as_array().unwrap().len() <= 32);
+    assert_eq!(bounded["truncated"], true);
+    std::fs::create_dir_all(outside.join("a/b/c/d")).unwrap();
+    let depth = cleanup_census(cleanup_directory(&outside).unwrap());
+    assert_eq!(depth["truncated"], true);
+    assert!(!depth.to_string().contains("a/b/c/d"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn semantic_cleanup_reports_original_failure_and_retains_failed_path() {
+    let root = std::env::temp_dir().join(format!("nac-semantic-removal-error-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("not-a-directory");
+    std::fs::write(&file, "fixture must remain").unwrap();
+    let error =
+        remove_semantic_root(&file, serde_json::json!({"control":"original failure"})).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::ENOTDIR));
+    let report = cleanup_failure(
+        &file,
+        &error,
+        serde_json::json!({"control":"original failure"}),
+    );
+    assert_eq!(report["raw_os_error"], libc::ENOTDIR);
+    assert_eq!(report["error"], error.to_string());
+    assert_eq!(report["receipts"]["control"], "original failure");
+    assert_eq!(
+        report["remaining_owned_entries"]["stage"],
+        "open_root_nofollow"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fixture must remain"
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }
