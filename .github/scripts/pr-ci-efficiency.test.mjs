@@ -13,7 +13,7 @@ const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };
 
 test("exact native supplier qualification is explicit, bounded and separate from publication", () => {
-  const stable = workflow("stable-release");
+  const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
   const input = stable.on.workflow_dispatch.inputs.native_qualification;
   assert.equal(input.default, "none");
   assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26"]);
