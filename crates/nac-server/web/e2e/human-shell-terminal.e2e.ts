@@ -153,8 +153,11 @@ test("manual human terminal freezes accepted uncertain input until acknowledgeme
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
   const show = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await show.click();
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+  // Document load can precede the session query and React's panel controls.
+  await expect(show.or(pane)).toBeVisible();
+  if (await show.isVisible()) await show.click();
+  await expect(pane).toBeVisible();
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const shell = (await api.listUserTerminals(session)).terminals[0];

@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
@@ -12,6 +13,7 @@ const fakes = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   test: vi.fn(),
+  updatePending: false,
   runtime: undefined as { servers: { name: string; sessions_blocked: boolean }[] } | undefined,
 }));
 
@@ -22,7 +24,7 @@ vi.mock("@/app/services/queries", () => {
   const mutation = (mutateAsync: unknown) => ({ mutateAsync, isPending: false });
   return {
     useCreateMcpServer: () => mutation(fakes.create),
-    useUpdateMcpServer: () => mutation(fakes.update),
+    useUpdateMcpServer: () => ({ ...mutation(fakes.update), isPending: fakes.updatePending }),
     useTestMcpServer: () => mutation(fakes.test),
     useDeleteMcpServer: () => mutation(vi.fn()),
     useMcpRuntimeAction: () => mutation(vi.fn()),
@@ -69,7 +71,15 @@ function httpRecord(helperArgs: string[]): McpServerView {
   };
 }
 
-function Form({ record }: { record: McpServerView | null }) {
+function Form({
+  record,
+  onSaved = () => {},
+  isCurrent,
+}: {
+  record: McpServerView | null;
+  onSaved?: (name: string) => void;
+  isCurrent?: () => boolean;
+}) {
   const [footer, setFooter] = useState<ReactNode>(null);
   return (
     <ToastProvider>
@@ -78,8 +88,9 @@ function Form({ record }: { record: McpServerView | null }) {
         template={null}
         libraryEntry={null}
         onClose={() => {}}
-        onSaved={() => {}}
+        onSaved={onSaved}
         onDeleted={() => {}}
+        isCurrent={isCurrent}
         setFooter={setFooter}
       />
       {footer}
@@ -111,6 +122,7 @@ beforeEach(() => {
   fakes.update.mockReset().mockResolvedValue({ name: "linear" });
   fakes.test.mockReset().mockResolvedValue({ connected: true, tools: [], error: null });
   fakes.runtime = undefined;
+  fakes.updatePending = false;
 });
 
 afterEach(() => {
@@ -347,6 +359,65 @@ describe("header helper arguments", () => {
 });
 
 describe("runtime connection", () => {
+  it("keeps both phone transport drafts and masked values without writing on selection", async () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    render(
+      <MemoryRouter>
+        <Form record={httpRecord(["--keep-helper"])} />
+      </MemoryRouter>,
+    );
+    const http = screen.getByRole("button", { name: "Streamable HTTP" });
+    const stdio = screen.getByRole("button", { name: "Stdio" });
+    type(screen.getByLabelText("URL"), "https://mcp.example.test/keep");
+    type(screen.getByLabelText("Bearer token environment variable"), "KEEP_TOKEN");
+    fireEvent.click(stdio);
+    expect(stdio.getAttribute("aria-pressed")).toBe("true");
+    type(screen.getByLabelText("Command"), "keep-command");
+    fireEvent.click(screen.getByRole("button", { name: "Add argument" }));
+    type(argument(1), "--keep-stdio");
+    fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+    type(screen.getByLabelText("Environment key 1"), "KEEP_ENV");
+    type(screen.getByLabelText("Environment value 1"), "${KEEP_ENV}");
+    fireEvent.click(http);
+    expect(http.getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("URL") as HTMLInputElement).value).toBe(
+      "https://mcp.example.test/keep",
+    );
+    expect(argument(1, "Header helper argument").value).toBe("--keep-helper");
+    fireEvent.click(stdio);
+    expect((screen.getByLabelText("Command") as HTMLInputElement).value).toBe("keep-command");
+    expect(argument(1).value).toBe("--keep-stdio");
+    const secret = screen.getByLabelText("Environment value 1") as HTMLInputElement;
+    expect(secret.type).toBe("password");
+    expect(secret.value).toBe("${KEEP_ENV}");
+    expect(fakes.create).not.toHaveBeenCalled();
+    expect(fakes.update).not.toHaveBeenCalled();
+    expect(fakes.test).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(fakes.test).toHaveBeenCalledOnce());
+    expect(fakes.test.mock.calls[0][0]).toMatchObject({
+      transport: "stdio",
+      command: "keep-command",
+      args: ["--keep-stdio"],
+      env: { KEEP_ENV: "${KEEP_ENV}" },
+    });
+    fireEvent.click(http);
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(fakes.test).toHaveBeenCalledTimes(2));
+    expect(fakes.test.mock.calls[1][0]).toMatchObject({
+      transport: "streamable_http",
+      url: "https://mcp.example.test/keep",
+      bearer_token_env_var: "KEEP_TOKEN",
+      header_helper: { args: ["--keep-helper"] },
+    });
+    expect(fakes.create).not.toHaveBeenCalled();
+    expect(fakes.update).not.toHaveBeenCalled();
+  });
+
   it("says sessions will not use a server the user disconnected", () => {
     fakes.runtime = { servers: [{ name: "linear", sessions_blocked: true }] };
     render(<Form record={stdioRecord([])} />);
@@ -355,3 +426,148 @@ describe("runtime connection", () => {
     ).toBeTruthy();
   });
 });
+
+describe("native form admission", () => {
+  it("keeps every editing control inside the pending native fieldset without replacing its draft", async () => {
+    const record = stdioRecord(["--keep"]);
+    const view = render(<Form record={record} />);
+    const name = screen.getByLabelText("Server name") as HTMLInputElement;
+    type(name, "kept draft");
+    const fieldset = name.closest("fieldset")!;
+    const controls = Array.from(fieldset.querySelectorAll("input,button,select,textarea"));
+    const disabledBefore = controls.map((control) => control.matches(":disabled"));
+    expect(controls.every((control) => control.closest("fieldset") === fieldset)).toBe(true);
+
+    fakes.updatePending = true;
+    view.rerender(<Form record={record} />);
+    expect(fieldset.disabled).toBe(true);
+    expect(controls.every((control) => control.matches(":disabled"))).toBe(true);
+    (screen.getByRole("button", { name: "Add argument" }) as HTMLButtonElement).click();
+    (screen.getByRole("button", { name: "Test connection" }) as HTMLButtonElement).click();
+    expect(fakes.test).not.toHaveBeenCalled();
+    expect(fakes.update).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("textbox", { name: /^Argument \d+$/ })).toHaveLength(1);
+    expect(screen.getByLabelText("Server name")).toBe(name);
+    expect(name.value).toBe("kept draft");
+    expect(Array.from(fieldset.querySelectorAll("input,button,select,textarea"))).toEqual(controls);
+
+    fakes.updatePending = false;
+    view.rerender(<Form record={record} />);
+    expect(fieldset.disabled).toBe(false);
+    expect(controls.map((control) => control.matches(":disabled"))).toEqual(disabledBefore);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
+    expect(fakes.update.mock.calls[0][0].payload).toMatchObject({
+      name: "kept draft",
+      args: ["--keep"],
+    });
+  });
+});
+
+describe("form result ownership", () => {
+  it("does not select an old server after its submitted form is replaced", async () => {
+    let finish!: (value: { name: string }) => void;
+    fakes.update.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const oldSaved = vi.fn();
+    const newerSaved = vi.fn();
+    const view = render(<Form key="old" record={stdioRecord([])} onSaved={oldSaved} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledOnce());
+    view.rerender(<Form key="new" record={null} onSaved={newerSaved} />);
+    type(screen.getByLabelText("Server name"), "newer draft");
+    await act(async () => {
+      finish({ name: "linear" });
+    });
+    expect(oldSaved).not.toHaveBeenCalled();
+    expect(newerSaved).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Server name") as HTMLInputElement).value).toBe("newer draft");
+  });
+
+  it("keeps a rejected draft visible with an adjacent error and allows retry", async () => {
+    fakes.update.mockRejectedValueOnce(new Error("Configured Deny prevents this operation."));
+    render(<Form record={stdioRecord(["--keep"])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("alert")
+          .some((alert) => alert.textContent?.includes("Configured Deny")),
+      ).toBe(true),
+    );
+    expect(argument(1).value).toBe("--keep");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fakes.update).toHaveBeenCalledTimes(2));
+    expect(
+      screen.queryByText("Save failed: Configured Deny prevents this operation.", {
+        selector: "p",
+      }),
+    ).toBeNull();
+  });
+});
+
+for (const outcome of [
+  "save rejection",
+  "test rejection",
+  "test refusal",
+  "test success",
+] as const) {
+  it(`keeps late ${outcome} out of a newer opening of the same mounted form`, async () => {
+    let currentOpening = 0;
+    let finish!: (value: {
+      connected: boolean;
+      tools: { name: string; description: string }[];
+      error: string | null;
+    }) => void;
+    let fail!: (error: Error) => void;
+    const pending = new Promise<Parameters<typeof finish>[0]>((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+    const saving = outcome === "save rejection";
+    const mutation = saving ? fakes.update : fakes.test;
+    mutation.mockReturnValueOnce(pending);
+    const owns = (opening: number) => () => currentOpening === opening;
+    const record = stdioRecord(["--keep"]);
+    const view = render(<Form record={record} isCurrent={owns(0)} />);
+    fireEvent.click(screen.getByRole("button", { name: saving ? "Save" : "Test connection" }));
+    await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
+    const field = screen.getByLabelText("Server name");
+    currentOpening += 1;
+    view.rerender(<Form record={record} isCurrent={owns(1)} />);
+    expect(screen.getByLabelText("Server name")).toBe(field);
+    type(field as HTMLInputElement, "newer draft");
+    await act(async () => {
+      if (outcome.endsWith("rejection")) fail(new Error("Prior draft failure."));
+      else
+        finish({
+          connected: outcome === "test success",
+          tools: [{ name: "prior_tool", description: "Prior draft only" }],
+          error: outcome === "test refusal" ? "Prior draft failure." : null,
+        });
+    });
+    expect((screen.getByLabelText("Server name") as HTMLInputElement).value).toBe("newer draft");
+    expect(argument(1).value).toBe("--keep");
+    expect(screen.queryByText(/Prior draft failure\./, { selector: "p" })).toBeNull();
+    expect(screen.queryByText("prior_tool")).toBeNull();
+    expect(screen.queryByText("1 tool found")).toBeNull();
+    // The original operation still reports its outcome through the unchanged toast.
+    const message =
+      outcome === "test success"
+        ? "Connection succeeded: 1 tool found."
+        : `${saving ? "Save" : "Test"} failed: Prior draft failure.`;
+    expect(screen.getByText(message)).toBeTruthy();
+    fakes.test.mockResolvedValueOnce({
+      connected: true,
+      tools: [{ name: "current_tool", description: "Current opening" }],
+      error: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(screen.getByText("current_tool")).toBeTruthy());
+    expect(screen.getByText("1 tool found")).toBeTruthy();
+  });
+}

@@ -1101,7 +1101,10 @@ test("uses an Advanced saved provider account from the unified composer without 
     (candidate) =>
       candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
   );
-  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  await page
+    .getByRole("group", { name: "Model results", exact: true })
+    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
+    .click();
   const body = (await mutation).postDataJSON() as Record<string, unknown>;
   expect(body).toMatchObject({
     backend: "fireworks-chat",
@@ -1151,7 +1154,10 @@ test("uses an Advanced saved provider account for the light model without exposi
   const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
   await lightRow.getByRole("button").click();
   await page.getByPlaceholder("Search models…").fill("fireworks-chat");
-  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  await page
+    .getByRole("group", { name: "Model results", exact: true })
+    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
+    .click();
 
   const mutation = page.waitForRequest(
     (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),

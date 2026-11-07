@@ -669,6 +669,7 @@ export function FilesView({
   return (
     <PanelSplit
       listTitle="Files"
+      phoneListToolbarInFlow
       title={current ? <FileTitle path={current} /> : undefined}
       titleAction={
         counts ? (

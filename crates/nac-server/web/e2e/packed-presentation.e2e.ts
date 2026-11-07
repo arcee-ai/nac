@@ -75,6 +75,18 @@ for (const mobile of [false, true]) {
       await expect.poll(callerStyles).toEqual(expected);
       const composer = page.getByRole("combobox", { name: "Message" });
       await expect(composer).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                globalThis as unknown as {
+                  __packedQualification: () => Record<string, { openStreams: number }>;
+                }
+              ).__packedQualification().Single.openStreams,
+          ),
+        )
+        .toBeGreaterThan(0);
       const nativeStyles = await page.locator("[data-nac-runtime]").evaluate((node) => {
         const browser = globalThis as unknown as {
           getComputedStyle: (element: unknown) => {
@@ -176,6 +188,7 @@ for (const mobile of [false, true]) {
         contentType: "application/json",
         body: JSON.stringify({
           integrity: fixture.integrity,
+          sha256: fixture.tarballSha256,
           peers: fixture.peerVersions,
           tools: fixture.toolVersions,
           fontResponses,

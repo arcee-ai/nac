@@ -32,7 +32,7 @@ OS/browser matrix. Default ignored cases remain ignored during that phase.
 ## Reviewed ignored inventory
 
 The exact names, package, disposition, reason and required capabilities live in
-[the inventory](../../.github/scripts/nightly-portability.json). All twenty-one
+[the inventory](../../.github/scripts/nightly-portability.json). All twenty-two
 ignored tests discovered by the native workspace harness must match that file;
 new, renamed or removed entries fail before any selected execution. Review the
 owning test and its nearest AGENTS guide before changing that inventory.
@@ -43,7 +43,7 @@ owning test and its nearest AGENTS guide before changing that inventory.
 | Included: server `tests::persistence_load` owned-store multi-thread and current-thread variants | 2 | Built `nac-web` worker, scripted local provider, SQLite and local processes. These exercise serving-store ownership and executor variants omitted by legacy managed-load. |
 | Already covered: server `tests::managed_load::managed_load_scenario` | 1 | Required `test-workspace` invokes `make test-managed-load`; managed quality also runs it. Not duplicated as a nightly ignored selection. |
 | Excluded: core `agent::live_tests` | 2 | Paid/live provider API key and network calls. |
-| Excluded: process admission, core projection, Responses SSE latency, task-wait maximum timeout and server heartbeat measurements | 5 | Manual quiet-host/exclusive-window timing or resource qualification. Task-wait measures the real 60-second maximum; heartbeat measures two real scheduler owners at 1/10/100 schedules. |
+| Excluded: process admission, core projection, Responses SSE latency, task-wait maximum timeout and server heartbeat measurements | 6 | Manual quiet-host/exclusive-window timing or resource qualification. Task-wait measures the real 60-second maximum; interval and calendar heartbeat cases measure two real scheduler owners at 1/10/100 schedules. |
 | Excluded: live reviewer calibration, corpus and two smokes | 4 | Authorized Arcee credentials, network and potentially paid reviewer requests; the default-profile smoke and calibration require the approved dev2 origin. |
 | Excluded: manually selected frozen reviewer replay | 1 | Explicit absolute `NAC_REVIEW_REPLAY_FILE` matching the compiled profile. Offline; no model calls. The separate committed Clef holdout remains a default workspace test. |
 | Explicit coverage gap: exact catalog/installed-skill source qualification | 1 | Explicit reviewed read-only catalog, installed symlink set and immutable catalog/repository source revisions, not provisioned by this hosted lane. Local synthetic skill fixtures remain default tests. |
@@ -73,9 +73,28 @@ added name, with no removed names, after build 346.553 s and inventory 12.393 s.
 The default suite and all four selected ignored cases had not started. That
 failed receipt remains failed; classifying this one name supplies no test pass.
 The historical twenty-name discovery fixture below is preserved separately
-from the current twenty-one-name reviewed inventory. All old included cases,
+from that twenty-one-name reviewed inventory. All old included cases,
 strict new/renamed/removed-name rejection, commands and one-attempt behavior
 remain unchanged; fresh native execution is still required after the repair.
+
+The calendar measurement later added one more ignored name, bringing the current
+reviewed inventory to twenty-two. The
+[calendar owner](../../crates/nac-server/src/application/heartbeat_scheduler/tests.rs#L313)
+requires the same exclusive measurement lease. It backdates a daily UTC rule
+seven days; it does not wait seven real days. At 1/10/100 schedules it measures
+calculation/scan time, admission lateness, RSS and database size, while asserting
+eight inclusive catch-up points and exactly one retained occurrence per schedule.
+The enabled two-schedule calendar correctness test remains default coverage;
+it does not establish the larger manual measurement's results.
+
+[Run 42301102067, job 128178811106](https://github.com/arcee-ai/nac/actions/runs/42301102067/job/128178811106)
+at `9fc475b11247e973206e3a117343261eff7f01ee` passed all fifteen runner controls,
+built in 588.042 seconds and discovered ignored tests in 11.678 seconds, then
+failed on this single added name. No default suite or selected ignored case had
+started. Classifying the calendar measurement as manual-only preserves that
+failure and supplies no benchmark or portability pass. The historical twenty-
+and twenty-one-name counterexamples, strict added/removed/renamed-name gate,
+four included integrations and Rust ignore annotations remain unchanged.
 
 The seven later additions were recovered from the actual ignored discovery in
 [scheduled run 41814252560, job 126520880813](https://github.com/arcee-ai/nac/actions/runs/41814252560/job/126520880813),

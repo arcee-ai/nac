@@ -103,18 +103,20 @@ function PathPicker({
       }
       size={ModalSize.Wide}
       flush
-      className="h-[560px]"
-      bodyClassName="min-h-0"
+      className="h-[560px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
+      bodyClassName={cn("min-h-0", onClear && "max-md:pb-32")}
       footer={
-        <>
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 md:contents">
           {onClear ? (
             isMobile ? (
               <StickyButton
+                buttonClassName="min-h-11 min-w-11 max-w-full"
+                className="min-h-11 max-w-full"
                 variant={ButtonVariant.Secondary}
                 content={ButtonContent.Text}
                 onClick={onClear}
               >
-                {clearLabel ?? "Clear"}
+                <span className="min-w-0 truncate">{clearLabel ?? "Clear"}</span>
               </StickyButton>
             ) : (
               <Button
@@ -124,12 +126,14 @@ function PathPicker({
                 className="mr-auto"
                 onClick={onClear}
               >
-                {clearLabel ?? "Clear"}
+                <span className="min-w-0 truncate">{clearLabel ?? "Clear"}</span>
               </Button>
             )
           ) : null}
           {isMobile ? (
             <StickyButton
+              buttonClassName="min-h-11 min-w-11 max-w-full"
+              className="min-h-11 max-w-full"
               variant={ButtonVariant.Secondary}
               content={ButtonContent.Text}
               onClick={onClose}
@@ -149,6 +153,8 @@ function PathPicker({
 
           {isMobile ? (
             <StickyButton
+              buttonClassName="min-h-11 min-w-11 max-w-full"
+              className="min-h-11 max-w-full"
               variant={ButtonVariant.Primary}
               content={ButtonContent.Text}
               disabled={!chosen}
@@ -171,14 +177,19 @@ function PathPicker({
               Select
             </Button>
           )}
-        </>
+        </div>
       }
     >
       <div className="flex flex-col gap-3 h-full min-h-0">
-        <div className="flex items-center gap-2 shrink-0">
+        <p className="shrink-0 text-small !leading-[22px] text-basic-secondary">
+          {ssh
+            ? "Browse folders on the connected SSH host."
+            : "Browse files on the NAC server, including existing Git working folders."}
+        </p>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Button
             variant={ButtonVariant.Secondary}
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.parent}
             onClick={() => data?.parent && goTo(data.parent)}
@@ -188,7 +199,7 @@ function PathPicker({
           </Button>
           <Button
             variant={ButtonVariant.Secondary}
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.home}
             onClick={() => data?.home && goTo(data.home)}
@@ -197,18 +208,19 @@ function PathPicker({
             <Icon iconName={IconName.Home} />
           </Button>
           <Input
-            inputSize={InputSize.Medium}
-            className="flex-1 min-w-0"
+            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+            className="order-last w-full min-w-0 md:order-none md:w-auto md:flex-1"
+            aria-label="Folder path"
             placeholder={ssh ? "~/path/on/the/host" : "/path/to/directory"}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(draft.trim());
             }}
           />
           <Button
             variant={hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             onClick={() => setHidden((on) => !on)}
             aria-pressed={hidden}
@@ -220,10 +232,12 @@ function PathPicker({
         </div>
 
         {error ? (
-          <p className="label-micro text-error-primary shrink-0">{errorMessage(error)}</p>
+          <p role="alert" className="text-small !leading-[22px] text-error-primary shrink-0">
+            {errorMessage(error)}
+          </p>
         ) : null}
 
-        <div className="flex-1 min-h-0 overflow-auto rounded-[4px] bg-input shadow-concave p-1 flex flex-col [&>*]:shrink-0">
+        <div className="flex-1 min-h-0 overflow-auto rounded-[8px] border border-muted p-1 flex flex-col [&>*]:shrink-0">
           {isFetching && !data ? (
             <div className="flex items-center justify-center py-6">
               <Loader size={LoaderSize.Small} />
@@ -244,7 +258,7 @@ function PathPicker({
               key={entry.path}
               type="button"
               className={cn(
-                "flex items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
+                "flex min-h-11 md:min-h-9 items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
                 "hover:bg-elevation-sublevel-variant-A",
                 file === entry.path && "bg-elevation-sublevel-variant-A",
               )}
@@ -275,7 +289,7 @@ function PathPicker({
           ) : null}
         </div>
 
-        <p className="text-micro text-basic-muted shrink-0 truncate">
+        <p className="text-small !leading-[22px] text-basic-secondary shrink-0 break-all">
           {chosen ? `Selected: ${chosen}` : "Nothing selected yet."}
         </p>
       </div>
