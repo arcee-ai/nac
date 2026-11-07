@@ -104,15 +104,15 @@ final class ExternalAuthSmoke {
             try await wait("external browser request") { try await self.observations() > before }
             switch mode {
             case "success":
-                try await text("Connected")
+                try await oauthStatus("Connected")
                 results["production_mcp_connected"] = true
             case "denied":
-                try await text("Authorization failed")
+                try await oauthStatus("Authorization failed")
                 results["production_mcp_denied"] = true
             case "wrong-state", "hold":
-                try await text("Waiting for authorization")
+                try await oauthStatus("Waiting for authorization")
                 try await clickButton("Cancel authorization")
-                try await text("Ready to connect")
+                try await oauthStatus("Ready to connect")
                 results[mode == "wrong-state" ? "wrong_state_rejected_then_canceled" : "pending_authorization_canceled"] = true
             default: break
             }
@@ -163,6 +163,35 @@ final class ExternalAuthSmoke {
     private func clickButton(_ title: String) async throws {
         let found = try await js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===title&&!b.disabled);b?.click();return !!b", arguments: ["title": title]) as? Bool
         guard found == true else { throw PreviewError.message("Missing fixture UI control: \(title)") }
+    }
+
+    private static let oauthStatusScript = #"""
+    const visible = e => {
+      if (!e || e.closest('[hidden],[inert],[aria-hidden="true"],[data-covered]')) return false;
+      for (let node=e; node; node=node.parentElement) {
+        const style=getComputedStyle(node);
+        if (style.display==='none' || style.visibility!=='visible' || Number(style.opacity)<0.99) return false;
+      }
+      const rect=e.getBoundingClientRect();return rect.width>0 && rect.height>0;
+    };
+    const dialogs=[...document.querySelectorAll('[role="dialog"][aria-label="MCP servers"][data-modal-open="true"]')].filter(visible);
+    if (dialogs.length!==1) return false;
+    const owner=dialogs[0];
+    const names=[...owner.querySelectorAll('input[aria-label="Server name"]')].filter(visible);
+    if (names.length!==1 || names[0].value!=='external-auth-fixture') return false;
+    const sections=[...owner.querySelectorAll('section[aria-labelledby]')].filter(section=>{
+      const heading=document.getElementById(section.getAttribute('aria-labelledby'));
+      return visible(section) && heading && owner.contains(heading) && heading.textContent.trim()==='OAuth';
+    });
+    if (sections.length!==1) return false;
+    const statuses=[...sections[0].querySelectorAll('[role="status"]')].filter(visible);
+    return statuses.length===1 && statuses[0].textContent.trim()===value;
+    """#
+
+    private func oauthStatus(_ value: String) async throws {
+        try await wait("OAuth UI status: \(value)") {
+            try await self.js(Self.oauthStatusScript, arguments: ["value": value]) as? Bool == true
+        }
     }
 
     private func text(_ value: String) async throws {
