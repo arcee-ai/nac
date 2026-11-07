@@ -6,7 +6,7 @@ import re
 import stat
 import uuid
 
-PRODUCT = 'acbfc63aa2399cff3d34ec5f947a5e86a914b323'
+PRODUCT = '476d30089ed2f422da0b335c9bafa8b0fa9b3bf2'
 HELPER = 'c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21'
 CASES = ('paths-xctest', 'paths-failure-xctest')
 OPERATIONS = ('select-reload-create-reveal', 'pending-engine-failure')

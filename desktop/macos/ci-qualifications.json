@@ -65,7 +65,7 @@
     "retry_budget": 0
   },
   "all-347-paths-macos26": {
-    "source_sha": "acbfc63aa2399cff3d34ec5f947a5e86a914b323",
+    "source_sha": "476d30089ed2f422da0b335c9bafa8b0fa9b3bf2",
     "profile": "macos26",
     "suite": "paths",
     "scenario_count": 2,

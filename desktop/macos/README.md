@@ -252,7 +252,7 @@ and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
 ### ALL-347 path adapter (source contract; native qualification pending)
 
 `all-347-paths-macos26` selects only product
-`acbfc63aa2399cff3d34ec5f947a5e86a914b323` and the ordered fresh-profile cases
+`476d30089ed2f422da0b335c9bafa8b0fa9b3bf2` and the ordered fresh-profile cases
 `paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
 references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
 T `NativePathJourney.swift` (SHA-256
@@ -261,9 +261,9 @@ T `NativePathJourney.swift` (SHA-256
 is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
 their compiler-input, engine identity and output hashes are checked.
 
-This current-foundation source nomination is provisional until the product owner
-and coordinator freeze the final supplier. The unchanged helper hash is not
-runtime acceptance. The current producer adds the required `expected_path_root`
+The product owner and coordinator froze this supplier on the final UI foundation
+`a6098e3655119075a349a8c923ef82f37f25bee4`. The unchanged helper hash is not
+runtime acceptance. Relative to the original producer, it adds `expected_path_root`
 to its denial probe; its phase schema, ordered transitions and helper interface
 remain unchanged. Actual picker/Finder execution and captures remain **UNRUN**.
 

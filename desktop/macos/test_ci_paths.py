@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -22,10 +23,18 @@ import test_ci_startup_attachments as image_fixtures
 
 
 class AdapterControls(unittest.TestCase):
+    def test_swift_observer_and_python_selector_bind_same_product(self):
+        observer = Path(__file__).resolve().parent / 'NativeUITests/PathPhaseObserver.swift'
+        pins = re.findall(r'static let product = "([0-9a-f]{40})"', observer.read_text())
+        self.assertEqual(pins, [PRODUCT])
+        self.assertEqual(select_target('all-347-paths-macos26')['source_sha'], PRODUCT)
+
     def test_fixed_selector_cannot_change_product_helper_order_or_retry(self):
         target = select_target('all-347-paths-macos26')
         self.assertEqual({k: target[k] for k in ci_paths.TARGET}, ci_paths.TARGET)
-        for changes in ({'source_sha':'0'*40}, {'helper_sha256':'0'*64}, {'retry_budget':1},
+        for changes in ({'source_sha':'0'*40},
+                        {'source_sha':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
+                        {'helper_sha256':'0'*64}, {'retry_budget':1},
                         {'scenarios':list(reversed(CASES))}, {'scenario_count':3}):
             with self.subTest(changes=changes), patch.object(Path, 'read_text', return_value=json.dumps({
                 'all-347-paths-macos26': {**ci_paths.TARGET, **changes}})), self.assertRaises(RuntimeError):
@@ -37,7 +46,9 @@ class AdapterControls(unittest.TestCase):
             value = dict(version=1, H='a'*40, T=PRODUCT, cases=list(CASES), source_preflight=True,
                          native_eligibility=True, allocation_id='synthetic-unit-only',
                          started_at_epoch=1000, deadline_epoch=3340, retry_budget=0)
-            variants = ({'H':'b'*40}, {'T':'b'*40}, {'cases':list(reversed(CASES))},
+            variants = ({'H':'b'*40}, {'T':'b'*40},
+                        {'T':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
+                        {'cases':list(reversed(CASES))},
                         {'source_preflight':False}, {'native_eligibility':False}, {'retry_budget':1},
                         {'started_at_epoch':2100}, {'deadline_epoch':2000}, {'deadline_epoch':9999})
             for changes in variants:
