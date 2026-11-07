@@ -67,9 +67,7 @@ for (const mode of [
         });
         expect(reserved.titleRight).toBeLessThanOrEqual(reserved.actionsLeft + 0.5);
         // A genuinely covering element must still prevent an ordinary pointer action.
-        const bounds = await disclosure.boundingBox();
-        expect(bounds).not.toBeNull();
-        await page.evaluate((rect) => {
+        await page.evaluate(() => {
           const browser = globalThis as unknown as {
             document: {
               createElement(tag: string): { id: string; style: { cssText: string } };
@@ -78,13 +76,16 @@ for (const mode of [
           };
           const cover = browser.document.createElement("div");
           cover.id = "session-action-test-occluder";
-          cover.style.cssText = `position:fixed;left:${rect!.x}px;top:${rect!.y}px;width:${rect!.width}px;height:${rect!.height}px;z-index:2147483647;background:magenta;pointer-events:auto`;
+          // Cover the viewport so Playwright's normal scroll cannot move the
+          // target outside a small fixed cover and accidentally invalidate the control.
+          cover.style.cssText =
+            "position:fixed;inset:0;z-index:2147483647;background:magenta;pointer-events:auto";
           browser.document.body.append(cover);
-        }, bounds);
+        });
         expect((await recordSessionAction(disclosure, info, "covered-tab-action")).centerHit).toBe(
           false,
         );
-        await expect(disclosure.click({ trial: true, timeout: 1000 })).rejects.toThrow(
+        await expect(disclosure.click({ timeout: 1000 })).rejects.toThrow(
           /intercepts pointer events/,
         );
         await page.locator("#session-action-test-occluder").evaluate((node) => node.remove());
