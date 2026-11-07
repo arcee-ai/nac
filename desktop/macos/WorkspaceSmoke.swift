@@ -376,6 +376,36 @@ final class WorkspaceSmoke {
         return rect.left >= left - 0.5 && rect.top >= top - 0.5 &&
           rect.right <= right + 0.5 && rect.bottom <= bottom + 0.5;
       };
+      const fileUncovered = element => {
+        if (typeof document.elementFromPoint !== 'function') return false;
+        // Inline code may wrap. Check each rendered fragment, not its union's
+        // empty space, without dismissing notifications or changing the page.
+        const rectangles = [...element.getClientRects()];
+        if (!rectangles.length) return false;
+        for (const rect of rectangles) {
+          if (rect.width <= 0 || rect.height <= 0) return false;
+          const insetX = Math.min(0.5, rect.width / 4), insetY = Math.min(0.5, rect.height / 4);
+          const points = [[(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2],
+            [rect.left + insetX, rect.top + insetY], [rect.right - insetX, rect.top + insetY],
+            [rect.left + insetX, rect.bottom - insetY], [rect.right - insetX, rect.bottom - insetY]];
+          if (!points.every(([x,y]) => {
+            const top = document.elementFromPoint(x,y);
+            return top && element.contains(top);
+          })) return false;
+          // Pointer-events:none paint is absent from hit testing. Production
+          // notifications must also stop overlapping the requested text.
+          if ([...document.querySelectorAll('.nac-toast')].some(toast => {
+            for (let e = toast; e; e = e.parentElement) {
+              const style = getComputedStyle(e);
+              if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+            }
+            const bounds = toast.getBoundingClientRect();
+            return bounds.width > 0 && bounds.height > 0 && bounds.left < rect.right &&
+              bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top;
+          })) return false;
+        }
+        return true;
+      };
       const panes = [...document.querySelectorAll('span[title]')].flatMap(title => {
         if (title.getAttribute('title') !== expected.path || title.closest('button,[inert],[role=dialog]')) return [];
         const header = title.parentElement, scroller = header?.nextElementSibling;
@@ -384,7 +414,8 @@ final class WorkspaceSmoke {
           row.firstElementChild.tagName === 'SPAN' && /^\d+$/.test(row.firstElementChild.textContent.trim()) &&
           row.lastElementChild.matches('span.code')).map(row => row.lastElementChild)
           .filter(e => e.textContent === expected.content.replace(/\n$/, ''));
-        return code.filter(e => fileVisible(e) && fileVisible(title) && fileVisible(scroller))
+        return code.filter(e => fileVisible(e) && fileVisible(title) && fileVisible(scroller) &&
+          fileUncovered(e) && fileUncovered(title))
           .map(element => ({element, scroller}));
       });
       const panel = panes.length === 1 ? panes[0].scroller.parentElement?.parentElement : null;
