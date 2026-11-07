@@ -17,6 +17,7 @@ pub(super) fn publish_pending_authorization(profile: &mut OAuthProfile, url: Str
         bail!("authorization URL state was not persisted");
     }
     profile.states.retain(|value, _| value == &state);
+    profile.preparing_states.clear();
     profile.completing_authorization = None;
     profile.pending_authorization_url = Some(url);
     Ok(())
@@ -75,11 +76,13 @@ pub fn discard_mcp_oauth_pending_authorization(
             // A failed preparation may have persisted this candidate without
             // publishing its URL. Remove only that state, never another owner.
             profile.states.remove(&state);
+            profile.preparing_states.remove(&state);
             return Ok(false);
         }
         profile.pending_authorization_url = None;
         profile.completing_authorization = None;
         profile.states.remove(&state);
+        profile.preparing_states.remove(&state);
         Ok(true)
     })
 }
@@ -99,10 +102,16 @@ pub(super) fn failed_authorization_start(
     }
 }
 
-pub(super) fn retain_live_authorization_states(profile: &mut OAuthProfile) {
+pub(super) fn retain_preparing_states(profile: &mut OAuthProfile) {
+    profile.preparing_states.retain(|key| {
+        profile
+            .states
+            .get(key)
+            .is_some_and(authorization_state_is_live)
+    });
     profile
         .states
-        .retain(|_, state| authorization_state_is_live(state));
+        .retain(|key, _| profile.preparing_states.contains(key));
 }
 
 fn authorization_state_is_live(state: &StoredAuthorizationState) -> bool {
@@ -189,6 +198,7 @@ impl CompletionOwnership {
         };
         self.capture(state)?;
         profile.states.remove(state);
+        profile.preparing_states.remove(state);
         profile.completing_authorization = Some(completion);
         Ok(())
     }
@@ -310,13 +320,15 @@ fn fail_authorization(
             // This failure owns the old binding, not a replacement that has
             // saved fresh state but has not published its URL yet.
             profile.states.remove(&state);
-            retain_live_authorization_states(profile);
+            profile.preparing_states.remove(&state);
+            retain_preparing_states(profile);
             if profile.states.is_empty() {
                 profile.pending_scopes.clear();
             }
         } else {
             profile.pending_scopes.clear();
             profile.states.clear();
+            profile.preparing_states.clear();
         }
         Ok(true)
     })

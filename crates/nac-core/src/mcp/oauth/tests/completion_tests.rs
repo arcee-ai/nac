@@ -176,6 +176,7 @@ async fn unscoped_failure_and_logout_still_clear_prepared_candidates() {
         assert!(profile.pending_scopes.is_empty());
         assert!(profile.completing_authorization.is_none());
         assert!(profile.pending_authorization_url.is_none());
+        assert!(profile.preparing_states.is_empty());
     }
 }
 
@@ -513,4 +514,161 @@ async fn completed_callback_releases_its_fence_before_a_later_guarded_refresh() 
     let file = read_store(&path).unwrap();
     let saved = serde_json::to_value(file.profiles["slack"].credentials.as_ref().unwrap()).unwrap();
     assert_eq!(saved["token_response"]["access_token"], "refresh-canary");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_provenance_is_private_and_retires_with_its_own_state() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("prepared-provenance");
+    let cwd = Path::new("/workspace");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(cwd).unwrap();
+    let current = adapter(&path);
+    pending(&current).await;
+    let profile = current.profile().unwrap();
+    assert!(profile.preparing_states.is_empty());
+    let mut legacy = serde_json::to_value(&profile).unwrap();
+    assert!(legacy.get("preparing_states").is_none());
+    legacy.as_object_mut().unwrap().remove("preparing_states");
+    let legacy: OAuthProfile = serde_json::from_value(legacy).unwrap();
+    assert!(legacy.preparing_states.is_empty());
+    for publish in [false, true] {
+        let mut state = profile.states["completion-state"].clone();
+        state.csrf_token = "prepared-state".into();
+        StateStore::save(&current, "prepared-state", state)
+            .await
+            .unwrap();
+        let prepared = current.profile().unwrap();
+        assert!(prepared.preparing_states.contains("prepared-state"));
+        if publish {
+            edit_store(&path, |store| {
+                publish_pending_authorization(
+                    store.profiles.get_mut("slack").unwrap(),
+                    "https://auth.example.test/authorize?state=prepared-state".into(),
+                )
+            })
+            .unwrap();
+        } else {
+            let _ = failed_authorization_start(
+                cwd,
+                "slack",
+                endpoint,
+                "https://auth.example.test/authorize?state=prepared-state",
+                anyhow!("fixture preparation failed"),
+            );
+        }
+        let settled = current.profile().unwrap();
+        assert!(settled.preparing_states.is_empty());
+        assert_eq!(settled.states.contains_key("prepared-state"), publish);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_provenance_prunes_expired_dangling_and_unmarked_orphans() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("prepared-provenance-expiry");
+    let cwd = Path::new("/workspace");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(cwd).unwrap();
+    let current = adapter(&path);
+    pending(&current).await;
+    let mut candidate = current.profile().unwrap().states["completion-state"].clone();
+    candidate.csrf_token = "prepared-state".into();
+    StateStore::save(&current, "prepared-state", candidate)
+        .await
+        .unwrap();
+    edit_store(&path, |store| {
+        let profile = store.profiles.get_mut("slack").unwrap();
+        let mut orphan = profile.states["prepared-state"].clone();
+        orphan.csrf_token = "unmarked-orphan".into();
+        profile.states.insert("unmarked-orphan".into(), orphan);
+        profile
+            .states
+            .get_mut("completion-state")
+            .unwrap()
+            .created_at = 0;
+        profile.states.get_mut("prepared-state").unwrap().created_at = 0;
+        profile.preparing_states.insert("dangling-state".into());
+        Ok(())
+    })
+    .unwrap();
+    let step = prepare_mcp_oauth_scope_step_up(cwd, "slack", endpoint, "mcp:new").unwrap();
+    assert!(!step.authorization_in_progress);
+    let retired = current.profile().unwrap();
+    assert!(retired.states.is_empty());
+    assert!(retired.preparing_states.is_empty());
+    assert!(retired.pending_authorization_url.is_none());
+    assert!(step
+        .authorization_scopes
+        .iter()
+        .any(|scope| scope == "mcp:new"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_provenance_follows_each_profile_invalidation_owner() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    for operation in ["configure", "redirect", "rename", "credentials", "delete"] {
+        let (_home, _restore) = test_environment(&format!("prepared-invalidate-{operation}"));
+        let cwd = Path::new("/workspace");
+        let endpoint = "https://mcp.example.test/mcp";
+        configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+        let path = oauth_store_path(cwd).unwrap();
+        let current = adapter(&path);
+        pending(&current).await;
+        let mut candidate = current.profile().unwrap().states["completion-state"].clone();
+        candidate.csrf_token = "prepared-state".into();
+        StateStore::save(&current, "prepared-state", candidate)
+            .await
+            .unwrap();
+        assert!(current
+            .profile()
+            .unwrap()
+            .preparing_states
+            .contains("prepared-state"));
+        match operation {
+            "configure" => {
+                configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+            }
+            "redirect" => {
+                assert!(set_mcp_oauth_redirect_uri(
+                    cwd,
+                    "slack",
+                    endpoint,
+                    "https://nac.example.test/callback"
+                )
+                .unwrap());
+            }
+            "rename" => rename_mcp_oauth_profile(
+                cwd,
+                "slack",
+                "renamed",
+                "https://nac.example.test/renamed",
+            )
+            .unwrap(),
+            "credentials" => CredentialStore::clear(&current).await.unwrap(),
+            "delete" => delete_mcp_oauth_profile(cwd, "slack").unwrap(),
+            _ => unreachable!(),
+        }
+        let file = read_store(&path).unwrap();
+        if operation == "delete" {
+            assert!(!file.profiles.contains_key("slack"));
+        } else {
+            let name = if operation == "rename" {
+                "renamed"
+            } else {
+                "slack"
+            };
+            assert!(file.profiles[name].states.is_empty(), "{operation}");
+            assert!(
+                file.profiles[name].preparing_states.is_empty(),
+                "{operation}"
+            );
+            assert!(
+                file.profiles[name].pending_authorization_url.is_none(),
+                "{operation}"
+            );
+        }
+    }
 }
