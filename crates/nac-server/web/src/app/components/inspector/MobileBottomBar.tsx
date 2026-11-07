@@ -18,9 +18,9 @@ export function MobileBottomBar({
   panels?: readonly SessionPanel[];
 }) {
   return (
-    <div className="fade-from-bottom absolute inset-x-0 bottom-0 z-10 p-3 pointer-events-none">
+    <div className="@container fade-from-bottom absolute inset-x-0 bottom-0 z-10 p-3 pointer-events-none">
       <div
-        className="flex items-center gap-[2px] w-full rounded-[12px] bg-elevation-level-3 shadow-2xl overflow-hidden pointer-events-auto"
+        className="grid grid-cols-[repeat(auto-fit,minmax(44px,1fr))] items-center gap-[2px] w-full rounded-[12px] bg-elevation-level-3 shadow-2xl overflow-hidden pointer-events-auto"
         role="tablist"
       >
         {panels.map((name) => {
@@ -32,7 +32,7 @@ export function MobileBottomBar({
               role="tab"
               aria-selected={active}
               className={cn(
-                "flex flex-col flex-1 min-w-0 items-center justify-center gap-[6px] h-16 rounded-[12px]",
+                "flex flex-col min-w-11 min-h-11 items-center justify-center gap-[2px] h-11 @min-[274px]:h-16 @min-[274px]:gap-[6px] rounded-[12px]",
                 "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
                 active ? "btn-primary" : "btn-ghost",
               )}

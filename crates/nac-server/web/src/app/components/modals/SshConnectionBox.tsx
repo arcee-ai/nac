@@ -317,13 +317,13 @@ export function SshConnectionBox({
   return (
     <div
       className={cn(
-        "relative flex flex-col rounded-[8px] overflow-hidden shadow-convex",
-        connected ? "bg-info-primary" : "bg-elevation-sublevel-variant-A",
+        "relative flex flex-col rounded-[8px] overflow-hidden border border-muted",
+        "bg-elevation-level-1",
         className,
       )}
     >
       {showSelector ? (
-        <div className="flex items-center gap-4 h-12 pl-3 pr-1.5 py-1 border-b border-muted bg-elevation-sublevel-variant-A">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-muted">
           <p className="label-small text-basic-primary flex-1 min-w-0">SSH config</p>
           {connected ? (
             <Badge text="Connected" color={BadgeColor.Blue} className="!py-0.5 !px-1" />
@@ -349,7 +349,7 @@ export function SshConnectionBox({
             }
           >
             <Button
-              size={ButtonSize.Medium}
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
               variant={ButtonVariant.Secondary}
               disabled={fieldsLocked}
               onClick={() => setMenuOpen((open) => !open)}
@@ -368,11 +368,12 @@ export function SshConnectionBox({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-4 p-3">
+      <div className="flex flex-col gap-4 p-4">
         {showNameField ? (
           <div className="flex flex-col gap-1 w-full">
             <FieldLabel label="SSH config name" required />
             <Input
+              aria-label="SSH config name"
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={name}
               isDisabled={fieldsLocked}
@@ -384,42 +385,44 @@ export function SshConnectionBox({
 
         <div className="flex flex-col md:flex-row gap-4 items-start w-full">
           <div className="flex flex-col gap-1 w-full md:flex-1 min-w-0">
-            <FieldLabel
-              label="SSH Host"
-              required
-              hint="user@host, a host alias from the NAC server's ~/.ssh/config, or an IP."
-            />
+            <FieldLabel label="SSH Host" required />
             <Input
+              aria-label="SSH Host"
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={host}
               isDisabled={fieldsLocked}
               onChange={(e) => setHost(e.target.value)}
               placeholder="example@192.0.2.10 or build-box"
             />
+            <p className="text-small !leading-[22px] text-basic-secondary">
+              user@host, a host alias from the NAC server's ~/.ssh/config, or an IP.
+            </p>
           </div>
           <div className="flex flex-col gap-1 w-full md:w-[98px] shrink-0">
-            <FieldLabel label="Port" hint="Blank uses OpenSSH's default (usually 22)." />
+            <FieldLabel label="Port" />
             <Input
+              aria-label="Port"
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               value={port}
               isDisabled={fieldsLocked}
               onChange={(e) => setPort(e.target.value)}
               placeholder="22"
             />
+            <p className="text-small !leading-[22px] text-basic-secondary">
+              Blank uses OpenSSH's default.
+            </p>
           </div>
         </div>
 
-        <div className="flex gap-4 items-end w-full">
+        <div className="flex w-full flex-col items-stretch gap-4 md:flex-row md:items-end">
           <div className="flex flex-col gap-1 flex-1 min-w-0">
-            <FieldLabel
-              label="Private Key"
-              hint="A key file on this machine. The default leaves the choice to your ~/.ssh/config and ssh agent."
-            />
+            <FieldLabel label="Private Key" />
             <Button
-              size={ButtonSize.Medium}
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
               variant={ButtonVariant.Secondary}
               className="w-full"
               disabled={fieldsLocked}
+              aria-label={`Private Key: ${identityFile.trim() || DEFAULT_KEY_LABEL}`}
               onClick={() => setPickingKey(true)}
             >
               <span className="flex-1 min-w-0 truncate text-left">
@@ -428,10 +431,10 @@ export function SshConnectionBox({
               <Icon iconName={IconName.FolderOpen} size={20} />
             </Button>
           </div>
-          <div className="md:w-[128px] shrink-0 relative">
+          <div className="relative w-full shrink-0 md:w-[128px]">
             {isManage ? (
               <Button
-                size={ButtonSize.Medium}
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
                 variant={ButtonVariant.Secondary}
                 className="w-full"
                 disabled={busy}
@@ -446,7 +449,7 @@ export function SshConnectionBox({
               </Button>
             ) : connected ? (
               <Button
-                size={ButtonSize.Medium}
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
                 variant={ButtonVariant.Ghost}
                 className="w-full"
                 onClick={runDisconnect}
@@ -455,7 +458,7 @@ export function SshConnectionBox({
               </Button>
             ) : (
               <Button
-                size={ButtonSize.Medium}
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
                 variant={ButtonVariant.Primary}
                 className="w-full"
                 disabled={busy}
@@ -468,7 +471,11 @@ export function SshConnectionBox({
           </div>
         </div>
 
-        {error ? <p className="text-micro text-error-primary">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-small !leading-[22px] text-error-primary">
+            {error}
+          </p>
+        ) : null}
       </div>
 
       {/* The key is read by this machine's ssh client, so it is always browsed

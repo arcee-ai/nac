@@ -89,7 +89,7 @@ it("separates saved profiles from server OpenSSH aliases and fills only the host
     const host = screen.getByPlaceholderText<HTMLInputElement>("example@192.0.2.10 or build-box");
     expect(host.value).toBe("staging");
     expect(screen.getByPlaceholderText<HTMLInputElement>("22").value).toBe("");
-    expect(screen.getByRole("button", { name: ".ssh/config" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Private Key: .ssh/config" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "staging" })).toBeTruthy();
     expect(connect).not.toHaveBeenCalled();
     expect(onConnectionChange).not.toHaveBeenCalled();

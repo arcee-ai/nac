@@ -4,6 +4,7 @@ import {
   InsightsNavigationContext,
   type InsightsNavigationTarget,
 } from "@/app/features/insights/useInsightsNavigation";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { SessionPanel } from "@/app/lib/routes";
 import type { InsightSelection } from "@/app/store/sessionLayoutStore";
 
@@ -25,15 +26,26 @@ export function InsightsNavigationProvider({
   useLayoutEffect(() => {
     latestFocusPanel.current = focusPanel;
   });
-  const detailFocusRef = useRef<InsightSelection | null>(null);
+  const { sessionLayoutStore } = useNativeRuntime().stores.sessionLayoutStore;
+  // Focus intent belongs to this exact parent and presentation lifetime too.
+  const { detailFocusRef, returnFocusRef } = useMemo(
+    () => ({
+      sessionId,
+      sessionLayoutStore,
+      detailFocusRef: { current: null as InsightSelection | null },
+      returnFocusRef: { current: false },
+    }),
+    [sessionId, sessionLayoutStore],
+  );
   const target = useMemo(
     () => ({
       sessionId,
       panels,
       focusPanel: (panel: SessionPanel) => latestFocusPanel.current(panel),
       detailFocusRef,
+      returnFocusRef,
     }),
-    [sessionId, panels],
+    [sessionId, panels, detailFocusRef, returnFocusRef],
   );
   return (
     <InsightsNavigationContext.Provider value={target}>

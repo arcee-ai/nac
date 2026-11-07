@@ -1,10 +1,39 @@
 .nac-toast {
+  container-type: inline-size;
   transform: translateY(-100%);
   transition: transform 150ms ease-out;
 }
 
 .nac-toast[data-visible="true"] {
   transform: translateY(0);
+}
+
+/* A contained toast can be much narrower than the browser viewport. Reserve
+   the first row for its icon and 44px dismiss target instead of squeezing the
+   message between them. The normal 360px presentation keeps its flex layout. */
+@container (max-width: 239px) {
+  .nac-toast .nac-toast-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    row-gap: 8px;
+    padding-right: 16px;
+  }
+
+  .nac-toast .nac-toast-content > svg {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .nac-toast .nac-toast-message {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .nac-toast .nac-toast-dismiss {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

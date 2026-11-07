@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -359,6 +359,60 @@ afterEach(() => {
   cleanup();
   resetRuntime("session");
   vi.unstubAllGlobals();
+});
+
+describe("responsive Session settings target", () => {
+  it.each([false, true])("keeps the settings action and draft on mobile=%s", async (phone) => {
+    mobile = phone;
+    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
+    try {
+      const textarea = composer({ behavior: "direct" });
+      type(textarea, "Unsent draft before opening settings");
+      const button = screen.getByRole("button", { name: "Session settings" });
+      for (const token of ["!size-11", "!min-h-11", "!min-w-11"])
+        expect(button.classList.contains(token)).toBe(phone);
+      expect(button.classList.contains("btn-small")).toBe(true);
+      expect(button.querySelector("svg")?.getAttribute("width")).toBe("16");
+      fireEvent.click(button);
+      const dialog = await screen.findByRole("dialog", { name: "Session settings" });
+      await waitFor(() => expect(readConfig).toHaveBeenCalled());
+      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "Session settings" })).toBeNull(),
+      );
+      expect(textarea.value).toBe("Unsent draft before opening settings");
+      expect(fakes.submitRun).not.toHaveBeenCalled();
+    } finally {
+      readConfig.mockRestore();
+    }
+  });
+
+  it("preserves the focused action and draft through mobile and desktop resize", async () => {
+    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
+    try {
+      const textarea = composer({ behavior: "direct" });
+      type(textarea, "Unsent draft survives responsive target changes");
+      const button = screen.getByRole("button", { name: "Session settings" });
+      act(() => button.focus());
+      resizeComposer(true);
+      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
+      expect(button.classList.contains("!size-11")).toBe(true);
+      expect(document.activeElement).toBe(button);
+      resizeComposer(false);
+      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
+      expect(button.classList.contains("!size-11")).toBe(false);
+      expect(document.activeElement).toBe(button);
+      expect(textarea.value).toBe("Unsent draft survives responsive target changes");
+      fireEvent.click(button);
+      expect(await screen.findByRole("dialog", { name: "Session settings" })).toBeTruthy();
+      await waitFor(() => expect(readConfig).toHaveBeenCalled());
+      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
+      expect(fakes.submitRun).not.toHaveBeenCalled();
+    } finally {
+      readConfig.mockRestore();
+    }
+  });
 });
 
 describe("responsive Enter behavior", () => {

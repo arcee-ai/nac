@@ -37,7 +37,12 @@ const openingPreset = {
   updated_at: "2026-09-30T00:00:00Z",
 } satisfies ModelConfigurationRecord;
 
+const resizeObserved = vi.fn();
+const resizeDisconnected = vi.fn();
+
 beforeEach(() => {
+  resizeObserved.mockClear();
+  resizeDisconnected.mockClear();
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener: vi.fn(),
@@ -46,8 +51,8 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      observe() {}
-      disconnect() {}
+      observe = resizeObserved;
+      disconnect = resizeDisconnected;
     },
   );
 });
@@ -187,7 +192,7 @@ function renderReadySettings({
 }
 
 it.each([false, true])(
-  "retains edited headers/context across picker presentations (matching preset: %s)",
+  "names native headers and retains edits across picker presentations (matching preset: %s)",
   async (matchingPreset) => {
     const record = openingPreset;
     vi.spyOn(api, "listModelConfigs").mockResolvedValue({
@@ -208,7 +213,23 @@ it.each([false, true])(
       );
       fireEvent.click(screen.getByText("Advanced execution settings"));
       fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
-      fireEvent.change(document.querySelector("textarea")!, {
+      const dialog = screen.getByRole("dialog", { name: "Session settings" });
+      const headers = () =>
+        screen.getByRole("textbox", {
+          name: "Extra headers (JSON object)",
+        }) as HTMLTextAreaElement;
+      expect(headers().tagName).toBe("TEXTAREA");
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(screen.getByText(/^Extra headers$/)).toBeTruthy();
+      expect(
+        screen.getByText("Enter a JSON object with string values. Blank sends none.").tagName,
+      ).toBe("P");
+      const body = headers().closest(".paragraph-medium")!;
+      expect(body).not.toBeNull();
+      // matchMedia is desktop: flush cards scroll the outer wrapper, not this inner body.
+      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body.parentElement);
+      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body);
+      fireEvent.change(headers(), {
         target: { value: '{"X-Manual":"draft"}' },
       });
       fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
@@ -220,11 +241,9 @@ it.each([false, true])(
           false,
         ),
       );
-      await waitFor(() =>
-        expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
-          '{"X-Manual":"draft"}',
-        ),
-      );
+      await waitFor(() => expect(headers().value).toBe('{"X-Manual":"draft"}'));
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(update).not.toHaveBeenCalled();
       expect(
         (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
       ).toBe("444");
@@ -237,9 +256,9 @@ it.each([false, true])(
       expect(
         (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
       ).toBe("444");
-      expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
-        '{"X-Manual":"draft"}',
-      );
+      expect(headers().value).toBe('{"X-Manual":"draft"}');
+      expect(headers().closest('[role="dialog"]')).toBe(dialog);
+      expect(update).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       await waitFor(() =>
         expect(update).toHaveBeenCalledExactlyOnceWith(
@@ -252,6 +271,7 @@ it.each([false, true])(
       );
     } finally {
       view.unmount();
+      expect(resizeDisconnected).toHaveBeenCalled();
       client.clear();
     }
   },
