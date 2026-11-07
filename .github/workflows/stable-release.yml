@@ -160,6 +160,8 @@ jobs:
         run: npm --prefix .github/scripts ci --ignore-scripts
       - name: Check portable path adapter contracts without native execution
         run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v
+      - name: Check instance capture evidence contracts without native execution
+        run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
       - name: Check workflows and scripts, then prove enforcement
         run: make lint-workflows test-workflow-lint test-manual-stack-override
 
