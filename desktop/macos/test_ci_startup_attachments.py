@@ -38,7 +38,7 @@ class StartupAttachmentTests(unittest.TestCase):
         observation.update({key: witness[key] for key in IDENTITY})
         observation.update(schema=SCHEMA, scenario=case, configuration_sha256=config_hash,
             bundle_id=config['bundle_id'], ordinary_compile_mode='LOCAL_APP', smoke_instrumentation=False,
-            operations=operations(config), console=[console] * (26 if operations(config) else 4),
+            operations=operations(config), console=[console] * {'onboarding': 5, 'configuredLocal': 27, 'invalidConfig': 4, 'futureStore': 4}[case],
             capture='public-XCTest-window-screenshot', png_sha256=digest(png), visible_paint='requires_actual_image_review',
             input_method='public-XCTest', physical_keyboard_or_ime_claim=False, external_cleanup_required=True,
             future_schema_G2_assertion=('exact_unique_message_observed_producer_binding_required'
