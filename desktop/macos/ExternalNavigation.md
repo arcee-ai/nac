@@ -158,6 +158,14 @@ the existing marked-engine owner/Origin contract. A green result establishes
 only the named local-double journeys on that host; it does not establish real
 vendor, physical-input, offline, minimum-OS or distribution qualification.
 
+The MCP actor settles the created session route/composer before preparing its
+disabled local fixture. A real same-engine/view reload then creates a new
+document and query cache, so direct fixture setup cannot be hidden by a warm
+empty MCP listing. Only the opaque name of the fake public-client credential
+crosses into the actor; its value and authorization state/code/token URLs do not.
+Configuration after reload uses that explicit fixture identity, without old
+page globals. Browser sequencing controls do not establish native browser handoff.
+
 ## Closed device-owner fixture
 
 `native-auth-fixture` is an explicit, nondefault server Cargo feature. It uses
