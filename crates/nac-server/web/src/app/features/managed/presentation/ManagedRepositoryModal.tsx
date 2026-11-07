@@ -204,6 +204,8 @@ export function ManagedRepositoryModal({
 
   const busy = starting || cloneIsRunning(operation);
   const branchError = branches.error ? githubErrorText(branches.error) : null;
+  const repositoriesLoading =
+    repositories.isLoading || (connectionRecovery !== null && repositories.isFetching);
 
   return (
     <Modal
@@ -259,11 +261,8 @@ export function ManagedRepositoryModal({
             <Loader size={LoaderSize.Small} /> Checking GitHub connection…
           </div>
         ) : github.error ? (
-          <div
-            role="alert"
-            className="flex flex-col items-start gap-3 text-small text-error-primary"
-          >
-            <p>{githubErrorText(github.error)}</p>
+          <div className="flex flex-col items-start gap-3 text-small text-error-primary">
+            <p role="alert">{githubErrorText(github.error)}</p>
             <Button
               className="min-h-11"
               variant={ButtonVariant.Secondary}
@@ -322,7 +321,7 @@ export function ManagedRepositoryModal({
                 onChange={(event) => setSearch(event.target.value)}
               />
               <div className="min-h-[140px] max-h-60 overflow-auto rounded-lg border border-basic p-1">
-                {repositories.isFetching ? (
+                {repositoriesLoading ? (
                   <div
                     role="status"
                     className="flex items-center gap-3 p-4 text-small text-basic-secondary"
@@ -330,7 +329,7 @@ export function ManagedRepositoryModal({
                     <Loader size={LoaderSize.Small} /> Loading repositories…
                   </div>
                 ) : null}
-                {!repositories.isFetching && repositories.error ? (
+                {!repositoriesLoading && repositories.error ? (
                   <p role="alert" className="p-4 text-small !leading-[22px] text-error-primary">
                     {githubErrorText(repositories.error)}
                   </p>
@@ -370,7 +369,7 @@ export function ManagedRepositoryModal({
                     ) : null}
                   </button>
                 ))}
-                {!repositories.isFetching && visibleRepositories.length === 0 ? (
+                {!repositoriesLoading && visibleRepositories.length === 0 ? (
                   <p className="p-4 text-small !leading-[22px] text-basic-secondary">
                     No repositories match.
                   </p>

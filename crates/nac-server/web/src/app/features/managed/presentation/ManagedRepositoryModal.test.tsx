@@ -1152,4 +1152,241 @@ describe("managed repository branch lifecycle", () => {
       }
     },
   );
+
+  it("repository cache presentation distinguishes initial fetching, empty, search and error", async () => {
+    const pending = deferred<{ repositories: ManagedGitHubRepository[] }>();
+    fakes.repositories.mockReturnValueOnce(pending.promise);
+    const writes = observeWrites();
+    const view = mount();
+    try {
+      expect(await screen.findByText("Loading repositories…")).toBeTruthy();
+      expect(view.client.getQueryState(repositoryKey)).toMatchObject({
+        status: "pending",
+        fetchStatus: "fetching",
+        data: undefined,
+      });
+      expect(screen.queryByText("No repositories match.")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      await act(async () => pending.resolve({ repositories: [] }));
+      expect(await screen.findByText("No repositories match.")).toBeTruthy();
+      expect(screen.queryByText("Loading repositories…")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      await act(async () => {
+        await view.client.invalidateQueries({ queryKey: repositoryKey });
+      });
+      expect(await screen.findByRole("button", { name: /arcee-ai\/first/ })).toBeTruthy();
+      const search = screen.getByRole<HTMLInputElement>("textbox", { name: "Find repository" });
+      fireEvent.change(search, { target: { value: "no-such-repository" } });
+      expect(screen.getByText("No repositories match.")).toBeTruthy();
+      expect(view.client.getQueryData(repositoryKey)).toEqual({ repositories });
+      fireEvent.change(search, { target: { value: "" } });
+      fakes.repositories.mockRejectedValueOnce(
+        denied("/managed/github/repositories", privateDenials[1]!),
+      );
+      await act(async () => {
+        await view.client.invalidateQueries({ queryKey: repositoryKey });
+      });
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "GitHub access was denied for this host",
+      );
+      expect(screen.getByRole("button", { name: /arcee-ai\/first/ })).toBeTruthy();
+      expect(screen.queryByText("Loading repositories…")).toBeNull();
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Clone repository" }).disabled,
+      ).toBe(true);
+      writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+    } finally {
+      pending.resolve({ repositories: [] });
+      view.unmount();
+      view.client.clear();
+      writes.forEach((write) => write.mockRestore());
+    }
+  });
+
+  it.each(["rows", "empty", "error"] as const)(
+    "repository cache presentation retains cached %s during an ordinary refresh",
+    async (cache) => {
+      fakes.branches.mockResolvedValue({ branches: ["first-default", "topic/saved"] });
+      const writes = observeWrites();
+      const view = mount();
+      const ordinary = deferred<{ repositories: ManagedGitHubRepository[] }>();
+      try {
+        await primeReadyCheckout();
+        if (cache !== "rows") {
+          if (cache === "empty") fakes.repositories.mockResolvedValueOnce({ repositories: [] });
+          else
+            fakes.repositories.mockRejectedValueOnce(
+              denied("/managed/github/repositories", privateDenials[1]!),
+            );
+          await act(async () => {
+            await view.client.invalidateQueries({ queryKey: repositoryKey });
+          });
+          if (cache === "empty") await screen.findByText("No repositories match.");
+          else await screen.findByRole("alert");
+        }
+        const search = screen.getByRole<HTMLInputElement>("textbox", { name: "Find repository" });
+        fireEvent.change(search, { target: { value: "arcee-ai/first" } });
+        const clone = screen.getByRole<HTMLButtonElement>("button", { name: "Clone repository" });
+        const wasDisabled = clone.disabled;
+        expect(wasDisabled).toBe(cache === "error");
+        fakes.repositories.mockReturnValueOnce(ordinary.promise);
+        let refresh!: Promise<unknown>;
+        act(() => {
+          refresh = view.client.invalidateQueries({ queryKey: repositoryKey });
+        });
+        await waitFor(() => {
+          expect(view.client.getQueryState(repositoryKey)?.fetchStatus).toBe("fetching");
+          expect(view.client.getQueryState(repositoryKey)?.status).toBe(
+            cache === "error" ? "error" : "success",
+          );
+        });
+        expect(screen.queryByText("Loading repositories…")).toBeNull();
+        if (cache === "empty") expect(screen.getByText("No repositories match.")).toBeTruthy();
+        else expect(screen.getByRole("button", { name: /arcee-ai\/first/ })).toBeTruthy();
+        if (cache === "error") {
+          expect(screen.getByRole("alert").textContent).toContain(
+            "GitHub access was denied for this host",
+          );
+          expect(screen.getByRole("alert").textContent).not.toMatch(/model|private denial detail/i);
+          expect(screen.queryByRole("button", { name: "Retry repository checks" })).toBeNull();
+          fireEvent.click(clone);
+        } else expect(screen.queryByRole("alert")).toBeNull();
+        expect(clone.disabled).toBe(wasDisabled);
+        expect(search.value).toBe("arcee-ai/first");
+        expect(screen.getByRole("button", { name: "Branch: topic/saved" })).toBeTruthy();
+        expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Project name" }).value).toBe(
+          "Owned readiness draft",
+        );
+        expect(
+          screen.getByRole<HTMLInputElement>("textbox", { name: "Checkout directory" }).value,
+        ).toBe("owned-readiness-checkout");
+        expect(fakes.github).toHaveBeenCalledOnce();
+        expect(fakes.branches).toHaveBeenCalledOnce();
+        writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+        await act(async () => {
+          if (cache === "error") {
+            ordinary.reject(denied("/managed/github/repositories", privateDenials[1]!));
+            await Promise.allSettled([ordinary.promise]);
+          } else ordinary.resolve({ repositories: cache === "empty" ? [] : repositories });
+          await refresh;
+        });
+        if (cache === "error")
+          expect(
+            await screen.findByRole("button", { name: "Retry repository checks" }),
+          ).toBeTruthy();
+        expect(clone.disabled).toBe(wasDisabled);
+        writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+      } finally {
+        ordinary.resolve({ repositories });
+        view.unmount();
+        view.client.clear();
+        writes.forEach((write) => write.mockRestore());
+      }
+    },
+  );
+
+  it("repository cache presentation retains a failed recovery error through an ordinary refresh", async () => {
+    fakes.branches.mockResolvedValue({ branches: ["first-default", "topic/saved"] });
+    const writes = observeWrites();
+    const view = mount();
+    const failed = deferred<{ repositories: ManagedGitHubRepository[] }>();
+    const branches = deferred<{ branches: string[] }>();
+    const ordinary = deferred<{ repositories: ManagedGitHubRepository[] }>();
+    try {
+      await primeReadyCheckout();
+      await failReadyConnection(view);
+      fakes.repositories.mockReturnValueOnce(failed.promise);
+      fakes.branches.mockReturnValueOnce(branches.promise);
+      fireEvent.click(screen.getByRole("button", { name: "Retry connection check" }));
+      await waitFor(() => {
+        expect(view.client.getQueryState(repositoryKey)?.fetchStatus).toBe("fetching");
+        expect(view.client.getQueryState(branchKey)?.fetchStatus).toBe("fetching");
+      });
+      expect(screen.getByText("Loading repositories…")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+      const clone = screen.getByRole<HTMLButtonElement>("button", { name: "Clone repository" });
+      expect(clone.disabled).toBe(true);
+      await act(async () => {
+        branches.resolve({ branches: ["first-default", "topic/saved"] });
+        failed.reject(denied("/managed/github/repositories", privateDenials[1]!));
+        await Promise.allSettled([branches.promise, failed.promise]);
+      });
+      expect(await screen.findByRole("button", { name: "Retry repository checks" })).toBeTruthy();
+      fakes.repositories.mockReturnValueOnce(ordinary.promise);
+      let refresh!: Promise<unknown>;
+      act(() => {
+        refresh = view.client.invalidateQueries({ queryKey: repositoryKey });
+      });
+      await waitFor(() => {
+        expect(view.client.getQueryState(repositoryKey)?.fetchStatus).toBe("fetching");
+        expect(view.client.getQueryState(repositoryKey)?.status).toBe("error");
+      });
+      expect(screen.queryByText("Loading repositories…")).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain(
+        "GitHub access was denied for this host",
+      );
+      expect(screen.queryByRole("button", { name: "Retry repository checks" })).toBeNull();
+      expect(clone.disabled).toBe(true);
+      fireEvent.click(clone);
+      writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+      await act(async () => {
+        ordinary.resolve({ repositories });
+        await refresh;
+      });
+      await waitFor(() => expect(clone.disabled).toBe(false));
+      expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Project name" }).value).toBe(
+        "Owned readiness draft",
+      );
+      expect(
+        screen.getByRole<HTMLInputElement>("textbox", { name: "Checkout directory" }).value,
+      ).toBe("owned-readiness-checkout");
+      expect(fakes.github).toHaveBeenCalledTimes(3);
+      expect(fakes.repositories).toHaveBeenCalledTimes(3);
+      expect(fakes.branches).toHaveBeenCalledTimes(2);
+      writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+    } finally {
+      failed.resolve({ repositories });
+      branches.resolve({ branches: [] });
+      ordinary.resolve({ repositories });
+      view.unmount();
+      view.client.clear();
+      writes.forEach((write) => write.mockRestore());
+    }
+  });
+
+  it.each(privateDenials)(
+    "denial message alert leaves Retry outside live text: %s",
+    async (detail) => {
+      fakes.github
+        .mockRejectedValueOnce(denied("/managed/github", detail))
+        .mockResolvedValue({ connected: true });
+      const writes = observeWrites();
+      const view = mount();
+      try {
+        const alert = await screen.findByRole("alert");
+        const retry = screen.getByRole<HTMLButtonElement>("button", {
+          name: "Retry connection check",
+        });
+        expect(alert.tagName).toBe("P");
+        expect(alert.textContent).toBe(
+          "GitHub access was denied for this host. Ask the host owner to check access to the GitHub App.",
+        );
+        expect(alert.querySelector("button")).toBeNull();
+        expect(retry.closest('[role="alert"]')).toBeNull();
+        retry.focus();
+        expect(document.activeElement).toBe(retry);
+        expect(writes.every((write) => write.mock.calls.length === 0)).toBe(true);
+        fireEvent.click(retry);
+        expect(await screen.findByRole("button", { name: /arcee-ai\/first/ })).toBeTruthy();
+        expect(fakes.github).toHaveBeenCalledTimes(2);
+        expect(screen.queryByRole("alert")).toBeNull();
+        writes.forEach((write) => expect(write).not.toHaveBeenCalled());
+      } finally {
+        view.unmount();
+        view.client.clear();
+        writes.forEach((write) => write.mockRestore());
+      }
+    },
+  );
 });

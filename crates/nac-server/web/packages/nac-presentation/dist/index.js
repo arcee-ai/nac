@@ -31492,7 +31492,7 @@ function tM({ open: e, onClose: t, onConnect: n }) {
 		} catch (e) {
 			T(Te(Ud(e)));
 		}
-	}, ue = E || xr(S), de = te.error ? Lj(te.error) : null;
+	}, ue = E || xr(S), de = te.error ? Lj(te.error) : null, fe = P.isLoading || O !== null && P.isFetching;
 	return /* @__PURE__ */ X(v, {
 		open: e,
 		onClose: ue ? void 0 : t,
@@ -31534,9 +31534,11 @@ function tM({ open: e, onClose: t, onConnect: n }) {
 					className: "flex items-center gap-3 text-small text-basic-secondary",
 					children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), " Checking GitHub connection…"]
 				}) : l.error ? /* @__PURE__ */ Z("div", {
-					role: "alert",
 					className: "flex flex-col items-start gap-3 text-small text-error-primary",
-					children: [/* @__PURE__ */ X("p", { children: Lj(l.error) }), /* @__PURE__ */ X(V, {
+					children: [/* @__PURE__ */ X("p", {
+						role: "alert",
+						children: Lj(l.error)
+					}), /* @__PURE__ */ X(V, {
 						className: "min-h-11",
 						variant: I.Secondary,
 						content: c.Text,
@@ -31581,12 +31583,12 @@ function tM({ open: e, onClose: t, onConnect: n }) {
 					}), /* @__PURE__ */ Z("div", {
 						className: "min-h-[140px] max-h-60 overflow-auto rounded-lg border border-basic p-1",
 						children: [
-							P.isFetching ? /* @__PURE__ */ Z("div", {
+							fe ? /* @__PURE__ */ Z("div", {
 								role: "status",
 								className: "flex items-center gap-3 p-4 text-small text-basic-secondary",
 								children: [/* @__PURE__ */ X(mn, { size: Ar.Small }), " Loading repositories…"]
 							}) : null,
-							!P.isFetching && P.error ? /* @__PURE__ */ X("p", {
+							!fe && P.error ? /* @__PURE__ */ X("p", {
 								role: "alert",
 								className: "p-4 text-small !leading-[22px] text-error-primary",
 								children: Lj(P.error)
@@ -31620,7 +31622,7 @@ function tM({ open: e, onClose: t, onConnect: n }) {
 									}) : null
 								]
 							}, e.id)),
-							!P.isFetching && oe.length === 0 ? /* @__PURE__ */ X("p", {
+							!fe && oe.length === 0 ? /* @__PURE__ */ X("p", {
 								className: "p-4 text-small !leading-[22px] text-basic-secondary",
 								children: "No repositories match."
 							}) : null
