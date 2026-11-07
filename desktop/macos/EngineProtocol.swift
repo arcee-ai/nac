@@ -78,6 +78,9 @@ final class EngineProtocol {
             guard receipt.version == 1, receipt.incarnation == incarnation else { throw invalid() }
             if receipt.kind == "failed" {
                 // Display a shell-owned message; never render arbitrary peer bytes.
+                if receipt.stage == "startup", receipt.code == "store_schema_incompatible" {
+                    throw PreviewError.message("The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.")
+                }
                 throw PreviewError.message("The bundled engine could not initialize its selected store or listener. Check directory access and whether another NAC process owns this store.")
             }
             guard receipt.kind == "ready", ready == nil,
