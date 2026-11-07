@@ -11,8 +11,8 @@ const script = swift.match(/static let disabledMcpFixtureScript = #"""\n([\s\S]*
 // McpServerForm Name field -> InputWrapper -> input-wrapper -> UIInput.
 // Keep both atom wrappers: a fixed two-parent lookup cannot reach Enabled.
 const form = `<div><div><div><div class="label-small">Name*</div></div><div class="flex text-left flex-col gap-1"><div class="input-wrapper relative w-full h-fit"><input placeholder="my_server" value="wk_disabled_fixture"></div></div></div>
-  <div><div><div><div class="label-small">Enabled</div></div><button id="enabled" role="switch" aria-checked="true"></button>
-  <div><div class="label-small">Required</div></div><button id="required" role="switch" aria-checked="true"></button></div></div></div>`;
+  <div><div><div><div class="label-small">Enabled</div></div><button id="enabled" aria-label="Enabled" role="switch" aria-checked="true"></button>
+  <div><div class="label-small">Required</div></div><button id="required" aria-label="Required" role="switch" aria-checked="true"></button></div></div></div>`;
 const dialog = body => `<div role="dialog" aria-label="MCP servers" data-modal-open="true">${body}</div>`;
 
 function fixture(html = dialog(form)) {
@@ -54,7 +54,7 @@ for (const [name, html] of [
   ['faded control', dialog(form.replace('id="enabled"', 'id="enabled" style="opacity:0.5"'))],
   ['missing Enabled label', dialog(form.replace('>Enabled<', '>Other<'))],
   ['duplicate Enabled label', dialog(form.replace('>Required<', '>Enabled<'))],
-  ['missing switch state', dialog(form.replace('id="enabled" role="switch" aria-checked="true"', 'id="enabled" role="switch"'))],
+  ['missing switch state', dialog(form.replace('id="enabled" aria-label="Enabled" role="switch" aria-checked="true"', 'id="enabled" aria-label="Enabled" role="switch"'))],
 ]) {
   test(name + ' fails closed before any click', () => {
     const f = fixture(html);
@@ -86,4 +86,22 @@ test('opening modal waits for full visibility before its one idempotent disable'
     assert.equal(f.probe(false), true);
     assert.deepEqual(f.clicks, ['enabled']);
   } finally { f.close(); }
+});
+
+// Current production form uses a descriptive label span and a separate 44px
+// target wrapper around the semantically named switch.
+const currentForm = `<div><input placeholder="my_server" value="wk_disabled_fixture"></div>
+<label><span><span class="label-small">Enabled</span><span>Disabled servers are kept</span></span>
+<span class="flex min-h-11 min-w-11"><button id="enabled" aria-label="Enabled" role="switch" aria-checked="true"></button></span></label>
+<label><span><span class="label-small">Required</span></span><span><button id="required" aria-label="Required" role="switch" aria-checked="true"></button></span></label>`;
+test('current production target wrappers preserve exact owned switch admission', () => {
+  const f=fixture(dialog(currentForm));
+  try { assert.equal(f.probe(true),true); assert.equal(f.probe(false),true); assert.deepEqual(f.clicks,['enabled']); }
+  finally { f.close(); }
+});
+for (const [name,html] of [
+  ['missing semantic Enabled name',currentForm.replace('aria-label="Enabled"','aria-label="Other"')],
+  ['duplicate semantic Enabled control',currentForm.replace('aria-label="Required"','aria-label="Enabled"')],
+]) test(name+' refuses before any switch click',()=>{
+  const f=fixture(dialog(html));try { assert.throws(()=>f.probe(true));assert.deepEqual(f.clicks,[]); }finally{f.close();}
 });
