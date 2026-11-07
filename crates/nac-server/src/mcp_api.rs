@@ -325,6 +325,7 @@ enum OAuthFlowState {
     Connecting {
         generation: u64,
         authorization_url: String,
+        started_at: std::time::Instant,
         task: Option<tokio::task::JoinHandle<()>>,
     },
     Failed,
@@ -1385,15 +1386,30 @@ pub async fn oauth_status_handler(
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let endpoint = oauth_endpoint(&manager, &server_name)?;
     let flow_key = oauth_flow_key(&manager, &server_name);
-    let (active_authorization_url, flow_failed) = {
+    let (active_authorization_url, flow_failed, flow_running) = {
         let flows = OAUTH_FLOWS.lock().await;
         match flows.get(&flow_key) {
             Some(OAuthFlowState::Connecting {
-                authorization_url, ..
-            }) => (Some(authorization_url.clone()), false),
-            Some(OAuthFlowState::Failed) => (None, true),
-            None => (None, false),
+                authorization_url,
+                started_at,
+                task,
+                ..
+            }) => (
+                Some(authorization_url.clone()),
+                false,
+                started_at.elapsed() < mcp::MCP_OAUTH_STATE_TTL
+                    && task.as_ref().is_some_and(|task| !task.is_finished()),
+            ),
+            Some(OAuthFlowState::Failed) => (None, true, false),
+            None => (None, false, false),
         }
+    };
+    let completing = if let Some(url) = active_authorization_url.as_deref().filter(|_| flow_running)
+    {
+        mcp::mcp_oauth_authorization_is_current(manager.root_cwd(), &server_name, &endpoint, url)
+            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?
+    } else {
+        false
     };
     let (active_authorization_url, pending_authorization_url) = reconcile_oauth_status_urls(
         active_authorization_url,
@@ -1405,6 +1421,15 @@ pub async fn oauth_status_handler(
             status: McpOAuthPublicStatus::Connecting,
             message: None,
             authorization_url: Some(active_authorization_url),
+        }));
+    }
+    // Consumed state cannot be replayed or offered as a link. Its still-owned
+    // callback must nevertheless keep the UI polling until exchange settles.
+    if completing && pending_authorization_url.is_none() {
+        return Ok(Json(McpOAuthStatusResponse {
+            status: McpOAuthPublicStatus::Connecting,
+            message: None,
+            authorization_url: None,
         }));
     }
     let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
@@ -1465,6 +1490,29 @@ pub async fn authenticate_oauth_handler(
     let request = payload.map(|Json(value)| value).unwrap_or_default();
     let callback = oauth_callback_target(&manager, &server_name)?;
 
+    let previous_authorization = {
+        let flows = OAUTH_FLOWS.lock().await;
+        match flows.get(&flow_key) {
+            Some(OAuthFlowState::Connecting {
+                authorization_url, ..
+            }) => Some(authorization_url.clone()),
+            _ => None,
+        }
+    };
+    if let Some(previous) = previous_authorization {
+        mcp::fail_mcp_oauth_authorization(
+            manager.root_cwd(),
+            &server_name,
+            &endpoint,
+            Some(&previous),
+        )
+        .map_err(|_| {
+            oauth_error(
+                StatusCode::BAD_REQUEST,
+                "MCP OAuth authentication could not restart",
+            )
+        })?;
+    }
     remove_oauth_flow(&flow_key).await;
 
     let (listeners, redirect_uri) = match callback {
@@ -1528,6 +1576,7 @@ pub async fn authenticate_oauth_handler(
         OAuthFlowState::Connecting {
             generation,
             authorization_url: authorization_url.clone(),
+            started_at: std::time::Instant::now(),
             task,
         },
     );
@@ -1601,6 +1650,19 @@ pub async fn oauth_callback_handler(
             Some(query) => format!("{redirect_uri}?{query}"),
             None => redirect_uri,
         };
+        let pending_before_callback = mcp::mcp_oauth_pending_authorization_url(
+            manager.root_cwd(), &server_name, &endpoint,
+        ).map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected"))?;
+        let callback_owner = {
+            let flows = OAUTH_FLOWS.lock().await;
+            match flows.get(&flow_key) {
+                Some(OAuthFlowState::Connecting { generation, authorization_url, .. })
+                    if pending_before_callback.as_deref() == Some(authorization_url.as_str())
+                        && callback_matches_authorization_state(authorization_url, &callback_url) =>
+                        Some((*generation, authorization_url.clone())),
+                _ => None,
+            }
+        };
         let completion = mcp::complete_mcp_oauth_authorization(
             manager.root_cwd(),
             &server_name,
@@ -1611,7 +1673,11 @@ pub async fn oauth_callback_handler(
         let mut flows = OAUTH_FLOWS.lock().await;
         match completion {
             Ok(()) => {
-                flows.remove(&flow_key);
+                if callback_owner.as_ref().is_some_and(|(generation, _)|
+                    matches!(flows.get(&flow_key), Some(OAuthFlowState::Connecting { generation: current, .. }) if current == generation))
+                {
+                    flows.remove(&flow_key);
+                }
                 Ok::<_, ApiError>(())
             }
             Err(_) => {
@@ -1623,8 +1689,16 @@ pub async fn oauth_callback_handler(
                 .map_err(|_| {
                     oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
                 })?;
+                let owned_completion = callback_owner.as_ref().filter(|(generation, url)| {
+                    matches!(flows.get(&flow_key), Some(OAuthFlowState::Connecting { generation: current, .. }) if current == generation)
+                        && mcp::mcp_oauth_authorization_is_current(
+                            manager.root_cwd(), &server_name, &endpoint, url,
+                        ).unwrap_or(false)
+                });
+                let expected_authorization_url = pending_authorization_url.as_deref()
+                    .or_else(|| owned_completion.map(|(_, url)| url.as_str()));
                 let matches_current = callback_matches_pending_authorization(
-                    pending_authorization_url.as_deref(),
+                    expected_authorization_url,
                     &callback_url,
                 );
                 let retryable = mcp::mcp_oauth_callback_is_retryable(
@@ -1641,7 +1715,7 @@ pub async fn oauth_callback_handler(
                         manager.root_cwd(),
                         &server_name,
                         &endpoint,
-                        pending_authorization_url.as_deref(),
+                        expected_authorization_url,
                     ) {
                         Ok(true) => { flows.insert(flow_key, OAuthFlowState::Failed); }
                         Ok(false) => { flows.remove(&flow_key); }
@@ -1712,7 +1786,9 @@ async fn run_oauth_callback(
             .await;
             continue;
         }
-        let success = session.handle_callback_url(&callback_url).await.is_ok();
+        let success = tokio::time::timeout_at(deadline, session.handle_callback_url(&callback_url))
+            .await
+            .is_ok_and(|result| result.is_ok());
         let (status, body) = if success {
             (
                 "200 OK",

@@ -526,14 +526,16 @@ pub fn configure_mcp_oauth(
             None => false,
         };
         // A re-created profile must not reuse a deleted profile's generation.
-        let logout_generation = existing.map_or_else(
-            || {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(1, |elapsed| elapsed.as_nanos() as u64)
-            },
-            |profile| profile.logout_generation,
-        );
+        // Reconfiguration also retires in-flight authorization saves.
+        let logout_generation = match existing {
+            None => SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(1, |elapsed| elapsed.as_nanos() as u64),
+            Some(profile) => profile
+                .logout_generation
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("MCP OAuth authorization generation is exhausted"))?,
+        };
         let matching = existing.filter(|_| same_configuration);
         let previous_issuer = matching.and_then(|profile| profile.binding.issuer.clone());
         let credentials = matching
@@ -1126,6 +1128,24 @@ pub fn mcp_oauth_pending_authorization_url(
         .flatten()
         .filter(|url| Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))))
 }
+
+/// Tests completion ownership, not whether a URL may be offered or replayed.
+/// The one-use state is consumed before token exchange, while this binding
+/// remains until completion, cancellation, logout or replacement.
+pub fn mcp_oauth_authorization_is_current(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    authorization_url: &str,
+) -> Result<bool> {
+    let store = read_store(&oauth_store_path(cwd)?)?;
+    let Some(profile) = store.profiles.get(server_name) else {
+        return Ok(false);
+    };
+    validate_profile_binding(profile, endpoint)?;
+    Ok(profile.pending_authorization_url.as_deref() == Some(authorization_url))
+}
+
 pub fn mcp_oauth_callback_is_retryable(
     cwd: &Path,
     server_name: &str,
@@ -1203,6 +1223,11 @@ pub fn fail_mcp_oauth_authorization(
         {
             return Ok(false);
         }
+        // Retire in-flight token saves as well as the one-use callback state.
+        profile.logout_generation = profile
+            .logout_generation
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("MCP OAuth authorization generation is exhausted"))?;
         profile.pending_authorization_url = None;
         profile.pending_scopes.clear();
         profile.states.clear();

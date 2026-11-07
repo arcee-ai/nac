@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "mcp_oauth/completion.rs"]
+mod completion;
+
 struct OAuthEnvRestore {
     values: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }

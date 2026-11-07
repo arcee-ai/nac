@@ -63,6 +63,10 @@ listed responsibility closed; a new concern requires a real submodule/port:
 - `mcp/file_config.rs` keeps revision-checked TOML editing, publication journal,
   locking, recovery, validation, and probe-facing records together. MCP
   transport invocation belongs elsewhere.
+- `mcp/oauth.rs` keeps registration, profile-bound credential/state-store
+  adapters, refresh locks and generation-checked authorization persistence
+  together above 800 lines. Callback-state helpers live in `authorization_state`;
+  HTTP flow ownership and public status projection remain in `nac-server`.
 - `terminal/session.rs` keeps one PTY adapter's construction, child/slave/master
   ownership, collector lifetime, input-root binding, geometry and explicit cleanup
   together. These fields share the same incarnation and reaping gate. Controller
