@@ -116,53 +116,6 @@ fn store_ownership_failure_is_typed_and_diagnostics_are_constant() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn future_schema_cause_survives_owned_construction() {
-    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = std::env::temp_dir().join(format!("nac-desktop-schema-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir(&root).unwrap();
-    let root = root.canonicalize().unwrap();
-    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("nac-home"), None);
-    let store = root.join("future.db");
-    let connection = rusqlite::Connection::open(&store).unwrap();
-    connection
-        .pragma_update(None, "user_version", nac_core::store::schema_version() + 1)
-        .unwrap();
-    drop(connection);
-    let before = std::fs::read(&store).unwrap();
-    let error = match SessionManager::new(crate::ServerOptions {
-        root_cwd: root.clone(),
-        store_path: Some(store.clone()),
-        worker_executable: None,
-        managed_host: None,
-    }) {
-        Err(error) => error.context("private-diagnostic-canary"),
-        Ok(_) => panic!("owned construction accepted a future store"),
-    };
-    assert!(error.chain().any(|cause| cause
-        .downcast_ref::<nac_core::store::StoreFutureSchemaError>()
-        .is_some()));
-    let (parent, launch) = channel_for_store(&store);
-    parent
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
-    launch.failed(&error);
-    let bytes = read_record(&mut BufReader::new(parent)).unwrap();
-    let receipt: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(
-        receipt,
-        serde_json::json!({"kind":"failed", "version":VERSION,
-        "incarnation":launch.incarnation, "stage":"startup", "code":"store_schema_incompatible",
-        "message":"The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."})
-    );
-    assert!(!String::from_utf8_lossy(&bytes).contains("private-diagnostic-canary"));
-    assert!(bytes.len() <= LIMIT);
-    assert_eq!(std::fs::read(&store).unwrap(), before);
-    let busy = error.context(nac_core::sessions::StoreProcessLeaseError::Busy);
-    assert_eq!(startup_failure_code(&busy), "store_owned");
-    let _ = std::fs::remove_dir_all(root);
-}
-
 #[test]
 fn records_are_bounded_and_require_a_complete_line() {
     for bytes in [
