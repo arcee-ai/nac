@@ -13,7 +13,7 @@ from ci_qualifications import require_checkout
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = '9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3'
+PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
 TEST_SOURCE = 'ddb2cb82ba9f17e662a96ccfe7b2f08442470d81'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
