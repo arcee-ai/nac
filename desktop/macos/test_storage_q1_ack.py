@@ -53,6 +53,15 @@ class FinalDraftAcknowledgementControls(unittest.TestCase):
             h.post(5, [['a', 'A']]); h.ack(6); await pause(); assert.equal(done, false); // Unrelated ACK.
             h.ack(5, true, {...expected, document: 'old'}); await pause(); assert.equal(done, false);
             h.ack(5); await waiting; assert.equal(done, true);
+            const cold = harness(); let cleared = false;
+            const clear = cold.awaitDraft('a', '', 0).then(() => { cleared = true; });
+            // Clearing newly typed text preserves the original cold review.
+            // That unreviewed tuple is not a live composer draft.
+            cold.post(1, [['a', 'fresh'], ['a', 'A', 'unreviewed']]); cold.ack(1);
+            await pause(); assert.equal(cleared, false);
+            cold.post(2, [['a', 'A', 'unreviewed']]); await pause();
+            assert.equal(cleared, false); // The clear's exact ACK is still required.
+            cold.ack(2); await clear; assert.equal(cleared, true);
             const delayed = harness(); delayed.post(1, [['a', 'old']]);
             const after = delayed.latestWrite(); let restored = false;
             const restore = delayed.awaitDraft('a', 'A', after).then(() => { restored = true; });
