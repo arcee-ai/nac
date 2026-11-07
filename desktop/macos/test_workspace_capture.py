@@ -13,8 +13,7 @@ class WorkspaceCaptureTests(unittest.TestCase):
         return re.search(r'export const ' + name + r' = String.raw`([\s\S]*?)`;', fixture)[1]
 
     def test_actual_capture_probe_rejects_premature_views_and_accepts_revealed_content(self):
-        result = subprocess.run(['node', '--test', str(Path(__file__).with_suffix('.mjs')),
-                                 str(Path(__file__).with_name('test_workspace_file_capture.mjs'))],
+        result = subprocess.run(['node', '--test', str(Path(__file__).with_suffix('.mjs'))],
                                 capture_output=True, text=True)
         print(result.stdout, end='')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
