@@ -108,7 +108,7 @@ test("ordinary workflow semantics permissions steps contexts and release gates r
   const stable = read("stable-release");
   reverseNativeQualification(stable);
   assert.equal(createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
-    "68e0f6e5eccff69eaa31c92b9221a96438619fef462aa32326016be018f7be3f",
+    "801cf3da3ba238f193e05a77528ee0b9d384fe9b33b8db0b65ae6ebd2783431a",
     "reversing only the reviewed route and path-test step recovers current dev exactly");
 });
 
@@ -172,7 +172,7 @@ test("ordinary preservation rejects changes to admission, caches, source securit
     assert.throws(() => {
       reverseNativeQualification(w);
       assert.equal(createHash('sha256').update(JSON.stringify(w)).digest('hex'),
-        '68e0f6e5eccff69eaa31c92b9221a96438619fef462aa32326016be018f7be3f');
+        '801cf3da3ba238f193e05a77528ee0b9d384fe9b33b8db0b65ae6ebd2783431a');
     });
   }
 });
@@ -207,12 +207,12 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
 test("startup catalog binds the delivered product and four-file query supplier", () => {
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
   assert.equal(startup.source_sha, "9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3");
-  assert.equal(startup.test_source_sha, "04c073bbbead6f4077da0199bacd542e45cf4e57");
+  assert.equal(startup.test_source_sha, "993102af913b94acfcf0f4f866f9350e6ca3650b");
   assert.deepEqual(startup.test_files, {
-    "README.md": "b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24",
-    "StartupJourneys.swift": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1",
-    "contract.py": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
-    "test_contract.py": "47f75f1067d0741925c4fa1d7130620194bbbb987a7f19e979238aed71868187",
+    "README.md": "6c61f4f0b726f2f1fc5eb5e0cbc4cb647913b0b0fcad6aa5100a05405cb393e3",
+    "StartupJourneys.swift": "5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471",
+    "contract.py": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
+    "test_contract.py": "d111ad946ea80b69d1a1c21a73a6818b46380829719a00054013105716aa776e",
   });
   assert.equal(startup.protocol_source_sha, "25046f450110d1b795d529d046d2c1deee880877");
   assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
