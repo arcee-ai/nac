@@ -550,7 +550,7 @@ final class RecoverySmoke {
                let data = raw.data(using: .utf8),
                let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let rows = saved["drafts"] as? [[Any]] {
-                fact["bPresent"] = rows.contains { $0.count >= 2 && $0[0] as? String == sessionB &&
+                fact["bPresent"] = rows.contains { $0.count == 2 && $0[0] as? String == sessionB &&
                     ($0[1] as? String).map { !$0.isEmpty } == true }
             }
             self.storageQ1Ledger.append(fact)
