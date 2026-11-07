@@ -18,6 +18,8 @@ class NativeCommandBridgeTests(unittest.TestCase):
         fixture = (OWNER / 'NativeConnectionLossFixture.swift').read_text()
         fixture = fixture.replace('// RETIRE_OWNER', member(source, 'func retire('))
         fixture = fixture.replace('// MESSAGE_OWNER', member(source, 'func userContentController('))
+        fixture = fixture.replace('// NAVIGATION_OWNER', member(source, 'func navigationStarted('))
+        fixture = fixture.replace('// CALL_OWNER', member(source, 'private func call('))
         compiler = subprocess.check_output(['xcrun', '--find', 'swiftc'], text=True).strip()
         sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
         with tempfile.TemporaryDirectory(prefix='nac-connection-loss-pure-') as directory:
