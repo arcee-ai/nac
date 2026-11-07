@@ -8,7 +8,7 @@ import tempfile
 from ci_qualifications import require_checkout
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = 'ff8c9609abf7bf7ddabe983c96ff31cf80362956'
+PRODUCT = '6c578a2c18050e218b83daf80f46731040e4b3e4'
 SOURCE = 'desktop/macos/CommandEnvironment.swift'
 SOURCE_SHA256 = 'c4b64f8bed76285c9455c48256180ff5cec5e775eabb832cf326ab4da3ca14a2'
 
