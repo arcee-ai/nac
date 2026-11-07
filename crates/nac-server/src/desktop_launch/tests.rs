@@ -84,6 +84,19 @@ fn store_ownership_failure_is_typed_and_diagnostics_are_constant() {
             ))),
             "engine_unavailable",
         ),
+        (
+            anyhow::anyhow!(
+                "unsupported store schema version {}; this build supports versions {} through {}",
+                nac_core::store::schema_version() + 1,
+                nac_core::store::MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+                nac_core::store::schema_version()
+            ),
+            "engine_unavailable",
+        ),
+        (
+            anyhow::anyhow!("store_schema_incompatible: private-diagnostic-canary"),
+            "engine_unavailable",
+        ),
     ] {
         let (parent, launch) = channel();
         parent
