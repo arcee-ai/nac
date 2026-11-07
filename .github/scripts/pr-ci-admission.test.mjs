@@ -1,3 +1,4 @@
+import {reverseNativeQualification} from './native-qualification-wiring.mjs';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -9,6 +10,7 @@ import {aptProducerSteps} from './browser-apt-wiring.mjs';
 import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
+reverseNativeQualification(stable);
 // Full pre-admission graph plus this layer's required startup-custody control.
 const parentHash="e2f13f6f6f2c2413a5892dc9b6afe135feb83c83d9f37ff2d1357acb6c3c0c0b";
 const sealedPins={
