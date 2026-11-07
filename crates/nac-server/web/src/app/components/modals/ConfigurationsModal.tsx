@@ -530,38 +530,11 @@ function ConfigurationForm({
     updateConfig.isPending,
   ]);
 
-  // The provider and its account sit above the scrolling fields: signing in is
-  // what makes the rest of the form answerable, so it is never below them.
+  // The provider and its account come first: signing in is what makes the rest
+  // of the form answerable, so it is never below the fields. They scroll with
+  // the form, so a narrow or zoomed window still has room for every field.
   return (
     <div ref={formRef} className="flex flex-col flex-1 min-w-0 min-h-0">
-      <section
-        aria-label="Provider account"
-        className="shrink-0 flex flex-col gap-2 px-4 pt-4 pb-2 border-b border-muted"
-      >
-        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3">
-          <ConfigRow
-            presentation="form"
-            label="Model Provider"
-            required
-            hint="Service that provides the models for this session."
-            control={
-              <SmallSelect
-                presentation="form"
-                items={PROVIDER_ITEMS}
-                value={backend}
-                onValueChange={(id) => {
-                  // SAFETY: the ids are built from PROVIDER_ITEMS, so every
-                  // value the picker can emit is a BackendKind.
-                  edit(setBackend)(id as BackendKind);
-                  setApiKey("");
-                  setModel("");
-                }}
-              />
-            }
-          />
-        </div>
-        <ManagedAuthCallout backend={backend} />
-      </section>
       <div
         className={cn(
           "flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
@@ -578,6 +551,31 @@ function ConfigurationForm({
             {error.message}
           </p>
         ) : null}
+        <section aria-label="Provider account" className="mb-4 flex flex-col gap-2">
+          <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3">
+            <ConfigRow
+              presentation="form"
+              label="Model Provider"
+              required
+              hint="Service that provides the models for this session."
+              control={
+                <SmallSelect
+                  presentation="form"
+                  items={PROVIDER_ITEMS}
+                  value={backend}
+                  onValueChange={(id) => {
+                    // SAFETY: the ids are built from PROVIDER_ITEMS, so every
+                    // value the picker can emit is a BackendKind.
+                    edit(setBackend)(id as BackendKind);
+                    setApiKey("");
+                    setModel("");
+                  }}
+                />
+              }
+            />
+          </div>
+          <ManagedAuthCallout backend={backend} />
+        </section>
         <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
             presentation="form"

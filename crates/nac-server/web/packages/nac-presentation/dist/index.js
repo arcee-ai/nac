@@ -5990,30 +5990,10 @@ function gp({ record: e, takenNames: t, onClose: n, onSaved: r, onDeleted: i, se
 		e,
 		a,
 		u.isPending
-	]), /* @__PURE__ */ Z("div", {
+	]), /* @__PURE__ */ X("div", {
 		ref: oe,
 		className: "flex flex-col flex-1 min-w-0 min-h-0",
-		children: [/* @__PURE__ */ Z("section", {
-			"aria-label": "Provider account",
-			className: "shrink-0 flex flex-col gap-2 px-4 pt-4 pb-2 border-b border-muted",
-			children: [/* @__PURE__ */ X("div", {
-				className: "flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3",
-				children: /* @__PURE__ */ X(Ld, {
-					presentation: "form",
-					label: "Model Provider",
-					required: !0,
-					hint: "Service that provides the models for this session.",
-					control: /* @__PURE__ */ X(Ff, {
-						presentation: "form",
-						items: dp,
-						value: p,
-						onValueChange: (e) => {
-							De(m)(e), S(""), w("");
-						}
-					})
-				})
-			}), /* @__PURE__ */ X(mf, { backend: p })]
-		}), /* @__PURE__ */ Z("div", {
+		children: /* @__PURE__ */ Z("div", {
 			className: R("flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", o && "pb-32 scroll-pb-32"),
 			children: [
 				re && !re.field ? /* @__PURE__ */ X("p", {
@@ -6023,6 +6003,27 @@ function gp({ record: e, takenNames: t, onClose: n, onSaved: r, onDeleted: i, se
 					className: "mb-4 text-small !leading-[22px] text-error-primary",
 					children: re.message
 				}) : null,
+				/* @__PURE__ */ Z("section", {
+					"aria-label": "Provider account",
+					className: "mb-4 flex flex-col gap-2",
+					children: [/* @__PURE__ */ X("div", {
+						className: "flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3",
+						children: /* @__PURE__ */ X(Ld, {
+							presentation: "form",
+							label: "Model Provider",
+							required: !0,
+							hint: "Service that provides the models for this session.",
+							control: /* @__PURE__ */ X(Ff, {
+								presentation: "form",
+								items: dp,
+								value: p,
+								onValueChange: (e) => {
+									De(m)(e), S(""), w("");
+								}
+							})
+						})
+					}), /* @__PURE__ */ X(mf, { backend: p })]
+				}),
 				/* @__PURE__ */ Z("div", {
 					className: "flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2",
 					children: [
@@ -6219,7 +6220,7 @@ function gp({ record: e, takenNames: t, onClose: n, onSaved: r, onDeleted: i, se
 					children: "* Required fields"
 				})
 			]
-		})]
+		})
 	});
 }
 function _p(e, t) {
