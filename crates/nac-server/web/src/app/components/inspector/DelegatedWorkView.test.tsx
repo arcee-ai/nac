@@ -68,11 +68,13 @@ function mount(
   behavior: "direct" | "direct-with-orchestrator",
   seed = true,
   orchestrationEnabled = true,
-  { tablet = false }: { tablet?: boolean } = {},
+  { tablet = false, mobile = false }: { tablet?: boolean; mobile?: boolean } = {},
 ) {
   window.matchMedia = (query: string) =>
     ({
-      matches: tablet && query.startsWith("(min-width: 768px)"),
+      matches:
+        (tablet && query.startsWith("(min-width: 768px)")) ||
+        (mobile && query === "(max-width: 767.98px)"),
       media: query,
       onchange: null,
       addEventListener: () => {},
@@ -153,6 +155,31 @@ afterEach(() => {
 });
 
 describe("delegated work", () => {
+  it("keeps the phone child name dialog read-only and restores its trigger without losing the draft", async () => {
+    mount("direct", true, true, { mobile: true });
+    act(() => showSidePanelList(false));
+    const heading = await screen.findByRole("button", {
+      name: "View full name: Review permissions",
+    });
+    fireEvent.change(draftBox("Send a message"), { target: { value: "Keep this child draft" } });
+    const draft = draftBox("Send a message");
+    act(() => heading.focus());
+    fireEvent.click(heading, { detail: 0 });
+    expect(screen.getByRole("dialog").querySelector("[data-full-session-name]")?.textContent).toBe(
+      "Review permissions",
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(draftBox("Send a message")).toBe(draft);
+    expect(draft.value).toBe("Keep this child draft");
+    expect(screen.getByTestId("location").textContent).toBe("/sessions/parent");
+    expect(startChild).not.toHaveBeenCalled();
+    expect(cancelChild).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByTestId("location").textContent).toBe("/session/child-1/insights");
+  });
+
   it("keeps coding agents and managed orchestrators visibly distinct", () => {
     mount("direct-with-orchestrator");
 

@@ -15,6 +15,7 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { TerminalWorkspace } from "@/app/features/terminal-selection/TerminalWorkspace";
+import { InsightsReturnButton } from "@/app/features/insights/presentation/InsightsReturnButton";
 import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
 import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
@@ -189,7 +190,10 @@ export function SessionSideBox({
         />
       ) : null}
       {active === "delegated" && direct && !delegatedTranscript ? (
-        <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
+        <>
+          <InsightsReturnButton sessionId={sessionId} />
+          <DelegatedWorkView sessionId={sessionId} behavior={behavior} />
+        </>
       ) : null}
       {active === "terminal" && direct && !delegatedTranscript ? (
         <TerminalWorkspace sessionId={sessionId} />
@@ -291,7 +295,7 @@ export function SessionSideBox({
               const open = () => {
                 // A tablet shows one column at a time, and a new panel opens on
                 // its selected row; a desktop split ignores the flag entirely.
-                showSidePanelList(false);
+                showSidePanelList(isTablet && selected && name === "insights");
                 onPanelChange(name);
               };
               // Focused, a tablet's box has the room for the labels again.

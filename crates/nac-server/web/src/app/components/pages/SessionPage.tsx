@@ -107,7 +107,7 @@ export default function SessionPage() {
     showSidePanelList,
     revealSidePanel,
     setSidePanelAnimate,
-    resetSessionSelection,
+    activateSessionSelection,
     unbindSidePanelProject,
     bindSidePanelProject,
   } = useNativeRuntime().stores.sessionLayoutStore;
@@ -181,8 +181,8 @@ export default function SessionPage() {
   }, [clearAttention, id, heartbeatResultsThrough]);
 
   useEffect(() => {
-    resetSessionSelection();
-  }, [id, resetSessionSelection]);
+    activateSessionSelection(id);
+  }, [id, activateSessionSelection]);
 
   // A focused panel belongs to the session it was focused on: another session,
   // or leaving the page, finds the split again. A phone's dialog is left to its
@@ -299,7 +299,7 @@ export default function SessionPage() {
   );
 
   const page = (
-    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
+    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-clip bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div
           className={cn("flex flex-col items-center flex-1 min-w-0 h-full", focused && "invisible")}
