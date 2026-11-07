@@ -30,8 +30,10 @@ jobs:
           import json, math, os, pathlib, re, time
           folder = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ff8-host-package-gate'
           folder.mkdir(mode=0o700)
-          report = dict(status='FAIL', product_build=False)
+          report = dict(status='FAIL', product_build=False, actual_image=os.environ.get('ImageVersion'),
+                        expected_image='20261102.0473.1')
           try:
+              assert report['actual_image'] == report['expected_image'], 'unexpected/unknown hosted image; no checkout/bootstrap'
               a = json.loads(os.environ['ROOT_PACKAGE_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','clock'}
               assert a['scope'] == 'ff8-hosted-normal-package-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
@@ -68,7 +70,7 @@ jobs:
           spec=importlib.util.spec_from_file_location('route',f); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
           m.admit(json.loads(os.environ['ROOT_PACKAGE_ADMISSION']),os.environ)
           p=json.loads(f.with_name('pair.json').read_text())
-          assert p['P']=='478895c50034b3d2b200cce5391e098c7ec477ae'
+          assert p['P']=='6c578a2c18050e218b83daf80f46731040e4b3e4'
           assert p['H_tools']=='9863b7714c32ed77bd66867973de6d5b02a753f8'
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('P='+p['P']+'\nH='+p['H_tools']+'\n')

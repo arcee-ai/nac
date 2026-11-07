@@ -14,12 +14,13 @@ ca919 controller on its original private branch; the manual guard now selects
 only `codex/experimental-native-q-host-package-post648`. Original G1 source
 clearance applies to ca919 only; affected verification must bind this successor.
 
-`pair.json` pins NEW P `478895c50034b3d2b200cce5391e098c7ec477ae`, its Native
-parent `e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1` and actual dev base as provenance.
-The exact P commit binds that ancestry; all eleven packaging blobs are identical
-to historical ff8, and Root's composition proof retains all125 Native patches.
-The original packaging guide's7013 proposal describes that historical baseline,
-not this product nomination. Q04c source hashes and SDK2cee H9863 stay unchanged.
+`pair.json` pins final P `6c578a2c18050e218b83daf80f46731040e4b3e4`.
+Its actual immediate `P_parent` is `478895c50034b3d2b200cce5391e098c7ec477ae`;
+`P_native_base` is `e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1` and
+`source_context` remains actual dev4b852. The final product adds only two guide/
+documentation corrections to P478; operational packaging/Native/Q blobs are
+unchanged. The exact P commit binds that ancestry. Root's composition proof
+retains all125 Native patches. Q04c hashes and SDK2cee H9863 stay unchanged.
 Only P's Rust/normal Swift are built. H provides the maintained Bound/ci.run
 process-group/ownership/drain/retention owner; its Rust/Auth/native cases are
 never built or called. Q's exact source, inherited unchanged by P, is imported
@@ -40,6 +41,10 @@ Existing action pins reproduce SDK2cee checkout/Rust1.98/Node24.22.1/bootstrap
 and always-retention patterns. Actual host must be Darwin arm64, image
 20261102.0473.1 and the H-qualified Xcode26.6/SDK26.5/OS envelope. DEVELOPER_DIR
 selects a preinstalled Xcode; no install/global xcode-select or OS setting change.
+The initial original-clock gate records actual/expected ImageVersion and requires
+exact equality before any checkout/bootstrap. Unknown or mismatched fleet images
+stop with a FAIL receipt; no wildcard, selector change, requeue or SDK inference.
+Later exact toolchain/OS/capacity checks remain required.
 Before/after each phase require observed integer memory>=6GiB, free disk>=8GiB,
 CPU>=2 and unchanged image; unknown/insufficient capacity stops. Cold setup and
 release compilation can exhaust this finite envelope on a7GiB/14GB hosted VM.
@@ -60,7 +65,7 @@ the unedited producer manifest and its original ZIP, bounded receipts and gate
 facts, unique run/attempt artifact name,3-day retention, no overwrite. Root must
 consume job/ownership PASS, exact file hashes/size/source and artifact ID before
 any further admission. Artifact hashes are NEW host evidence, not required to
-equal local f591/bb45; source P478 and genuine invariants remain exact.
+equal local f591/bb45; source final P6c578 and genuine invariants remain exact.
 The legacy `ff8-hosted-normal-package-only` scope and temp/artifact names identify
 the unchanged packaging lineage; they neither select old P nor renew an allocation.
 

@@ -2,6 +2,10 @@
 import copy
 import importlib.util
 import json
+import os
+import tempfile
+import textwrap
+from unittest.mock import patch
 from pathlib import Path
 import unittest
 
@@ -76,11 +80,34 @@ class ClockRouting(unittest.TestCase):
             self.assertEqual(argv[2],'/P/desktop/macos/packaging/package.py')
             self.assertFalse(any(x in argv for x in ['fixture','smoke','app-run','xcodebuild','test-without-building','distribution-plan']))
         pair=json.loads((HERE/'pair.json').read_text())
-        self.assertEqual(pair['P'],'478895c50034b3d2b200cce5391e098c7ec477ae')
-        self.assertEqual(pair['P_parent'],'e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1')
-        self.assertEqual(pair['P_base'],'4b852f065e2200f46c194b4ad2c5ace3fbd766a8')
+        self.assertEqual(pair['P'],'6c578a2c18050e218b83daf80f46731040e4b3e4')
+        self.assertEqual(pair['P_parent'],'478895c50034b3d2b200cce5391e098c7ec477ae')
+        self.assertEqual(pair['P_native_base'],'e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1')
+        self.assertEqual(pair['source_context'],'4b852f065e2200f46c194b4ad2c5ace3fbd766a8')
         self.assertEqual(pair['H_tools'],'9863b7714c32ed77bd66867973de6d5b02a753f8')
         self.assertEqual(pair['Q'],'04c073bbbead6f4077da0199bacd542e45cf4e57')
+
+    def test_initial_image_gate_records_and_rejects_before_bootstrap(self):
+        text=(HERE.parents[1]/'workflows/stable-release.yml').read_text()
+        body=text.split("          python3 -B - <<'PYCODE'\n",1)[1].split('          PYCODE\n',1)[0]
+        code=compile(textwrap.dedent(body),'initial-image-inert','exec')
+        expected=json.loads((HERE/'pair.json').read_text())['host_image']
+        for actual in [expected,None,'','20261026.0455.2']:
+            with self.subTest(actual=actual),tempfile.TemporaryDirectory() as directory:
+                a,e=self.values()
+                output=Path(directory)/'output'
+                e.update(ROOT_PACKAGE_ADMISSION=json.dumps(a),RUNNER_TEMP=directory,GITHUB_OUTPUT=str(output))
+                if actual is not None:e['ImageVersion']=actual
+                with patch.dict(os.environ,e,clear=True),patch('time.time',return_value=1001):
+                    if actual==expected:exec(code,{})
+                    else:
+                        with self.assertRaises(AssertionError):exec(code,{})
+                receipt=json.loads((Path(directory)/'ff8-host-package-gate/initial.json').read_text())
+                self.assertEqual(receipt['actual_image'],actual)
+                self.assertEqual(receipt['expected_image'],expected)
+                self.assertFalse(receipt['product_build'])
+                self.assertEqual(receipt['status'],'PASS' if actual==expected else 'FAIL')
+                self.assertEqual(output.exists(),actual==expected)
 
     def test_workflow_is_exact_guarded_private_package_route(self):
         text=(HERE.parents[1]/'workflows/stable-release.yml').read_text()
