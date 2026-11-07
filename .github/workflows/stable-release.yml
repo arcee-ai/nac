@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   onboarding:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-onboarding-post648' && github.run_attempt == 1
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-onboarding-post648-p9' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 23
     env:

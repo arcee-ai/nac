@@ -7,10 +7,10 @@ Q04c on the exact final post-648 full Native product, not prefix-only binary
 acceptance, full Native/ALL-348, or a private345 operation. The default maintained
 four-case/R/futureStore contract is unchanged and not called by this experiment.
 
-`pair.json` freezes H, final P6c, Q04c and historical provenance separately.
-P's direct parent is packaging carry478895; its Native boundary is e785, on
-actual landed dev4b. Do not call e785 P's immediate parent or substitute the old
-ff8/7013 package. H is the locally refreshed H9 plus the existing reviewed F1
+`pair.json` freezes H, current P9ec, Q04c and historical provenance separately.
+P's direct parent is packaging carry4f2a; its Native boundary is84c259, on
+actual landed dev4b. Do not call84c259 P's immediate parent or substitute the old
+6c/ff8/7013 package. H is the locally refreshed H9 plus the existing reviewed F1
 experimental commit, using current4b ancestry. H Rust/OAuth/MCP is not built/run.
 The external Q four files/Swift0204 remain unchanged. Old H986/Pff8 SDK PASS is
 ONE CONSUMED compiler episode, not a new product/runtime/config/binary receipt.
@@ -35,25 +35,30 @@ Ordinary Xcode bookkeeping is not claimed absent.
 ## Source and actual admissions are separate
 
 Root owns publication and original SAME G1 affected verification of these new
-source identities/pins/workflow. No old SOURCE_CLEAR verdict is a wildcard.
+source identities/pins/workflow. The H6b/consumer69e SOURCE_CLEAR verdict is historical; it is not a wildcard for this P9 pin refresh.
 The experiment/H source refs are local until explicitly source-published; no
 public H9/Native14 update is required to consume a separately approved scratch
 source. Consumer workflow/source must be frozen/reviewed before runtime.
 
-Root independently admitted package-only run42394387284/job128468521242,
-producer controller697266e28d5ecf13bdd9dd8bbe562610325c3d15 on
-`codex/experimental-native-q-host-package-post648`, exact P6c. Root reports its
-initial image/bootstrap PASS; Root alone monitors and verifies final outcome.
-Cold production may overlap this source preparation. The existing ordinary
-sealed manifest+original ZIP and3-day artifact retention permit later consumption;
-this consumer never rebuilds the product or automatically chains another run.
-Actual artifact ID/manifest hash are UNKNOWN until verified producer success.
+Root's old package-only run42394387284/job128468521242 is FAIL/consumed;
+its original allocation is never retried or renewed here. It was bound to oldP6c
+and cannot supply a P9ec package. Root's new composition9ec incorporates frozen
+Native84c259, including the changed EngineFailure normal Swift input. The same
+39-file normal schema, three build supports, lockfiles and operational packager
+are retained; product/binary identity must be measured again by a separately
+admitted NEW finite producer. 355 owns that producer controller's source repin.
+
+Producer run/artifact/controller/branch fields remain dynamically Root-bound;
+there is no baked-in replacement producer, allocated clock or autochain. Cold
+production may overlap source preparation, using ordinary three-day sealed
+manifest/original ZIP retention. Actual new producer/run/artifact ID/manifest
+hash remain UNKNOWN until separate review, admission and verified success.
+This consumer never rebuilds the product or automatically chains another run.
 
 Root must verify actual job/provenance/custody/hashes and issue a SEPARATE named
 one-case admission. Proposed maximum23min: <=15work, >=6cleanup, >=2retention,
 absolute STARTED before queue/checkout/bootstrap/download/setup/imports. No
-clock or slot is allocated by this document. Producer40m/30work/8cleanup/2retention
-is a different already-owned episode; it does not authorize this UI case.
+clock or slot is allocated by this document. A producer allocation is a separate episode and does not authorize this UI case.
 No compiler/producer/runtime job was dispatched during this source unit.
 
 ## Ordinary exact artifact handoff
@@ -98,10 +103,10 @@ example is a declaration schema, not authority or an allocated clock:
   "retries": 0,
   "manifest_sha256": "<verified actual producer manifest SHA256>",
   "producer": {
-    "run_id": 42394387284,
+    "run_id": 0,
     "artifact_id": 0,
-    "controller_sha": "697266e28d5ecf13bdd9dd8bbe562610325c3d15",
-    "branch": "codex/experimental-native-q-host-package-post648",
+    "controller_sha": "<reviewed new producer full SHA>",
+    "branch": "<reviewed new producer branch>",
     "artifact_name": "<verified exact artifact name>"
   },
   "clock": {
@@ -113,7 +118,7 @@ example is a declaration schema, not authority or an allocated clock:
 }
 ```
 
-Artifact_id0/zero epochs/placeholders are rejected. Workflow checkout roots,
+Run_id0/artifact_id0/zero epochs/placeholders are rejected. Workflow checkout roots,
 package/output/download locations are fixed disjoint job-owned paths. The case
 cannot rerun via run_attempt2 or another scenario argument. Root's allocation
 ledger, source review and current runtime-category permission remain external
@@ -129,8 +134,8 @@ source/package/config/runner/console/policy/API/result/cleanup receipts before
 accepting only this selected result; no next case follows automatically.
 
 ONBOARD-CLOCK-F1 count1 remains7PASS/1 canonical fixture ERROR; count2/4 closed at
-SOURCE for original0cb/d09 after SAME verification. This source refresh creates
-no count3 or new runtime credit. Preserve the four failed historical Q cases,
+SOURCE for original0cb/d09 after SAME verification. This P9 source refresh creates
+no count3 or new runtime credit. The old H6b/consumer69e refs remain preserved. Preserve the four failed historical Q cases,
 SDK ONE CONSUMED PASS, lifecycle531 spent1 and all named one-shots. The private
 345 platform stop remains independent and untouched. The old local354 goal
 stays BLOCKED/unfinished; Root's actual ACTIVE goal owns finite work.
