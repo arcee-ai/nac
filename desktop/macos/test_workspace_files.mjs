@@ -27,8 +27,21 @@ function fixture(html = row + pane, hash = '#/session/session/files', chat = '')
     hitOwner = this;
     return [this.getBoundingClientRect()];
   };
-  dom.window.document.elementFromPoint = () =>
-    hitOwner?.matches('[data-covered]') ? dom.window.document.body : hitOwner;
+  // JSDOM has no glyph layout. Model text rectangles independently from
+  // flexible element padding; real multiline geometry has separate Chromium
+  // controls and native acceptance must still inspect the actual WK image.
+  dom.window.Range.prototype.getClientRects = function () {
+    hitOwner = this.startContainer.nodeType === dom.window.Node.TEXT_NODE
+      ? this.startContainer.parentElement : this.startContainer;
+    const rect = hitOwner.getBoundingClientRect();
+    const text = new dom.window.DOMRect(rect.x, rect.y, hitOwner.hasAttribute('data-padding-covered') ? 80 : rect.width, rect.height);
+    if (hitOwner.hasAttribute('data-no-text-fragments')) return [];
+    if (hitOwner.hasAttribute('data-newline-fragment')) return [new dom.window.DOMRect(rect.x, rect.y, 0, rect.height), text];
+    return [text];
+  };
+  dom.window.document.elementFromPoint = x =>
+    hitOwner?.matches('[data-covered]') || (hitOwner?.matches('[data-padding-covered]') && x > 80)
+      ? dom.window.document.body : hitOwner;
   Object.defineProperty(dom.window.HTMLElement.prototype, 'clientWidth', {
     get() { return Number(this.dataset.clipWidth || 100); },
   });
@@ -120,4 +133,15 @@ test('file header and code must be unobscured, including noninteractive notifica
     unknown.window.document.elementFromPoint = undefined;
     assert.equal(unknown.probe().ready,false);
   } finally { unknown.close(); }
+});
+
+test('flexible element padding is not rendered file text', () => {
+  assert.equal(check(row + pane.replace('class="code"', 'class="code" data-padding-covered')).ready, true);
+  assert.equal(check(row + pane.replace('class="code"', 'class="code" data-covered')).ready, false);
+});
+test('zero-width newline fragments do not hide nonempty rendered text', () => {
+  assert.equal(check(row + pane.replace('class="code"', 'class="code" data-newline-fragment')).ready, true);
+});
+test('no rendered text fragments cannot qualify a matching code span', () => {
+  assert.equal(check(row + pane.replace('class="code"', 'class="code" data-no-text-fragments')).ready, false);
 });
