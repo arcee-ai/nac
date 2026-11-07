@@ -1,125 +1,110 @@
 name: Focused native terminal browser
 
+# UNAPPLIED private-control-branch override ONLY. Never merge this diagnostic.
 on:
+  workflow_dispatch:
+    inputs:
+      execute_once:
+        description: 'Run the single retained-producer diagnostic on this private control ref'
+        required: true
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       candidate:
         required: true
         type: string
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/terminal-browser.yml'
-      - '.github/workflows/nightly-portability.yml'
-      - '.github/scripts/terminal-browser*'
-      - '.github/scripts/nightly-portability.py'
-      - 'Makefile'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/nac-process/**'
-      - 'crates/nac-core/src/terminal/**'
-      - 'crates/nac-core/src/tools/*terminal*'
-      - 'crates/nac-core/src/session_service/*terminal*'
-      - 'crates/nac-core/src/sandbox/**'
-      - 'crates/nac-core/src/runtime/**'
-      - 'crates/nac-server/src/application/*terminal*'
-      - 'crates/nac-server/src/delivery/*terminal*'
-      - 'crates/nac-server/src/delivery/executions.rs'
-      - 'crates/nac-server/src/delivery/server.rs'
-      - 'crates/nac-server/src/lib.rs'
-      - 'crates/nac-server/web/src/app/features/terminal/**'
-      - 'crates/nac-server/web/src/app/features/terminal-selection/**'
-      - 'crates/nac-server/web/src/app/components/inspector/SessionSideBox.tsx'
-      - 'crates/nac-server/web/src/app/services/**'
-      - 'crates/nac-server/web/src/app/runtime/**'
-      - 'crates/nac-server/web/e2e/**'
-      - 'crates/nac-server/web/playwright.config.ts'
-      - 'crates/nac-server/web/package*.json'
-      - 'crates/nac-server/web/packages/nac-client/**'
-      - 'docs/ci/nightly-portability.md'
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: terminal-browser-${{ github.run_id }}-${{ github.run_attempt }}
+  group: terminal644-retained-producer-diagnostic-once
   cancel-in-progress: false
 
 jobs:
   terminal-browser:
-    name: ${{ matrix.profile }} real shell, pager and trusted clipboard
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            profile: ARM macOS
-          - runner: ubuntu-latest
-            profile: Linux
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_once == true }}
+    name: One Linux original-session protocol diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
-      CARGO_PROFILE_TEST_DEBUG: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      NAC_DIAG_SUT_ROOT: ${{ github.workspace }}/sut
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check out immutable private control revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.candidate || github.sha }}
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - name: Stage diagnostic inputs outside SUT and record the distinct dispatch
+        working-directory: control
+        env:
+          CONTROL_HEAD: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert head == os.environ['CONTROL_HEAD']
+          assert os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          packet = Path(os.environ['RUNNER_TEMP']) / 'terminal-read-packet'
+          packet.mkdir(mode=0o700)
+          names = ['run-linux-once.py', 'protocol_metadata.py', 'admit-producer.py', 'producer-receipt.json']
+          hashes = {}
+          for name in names:
+              source = Path('.github/terminal-read-diagnostic') / name
+              assert source.is_file() and not source.is_symlink()
+              shutil.copyfile(source, packet / name)
+              hashes[name] = hashlib.sha256(source.read_bytes()).hexdigest()
+          control = dict(head=head, run_id=os.environ['GITHUB_RUN_ID'],
+                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), files=hashes,
+                         scope='Private one-off diagnostic control; not SUT or normal same-run CI admission')
+          (packet / 'control.json').write_text(json.dumps(control, indent=2) + '\n')
+          evidence = Path(os.environ['RUNNER_TEMP']) / 'terminal-read-evidence'
+          evidence.mkdir(mode=0o700)
+          shutil.copyfile(packet / 'control.json', evidence / 'control.json')
+          with open(os.environ['GITHUB_ENV'], 'a') as exports:
+              exports.write(f'NAC_DIAG_EVIDENCE={evidence}\n')
+          PY
+      - name: Check out exact retained-producer SUT
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: e7b557dc558ac4382bd0f8e7308b4d5bd306f3b5
+          path: sut
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           toolchain: 1.98.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: nac-ci-v1
-          # Match stable-release browser: prefix + key(browser) + job(browser).
-          shared-key: browser-browser
-          key: browser
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-      - name: Provision Linux pager
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes less
-      - name: Prepare locked development dependencies
+      - name: Prepare original locked development dependencies without building SUT
+        working-directory: sut
         run: make setup
-      - name: Install Linux Chromium system dependencies
-        if: runner.os == 'Linux'
-        working-directory: crates/nac-server/web
-        run: npx playwright install-deps chromium
-      - name: Verify native Rust supervisor controls
-        if: runner.os == 'macOS'
-        run: python3 .github/scripts/nightly-portability.test.py
-      - name: Verify browser result selection controls
-        run: python3 .github/scripts/terminal-browser.test.py
-      - name: Run native journey and deterministic byte negative control
+      - name: Provision original Linux pager and Chromium system dependencies
+        working-directory: sut/crates/nac-server/web
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes less
+          npx playwright install-deps chromium
+      - name: Retrieve only the pinned historical producer artifact
         env:
-          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          exec python3 .github/scripts/terminal-browser.py \
-            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser"
-      - name: Prove cancellation settles the actual detached server and shell
-        env:
-          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
-        run: |
-          exec python3 .github/scripts/terminal-browser-cancel.py \
-            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser/cancellation-control"
-      - name: Summarize exact candidate and attempts
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/terminal-browser/summary.md" ]; then
-            cat "$RUNNER_TEMP/terminal-browser/summary.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Focused browser setup did not complete; no journey pass is claimed.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -f "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" ]; then
-            cat "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Retain native journey and negative-control evidence
+          timeout 90s gh api --allow-escape-sequences repos/arcee-ai/nac/actions/artifacts/13546575180/zip > "$RUNNER_TEMP/terminal-read-packet/producer.zip"
+      - name: Admit retained producer with actual consumer image and compiler or HOLD
+        run: python3 "$RUNNER_TEMP/terminal-read-packet/admit-producer.py"
+      - name: Run exactly one unchanged pressure case with filtered original-session protocol
+        run: python3 "$RUNNER_TEMP/terminal-read-packet/run-linux-once.py"
+      - name: Retain filtered metadata and normal controlled-fixture evidence only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: terminal-browser-${{ runner.os }}-${{ inputs.candidate || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/terminal-browser
-          retention-days: 14
+          name: terminal644-linux-protocol-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/terminal-read-evidence
+          retention-days: 7
           if-no-files-found: error

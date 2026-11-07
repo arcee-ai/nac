@@ -1,0 +1,20 @@
+{
+  "archive_bytes": 42945659,
+  "archive_sha256": "bbead04f772d7f507fa4cfbaf762a12696e1490fbfdfe9fc641ea33cffd9cb1d",
+  "binary_bytes": 248342544,
+  "binary_sha256": "ee58ca7ddbb44cdc838e78a6858014339e486bfb1db90e9270b3760e1f347e2f",
+  "build_id": "dev-e7b557dc558ac4382bd0f8e7308b4d5bd306f3b5",
+  "build_track": "dev",
+  "dev_debug": 0,
+  "manifest_bytes": 493,
+  "manifest_sha256": "b13d076dd52862ae6fde7ce03c4e48a4871fce73df956b59862886d2866b9d42",
+  "profile": "dev",
+  "repository": "arcee-ai/nac",
+  "run_attempt": 1,
+  "run_id": "42304372728",
+  "runner_image": "ubuntu26@20261101.186.1",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "schema": 1,
+  "source_revision": "e7b557dc558ac4382bd0f8e7308b4d5bd306f3b5",
+  "target": "x86_64-unknown-linux-gnu"
+}
