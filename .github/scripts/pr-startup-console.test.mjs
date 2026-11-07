@@ -51,3 +51,25 @@ test('ordinary-CI projection removes only the exact reviewed three-step contract
     assert.throws(() => reverseStartupConsole(changed));
   }
 });
+
+test('required Mac workflow compiles only the nominated five panel policy controls', () => {
+  const mac = require('yaml').parse(readFileSync('.github/workflows/macos-native.yml', 'utf8'));
+  assert.ok(requiredJobs.includes('macos-native'));
+  assert.ok(workflow.jobs['required-pr-checks'].needs.includes('macos-native'));
+  const job = mac.jobs['startup-panel-policy'];
+  assert.equal(job['runs-on'], 'macos-26');
+  assert.equal(job.if, undefined);
+  assert.equal(job['continue-on-error'], undefined);
+  assert.equal(job.steps[0].with.ref, '${{ inputs.source-sha }}');
+  assert.equal(job.steps[2].with.ref, '${{ steps.policy-source.outputs.revision }}');
+  assert.equal(job.steps[3].env.NAC342_SWIFT_PANEL_PROOF, '1');
+  assert.equal(job.steps[3].run, 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel');
+  for (const step of job.steps) {
+    assert.equal(step.if, undefined);
+    assert.equal(step['continue-on-error'], undefined);
+    if (step.uses) {
+      assert.equal(step.uses, 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
+      assert.equal(step.with['persist-credentials'], false);
+    }
+  }
+});

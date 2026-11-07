@@ -14,15 +14,15 @@ from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
-TEST_SOURCE = '04c073bbbead6f4077da0199bacd542e45cf4e57'
+TEST_SOURCE = '993102af913b94acfcf0f4f866f9350e6ca3650b'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': 'b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24',
-    'StartupJourneys.swift': '0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1',
-    'contract.py': '86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048',
-    'test_contract.py': '47f75f1067d0741925c4fa1d7130620194bbbb987a7f19e979238aed71868187',
+    'README.md': '6c61f4f0b726f2f1fc5eb5e0cbc4cb647913b0b0fcad6aa5100a05405cb393e3',
+    'StartupJourneys.swift': '5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471',
+    'contract.py': '1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86',
+    'test_contract.py': 'd111ad946ea80b69d1a1c21a73a6818b46380829719a00054013105716aa776e',
 }
 FUTURE_MESSAGE = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
                   'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
@@ -57,9 +57,9 @@ def test_contract(root):
 def operations(config):
     if config['scenario'] != 'configuredLocal':
         return []
-    return ['click:Get Started', 'click:' + config['home'], 'click:folder-input',
-            'key:command-a-folder-input', 'type:owned-workspace', 'key:return-folder-input',
-            'click:Select', 'click:Create Project', 'click:Message',
+    return ['click:Get Started', 'click:Choose Working Folder: ' + config['home'], 'key:command-shift-g-native-folder',
+            'key:command-a-native-go-to-folder', 'type:owned-workspace', 'key:return-native-go-to-folder',
+            'click:native-folder-Select', 'click:Create Project', 'click:Message',
             'type:FINDER_CONFIGURED_LOCAL_startup-home', 'click:Send']
 
 
