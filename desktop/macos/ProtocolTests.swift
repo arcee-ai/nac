@@ -75,6 +75,27 @@ struct ProtocolTests {
                 precondition(!text.contains("newer NAC version") && !text.contains("compatible version"))
             }
         }
+        // Only the authenticated startup cause establishes future-schema recovery.
+        for (stage, code, expected) in [("startup", "store_schema_incompatible", true),
+            ("listener", "store_schema_incompatible", false), ("", "store_schema_incompatible", false),
+            ("startup", "unknown", false)] {
+            let state = try parser()
+            do {
+                _ = try state.receive(line(["kind": "failed", "version": 1, "incarnation": state.incarnation,
+                    "stage": stage, "code": code, "message": "private-peer-canary"]))
+                preconditionFailure("Failed receipt accepted")
+            } catch {
+                let text = error.localizedDescription
+                if text.contains("compatible version") != expected {
+                    fputs("Typed future-schema guidance did not match the exact startup cause\n", stderr)
+                    exit(1)
+                }
+                precondition(!text.contains("private-peer-canary"))
+                if expected {
+                    precondition(text.contains("Keep your configuration and data") && text.contains("do not delete or downgrade"))
+                }
+            }
+        }
         print("Private engine protocol fixtures passed")
     }
 }
