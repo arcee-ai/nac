@@ -60,19 +60,22 @@ export function ManagedAuthCallout({
   const replacing = rejected && signedIn;
 
   const control = waiting ? (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Loader size={LoaderSize.XSmall} />
       {state.prompt.user_code ? (
         <>
-          <span className="text-micro text-basic-muted">Code</span>
+          <span className="text-small !leading-[22px] text-basic-secondary">Code</span>
           <span className="label-small text-basic-primary tabular-nums">
             {state.prompt.user_code}
           </span>
         </>
       ) : (
-        <span className="text-micro text-basic-muted">Waiting for the browser</span>
+        <span className="text-small !leading-[22px] text-basic-secondary">
+          Waiting for the browser
+        </span>
       )}
       <Button
+        className="min-h-11 max-w-full !whitespace-normal"
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
         content={ButtonContent.IconRight}
@@ -82,6 +85,7 @@ export function ManagedAuthCallout({
         <Icon iconName={IconName.External} />
       </Button>
       <Button
+        className="min-h-11 max-w-full !whitespace-normal"
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
         content={ButtonContent.Text}
@@ -91,12 +95,13 @@ export function ManagedAuthCallout({
       </Button>
     </div>
   ) : settled ? (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
         <Icon iconName={IconName.CheckCircle} className="text-success-primary" />
         <span className="label-small text-success-primary">Signed in</span>
       </div>
       <Button
+        className="min-h-11 max-w-full !whitespace-normal"
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
         content={ButtonContent.Text}
@@ -108,6 +113,7 @@ export function ManagedAuthCallout({
     </div>
   ) : (
     <Button
+      className="min-h-11 max-w-full !whitespace-normal"
       variant={ButtonVariant.Primary}
       size={ButtonSize.Medium}
       content={ButtonContent.IconRight}
@@ -132,29 +138,32 @@ export function ManagedAuthCallout({
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:items-center md:justify-between md:gap-4",
+        "flex min-w-0 flex-col gap-4 rounded-lg border p-4 md:flex-row md:flex-wrap md:items-center md:justify-between",
         invalid ? "border-error-primary" : "border-muted",
         className,
       )}
     >
-      <div className="flex items-start gap-2 min-w-0">
+      <div className="flex min-w-0 items-start gap-3 md:flex-1 md:basis-60">
         <Icon
           iconName={PROVIDER_ICONS[provider]}
           className={cn("shrink-0", invalid ? "text-error-primary" : "text-basic-secondary")}
         />
-        <div className="flex flex-col gap-0.5 min-w-0">
+        <div className="flex min-w-0 flex-col gap-1">
           <span
             className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}
           >
             {label} sign-in
           </span>
-          <span className="text-micro text-basic-muted">{description}</span>
+          <span className="text-small !leading-[22px] text-basic-secondary">{description}</span>
         </div>
       </div>
-      <div className="flex flex-col items-stretch md:items-end gap-1 shrink-0">
+      <div className="flex min-w-0 flex-col items-stretch gap-2 md:ml-auto md:items-end">
         {control}
         {failed || expired || logout.isError ? (
-          <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
+          <p
+            role="alert"
+            className="text-small !leading-[22px] text-error-primary max-w-full break-words md:max-w-[320px] md:text-right pt-1"
+          >
             {humanErrorText(
               failed ? state.message : logout.isError ? logout.error : reach.error,
               backend,

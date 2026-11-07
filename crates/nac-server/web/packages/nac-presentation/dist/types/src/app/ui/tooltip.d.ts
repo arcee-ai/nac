@@ -12,6 +12,8 @@ declare function Tooltip({ open: openProp, defaultOpen, onOpenChange, delayDurat
 declare function TooltipTrigger({ ref, ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>): React.JSX.Element;
 type TooltipContentProps = Omit<React.ComponentProps<typeof TooltipPrimitive.Content>, "onEscapeKeyDown"> & {
     container?: HTMLElement | null;
+    /** A noninteractive hint must not intercept input through its positioning wrapper. */
+    nonInteractive?: boolean;
 };
-declare function TooltipContent({ className, sideOffset, collisionPadding, container, ref, ...props }: TooltipContentProps): React.JSX.Element;
+declare function TooltipContent({ className, sideOffset, collisionPadding, container, nonInteractive, ref, ...props }: TooltipContentProps): React.JSX.Element;
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };

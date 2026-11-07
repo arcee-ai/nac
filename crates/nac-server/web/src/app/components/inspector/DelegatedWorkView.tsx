@@ -104,6 +104,7 @@ export function DelegatedWorkView({
     useSelectedSubagent,
     useSidePanelExpanded,
     toggleSidePanelExpanded,
+    rememberSubagentPage,
   } = useNativeRuntime().stores.sessionLayoutStore;
   // Below the desktop width the list and the detail are never both on screen.
   const isMobile = useIsMobile();
@@ -198,7 +199,7 @@ export function DelegatedWorkView({
     <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
       <div className="text-small text-error-primary">Subagents could not be loaded.</div>
       <Button
-        className="mt-2"
+        className="mt-2 max-md:!min-h-11 max-md:!min-w-11"
         size={ButtonSize.Small}
         variant={ButtonVariant.Ghost}
         onClick={() => {
@@ -258,6 +259,8 @@ export function DelegatedWorkView({
   );
 
   const openDetail = (id: string) => {
+    if (selected) selectSubagent(sessionId, selected.key);
+    rememberSubagentPage(sessionId, id);
     // The expanded side box outlives route changes and would cover the chat
     // opened, on a phone and on a wider screen alike.
     if (expanded) toggleSidePanelExpanded();
@@ -265,9 +268,12 @@ export function DelegatedWorkView({
   };
   const openButton = !selected ? null : isMobile ? (
     <StickyButton
+      className="!h-11"
+      buttonClassName="!h-11"
       variant={ButtonVariant.Ghost}
       content={ButtonContent.IconRight}
       aria-label="Open"
+      aria-description="Open this child’s own Insights and Files"
       onClick={() => openDetail(selected.id)}
     >
       Open
@@ -275,26 +281,33 @@ export function DelegatedWorkView({
     </StickyButton>
   ) : isTablet ? (
     <Button
+      className="!min-h-11"
       size={ButtonSize.Small}
       variant={ButtonVariant.Ghost}
       content={ButtonContent.IconRight}
       aria-label="Open"
+      aria-description="Open this child’s own Insights and Files"
       onClick={() => openDetail(selected.id)}
     >
-      Open
+      Open child
       <Icon iconName={IconName.External} />
     </Button>
   ) : null;
 
   return (
     <PanelSplit
+      phoneHeaderInFlow={isMobile}
       listTitle="Subagents"
       title={
         selected ? (
           <SessionNameDisclosure
             name={rowTitle(selected)}
             running={selected.status === "running"}
-            className={cn("min-w-0 max-w-full", isTablet && "font-medium")}
+            className={cn(
+              "min-w-0 max-w-full",
+              isMobile && "min-h-11 min-w-11",
+              isTablet && "font-medium",
+            )}
           />
         ) : undefined
       }
@@ -320,6 +333,7 @@ export function DelegatedWorkView({
               fallbackText={selected.fallbackText}
               icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
               header={!narrow}
+              phoneHeaderInFlow={isMobile}
               onOpen={() => openDetail(selected.id)}
             />
             <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">

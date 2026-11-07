@@ -2,7 +2,7 @@ import { Outlet } from "react-router-dom";
 
 import { TopBar } from "@/app/components/TopBar";
 
-/** Fixed top bar over a single scrolling region owned by the active page. */
+/** Phone chrome reserves its height; wide chrome floats over the page-owned scroll. */
 export function AppShell() {
   return (
     <div className="h-full flex flex-col bg-elevation-ground text-basic-primary">

@@ -3,7 +3,7 @@
 // Managed providers the server already authenticates as overlay their live
 // `POST /providers/models` index (same path Create New uses after login).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type AriaAttributes } from "react";
 
 import {
   Badge,
@@ -19,7 +19,6 @@ import {
   InputSize,
   Popover,
   PopoverPlacement,
-  Separator,
   TabButton,
   TabButtonSize,
   TabButtonVariant,
@@ -117,6 +116,8 @@ export function CatalogModelPicker({
   liveByBackend,
   value,
   onSelect,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: {
   catalog: ModelCatalog | undefined;
   loading: boolean;
@@ -128,7 +129,7 @@ export function CatalogModelPicker({
   liveByBackend: Map<BackendKind, ProviderModel[] | null>;
   value: CatalogPick | null;
   onSelect: (pick: CatalogPick) => void;
-}) {
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">) {
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -195,6 +196,8 @@ export function CatalogModelPicker({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    // Enter commits the IME composition before it can choose a model.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (!rows.length) return;
@@ -251,6 +254,7 @@ export function CatalogModelPicker({
               leading={InputLeading.Icon}
               leadingIconName={IconName.Search}
               placeholder="Search models…"
+              aria-label="Search models"
               autoFocus
               autoComplete="off"
               spellCheck={false}
@@ -261,10 +265,15 @@ export function CatalogModelPicker({
           </div>
           <div
             ref={listRef}
+            role="group"
+            aria-label="Model results"
             className="flex flex-col flex-1 gap-1 min-h-0 overflow-auto [&>*]:shrink-0"
           >
             {rows.length === 0 ? (
-              <p className="px-4 md:px-2 py-3 text-micro text-basic-muted">
+              <p
+                role="status"
+                className="px-4 md:px-2 py-3 text-small !leading-[22px] text-basic-secondary"
+              >
                 {loading
                   ? "Reading the catalog…"
                   : failed
@@ -278,13 +287,10 @@ export function CatalogModelPicker({
                 return (
                   <div key={`${row.provider.id}/${row.model.id}`} className="px-2 md:px-0">
                     {first ? (
-                      <div className="flex items-center gap-2 px-2 pt-6 pb-2">
-                        <span className="tag-label text-basic-muted whitespace-nowrap shrink-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-2 pt-4 pb-2">
+                        <span className="label-small text-basic-secondary whitespace-nowrap shrink-0">
                           {providerLabel(row.provider.id)}
                         </span>
-                        {/* Basis 100%, so it eats the row's slack and leaves the
-                            label and badge at their natural width. */}
-                        <Separator className="shrink" />
                         <ProviderBadges provider={row.provider} />
                       </div>
                     ) : null}
@@ -292,6 +298,11 @@ export function CatalogModelPicker({
                       size={tabSize}
                       variant={TabButtonVariant.Regular}
                       active={chosen}
+                      aria-pressed={chosen}
+                      className={cn(
+                        "!h-auto min-h-11 !items-start !py-3",
+                        position === index && "bg-elevation-sublevel-variant-A",
+                      )}
                       data-row={position}
                       onMouseEnter={() => setHovered(position)}
                       onMouseLeave={() =>
@@ -299,16 +310,18 @@ export function CatalogModelPicker({
                       }
                       onClick={() => pick(row)}
                     >
-                      <span className="flex-1 min-w-0 text-left truncate">
-                        {modelName(row.model)}
-                      </span>
-                      {!isMobile ? (
-                        <span className="code-small text-basic-muted truncate md:max-w-[180px]">
-                          {row.model.id}
+                      <span className="flex min-w-0 flex-1 flex-col gap-1 text-left whitespace-normal">
+                        <span className="label-small !leading-[22px] break-words">
+                          {modelName(row.model)}
                         </span>
-                      ) : null}
-                      <span className="text-micro text-basic-muted shrink-0">
-                        {modelMeta(row.model)}
+                        {modelName(row.model) !== row.model.id ? (
+                          <span className="code-small text-basic-secondary break-all">
+                            {row.model.id}
+                          </span>
+                        ) : null}
+                        <span className="text-micro text-basic-secondary font-normal">
+                          {modelMeta(row.model)}
+                        </span>
                       </span>
                     </TabButton>
                   </div>
@@ -327,31 +340,35 @@ export function CatalogModelPicker({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         className={
-          compact ? "min-w-0 max-w-full !gap-1 !rounded-[4px] !px-2" : "w-full md:w-[280px]"
+          compact
+            ? "min-w-0 max-w-full !gap-1 !rounded-[4px] !px-2"
+            : "w-full md:w-[280px] !h-auto min-h-11 !py-2"
         }
       >
         <span
           className={cn(
-            "min-w-0 text-left truncate",
-            compact ? cn("label-micro", isMobile ? "max-w-[64px]" : "max-w-[96px]") : "flex-1",
+            "min-w-0 text-left",
+            compact
+              ? cn("label-micro truncate", isMobile ? "max-w-[64px]" : "max-w-[96px]")
+              : "flex flex-1 flex-col gap-1",
           )}
         >
-          {label}
+          <span className={compact ? "truncate" : "whitespace-normal break-words"}>{label}</span>
+          {!compact && value && providerLabel(value.backend) !== label ? (
+            <span className="text-micro text-basic-secondary whitespace-normal break-words font-normal">
+              {providerLabel(value.backend)}
+            </span>
+          ) : null}
         </span>
-        {/* Some providers name their flagship after themselves; saying it twice
-            on one line reads like a mistake. */}
-        {value && providerLabel(value.backend) !== label ? (
+        {compact && value && providerLabel(value.backend) !== label ? (
           <span
             className={cn(
-              "truncate",
-              compact
-                ? cn(
-                    "text-micro font-normal",
-                    isMobile ? "max-w-[64px]" : "max-w-[96px]",
-                    triggerDisabled ? "text-basic-muted" : "text-basic-tertiary",
-                  )
-                : "text-micro text-basic-muted max-w-[110px]",
+              "text-micro font-normal truncate",
+              isMobile ? "max-w-[64px]" : "max-w-[96px]",
+              triggerDisabled ? "text-basic-muted" : "text-basic-tertiary",
             )}
           >
             {providerLabel(value.backend)}
