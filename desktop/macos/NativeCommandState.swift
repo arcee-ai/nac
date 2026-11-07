@@ -27,6 +27,7 @@ final class NativeCommandState {
     private(set) var binding: NativeDocumentBinding?
     private(set) var ready = false
     private(set) var connectionLost = false
+    private(set) var pendingConnectionLoss: NativeDocumentBinding?
     private var retired = false
     private var sequence = 0
     private var pending: Int?
@@ -57,6 +58,7 @@ final class NativeCommandState {
 
     func beginDocument(receipt: EngineReceipt?) -> NativeDocumentBinding? {
         endDocument()
+        pendingConnectionLoss = nil
         guard matches(receipt) else { return nil }
         let next = NativeDocumentBinding(launch: launch, view: view, document: UUID().uuidString)
         binding = next
@@ -64,7 +66,15 @@ final class NativeCommandState {
     }
 
     func endDocument() { binding = nil; ready = false; pending = nil; connectionLost = false }
-    func retire() { endDocument(); retired = true }
+    func retire() { endDocument(); pendingConnectionLoss = nil; retired = true }
+
+    // Command callbacks/navigation may fence the old document before the
+    // deferred loss drains. Only a successor document or retirement cancels it.
+    func consumeConnectionLoss(_ document: NativeDocumentBinding) -> Bool {
+        guard pendingConnectionLoss == document else { return false }
+        pendingConnectionLoss = nil
+        return true
+    }
 
     func issue(_ action: NativeUIAction, receipt: EngineReceipt?) -> NativeUIRequest? {
         guard matches(receipt), binding != nil, ready, pending == nil, sequence < Int(Int32.max) else { return nil }
@@ -99,6 +109,7 @@ final class NativeCommandState {
             ready = false
             pending = nil
             connectionLost = true
+            pendingConnectionLoss = binding
         case "settled":
             guard Set(object.keys) == common.union(["request", "accepted"]), ready,
                   let request = object["request"] as? NSNumber, CFGetTypeID(request) != CFBooleanGetTypeID(),
