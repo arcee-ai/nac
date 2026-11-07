@@ -24,11 +24,19 @@ CONTROL_LISTENER_TESTS = (
 )
 CONTROL_LISTENER_FILTER = ("package(=nac-server) & test(/^managed_control::tests::("
                            + "|".join(CONTROL_LISTENER_TESTS) + ")$/)")
-POLICY = {"test-groups": {"managed-control-port3211": {"max-threads": 1}}, "profile": {"ci": {
+OAUTH_LOOPBACK_TESTS = (
+    "loopback_retry_reuses_only_its_own_live_callback_listener",
+    "loopback_replacement_rejects_the_old_accepted_callback",
+)
+OAUTH_LOOPBACK_FILTER = ("package(=nac-server) & test(/^tests::mcp_oauth::loopback::("
+                         + "|".join(OAUTH_LOOPBACK_TESTS) + ")$/)")
+POLICY = {"test-groups": {"managed-control-port3211": {"max-threads": 1},
+                          "oauth-loopback-port1456": {"max-threads": 1}}, "profile": {"ci": {
     "retries": 0, "fail-fast": False, "test-threads": 4,
     "leak-timeout": {"period": "200ms", "result": "fail"},
     "junit": {"path": "junit.xml", "report-skipped": "all"},
-    "overrides": [{"filter": CONTROL_LISTENER_FILTER, "test-group": "managed-control-port3211"}],
+    "overrides": [{"filter": CONTROL_LISTENER_FILTER, "test-group": "managed-control-port3211"},
+                  {"filter": OAUTH_LOOPBACK_FILTER, "test-group": "oauth-loopback-port1456"}],
 }}}
 
 
