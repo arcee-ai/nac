@@ -54,9 +54,26 @@ struct ProtocolTests {
                                          "message": "private-canary"]))
             preconditionFailure("Failed receipt accepted")
         } catch {
-            precondition(error.localizedDescription.contains("If a newer NAC version"))
-            precondition(error.localizedDescription.contains("compatible version"))
-            precondition(!error.localizedDescription.contains("private-canary"))
+            let text = error.localizedDescription
+            if text.contains("newer NAC version") || text.contains("compatible version") || text.contains("private-canary") {
+                fputs("Generic failed receipt incorrectly suggests a newer schema or exposes peer text\n", stderr)
+                exit(1)
+            }
+            precondition(text.contains("directory access"))
+        }
+        // Failed startup/listener/unknown codes do not establish a newer schema.
+        for (stage, code) in [("startup", "engine_unavailable"), ("startup", "store_owned"),
+                              ("listener", "bind_failed"), ("startup", "unknown")] {
+            let state = try parser()
+            do {
+                _ = try state.receive(line(["kind": "failed", "version": 1, "incarnation": state.incarnation,
+                    "stage": stage, "code": code, "message": "private-peer-canary"]))
+                preconditionFailure("Failure was accepted as readiness")
+            } catch {
+                let text = error.localizedDescription
+                precondition(text.contains("directory access") && !text.contains("private-peer-canary"))
+                precondition(!text.contains("newer NAC version") && !text.contains("compatible version"))
+            }
         }
         print("Private engine protocol fixtures passed")
     }
