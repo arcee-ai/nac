@@ -17,6 +17,7 @@ pub(super) fn publish_pending_authorization(profile: &mut OAuthProfile, url: Str
         bail!("authorization URL state was not persisted");
     }
     profile.states.retain(|value, _| value == &state);
+    profile.completing_authorization = None;
     profile.pending_authorization_url = Some(url);
     Ok(())
 }
@@ -50,7 +51,7 @@ pub(super) fn pending_authorization_is_live(profile: &OAuthProfile) -> bool {
         .is_some_and(authorization_state_is_live)
 }
 
-pub(crate) fn discard_mcp_oauth_pending_authorization(
+pub fn discard_mcp_oauth_pending_authorization(
     cwd: &Path,
     server_name: &str,
     endpoint: &str,
@@ -74,6 +75,7 @@ pub(crate) fn discard_mcp_oauth_pending_authorization(
             return Ok(false);
         }
         profile.pending_authorization_url = None;
+        profile.completing_authorization = None;
         profile.states.remove(&state);
         Ok(true)
     })
@@ -156,17 +158,41 @@ impl CompletionOwnership {
         Ok(())
     }
 
+    pub(super) fn claim(&self, profile: &mut OAuthProfile, state: &str) -> Result<()> {
+        let stored = profile
+            .states
+            .get(state)
+            .filter(|stored| authorization_state_is_live(stored))
+            .filter(|_| {
+                profile
+                    .pending_authorization_url
+                    .as_deref()
+                    .and_then(authorization_state)
+                    .as_deref()
+                    == Some(state)
+            })
+            .ok_or_else(|| {
+                anyhow!("MCP OAuth authorization state was consumed, expired or replaced")
+            })?;
+        let completion = CompletingAuthorization {
+            state: state.into(),
+            created_at: stored.created_at,
+        };
+        self.capture(state)?;
+        profile.states.remove(state);
+        profile.completing_authorization = Some(completion);
+        Ok(())
+    }
+
     pub(super) fn validate(profile: &OAuthProfile, expected: Option<&str>) -> Result<()> {
-        if let Some(expected) = expected {
-            if profile
-                .pending_authorization_url
-                .as_deref()
-                .and_then(authorization_state)
-                .as_deref()
-                != Some(expected)
-            {
-                bail!("MCP OAuth authorization was retired while completing");
-            }
+        if expected.is_some_and(|state| {
+            !completion_is_live(profile)
+                || profile
+                    .completing_authorization
+                    .as_ref()
+                    .is_none_or(|value| value.state != state)
+        }) {
+            bail!("MCP OAuth authorization was retired while completing");
         }
         Ok(())
     }
@@ -181,4 +207,69 @@ impl CompletionOwnership {
         }
         Ok(())
     }
+}
+
+// This private optional v2 field retains only completion identity and the
+// original state age. The PKCE verifier remains deleted and cannot be replayed.
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct CompletingAuthorization {
+    state: String,
+    created_at: u64,
+}
+
+pub(super) fn completion_is_live(profile: &OAuthProfile) -> bool {
+    profile
+        .completing_authorization
+        .as_ref()
+        .is_some_and(|completion| {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            now.saturating_sub(completion.created_at) <= MCP_OAUTH_STATE_TTL.as_secs()
+                && profile
+                    .pending_authorization_url
+                    .as_deref()
+                    .and_then(authorization_state)
+                    .as_deref()
+                    == Some(completion.state.as_str())
+        })
+}
+
+pub fn mcp_oauth_completion_is_pending(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+) -> Result<bool> {
+    let store = read_store(&oauth_store_path(cwd)?)?;
+    let Some(profile) = store.profiles.get(server_name) else {
+        return Ok(false);
+    };
+    validate_profile_binding(profile, endpoint)?;
+    Ok(completion_is_live(profile))
+}
+
+pub fn fail_mcp_oauth_authorization(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    expected_authorization_url: Option<&str>,
+) -> Result<bool> {
+    edit_store(&oauth_store_path(cwd)?, |store| {
+        let profile = store
+            .profiles
+            .get_mut(server_name)
+            .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
+        validate_profile_binding(profile, endpoint)?;
+        if expected_authorization_url
+            .is_some_and(|expected| profile.pending_authorization_url.as_deref() != Some(expected))
+        {
+            return Ok(false);
+        }
+        profile.pending_authorization_url = None;
+        profile.completing_authorization = None;
+        profile.pending_scopes.clear();
+        profile.states.clear();
+        Ok(true)
+    })
 }

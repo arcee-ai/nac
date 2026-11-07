@@ -4,6 +4,8 @@ use axum::response::IntoResponse;
 #[derive(Clone, Copy, Debug)]
 enum Outcome {
     Success,
+    ScopeUpgrade,
+    RetryScopes,
     TokenFailure,
     Logout,
     Reconfigure,
@@ -34,6 +36,15 @@ async fn a_replacement_flow_survives_the_old_callback() {
 #[tokio::test]
 async fn expiry_rejects_the_late_token_response() {
     complete(Outcome::Expire).await;
+}
+
+#[tokio::test]
+async fn flowless_scope_upgrade_stays_connecting_during_exchange() {
+    complete(Outcome::ScopeUpgrade).await;
+}
+#[tokio::test]
+async fn authenticate_retry_preserves_pending_only_scopes() {
+    complete(Outcome::RetryScopes).await;
 }
 
 async fn complete(outcome: Outcome) {
@@ -85,7 +96,7 @@ async fn complete(outcome: Outcome) {
                     "access_token": "latched-test-access-token",
                     "token_type": "Bearer",
                     "expires_in": 3600,
-                    "scope": "channels:history chat:write"
+                    "scope": if matches!(outcome, Outcome::ScopeUpgrade | Outcome::RetryScopes) { "channels:history chat:write mcp:pending-only" } else { "channels:history chat:write" }
                 }))
                 .into_response()
             }
@@ -132,15 +143,43 @@ async fn complete(outcome: Outcome) {
         .status(),
         StatusCode::OK
     );
-    let authenticating = response_json(
-        post_json(
-            app.clone(),
-            "/mcp_library/servers/slack/oauth/authenticate",
-            serde_json::json!({}),
+    let authenticating = if matches!(outcome, Outcome::ScopeUpgrade) {
+        // The core publisher also serves remote scope upgrades without an
+        // authenticate-created HTTP watchdog/flow-map entry.
+        let session = nac_core::mcp_configurations::begin_mcp_oauth_authorization(
+            manager.root_cwd(),
+            "slack",
+            "https://mcp.slack.com/mcp",
+            "https://nac.example.test/mcp_library/servers/slack/oauth/callback",
+            &["mcp:pending-only".into()],
         )
-        .await,
-    )
-    .await;
+        .await
+        .unwrap();
+        serde_json::json!({"authorization_url":session.authorization_url()})
+    } else {
+        let first = response_json(
+            post_json(
+                app.clone(),
+                "/mcp_library/servers/slack/oauth/authenticate",
+                serde_json::json!({"additional_scopes": if matches!(outcome, Outcome::RetryScopes) { vec!["mcp:pending-only"] } else { vec![] }}),
+            )
+            .await,
+        )
+        .await;
+        if matches!(outcome, Outcome::RetryScopes) {
+            response_json(
+                post_json(
+                    app.clone(),
+                    "/mcp_library/servers/slack/oauth/authenticate",
+                    serde_json::json!({}),
+                )
+                .await,
+            )
+            .await
+        } else {
+            first
+        }
+    };
     let authorization =
         url::Url::parse(authenticating["authorization_url"].as_str().unwrap()).unwrap();
     let state = authorization
@@ -267,7 +306,7 @@ async fn complete(outcome: Outcome) {
     );
     assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
     match outcome {
-        Outcome::Success => {
+        Outcome::Success | Outcome::ScopeUpgrade | Outcome::RetryScopes => {
             assert_eq!(callback_status, StatusCode::OK);
             assert_eq!(completed["status"], "connected");
         }
@@ -287,6 +326,15 @@ async fn complete(outcome: Outcome) {
             assert!(replacement["authorization_url"] == completed["authorization_url"]);
             assert!(replacement["authorization_url"].as_str() != Some(authorization.as_str()));
         }
+    }
+    if matches!(outcome, Outcome::RetryScopes) {
+        let scopes = authorization
+            .query_pairs()
+            .find_map(|(key, value)| (key == "scope").then(|| value.into_owned()))
+            .unwrap();
+        assert!(scopes
+            .split_whitespace()
+            .any(|scope| scope == "mcp:pending-only"));
     }
     assert_eq!(pending["status"], "connecting");
     assert!(pending.get("authorization_url").is_none());

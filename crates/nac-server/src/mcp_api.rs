@@ -1411,6 +1411,9 @@ pub async fn oauth_status_handler(
     } else {
         false
     };
+    let completing = completing
+        || mcp::mcp_oauth_completion_is_pending(manager.root_cwd(), &server_name, &endpoint)
+            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
     let (active_authorization_url, pending_authorization_url) = reconcile_oauth_status_urls(
         active_authorization_url,
         mcp::mcp_oauth_pending_authorization_url(manager.root_cwd(), &server_name, &endpoint),
@@ -1500,11 +1503,11 @@ pub async fn authenticate_oauth_handler(
         }
     };
     if let Some(previous) = previous_authorization {
-        mcp::fail_mcp_oauth_authorization(
+        mcp::discard_mcp_oauth_pending_authorization(
             manager.root_cwd(),
             &server_name,
             &endpoint,
-            Some(&previous),
+            &previous,
         )
         .map_err(|_| {
             oauth_error(
@@ -1653,6 +1656,8 @@ pub async fn oauth_callback_handler(
         let pending_before_callback = mcp::mcp_oauth_pending_authorization_url(
             manager.root_cwd(), &server_name, &endpoint,
         ).map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected"))?;
+        let completion_authorization_url = pending_before_callback.clone()
+            .filter(|url| callback_matches_authorization_state(url, &callback_url));
         let callback_owner = {
             let flows = OAUTH_FLOWS.lock().await;
             match flows.get(&flow_key) {
@@ -1689,14 +1694,13 @@ pub async fn oauth_callback_handler(
                 .map_err(|_| {
                     oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
                 })?;
-                let owned_completion = callback_owner.as_ref().filter(|(generation, url)| {
-                    matches!(flows.get(&flow_key), Some(OAuthFlowState::Connecting { generation: current, .. }) if current == generation)
-                        && mcp::mcp_oauth_authorization_is_current(
-                            manager.root_cwd(), &server_name, &endpoint, url,
-                        ).unwrap_or(false)
+                let owned_completion = completion_authorization_url.as_ref().filter(|url| {
+                    mcp::mcp_oauth_authorization_is_current(
+                        manager.root_cwd(), &server_name, &endpoint, url,
+                    ).unwrap_or(false)
                 });
                 let expected_authorization_url = pending_authorization_url.as_deref()
-                    .or_else(|| owned_completion.map(|(_, url)| url.as_str()));
+                    .or_else(|| owned_completion.map(|url| url.as_str()));
                 let matches_current = callback_matches_pending_authorization(
                     expected_authorization_url,
                     &callback_url,

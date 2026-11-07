@@ -65,7 +65,8 @@ listed responsibility closed; a new concern requires a real submodule/port:
   transport invocation belongs elsewhere.
 - `mcp/oauth.rs` keeps registration, profile-bound credential/state-store
   adapters, refresh locks and generation-checked authorization persistence
-  together above 800 lines. Callback-state helpers live in `authorization_state`;
+  together above 800 lines. Atomic callback consumption, bounded completion
+  identity and retirement live in `authorization_state`;
   HTTP flow ownership and public status projection remain in `nac-server`.
 - `terminal/session.rs` keeps one PTY adapter's construction, child/slave/master
   ownership, collector lifetime, input-root binding, geometry and explicit cleanup
