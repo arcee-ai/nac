@@ -150,7 +150,65 @@ def approve(prompt):
     assert status == 200, 'HTTP approval double failed'
 
 
+def startup_only(fixture_binary, output):
+    """Actual Foundation/Rust boundary with no app, browser or serving owner."""
+    assert sys.platform == 'darwin', 'Foundation startup contract requires macOS'
+    output.mkdir(parents=True, exist_ok=False)
+    owner = Path(__file__).resolve().parent
+    sources = ['EngineProtocol.swift', 'EngineFailure.swift', 'CommandEnvironment.swift',
+               'DesktopStartup.swift', 'NativeAuthStartupTests.swift']
+    helper = output / 'NativeAuthStartupTests'
+    subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-target', 'arm64-apple-macosx14.0',
+        '-D', 'NATIVE_AUTH_FIXTURE', '-O', *(str(owner / name) for name in sources),
+        '-o', str(helper)], check=True, timeout=60)
+    build = identity(fixture_binary)
+    results = []
+    # Reserve the origin without a listener: preflight must not perform HTTP.
+    with socket.socket() as reserved:
+        reserved.bind(('127.0.0.1', 0))
+        with DeviceProfile(build, 'http://127.0.0.1:' + str(reserved.getsockname()[1])) as profile:
+            marker = b'Preflight must neither open nor mutate this non-SQLite fixture file.'
+            for existing in (False, True):
+                if existing:
+                    profile.store.write_bytes(marker)
+                checked = subprocess.run([str(helper), str(fixture_binary), str(profile.workspace),
+                    str(profile.store)], env=profile.environment, capture_output=True, timeout=15)
+                assert checked.returncode == 0, 'Foundation fixture preflight rejected; no serving launch'
+                if existing:
+                    assert profile.store.read_bytes() == marker
+                else:
+                    assert not profile.store.exists()
+                results.append({'scenario': 'existing-store' if existing else 'fresh-store',
+                                'native_rust_selection': True, 'store_unchanged': True})
+            arguments = ['__desktop-configuration', '--directory', str(profile.workspace),
+                         '--store-path', str(profile.store)]
+            assert str(profile.workspace).startswith('/private/'), 'Expected Darwin physical fixture root'
+            alias = str(profile.workspace).removeprefix('/private')
+            for name, environment, options, reason in [
+                ('wrong-home', {**profile.environment, 'HOME': str(profile.root / 'other')}, arguments,
+                 b'native auth fixture environment is not isolated'),
+                ('foundation-alias', profile.environment,
+                 [arguments[0], arguments[1], alias, *arguments[3:]],
+                 b'native auth fixture workspace/store is not explicit'),
+            ]:
+                refused = subprocess.run([str(fixture_binary), *options], env=environment,
+                    capture_output=True, timeout=15)
+                assert refused.returncode != 0 and reason in refused.stderr
+                assert profile.store.read_bytes() == marker
+                results.append({'scenario': name, 'unchanged_rust_admission_rejected': True})
+            profile_root = profile.root
+    assert not profile_root.exists()
+    report = {'source': build['source_revision'], 'engine_identity': build,
+              'scope': 'actual Foundation/Rust fixture preflight; no app/browser/serving launch',
+              'profile_removed': True, 'results': results,
+              'source_hashes': {name: hashlib.sha256((owner / name).read_bytes()).hexdigest() for name in sources}}
+    (output / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
+
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == '--startup-only':
+        startup_only(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve())
+        return
     fixture_binary, normal_binary, output = (Path(value).resolve() for value in sys.argv[1:])
     output.mkdir(parents=True, exist_ok=False)
     build = identity(fixture_binary)
