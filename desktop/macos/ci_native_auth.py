@@ -55,14 +55,35 @@ def isolate_subprocess_environment(environment):
     return token
 
 
-def public_candidate(source, parents, environment, pull):
-    """Native GitHub stacks compose the base through prior synthetic merges."""
+def git_oid(value):
+    return isinstance(value, str) and len(value) == 40 and all(character in '0123456789abcdef' for character in value)
+
+
+def public_candidate(source, parents, environment, pull, *, tree, read_commit):
+    """Admit the exact live candidate, including equivalent synthetic metadata."""
+    public_merge = pull.get('merge_commit_sha')
     require(pull.get('number') == int(environment['CANDIDATE_PR']) and pull.get('state') == 'open' and
-            pull.get('merge_commit_sha') == source and pull.get('head', {}).get('sha') == environment.get('CANDIDATE_HEAD') and
+            pull.get('head', {}).get('sha') == environment.get('CANDIDATE_HEAD') and
             pull.get('base', {}).get('sha') == environment.get('CANDIDATE_BASE') and
-            len(parents) == 2 and parents[1] == environment.get('CANDIDATE_HEAD'),
+            git_oid(source) and git_oid(tree) and git_oid(public_merge) and
+            len(parents) == 2 and all(git_oid(parent) for parent in parents) and
+            parents[1] == environment.get('CANDIDATE_HEAD'),
             'Checkout is not the current public candidate merge')
-    return dict(source=source, parents=parents, head=pull['head']['sha'], base=pull['base']['sha'])
+    equivalent_metadata = public_merge != source
+    if equivalent_metadata:
+        # read_commit is the existing authenticated GitHub service reader, never
+        # an environment/caller assertion about source equivalence. Preserve the
+        # composed first parent: it need not be the PR's direct base-ref SHA.
+        current = read_commit(public_merge)
+        require(isinstance(current, dict) and current.get('sha') == public_merge and
+                isinstance(current.get('tree'), dict) and current['tree'].get('sha') == tree and
+                isinstance(current.get('parents'), list) and
+                [parent.get('sha') if isinstance(parent, dict) else None
+                 for parent in current['parents']] == parents,
+                'Current public merge differs in source tree or ordered parents')
+    return dict(source=source, parents=parents, tree=tree, head=pull['head']['sha'],
+                base=pull['base']['sha'], public_merge_sha=public_merge,
+                equivalent_synthetic_metadata=equivalent_metadata)
 
 
 def main():
@@ -107,7 +128,7 @@ def main():
         return json.loads(subprocess.check_output(arguments, timeout=5))
 
     try:
-        parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', 'HEAD'], text=True).split()
+        parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', source], text=True).split()
         require(token and os.environ.get('GITHUB_RUN_ID', '').isdigit(), 'Missing live Actions identity')
         def service(path):
             with urlopen(Request('https://api.github.com/repos/arcee-ai/nac/' + path,
@@ -115,7 +136,10 @@ def main():
                              'Accept': 'application/vnd.github+json'}), timeout=15) as response:
                 return json.load(response)
         require(os.environ.get('CANDIDATE_PR', '').isdigit(), 'Missing public pull request identity')
-        candidate = public_candidate(source, parents, os.environ, service('pulls/' + os.environ['CANDIDATE_PR']))
+        tree = subprocess.check_output(['git', 'rev-parse', source + '^{tree}'], text=True).strip()
+        candidate = public_candidate(source, parents, os.environ,
+            service('pulls/' + os.environ['CANDIDATE_PR']), tree=tree,
+            read_commit=lambda sha: service('git/commits/' + sha))
         jobs = service('actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/jobs?per_page=100')
         require(jobs['total_count'] <= 100, 'Incomplete job metadata')
         job = hosted_job(os.environ, jobs['jobs'], source)
