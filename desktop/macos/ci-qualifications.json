@@ -26,7 +26,7 @@
     "phase_count": 6
   },
   "all-342-startup-macos26": {
-    "source_sha": "ff8c9609abf7bf7ddabe983c96ff31cf80362956",
+    "source_sha": "6c578a2c18050e218b83daf80f46731040e4b3e4",
     "test_source_sha": "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81",
     "protocol_source_sha": "25046f450110d1b795d529d046d2c1deee880877",
     "profile": "macos26",
