@@ -90,7 +90,7 @@ async fn followup_peer_lease_fifo_shutdown_and_replays_do_not_duplicate_turns() 
     witness.mark("serverStarting");
     let observed_phases = witness.phases.clone();
     let observed_started = witness.started;
-    let server = ScriptedServer::start_observed(
+    let (server, arm_response_budget) = ScriptedServer::start_observed_armed(
         vec![
             ScriptedResponse::json("200 OK", compaction_response("first received")),
             ScriptedResponse::json("200 OK", compaction_response("second received")),
@@ -141,7 +141,15 @@ async fn followup_peer_lease_fifo_shutdown_and_replays_do_not_duplicate_turns() 
     service.start_next_direct_inbox_item().await.unwrap();
     witness.mark("wakeReturned");
     witness.mark("settleStarting");
-    settled(service, &path, 2).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    arm_response_budget.send(deadline).unwrap();
+    witness.mark("responseBudgetArmed");
+    tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        settled(service, &path, 2),
+    )
+    .await
+    .unwrap();
     witness.mark("settled2Inactive");
     let replay = service.admit_task_followup(first.clone()).await.unwrap();
     assert!(replay.replayed);
