@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -56,6 +57,76 @@ class WorkspaceRunnerTests(unittest.TestCase):
             self.assertTrue(Path(result['relocated_app']).exists())
             self.assertEqual(json.loads((output / 'workspace-direct.json').read_text()), result)
             launcher.terminate.assert_not_called()
+
+    def test_cleanup_timeout_retains_original_failure_and_unreaped_launcher(self):
+        for original in (subprocess.TimeoutExpired(['inert-open-W'], 300), KeyboardInterrupt()):
+            with self.subTest(original=type(original).__name__), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+                for path in [app, output, relocation]:
+                    path.mkdir()
+                launcher = Mock(args=['inert-open-W'], returncode=None)
+                launcher.poll.return_value = None
+                launcher.wait.side_effect = [original, subprocess.TimeoutExpired(launcher.args, 5)]
+                with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                        patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                        patch('workspace.subprocess.Popen', return_value=launcher), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if isinstance(original, KeyboardInterrupt):
+                        with self.assertRaises(KeyboardInterrupt):
+                            run_case(app, output, 'workspace-direct')
+                    else:
+                        run_case(app, output, 'workspace-direct')
+                record = json.loads((output / 'workspace-direct.json').read_text())
+                self.assertFalse(record['passed'])
+                self.assertIn(type(original).__name__, record['runner_error'])
+                if isinstance(original, subprocess.TimeoutExpired):
+                    self.assertIn('300', record['runner_error'])
+                self.assertFalse(record['launcher_reaped'])
+                self.assertIn('TimeoutExpired', record['runner_cleanup_errors'][0])
+                self.assertTrue((relocation / 'Moved workspace fixture with spaces' / app.name).exists())
+                launcher.terminate.assert_called_once_with()
+
+    def test_native_cleanup_error_still_records_failure_and_reaps_launcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, output, relocation = root / 'Fixture.app', root / 'evidence', root / 'relocation'
+            for path in [app, output, relocation]:
+                path.mkdir()
+            evidence = output / 'workspace-direct.json'
+            profile = root / 'retained-native-profile'
+            profile.mkdir()
+            launcher = Mock(returncode=None)
+            launcher.poll.side_effect = [None, 0]
+            def started(*_):
+                evidence.write_text(json.dumps({'profile': str(profile), 'checks': {'direct': {'status': 'pass'}}}))
+                raise RuntimeError('original launch failure')
+            def reaped(**_):
+                evidence.write_text(json.dumps({'profile': str(profile), 'checks': {'direct': {'status': 'pass'},
+                    'cleanup-published': {'status': 'pass'}}, 'engine_reaped': True, 'profile_removed': True}))
+                launcher.returncode = 0
+                return 0
+            launcher.wait.side_effect = reaped
+            with patch('workspace.tempfile.mkdtemp', return_value=str(relocation)), \
+                    patch('workspace.console_state', return_value={'prior_pid': 0, 'prior_bundle_id': '', 'screen_locked': True}), \
+                    patch('workspace.subprocess.Popen', return_value=launcher), \
+                    patch('workspace.wait_for_case', side_effect=started), \
+                    patch('workspace.cleanup_failed_case', side_effect=RuntimeError('native cleanup unavailable')), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                result = run_case(app, output, 'workspace-direct')
+            self.assertFalse(result['passed'])
+            self.assertEqual(result['runner_error'], 'RuntimeError: original launch failure')
+            self.assertIn('native cleanup unavailable', result['runner_cleanup_errors'][0])
+            self.assertIn('Fixture profile survived cleanup', result['runner_cleanup_errors'])
+            self.assertTrue(profile.exists())
+            self.assertTrue(result['launcher_reaped'])
+            self.assertTrue(result['engine_reaped'])
+            self.assertTrue(result['profile_removed'])
+            self.assertEqual(result['checks']['cleanup-published']['status'], 'pass')
+            self.assertEqual(result['checks']['direct']['status'], 'pass')
+            self.assertEqual(json.loads(evidence.read_text()), result)
+            self.assertTrue(Path(result['relocated_app']).exists())
+            launcher.terminate.assert_called_once_with()
 
     def test_interrupt_retains_partial_checks_and_records_owned_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
