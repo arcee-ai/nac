@@ -18,9 +18,11 @@ import {
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useBrowsePath, useSshBrowsePath, type BrowseKind } from "@/app/services/queries";
+import type { BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+
+import { usePathPicker } from "./usePathPicker";
 
 /**
  * Picks a path from the machine running the server, or from an SSH host when
@@ -49,8 +51,12 @@ interface PathPickerProps {
 
 export function PathPickerModal({ open, ssh, ...props }: PathPickerProps & { open: boolean }) {
   const mounted = useExitTransition(open);
+  // Each opening is its own picker, even one that reopens while the last is
+  // still sliding out: no draft or pending Select carries over.
+  const [opening, setOpening] = useState({ open, count: 0 });
+  if (opening.open !== open) setOpening({ open, count: opening.count + (open ? 1 : 0) });
   if (!mounted) return null;
-  return <PathPicker open={open} ssh={ssh ?? null} {...props} />;
+  return <PathPicker key={opening.count} open={open} ssh={ssh ?? null} {...props} />;
 }
 
 function PathPicker({
@@ -65,27 +71,18 @@ function PathPicker({
   onClose,
   onSelect,
 }: PathPickerProps & { open: boolean }) {
-  const pickingFile = kind !== "directory";
   const isMobile = useIsMobile();
-  // A directory is picked from an empty path so the server starts at its root,
-  // or the host at the login home.
-  const [directory, setDirectory] = useState(initialPath.trim());
-  const [draft, setDraft] = useState(initialPath.trim());
-  const [file, setFile] = useState<string | null>(null);
-  const [hidden, setHidden] = useState(showHidden);
-  // Both hooks are called every render, as hooks must be; the one that is not
-  // the source of this listing is disabled and never fetches.
-  const local = useBrowsePath(directory || null, kind, hidden, !ssh);
-  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
-  const { data, error, isFetching } = ssh ? remote : local;
-
-  const goTo = (path: string) => {
-    setDirectory(path);
-    setDraft(path);
-    setFile(null);
-  };
-
-  const chosen = pickingFile ? file : (data?.path ?? directory);
+  const picker = usePathPicker({
+    open,
+    kind,
+    initialPath,
+    ssh: ssh ?? null,
+    showHidden,
+    onSelect,
+  });
+  const { pickingFile, draft, hidden, chosen, checking, failure } = picker;
+  const { data, error, isFetching } = picker.listing;
+  const selectDisabled = !chosen || checking !== null;
 
   return (
     <Modal
@@ -157,10 +154,9 @@ function PathPicker({
               className="min-h-11 max-w-full"
               variant={ButtonVariant.Primary}
               content={ButtonContent.Text}
-              disabled={!chosen}
-              onClick={() => {
-                if (chosen) onSelect(chosen);
-              }}
+              disabled={selectDisabled}
+              aria-busy={checking !== null}
+              onClick={picker.select}
             >
               Select
             </StickyButton>
@@ -169,10 +165,9 @@ function PathPicker({
               variant={ButtonVariant.Primary}
               size={ButtonSize.Large}
               content={ButtonContent.Text}
-              disabled={!chosen}
-              onClick={() => {
-                if (chosen) onSelect(chosen);
-              }}
+              disabled={selectDisabled}
+              aria-busy={checking !== null}
+              onClick={picker.select}
             >
               Select
             </Button>
@@ -192,7 +187,7 @@ function PathPicker({
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.parent}
-            onClick={() => data?.parent && goTo(data.parent)}
+            onClick={() => data?.parent && picker.goTo(data.parent)}
             aria-label="Parent directory"
           >
             <Icon iconName={IconName.Top} />
@@ -202,7 +197,7 @@ function PathPicker({
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.home}
-            onClick={() => data?.home && goTo(data.home)}
+            onClick={() => data?.home && picker.goTo(data.home)}
             aria-label="Home directory"
           >
             <Icon iconName={IconName.Home} />
@@ -210,19 +205,21 @@ function PathPicker({
           <Input
             inputSize={isMobile ? InputSize.Large : InputSize.Medium}
             className="order-last w-full min-w-0 md:order-none md:w-auto md:flex-1"
-            aria-label="Folder path"
             placeholder={ssh ? "~/path/on/the/host" : "/path/to/directory"}
+            aria-label={pickingFile ? "Directory path" : "Folder path"}
+            aria-invalid={failure !== null}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => picker.setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing)
+                picker.goTo(draft.trim());
             }}
           />
           <Button
             variant={hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
-            onClick={() => setHidden((on) => !on)}
+            onClick={picker.toggleHidden}
             aria-pressed={hidden}
             title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
             aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
@@ -231,7 +228,11 @@ function PathPicker({
           </Button>
         </div>
 
-        {error ? (
+        {failure ? (
+          <p role="alert" className="text-small !leading-[22px] text-error-primary shrink-0">
+            {`Cannot select this folder: ${errorMessage(failure.error)}. Check the path, or choose a folder from the list.`}
+          </p>
+        ) : error ? (
           <p role="alert" className="text-small !leading-[22px] text-error-primary shrink-0">
             {errorMessage(error)}
           </p>
@@ -260,9 +261,11 @@ function PathPicker({
               className={cn(
                 "flex min-h-11 md:min-h-9 items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
                 "hover:bg-elevation-sublevel-variant-A",
-                file === entry.path && "bg-elevation-sublevel-variant-A",
+                picker.file === entry.path && "bg-elevation-sublevel-variant-A",
               )}
-              onClick={() => (entry.is_directory ? goTo(entry.path) : setFile(entry.path))}
+              onClick={() =>
+                entry.is_directory ? picker.goTo(entry.path) : picker.chooseFile(entry.path)
+              }
               onDoubleClick={() => {
                 if (!entry.is_directory) onSelect(entry.path);
               }}
@@ -290,7 +293,11 @@ function PathPicker({
         </div>
 
         <p className="text-small !leading-[22px] text-basic-secondary shrink-0 break-all">
-          {chosen ? `Selected: ${chosen}` : "Nothing selected yet."}
+          {checking !== null
+            ? `Checking ${checking || "this folder"}…`
+            : chosen
+              ? `Selected: ${chosen}`
+              : "Nothing selected yet."}
         </p>
       </div>
     </Modal>

@@ -1,6 +1,8 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { type BrowseKind } from "./keys";
 import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api";
+/** Where a listing comes from: the server's own filesystem or one SSH host. */
+export type BrowseSource = SshTarget | null;
 /**
  * Directory listing from the machine running the server. Only fetched while
  * the picker is open, and never cached long: the filesystem moves under us.
@@ -23,6 +25,24 @@ export declare function useSshBrowsePath(target: SshTarget | null, path: string 
     path: string;
     truncated: boolean;
 }>, Error>;
+/**
+ * Asks the server afresh for the listing a typed path names, with the same
+ * request the picker browses with. The server expands `~` and canonicalizes,
+ * so whatever resolves here is the path the listing would show after Enter;
+ * a missing, non-directory or unreadable path rejects with the server's error.
+ *
+ * Every call is its own request, outside the query cache: a request already
+ * running for the same path may predate a change on disk, and a listing or
+ * another picker may share that cache entry, so it is neither reused nor
+ * canceled.
+ */
+export declare function useResolveBrowsePath(): (source: BrowseSource, path: string | null, kind: BrowseKind, hidden: boolean) => Promise<{
+    entries: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["BrowseEntry"][];
+    home?: string | null;
+    parent?: string | null;
+    path: string;
+    truncated: boolean;
+}>;
 /**
  * Opens the connection the launch form needs before it can offer anything
  * remote, and reports the login home so the form can start there.
