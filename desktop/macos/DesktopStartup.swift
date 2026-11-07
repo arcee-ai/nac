@@ -56,8 +56,15 @@ enum DesktopStartup {
             throw DesktopStartupError.message("HOME is not an absolute directory. Pass --directory with an existing absolute path and relaunch NAC.")
         }
         let directory = options.directory ?? home
-        let cwd = URL(fileURLWithPath: directory.hasPrefix("/") ? directory :
-            URL(fileURLWithPath: home).appendingPathComponent(directory).path).resolvingSymlinksInPath()
+        let bootstrap = URL(fileURLWithPath: directory.hasPrefix("/") ? directory :
+            URL(fileURLWithPath: home).appendingPathComponent(directory).path)
+        #if NATIVE_AUTH_FIXTURE
+        // Foundation hides Darwin's /private prefix for existing paths. The
+        // closed fixture admits its explicit POSIX spelling before discovery.
+        let cwd = bootstrap
+        #else
+        let cwd = bootstrap.resolvingSymlinksInPath()
+        #endif
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: cwd.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw DesktopStartupError.message("The bootstrap directory is unavailable. Pass --directory with an existing directory and relaunch NAC.")
