@@ -525,7 +525,7 @@ class ProductionObserverControls(unittest.TestCase):
                 'configuration_selection': Mock(return_value={}), 'immutable_snapshot': Mock(return_value={}),
                 'generated_runner': Mock(return_value=(runner, {'xctestrun_sha256': hashlib.sha256(runner.read_bytes()).hexdigest()})),
                 'observe_prerequisites': Mock(return_value={}), 'authorization_policy': Mock(return_value={}),
-                'test_contract': MagicMock(), 'AttachmentTool': MagicMock(), 'OwnerWitness': Mock(return_value=owner),
+                'test_contract': MagicMock(), 'package_contract': MagicMock(), 'AttachmentTool': MagicMock(), 'OwnerWitness': Mock(return_value=owner),
                 'LiveAudit': Mock(return_value=audit), 'require_integrity': Mock(return_value={}), 'remove_profile': remove}
             for name, value in values.items():
                 stack.enter_context(patch('ci_startup.' + name, value))
