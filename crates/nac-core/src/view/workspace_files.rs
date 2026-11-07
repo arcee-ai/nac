@@ -62,8 +62,13 @@ pub fn list_files(target: &GitTarget) -> Result<WorkspaceFileList> {
         .transpose()?;
     let git_dir = if let Some(root) = &path_root {
         Some(
-            String::from_utf8(run_git(target, root, &["rev-parse", "--absolute-git-dir"])?)
-                .context("git directory is not valid UTF-8")?,
+            String::from_utf8(run_git(
+                target,
+                root,
+                "rev-parse",
+                &["rev-parse", "--absolute-git-dir"],
+            )?)
+            .context("git directory is not valid UTF-8")?,
         )
     } else {
         None
@@ -94,7 +99,7 @@ pub fn list_files(target: &GitTarget) -> Result<WorkspaceFileList> {
         "--exclude-standard",
         "--full-name",
     ]);
-    let raw = run_git(target, target.root(), &args)?;
+    let raw = run_git(target, target.root(), "ls-files", &args)?;
 
     let mut files: Vec<String> = raw
         .split(|byte| *byte == 0)
@@ -183,6 +188,7 @@ pub fn list_revision_files(target: &GitTarget, commit: &str) -> Result<Workspace
     let raw = run_git(
         target,
         &repo_root,
+        "ls-tree",
         &["ls-tree", "-r", "-z", "--full-tree", commit],
     )?;
 
@@ -223,10 +229,15 @@ pub fn read_revision_file(
         bail!("invalid path: '{relpath}' is not a regular file");
     }
 
-    let size = String::from_utf8_lossy(&run_git(target, &repo_root, &["cat-file", "-s", &object])?)
-        .trim()
-        .parse::<u64>()
-        .with_context(|| format!("cannot measure '{relpath}'"))?;
+    let size = String::from_utf8_lossy(&run_git(
+        target,
+        &repo_root,
+        "cat-file",
+        &["cat-file", "-s", &object],
+    )?)
+    .trim()
+    .parse::<u64>()
+    .with_context(|| format!("cannot measure '{relpath}'"))?;
     if size > MAX_FILE_BYTES {
         return Ok(WorkspaceFileContent {
             path: relpath,
@@ -237,7 +248,12 @@ pub fn read_revision_file(
         });
     }
 
-    let bytes = run_git(target, &repo_root, &["cat-file", "blob", &object])?;
+    let bytes = run_git(
+        target,
+        &repo_root,
+        "cat-file",
+        &["cat-file", "blob", &object],
+    )?;
     let binary = bytes.iter().take(BINARY_SNIFF_BYTES).any(|byte| *byte == 0);
     let content = if binary {
         None
@@ -266,7 +282,7 @@ fn parse_tree_blob_path(record: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&record[tab + 1..]).into_owned())
 }
 
-fn run_git(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
+fn run_git(target: &GitTarget, cwd: &Path, operation: &str, args: &[&str]) -> Result<Vec<u8>> {
     let output = target.output(cwd, args)?;
     if !output.status.success() {
         if let Some(reason) = target.unavailable_reason(&output) {
@@ -274,7 +290,7 @@ fn run_git(target: &GitTarget, cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
         }
         bail!(
             "git {} failed: {}",
-            args[0],
+            operation,
             first_stderr_line(&output.stderr)
         );
     }
