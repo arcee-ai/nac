@@ -9,6 +9,8 @@ import tempfile
 import time
 
 from ci_qualifications import require_checkout
+from ci_paths_budget import active, using
+from ci_startup_process import package_contract
 from ci_startup_api import Provider, configuration_selection, require, seed_model, setup_engine
 from ci_startup_attachments import collect
 from ci_startup_audit import LiveAudit, persisted_audit
@@ -92,173 +94,179 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
     caller_abort = {'observed': False, 'origin': None}
     result = folder / 'ordinary-startup.xcresult'
     stage = 'preparation'
+    bound = active()
     try:
-        base = provider.start()
-        profile = prepare_profile(profiles, scenario, base + '/models-dev')
-        write(folder / 'fixture-location.json', {'root': str(profile['root']), 'scenario': scenario})
-        config, config_path, admission = prepare_configuration(profile, app, manifest, product, tests, harness_sha)
-        configuration_sha256 = digest(config_path)
-        write(folder / 'configuration.json', config)
-        write(folder / 'package-admission.json', admission)
-        proof['configuration_preflight'] = configuration_selection(profile, Path(config['app_path']) / 'Contents/Resources/nac-web')
-        model_config = None
-        if scenario == 'configuredLocal':
-            with setup_engine(profile, config, folder / 'settings-engine.log') as setup:
-                model_config = seed_model(setup['base_url'], base)
-                proof['settings_preparation'] = setup
-                proof['model_config'] = model_config
-        protected = immutable_snapshot(profile)
-        proof['protected_before'] = protected
-        write(folder / 'protected-before.json', protected)
-        initial_status = observe_prerequisites(command)
-        policy = authorization_policy(initial_status)
-        write(folder / 'prerequisites-initial.json', initial_status)
-        stage = 'build'
-        # The full selected SDK target and actual generated runner must exist
-        # before starting the owner observer or requesting any public UI input.
-        runner, runner_receipt = generated_runner(folder, config_path, configuration_sha256, config, selection, run)
-        stage = 'admission'
-        status = observe_prerequisites(command)
-        require(authorization_policy(status) == policy, 'persistent_policy_changed_during_build')
-        write(folder / 'prerequisites-before.json', status)
-        require(digest(config_path) == configuration_sha256, 'configuration_changed_during_build')
-        test_contract(tests).validate_normal_package(config, str(manifest), str(product),
-            product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha)
-        tool = AttachmentTool(folder, command)
-        tool.prepare()  # Actual selected SDK tool/schema admission, before input.
-        witness = OwnerWitness(config, configuration_sha256)
-        witness.start(observer, config_path)
-        if scenario in ('onboarding', 'configuredLocal'):
-            audit = LiveAudit(witness, {**config, 'provider_base': base}, product, model_config)
-            audit.start()
-        require(digest(config_path) == configuration_sha256
-                and digest(runner) == runner_receipt['xctestrun_sha256'], 'runner_configuration_changed_before_input')
-        stage = 'test'
-        attempted = True
-        def abort():
-            reason = witness.failure
-            origin = 'witness'
-            if not reason:
-                reason = audit and audit.failure
-                origin = 'audit'
-            if reason and not caller_abort['observed']:
-                caller_abort.update(observed=True, origin=origin)
-            return reason
-        run(['xcodebuild', 'test-without-building', '-xctestrun', str(runner),
-             '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
-             '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
-             '-only-testing:NACStartupUITests/StartupJourneys/testOrdinaryStartup'],
-            folder / 'test.log', 300, env=runner_environment(),
-            abort=abort)
+        with using(bound.owner.work if bound else None):
+            base = provider.start()
+            profile = prepare_profile(profiles, scenario, base + '/models-dev', run=run, directory=folder)
+            write(folder / 'fixture-location.json', {'root': str(profile['root']), 'scenario': scenario})
+            config, config_path, admission = prepare_configuration(profile, app, manifest, product, tests, harness_sha, run=run, directory=folder)
+            configuration_sha256 = digest(config_path)
+            write(folder / 'configuration.json', config)
+            write(folder / 'package-admission.json', admission)
+            proof['configuration_preflight'] = configuration_selection(profile, Path(config['app_path']) / 'Contents/Resources/nac-web', run=run, directory=folder)
+            model_config = None
+            if scenario == 'configuredLocal':
+                with setup_engine(profile, config, folder / 'settings-engine.log') as setup:
+                    model_config = seed_model(setup['base_url'], base)
+                    proof['settings_preparation'] = setup
+                    proof['model_config'] = model_config
+            protected = immutable_snapshot(profile)
+            proof['protected_before'] = protected
+            write(folder / 'protected-before.json', protected)
+            initial_status = observe_prerequisites(command)
+            policy = authorization_policy(initial_status)
+            write(folder / 'prerequisites-initial.json', initial_status)
+            stage = 'build'
+            # The full selected SDK target and actual generated runner must exist
+            # before starting the owner observer or requesting any public UI input.
+            runner, runner_receipt = generated_runner(folder, config_path, configuration_sha256, config, selection, run)
+            stage = 'admission'
+            status = observe_prerequisites(command)
+            require(authorization_policy(status) == policy, 'persistent_policy_changed_during_build')
+            write(folder / 'prerequisites-before.json', status)
+            require(digest(config_path) == configuration_sha256, 'configuration_changed_during_build')
+            package_contract(test_contract(tests), 'validate_normal_package', [config, str(manifest), str(product)],
+                dict(product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha),
+                tests=tests, directory=folder, name='package-before-input', run=run)
+            tool = AttachmentTool(folder, command)
+            tool.prepare()  # Actual selected SDK tool/schema admission, before input.
+            witness = OwnerWitness(config, configuration_sha256)
+            witness.start(observer, config_path)
+            if scenario in ('onboarding', 'configuredLocal'):
+                audit = LiveAudit(witness, {**config, 'provider_base': base}, product, model_config)
+                audit.start()
+            require(digest(config_path) == configuration_sha256
+                    and digest(runner) == runner_receipt['xctestrun_sha256'], 'runner_configuration_changed_before_input')
+            stage = 'test'
+            attempted = True
+            def abort():
+                reason = witness.failure
+                origin = 'witness'
+                if not reason:
+                    reason = audit and audit.failure
+                    origin = 'audit'
+                if reason and not caller_abort['observed']:
+                    caller_abort.update(observed=True, origin=origin)
+                return reason
+            run(['xcodebuild', 'test-without-building', '-xctestrun', str(runner),
+                 '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
+                 '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
+                 '-only-testing:NACStartupUITests/StartupJourneys/testOrdinaryStartup'],
+                folder / 'test.log', 300, env=runner_environment(),
+                abort=abort)
     except BaseException as error:
         errors[stage] = error
     finally:
-        if audit:
-            # Preserve the rejection before stop() can replace it with a
-            # generic missing-proof exception. Never retain exception text.
-            proof['api_audit_diagnostic'] = audit_diagnostic(audit, caller_abort, folder)
-            try:
-                proof['live_api'] = audit.stop()
-            except BaseException as error:
-                errors['api'] = error
-        if result.exists():
-            try:
-                proof['actual_result'] = result_receipt(result)
-                write(folder / 'actual-result.json', proof['actual_result'])
-            except BaseException as error:
-                errors['result'] = error
-            try:
-                collection = collect(tool, result, config, configuration_sha256,
-                                     witness.attachment_binding(), folder / 'attachments')
-                proof['attachments_complete'] = collection['complete']
-            except BaseException as error:
-                errors['collector'] = error
-            image = folder / 'attachments' / ('nac342-ordinary-' + scenario + '.png')
-            if image.exists():
+        with using(bound.owner.cleanup if bound else None):
+            if audit:
+                # Preserve the rejection before stop() can replace it with a
+                # generic missing-proof exception. Never retain exception text.
+                proof['api_audit_diagnostic'] = audit_diagnostic(audit, caller_abort, folder)
                 try:
-                    mode = {'onboarding': 'instance-empty', 'configuredLocal': 'startup-configured',
-                            'invalidConfig': 'startup-invalid', 'futureStore': 'startup-future'}[scenario]
-                    proof['image'] = {'sha256': digest(image), 'observation': native_report(
-                        [str(image_reader), '--' + mode, str(image)], folder / 'image.log')}
+                    proof['live_api'] = audit.stop()
                 except BaseException as error:
-                    errors['image'] = error
-            else:
-                errors['image'] = RuntimeError('Actual named startup PNG unavailable')
-        elif attempted:
-            errors['result'] = RuntimeError('Actual startup result unavailable')
-        if attempted:
-            try:
-                after = observe_prerequisites(command)
-                write(folder / 'prerequisites-after.json', after)
-                require(policy is not None and authorization_policy(after) == policy, 'persistent_policy_changed')
-                proof['persistent_authorization_policy_unchanged'] = True
-            except BaseException as error:
-                errors['policy'] = error
-        if witness:
-            try:
-                settled = witness.settle(time.monotonic())
-                proof['cleanup'] = cleanup_receipt(settled)
-                safe_to_remove = True
-            except BaseException as error:
-                errors['cleanup'] = error
-            finally:
+                    errors['api'] = error
+            if result.exists():
                 try:
-                    witness.stop()
+                    proof['actual_result'] = result_receipt(result)
+                    write(folder / 'actual-result.json', proof['actual_result'])
+                except BaseException as error:
+                    errors['result'] = error
+                try:
+                    collection = collect(tool, result, config, configuration_sha256,
+                                         witness.attachment_binding(), folder / 'attachments')
+                    proof['attachments_complete'] = collection['complete']
+                except BaseException as error:
+                    errors['collector'] = error
+                image = folder / 'attachments' / ('nac342-ordinary-' + scenario + '.png')
+                if image.exists():
+                    try:
+                        mode = {'onboarding': 'instance-empty', 'configuredLocal': 'startup-configured',
+                                'invalidConfig': 'startup-invalid', 'futureStore': 'startup-future'}[scenario]
+                        proof['image'] = {'sha256': digest(image), 'observation': native_report(
+                            [str(image_reader), '--' + mode, str(image)], folder / 'image.log')}
+                    except BaseException as error:
+                        errors['image'] = error
+                else:
+                    errors['image'] = RuntimeError('Actual named startup PNG unavailable')
+            elif attempted:
+                errors['result'] = RuntimeError('Actual startup result unavailable')
+            if attempted:
+                try:
+                    after = observe_prerequisites(command)
+                    write(folder / 'prerequisites-after.json', after)
+                    require(policy is not None and authorization_policy(after) == policy, 'persistent_policy_changed')
+                    proof['persistent_authorization_policy_unchanged'] = True
+                except BaseException as error:
+                    errors['policy'] = error
+            if witness:
+                try:
+                    settled = witness.settle(time.monotonic())
+                    proof['cleanup'] = cleanup_receipt(settled)
+                    safe_to_remove = True
+                except BaseException as error:
+                    errors['cleanup'] = error
+                finally:
+                    try:
+                        witness.stop()
+                    except BaseException as error:
+                        errors['cleanup'] = errors['cleanup'] or error
+                        safe_to_remove = False
+                try:
+                    proof['owner_observation'] = witness.failure_receipt()
+                    write(folder / 'owner-observation.json', proof['owner_observation'])
                 except BaseException as error:
                     errors['cleanup'] = errors['cleanup'] or error
                     safe_to_remove = False
-            try:
-                proof['owner_observation'] = witness.failure_receipt()
-                write(folder / 'owner-observation.json', proof['owner_observation'])
-            except BaseException as error:
-                errors['cleanup'] = errors['cleanup'] or error
-                safe_to_remove = False
-        # The persisted read is additional evidence after live settlement;
-        # it never restarts an unsettled run or counts as rendered UI reload.
-        if safe_to_remove and scenario == 'configuredLocal' and 'live_api' in proof:
-            try:
-                with setup_engine(profile, config, folder / 'persisted-engine.log') as setup:
-                    proof['persisted_api'] = persisted_audit(setup['base_url'], {**config, 'provider_base': base},
-                                                           model_config, proof['live_api'])
-            except BaseException as error:
-                errors['api'] = errors['api'] or error
-                safe_to_remove = False  # A later helper's retirement may be unknown.
-        if profile:
-            try:
-                proof['protected_after'] = immutable_snapshot(profile)
-                write(folder / 'protected-after.json', proof['protected_after'])
-                proof['integrity'] = require_integrity(profile, protected)
-                if config:
-                    test_contract(tests).validate_normal_package(config, str(manifest), str(product),
-                        product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha)
-            except BaseException as error:
-                errors['integrity'] = error
-                safe_to_remove = False
-            # A pre-launch failure lacks a full cleanup receipt. Preserve it
-            # just like an unknown owner; do not infer zero input/ownership.
-            if safe_to_remove:
+            # The persisted read is additional evidence after live settlement;
+            # it never restarts an unsettled run or counts as rendered UI reload.
+            if safe_to_remove and scenario == 'configuredLocal' and 'live_api' in proof:
                 try:
-                    remove_profile(profile, settled)
-                    proof['profile_removed'] = True
+                    with setup_engine(profile, config, folder / 'persisted-engine.log') as setup:
+                        proof['persisted_api'] = persisted_audit(setup['base_url'], {**config, 'provider_base': base},
+                                                               model_config, proof['live_api'])
                 except BaseException as error:
-                    errors['cleanup'] = errors['cleanup'] or error
-        try:
-            proof['provider'] = provider.stop(require_complete=scenario == 'configuredLocal' and errors['test'] is None)
-        except BaseException as error:
-            errors['provider'] = error
-        proof.update(scenario=scenario, P=PRODUCT, Q=TEST_SOURCE, R=PROTOCOL_SOURCE, H=harness_sha,
-            public_test_requested=attempted, input_completion_unknown=collection is None or not collection.get('complete'),
-            rendered_UI_reload_observed=False,
-            errors={name: {'type': type(error).__name__, 'stage': name} if error else None for name, error in errors.items()})
-        proof['passed'] = attempted and all(error is None for error in errors.values())
-        write(folder / 'case.json', proof)
-        if profile and not safe_to_remove:
-            write(folder / 'retained-fixture.json', {'root': str(profile['root']),
-                'positive_process_settlement': 'cleanup' in proof,
-                'retention_reasons': [name for name, error in errors.items() if error is not None]})
-        # Build products and XCTest's raw result never enter the bounded export.
-        if (folder / 'derived').exists():
-            shutil.rmtree(folder / 'derived')
+                    errors['api'] = errors['api'] or error
+                    safe_to_remove = False  # A later helper's retirement may be unknown.
+            try:
+                proof['provider'] = provider.stop(require_complete=scenario == 'configuredLocal' and errors['test'] is None)
+            except BaseException as error:
+                errors['provider'] = error
+                safe_to_remove = False
+            if profile:
+                try:
+                    proof['protected_after'] = immutable_snapshot(profile)
+                    write(folder / 'protected-after.json', proof['protected_after'])
+                    proof['integrity'] = require_integrity(profile, protected)
+                    if config:
+                        package_contract(test_contract(tests), 'validate_normal_package', [config, str(manifest), str(product)],
+                            dict(product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha),
+                            tests=tests, directory=folder, name='package-after-cleanup', run=run)
+                except BaseException as error:
+                    errors['integrity'] = error
+                    safe_to_remove = False
+                # A pre-launch failure lacks a full cleanup receipt. Preserve it
+                # just like an unknown owner; do not infer zero input/ownership.
+                if safe_to_remove:
+                    try:
+                        remove_profile(profile, settled)
+                        proof['profile_removed'] = True
+                    except BaseException as error:
+                        errors['cleanup'] = errors['cleanup'] or error
+            proof.update(scenario=scenario, P=PRODUCT, Q=TEST_SOURCE, R=PROTOCOL_SOURCE, H=harness_sha,
+                public_test_requested=attempted, input_completion_unknown=collection is None or not collection.get('complete'),
+                rendered_UI_reload_observed=False,
+                errors={name: {'type': type(error).__name__, 'stage': name} if error else None for name, error in errors.items()})
+            proof['passed'] = attempted and all(error is None for error in errors.values())
+            write(folder / 'case.json', proof)
+            if profile and not safe_to_remove:
+                write(folder / 'retained-fixture.json', {'root': str(profile['root']),
+                    'positive_process_settlement': 'cleanup' in proof,
+                    'retention_reasons': [name for name, error in errors.items() if error is not None]})
+            # Build products and XCTest's raw result never enter the bounded export.
+            if (folder / 'derived').exists():
+                shutil.rmtree(folder / 'derived')
     require(proof['passed'], 'ordinary_startup_case_' + scenario)
     return proof
 

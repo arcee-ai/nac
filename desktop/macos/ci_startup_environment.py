@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 
 from ci_qualifications import require_checkout
+from ci_startup_process import capture
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
@@ -17,7 +18,7 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def resolve_environment(product, profile):
+def resolve_environment(product, profile, *, run=None, directory=None):
     """No algorithm copy, ambient expectation, shell, product or process probe."""
     require_checkout(product, PRODUCT)
     source = Path(product) / SOURCE
@@ -34,10 +35,20 @@ def resolve_environment(product, profile):
     encoded = json.dumps(request, sort_keys=True).encode()
     if len(encoded) > 32 * 1024:
         raise RuntimeError('Startup environment input exceeds bound')
-    compiler = subprocess.check_output(['/usr/bin/xcrun', '--find', 'swiftc'], timeout=10).decode().strip()
+    if run is not None:
+        data, errors = capture(['/usr/bin/xcrun', '--find', 'swiftc'], directory, 'environment-find', 10, run, cwd=product)
+        if errors:
+            raise RuntimeError('Environment compiler lookup stderr')
+        compiler = data.decode().strip()
+    else:
+        compiler = subprocess.check_output(['/usr/bin/xcrun', '--find', 'swiftc'], timeout=10).decode().strip()
     swift = ['/usr/bin/xcrun', 'swiftc']
-    version = subprocess.run([*swift, '--version'], capture_output=True, check=True, timeout=10)
-    version_data = version.stdout + version.stderr
+    if run is not None:
+        stdout, stderr = capture([*swift, '--version'], directory, 'environment-version', 10, run, cwd=product)
+        version_data = stdout + stderr
+    else:
+        version = subprocess.run([*swift, '--version'], capture_output=True, check=True, timeout=10)
+        version_data = version.stdout + version.stderr
     if len(version_data) > 4096:
         raise RuntimeError('Startup environment compiler provenance exceeds bound')
     with tempfile.TemporaryDirectory(prefix='environment-resolver-', dir=profile['root']) as temporary:
@@ -45,11 +56,20 @@ def resolve_environment(product, profile):
         input_file, executable = folder / 'input.json', folder / 'Resolver'
         input_file.write_bytes(encoded)
         input_file.chmod(0o400)
-        build = subprocess.run([*swift, '-swift-version', '5', str(source), str(helper), '-o', str(executable)],
-                               capture_output=True, timeout=45)
+        if run is not None:
+            stdout, stderr = capture([*swift, '-swift-version', '5', str(source), str(helper), '-o', str(executable)],
+                directory, 'environment-build', 45, run, cwd=product)
+            build = subprocess.CompletedProcess([], 0, stdout, stderr)
+        else:
+            build = subprocess.run([*swift, '-swift-version', '5', str(source), str(helper), '-o', str(executable)],
+                                   capture_output=True, timeout=45)
         if build.returncode or len(build.stdout) + len(build.stderr) > 32768:
             raise RuntimeError('Pure Foundation startup resolver compilation unavailable')
-        result = subprocess.run([str(executable), str(input_file)], capture_output=True, timeout=5)
+        if run is not None:
+            stdout, stderr = capture([str(executable), str(input_file)], directory, 'environment-resolve', 5, run, cwd=product)
+            result = subprocess.CompletedProcess([], 0, stdout, stderr)
+        else:
+            result = subprocess.run([str(executable), str(input_file)], capture_output=True, timeout=5)
         if result.returncode or result.stderr or len(result.stdout) > 32768:
             raise RuntimeError('Pure Foundation startup environment resolution unavailable')
         resolved = json.loads(result.stdout)

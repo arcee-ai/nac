@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 
 from ci_qualifications import require_checkout
+from ci_paths_budget import check as budget_check, time_limit
+from ci_startup_process import capture, package_contract
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
@@ -71,7 +73,8 @@ def environment(root, catalog_url):
             'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none', 'MODELS_DEV_URL': catalog_url}
 
 
-def prepare_profile(parent, scenario, catalog_url):
+def prepare_profile(parent, scenario, catalog_url, *, run=None, directory=None):
+    budget_check()
     if scenario not in CASES:
         raise RuntimeError('Unknown ordinary startup case')
     parent = canonical(parent)
@@ -80,7 +83,11 @@ def prepare_profile(parent, scenario, catalog_url):
     home, nac, workspace = Path(env['HOME']), Path(env['NAC_HOME']), root / 'workspace with spaces'
     nac.mkdir(parents=True, mode=0o700)
     workspace.mkdir(mode=0o700)
-    subprocess.run(['/usr/bin/git', 'init', '-q', str(workspace)], env=env, check=True, timeout=15)
+    if run is not None:
+        capture(['/usr/bin/git', 'init', '-q', str(workspace)], directory, 'profile-git', 15, run, cwd=root, env=env)
+    else:
+        subprocess.run(['/usr/bin/git', 'init', '-q', str(workspace)], env=env, check=True, timeout=time_limit(15))
+        budget_check()
     config, store = nac / 'config.toml', nac / 'dev.db'
     if scenario == 'invalidConfig':
         config.write_text('[broken\n')
@@ -130,7 +137,7 @@ def require_integrity(profile, before):
     return {'protected_before': before, 'protected_after': after, 'no_alternate_database': True}
 
 
-def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha):
+def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha, *, run=None, directory=None):
     """Host-side only; public XCTest reads the resulting frozen file and bundle."""
     product_root = canonical(product_root)
     require_checkout(product_root, PRODUCT)
@@ -142,8 +149,10 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
     relocated = root / 'Moved app folder with spaces/NAC.app'
     relocated.parent.mkdir()
     shutil.copytree(app, relocated, symlinks=True)
-    proof = contract.inspect_normal_package(str(manifest), str(relocated), str(product_root), product_sha=PRODUCT)
-    child_environment, environment_resolution = resolve_environment(product_root, profile)
+    proof = package_contract(contract, 'inspect_normal_package', [str(manifest), str(relocated), str(product_root)],
+        dict(product_sha=PRODUCT), tests=test_root, directory=directory, name='package-relocated', run=run)
+    child_environment, environment_resolution = (resolve_environment(product_root, profile, run=run, directory=directory)
+        if run is not None else resolve_environment(product_root, profile))
     environment_resolution.update(test_source_sha=TEST_SOURCE,
         startup_source_sha256=TEST_FILES['StartupJourneys.swift'],
         app_launch_arguments=['--directory', str(profile['home'])],
@@ -159,8 +168,9 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
         config[key] = proof[key]
     for key in ('native_sha256', 'engine_sha256', 'info_plist_sha256'):
         config[key] = proof['post_sign_receipt'][key]
-    admission = contract.validate_normal_package(config, str(manifest), str(product_root),
-        product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha)
+    admission = package_contract(contract, 'validate_normal_package', [config, str(manifest), str(product_root)],
+        dict(product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha),
+        tests=test_root, directory=directory, name='package-configuration', run=run)
     encoded = (json.dumps(config, indent=2) + '\n').encode()
     if len(encoded) > 32 * 1024:
         raise RuntimeError('Startup configuration exceeds its immutable bound')

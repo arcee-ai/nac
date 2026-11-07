@@ -99,7 +99,7 @@ class StartupSupervisorTests(unittest.TestCase):
                 'prepare_configuration': MagicMock(return_value=(config, config_path, {})),
                 'configuration_selection': MagicMock(return_value={}), 'immutable_snapshot': MagicMock(return_value={}),
                 'generated_runner': generated, 'observe_prerequisites': MagicMock(return_value={}),
-                'authorization_policy': MagicMock(return_value={}), 'test_contract': MagicMock(),
+                'authorization_policy': MagicMock(return_value={}), 'test_contract': MagicMock(), 'package_contract': MagicMock(),
                 'AttachmentTool': MagicMock(), 'OwnerWitness': MagicMock(return_value=witness),
                 'LiveAudit': MagicMock(return_value=audit), 'result_receipt': MagicMock(return_value={'files': 1}),
                 'collect': collect, 'require_integrity': MagicMock(return_value={}), 'remove_profile': MagicMock()}
