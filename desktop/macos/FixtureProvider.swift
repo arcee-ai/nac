@@ -9,6 +9,17 @@ final class FixtureProvider {
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
     private(set) var responseCount = 0
+    #if PREVIEW_SMOKE
+    var holdResponses = false
+    private(set) var heldResponseCount = 0
+    private var heldResponses: [() -> Void] = []
+    func releaseResponses() {
+        holdResponses = false
+        let completions = heldResponses
+        heldResponses.removeAll()
+        completions.forEach { $0() }
+    }
+    #endif
     private var startContinuation: CheckedContinuation<Void, Error>?
     var baseURL: URL!
 
@@ -57,6 +68,9 @@ final class FixtureProvider {
         listener?.cancel()
         for connection in connections.values { connection.cancel() }
         connections.removeAll()
+        #if PREVIEW_SMOKE
+        heldResponses.removeAll()
+        #endif
     }
 
     private func receive(_ connection: NWConnection, accumulated: Data) {
@@ -107,13 +121,21 @@ final class FixtureProvider {
         send(connection, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" +
              event(["type": "response.output_text.delta", "delta": Self.partial]))
         // Deliberately separate transport frames so the real UI can observe streaming.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        let finish = { [weak self] in
             guard let self else { return }
             self.send(connection, self.event(["type": "response.output_text.delta",
                 "delta": " NAC Mac preview."]) +
                 self.event(["type": "response.output_item.done", "output_index": 0, "item": item]) +
                 self.event(["type": "response.completed", "response": response]), final: true)
         }
+        #if PREVIEW_SMOKE
+        if holdResponses {
+            heldResponseCount += 1
+            heldResponses.append(finish)
+            return
+        }
+        #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: finish)
     }
 
     private func encode(_ object: [String: Any]) -> String {

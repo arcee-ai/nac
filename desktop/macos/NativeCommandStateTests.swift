@@ -53,6 +53,38 @@ struct NativeCommandStateTests {
         let successor = state.beginDocument(receipt: receipt)!
         precondition(successor.document != binding.document && successor.view == binding.view)
         precondition(!receive(ready))
+        // A scoped connection-loss fact disables commands without acquiring
+        // any execution authority. Duplicate/late readiness cannot revive it.
+        let lostState = NativeCommandState(receipt: receipt)!
+        let lostBinding = lostState.beginDocument(receipt: receipt)!
+        var lost: [String: Any] = ["version": 1, "kind": "ready", "launch": lostBinding.launch,
+                                  "view": lostBinding.view, "document": lostBinding.document]
+        func lostMessage() throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: lost), as: UTF8.self)
+        }
+        let origin = URL(string: receipt.endpoint!)!
+        let firstReady = try lostMessage()
+        precondition(lostState.receive(firstReady, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
+        lost["kind"] = "connection_lost"
+        let disconnected = try lostMessage()
+        precondition(!lostState.receive(disconnected, origin: origin, mainFrame: false, currentView: true, receipt: receipt))
+        precondition(lostState.receive(disconnected, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
+        precondition(!lostState.ready && lostState.connectionLost)
+        precondition(lostState.issue(.settings, receipt: receipt) == nil)
+        precondition(!lostState.receive(disconnected, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
+        lost["kind"] = "ready"
+        let lateReady = try lostMessage()
+        precondition(!lostState.receive(lateReady, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
+        precondition(lostState.pendingConnectionLoss == lostBinding)
+        lostState.endDocument()
+        precondition(lostState.binding == nil && lostState.pendingConnectionLoss == lostBinding)
+        precondition(!lostState.consumeConnectionLoss(binding))
+        precondition(lostState.consumeConnectionLoss(lostBinding))
+        precondition(!lostState.consumeConnectionLoss(lostBinding))
+        let nextLostBinding = lostState.beginDocument(receipt: receipt)!
+        precondition(nextLostBinding.document != lostBinding.document && !lostState.connectionLost &&
+                     lostState.pendingConnectionLoss == nil)
+        precondition(!lostState.receive(disconnected, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
         state.retire()
         precondition(state.beginDocument(receipt: receipt) == nil)
         precondition(state.issue(.settings, receipt: receipt) == nil)

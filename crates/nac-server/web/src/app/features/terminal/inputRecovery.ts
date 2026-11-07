@@ -3,6 +3,8 @@ type Entry = { failed: boolean; readers: number; listeners: Set<() => void> };
 export interface TerminalInputRecoveryLease {
   current: boolean;
   readonly available: boolean;
+  /** Deliberately non-recording observation, not exhausted live-input capacity. */
+  readonly observationOnly: boolean;
   subscribe(listener: () => void): () => void;
   acknowledge(): boolean;
   release(): void;
@@ -13,13 +15,43 @@ export class TerminalInputRecovery {
   private readonly entries = new Map<string, Entry>();
   private closed = false;
 
-  constructor(private readonly limit = 128) {}
+  constructor(
+    private readonly limit = 128,
+    private readonly requireAcknowledgement = false,
+  ) {}
 
-  acquire(sessionId: string, executionId: string): TerminalInputRecoveryLease {
+  acquire(
+    sessionId: string,
+    executionId: string,
+    observationOnly = false,
+  ): TerminalInputRecoveryLease {
     const key = JSON.stringify([sessionId, executionId]);
-    let entry = this.entries.get(key);
-    if (!this.closed && !entry && this.entries.size < this.limit) {
-      entry = { failed: false, readers: 0, listeners: new Set() };
+    // Read-only observations cannot acknowledge live delivery. They receive an
+    // unavailable, non-recording lease, never a false/acknowledged cached entry.
+    // Ordinary documents preserve their existing acquisition semantics.
+    const record = !this.requireAcknowledgement || !observationOnly;
+    let entry = record ? this.entries.get(key) : undefined;
+    if (
+      record &&
+      !this.closed &&
+      !entry &&
+      this.requireAcknowledgement &&
+      this.entries.size >= this.limit
+    ) {
+      // Keep acknowledged facts across ordinary remounts. Reclaim only inactive
+      // acknowledged entries; reopening an evicted execution conservatively
+      // requires acknowledgement again. Unresolved delivery facts never evict.
+      for (const [candidate, value] of this.entries) {
+        if (!value.failed && !value.readers) {
+          this.entries.delete(candidate);
+          break;
+        }
+      }
+    }
+    if (record && !this.closed && !entry && this.entries.size < this.limit) {
+      // After native recovery the old document may have died without reporting
+      // uncertainty. Even a newly created terminal requires one explicit ack.
+      entry = { failed: this.requireAcknowledgement, readers: 0, listeners: new Set() };
       this.entries.set(key, entry);
     }
     if (entry) entry.readers++;
@@ -27,6 +59,7 @@ export class TerminalInputRecovery {
     const subscriptions = new Set<() => void>();
     const available = () => !this.closed && !released && !!entry && this.entries.get(key) === entry;
     const lease: TerminalInputRecoveryLease = {
+      observationOnly: !record,
       get available() {
         return available();
       },
@@ -60,7 +93,8 @@ export class TerminalInputRecovery {
           for (const listener of subscriptions) entry.listeners.delete(listener);
           entry.readers--;
           // Unresolved failures never disappear merely because a view detached.
-          if (!entry.failed && !entry.readers) this.entries.delete(key);
+          if (!this.requireAcknowledgement && !entry.failed && !entry.readers)
+            this.entries.delete(key);
         }
         subscriptions.clear();
         released = true;

@@ -150,6 +150,84 @@ class NativeCommandScriptTests(unittest.TestCase):
           assert.throws(() => port.connect(callback), /handler unavailable/);
         """)
 
+    def test_matching_retirement_closes_lifetime_once_after_fencing_dispatch(self):
+        self.run_script("""
+          let closed = 0;
+          const release = port.connectLifetime(() => {
+            closed++;
+            assert.equal(port.dispatch(binding, request), false);
+          });
+          assert.equal(port.retire({...binding, document: 'old'}), false);
+          assert.equal(closed, 0);
+          assert.equal(port.retire(binding), true);
+          assert.equal(port.retire(binding), false);
+          release();
+          assert.equal(closed, 1);
+          assert.throws(() => port.connectLifetime(() => {}), /UI lifetime unavailable/);
+        """)
+
+    def test_view_disposal_closes_activated_document_without_a_native_binding(self):
+        self.run_script("""
+          let closed = 0;
+          port.connectLifetime(() => {
+            closed++;
+            assert.equal(port.dispatch(binding, request), false);
+          });
+          // Provisional navigation cleared the native binding while this old
+          // page is still current. Disposal belongs to the concrete view.
+          assert.equal(port.retireView(), true);
+          assert.equal(port.retireView(), false);
+          assert.equal(closed, 1);
+          assert.equal(port.activate(binding), false);
+        """)
+
+    def test_view_disposal_before_activation_closes_lifetime_and_fences_late_setup(self):
+        self.run_script("""
+          const earlyWindow = {webkit: {messageHandlers: {nacUIReceipt: handler}}};
+          earlyWindow.top = earlyWindow;
+          // Install the same document-start script in a fresh unactivated page.
+          const early = (() => { const window = earlyWindow;
+        """ + self.source + """
+            return window.__nacDesktop;
+          })();
+          let closed = 0;
+          early.connectLifetime(() => closed++);
+          assert.equal(early.retireView(), true);
+          assert.equal(early.retireView(), false);
+          assert.equal(closed, 1);
+          assert.equal(early.activate(binding), false);
+          assert.throws(() => early.connect(callback), /UI owner unavailable/);
+          assert.throws(() => early.connectLifetime(() => {}), /UI lifetime unavailable/);
+        """)
+
+    def test_lifetime_cleanup_cannot_remove_a_successor_registration(self):
+        self.run_script("""
+          let closed = 0;
+          const lifetimeCallback = () => closed++;
+          const old = port.connectLifetime(lifetimeCallback);
+          old();
+          const current = port.connectLifetime(lifetimeCallback);
+          old();
+          assert.equal(port.retire(binding), true);
+          current();
+          assert.equal(closed, 1);
+        """)
+
+    def test_connection_loss_is_a_single_scoped_fact_and_blocks_commands(self):
+        self.run_script("""
+          port.reportConnectionLost();
+          port.reportConnectionLost();
+          assert.equal(receipts.map(value => value.kind).join(','), 'ready,connection_lost');
+          assert.equal(port.dispatch(binding, request), false);
+          assert.equal(calls, 0);
+          let closed = 0;
+          port.connectLifetime(() => closed++);
+          assert.equal(port.retire(binding), true);
+          port.reportConnectionLost();
+          assert.equal(closed, 1);
+          assert.equal(receipts.length, 2);
+        """)
+
 
 if __name__ == '__main__':
     unittest.main()
