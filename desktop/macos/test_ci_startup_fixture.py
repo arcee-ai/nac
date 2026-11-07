@@ -20,6 +20,25 @@ class StartupFixtureTests(unittest.TestCase):
     def profile(self, case):
         return prepare_profile(self.parent, case, 'http://127.0.0.1:4173/models-dev')
 
+    def test_query_pin_and_four_files_reject_tamper_before_contract_import(self):
+        import ci_startup_fixture as fixture
+        self.assertEqual(TEST_SOURCE, '04c073bbbead6f4077da0199bacd542e45cf4e57')
+        self.assertEqual(fixture.TEST_FILES, {
+            'README.md': 'b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24',
+            'StartupJourneys.swift': '0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1',
+            'contract.py': '86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048',
+            'test_contract.py': '47f75f1067d0741925c4fa1d7130620194bbbb987a7f19e979238aed71868187',
+        })
+        directory = self.parent / 'desktop/macos/startup_xctest'
+        directory.mkdir(parents=True)
+        (directory / 'README.md').write_text('tampered inert fixture')
+        with patch('ci_startup_fixture.require_checkout') as checkout, \
+                patch('ci_startup_fixture.importlib.util.spec_from_file_location') as load:
+            with self.assertRaisesRegex(RuntimeError, 'four-file startup source differs'):
+                fixture.test_contract(self.parent)
+        checkout.assert_called_once_with(self.parent, TEST_SOURCE)
+        load.assert_not_called()
+
     def test_four_profiles_are_distinct_and_environment_has_no_inherited_authority(self):
         profiles = [self.profile(case) for case in CASES]
         self.assertEqual(len({p['root'] for p in profiles}), 4)
