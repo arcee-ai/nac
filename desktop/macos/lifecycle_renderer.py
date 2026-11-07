@@ -17,6 +17,17 @@ DISCONNECTED_DENIAL = ('Error: permission denied for exec_command: '
 PROVIDER_PREFIX = ['transcript', 'goal', 'approval']
 
 
+def approval_snapshot(fixture):
+    snapshot = request(fixture.endpoint, '/sessions/' + fixture.approval_session)
+    # The public session snapshot omits this counter. It belongs to the
+    # published session summary inventory, not internal SessionMetadata.
+    summaries = request(fixture.endpoint, '/sessions')
+    matching = [entry['summary'] for entry in summaries
+                if entry['summary']['session_id'] == fixture.approval_session]
+    assert len(matching) == 1, 'Original approval session missing/ambiguous'
+    return snapshot, matching[0]['run_count']
+
+
 def approval_origin(fixture):
     """Capture the actual pending request and its admission before view loss."""
     fixture.assert_work_running()
@@ -24,19 +35,19 @@ def approval_origin(fixture):
     pending = permissions['requests']
     assert len(pending) == 1 and pending[0]['session_id'] == fixture.approval_session
     assert pending[0]['call_id'] == 'quit-unapproved-command' and pending[0]['tool'] == 'exec_command'
-    snapshot = request(fixture.endpoint, '/sessions/' + fixture.approval_session)
+    snapshot, count = approval_snapshot(fixture)
     model = request(fixture.endpoint, '/sessions/' + fixture.session)
     assert snapshot['active_run'] and model['active_run']
     return dict(request=pending[0], run_id=snapshot['active_run']['run_id'],
-                run_count=snapshot['metadata']['run_count'], model_run_id=model['active_run']['run_id'])
+                run_count=count, model_run_id=model['active_run']['run_id'])
 
 
-def approval_state(origin, permissions, snapshot, provider_requests, denied_outputs):
+def approval_state(origin, permissions, snapshot, provider_requests, denied_outputs, run_count):
     """Only the original Ask or its exact, once-only fail-closed continuation."""
     assert permissions['approval_mode'] == 'manual' and permissions['grants'] == []
     assert snapshot['metadata']['session_id'] == origin['request']['session_id']
-    assert type(snapshot['metadata']['run_count']) is int and type(origin['run_count']) is int
-    assert snapshot['metadata']['run_count'] == origin['run_count'] == 1
+    assert type(run_count) is int and type(origin['run_count']) is int
+    assert run_count == origin['run_count'] == 1
     active = snapshot.get('active_run')
     assert active is None or active['run_id'] == origin['run_id'], 'Approval admission changed'
     assert provider_requests in (PROVIDER_PREFIX, PROVIDER_PREFIX + ['approval-denied'])
@@ -60,9 +71,9 @@ def renderer_survival(fixture, origin):
     def observed():
         fixture.assert_unapproved()  # Includes actual empty execution inventory.
         permissions = request(fixture.endpoint, '/sessions/' + fixture.approval_session + '/permissions')
-        snapshot = request(fixture.endpoint, '/sessions/' + fixture.approval_session)
+        snapshot, count = approval_snapshot(fixture)
         return approval_state(origin, permissions, snapshot,
-                              list(fixture.provider.requests), list(fixture.provider.denied_outputs))
+                              list(fixture.provider.requests), list(fixture.provider.denied_outputs), count)
     approval = wait_for('Original renderer approval or exact disconnected-denial', observed, timeout=5)
     model = request(fixture.endpoint, '/sessions/' + fixture.session)
     assert (model.get('active_run') or {}).get('run_id') == origin['model_run_id'], 'Independent work changed'
