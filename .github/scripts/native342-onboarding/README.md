@@ -15,6 +15,14 @@ experimental commit, using current4b ancestry. H Rust/OAuth/MCP is not built/run
 The external Q four files/Swift0204 remain unchanged. Old H986/Pff8 SDK PASS is
 ONE CONSUMED compiler episode, not a new product/runtime/config/binary receipt.
 
+Current H `1b9ba3c50170cc9edf5a50712c05f22e8c2e166f` has preparation parent
+`4fae3a44541f047dcd552061c57062a98e5b5eab`. Owning H9 layer521 carries the exact
+console-cardinality correction for Q's additional successful title-verify guard;
+public H9 publication remains a separate handoff, not private-candidate readiness.
+Actual consumer02's genuine public XCTest PASS still ended overall collector FAIL:
+the original PNG/observation were not retained, the rejected raw console count is
+unknown, and no Native image acceptance or automatic retry follows this H repin.
+
 Only maintained `ci_startup.run_case(scenario='onboarding')` is called, once.
 Its exact normal-package/canonical relocation/unsigned-versus-post-sign/source
 admission, environment resolver, real configuration/runner, OwnerWitness,
