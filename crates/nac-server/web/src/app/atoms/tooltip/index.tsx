@@ -278,6 +278,7 @@ const Tooltip: React.FC<TooltipProps> & {
         </TooltipAnchor>
       </TooltipTrigger>
       <TooltipContent
+        nonInteractive
         side={side}
         align={align}
         sideOffset={ANCHOR_GAP}

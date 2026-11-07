@@ -38,10 +38,12 @@ export function FilesListToolbar({
 
   if (isMobile) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {LISTINGS.map((item) => (
           <StickyButton
             key={item.listing}
+            className="!h-11"
+            buttonClassName="!h-11 !min-w-11"
             variant={
               listing === item.listing ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost
             }

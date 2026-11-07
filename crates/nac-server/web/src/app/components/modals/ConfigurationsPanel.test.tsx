@@ -608,3 +608,93 @@ it("does not acquire a partial matching preset id by switching a catalog pick to
     client.clear();
   }
 });
+
+it("explains the retained advanced connection without requiring replacement fields or changing the launch tuple", async () => {
+  vi.spyOn(api, "getManagedStatus").mockRejectedValue(new Error("unmanaged host"));
+  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+  vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
+  vi.spyOn(api, "listProviderModels").mockResolvedValue({
+    base_url: "https://gateway.example/v1",
+    models: [{ id: "trinity-large-thinking", display_name: "Trinity" }],
+  });
+  const create = vi.spyOn(api, "createModelConfig");
+  const project = vi.spyOn(api, "createProject");
+  const chat = vi.spyOn(api, "createSession");
+  const initial = {
+    backend: "arcee-api" as const,
+    model: "trinity-large-thinking",
+    base_url: "https://gateway.example/v1",
+    allow_insecure_http: false,
+    api_key_env: "RETAINED_KEY",
+    reasoning_effort: "high",
+    extra_headers: { "X-Inherited": "exact" },
+    orchestrator_compaction_threshold: 321,
+    light_model: {
+      model: "retained-light",
+      backend: "arcee-api" as const,
+      reasoning_effort: "low" as const,
+    },
+  };
+  const onChange = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ModelSetupSection initial={initial} invalid={false} onChange={onChange} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "resolved", ...initial }),
+        "primary",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Advanced presets and provider setup" }));
+    expect(await screen.findByText(/This selection keeps the current connection/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain(initial.model);
+    expect(screen.getByRole("group", { name: "Name" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "API Key" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Name*" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "API Key*" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Name alone does not replace a connection" },
+    });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "resolved", ...initial }),
+        "preset",
+      ),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(project).not.toHaveBeenCalled();
+    expect(chat).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("group", { name: "Model Provider*" }).querySelector("button")!,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Model" }), {
+      target: { value: "retained-custom-model" },
+    });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "resolved", ...initial, model: "retained-custom-model" }),
+        "preset",
+      ),
+    );
+    expect(screen.getByRole("status").textContent).toContain("retained-custom-model");
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Create New" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Create New" }).at(-1)!);
+    await screen.findByRole("group", { name: "Name*" });
+    expect(screen.getByRole("group", { name: "API Key*" })).toBeTruthy();
+    expect(screen.queryByText(/This selection keeps the current connection/)).toBeNull();
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(null, "preset"));
+    expect(create).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

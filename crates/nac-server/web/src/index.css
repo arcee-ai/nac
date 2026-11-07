@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./app-theme.css";
 @config "../tailwind.config.js";
+@source not "../packages/nac-presentation/dist";
 
 @layer utilities, components;
 

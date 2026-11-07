@@ -57,6 +57,11 @@ share active-operation binding and durable enqueue-before-wake ordering. Retry
 rollback must use that same insertion boundary and preserve relationship leases
 through in-flight store calls; do not fork a second inbox mutation path.
 
+`admission.rs` keeps host/session/workspace admission, occurrence-checked inbox
+ownership, active-run publication and task startup in one ordered owner above
+800 lines. Splitting that sequence into dispatch wrappers would obscure which
+transaction created an input and which authority its run retains.
+
 ## Verification
 
 ```sh
@@ -82,3 +87,9 @@ their delivery owners.
   path.
 - Do not combine topology-wide branches when construction can pass a focused
   component or capability.
+
+`settlement.rs` remains above 800 lines because terminal persistence, goal
+accounting, active-run retirement, continuation selection and final attention
+publication form one ordered settlement boundary. Nonshipping interleave
+synchronization lives in `attention_test_support.rs`; keep its awaits outside
+store/operation/hub locks and compile it out without test-support.

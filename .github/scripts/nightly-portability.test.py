@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -17,8 +19,74 @@ spec = importlib.util.spec_from_file_location('portability', SCRIPT)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+# Actual ignored-list.log from schedule 41814252560, attempt 1, job 126520880813;
+# candidate 481ee248f755461c6bee9c274963cb30ccd6b0aa. This is a discovery receipt,
+# not a test-pass receipt. Keep independent of the reviewed inventory.
+RETAINED_IGNORED = '''\
+agent::live_tests::test_simple_prompt
+agent::live_tests::test_tool_usage
+model::jev::calibration::live_reviewer_calibration
+model::jev::corpus_tests::live_jev_corpus
+model::jev::tests::live_default_clef_scope_profile_smoke
+model::jev::tests::live_jev_smoke
+model::reviewer_policy::tests::replay_frozen_responses_through_production_policy
+model::sse::tests::benchmark_responses_terminal_event_latency
+session_service::tests::projection::benchmark_frontend_snapshot_latency
+skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read
+terminal::manager::tests::openssh_backend_preserves_output_contract
+terminal::manager::tests::podman_backend_preserves_output_contract
+tools::discovery::tests::podman_and_local_backends_return_identical_discovery_pages
+tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages
+tools::discovery::tests::tools_work_without_external_search_binaries_on_path
+tools::task_wait::tests::maximum_timeout_measurement
+native_pty::tests::latency::native_admission_latency_and_independent_root_cleanup
+tests::managed_load::managed_load_scenario
+tests::persistence_load::owned_persistence_current_thread_load_scenario
+tests::persistence_load::owned_persistence_load_scenario
+'''.splitlines()
+
+
+def cancellation_fixture_pids(ready, log, deadline):
+    while time.monotonic() < deadline:
+        # The producer writes the complete PID receipt before flushing this
+        # marker. A PID file alone does not establish output to retain.
+        if ready.exists() and log.exists() and 'ready' in log.read_text():
+            pids = [int(pid) for pid in ready.read_text().split()]
+            if len(pids) != 2 or len(set(pids)) != 2 or min(pids) <= 0:
+                raise AssertionError('expected distinct positive root and child PIDs')
+            return pids
+        time.sleep(.02)
+    raise AssertionError('child never reached PID and output readiness barrier')
+
 
 class Controls(unittest.TestCase):
+    def test_cancellation_readiness_waits_for_actual_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            log.write_text('')
+            def release_producer(_):
+                self.assertEqual(log.read_text(), '')
+                log.write_text('ready\n')
+            with patch.object(time, 'sleep', side_effect=release_producer) as poll:
+                self.assertEqual(cancellation_fixture_pids(ready, log, time.monotonic() + 1), [101, 102])
+            poll.assert_called_once_with(.02)
+
+    def test_cancellation_readiness_rejects_missing_output_and_invalid_pids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready, log = Path(directory) / 'ready', Path(directory) / 'build.log'
+            ready.write_text('101 102')
+            with patch.object(time, 'monotonic', side_effect=[0, 1]):
+                with patch.object(time, 'sleep'):
+                    with self.assertRaisesRegex(AssertionError, 'output readiness'):
+                        cancellation_fixture_pids(ready, log, 1)
+            log.write_text('ready\n')
+            for receipt in ('', '101', '101 101', '0 102', '101 102 103', 'invalid 102'):
+                with self.subTest(receipt=receipt):
+                    ready.write_text(receipt)
+                    with self.assertRaises((AssertionError, ValueError)):
+                        cancellation_fixture_pids(ready, log, time.monotonic() + 1)
+
     def test_signal_permission_failure_remains_closed_for_live_group(self):
         with patch.object(runner.os, 'killpg', side_effect=PermissionError('denied')):
             with patch.object(runner, 'live_group_members', return_value=[{'pid': 123, 'group': 123, 'state': 'T'}]):
@@ -97,6 +165,56 @@ class Controls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate'):
             runner.verify_inventory(listing, inventory + inventory[:1])
 
+    def test_retained_native_discovery_requires_all_reviewed_names(self):
+        inventory = json.loads(runner.INVENTORY.read_text())
+        # Keep the actual historical twenty-name discovery receipt unchanged.
+        historical = '\n'.join(name + ': test' for name in RETAINED_IGNORED)
+        self.assertEqual(len(RETAINED_IGNORED), 20)
+        runner.verify_inventory(historical, [c for c in inventory if c['name'] in RETAINED_IGNORED])
+        heartbeat = ('application::heartbeat_scheduler::tests::'
+                     'heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention')
+        calendar = ('application::heartbeat_scheduler::tests::'
+                    'heartbeat_calendar_measure_1_10_100_with_two_owners_and_seven_day_downtime')
+        for name in (heartbeat, calendar):
+            case = next(c for c in inventory if c['name'] == name)
+            self.assertEqual((case['package'], case['disposition']), ('nac-server', 'excluded'))
+            self.assertIn('shared exclusive Rust/browser/setup measurement lease', case['capabilities'])
+        owner = runner.ROOT / 'crates/nac-server/src/application/heartbeat_scheduler/tests.rs'
+        source = owner.read_text()
+        for name in (heartbeat, calendar):
+            self.assertIn('#[ignore = "run with the shared exclusive measurement lease and --nocapture"]\n'
+                          + 'async fn ' + name.rsplit('::', 1)[1] + '()', source)
+        self.assertIn('#[tokio::test]\nasync fn heartbeat_calendar_scheduler_two_owners_bound_missed_range_and_admit_once()', source)
+        self.assertIn('for n in [1, 10, 100]', source)
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_new:
+            runner.verify_inventory(historical, inventory)
+        self.assertIn(heartbeat, str(missing_new.exception))
+        self.assertIn(calendar, str(missing_new.exception))
+        # Preserve the prior 21-name receipt as a counterexample too.
+        previous = '\n'.join(name + ': test' for name in [*RETAINED_IGNORED, heartbeat])
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_calendar:
+            runner.verify_inventory(previous, inventory)
+        self.assertIn(calendar, str(missing_calendar.exception))
+        reviewed_names = [*RETAINED_IGNORED, heartbeat, calendar]
+        listing = '\n'.join(name + ': test' for name in reviewed_names)
+        runner.verify_inventory(listing, inventory)
+        # Every removal/rename, including the new manual case, still fails closed.
+        for name in reviewed_names:
+            for changed in (listing.replace(name + ': test', ''),
+                            listing.replace(name + ': test', name + '_renamed: test')):
+                with self.subTest(name=name, changed=changed):
+                    with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
+                        runner.verify_inventory(changed, inventory)
+        # Reproduce the original thirteen-entry inventory's seven-name failure.
+        legacy = inventory[:13]
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift') as failure:
+            runner.verify_inventory(listing, legacy)
+        for case in inventory[13:]:
+            self.assertIn(case['name'], str(failure.exception))
+            self.assertNotEqual(case['disposition'], 'included')
+        with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
+            runner.verify_inventory(listing + '\nnew::unreviewed: test', inventory)
+
     def test_zero_selected_or_ignored_does_not_pass(self):
         for log in ('running 0 tests', 'test exact::case ... ignored'):
             with self.assertRaisesRegex(RuntimeError, 'exact test did not pass'):
@@ -109,9 +227,46 @@ class Controls(unittest.TestCase):
         self.assertNotIn('--include-ignored', source)
         self.assertIn("'--test-threads=1'", source)
         included = [c for c in json.loads(runner.INVENTORY.read_text()) if c['disposition'] == 'included']
-        self.assertEqual(len(included), 4)
+        self.assertEqual({c['name'] for c in included}, {
+            'tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages',
+            'tools::discovery::tests::tools_work_without_external_search_binaries_on_path',
+            'tests::persistence_load::owned_persistence_load_scenario',
+            'tests::persistence_load::owned_persistence_current_thread_load_scenario',
+        })
         self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
         self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
+
+    def test_real_unix_socket_suffixes_fit_short_owned_root_not_long_default(self):
+        # These are the exact suffix lengths from the two failed Rust cases,
+        # including both readonly and workspace sockets in the first case.
+        suffixes = ('nac-sock-95a2e5c0/r/d.sock', 'nac-sock-95a2e5c0/w/d.sock',
+                    'nac-sock-ac2f8471/r/d.sock')
+        with tempfile.TemporaryDirectory(prefix='nac-sock-control-', dir='/tmp') as directory:
+            owned = Path(directory).resolve()
+            # A 56-byte canonical default root reproduces the local Darwin
+            # layout without creating files in an unowned /var/folders tree.
+            long_default = owned / ('x' * (56 - len(str(owned).encode('utf-8')) - 1))
+            long_default.mkdir()
+            self.assertEqual(len(str(long_default).encode('utf-8')), 56)
+            with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-', dir=long_default) as old:
+                for suffix in suffixes:
+                    path = Path(old).resolve() / suffix
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                        with self.subTest(path_bytes=len(str(path).encode('utf-8'))):
+                            with self.assertRaisesRegex(OSError, 'path too long'):
+                                listener.bind(str(path))
+            with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-', dir='/tmp') as short:
+                fixture = Path(short).resolve()
+                self.assertEqual(fixture.parent, Path('/tmp').resolve())
+                self.assertEqual(stat.S_IMODE(fixture.stat().st_mode), 0o700)
+                for suffix in suffixes:
+                    path = fixture / suffix
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                        listener.bind(str(path))
+                        self.assertTrue(path.is_socket())
+            self.assertFalse(fixture.exists())
 
     def test_full_command_plan_is_serial_and_exact(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -120,7 +275,7 @@ class Controls(unittest.TestCase):
             (root / 'debug/nac-web').touch()
             cargo = root / 'cargo'
             cargo.write_text("""#!/usr/bin/env python3
-import json, os, sys
+import json, os, socket, sys
 from pathlib import Path
 inventory=json.loads(Path(os.environ['CONTROL_INVENTORY']).read_text())
 if '--no-run' in sys.argv:
@@ -136,14 +291,25 @@ elif '--exact' in sys.argv:
     with open(os.environ['CONTROL_ORDER'],'a') as f: f.write(names[0]+'\\n')
 elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
     assert '--ignored' not in sys.argv
+    fixture=Path(os.environ['TMPDIR'])
+    assert fixture.parent == Path('/tmp').resolve()
+    assert fixture.name.startswith('nac-portability-fixture-')
+    assert os.environ['TMP'] == os.environ['TEMP'] == str(fixture)
+    for suffix in ('nac-sock-95a2e5c0/r/d.sock', 'nac-sock-ac2f8471/r/d.sock'):
+        path=fixture/suffix
+        path.parent.mkdir(parents=True,exist_ok=True)
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
     with open(os.environ['CONTROL_ORDER'],'a') as f: f.write('workspace\\n')
 """)
             cargo.chmod(0o700)
             sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=runner.ROOT, text=True).strip()
             order = root / 'order'
+            long_default = root / ('long-host-default-' * 4)
+            long_default.mkdir()
             env = dict(os.environ, CARGO=str(cargo), CARGO_TARGET_DIR=str(root),
                        CONTROL_INVENTORY=str(runner.INVENTORY), CONTROL_ORDER=str(order),
-                       CONTROL_BUILD_TMPDIR=os.environ.get('TMPDIR', ''))
+                       TMPDIR=str(long_default), CONTROL_BUILD_TMPDIR=str(long_default))
             result = subprocess.run([sys.executable, str(SCRIPT), '--expected-sha', sha,
                                      '--output', str(root / 'evidence')],
                                     env=env, text=True, capture_output=True)
@@ -152,8 +318,12 @@ elif '--workspace' in sys.argv and '--no-run' not in sys.argv:
                         if c['disposition'] == 'included']
             self.assertEqual(order.read_text().splitlines(), ['workspace', *included])
             report = json.loads((root / 'evidence/report.json').read_text())
+            self.assertEqual(Path(report['fixture_root']).parent, Path('/tmp').resolve())
+            self.assertEqual(report['fixture_root_bytes'], len(report['fixture_root'].encode('utf-8')))
+            self.assertFalse(Path(report['fixture_root']).exists())
             self.assertEqual(report['fixture_pids_remaining'], [])
-            self.assertEqual(report['fixture_files_remaining'], [])
+            self.assertIn('nac-sock-95a2e5c0/r/d.sock', report['fixture_files_remaining'])
+            self.assertIn('nac-sock-ac2f8471/r/d.sock', report['fixture_files_remaining'])
 
     def test_real_rust_seed_is_detected_once_and_removed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -217,12 +387,11 @@ else:
             wrapper_log = wrapper_output.open('w')
             process = subprocess.Popen(['bash', str(shell)], cwd=runner.ROOT, env=env,
                                        stdout=wrapper_log, stderr=subprocess.STDOUT)
+            cancel_sent = False
             try:
-                deadline = time.monotonic() + 10
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(.02)
-                self.assertTrue(ready.exists(), 'child never reached readiness barrier')
-                pids = [int(p) for p in ready.read_text().split()]
+                pids = cancellation_fixture_pids(ready, root / 'nightly-portability/build.log',
+                                                 time.monotonic() + 10)
+                cancel_sent = True
                 process.send_signal(signal.SIGINT)
                 code = process.wait(timeout=10)
                 wrapper_log.flush()
@@ -240,8 +409,15 @@ else:
                 self.assertIn('ready', (evidence / 'build.log').read_text())
             finally:
                 if process.poll() is None:
-                    process.kill()
-                    process.wait()
+                    if not cancel_sent:
+                        process.send_signal(signal.SIGINT)
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                        wrapper_log.close()
+                        self.fail('cancellation fixture required forced supervisor cleanup')
                 wrapper_log.close()
 
 

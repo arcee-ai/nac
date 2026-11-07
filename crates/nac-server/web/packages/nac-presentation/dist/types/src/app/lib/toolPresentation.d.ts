@@ -23,6 +23,13 @@ export interface ToolPresentation {
      * consumers must resolve it against the delegation queries before trusting it.
      */
     spawnedSessionId?: string;
+    /** Native launch identity hint; consumers validate it against passive session inventory. */
+    launchedTask?: {
+        sessionId: string;
+        projectId: string;
+        callerId: string;
+        title: string;
+    };
 }
 type ToolStarted = Extract<AgentEvent, {
     type: "tool_call_started";
