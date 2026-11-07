@@ -7,6 +7,7 @@ private enum World { case page }
 private enum NativeCommandScript { static let handler = "nacUIReceipt" }
 private enum WorkspaceStorageScript { static let handler = "nacPresentationStorage" }
 private final class Storage {
+    func endDocument() {}
     func retire() {}
     func flush(completion: (Bool) -> Void) { completion(true) }
     func receive(_ body: String, expected: NativeDocumentBinding) -> Bool { false }
@@ -28,13 +29,18 @@ private final class WKUserContentController {
 private final class Configuration { let userContentController = WKUserContentController() }
 @MainActor private final class View {
     let configuration = Configuration()
+    var holdCalls = false
+    var completions: [(Result<Any, Error>) -> Void] = []
     func callAsyncJavaScript(_ source: String, arguments: [String: Any], in frame: Int?, in world: World,
                              completionHandler: @escaping (Result<Any, Error>) -> Void) {
-        completionHandler(.success(true))
+        if holdCalls { completions.append(completionHandler) }
+        else { completionHandler(.success(true)) }
     }
 }
 private struct Origin { let `protocol` = "http"; let host = "127.0.0.1"; let port = 1234 }
 private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
+private typealias WKWebView = View
+private typealias WKNavigation = Int
 @MainActor private struct WKScriptMessage {
     let webView: View?
     let name = NativeCommandScript.handler
@@ -57,8 +63,11 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
         state = NativeCommandState(receipt: receipt)!
     }
     private func receipt() -> EngineReceipt? { current }
+    func beginCall(_ binding: NativeDocumentBinding) { call("test", arguments: [:], binding: binding) }
     // RETIRE_OWNER
     // MESSAGE_OWNER
+    // NAVIGATION_OWNER
+    // CALL_OWNER
 }
 
 @main private enum ConnectionLossTests {
@@ -74,7 +83,7 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
         return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
     @MainActor static func main() throws {
-        for change in ["none", "retire", "document", "view", "engine", "not-loss"] {
+        for change in ["none", "call-false", "call-failure", "navigation", "retire", "document", "view", "engine", "not-loss"] {
             let view = View(), replacement = View()
             let bridge = Bridge(view, try receipt())
             let binding = bridge.state.beginDocument(receipt: bridge.current)!
@@ -82,6 +91,7 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
             precondition(bridge.state.receive(ready, origin: bridge.state.origin,
                 mainFrame: true, currentView: true, receipt: bridge.current))
             var calls = 0
+            if change.hasPrefix("call-") { view.holdCalls = true; bridge.beginCall(binding) }
             bridge.connectionLost = { [weak bridge] in
                 calls += 1
                 bridge?.retire()
@@ -98,6 +108,9 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
             precondition(!bridge.state.ready && bridge.state.issue(.settings, receipt: bridge.current) == nil,
                          "Command admission must be fenced before deferring recovery")
             switch change {
+            case "call-false": view.completions.removeFirst()(.success(false))
+            case "call-failure": view.completions.removeFirst()(.failure(NSError(domain: "inert", code: 1)))
+            case "navigation": bridge.navigationStarted(in: view, navigation: 2)
             case "retire": bridge.retire()
             case "document": _ = bridge.state.beginDocument(receipt: bridge.current)
             case "view": bridge.webView = replacement
@@ -105,8 +118,9 @@ private struct Frame { let securityOrigin = Origin(); let isMainFrame = true }
             default: break
             }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-            precondition(calls == (change == "none" ? 1 : 0), "Queued loss escaped its original binding")
-            if change == "none" {
+            let notified = ["none", "call-false", "call-failure", "navigation"].contains(change)
+            precondition(calls == (notified ? 1 : 0), "Queued loss was lost or escaped its original binding: \(change)")
+            if notified {
                 precondition(controller.removed > 0 && !bridge.installed && !controller.removedInsideCallback)
             }
         }
