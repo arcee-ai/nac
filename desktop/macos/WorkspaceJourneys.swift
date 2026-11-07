@@ -23,7 +23,8 @@ extension WorkspaceSmoke {
     // Input/InputWrapper add nested divs. The unique owned active dialog
     // already scopes this form; do not infer its row from a fixed depth.
     const labels=[...dialogs[0].querySelectorAll('.label-small')].filter(e => e.textContent.trim() === 'Enabled' && visible(e));
-    const control=labels.length === 1 ? labels[0].parentElement.nextElementSibling : null;
+    const controls=[...dialogs[0].querySelectorAll('[role="switch"][aria-label="Enabled"]')].filter(visible);
+    const control=labels.length === 1 && controls.length === 1 ? controls[0] : null;
     if (!control || control.getAttribute('role') !== 'switch' || !visible(control) ||
         control.matches(':disabled,[aria-disabled="true"]')) throw Error('Expected one actionable owned Enabled switch');
     const checked=control.getAttribute('aria-checked');
