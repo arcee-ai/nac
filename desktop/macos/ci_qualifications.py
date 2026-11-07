@@ -1,5 +1,7 @@
 """Finite, immutable supplier qualifications; never arbitrary commands/runners."""
 import argparse
+import hashlib
+import textwrap
 import json
 from pathlib import Path
 import re
@@ -85,6 +87,46 @@ def require_workspace(matrix, episodes, baseline, target):
             'target_full_acceptance': matrix.get('full_acceptance'),
             'target_minimum_selected': matrix.get('minimum_selected'),
             'qualification_scope': 'scripted system WKWebView rows only; no physical/IME/VoiceOver claim'}
+
+
+def require_rich_capture(episode, provenance, png, fixture_source):
+    """Only the ALL-351 owned WK_RICH capture; not a generic receipt format."""
+    source = Path(fixture_source).read_text()
+    matches = re.findall(r'    static let rich = #"""\n([\s\S]*?)    """#', source)
+    if len(matches) != 1:
+        raise RuntimeError('Exact WorkspaceFixture.rich literal unavailable')
+    expected = textwrap.dedent(matches[0]).removesuffix('\n')
+    digest = hashlib.sha256(expected.encode('utf-8')).hexdigest()
+    capture = episode.get('paint_diagnostics', {}).get('rich-chat.png', {})
+    before, after = capture.get('readiness', {}), capture.get('after_snapshot_readiness', {})
+    owned = before.get('message_identity', {})
+    identity = {key: provenance.get(key) for key in ('source_head', 'engine_sha256', 'native_sha256')}
+    if (any(not value for value in identity.values()) or capture.get('source_identity') != identity
+            or capture.get('expected_answer_sha256') != digest
+            or any(capture.get('settled_answer_sha256_' + phase) != digest for phase in ('before', 'after'))
+            or capture.get('png_sha256') != hashlib.sha256(Path(png).read_bytes()).hexdigest()
+            or capture.get('semantic_ready') is not True or capture.get('animation_frame_observed') is not True
+            or capture.get('window_visible') is not True or capture.get('window_occlusion_visible') is not True
+            or capture.get('window_visible_after_snapshot') is not True
+            or owned.get('visible_index') != 1 or owned.get('message_count') != 2 or not owned.get('session_id')
+            or before.get('message_identity') != after.get('message_identity')):
+        raise RuntimeError('Owned rich answer/source/frame/PNG binding differs')
+    for observation in (before, after):
+        targets = observation.get('surfaces', [])
+        if (observation.get('ready') is not True or observation.get('reason') != 'ready'
+                or observation.get('expected', {}).get('kind') != 'rich'
+                or observation.get('expected', {}).get('id') != owned['session_id']
+                or observation.get('hash') != '#/session/' + owned['session_id'] + '/insights'
+                or observation.get('full_answer') != expected
+                or observation.get('loadingConversation') is not False
+                or observation.get('fonts_ready') is not True or observation.get('visibility') != 'visible'
+                or len(targets) != 5 or any(t.get('visible') is not True or t.get('within_frame') is not True for t in targets)):
+            raise RuntimeError('Current owned rich targets/fonts not visible and settled')
+    return {'source_identity': identity, 'session_message': owned, 'settled_answer_sha256': digest,
+            'png_sha256': capture['png_sha256'],
+            'capture_record_sha256': hashlib.sha256(json.dumps(capture, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest(),
+            'sentinel_observation': before.get('sentinel_observation'),
+            'scope': 'fixture-local full answer and actual rich targets; OCR and visual inspection still required'}
 
 
 if __name__ == '__main__':
