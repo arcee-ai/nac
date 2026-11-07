@@ -99,6 +99,12 @@ pub(super) fn failed_authorization_start(
     }
 }
 
+pub(super) fn retain_live_authorization_states(profile: &mut OAuthProfile) {
+    profile
+        .states
+        .retain(|_, state| authorization_state_is_live(state));
+}
+
 fn authorization_state_is_live(state: &StoredAuthorizationState) -> bool {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -300,8 +306,18 @@ fn fail_authorization(
         }
         profile.pending_authorization_url = None;
         profile.completing_authorization = None;
-        profile.pending_scopes.clear();
-        profile.states.clear();
+        if let Some(state) = expected_authorization_url.and_then(authorization_state) {
+            // This failure owns the old binding, not a replacement that has
+            // saved fresh state but has not published its URL yet.
+            profile.states.remove(&state);
+            retain_live_authorization_states(profile);
+            if profile.states.is_empty() {
+                profile.pending_scopes.clear();
+            }
+        } else {
+            profile.pending_scopes.clear();
+            profile.states.clear();
+        }
         Ok(true)
     })
 }

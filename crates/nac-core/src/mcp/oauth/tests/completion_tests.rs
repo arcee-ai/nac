@@ -42,6 +42,144 @@ struct BothLoaded {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn old_retirement_and_idle_expiry_preserve_prepared_replacement() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    for claimed in [false, true] {
+        for idle_expiry in [false, true] {
+            let (_home, _restore) =
+                test_environment(&format!("prepared-retirement-{claimed}-{idle_expiry}"));
+            let cwd = Path::new("/workspace");
+            let endpoint = "https://mcp.example.test/mcp";
+            configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+            let path = oauth_store_path(cwd).unwrap();
+            let old = adapter(&path);
+            pending(&old).await;
+            if claimed {
+                StateStore::delete(&old, "completion-state").await.unwrap();
+            }
+            let candidate = adapter(&path);
+            let created = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            StateStore::save(
+                &candidate,
+                "prepared-state",
+                serde_json::from_value(serde_json::json!({
+                    "pkce_verifier":"prepared-verifier", "csrf_token":"prepared-state",
+                    "created_at":created, "requested_scopes":["mcp:replacement"]
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+            // B was saved while A was live; a later challenge/expiry must not
+            // erase B or scope requirements added after begin's snapshot.
+            prepare_mcp_oauth_scope_step_up(cwd, "slack", endpoint, "mcp:concurrent").unwrap();
+            edit_store(&path, |store| {
+                let profile = store.profiles.get_mut("slack").unwrap();
+                let expired = created - MCP_OAUTH_STATE_TTL.as_secs() - 1;
+                if claimed {
+                    let mut value = serde_json::to_value(&*profile)?;
+                    value["completing_authorization"]["created_at"] = expired.into();
+                    *profile = serde_json::from_value(value)?;
+                } else {
+                    profile
+                        .states
+                        .get_mut("completion-state")
+                        .unwrap()
+                        .created_at = expired;
+                }
+                Ok(())
+            })
+            .unwrap();
+            if idle_expiry {
+                let step =
+                    prepare_mcp_oauth_scope_step_up(cwd, "slack", endpoint, "mcp:late").unwrap();
+                assert!(!step.authorization_in_progress);
+            } else {
+                assert!(fail_mcp_oauth_authorization(
+                    cwd,
+                    "slack",
+                    endpoint,
+                    Some("https://auth.example.test/authorize?state=completion-state")
+                )
+                .unwrap());
+            }
+            // Reload the durable profile, then use the same publication helper
+            // as real begin; no in-memory snapshot is restored.
+            let retired = read_store(&path).unwrap().profiles.remove("slack").unwrap();
+            let published = edit_store(&path, |store| {
+                publish_pending_authorization(
+                    store.profiles.get_mut("slack").unwrap(),
+                    "https://auth.example.test/authorize?state=prepared-state".into(),
+                )
+            });
+            assert!(
+                published.is_ok(),
+                "old retirement erased prepared state: {published:?}"
+            );
+            assert!(retired.pending_scopes.iter().any(|s| s == "mcp:concurrent"));
+            assert_eq!(retired.states["prepared-state"].created_at, created);
+            assert!(!retired.states.contains_key("completion-state"));
+            assert!(retired.completing_authorization.is_none());
+            assert!(!fail_mcp_oauth_authorization(
+                cwd,
+                "slack",
+                endpoint,
+                Some("https://auth.example.test/authorize?state=completion-state")
+            )
+            .unwrap());
+            if claimed {
+                assert!(
+                    CredentialStore::save(&old, credentials("old-after-retirement"))
+                        .await
+                        .is_err()
+                );
+            } else {
+                assert!(StateStore::delete(&old, "completion-state").await.is_err());
+            }
+            StateStore::delete(&candidate, "prepared-state")
+                .await
+                .unwrap();
+            CredentialStore::save(&candidate, credentials("prepared-completion"))
+                .await
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unscoped_failure_and_logout_still_clear_prepared_candidates() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    for logout in [false, true] {
+        let (_home, _restore) = test_environment(&format!("prepared-global-clear-{logout}"));
+        let cwd = Path::new("/workspace");
+        let endpoint = "https://mcp.example.test/mcp";
+        configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+        let path = oauth_store_path(cwd).unwrap();
+        let current = adapter(&path);
+        pending(&current).await;
+        let mut candidate =
+            read_store(&path).unwrap().profiles["slack"].states["completion-state"].clone();
+        candidate.csrf_token = "prepared-state".into();
+        StateStore::save(&current, "prepared-state", candidate)
+            .await
+            .unwrap();
+        if logout {
+            clear_mcp_oauth(cwd, "slack").unwrap();
+        } else {
+            assert!(fail_mcp_oauth_authorization(cwd, "slack", endpoint, None).unwrap());
+        }
+        let profile = read_store(&path).unwrap().profiles.remove("slack").unwrap();
+        assert!(profile.states.is_empty());
+        assert!(profile.pending_scopes.is_empty());
+        assert!(profile.completing_authorization.is_none());
+        assert!(profile.pending_authorization_url.is_none());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn failed_prepared_replacement_preserves_the_claimed_exchange() {
     let _lock = TEST_ENV_LOCK.lock().unwrap();
     let (_home, _restore) = test_environment("completion-failed-replacement");

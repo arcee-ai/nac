@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use authorization_state::{
     authorization_state, completion_is_live, ensure_not_logged_out, failed_authorization_start,
     merge_pending_scopes, pending_authorization_is_live, publish_pending_authorization,
-    CompletingAuthorization, CompletionOwnership,
+    retain_live_authorization_states, CompletingAuthorization, CompletionOwnership,
 };
 pub use authorization_state::{
     discard_mcp_oauth_pending_authorization, fail_mcp_oauth_authorization, fail_mcp_oauth_callback,
@@ -1273,7 +1273,7 @@ pub(crate) fn prepare_mcp_oauth_scope_step_up(
         if !authorization_in_progress {
             profile.pending_authorization_url = None;
             profile.completing_authorization = None;
-            profile.states.clear();
+            retain_live_authorization_states(profile);
         }
         Ok(McpOAuthScopeStepUp {
             uses_loopback: profile
