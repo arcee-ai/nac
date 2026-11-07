@@ -5,7 +5,7 @@ import Darwin
 /// H-owned known-file reader. The actual T helper is a separate compiler input.
 @MainActor
 final class PathPhaseObserver {
-    static let product = "528b7986f1abbf7e47228d15a48c0492af2c0669"
+    static let product = "7013a96f2f2fdf3046c6976e018c9bf988eebfe0"
     let path: URL
     let parent: URL
     let parentIdentity: (UInt64, UInt64)
@@ -50,7 +50,7 @@ final class PathPhaseObserver {
         let capacity = bytes.count
         while count < capacity {
             let readCount = bytes.withUnsafeMutableBytes { buffer in
-                read(fd, buffer.baseAddress!.advanced(by: count), capacity - count)
+                Darwin.read(fd, buffer.baseAddress!.advanced(by: count), capacity - count)
             }
             try need(readCount >= 0, "Evidence read failed")
             if readCount == 0 { break }
