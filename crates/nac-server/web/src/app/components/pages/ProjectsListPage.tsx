@@ -568,7 +568,7 @@ export default function ProjectsListPage() {
           drag && "select-none cursor-grabbing",
         )}
       >
-        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-18 pb-8" : "py-4")}>
+        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-3 pb-8" : "py-4")}>
           {!managed.isManaged && (
             <div className="flex justify-end">
               <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>
