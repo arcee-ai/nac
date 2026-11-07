@@ -340,10 +340,30 @@ impl TranscriptLogWriter {
                 let transaction = connection
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 self.validate_append_run(&transaction, session_id, purpose)?;
+                // Only real bound prompt admission changes current run ownership.
+                // Receipt replay and ordinary transcript deltas are silent.
+                let admitted_run = match purpose {
+                    AppendPurpose::RunPrompt(run) if self.append_fence.is_some() => Some(run),
+                    _ => None,
+                };
+                let marker = |run: Option<&str>| -> Result<Option<i64>> {
+                    let Some(run) = run else {
+                        return Ok(None);
+                    };
+                    Ok(transaction.query_row(
+                        "SELECT submitted_message_id FROM session_run_recovery WHERE session_id=?1 AND run_id=?2",
+                        params![session_id, run], |row| row.get(0),
+                    ).optional()?)
+                };
+                let before_admission = marker(admitted_run)?;
                 let result = prepare(&transaction)?;
+                let admission_changed = before_admission != marker(admitted_run)?;
                 self.append_fault(AppendFault::BeforeCommit)?;
                 let commit_error = transaction.commit().err().map(anyhow::Error::new);
                 if commit_error.is_none() {
+                    if admission_changed {
+                        goal_changes::session_committed(&self.store_path, session_id);
+                    }
                     #[cfg(feature = "managed-fault-fixture")]
                     if crate::managed_fault_fixture::hit(
                         crate::managed_fault_fixture::Boundary::CommitAck,

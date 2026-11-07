@@ -12,9 +12,11 @@ import {
   Loader,
   LoaderSize,
 } from "@/app/atoms";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { managedQueryKeys, useManagedGitHub } from "@/app/features/managed/queries";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
+import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
+import { githubErrorText } from "./managedErrorText";
 
 import type { ManagedGitHubLoginStarted } from "@/app/types/api";
 
@@ -56,7 +58,7 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
             return;
           }
         } catch (error) {
-          if (!controller.signal.aborted) setLoginError(humanErrorText(toRunError(error)));
+          if (!controller.signal.aborted) setLoginError(githubErrorText(error));
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -75,7 +77,7 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
     try {
       setLogin(await api.startManagedGitHubLogin());
     } catch (error) {
-      setLoginError(humanErrorText(toRunError(error)));
+      setLoginError(githubErrorText(error));
     } finally {
       setBusy(false);
     }
@@ -97,97 +99,138 @@ export function ManagedGitHubPanel({ onConnected }: { onConnected?: () => void }
     }
   };
 
-  if (github.isLoading) return <Loader size={LoaderSize.Medium} />;
-  return (
-    <div className="flex flex-col gap-5" data-testid="managed-github-settings">
-      <div>
-        <p className="header-xl text-basic-primary">GitHub</p>
-        <p className="text-small text-basic-tertiary">
-          Connect the private Arcee GitHub App. Tokens are never shown in NAC.
-        </p>
+  if (github.isPending)
+    return (
+      <div
+        role="status"
+        className="flex flex-wrap items-center gap-3 text-small text-basic-secondary"
+      >
+        <Loader size={LoaderSize.Small} />
+        Checking GitHub connection…
       </div>
-      {github.data?.connected ? (
-        <div className="rounded-lg border border-basic p-4">
-          <div className="flex items-center gap-3">
-            {github.data.avatar_url ? (
-              <img src={github.data.avatar_url} alt="" className="h-10 w-10 rounded-full" />
-            ) : (
-              <Icon iconName={IconName.Github} />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="label-medium text-basic-primary truncate">
-                {github.data.name ?? github.data.login}
-              </p>
-              <p className="text-small text-basic-tertiary truncate">@{github.data.login}</p>
-            </div>
-            <span className="flex shrink-0 items-center gap-1.5 label-small text-success-primary">
-              <Icon iconName={IconName.CheckCircle} aria-hidden="true" />
-              Connected
-            </span>
+    );
+  return (
+    <div data-testid="managed-github-settings">
+      <FormSection
+        title="GitHub"
+        description="Connect the private Arcee GitHub App. Tokens are never shown in NAC."
+      >
+        {github.error ? (
+          <div className="flex flex-col items-start gap-3 text-small !leading-[22px] text-error-primary">
+            <p role="alert">{githubErrorText(github.error)}</p>
+            <Button
+              className="min-h-11"
+              variant={ButtonVariant.Secondary}
+              content={ButtonContent.Text}
+              onClick={() => void github.refetch()}
+              loading={github.isFetching}
+            >
+              Retry connection check
+            </Button>
           </div>
-          {github.data.git_name && github.data.git_email ? (
-            <p className="mt-3 text-small text-basic-tertiary">
-              Git commits: {github.data.git_name} · {github.data.git_email}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {login ? (
-        <div className="rounded-lg border border-info-primary p-4" data-testid="github-device-code">
-          <p className="label-medium text-basic-primary">Authorize this host on GitHub</p>
-          <p className="mt-1 text-small text-basic-tertiary">
-            Open GitHub and enter this code. Returning here will preserve this pending login.
+        ) : null}
+        {!github.error && github.data?.configured === false ? (
+          <p role="status" className="text-small !leading-[22px] text-basic-secondary">
+            GitHub App is not configured on this host.
           </p>
-          <div className="mt-4 flex items-center gap-2">
-            <code className="flex-1 rounded bg-elevation-level-2 px-4 py-3 text-center text-xl tracking-[0.2em] text-basic-primary">
-              {login.user_code}
-            </code>
-            <CopyButton value={login.user_code} title="Copy device code" />
+        ) : null}
+        {!github.error && github.data?.connected ? (
+          <div className="border-y border-basic py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              {github.data.avatar_url ? (
+                <img src={github.data.avatar_url} alt="" className="h-10 w-10 rounded-full" />
+              ) : (
+                <Icon iconName={IconName.Github} />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="label-medium text-basic-primary break-words">
+                  {github.data.name ?? github.data.login}
+                </p>
+                <p className="text-small !leading-[22px] text-basic-secondary break-words">
+                  @{github.data.login}
+                </p>
+              </div>
+              <span className="flex shrink-0 items-center gap-1.5 label-small text-success-primary">
+                <Icon iconName={IconName.CheckCircle} aria-hidden="true" />
+                Connected
+              </span>
+            </div>
+            {github.data.git_name && github.data.git_email ? (
+              <p className="mt-3 text-small !leading-[22px] text-basic-secondary">
+                Git commits: {github.data.git_name} · {github.data.git_email}
+              </p>
+            ) : null}
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+        ) : null}
+        {login ? (
+          <div className="rounded-lg border border-basic p-4" data-testid="github-device-code">
+            <p className="label-medium text-basic-primary">Authorize this host on GitHub</p>
+            <p className="mt-1 text-small !leading-[22px] text-basic-secondary">
+              Open GitHub and enter this code. Returning here will preserve this pending login.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 basis-32 break-all rounded bg-elevation-level-2 px-4 py-3 text-center text-xl tracking-[0.2em] text-basic-primary">
+                {login.user_code}
+              </code>
+              <CopyButton
+                className="min-h-11 min-w-11"
+                value={login.user_code}
+                title="Copy device code"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                className="min-h-11 max-w-full !whitespace-normal"
+                variant={ButtonVariant.Primary}
+                content={ButtonContent.IconRight}
+                onClick={() => window.open(login.verification_uri, "_blank", "noopener")}
+              >
+                Open GitHub <Icon iconName={IconName.External} />
+              </Button>
+              <Button
+                className="min-h-11 max-w-full !whitespace-normal"
+                variant={ButtonVariant.Tertiary}
+                content={ButtonContent.Text}
+                onClick={() => {
+                  void api.cancelManagedGitHubLogin(login.login_id);
+                  setLogin(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {loginError ? (
+          <p role="alert" className="text-small !leading-[22px] text-error-primary">
+            {loginError}
+          </p>
+        ) : null}
+        {!login && !github.error ? (
+          <div className="flex flex-wrap gap-2">
             <Button
+              className="min-h-11 max-w-full !whitespace-normal"
               variant={ButtonVariant.Primary}
-              content={ButtonContent.IconRight}
-              onClick={() => window.open(login.verification_uri, "_blank", "noopener")}
-            >
-              Open GitHub <Icon iconName={IconName.External} />
-            </Button>
-            <Button
-              variant={ButtonVariant.Tertiary}
               content={ButtonContent.Text}
-              onClick={() => {
-                void api.cancelManagedGitHubLogin(login.login_id);
-                setLogin(null);
-              }}
+              onClick={() => void connect()}
+              loading={busy}
             >
-              Cancel
+              {github.data?.connected ? "Reconnect GitHub" : "Connect GitHub"}
             </Button>
+            {github.data?.connected ? (
+              <Button
+                className="min-h-11 max-w-full !whitespace-normal"
+                variant={ButtonVariant.SecondaryDestructive}
+                content={ButtonContent.Text}
+                onClick={() => void disconnect()}
+                disabled={busy}
+              >
+                Disconnect
+              </Button>
+            ) : null}
           </div>
-        </div>
-      ) : null}
-      {loginError ? <p className="text-small text-error-primary">{loginError}</p> : null}
-      {!login ? (
-        <div className="flex gap-2">
-          <Button
-            variant={ButtonVariant.Primary}
-            content={ButtonContent.Text}
-            onClick={() => void connect()}
-            loading={busy}
-          >
-            {github.data?.connected ? "Reconnect GitHub" : "Connect GitHub"}
-          </Button>
-          {github.data?.connected ? (
-            <Button
-              variant={ButtonVariant.SecondaryDestructive}
-              content={ButtonContent.Text}
-              onClick={() => void disconnect()}
-              disabled={busy}
-            >
-              Disconnect
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+      </FormSection>
     </div>
   );
 }

@@ -689,10 +689,21 @@ async fn prepare_never_queues_behind_an_active_reader_or_blocks_later_requests()
 #[tokio::test]
 async fn blocker_scan_never_queues_behind_active_session_registry_updates() {
     let fixture = Fixture::new();
-    let _writer = fixture.manager.inner.active_sessions.write().await;
-    let started = std::time::Instant::now();
-    let blockers = fixture.manager.managed_upgrade_blockers().unwrap();
-    assert!(started.elapsed() < std::time::Duration::from_millis(50));
+    let writer = fixture.manager.inner.active_sessions.write().await;
+    // The fixture has no store-owner thread, so offload the actual synchronous
+    // scan. Keep its handle and the writer: a queued scan cannot finish until
+    // the writer is released, and a timeout must not strand its worker.
+    let manager = fixture.manager.clone();
+    let mut scan = tokio::task::spawn_blocking(move || manager.managed_upgrade_blockers());
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(1), &mut scan).await;
+    drop(writer);
+    let blockers = match completed {
+        Ok(result) => result.unwrap().unwrap(),
+        Err(error) => {
+            let _ = scan.await;
+            panic!("blocker scan queued behind the held registry writer: {error}");
+        }
+    };
     assert!(blockers.iter().any(|blocker| {
         blocker.kind == nac_core::store::ManagedBlockerKind::OperationLease
             && blocker.id == "process-active-sessions-snapshot"

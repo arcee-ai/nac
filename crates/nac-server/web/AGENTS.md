@@ -69,9 +69,11 @@ server remains the source of business truth and wire schemas.
   text/selection, slash commands, attachments, send-versus-queue behavior,
   keyboard/IME handling, and its accessible presentation. Put server state and
   API mutations in query/controller owners, not in this component.
-- `components/modals/ConfigurationsPanel.tsx` and `SettingsModal.tsx` keep the
+- `components/modals/ConfigurationsPanel.tsx`, `ConfigurationsModal.tsx` and `SettingsModal.tsx` keep the
   existing dense configuration forms whose field validation and save ordering
   are exercised as one workflow. Managed-host panels do not belong there.
+  Saved-configuration field feedback and its focus origin stay with that form's
+  draft and mutation callbacks so late errors cannot steal another view's focus.
 - `components/modals/CreateProjectModal.tsx` keeps the coupled project location,
   SSH/sandbox fields and advanced launch draft in one accessible form. Ordered
   commands and session-request construction belong in `features/setup`, while

@@ -9,6 +9,14 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(scriptDir, "..");
 const repositoryRoot = path.resolve(webDir, "../../..");
 const packageName = "@arcee-ai/nac-client-all-121";
+const openapi = JSON.parse(await readFile(path.join(webDir, "openapi.json"), "utf8"));
+const operationKeys = Object.entries(openapi.paths)
+  .flatMap(([resource, item]) =>
+    Object.keys(item)
+      .filter((method) => ["get", "post", "put", "patch", "delete"].includes(method))
+      .map((method) => `${method.toUpperCase()} ${resource}`),
+  )
+  .sort();
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8" });
@@ -101,7 +109,21 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 156);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 175);
+assert.deepEqual(Object.keys(NAC_API_SURFACE).sort(), ${JSON.stringify(operationKeys)});
+assert.equal(NAC_API_SURFACE["GET /attention/events"], "private:native opt-in metadata attention stream");
+assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/heartbeats/preview"], "private:passive existing-chat calendar preview");
+for (const resource of [
+  "POST /sessions/{session_id}/heartbeats/preview",
+  "POST /sessions/{session_id}/task-followup-delegations",
+  "GET /sessions/{session_id}/task-followup-delegations/{delegation_id}",
+  "DELETE /sessions/{session_id}/task-followup-delegations/{delegation_id}",
+  "GET /sessions/{session_id}/questions",
+  "GET /sessions/{session_id}/questions/{request_id}",
+  "POST /sessions/{session_id}/questions/{request_id}/answer",
+  "POST /sessions/{session_id}/questions/{request_id}/cancel",
+]) assert.match(NAC_API_SURFACE[resource], /^private:/);
+
 for (const owner of Object.values(NAC_API_SURFACE)) {
   if (owner.startsWith("api.")) assert.equal(typeof api[owner.slice(4)], "function", owner);
   if (owner.startsWith("client.")) assert.equal(typeof client[owner.slice(7)], "function", owner);
@@ -131,6 +153,23 @@ assert.equal(productCalls[1].method, "POST");
 assert.deepEqual(JSON.parse(productCalls[1].body), { destination: "mcp-settings", session_id: "session /scope", expected_build_id: "build" });
 assert.equal("getManagedUpgrade" in api, false);
 assert.equal("startTaskLaunch" in api, false);
+assert.equal("sessionIntegrations" in api, false);
+assert.equal("refreshSessionIntegrations" in api, false);
+assert.equal(NAC_API_SURFACE["GET /sessions/{session_id}/integrations"], "private:standalone session integration status");
+assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/integrations/refresh"], "private:standalone explicit session integration refresh");
+assert.equal("controlHeartbeat" in api, false);
+assert.equal("controlFreshTaskSchedule" in api, false);
+assert.equal("changeFreshTaskRetainedAllowance" in api, false);
+for (const [operation, owner] of [
+  ["GET /heartbeats", "private:standalone Local heartbeat inventory"],
+  ["GET /sessions/{session_id}/heartbeats/{schedule_id}", "private:standalone passive heartbeat history"],
+  ["POST /sessions/{session_id}/heartbeats/control", "private:standalone human heartbeat control"],
+  ["POST /sessions/{session_id}/heartbeats/attention", "private:standalone human result acknowledgement"],
+  ["GET /projects/{project_id}/task-schedules", "private:standalone Local interval task inventory"],
+  ["GET /projects/{project_id}/task-schedules/{schedule_id}", "private:standalone passive interval task history and retained resources"],
+  ["POST /projects/{project_id}/task-schedules/control", "private:standalone human interval task control"],
+  ["POST /projects/{project_id}/task-schedules/retained-allowance", "private:standalone human host retained allowance control"],
+]) assert.equal(NAC_API_SURFACE[operation], owner);
 assert.equal(NAC_API_SURFACE["POST /task-launches"], "private:standalone Local retained task launch");
 const context = await client.transport.streamContext();
 assert.deepEqual(context, {

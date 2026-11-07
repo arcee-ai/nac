@@ -19,7 +19,13 @@ impl Root {
         command
             .args([
                 "-c",
-                "while read token; do sleep 30 & job=$!; echo $job; wait $job; done",
+                // The job must announce its own PID after exec. Printing $!
+                // from the parent can expose a pre-exec process instead of
+                // the intended job. The child blocks without another exec;
+                // the parent waits before reading the next job token.
+                // Save stdin before the asynchronous list can replace fd 0
+                // with /dev/null (dash does this even with an explicit <&0).
+                "while read token; do /bin/sh -c 'printf \"%s\\n\" \"$$\"; read token' <&3 3<&- & job=$!; wait $job; done 3<&0",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -167,7 +173,7 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
-    for _ in 0..48 {
+    for _iteration in 0..48 {
         let pid = root.job().unwrap();
         root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
         assert!(!root.authority.leader_exited().unwrap());
@@ -180,7 +186,12 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
                 .1,
         );
         let weak = Arc::downgrade(&identity);
+        #[cfg(target_os = "macos")]
+        let signal_trace =
+            super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, _iteration);
         identity.signal(libc::SIGKILL).unwrap();
+        #[cfg(target_os = "macos")]
+        drop(signal_trace);
         drop(identity);
         root.until(|authority| {
             authority.members.is_empty() && authority.pending_capture.is_empty()
@@ -223,7 +234,11 @@ fn active_prune_preserves_original_parent_arc_in_pending_obligation() {
     root.authority
         .pending_capture
         .insert(key, (row, Evidence::Parent(Arc::clone(&parent))));
+    #[cfg(target_os = "macos")]
+    let signal_trace = super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, 0);
     parent.signal(libc::SIGKILL).unwrap();
+    #[cfg(target_os = "macos")]
+    drop(signal_trace);
     drop(parent);
     let deadline = Instant::now() + Duration::from_secs(3);
     while root.authority.members.contains_key(&key) {

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
@@ -61,6 +61,19 @@ async function show(page: Page, base: string, session: string) {
   if (await button.isVisible()) await button.click();
   await expect(pane).toBeVisible();
   return pane;
+}
+async function prepareNewShell(pane: Locator) {
+  const launch = pane.getByRole("button", { name: /^New shell$/i });
+  const openList = pane.getByRole("button", { name: "Open list", exact: true });
+  // Compact panels put creation on their list screen; wide panels keep the
+  // same action beside the detail. Follow the public navigation in either case.
+  await expect(launch.or(openList)).toBeVisible();
+  if (!(await launch.isVisible())) {
+    await expect(openList).toBeVisible();
+    await openList.click();
+  }
+  await expect(launch).toBeVisible();
+  await expect(launch).toBeEnabled();
 }
 async function focus(pane: Locator) {
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
@@ -197,6 +210,7 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
   const pane = await show(page, harness.baseUrl, session);
   let terminal: string | undefined;
   try {
+    await prepareNewShell(pane);
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -316,6 +330,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   let pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -438,6 +453,7 @@ test("actual Python build and unittest consume active agent edits in the shell w
     completion,
   );
   const pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -577,14 +593,16 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   });
   // Reproduce the observed CI race: the first live history refresh completes
   // after the drag but before copy. Its empty-state row must not resize xterm.
-  await page.route(`**/sessions/${session}/executions/history`, async (route) => {
+  const historyPattern = `**/sessions/${session}/executions/history`;
+  const holdHistory = async (route: Route) => {
     if (!initialHistory) {
       historyPending();
       await historyReleased;
     }
     initialHistory = false;
     await route.continue();
-  });
+  };
+  await page.route(historyPattern, holdHistory);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   const root = path.join(harness.runRoot, "workspace");
@@ -593,15 +611,22 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     [
       "import os,time",
       "os.write(1,b'\\x1b[2J\\x1b[HSELECT-WHILE-OUTPUT\\r\\n')",
-      "for i in range(240):",
-      // Rows stay as wide as the half-row panel the 1500ms budget below was set
-      // against; the wider panel would otherwise grow the noise by 1.6x.
-      " width=min(48,max(1,os.get_terminal_size(1).columns-6))",
-      " block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
-      " os.write(1,block*300); time.sleep(0.02)",
+      "try:",
+      " for i in range(240):",
+      // Retain the original complete noisy workload and row width.
+      "  width=min(48,max(1,os.get_terminal_size(1).columns-6))",
+      "  block=b'\\x1b[2;1H'+str(i).encode()+b':'+b'n'*width+b'\\x1b[K'",
+      "  os.write(1,block*300); time.sleep(0.02)",
+      // Keep this foreground process available for SIGINT through the unchanged
+      // 45-second test budget, even if the finite output finishes during setup.
+      " time.sleep(45)",
+      "except KeyboardInterrupt:",
+      " os.write(1,b'\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
+      " raise",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await expect(pane.getByText("No recent activity is available.")).toBeVisible();
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -642,6 +667,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   const measurements: Record<string, unknown> = {};
   try {
     await focus(pane);
+    // Install the echo-proof witness before loading the renderer. The timed
+    // interaction still requires fresh trusted keyboard input in the same shell.
+    await command(page, "nac_probe() { printf '" + octal("NOISE-INTERRUPTED\n") + "'; }");
     await command(page, "python3 noise.py");
     const accessible = pane.locator(".xterm-accessibility");
     await expect(accessible).toContainText("SELECT-WHILE-OUTPUT");
@@ -671,6 +699,9 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
         expect(afterHistory.rows).toBe(before.rows);
       }),
     ).toBe("SELECT-WHILE-OUTPUT");
+    // The controlled history race is complete. Retire its interception before
+    // timing unrelated production observer traffic; keep all race assertions.
+    await page.unroute(historyPattern, holdHistory);
     const resizedAt = performance.now();
     await page.setViewportSize({ width: 1050, height: 650 });
     await expect
@@ -685,7 +716,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await armRenderedMarker(pane, "NOISE-INTERRUPTED");
     await page.keyboard.press("Control+c");
-    await command(page, "printf '" + octal("NOISE-INTERRUPTED\n") + "'");
+    await command(page, "nac_probe");
     const timing = await page.evaluate(() => {
       if (!window.terminalRenderedMarker)
         throw new Error("Terminal render measurement was not armed");
@@ -695,6 +726,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     measurements.interruptToRenderedMarkerMs = timing.renderedMs;
     // Accessibility correctness remains required, with its own throttled update
     // lifetime. Its assertion polling never contributes to the recorded latency.
+    await expect(accessible).toContainText("NOISE-SIGINT-OBSERVED");
     await expect(accessible).toContainText("NOISE-INTERRUPTED");
     expect(measurements.interruptToRenderedMarkerMs).toBeLessThan(1500);
     expect(measurements.resizeMs).toBeLessThan(1500);
@@ -712,6 +744,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
+    await page.unroute(historyPattern, holdHistory);
     await page.evaluate(() => {
       window.terminalRenderedMarker?.dispose();
       delete window.terminalRenderedMarker;
@@ -748,6 +781,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     });
   }
   expect(pages.length).toBeGreaterThan(2);
+  expect(pages.every((frame) => !frame.gap)).toBe(true);
   expect(Math.max(...pages.map((frame) => frame.retained))).toBeLessThanOrEqual(8 * 1024 * 1024);
   expect(Math.max(...pages.map((frame) => frame.bytes))).toBeLessThanOrEqual(32 * 1024);
   harness.provider.assertConsumed();

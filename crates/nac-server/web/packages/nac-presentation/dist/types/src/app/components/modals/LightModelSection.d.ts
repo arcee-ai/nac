@@ -1,3 +1,4 @@
+import { type AriaAttributes } from "react";
 import type { LightModelSettings, SessionBehavior } from "../../types/api";
 export type LightMode = "single" | "dual";
 /**
@@ -14,10 +15,10 @@ export interface LightSelection {
  * the lighter one. Owns its form state and reports every change upward
  * through `onChange`.
  */
-export declare function LightModelSection({ initial, onChange, behavior, }: {
+export declare function LightModelSection({ initial, onChange, behavior, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy, }: {
     /** Seeds the form; a value opens the section in dual mode. */
     initial?: LightModelSettings | null;
     onChange: (selection: LightSelection) => void;
     /** Adjusts the promise without changing the stored optional field. */
     behavior?: SessionBehavior;
-}): import("react").JSX.Element;
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">): import("react").JSX.Element;

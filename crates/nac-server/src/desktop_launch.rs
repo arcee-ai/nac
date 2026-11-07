@@ -210,6 +210,7 @@ impl DesktopLaunch {
         }
         let info = manager.store_info();
         let selected_store = info.store_path;
+        let attention_manager = manager.clone();
         let mut publication_failed = false;
         let mut stopped = self.stopped.clone();
         let shutdown = async move {
@@ -236,6 +237,12 @@ impl DesktopLaunch {
                         return;
                     }
                 };
+                if let Ok(engine) = uuid::Uuid::parse_str(&self.incarnation) {
+                    attention_manager
+                        .inner
+                        .attention
+                        .configure_native(engine, bound.to_string());
+                }
                 if self
                     .send(serde_json::json!({"kind":"ready", "version":VERSION,
                 "incarnation":self.incarnation, "endpoint":format!("http://{bound}"),

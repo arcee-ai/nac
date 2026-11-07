@@ -3,11 +3,42 @@ use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod completion_migration_tests;
+mod completion_tables;
 mod delegation_receipts;
+#[cfg(test)]
+mod fresh_task_migration_tests;
+mod fresh_task_tables;
+mod heartbeat_calendar;
+#[cfg(test)]
+mod heartbeat_calendar_tests;
+#[cfg(test)]
+mod heartbeat_migration_tests;
+pub(super) mod heartbeat_tables;
+#[cfg(test)]
+mod native_task_launch_migration_tests;
+mod native_task_launches;
+#[cfg(test)]
+mod peer_goal_start_migration_tests;
+mod peer_goal_starts;
+#[cfg(test)]
+mod session_mcp_refresh_migration_tests;
+#[cfg(test)]
+mod task_followup_delegation_migration_tests;
+mod task_followup_delegations;
+mod task_followups;
+#[cfg(test)]
+mod task_question_migration_tests;
+
+#[cfg(test)]
+mod task_followup_migration_tests;
 
 #[cfg(test)]
 #[path = "schema/child_input_migration_tests.rs"]
 mod child_input_migration_tests;
+#[cfg(test)]
+mod lineage_retention_tests;
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
@@ -27,7 +58,8 @@ pub(super) use managed_tables::create_managed_maintenance_tables;
 use managed_tables::create_terminal_remote_cleanups_table;
 use model_configurations::create_model_configurations_table;
 use transcript_tables::{
-    create_session_run_recovery_table, create_transcript_append_receipts_table,
+    autoincrement_sequence, backfill_run_counts, create_session_run_recovery_table,
+    create_transcript_append_receipts_table, restore_autoincrement_sequence,
 };
 
 #[cfg(test)]
@@ -56,6 +88,15 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 50 extends the occurrence source format for calendar cadence.
+// 49 adds the physical completion ledger; runtime production remains separately owned.
+// 48 adds standalone fresh-task schedule ownership and retained-resource receipts.
+// 47 binds new task follow-ups to retained service-issued human delegation.
+// 46 retains exact structured questions and identified answer continuations.
+// 45 adds session-scoped, revision-checked MCP mount refresh intent.
+// 44 adds same-chat heartbeat schedules, occurrences and control receipts.
+// 42 retains caller-bound native independent task launch receipts.
+// 41 retains retry-safe agent follow-up receipts independently of delivery.
 // 40 composes automatic permission review with the retained-task/child-input schema.
 // 39 adds retained task launch receipts and saved Git source bindings.
 // 38 retains bounded run and replaced/cleared goal outcomes for task reads.
@@ -91,7 +132,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 40;
+const STORE_SCHEMA_VERSION: i64 = 50;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -640,6 +681,7 @@ pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection>
         version == STORE_SCHEMA_VERSION,
         "probe store is not initialized"
     );
+    heartbeat_calendar::verify_format(&conn)?;
     Ok(conn)
 }
 
@@ -655,6 +697,7 @@ pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConne
             "store schema version {schema_version} is not initialized for runtime reads; expected {STORE_SCHEMA_VERSION}"
         ));
     }
+    heartbeat_calendar::verify_format(&conn)?;
     Ok(conn)
 }
 
@@ -666,6 +709,9 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
         return Err(anyhow!(
             "unsupported store schema version {schema_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
         ));
+    }
+    if schema_version == STORE_SCHEMA_VERSION {
+        heartbeat_calendar::verify_format(&conn)?;
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -729,6 +775,7 @@ fn open_connection_with_hooks(
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     if preflight_schema_version == STORE_SCHEMA_VERSION {
+        heartbeat_calendar::verify_format(&conn)?;
         return Ok(conn);
     }
     after_preflight();
@@ -740,6 +787,12 @@ fn open_connection_with_hooks(
     after_lock();
     let schema_version: i64 =
         transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version == STORE_SCHEMA_VERSION {
+        heartbeat_calendar::verify_format(&transaction)?;
+        before_commit()?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
@@ -783,9 +836,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-        | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-        | 38 | 39 | STORE_SCHEMA_VERSION => {}
+        2..=49 => {}
         unsupported => {
             return Err(anyhow!(
                 "unsupported store schema version {unsupported}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}"
@@ -1008,6 +1059,17 @@ fn open_connection_with_hooks(
     ensure_column(&transaction, "session_goals", "last_run_id", "TEXT")?;
     super::task_evidence::create_task_evidence_tables(&transaction)?;
     super::task_launches::create_tables(&transaction)?;
+    task_followups::create_tables(&transaction)?;
+    task_followup_delegations::create_tables(&transaction)?;
+    native_task_launches::create_tables(&transaction)?;
+    peer_goal_starts::create_tables(&transaction)?;
+    heartbeat_tables::create_heartbeat_tables(&transaction)?;
+    super::session_mcp_refresh::create_table(&transaction)?;
+    super::task_questions::create_table(&transaction)?;
+    fresh_task_tables::migrate(&transaction)?;
+    completion_tables::create_tables(&transaction)?;
+    heartbeat_calendar::rebuild_occurrences_for_calendar(&transaction)?;
+    heartbeat_calendar::verify_format(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -1826,39 +1888,6 @@ fn verify_copy_count(
     Ok(())
 }
 
-fn autoincrement_sequence(conn: &Connection, table: &str) -> Result<Option<i64>> {
-    Ok(conn
-        .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name = ?1",
-            params![table],
-            |row| row.get(0),
-        )
-        .optional()?)
-}
-
-fn restore_autoincrement_sequence(
-    conn: &Connection,
-    table: &str,
-    prior_sequence: Option<i64>,
-) -> Result<()> {
-    let Some(prior_sequence) = prior_sequence else {
-        return Ok(());
-    };
-    let updated = conn.execute(
-        "UPDATE sqlite_sequence
-         SET seq = MAX(seq, ?2)
-         WHERE name = ?1",
-        params![table, prior_sequence],
-    )?;
-    if updated == 0 {
-        conn.execute(
-            "INSERT INTO sqlite_sequence (name, seq) VALUES (?1, ?2)",
-            params![table, prior_sequence],
-        )?;
-    }
-    Ok(())
-}
-
 fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
     for table in [
         "thread_steering",
@@ -1866,7 +1895,12 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "orchestrator_compaction_checkpoints",
         "workspace_revisions",
         "session_run_recovery",
+        "session_completion_bindings",
+        "session_completion_marks",
+        "session_completion_occurrences",
         "session_inbox",
+        "task_followups",
+        "session_mcp_refresh",
         "human_shell_operations",
         "permission_grants",
         "traditional_children",
@@ -1894,24 +1928,6 @@ fn ensure_workset_items_acceptance_column(conn: &Connection) -> Result<()> {
     }
     conn.execute(
         "ALTER TABLE workset_items ADD COLUMN acceptance TEXT NOT NULL DEFAULT ''",
-        [],
-    )?;
-    Ok(())
-}
-
-/// Seeds the run counter for sessions that predate it. One run submits exactly
-/// one user message, so the stored history is the best available estimate.
-/// Rows that already counted a run keep their value, and unparseable history
-/// stays at zero rather than failing the migration.
-fn backfill_run_counts(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "UPDATE sessions
-         SET run_count = (
-             SELECT COUNT(*)
-             FROM json_each(sessions.messages_json)
-             WHERE json_extract(value, '$.role') = 'user'
-         )
-         WHERE run_count = 0 AND json_valid(messages_json)",
         [],
     )?;
     Ok(())

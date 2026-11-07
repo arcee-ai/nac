@@ -266,11 +266,24 @@ impl SessionService {
     pub(super) fn try_submit_prompt_with_guard<'a>(
         &'a self,
         client_id: Option<SessionClientId>,
-        expanded_prompt: String,
+        mut expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        admission: RunAdmissionKind,
+        mut admission: RunAdmissionKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
+        admission.inbox_prompt =
+            self.admitted_inbox_prompt(admission.inbox_item_id, &expanded_prompt)?;
+        if admission.heartbeat_occurrence.is_none() {
+            if let Some(inbox) = admission.inbox_item_id {
+                admission.heartbeat_occurrence = self
+                    .prepare_fresh_heartbeat_input(inbox, &mut expanded_prompt)?
+                    .map(Box::new);
+            }
+        }
+        let heartbeat_timeout = admission
+            .heartbeat_occurrence
+            .as_ref()
+            .map(|occurrence| occurrence.spec.execution_timeout_ms);
         let active_run = self.try_begin_run_inner_with_guard(
             client_id,
             &expanded_prompt,
@@ -285,7 +298,7 @@ impl SessionService {
         let prompt_commit = self
             .run_prompt_commit(&run_id)
             .expect("newly admitted run must own its prompt commit channel");
-        let inbox_item_id = self.run_inbox_item_id(&run_id);
+        let inbox_prompt = self.run_inbox_prompt(&run_id);
         let review_intent = self.run_review_intent(&run_id);
         let event_bus = self.event_bus.clone();
         let service = self.clone();
@@ -322,7 +335,7 @@ impl SessionService {
                         &expanded_prompt,
                         &task_run_id,
                         prompt_commit,
-                        inbox_item_id,
+                        inbox_prompt,
                         review_intent,
                     )
                     .await
@@ -366,6 +379,9 @@ impl SessionService {
             }
         });
         self.set_run_task(&run_id, task);
+        if let Some(timeout) = heartbeat_timeout {
+            self.arm_heartbeat_deadline(&run_id, Duration::from_millis(timeout as u64));
+        }
 
         Ok(SessionRunHandle {
             run_id: active_run.run_id,
@@ -458,13 +474,16 @@ impl SessionService {
                 )),
             })?;
         let RunAdmissionKind {
+            heartbeat_occurrence,
             terminal_selection,
-            inbox_item_id,
+            mut inbox_item_id,
+            inbox_prompt,
             review_intent,
             goal_continuation,
             child_execution_mode,
             managed_orchestrator_execution_mode,
         } = admission;
+        let mut inbox_prompt = inbox_prompt.map(RunInboxPrompt::CapturedRaw);
         let mut guard = guard.unwrap_or_else(|| self.lock_active_operation());
         if self
             .stopping_admission
@@ -528,9 +547,17 @@ impl SessionService {
             self.terminal_manager
                 .acquire_workspace_activity_lease()
                 .map_err(|error| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::store(format!(
-                        "failed to acquire workspace run authority: {error:#}"
-                    )),
+                    message: if heartbeat_occurrence.is_some()
+                        && matches!(
+                            error.downcast_ref::<sessions::SessionOperationLeaseError>(),
+                            Some(sessions::SessionOperationLeaseError::Busy(_))
+                        ) {
+                        SessionCoordinationError::local_agent_busy()
+                    } else {
+                        SessionCoordinationError::store(format!(
+                            "failed to acquire workspace run authority: {error:#}"
+                        ))
+                    },
                 })?
         } else {
             None
@@ -577,7 +604,40 @@ impl SessionService {
             }
         }
 
-        let run_id = SessionRunId::new();
+        if goal_continuation
+            && crate::store::pending_task_question(
+                &self.metadata.store_path,
+                self.metadata.session_id.as_deref().unwrap_or_default(),
+            )
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "question gate unavailable: {error:#}"
+                )),
+            })?
+            .is_some()
+        {
+            return Err(SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store("a blocking question is pending"),
+            });
+        }
+        let reserved = inbox_item_id
+            .map(|item| {
+                crate::store::question_continuation_run(
+                    &self.metadata.store_path,
+                    self.metadata.session_id.as_deref().unwrap_or_default(),
+                    item,
+                )
+            })
+            .transpose()
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "question continuation changed: {error:#}"
+                )),
+            })?
+            .flatten();
+        let run_id = reserved
+            .map(SessionRunId::from_stored)
+            .unwrap_or_else(SessionRunId::new);
         if !self.active_threads.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
@@ -663,7 +723,7 @@ impl SessionService {
                             "failed to bind traditional child generation to run: {error:#}"
                         )),
                     })?;
-                } else {
+                } else if heartbeat_occurrence.is_none() {
                     crate::store::bind_session_goal_run(
                         &self.metadata.store_path,
                         session_id,
@@ -683,19 +743,61 @@ impl SessionService {
             }
         }
         if let Some(lease) = operation_lease.as_ref() {
-            self.agent
-                .try_lock()
-                .map_err(|_| SessionSubmitError::Coordination {
-                    message: SessionCoordinationError::local_agent_busy(),
-                })?
+            let mut agent =
+                self.agent
+                    .try_lock()
+                    .map_err(|_| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::local_agent_busy(),
+                    })?;
+            agent
                 .bind_transcript_run(active_run.run_id.as_str(), lease)
                 .map_err(|error| SessionSubmitError::Coordination {
                     message: SessionCoordinationError::store(format!(
                         "failed to bind transcript append authority: {error:#}"
                     )),
                 })?;
+            agent.bind_heartbeat_execution(heartbeat_occurrence.as_deref());
+        }
+        let heartbeat = heartbeat_occurrence.is_some();
+        if let Some(occurrence) = heartbeat_occurrence {
+            let admitted = crate::store::admit_heartbeat(
+                &self.metadata.store_path,
+                self.metadata.session_id.as_deref().ok_or_else(|| {
+                    SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(
+                            "heartbeat session identity is unavailable",
+                        ),
+                    }
+                })?,
+                &occurrence.occurrence_id,
+                occurrence.revision,
+                active_run.run_id.as_str(),
+                &occurrence.receipt_id,
+                expanded_prompt,
+                &self
+                    .heartbeat_context
+                    .as_ref()
+                    .map(|context| context.execution_cwd())
+                    .unwrap_or_default(),
+                i64::try_from(active_run.started_at_epoch_ms).unwrap_or(i64::MAX),
+            )
+            .map_err(|error| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::store(format!(
+                    "heartbeat admission failed: {error:#}"
+                )),
+            })?
+            .ok_or_else(|| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::local_agent_busy(),
+            })?;
+            if inbox_item_id.is_none() && occurrence.inbox_item_id.is_none() {
+                inbox_prompt = admitted
+                    .inbox_item_id
+                    .map(RunInboxPrompt::AdmissionCreatedHeartbeat);
+            }
+            inbox_item_id = admitted.inbox_item_id;
         }
         *guard = Some(ActiveSessionOperation::Run(ActiveRunState {
+            heartbeat,
             snapshot: active_run.clone(),
             started_at: Instant::now(),
             finishing: false,
@@ -705,6 +807,7 @@ impl SessionService {
             transcript_baseline: None,
             command_cancellation,
             inbox_item_id,
+            inbox_prompt,
             review_intent,
             _operation_lease: operation_lease,
             _workspace_activity_lease: workspace_activity_lease,
