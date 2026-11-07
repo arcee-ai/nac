@@ -39,12 +39,12 @@ def until(description, predicate, timeout=15):
     raise TimeoutError(description)
 
 
-def request(endpoint, path, body=None, method=None):
+def request(endpoint, path, body=None, method=None, *, timeout=8):
     payload = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(endpoint + path, payload, method=method,
                                  headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         raise AssertionError(f'{path}: {error.code}: {error.read(4096).decode()}') from error
@@ -52,20 +52,75 @@ def request(endpoint, path, body=None, method=None):
 
 class QuitProvider:
     """One completed transcript, one slow goal, and one unapproved tool call."""
-    def __init__(self, workspace):
+    def __init__(self, workspace, *, q1_metadata=False):
         self.workspace = workspace
+        self.q1_metadata = q1_metadata
         self.release = threading.Event()
         self.goal_accepted = threading.Event()
         self.requests = []
         self.errors = []
         self.denied_outputs = []
+        self._ingress_lock = threading.Lock()
+        self._ingress = []
+        self._ingress_total = 0
+        self._ingress_active = 0
+        self._ingress_overflow = False
+        self._ingress_closed = False
+        self._connections_active = 0
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def finish(self):
+                try:
+                    super().finish()
+                finally:
+                    with owner._ingress_lock:
+                        owner._connections_active -= 1
+
+            def handle_one_request(self):
+                # Own the read attempt before the base handler can swallow a timeout.
+                self.observation = owner.begin_ingress()
+                try:
+                    return super().handle_one_request()
+                except Exception as error:
+                    self.observe_error(type(error).__name__)
+                    raise
+                finally:
+                    if self.observation is not None:
+                        owner.finish_ingress(self.observation)
+
+            def parse_request(self):
+                # Retain the same observation through HTTP/header/method validation.
+                parsed = super().parse_request()
+                owner.mark_ingress(self.observation, method=getattr(self, 'command', None),
+                                   path=getattr(self, 'path', ''), parsed=parsed)
+                return parsed
+
+            def observe_error(self, error):
+                # No raw line is required to retain an unknown read failure.
+                if self.observation is None:
+                    self.observation = owner.begin_ingress()
+                if self.observation is not None:
+                    owner.mark_ingress(self.observation, error=error)
+
+            def send_error(self, code, *args, **kwargs):
+                self.observe_error('HTTP ' + str(code))
+                return super().send_error(code, *args, **kwargs)
+
             def log_message(self, *_args):
                 pass
 
             def do_GET(self):
+                if owner.q1_metadata and self.path == '/models':
+                    owner.mark_ingress(self.observation, recognized='q1-model-index')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(dict(object='list', data=[
+                        dict(id='gpt-5.6-sol', object='model')])).encode())
+                    return
+                owner.mark_ingress(self.observation,
+                                   recognized='catalog' if self.path.startswith('/models-dev') else None)
                 self.send_response(304 if self.path.startswith('/models-dev') else 404)
                 self.end_headers()
 
@@ -116,6 +171,7 @@ class QuitProvider:
                     owner.errors.append('Unexpected model request')
                     self.send_error(400)
                     return
+                owner.mark_ingress(self.observation, recognized=scenario)
                 owner.requests.append(scenario)
                 self.send_response(200)
                 streaming = body.get('stream') is True
@@ -138,10 +194,60 @@ class QuitProvider:
                 else:
                     self.wfile.write(json.dumps(response).encode())
 
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        class ObservedServer(ThreadingHTTPServer):
+            def process_request(self, connection, address):
+                # Admission is counted on the serving thread before worker creation.
+                with owner._ingress_lock:
+                    owner._connections_active += 1
+                try:
+                    return super().process_request(connection, address)
+                except Exception:
+                    with owner._ingress_lock:
+                        owner._connections_active -= 1
+                    raise
+
+        self.server = ObservedServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.endpoint = f'http://127.0.0.1:{self.server.server_port}'
+
+    def begin_ingress(self):
+        with self._ingress_lock:
+            self._ingress_total += 1
+            self._ingress_active += 1
+            row = dict(sequence=self._ingress_total, method=None, path='', parsed=False,
+                       recognized=None, error=None, finished=False)
+            if len(self._ingress) < 256:
+                self._ingress.append(row)
+            else:
+                self._ingress_overflow = True
+            return row
+
+    def mark_ingress(self, row, **facts):
+        with self._ingress_lock:
+            for key, value in facts.items():
+                if key in ('method', 'path', 'recognized', 'error') and isinstance(value, str):
+                    value = value[:256]
+                row[key] = value
+
+    def finish_ingress(self, row):
+        with self._ingress_lock:
+            if not row['finished']:
+                if not row['parsed'] and row['error'] is None:
+                    row['error'] = 'Pre-parse request outcome unknown'
+                row['finished'] = True
+                self._ingress_active -= 1
+
+    def ingress_snapshot(self):
+        with self._ingress_lock:
+            rows = [dict(row) for row in self._ingress]
+            return dict(total=self._ingress_total, active=self._ingress_active,
+                        connectionsActive=self._connections_active,
+                        overflow=self._ingress_overflow, closed=self._ingress_closed,
+                        complete=not self._ingress_overflow and self._ingress_active == 0 and
+                                 self._connections_active == 0 and
+                                 len(rows) == self._ingress_total,
+                        rows=rows)
 
     def close(self):
         self.release.set()
@@ -149,6 +255,8 @@ class QuitProvider:
         self.server.server_close()
         self.thread.join(timeout=3)
         assert not self.thread.is_alive()
+        with self._ingress_lock:
+            self._ingress_closed = True
 
 
 class QuitWorkspaceFixture:
