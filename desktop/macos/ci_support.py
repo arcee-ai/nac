@@ -45,9 +45,12 @@ def require_console(data, uid, quartz):
 
 
 def qualify_toolchain(actual, expected):
+    # Exact image-bound OS pairs retain all historical approved envelopes.
+    host = expected.get('image_hosts', {}).get(actual.get('image'), {})
     for key in ('developer_directory', 'xcode', 'sdk', 'os_version', 'os_build'):
-        if actual.get(key) != expected.get(key):
-            raise RuntimeError(f'{key} drift: expected {expected.get(key)!r}, got {actual.get(key)!r}; requalify explicitly')
+        value = host.get(key, expected.get(key)) if key in ('os_version', 'os_build') else expected.get(key)
+        if actual.get(key) != value:
+            raise RuntimeError(f'{key} drift: expected {value!r}, got {actual.get(key)!r}; requalify explicitly')
     if actual.get('image') not in expected['images']:
         raise RuntimeError(f'image drift: {actual.get("image")!r}; requalify explicitly against official inventory')
     if expected['swift'] is not None and actual['swift'] != expected['swift']:
