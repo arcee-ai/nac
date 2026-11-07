@@ -30,7 +30,6 @@ def write(path, value):
     path.write_bytes(data)
 
 
-
 def generated_runner(folder, config_path, configuration_sha256, config, selection, run):
     derived = folder / 'derived'
     args = ['xcodebuild', 'build-for-testing', '-project', selection['project'], '-scheme', selection['scheme'],
