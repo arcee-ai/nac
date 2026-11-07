@@ -1,6 +1,7 @@
 """Injected actual path finalizer controls; no native commands are executed."""
 from contextlib import ExitStack, contextmanager
 import json
+import os
 from pathlib import Path
 import plistlib
 import tempfile
@@ -14,7 +15,8 @@ from ci_paths_protocol import CASES, PRODUCT
 
 class CaseFinalizationControls(unittest.TestCase):
     def exercise(self, *, scenario=CASES[0], test_error=False, export_error=False,
-                 cleanup_error=False, build_error=False, missing_result=False, budget=None, actual_collector=None, expire_cleanup=None):
+                 cleanup_error=False, build_error=False, missing_result=False, budget=None, actual_collector=None, expire_cleanup=None,
+                 check_environment=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             raw = root / 'raw'; raw.mkdir()
@@ -27,11 +29,21 @@ class CaseFinalizationControls(unittest.TestCase):
             relocation['path'].mkdir()
             commands, cleanup_calls, collect_calls = [], [], []
             config_seen = {}
+            environments = []
+            permitted = dict(PATH='/Selected/tools:/usr/bin', DEVELOPER_DIR='/Selected/Xcode',
+                             SDKROOT='/Selected/SDK', LANG='en_US.UTF-8', LC_ALL='C',
+                             HOME='/private/fixture-home', TMPDIR='/private/fixture-tmp',
+                             NAC_MAC_ENGINE='/private/fixture-engine', CARGO_BUILD_JOBS='2')
+            forbidden = dict(NAC_MANAGED_CONFIG='ambient-managed-canary', GITHUB_TOKEN='ambient-gh-canary',
+                             FIXTURE_TOKEN='ambient-token-canary', OPENAI_API_KEY='ambient-api-canary',
+                             OTHER_API_KEY='ambient-other-api-canary')
             @contextmanager
             def lease(_):
                 yield relocation
-            def run(argv, log, timeout):
+            def run(argv, log, timeout, **options):
                 commands.append(argv)
+                environment = options.get('env')
+                environments.append(dict(os.environ if environment is None else environment))
                 if 'build-for-testing' in argv:
                     if build_error:
                         raise RuntimeError('Injected build failure, no SDK invoked')
@@ -68,6 +80,8 @@ class CaseFinalizationControls(unittest.TestCase):
                     raise RuntimeError('Injected missing/unsettled custody; preserve relocated root')
                 return dict(app_engine_settled=True,profile_removed=True)
             with ExitStack() as stack:
+                if check_environment:
+                    stack.enter_context(patch.dict(os.environ, {**permitted, **forbidden}, clear=True))
                 stack.enter_context(patch('ci_paths.relocation_directory',lease))
                 stack.enter_context(patch('ci_paths.require_checkout'))
                 stack.enter_context(patch('ci_paths.verify_build',return_value=dict(native_sha256='b'*64,engine_sha256='c'*64)))
@@ -86,6 +100,8 @@ class CaseFinalizationControls(unittest.TestCase):
                     result=ci_paths.run_case(raw,root,app,selection,'a'*40,scenario,run,
                                             lambda _:self.fail('Unexpected uninjected native command'),lambda _:None,time.time()+1000,budget=budget)
                     self.assertTrue(result['passed'])
+                if check_environment:
+                    self.assertEqual(dict(os.environ), {**permitted, **forbidden}, 'Parent environment unchanged')
             essential=json.loads((raw/scenario/'essential.json').read_text())
             self.assertFalse((raw/scenario/'derived').exists())
             self.assertFalse(essential['native_acceptance'])
@@ -107,7 +123,23 @@ class CaseFinalizationControls(unittest.TestCase):
             if test_error and not export_error and not cleanup_error:
                 self.assertFalse(essential['retained_bundle']);self.assertTrue(relocation['safe_to_remove'])
                 self.assertEqual(collect_calls,[False])
+            if check_environment:
+                self.assertEqual(len(environments), 2)
+                self.assertEqual(commands[0][1], 'build-for-testing')
+                self.assertEqual(commands[1][1], 'test-without-building')
+                self.assertTrue(config_seen['evidence'].endswith('/app-evidence/app.json'))
+                for stage, environment in zip(('build', 'input'), environments):
+                    with self.subTest(stage=stage):
+                        self.assertEqual(environment, permitted)
+                        self.assertTrue(set(forbidden).isdisjoint(environment))
+                        self.assertTrue(set(forbidden.values()).isdisjoint(environment.values()))
             return essential
+
+    def test_successful_path_filters_both_child_environments_and_preserves_fixture_binding(self):
+        self.exercise(check_environment=True)
+
+    def test_failed_path_filters_both_child_environments_and_still_settles_fixture(self):
+        self.exercise(scenario=CASES[1], test_error=True, check_environment=True)
 
     def test_both_cases_keep_actual_test_selection_and_separate_native_acceptance(self):
         for scenario in CASES:
