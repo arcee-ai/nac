@@ -308,6 +308,10 @@ def workspace_case(app, case, root, observer, console_checks):
 
 def app_crash_case(app, case, root, observer, console_checks):
     env = environment(root)
+    # Compute pins before actuation, keeping the equality boundary itself short.
+    pins = dict(source_revision=json.loads((app / 'Contents/Resources/engine-identity.json').read_text())['source_revision'],
+                controller_sha256=digest(__file__), native_sha256=digest(app / 'Contents/MacOS/NACPreview'),
+                engine_sha256=digest(app / 'Contents/Resources/nac-web'))
     store = root / 'selected store.db'
     journeys = []
     try:
@@ -322,7 +326,14 @@ def app_crash_case(app, case, root, observer, console_checks):
         assert requested['termination_requested'], 'Exact owned app incarnation did not accept crash control'
         wait_for('Crashed app leaves running-app registry', lambda: not first.observe()['apps'], timeout=8)
         wait_for('Parent death settles its exact engine', lambda: engine_settled(app, previous['engine_pid']), timeout=25)
-        assert first.observe().get('frontmost') == first.prior, 'Focus changed after fixture crash; refusing reactivation'
+        observed_focus = first.observe().get('frontmost')
+        focus_receipt = json.dumps(dict(pins, prior=first.prior, fixture_identity=first.identity,
+                                        observed=observed_focus, monotonic=time.monotonic()),
+                                   allow_nan=False, indent=2) + '\n'
+        if len(focus_receipt.encode('utf-8')) > 16 * 1024:
+            raise ValueError('Post-crash focus receipt exceeded its 16 KiB bound')
+        (case / 'post-crash-focus.json').write_text(focus_receipt)
+        assert observed_focus == first.prior, 'Focus changed after fixture crash; refusing reactivation'
         replacement = case / 'replacement'
         replacement.mkdir()
         second = AppJourney(app, replacement / 'result.json', root, env, store, observer, console_checks)
