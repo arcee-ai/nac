@@ -48,6 +48,54 @@ struct ProtocolTests {
         }
         let control = try JSONSerialization.jsonObject(with: parser().stop()) as! [String: Any]
         precondition(Set(control.keys) == Set(["kind", "version", "incarnation"]))
+        let failed = try parser()
+        do {
+            _ = try failed.receive(line(["kind": "failed", "version": 1, "incarnation": failed.incarnation,
+                                         "message": "private-canary"]))
+            preconditionFailure("Failed receipt accepted")
+        } catch {
+            let text = error.localizedDescription
+            if text.contains("newer NAC version") || text.contains("compatible version") || text.contains("private-canary") {
+                fputs("Generic failed receipt incorrectly suggests a newer schema or exposes peer text\n", stderr)
+                exit(1)
+            }
+            precondition(text.contains("directory access"))
+        }
+        // Failed startup/listener/unknown codes do not establish a newer schema.
+        for (stage, code) in [("startup", "engine_unavailable"), ("startup", "store_owned"),
+                              ("listener", "bind_failed"), ("startup", "unknown")] {
+            let state = try parser()
+            do {
+                _ = try state.receive(line(["kind": "failed", "version": 1, "incarnation": state.incarnation,
+                    "stage": stage, "code": code, "message": "private-peer-canary"]))
+                preconditionFailure("Failure was accepted as readiness")
+            } catch {
+                let text = error.localizedDescription
+                precondition(text.contains("directory access") && !text.contains("private-peer-canary"))
+                precondition(!text.contains("newer NAC version") && !text.contains("compatible version"))
+            }
+        }
+        // Only the authenticated startup cause establishes future-schema recovery.
+        for (stage, code, expected) in [("startup", "store_schema_incompatible", true),
+            ("listener", "store_schema_incompatible", false), ("", "store_schema_incompatible", false),
+            ("startup", "unknown", false)] {
+            let state = try parser()
+            do {
+                _ = try state.receive(line(["kind": "failed", "version": 1, "incarnation": state.incarnation,
+                    "stage": stage, "code": code, "message": "private-peer-canary"]))
+                preconditionFailure("Failed receipt accepted")
+            } catch {
+                let text = error.localizedDescription
+                if text.contains("compatible version") != expected {
+                    fputs("Typed future-schema guidance did not match the exact startup cause\n", stderr)
+                    exit(1)
+                }
+                precondition(!text.contains("private-peer-canary"))
+                if expected {
+                    precondition(text.contains("Keep your configuration and data") && text.contains("do not delete or downgrade"))
+                }
+            }
+        }
         print("Private engine protocol fixtures passed")
     }
 }
