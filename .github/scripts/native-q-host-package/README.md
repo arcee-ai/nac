@@ -11,16 +11,17 @@ source preparation. No ONE-Q clock/source repair is imported here.
 This successor is based on actual dev
 `4b852f065e2200f46c194b4ad2c5ace3fbd766a8`. It preserves the reviewed
 ca919 controller on its original private branch; the manual guard now selects
-only `codex/experimental-native-q-host-package-post648`. Original G1 source
-clearance applies to ca919 only; affected verification must bind this successor.
+only `codex/experimental-native-q-host-package-post648`. Prior ca919/697266/1bf7 source
+decisions remain frozen; original G1 affected verification must bind this new pair.
 
-`pair.json` pins final P `6c578a2c18050e218b83daf80f46731040e4b3e4`.
-Its actual immediate `P_parent` is `478895c50034b3d2b200cce5391e098c7ec477ae`;
-`P_native_base` is `e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1` and
-`source_context` remains actual dev4b852. The final product adds only two guide/
-documentation corrections to P478; operational packaging/Native/Q blobs are
-unchanged. The exact P commit binds that ancestry. Root's composition proof
-retains all125 Native patches. Q04c hashes and SDK2cee H9863 stay unchanged.
+`pair.json` pins current P `9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3`.
+Its actual immediate `P_parent` is `4f2a14149558271842a58c6a1591c2b6ffc61306`;
+`P_native_base` is `84c25942f848eccdfa8e7c60c9bcaa37133e418a` and
+`source_context` remains actual dev4b852. The normal39 roster is unchanged;
+EngineFailure.swift is the sole normal-input drift from previous P6c578. All three
+builder supports, locks and operational packaging Python blobs are unchanged.
+Root's current-P9 composition proof records the actual chain through739638/4f2a
+and this current normal-input nomination. Q04c hashes and SDK2cee H9863 stay exact.
 Only P's Rust/normal Swift are built. H provides the maintained Bound/ci.run
 process-group/ownership/drain/retention owner; its Rust/Auth/native cases are
 never built or called. Q's exact source, inherited unchanged by P, is imported
@@ -69,7 +70,7 @@ missing positive fresh release-dependency inventory stops before production.
 archive is unused: no ci-incremental helper, workspace-crate caching or old engine.
 The driver requires1530s remaining (1080engine+390downstream+60handoff) before
 marking its one producer attempt. Original40/30/8/2 and1080 caps stay unchanged.
-P6c has no release/config override: explicit CGU16/nonincremental0 match canonical
+P9 has no release/config override: explicit CGU16/nonincremental0 match canonical
 release defaults. The target is a job-owned sibling of all checkouts, outside
 handoff/output and never uploaded. Source identity and locked build stay exact.
 Job01 remains consumed/closed; this successor grants no actual cache/build retry.
@@ -79,7 +80,7 @@ the unedited producer manifest and its original ZIP, bounded receipts and gate
 facts, unique run/attempt artifact name,3-day retention, no overwrite. Root must
 consume job/ownership PASS, exact file hashes/size/source and artifact ID before
 any further admission. Artifact hashes are NEW host evidence, not required to
-equal local f591/bb45; source final P6c578 and genuine invariants remain exact.
+equal local f591/bb45; source current P9ec88 and genuine invariants remain exact.
 The legacy `ff8-hosted-normal-package-only` scope and temp/artifact names identify
 the unchanged packaging lineage; they neither select old P nor renew an allocation.
 
