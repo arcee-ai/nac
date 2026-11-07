@@ -40,6 +40,12 @@ class WorkspaceCaptureTests(unittest.TestCase):
         self.assertNotIn('.drop', prefix)
         projected = prefix.replace('        var canonicalState: [String: Any]?\n', '').replace(canonical, '')
         projected = projected.replace(" + '?message_limit=3&include_system=false&include_sessions=false'", '')
+        file_branch = r'''        if case let .file(id, path, _) = target {
+            arguments["fileState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/workspace/file?' + new URLSearchParams({path:\(quote(path))}),{cache:'no-store'}); if(!r.ok)throw Error('File snapshot unavailable'); return await r.json();")
+        }
+'''
+        self.assertEqual(projected.count(file_branch), 1)
+        projected = projected.replace(file_branch, '')
         self.assertEqual(projected, self.frozen('originalCapturePrefix'))
         self.assertIn('value["canonical_snapshot"] = canonicalState', source)
         # Keep the entire original capture flow except the two diagnostic-only guards.
