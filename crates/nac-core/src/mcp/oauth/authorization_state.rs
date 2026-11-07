@@ -116,3 +116,69 @@ mod tests {
         );
     }
 }
+
+/// Tests completion ownership, not whether a URL may be offered or replayed.
+/// The one-use state is consumed before token exchange, while this binding
+/// remains until completion, cancellation, logout or replacement.
+pub fn mcp_oauth_authorization_is_current(
+    cwd: &Path,
+    server_name: &str,
+    endpoint: &str,
+    authorization_url: &str,
+) -> Result<bool> {
+    let store = read_store(&oauth_store_path(cwd)?)?;
+    let Some(profile) = store.profiles.get(server_name) else {
+        return Ok(false);
+    };
+    validate_profile_binding(profile, endpoint)?;
+    Ok(profile.pending_authorization_url.as_deref() == Some(authorization_url))
+}
+
+// Each manager shares this fence between its state and credential adapters.
+// Consuming a state does not retire the flow; clearing/replacing its binding does.
+#[derive(Clone, Default)]
+pub(super) struct CompletionOwnership(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+
+impl CompletionOwnership {
+    pub(super) fn current(&self) -> Result<Option<String>> {
+        self.0
+            .lock()
+            .map(|value| value.clone())
+            .map_err(|_| anyhow!("MCP OAuth completion ownership lock was poisoned"))
+    }
+
+    pub(super) fn capture(&self, state: &str) -> Result<()> {
+        *self
+            .0
+            .lock()
+            .map_err(|_| anyhow!("MCP OAuth completion ownership lock was poisoned"))? =
+            Some(state.into());
+        Ok(())
+    }
+
+    pub(super) fn validate(profile: &OAuthProfile, expected: Option<&str>) -> Result<()> {
+        if let Some(expected) = expected {
+            if profile
+                .pending_authorization_url
+                .as_deref()
+                .and_then(authorization_state)
+                .as_deref()
+                != Some(expected)
+            {
+                bail!("MCP OAuth authorization was retired while completing");
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn settled(&self, expected: Option<String>) -> Result<()> {
+        let mut current = self
+            .0
+            .lock()
+            .map_err(|_| anyhow!("MCP OAuth completion ownership lock was poisoned"))?;
+        if *current == expected {
+            *current = None;
+        }
+        Ok(())
+    }
+}

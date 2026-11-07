@@ -11,9 +11,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 pub(crate) use authorization_state::discard_mcp_oauth_pending_authorization;
+pub use authorization_state::mcp_oauth_authorization_is_current;
 use authorization_state::{
     authorization_state, ensure_not_logged_out, failed_authorization_start, merge_pending_scopes,
-    pending_authorization_is_live, publish_pending_authorization,
+    pending_authorization_is_live, publish_pending_authorization, CompletionOwnership,
 };
 use base64::Engine;
 #[cfg(test)]
@@ -674,6 +675,7 @@ pub(crate) struct OAuthProfileStore {
     expected_client_id: Option<String>,
     save_mode: CredentialSaveMode,
     logout_generation: u64,
+    completion: CompletionOwnership,
 }
 
 #[derive(Clone, Copy)]
@@ -717,6 +719,7 @@ impl CredentialStore for OAuthProfileStore {
                 "client binding mismatch".into(),
             ));
         }
+        let completion = self.completion.current().map_err(Self::auth_error)?;
         let update = |store: &mut OAuthStoreFile| {
             let profile = store
                 .profiles
@@ -727,6 +730,7 @@ impl CredentialStore for OAuthProfileStore {
             if matches!(self.save_mode, CredentialSaveMode::Independent) {
                 ensure_not_logged_out(profile, self.logout_generation)?;
             }
+            CompletionOwnership::validate(profile, completion.as_deref())?;
             profile.binding.issuer = credentials.issuer.clone();
             if matches!(self.save_mode, CredentialSaveMode::Independent) {
                 if credentials.granted_scopes.is_empty() {
@@ -751,7 +755,10 @@ impl CredentialStore for OAuthProfileStore {
                 write_store(&self.path, &store)
             })(),
         };
-        result.map_err(Self::auth_error)
+        result.map_err(Self::auth_error)?;
+        self.completion
+            .settled(completion)
+            .map_err(Self::auth_error)
     }
 
     async fn clear(&self) -> std::result::Result<(), AuthError> {
@@ -846,9 +853,12 @@ impl StateStore for OAuthProfileStore {
                 .get_mut(&self.server_name)
                 .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
             validate_profile_binding(profile, &self.endpoint)?;
-            profile.states.remove(csrf_token);
-            Ok(())
+            Ok(profile.states.remove(csrf_token).is_some())
         })
+        .map_err(Self::auth_error)?
+        .then(|| self.completion.capture(csrf_token))
+        .transpose()
+        .map(|_| ())
         .map_err(Self::auth_error)
     }
 }
@@ -868,6 +878,7 @@ async fn manager_and_profile(
         .ok_or_else(|| anyhow!("MCP OAuth is not configured"))?;
     let registration = validate_profile_binding(&profile, endpoint)?;
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         path,
         server_name: server_name.to_string(),
         endpoint: normalize_endpoint(endpoint)?,
@@ -1129,23 +1140,6 @@ pub fn mcp_oauth_pending_authorization_url(
         .filter(|url| Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))))
 }
 
-/// Tests completion ownership, not whether a URL may be offered or replayed.
-/// The one-use state is consumed before token exchange, while this binding
-/// remains until completion, cancellation, logout or replacement.
-pub fn mcp_oauth_authorization_is_current(
-    cwd: &Path,
-    server_name: &str,
-    endpoint: &str,
-    authorization_url: &str,
-) -> Result<bool> {
-    let store = read_store(&oauth_store_path(cwd)?)?;
-    let Some(profile) = store.profiles.get(server_name) else {
-        return Ok(false);
-    };
-    validate_profile_binding(profile, endpoint)?;
-    Ok(profile.pending_authorization_url.as_deref() == Some(authorization_url))
-}
-
 pub fn mcp_oauth_callback_is_retryable(
     cwd: &Path,
     server_name: &str,
@@ -1223,11 +1217,6 @@ pub fn fail_mcp_oauth_authorization(
         {
             return Ok(false);
         }
-        // Retire in-flight token saves as well as the one-use callback state.
-        profile.logout_generation = profile
-            .logout_generation
-            .checked_add(1)
-            .ok_or_else(|| anyhow!("MCP OAuth authorization generation is exhausted"))?;
         profile.pending_authorization_url = None;
         profile.pending_scopes.clear();
         profile.states.clear();
@@ -1557,6 +1546,7 @@ mod tests {
         configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
         let path = oauth_store_path(Path::new("/workspace")).unwrap();
         let adapter = OAuthProfileStore {
+            completion: CompletionOwnership::default(),
             logout_generation: test_support::logout_generation(&path, "slack"),
             path: path.clone(),
             server_name: "slack".to_string(),
