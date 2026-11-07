@@ -46,7 +46,7 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
@@ -75,7 +75,7 @@ final class PreviewSmoke {
                     }
                     if scenario != "stale-launch" {
                         try await journey()
-                        if scenario != "normal" { try await lifecycle() }
+                        if !["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { try await lifecycle() }
                     }
                 }
                 else if ["parent-loss-startup", "channel-loss-startup", "parent-loss-initialization", "channel-loss-initialization"].contains(scenario) {
@@ -319,6 +319,16 @@ final class PreviewSmoke {
         evidence["persisted_assistant_message"] = true
         try await settleReloadCapture(sessionID: sessionID)
         try await captureWeb("persisted-chat.png")
+        if ["ci-terminal", "ci-terminal-xctest"].contains(scenario) {
+            let ready: (([String: Any]) -> Void)? = scenario == "ci-terminal-xctest" ? { fields in
+                self.evidence.merge(fields) { _, new in new }
+                self.recordOwnership()
+                self.write()
+            } : nil
+            evidence["trusted_terminal"] = try await CITerminal.run(app: app, sessionID: sessionID, externalReady: ready) {
+                try await self.captureWeb("trusted-terminal.png")
+            }
+        }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
         try await wait("second provider request") { self.app.provider.responseCount == 2 }
@@ -437,7 +447,7 @@ final class PreviewSmoke {
         while Date() < end {
             recordOwnership()
             if try await condition() { return }
-            if app.failure != nil && scenario == "normal" { throw PreviewError.message(app.failure!) }
+            if app.failure != nil && ["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { throw PreviewError.message(app.failure!) }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw PreviewError.message("Timed out waiting for \(label)")

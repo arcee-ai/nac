@@ -1,3 +1,4 @@
+import {nativeOrdinary, nativeExcludedName} from './native-qualification-wiring.mjs';
 import { protectedNames } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -167,8 +168,8 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.doesNotMatch(triggers, /paths(?:-ignore)?:/);
   assert.doesNotMatch(workflow, /pull_request_target:|workflow_run:/);
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
-  assert.ok(aggregate.includes("name: " + protectedNames["required-pr-checks"]));
-  assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
+  assert.ok(aggregate.includes("name: " + nativeExcludedName(protectedNames["required-pr-checks"])));
+  assert.ok(aggregate.includes('if: ${{ always() && (' + nativeOrdinary + ') }}'));
   const needs = aggregate.match(/^    needs:\s*\[([\s\S]*?)\]/m);
   assert.ok(needs, "required-pr-checks must declare its literal needs list");
   const dependencies = needs[1]

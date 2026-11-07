@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual AppKit/WKWebView acceptance; requires an interactive Aqua session."""
 import hashlib
+from ci_paths_budget import check as budget_check, timeout_options
 import json
 import os
 import plistlib
@@ -47,19 +48,22 @@ def cleanup_failed_case(evidence, relocated):
     if not evidence.exists():
         raise RuntimeError('No ownership record; inspect app launch diagnostics before cleanup')
     record = json.loads(evidence.read_text())
+    budget_check()
     helper = record.get('app_helper_pid')
     if helper and alive(helper):
-        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True).strip()
+        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True, **timeout_options()).strip()
         if command != '/bin/sleep ' + record.get('app_helper_argument', ''):
             raise RuntimeError('Refusing cleanup of an unrelated app helper')
+        budget_check()
         os.kill(helper, signal.SIGTERM)
     for key, executable in [('engine_pid', relocated / 'Contents/Resources/nac-web'),
                             ('app_pid', relocated / 'Contents/MacOS/NACPreview')]:
+        budget_check()
         pid = record.get(key, 0)
         if not pid:
             continue
         command = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'command='],
-                                 capture_output=True, text=True).stdout
+                                 capture_output=True, text=True, **timeout_options()).stdout
         if not command:
             continue
         if str(executable) not in command:
@@ -68,21 +72,24 @@ def cleanup_failed_case(evidence, relocated):
             raise RuntimeError(f'Refusing cleanup of unowned engine group {pid}')
         send = (lambda sig: os.killpg(pid, sig)) if key == 'engine_pid' else (lambda sig: os.kill(pid, sig))
         try:
+            budget_check()
             send(signal.SIGTERM)
             deadline = time.monotonic() + (25 if key == 'engine_pid' else 3)
             while time.monotonic() < deadline:
+                budget_check()
                 state = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='],
-                                       capture_output=True, text=True).stdout.strip()
+                                       capture_output=True, text=True, **timeout_options()).stdout.strip()
                 if not state or state.startswith('Z'):
                     break
                 time.sleep(0.05)
+            budget_check()
             send(signal.SIGKILL)
         except ProcessLookupError:
             pass
         except PermissionError:
             # Darwin can report EPERM for an already dead process group. Never
             # hide a permission failure while any group member can still run.
-            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True)
+            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True, **timeout_options())
             members = [line.split() for line in rows.splitlines()]
             live = [row for row in members if len(row) == 3 and
                     int(row[1 if key == 'engine_pid' else 0]) == pid and not row[2].startswith('Z')]
@@ -91,6 +98,7 @@ def cleanup_failed_case(evidence, relocated):
     root = Path(record.get('profile', '/missing-ownership-record'))
     if (root.name.startswith('nac-mac-preview-') and not root.is_symlink()
             and root.resolve().parent == Path(tempfile.gettempdir()).resolve()):
+        budget_check()
         if root.exists():
             shutil.rmtree(root)
 
@@ -99,8 +107,9 @@ def main():
     app, output = map(lambda value: Path(value).resolve(), sys.argv[1:])
     output.mkdir(parents=True, exist_ok=True)
     selection = os.environ.get('NAC_MAC_SMOKE_SCENARIOS')
-    scenarios = tuple(selection.split(',')) if selection else SCENARIOS
-    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(SCENARIOS)
+    available = SCENARIOS + (('ci-terminal',) if os.environ.get('NAC_MAC_CI_TERMINAL') == '1' else ())
+    scenarios = tuple(selection.split(',')) if selection else available
+    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(available)
     metadata = {
         'requested_scenarios': scenarios,
         'full_scenario_run': scenarios == SCENARIOS,
@@ -168,7 +177,7 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
-                    if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
+                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)

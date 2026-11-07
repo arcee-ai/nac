@@ -158,3 +158,177 @@ watchdog. The checked-in runner records source/engine/native binary identities,
 exact receipts, OS/SDK, native failure snapshots and cleanup. `engine_contract.py`
 adds direct binary/channel controls using the same bundled executable. These
 fixtures add no production bridge and make no trusted OS input qualification.
+
+## Fixed hosted lifecycle qualification (ALL-344)
+
+`all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
+lane. It pins supplier `7d8322f1d8cad25cc1aa79dc5a7a025a6719065b` and tree
+`89a58b792f4b181a6d64af5dfcb5bc4d6bb24053`; the supplier must be published by its
+owner before GitHub can check it out. Its normal fifteen Swift inputs, production
+blobs, fixture, builder and observer are unchanged. Historical local bundle hashes
+are custody evidence; fresh hosted binary hashes are checked against fresh build
+receipts, rather than assumed equal across toolchains.
+
+The root coordinator is the cross-host authority for allocation
+`nac344-ordering-7e-one`. Its original three cases were blocked before dispatch
+and remain unspent until separately admitted. Before the one workflow dispatch,
+root must atomically reserve its durable transfer/custody record, bind the exact
+published harness and supplier, and supply `lifecycle_custody` JSON. The capsule
+must contain exactly the fields checked by `require_capsule`: version, allocation,
+supplier/tree, harness, repository/workflow/branch, attempt 1, ordered scenarios,
+all-zero prior counts, zero retry/production-repair budgets, the eight pinned
+historical custody digests, and a root-reserved 64-hex admission nonce. Missing,
+altered or extra fields fail closed. A lost dispatch response is reconciled by
+root against the existing run, never resubmitted. This contents-read runner is
+not a global replay database: root must reject reuse of a capsule on another host.
+
+The existing macOS 26 toolchain envelope and positive hosted console guards
+remain required. Setup, a private exact Rust engine, all five build-only bundle
+modes and the image reader complete before any case reservation. Each case
+rechecks source/build/console identity, then fsyncs its command and custody hashes
+before spawn. The fixed order is `run`, `approval`, `terminal`; no case repeats,
+and the first failure, interruption, unknown cleanup or incomplete critical
+evidence stops all remaining cases. The case envelope is six minutes, including
+the four-minute driver bound; the supervisor reserves an additional 150 seconds
+for the target's cleanup and 120 seconds for upload. Budget shortage stops
+before reserving the next case.
+
+The external child installs interruption handling before executing the unchanged
+supplier entry point. The supplier owns native/engine/descendant settlement.
+The harness retains the supplier's bounded fixture receipt before private teardown,
+binds it to the selected store, then observes exact private fixture applications,
+matching private process paths and the recorded terminal descendant afterward.
+A live or reused descendant PID leaves cleanup unknown. The harness never signals
+native PIDs from JSON or searches by application name. Passing cases require store reacquisition, preserved transcript,
+goal, approval mode and inbox identities, no grants/replay, completed duplicate
+Quit/Cancel ordering and settled descendants.
+
+Four WK workspace snapshots and one AppKit sheet snapshot per case are required.
+Each original PNG is bounded, hashed before/after decoding and checked for
+readability; sheets require their Cancel/Stop-and-Quit controls. Root still
+inspects actual originals. These snapshots do not prove composited OS paint,
+trusted keyboard/IME input or accessibility. Complete redacted critical JSON is
+retained, splitting oversized receipts into indexed readable text parts with
+raw/reassembled-export hashes. Database, bundle and private profile data are not
+uploaded. A critical export failure is an explicit failure, not a capped pass.
+
+Lifecycle export reserves a separate finite allowance for the exact fifteen PNG
+paths: at most 2 MiB each and 30 MiB together. Actual redacted non-image payload,
+including JSON split wrappers, remains bounded to 11.75 MiB; its index remains
+256 KiB. The whole lifecycle envelope is 42 MiB (44,040,192 bytes). Shared export
+caps and other qualifications are unchanged. Before the first reservation, the
+harness records this capacity in its build manifest and checks existing payload
+with 4 MiB reserved inside the non-image budget for the complete finalization
+tail. Its exported slots cover the final result and ledger (256 KiB each), GUI
+log and three crash snippets (256 KiB each), report (2 MiB), finalization receipt
+and failure receipt (256 KiB each). The known report/build baseline must fit
+128 KiB before admission; final GUI JSON is limited to 32 KiB. These lifecycle
+producer bounds do not increase any shared or per-kind export cap. Every slot
+charges actual UTF8/redacted bytes and JSON split wrappers. It rechecks the
+reserved allowance after every case. Completed image cases must form the fixed
+run/approval/terminal prefix; final success requires all fifteen original images.
+Extra paths, missing successful final images or any byte overflow stop remaining cases with
+unknown export acceptance and no retry. This capacity declaration is source
+evidence; synthetic export-byte controls do not establish PNG validity or OCR.
+Stopped failed/unknown runs and consistent unfinished dispatched prefixes export
+their available original expected-path images
+from dispatched cases, including earlier successful cases, with complete bounded
+redacted JSON/logs. A separate failure-evidence receipt lists missing captures
+and explicitly denies native acceptance. This failure export never satisfies a
+successful case's exact-five or the final exact-fifteen capture requirement.
+Unfinished export validates prior/active/later states and exact one-dispatch
+counts without mutating or finalizing the ledger. All late writers are staged
+and checked together before atomic export publication. A late producer violation
+forces a failed report and retains complete bounded originals where the actual
+envelope fits, or explicit incomplete failure metadata when it cannot; it never
+publishes a passing report from a failed export.
+
+Ordinary PR/push/release guards, permissions and the other named qualifications
+are preserved. A manual stable workflow also starts its existing ordinary CI jobs
+on their isolated standard hosts; this adapter does not reroute them. Publication
+and the actual hosted admission require separate root decisions. Source controls
+and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
+
+### ALL-347 path adapter (source contract; native qualification pending)
+
+`all-347-paths-macos26` selects only product
+`acbfc63aa2399cff3d34ec5f947a5e86a914b323` and the ordered fresh-profile cases
+`paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
+references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
+T `NativePathJourney.swift` (SHA-256
+`c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21`), with
+`NATIVE_UI_TESTS`. No helper copy, standalone extraction or fabricated xctestrun
+is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
+their compiler-input, engine identity and output hashes are checked.
+
+This current-foundation source nomination is provisional until the product owner
+and coordinator freeze the final supplier. The unchanged helper hash is not
+runtime acceptance. The current producer adds the required `expected_path_root`
+to its denial probe; its phase schema, ordered transitions and helper interface
+remain unchanged. Actual picker/Finder execution and captures remain **UNRUN**.
+
+The later `ci.py --qualification all-347-paths-macos26 --expected-sha <H>
+--source-root <canonical-T-checkout> --output <absent-private-output>` invocation
+also needs an explicit `NAC_PATHS_CUSTODY` capsule from ROOT's separately reviewed
+source/host/custody allocation and `CARGO_BUILD_JOBS=2`. The bounded capsule binds
+version 1, H, T, both ordered cases, `source_preflight=true`,
+`native_eligibility=true`, one allocation ID, original start/deadline epochs
+(maximum 2340 queue-inclusive seconds), and zero retries. Exclusive `.consumed` creation prevents
+reusing it. The maintained manual selector transports the optional `paths_custody` JSON
+through `macos-qualification.yml`. The additional native-only dispatcher uses
+`native-qualification=all-347-paths-macos26` and `native-paths-custody`; it validates
+the original capsule on an Ubuntu admission job before requesting a Mac. Ordinary
+CI and the legacy underscore input remain separate, unchanged interfaces. Its
+skipped aggregate has a distinct name and cannot supply `Required PR checks`.
+Both actual path xcodebuild calls use the shared runner environment filter,
+removing ambient managed configuration, tokens and API keys while preserving
+selected Xcode/SDK, private fixture and locale plumbing. The path-only step validates the original
+contract and writes those exact bytes into a fresh private runner directory,
+then sets `NAC_PATHS_CUSTODY` for the existing CLI. Missing, stale, foreign or
+reused handoffs fail closed. The runner creates no eligibility or deadline,
+and hosted rerun attempts are rejected. Selecting or transporting this contract
+does not itself allocate a run. Local/hosted envelope qualification remains an
+independent prerequisite; no SDK, TCC, toolchain or settings changes are implied.
+
+The actor reads only H's predeclared private app JSON through a no-follow regular
+file descriptor, permits atomic inode replacement and identical rereads, and
+rejects mutated, skipped, backward or foreign phases. Normal phases are ready0,
+document-reloaded1 (one successor UUID), folder-moved2, folder-restored3,
+reveal-observed4; failure is ready0 then failure-panel-observed1 on the initial
+document. Authorization before helper input checks exact app/engine bytes,
+launch/start identity, owner/window, current document/phase, unlocked same-user
+console and unchanged existing helper/developer/automation policy. It never
+activates Finder, sends Finder input or claims Finder close authority.
+
+Named original PNGs bind chooser/Unicode, replacement form, moved-folder error,
+successful session/Files and Finder's unique selected leaf; the failure case
+retains its pending panel. Actual readable paint and non-occlusion review is
+mandatory and cannot be replaced by AX labels, PNG framing, OCR or app receipts.
+Each PNG is at most 2 MiB; the existing exporter retains at most 12 MiB total,
+with complete essential JSON (256 KiB each) before verbose diagnostics. Missing
+proof preserves relocated roots. Case finalization always attempts the existing
+H cleanup owner independently of SDK collection failure. Known Finder residual
+windows stay open and explicit. The original B499-2 disappearance repair stays
+owned by `settle_apps`; this adapter does not duplicate it.
+
+Portable source controls run with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v`
+and are discovered by the existing workflow-lint job. They establish no compiled
+XCTest import/target, sandbox readability, trusted input, actual chooser/Finder,
+minimum-OS or complete ALL-354/ALL-347 acceptance. Those gates remain **UNRUN**
+until a separate frozen-source native allocation.
+
+The path clock uses one original ROOT allocation started before its one exact
+dispatch, at most2340s including queues. ROOT’s operation ledger must bind the
+actual repository/ref/H/run/firstattempt and exact original capsule bytes; local
+`.consumed` is not cross-run replay evidence. `native_eligibility=true` expresses
+conditional ROOT authorization; actual clean source/toolchain/console/policy
+checks before input remain mandatory. It does not attest to a future host.
+
+Under the existing synchronized-UTC engineering premise, a declared60s allowance
+shortens the ROOT deadline once; it is not measured skew evidence. C' is the
+earlier of that conservative conversion and H's original import+1800s deadline.
+Work/collection ends C'-600, cleanup C'-120 and retention C'. Build1200s and
+sharedcases900s only shorten those fixed bounds. Clock discontinuity, expiry or
+unknown cleanup latches failure, retains relocated bundles and permits only
+independent bounded cleanup/retention; it never renews a case or grants input.
