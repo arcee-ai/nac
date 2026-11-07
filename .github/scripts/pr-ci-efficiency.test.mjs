@@ -97,7 +97,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
 });
 
 test("lifecycle custody stays in the named native adapter without rerouting ordinary CI", () => {
-  const stable = workflow("stable-release");
+  const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
   const native = stable.jobs["native-qualification"];
   assert.match(native.if, /inputs.native_qualification == 'all-344-lifecycle-macos26'/);
   assert.equal(stable.on.workflow_dispatch.inputs.lifecycle_custody.type, "string");
@@ -109,7 +109,7 @@ test("lifecycle custody stays in the named native adapter without rerouting ordi
       assert.equal(JSON.stringify(job).includes("inputs.lifecycle_custody"), false, name);
     }
   }
-  assert.equal(stable.jobs["macos-native"].if, "${{ needs.prepare.outputs.run == 'true' }}");
+  assert.equal(stable.jobs["macos-native"].if, "${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}");
   const exact = workflow("macos-qualification");
   assert.equal(exact.on.workflow_call.inputs["lifecycle-custody"].default, "");
   const driver = exact.jobs.native.steps.find(step => step.name === "Qualify the exact supplier without copying or changing its sources");

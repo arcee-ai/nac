@@ -26,12 +26,12 @@ export function reverseStartupConsole(workflow) {
 export function reverseNativeQualification(workflow) {
   reverseStartupConsole(workflow);
   if (!workflow.jobs['native-qualification']) return;
-  assert.equal(digest(workflow.jobs['native-qualification']), 'ccd4511dc32a25279e7ab64a00400b2613cbda67d5d71c834925d926af79a6a9', 'reviewed legacy supplier job');
+  assert.equal(digest(workflow.jobs['native-qualification']), '58805b410886ff3775ce6642e5f2dd664833013a3e4a1006da49931d4f01b5ae', 'reviewed legacy supplier job');
   delete workflow.jobs['native-qualification'];
   const inputs = workflow.on.workflow_dispatch.inputs;
-  assert.deepEqual(Object.keys(inputs).sort(), ['cold_caches', 'native_qualification'].sort());
+  assert.deepEqual(Object.keys(inputs).sort(), ['cold_caches', 'native_qualification', 'lifecycle_custody'].sort());
   const added = {...inputs}; delete added.cold_caches;
-  assert.equal(digest(added), '6df9104aca0aed2f7cd7d9082023b04f43468408d3ea28aca3a41bab32a232ad', 'reviewed legacy supplier inputs');
+  assert.equal(digest(added), '302a539d4e6d93e53f9d51e1749557b8f33ac6e9fa7cbf9c1bcf84f19303fe73', 'reviewed legacy supplier inputs');
   for (const key of Object.keys(added)) delete inputs[key];
 }
 
