@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real relocated LOCAL_APP / system WKWebView startup qualification."""
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -38,6 +39,44 @@ class Catalog(BaseHTTPRequestHandler):
         pass
 
 
+def _retention_notice(diagnostic, failure):
+    if failure is not None:
+        failure.add_note(diagnostic)
+    try:
+        print(diagnostic, file=sys.stderr)
+    except BaseException as error:
+        if failure is None:
+            raise
+        failure.add_note(f'Retention notice could not be written: {error}')
+
+
+@contextmanager
+def startup_profile(evidence, relocated, retained):
+    """Keep private roots in custody until existing exact-owner cleanup settles."""
+    root = Path(tempfile.mkdtemp(prefix='nac-finder-profile-')).resolve()
+    failure = None
+    try:
+        yield root
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            record = json.loads(evidence.read_text())
+            if (not isinstance(record, dict)
+                    or type(record.get('app_pid')) is not int or record['app_pid'] <= 0
+                    or type(record.get('engine_pid')) is not int or record['engine_pid'] < 0):
+                raise RuntimeError('Incomplete startup ownership record; cleanup is unproven')
+            cleanup_failed_case(evidence, relocated)
+            shutil.rmtree(root)
+        except BaseException as error:
+            retained.append(root)
+            diagnostic = f'Startup cleanup unproven; retained profile {root} and app {relocated}: {error}'
+            _retention_notice(diagnostic, failure if failure is not None else error)
+            if failure is None:
+                raise
+
+
 def main():
     app, destination = (Path(value).resolve() for value in sys.argv[1:])
     destination.mkdir(parents=True, exist_ok=True)
@@ -49,6 +88,13 @@ def main():
         raise RuntimeError('The authorized existing ARCEE_API_KEY environment reference is unavailable')
     if 'startup-real-arcee' in os.environ.get('NAC_STARTUP_SCENARIOS', '') and not vendor:
         raise RuntimeError('Run the single bounded real-vendor case separately from dummy fixtures')
+    scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
+        'startup-fresh,startup-home,startup-nac-relative,startup-xdg-relative,startup-store-override,'
+        'startup-invalid-config,startup-future-store,startup-bad-directory,startup-missing-git').split(',')
+    # Reserve every scenario before replacing evidence or starting any actor.
+    # An existing directory may hold receipts from an earlier, unproven run.
+    for scenario in scenarios:
+        (destination / scenario).mkdir()
     identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
     metadata = {
         'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
@@ -71,17 +117,14 @@ def main():
     provider_url = json.loads(provider.stdout.readline())['base_url']
     results = []
     try:
-        with tempfile.TemporaryDirectory(prefix='nac-finder-relocation-') as relocation:
+        relocation = Path(tempfile.mkdtemp(prefix='nac-finder-relocation-')).resolve()
+        retained_profiles = []
+        try:
             relocated = Path(relocation).resolve() / 'Moved app folder with spaces' / app.name
             shutil.copytree(app, relocated)
-            scenarios = os.environ.get('NAC_STARTUP_SCENARIOS',
-                'startup-fresh,startup-home,startup-nac-relative,startup-xdg-relative,startup-store-override,'
-                'startup-invalid-config,startup-future-store,startup-bad-directory,startup-missing-git').split(',')
             for scenario in scenarios:
                 case = destination / scenario
-                case.mkdir(exist_ok=True)
-                with tempfile.TemporaryDirectory(prefix='nac-finder-profile-') as temporary:
-                    root = Path(temporary).resolve()
+                with startup_profile(case / 'result.json', relocated, retained_profiles) as root:
                     home, workspace = root / 'home with spaces', root / 'workspace with spaces'
                     home.mkdir(mode=0o700)
                     workspace.mkdir(mode=0o700)
@@ -172,12 +215,27 @@ def main():
                             record['profile_cleaned_by_runner'] = True
                             record['screen_locked'] = locked
                             results.append(record)
-                        except BaseException:
-                            if opened.poll() is None:
-                                opened.terminate()
-                                opened.wait(timeout=5)
-                            cleanup_failed_case(evidence, relocated)
+                        except BaseException as failure:
+                            try:
+                                if opened.poll() is None:
+                                    opened.terminate()
+                                    opened.wait(timeout=5)
+                            except BaseException as error:
+                                failure.add_note(f'LaunchServices wrapper cleanup failed: {error}')
                             raise
+        finally:
+            failure = sys.exception()
+            if retained_profiles:
+                _retention_notice(
+                    f'Retained relocated bundle root {relocation}; profiles: {retained_profiles}', failure)
+            else:
+                try:
+                    shutil.rmtree(relocation)
+                except BaseException as error:
+                    diagnostic = f'Relocation cleanup failed; retained root {relocation}: {error}'
+                    _retention_notice(diagnostic, failure if failure is not None else error)
+                    if failure is None:
+                        raise
         provider.stdin.write('{"kind":"finish"}\n')
         provider.stdin.flush()
         report = json.loads(provider.stdout.readline())
@@ -187,16 +245,38 @@ def main():
         assert provider.returncode == 0
         (destination / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     finally:
-        catalog.shutdown()
-        catalog.server_close()
-        if provider.poll() is None:
-            provider.stdin.close()
+        failure = sys.exception()
+        errors = []
+        for name, operation in [('Catalog shutdown', catalog.shutdown), ('Catalog close', catalog.server_close)]:
             try:
-                provider.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                provider.terminate()
-                provider.wait(timeout=5)
-        provider_log.close()
+                operation()
+            except BaseException as error:
+                errors.append((name, error))
+        if provider.poll() is None:
+            try:
+                provider.stdin.close()
+            except BaseException as error:
+                errors.append(('Provider stdin close', error))
+            try:
+                try:
+                    provider.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    provider.terminate()
+                    provider.wait(timeout=5)
+            except BaseException as error:
+                errors.append(('Provider teardown', error))
+        try:
+            provider_log.close()
+        except BaseException as error:
+            errors.append(('Provider log close', error))
+        primary = failure
+        for name, error in errors:
+            if primary is None:
+                primary = error
+            else:
+                primary.add_note(f'{name} failed: {error}')
+        if failure is None and primary is not None:
+            raise primary
 
 
 if __name__ == '__main__':

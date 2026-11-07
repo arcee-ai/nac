@@ -9,7 +9,8 @@ import {aptProducerSteps} from './browser-apt-wiring.mjs';
 import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
-const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
+// Full pre-admission graph plus this layer's required startup-custody control.
+const parentHash="e2f13f6f6f2c2413a5892dc9b6afe135feb83c83d9f37ff2d1357acb6c3c0c0b";
 const sealedPins={
   ".github/scripts/ci-admission.py": "afa1c74728cdf5646de034a553c32bc5af6552ecc6fdf0bacab67eca31aef04a",
   ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
