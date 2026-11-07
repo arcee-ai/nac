@@ -19,6 +19,7 @@ import type {
   SkillCatalogEntry,
   SlashCommandDefinition,
   SshConfigurationList,
+  OpenSshAliasList,
   SshTarget,
   TestMcpServerRequest,
   UpdateMcpServerRequest,
@@ -96,6 +97,22 @@ export function useSshConfigs() {
   return useQuery<SshConfigurationList>({
     queryKey: queryKeys.sshConfigs,
     queryFn: ({ signal }) => api.listSshConfigs(signal),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/**
+ * OpenSSH aliases from the NAC server's `~/.ssh/config`. Discovery degrades to
+ * a partial list instead of failing, so a refusal here only hides the group.
+ */
+export function useSshAliases(enabled = true) {
+  const { api } = useNativeRuntime();
+
+  return useQuery<OpenSshAliasList>({
+    queryKey: queryKeys.sshAliases,
+    queryFn: ({ signal }) => api.listSshAliases(signal),
+    enabled,
     staleTime: 30_000,
     retry: false,
   });

@@ -79,7 +79,7 @@ impl std::fmt::Display for BrowseError {
 
 impl std::error::Error for BrowseError {}
 
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 

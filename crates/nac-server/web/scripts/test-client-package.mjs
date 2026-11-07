@@ -109,7 +109,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 175);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 176);
 assert.deepEqual(Object.keys(NAC_API_SURFACE).sort(), ${JSON.stringify(operationKeys)});
 assert.equal(NAC_API_SURFACE["GET /attention/events"], "private:native opt-in metadata attention stream");
 assert.equal(NAC_API_SURFACE["POST /sessions/{session_id}/heartbeats/preview"], "private:passive existing-chat calendar preview");

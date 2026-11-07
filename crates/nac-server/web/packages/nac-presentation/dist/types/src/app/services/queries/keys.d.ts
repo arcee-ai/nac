@@ -14,6 +14,7 @@ export declare const queryKeys: {
     managedAuth: readonly ["managed-auth"];
     modelConfigs: readonly ["model-configs"];
     sshConfigs: readonly ["ssh-configs"];
+    sshAliases: readonly ["ssh-aliases"];
     mcpLibrary: readonly ["mcp-library"];
     mcpServers: readonly ["mcp-servers"];
     mcpRuntime: readonly ["mcp-runtime"];

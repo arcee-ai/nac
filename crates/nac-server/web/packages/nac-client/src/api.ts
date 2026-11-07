@@ -90,6 +90,7 @@ import type {
   SlashCommandDefinition,
   SshBrowseRequest,
   SshConfigurationList,
+  OpenSshAliasList,
   SshConfigurationRecord,
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
@@ -414,6 +415,13 @@ export function createNacApi(
 
     deleteSshConfig: (configId: string) =>
       request<void>("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
+
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) =>
+      request<OpenSshAliasList>("GET", "/ssh/aliases", { signal }),
 
     // The MCP library is a curated catalog served by the binary; servers are
     // saved into config.toml, keyed by name, and parsed when a session starts.

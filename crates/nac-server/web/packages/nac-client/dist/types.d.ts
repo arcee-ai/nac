@@ -83,6 +83,7 @@ export type SkillCatalogEntry = ApiSchema<"SkillCatalogEntry">;
 export type SlashCommandDefinition = ApiSchema<"SlashCommandDefinition">;
 export type SshBrowseRequest = ApiSchema<"SshBrowseRequest">;
 export type SshConfigurationList = ApiSchema<"SshConfigurationList">;
+export type OpenSshAliasList = ApiSchema<"OpenSshAliasList">;
 export type SshConfigurationRecord = ApiSchema<"SshConfigurationRecord">;
 export type CreateSshConfigurationRequest = ApiSchema<"CreateSshConfigurationRequest">;
 export type UpdateSshConfigurationRequest = ApiSchema<"UpdateSshConfigurationRequest">;
