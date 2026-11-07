@@ -144,7 +144,7 @@ jobs:
           path: .startup-console-q
           persist-credentials: false
       - name: Require startup console producer and collector controls with zero skips
-        run: python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
+        run: python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
       - name: Check workflows and scripts, then prove enforcement
         env:
           GITHUB_TOKEN: ${{ github.token }}
