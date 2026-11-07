@@ -44,7 +44,7 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
   return (
     <div className="overflow-hidden">
       <div className="nac-toast w-full pointer-events-auto" data-visible={isVisible}>
-        <div className="rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full">
+        <div className="nac-toast-content rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full">
           <Icon
             iconName={VARIANT_ICONS[variant]}
             size={20}
@@ -55,14 +55,14 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
               variant === ToastVariant.Error || variant === ToastVariant.Danger ? "alert" : "status"
             }
             aria-atomic="true"
-            className="flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line"
+            className="nac-toast-message flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line"
           >
             {content}
           </span>
           <Button
             variant={Button.Variant.Ghost}
             content={Button.Content.Icon}
-            className="absolute top-1 right-1 !size-11 shrink-0"
+            className="nac-toast-dismiss absolute top-1 right-1 !size-11 shrink-0"
             aria-label="Dismiss notification"
             onClick={onClose}
           >
