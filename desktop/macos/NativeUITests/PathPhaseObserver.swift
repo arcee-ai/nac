@@ -50,7 +50,7 @@ final class PathPhaseObserver {
         let capacity = bytes.count
         while count < capacity {
             let readCount = bytes.withUnsafeMutableBytes { buffer in
-                read(fd, buffer.baseAddress!.advanced(by: count), capacity - count)
+                Darwin.read(fd, buffer.baseAddress!.advanced(by: count), capacity - count)
             }
             try need(readCount >= 0, "Evidence read failed")
             if readCount == 0 { break }
