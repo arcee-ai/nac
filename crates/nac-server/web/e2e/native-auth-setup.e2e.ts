@@ -5,18 +5,10 @@ import { createProject, expect, test } from "./harness";
 
 test.use({ orchestration: "0" });
 
-const repo = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../..",
-);
-const source = await fs.readFile(
-  path.join(repo, "desktop/macos/ExternalAuthSmoke.swift"),
-  "utf8",
-);
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const source = await fs.readFile(path.join(repo, "desktop/macos/ExternalAuthSmoke.swift"), "utf8");
 function script(name: string): string {
-  const match = source.match(
-    new RegExp(`static let ${name} = #"""([\\s\\S]*?)"""#`),
-  );
+  const match = source.match(new RegExp(`static let ${name} = #"""([\\s\\S]*?)"""#`));
   if (!match) throw new Error(`Missing actual native fixture script: ${name}`);
   return match[1]!;
 }
@@ -31,15 +23,10 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
 }) => {
   // Catalog contents are unrelated to the owned disabled server and OAuth
   // controls. Keep this test's optional registry read entirely local.
-  await page.route("**/mcp_library/library", (route) =>
-    route.fulfill({ json: { entries: [] } }),
-  );
+  await page.route("**/mcp_library/library", (route) => route.fulfill({ json: { entries: [] } }));
   let serverReads = 0;
   page.on("request", (sent) => {
-    if (
-      new URL(sent.url()).pathname === "/mcp_library/servers" &&
-      sent.method() === "GET"
-    )
+    if (new URL(sent.url()).pathname === "/mcp_library/servers" && sent.method() === "GET")
       serverReads++;
   });
   const project = await createProject(request, harness, {
@@ -55,9 +42,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
   expect(empty.ok()).toBe(true);
   expect((await empty.json()).servers).toEqual([]);
   await empty.finished();
-  await expect(
-    page.getByRole("button", { name: "Create chat", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create chat", exact: true })).toBeVisible();
   await expect.poll(() => serverReads).toBeGreaterThan(0);
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
@@ -76,9 +61,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
     await route.fulfill({ response });
   });
   try {
-    await page
-      .getByRole("button", { name: "Create chat", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Create chat", exact: true }).click();
     const session = await accepted;
     expect(await page.evaluate(ready, "")).toBe(false);
     await page
@@ -90,9 +73,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
       exact: true,
     });
     await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Add server", exact: true }),
-    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Add server", exact: true })).toBeVisible();
     await expect(dialog.getByText("Loading…", { exact: true })).toHaveCount(0);
     release();
     await expect(page).toHaveURL(new RegExp(`#/session/${session}(?:/|$)`));
@@ -113,20 +94,17 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
     });
     expect(credential.ok()).toBe(true);
     const name = ((await credential.json()) as { name: string }).name;
-    const created = await request.post(
-      `${harness.baseUrl}/mcp_library/servers`,
-      {
-        data: {
-          name: "external-auth-fixture",
-          enabled: false,
-          transport: "streamable_http",
-          url: `${harness.provider.baseUrl}/mcp`,
-          headers: {},
-          args: [],
-          env: {},
-        },
+    const created = await request.post(`${harness.baseUrl}/mcp_library/servers`, {
+      data: {
+        name: "external-auth-fixture",
+        enabled: false,
+        transport: "streamable_http",
+        url: `${harness.provider.baseUrl}/mcp`,
+        headers: {},
+        args: [],
+        env: {},
       },
-    );
+    });
     expect(created.ok()).toBe(true);
     const configured = await request.post(
       `${harness.baseUrl}/mcp_library/servers/external-auth-fixture/oauth/configure`,
@@ -174,9 +152,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
         exact: true,
       }),
     ).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Authenticate", exact: true }),
-    ).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "Authenticate", exact: true })).toBeEnabled();
     expect(harness.provider.requests).toHaveLength(0);
   } finally {
     release();
