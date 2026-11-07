@@ -22,7 +22,7 @@ class ExactSourceTests(unittest.TestCase):
         self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
         self.assertEqual(startup['source_sha'], 'ef2cce9141973f37bf35e33d113e35eaa7a91f19')
-        self.assertEqual(startup['test_source_sha'], '55cbda6b5b626408dc822d90b8fecab0d5828434')
+        self.assertEqual(startup['test_source_sha'], '04c073bbbead6f4077da0199bacd542e45cf4e57')
         self.assertEqual(startup['protocol_source_sha'], '7325c48b3c9ec7036e255a6bd92f31c1a98c1607')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
@@ -63,6 +63,7 @@ class ExactSourceTests(unittest.TestCase):
                         {'source_sha': '6c578a2c18050e218b83daf80f46731040e4b3e4'},
                         {'source_sha': 'ff8c9609abf7bf7ddabe983c96ff31cf80362956'},
                         {'source_sha': 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d'},
+                        {'test_source_sha': '55cbda6b5b626408dc822d90b8fecab0d5828434'},
                         {'source_sha': 'f' * 40}, {'test_source_sha': 'f' * 40},
                         {'protocol_source_sha': 'f' * 40}, {'test_files': {}}, {'protocol_files': {}},
                         {'scenarios': list(reversed(target['scenarios']))}, {'scenario_count': 5}):

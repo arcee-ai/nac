@@ -27,7 +27,7 @@
   },
   "all-342-startup-macos26": {
     "source_sha": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
-    "test_source_sha": "55cbda6b5b626408dc822d90b8fecab0d5828434",
+    "test_source_sha": "04c073bbbead6f4077da0199bacd542e45cf4e57",
     "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
     "profile": "macos26",
     "suite": "startup",
@@ -39,8 +39,8 @@
       "futureStore"
     ],
     "test_files": {
-      "README.md": "1da8985189fda88c5befe319fe36f1c4334e89035751d9a83394ce51cec1f68d",
-      "StartupJourneys.swift": "15ec7e838f21ed284b2f9d68beec062c71020f9b82de1fca2f819576c1e1faf4",
+      "README.md": "b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24",
+      "StartupJourneys.swift": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1",
       "contract.py": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
       "test_contract.py": "47f75f1067d0741925c4fa1d7130620194bbbb987a7f19e979238aed71868187"
     },
