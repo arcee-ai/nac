@@ -25,9 +25,6 @@ jobs:
       H_ROOT: ${{ github.workspace }}/harness
       P_ROOT: ${{ github.workspace }}/product
       Q_ROOT: ${{ github.workspace }}/query
-      DOWNLOAD_ROOT: ${{ runner.temp }}/native342-download
-      PACKAGE_ROOT: ${{ runner.temp }}/native342-package
-      OUTPUT_ROOT: ${{ runner.temp }}/native342-case
     steps:
       - name: Admit original clock and exact image before checkout or bootstrap
         id: initial
@@ -51,6 +48,11 @@ jobs:
               assert cleanup-work >= 360 and hard-cleanup >= 120
               assert os.environ.get('ImageVersion') == '20261102.0473.1', 'different fleet image: unavailable, no fallback/retry'
               minutes = min(1, math.floor((work-now-60)/60)); assert minutes >= 1
+              with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as f:
+                  for name,suffix in (('DOWNLOAD_ROOT','native342-download'), ('PACKAGE_ROOT','native342-package'), ('OUTPUT_ROOT','native342-case')):
+                      path = str(gate.parent / suffix)
+                      assert '\n' not in path and '\r' not in path, 'single-line canonical runner path'
+                      f.write(name+'='+path+'\n')
               with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('minutes='+str(minutes)+'\n')
               report.update(status='PASS', clock=c, timeout_minutes=minutes)
           except BaseException as error:
