@@ -22,6 +22,13 @@ function fixture(html = row + pane, hash = '#/session/session/files', chat = '')
     return new dom.window.DOMRect(Number(this.closest('[data-left]')?.dataset.left || 0),
       Number(this.closest('[data-top]')?.dataset.top || 0), this.closest('[data-zero]') ? 0 : 100, 24);
   };
+  let hitOwner;
+  dom.window.HTMLElement.prototype.getClientRects = function () {
+    hitOwner = this;
+    return [this.getBoundingClientRect()];
+  };
+  dom.window.document.elementFromPoint = () =>
+    hitOwner?.matches('[data-covered]') ? dom.window.document.body : hitOwner;
   Object.defineProperty(dom.window.HTMLElement.prototype, 'clientWidth', {
     get() { return Number(this.dataset.clipWidth || 100); },
   });
@@ -88,4 +95,29 @@ test('chat snapshot selection is outside the owning Files panel', () => {
   finally { f.close(); }
   const foreign = fixture(pane, '#/session/session/files', row);
   try { assert.equal(foreign.probe().ready,false); } finally { foreign.close(); }
+});
+
+test('file header and code must be unobscured, including noninteractive notifications', () => {
+  for (const html of [row + pane.replace('class="code"', 'class="code" data-covered'),
+    row + pane.replace('span title="workspace.ts"', 'span title="workspace.ts" data-covered')])
+    assert.equal(check(html).ready,false);
+  for (const style of ['', 'opacity:0.5', 'pointer-events:none']) {
+    const f = fixture(row + pane, '#/session/session/files', '<div class="nac-toast" style="' + style + '">Saved</div>');
+    try {
+      assert.equal(f.probe().ready,false);
+      f.window.document.querySelector('.nac-toast').remove();
+      assert.equal(f.probe().ready,true);
+    } finally { f.close(); }
+  }
+  for (const toast of ['<div class="nac-toast" data-left="2000">Elsewhere</div>',
+    '<div class="nac-toast" style="display:none">Hidden</div>',
+    '<div class="nac-toast" style="opacity:0">Transparent</div>']) {
+    const f = fixture(row + pane, '#/session/session/files', toast);
+    try { assert.equal(f.probe().ready,true); } finally { f.close(); }
+  }
+  const unknown = fixture();
+  try {
+    unknown.window.document.elementFromPoint = undefined;
+    assert.equal(unknown.probe().ready,false);
+  } finally { unknown.close(); }
 });
