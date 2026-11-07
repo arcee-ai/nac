@@ -1759,7 +1759,7 @@ pub async fn oauth_callback_handler(
                     ).unwrap_or(false)
                 });
                 let expected_authorization_url = pending_authorization_url.as_deref()
-                    .or_else(|| owned_completion.map(|url| url.as_str()));
+                    .or_else(|| owned_completion.map(String::as_str));
                 let matches_current = callback_matches_pending_authorization(
                     expected_authorization_url,
                     &callback_url,
