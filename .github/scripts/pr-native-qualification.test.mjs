@@ -206,7 +206,7 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
 
 test("startup catalog binds the delivered product and four-file query supplier", () => {
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
-  assert.equal(startup.source_sha, "ff8c9609abf7bf7ddabe983c96ff31cf80362956");
+  assert.equal(startup.source_sha, "6c578a2c18050e218b83daf80f46731040e4b3e4");
   assert.equal(startup.test_source_sha, "04c073bbbead6f4077da0199bacd542e45cf4e57");
   assert.deepEqual(startup.test_files, {
     "README.md": "b8cacd58eaf6976e3051a009e826ffb5ff95fb12b223a55e834811e51d35fd24",
