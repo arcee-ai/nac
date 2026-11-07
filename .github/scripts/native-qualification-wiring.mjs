@@ -18,7 +18,7 @@ export function reverseStartupConsole(workflow) {
     { uses: 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262',
       with: { ref: '${{ steps.startup-console-source.outputs.revision }}', path: '.startup-console-q', 'persist-credentials': false } },
     { name: 'Require startup console producer and collector controls with zero skips',
-      run: 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q' },
+      run: 'python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q' },
   ]);
   steps.splice(index, 3);
 }
