@@ -4,6 +4,7 @@ import { createProject, createSession, expect, test } from "./harness";
 import { startPackedPresentation } from "./packed-presentation-fixture";
 import { openNameZoom } from "./session-name-zoom";
 import { revealDesktopSidebar } from "./presentation-composed-fixture";
+import { expectExposedRowAction, recordSessionAction } from "./session-action-geometry";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local packed consumer");
 test.use({ orchestration: "0", hasTouch: true });
@@ -332,9 +333,14 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   const pin = (phone ? menu : right).getByRole("button", { name: /^Pin / }).first();
   // Compact navigation reveals its row actions on hover or keyboard focus.
   // A clipped sr-only button can satisfy Playwright's visibility geometry.
-  if (phone) await pin.tap({ timeout: 5000 });
-  else {
+  await recordSessionAction(pin, info, `${label}-pin-before-hover`);
+  if (phone) {
+    await pin.tap({ timeout: 5000 });
+    expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-tap`));
+  } else {
     await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
+    expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-hover`));
+    await capture(page, info, `${label}-packed-pin-target`);
     await pin.click({ timeout: 5000 });
   }
   const notifications = right.getByRole("region", { name: "Notifications", exact: true });
@@ -619,7 +625,10 @@ test("packed retired responses, timers and shortcuts stay within their binding",
       await route.fulfill({ status: 503, json: { error: "Local lifetime notification" } });
     });
     const pin = right.getByRole("button", { name: /^Pin / }).first();
+    await recordSessionAction(pin, info, "lifetime-pin-before-hover");
     await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
+    expectExposedRowAction(await recordSessionAction(pin, info, "lifetime-pin-after-hover"));
+    await capture(page, info, "lifetime-packed-pin-target");
     await pin.click();
     const notices = right.getByRole("region", { name: "Notifications", exact: true });
     await expect(notices.getByRole("alert")).toContainText("Local lifetime notification");
