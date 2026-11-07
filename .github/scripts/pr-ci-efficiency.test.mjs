@@ -53,7 +53,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   assert.equal(catalog["all-351-macos14"].profile, "macos14");
   assert.equal(catalog["all-352-macos26"].source_sha, "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1");
   assert.equal(catalog["all-352-macos26"].phase_count, 6);
-  assert.equal(catalog["all-342-startup-macos26"].source_sha, "d443a2aca506def2817b9afc0c9a20a75f5c4b5d");
+  assert.equal(catalog["all-342-startup-macos26"].source_sha, "ff8c9609abf7bf7ddabe983c96ff31cf80362956");
   assert.equal(catalog["all-342-startup-macos26"].test_source_sha, "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81");
   assert.equal(catalog["all-342-startup-macos26"].protocol_source_sha, "25046f450110d1b795d529d046d2c1deee880877");
   assert.deepEqual(catalog["all-342-startup-macos26"].scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
