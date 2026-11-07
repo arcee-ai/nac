@@ -370,7 +370,7 @@ pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection>
 /// repairs database-wide pragmas. Callers fail closed if initialization is not
 /// complete.
 pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConnection> {
-    let conn = match connection::checkout_executor_connection(path, Access::ReadOnly)? {
+    let mut conn = match connection::checkout_executor_connection(path, Access::ReadOnly)? {
         Some(conn) => conn,
         None => connect_read_only(path)?,
     };
@@ -380,14 +380,14 @@ pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConne
             "store schema version {schema_version} is not initialized for runtime reads; expected {STORE_SCHEMA_VERSION}"
         ));
     }
-    heartbeat_calendar::verify_format(&conn)?;
+    conn.check_once_per_schema(heartbeat_calendar::verify_format)?;
     Ok(conn)
 }
 
 pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     // The executor's reused connection already passed the pre-open check; the
     // version checks below still see any schema a peer has since committed.
-    let conn = match connection::checkout_executor_connection(path, Access::ReadWrite)? {
+    let mut conn = match connection::checkout_executor_connection(path, Access::ReadWrite)? {
         Some(conn) => conn,
         None => {
             reject_future_schema_before_open(path)?;
@@ -401,7 +401,7 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
         ));
     }
     if schema_version == STORE_SCHEMA_VERSION {
-        heartbeat_calendar::verify_format(&conn)?;
+        conn.check_once_per_schema(heartbeat_calendar::verify_format)?;
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     let journal_mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
@@ -419,11 +419,11 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
 }
 
 pub(crate) fn open_connection(path: &Path) -> Result<StoreConnection> {
-    if let Some(conn) = connection::checkout_executor_connection(path, Access::ReadWrite)? {
+    if let Some(mut conn) = connection::checkout_executor_connection(path, Access::ReadWrite)? {
         let schema_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if schema_version == STORE_SCHEMA_VERSION {
-            heartbeat_calendar::verify_format(&conn)?;
+            conn.check_once_per_schema(heartbeat_calendar::verify_format)?;
             conn.execute_batch("PRAGMA foreign_keys = ON;")?;
             return Ok(conn);
         }
@@ -451,7 +451,7 @@ fn open_connection_with_hooks(
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     if preflight_schema_version == STORE_SCHEMA_VERSION {
-        heartbeat_calendar::verify_format(&conn)?;
+        conn.check_once_per_schema(heartbeat_calendar::verify_format)?;
         return Ok(conn);
     }
     after_preflight();

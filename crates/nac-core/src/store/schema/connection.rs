@@ -165,6 +165,9 @@ pub(crate) struct StoreConnection {
     /// Set when this is the persistence executor's own connection, which goes
     /// back to the executor on drop instead of closing.
     reuse: Option<Reuse>,
+    /// The schema cookie at which this connection last passed the store
+    /// format check, carried with the executor's connection between commands.
+    checked_schema_cookie: Option<i64>,
 }
 
 impl Drop for StoreConnection {
@@ -308,9 +311,41 @@ impl StoreConnection {
                 permit: self.permit.take(),
                 transaction_observation: self.transaction_observation.take(),
                 reuse: None,
+                checked_schema_cookie: self.checked_schema_cookie,
             },
         })
     }
+
+    /// Run the store format `check` unless this connection already passed it
+    /// at the store's current schema cookie. Every schema change, a peer's
+    /// included, bumps `PRAGMA schema_version`, so an unchanged cookie still
+    /// has the layout `check` accepted. The executor's reused connection would
+    /// otherwise repeat the check's schema queries for every command.
+    pub(super) fn check_once_per_schema(
+        &mut self,
+        check: impl FnOnce(&Connection) -> Result<()>,
+    ) -> Result<()> {
+        let cookie: i64 = self.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+        if self.checked_schema_cookie == Some(cookie) {
+            return Ok(());
+        }
+        check(self)?;
+        #[cfg(test)]
+        SCHEMA_CHECKS.with(|checks| checks.set(checks.get() + 1));
+        self.checked_schema_cookie = Some(cookie);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static SCHEMA_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Store format checks run on this thread; each store's executor has its own.
+#[cfg(test)]
+pub(crate) fn schema_checks_on_this_thread() -> usize {
+    SCHEMA_CHECKS.with(std::cell::Cell::get)
 }
 
 fn return_executor_connection(idle: IdleConnection) {
@@ -420,6 +455,7 @@ fn connect_after_authority_check(
                 permit: Some(permit),
                 transaction_observation,
                 reuse: None,
+                checked_schema_cookie: None,
             };
             #[cfg(test)]
             {

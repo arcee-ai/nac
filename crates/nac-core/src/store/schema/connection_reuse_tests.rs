@@ -292,3 +292,39 @@ async fn a_foreign_calendar_format_is_refused_through_the_reused_connection() {
     }
     finish(&path, owner).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_reused_connection_rechecks_the_calendar_format_only_after_a_schema_change() {
+    async fn checks(owner: &StoreCoordinator) -> Result<usize> {
+        on_executor(owner, |_| Ok(schema_checks_on_this_thread())).await
+    }
+    let (path, owner) = owned_store("calendar_format_once").await;
+    on_executor(&owner, |store| open_runtime_connection(store).map(drop))
+        .await
+        .unwrap();
+    let settled = checks(&owner).await.unwrap();
+    for action in ["open", "runtime", "read-only"].repeat(4) {
+        on_executor(&owner, move |store| match action {
+            "open" => open_connection(store).map(drop),
+            "runtime" => open_runtime_connection(store).map(drop),
+            _ => open_initialized_read_connection(store).map(drop),
+        })
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        checks(&owner).await.unwrap(),
+        settled,
+        "an unchanged schema must not be checked again"
+    );
+    // Any peer DDL bumps the schema cookie, so the next checkout checks again.
+    let peer = rusqlite::Connection::open(&path).unwrap();
+    peer.execute_batch("CREATE TABLE peer_probe (value INTEGER);")
+        .unwrap();
+    drop(peer);
+    on_executor(&owner, |store| open_connection(store).map(drop))
+        .await
+        .unwrap();
+    assert_eq!(checks(&owner).await.unwrap(), settled + 1);
+    finish(&path, owner).await;
+}
