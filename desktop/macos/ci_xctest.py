@@ -1,6 +1,7 @@
 """Shared public XCTest launcher; never provisions host permissions."""
 import hashlib
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 import plistlib
@@ -14,6 +15,13 @@ from ci_xctest_attachments import AttachmentTool, json_data, require_source_bind
 from smoke import cleanup_failed_case
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def runner_environment():
+    # Keep Xcode's selected SDK/runtime plumbing, remove all credential/managed
+    # variables before launching XCTest. Private fixture bindings are explicit.
+    return {name: value for name, value in os.environ.items()
+            if name != 'NAC_MANAGED_CONFIG' and not name.endswith(('_TOKEN', '_API_KEY'))}
 
 
 @contextmanager
@@ -183,7 +191,7 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
              'desktop/macos/NativeUITests/NACNativeUITests.xcodeproj', '-scheme', 'NACNativeUITests',
              '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', derived,
              '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(config)],
-            raw / 'xctest-build.log', 180)
+            raw / 'xctest-build.log', 180, env=runner_environment())
         runners = list((Path(derived) / 'Build/Products').glob('*.xctestrun'))
         if len(runners) != 1:
             raise RuntimeError('Xcode must generate exactly one real .xctestrun')
@@ -217,7 +225,7 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
                  '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
                  '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
                  '-only-testing:NACNativeUITests/NativeJourneys/' + test_name],
-                raw / 'xctest-input.log', 420 if operations else 240)
+                raw / 'xctest-input.log', 420 if operations else 240, env=runner_environment())
             record = json.loads(evidence.read_text())
             if operations:
                 runtime_path = record.get('terminal_xctest_identity', {}).get('bundle_path')
