@@ -48,11 +48,13 @@ def cleanup_failed_case(evidence, relocated):
     if not evidence.exists():
         raise RuntimeError('No ownership record; inspect app launch diagnostics before cleanup')
     record = json.loads(evidence.read_text())
+    budget_check()
     helper = record.get('app_helper_pid')
     if helper and alive(helper):
-        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True).strip()
+        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True, **timeout_options()).strip()
         if command != '/bin/sleep ' + record.get('app_helper_argument', ''):
             raise RuntimeError('Refusing cleanup of an unrelated app helper')
+        budget_check()
         os.kill(helper, signal.SIGTERM)
     for key, executable in [('engine_pid', relocated / 'Contents/Resources/nac-web'),
                             ('app_pid', relocated / 'Contents/MacOS/NACPreview')]:
@@ -61,7 +63,7 @@ def cleanup_failed_case(evidence, relocated):
         if not pid:
             continue
         command = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'command='],
-                                 capture_output=True,text=True,**timeout_options()).stdout
+                                 capture_output=True, text=True, **timeout_options()).stdout
         if not command:
             continue
         if str(executable) not in command:
@@ -76,7 +78,7 @@ def cleanup_failed_case(evidence, relocated):
             while time.monotonic() < deadline:
                 budget_check()
                 state = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='],
-                                       capture_output=True,text=True,**timeout_options()).stdout.strip()
+                                       capture_output=True, text=True, **timeout_options()).stdout.strip()
                 if not state or state.startswith('Z'):
                     break
                 time.sleep(0.05)
@@ -87,7 +89,7 @@ def cleanup_failed_case(evidence, relocated):
         except PermissionError:
             # Darwin can report EPERM for an already dead process group. Never
             # hide a permission failure while any group member can still run.
-            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True,**timeout_options())
+            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True, **timeout_options())
             members = [line.split() for line in rows.splitlines()]
             live = [row for row in members if len(row) == 3 and
                     int(row[1 if key == 'engine_pid' else 0]) == pid and not row[2].startswith('Z')]
