@@ -160,6 +160,23 @@ describe("managed branch picker", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("leaves IME confirmation and cancellation to composition without selecting or closing", () => {
+    const onValueChange = vi.fn();
+    mount({ onValueChange });
+    fireEvent.click(screen.getByRole("button", { name: "Branch: main" }));
+    const input = screen.getByRole("combobox", { name: "Find branch" });
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+    expect(onValueChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onValueChange).toHaveBeenCalledExactlyOnceWith("main");
+  });
+
   it("closes and clears its query when the repository changes", () => {
     const view = mount();
     fireEvent.click(screen.getByRole("button", { name: "Branch: main" }));

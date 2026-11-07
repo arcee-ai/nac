@@ -15,6 +15,7 @@ import {
   Switch,
 } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
@@ -658,382 +659,422 @@ export function ConfigurationsPanel({
     <div className="flex flex-col gap-1">
       <div
         className={cn(
-          "flex flex-col rounded-[8px] bg-elevation-level-2 border border-muted overflow-visible",
+          "flex min-w-0 flex-col overflow-visible border-t border-muted pt-4",
           boxInvalid && "border border-error-primary",
         )}
       >
-        <div className="flex items-center gap-4 px-3 py-2 bg-elevation-level-3 rounded-t-[8px] border-b border-muted">
-          <div
-            className={cn(
-              "flex-1 min-w-0 truncate",
-              isMobile ? "label-medium" : "label-small",
-              boxInvalid ? "text-error-primary" : "text-basic-primary",
-            )}
-          >
-            Configurations
-          </div>
-          <SourceMenu
-            label={sourceLabel}
-            configurations={configurations.map((entry) => ({
-              id: entry.config_id,
-              name: entry.name,
-            }))}
-            activeId={configId}
-            source={source.kind}
-            onSelect={switchSource}
-            onDelete={(id, label) => void onDelete(id, label)}
-          />
-        </div>
-        <Separator />
-
-        <div className="flex flex-col gap-4 md:gap-2 p-3">
-          {source.kind === "catalog" ? (
-            <>
-              <ConfigRow
-                label="Model"
-                required
-                verticalOnMobile
-                hint="Every model this build knows about; picking one names its provider."
-                control={
-                  <CatalogModelPicker
-                    catalog={catalog.data}
-                    loading={catalog.isLoading}
-                    failed={catalog.isError}
-                    disabled={initialSourcesPending}
-                    liveByBackend={liveByBackend}
-                    value={catalogPick}
-                    onSelect={(pick) => {
-                      setPicked({ kind: "catalog" });
-                      setPickedModel(pick);
-                      setApiKey("");
-                      setNameDraft(null);
-                    }}
-                  />
-                }
-              />
-              {catalogPick ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    label="Base URL"
-                    hint="Endpoint the catalog names for this provider."
-                    verticalOnMobile
-                    control={
-                      <Input
-                        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        value={catalogPick.baseUrl}
-                        isDisabled
-                        readOnly
-                      />
-                    }
-                  />
-                  {needsKey ? (
-                    <>
-                      <Separator />
-                      {managedCatalogProfile ? (
-                        <ManagedModelCredentialStatus ready={catalogCredential} />
-                      ) : catalogCredential ? (
-                        <ConfigRow
-                          label="Credential"
-                          verticalOnMobile
-                          hint="This provider's conventional environment variable is set on the server; the session reuses it."
-                          control={
-                            <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
-                              <Icon
-                                iconName={IconName.CheckCircle}
-                                className="text-success-primary"
-                              />
-                              <span className="label-small text-success-primary">Detected</span>
-                            </div>
-                          }
-                        />
-                      ) : (
-                        <>
-                          <ConfigRow
-                            label="Name"
-                            required
-                            verticalOnMobile
-                            hint="How this setup is listed the next time a session is created."
-                            control={
-                              <Input
-                                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                                className={CONTROL_WIDTH}
-                                value={name}
-                                onChange={(event) => setNameDraft(event.target.value)}
-                              />
-                            }
-                          />
-                          <Separator />
-                          <ConfigRow
-                            label="API Key"
-                            required
-                            verticalOnMobile
-                            invalid={keyInvalid}
-                            hint={
-                              catalogProvider?.auth_hint
-                                ? `Stored in NAC once the setup is saved, or set ${catalogProvider.auth_hint} on the server instead.`
-                                : "Stored in NAC under a generated name once the setup is saved."
-                            }
-                            control={
-                              <Input
-                                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                                className={CONTROL_WIDTH}
-                                type="password"
-                                autoComplete="off"
-                                placeholder="Paste the provider key"
-                                leadingSlot={<KeyStatus status={validation.status} />}
-                                validation={keyInvalid}
-                                value={apiKey}
-                                onChange={(event) => setApiKey(event.target.value)}
-                              />
-                            }
-                          />
-                        </>
-                      )}
-                    </>
-                  ) : null}
-                </>
-              ) : null}
-            </>
-          ) : null}
-
-          {source.kind === "file" ? (
-            <>
-              <ConfigRow
-                label="Config File"
-                required
-                hint="A config.toml on this machine; its [model] section is read."
-                invalid={Boolean(resolveError)}
-                verticalOnMobile
-                control={
-                  <Input
-                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                    className={CONTROL_WIDTH}
-                    placeholder="Select Config File"
-                    trailing={InputTrailing.Button}
-                    trailingIconName={IconName.Folder}
-                    trailingOnClick={() => setPicking(true)}
-                    value={filePath}
-                    onChange={(event) => setFilePath(event.target.value)}
-                  />
-                }
-              />
-              {filePath.trim() ? <Separator /> : null}
-            </>
-          ) : null}
-
-          {source.kind === "new" ? (
-            <>
-              <ConfigRow
-                label="Model Provider"
-                required
-                hint="Service that provides the models for this session."
-                control={
-                  <SmallSelect
-                    items={PROVIDER_ITEMS}
-                    value={provider}
-                    onValueChange={(id) => {
-                      // SAFETY: the ids are built from PROVIDER_ITEMS, so
-                      // every value the picker can emit is a ProviderChoice.
-                      setProvider(id as ProviderChoice);
-                      setApiKey("");
-                      setDefaultModel("");
-                    }}
-                  />
-                }
-              />
-              <Separator />
-              {provider === CUSTOM ? (
-                <>
-                  <ConfigRow
-                    label="Protocol"
-                    required
-                    hint="Wire format the endpoint speaks; a URL alone cannot say."
-                    control={
-                      <SmallSelect
-                        items={PROTOCOL_ITEMS}
-                        value={protocol}
-                        onValueChange={(id) =>
-                          // SAFETY: the ids are built from PROTOCOL_ITEMS, so
-                          // every value the picker can emit is a BackendKind.
-                          setProtocol(id as BackendKind)
-                        }
-                      />
-                    }
-                  />
-                  <Separator />
-                </>
-              ) : null}
-              <ConfigRow
-                label="Name"
-                required
-                hint="How this setup is listed the next time a session is created."
-                control={
-                  <Input
-                    inputSize={InputSize.Medium}
-                    className={CONTROL_WIDTH}
-                    value={name}
-                    onChange={(event) => setNameDraft(event.target.value)}
-                  />
-                }
-              />
-              {needsKey ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    label="API Key"
-                    required
-                    invalid={keyInvalid}
-                    hint="Stored in NAC under a generated name once the setup is saved."
-                    control={
-                      <Input
-                        inputSize={InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        type="password"
-                        autoComplete="off"
-                        placeholder="Paste the provider key"
-                        leadingSlot={<KeyStatus status={validation.status} />}
-                        validation={keyInvalid}
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                      />
-                    }
-                  />
-                </>
-              ) : null}
-              {provider === CUSTOM ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    label="Model"
-                    required
-                    hint="Model identifier the endpoint expects."
-                    control={
-                      <Input
-                        inputSize={InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        placeholder="gpt-5.5"
-                        value={modelDraft}
-                        onChange={(event) => setModelDraft(event.target.value)}
-                      />
-                    }
-                  />
-                  <Separator />
-                  <ConfigRow
-                    label="Base URL"
-                    required
-                    hint="Endpoint the session sends its requests to."
-                    control={
-                      <Input
-                        inputSize={InputSize.Medium}
-                        className={CONTROL_WIDTH}
-                        placeholder="https://api.openai.com/v1"
-                        value={baseUrlDraft}
-                        onChange={(event) => setBaseUrlDraft(event.target.value)}
-                      />
-                    }
-                  />
-                  <Separator />
-                  <ConfigRow
-                    label="Allow insecure HTTP"
-                    control={
-                      <div className={`${CONTROL_WIDTH} flex flex-col items-start gap-1`}>
-                        <Switch
-                          aria-label="Allow insecure HTTP"
-                          checked={allowInsecureHttp}
-                          onChange={setAllowInsecureHttp}
-                        />
-                        <p className="body-small text-basic-secondary">
-                          Your API key, prompts, source code, tool output, and model responses may
-                          be read or modified in transit.
-                        </p>
-                      </div>
-                    }
-                  />
-                </>
-              ) : !needsKey ? (
-                signedIn ? (
+        <FormSection
+          title="Configurations"
+          description="Choose a saved setup, browse the catalog, or configure a provider."
+          action={
+            <SourceMenu
+              label={sourceLabel}
+              configurations={configurations.map((entry) => ({
+                id: entry.config_id,
+                name: entry.name,
+              }))}
+              activeId={configId}
+              source={source.kind}
+              onSelect={switchSource}
+              onDelete={(id, label) => void onDelete(id, label)}
+            />
+          }
+        >
+          <div className="flex flex-col gap-4">
+            {source.kind === "catalog" ? (
+              <>
+                <ConfigRow
+                  presentation="form"
+                  label="Model"
+                  required
+                  verticalOnMobile
+                  hint="Every model this build knows about; picking one names its provider."
+                  control={
+                    <CatalogModelPicker
+                      catalog={catalog.data}
+                      loading={catalog.isLoading}
+                      failed={catalog.isError}
+                      disabled={initialSourcesPending}
+                      liveByBackend={liveByBackend}
+                      value={catalogPick}
+                      onSelect={(pick) => {
+                        setPicked({ kind: "catalog" });
+                        setPickedModel(pick);
+                        setApiKey("");
+                        setNameDraft(null);
+                      }}
+                    />
+                  }
+                />
+                {catalogPick ? (
                   <>
                     <Separator />
                     <ConfigRow
-                      label="Default Model"
-                      hint="The NAC session will start with this default and may switch to another."
-                      invalid={Boolean(modelListError)}
+                      presentation="form"
+                      label="Base URL"
+                      hint="Endpoint the catalog names for this provider."
+                      verticalOnMobile
+                      control={
+                        <Input
+                          aria-label="Base URL"
+                          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                          className={CONTROL_WIDTH}
+                          value={catalogPick.baseUrl}
+                          isDisabled
+                          readOnly
+                        />
+                      }
+                    />
+                    {needsKey ? (
+                      <>
+                        <Separator />
+                        {managedCatalogProfile ? (
+                          <ManagedModelCredentialStatus ready={catalogCredential} />
+                        ) : catalogCredential ? (
+                          <ConfigRow
+                            presentation="form"
+                            label="Credential"
+                            verticalOnMobile
+                            hint="This provider's conventional environment variable is set on the server; the session reuses it."
+                            control={
+                              <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
+                                <Icon
+                                  iconName={IconName.CheckCircle}
+                                  className="text-success-primary"
+                                />
+                                <span className="label-small text-success-primary">Detected</span>
+                              </div>
+                            }
+                          />
+                        ) : (
+                          <>
+                            <ConfigRow
+                              presentation="form"
+                              label="Name"
+                              required
+                              verticalOnMobile
+                              hint="How this setup is listed the next time a session is created."
+                              control={
+                                <Input
+                                  aria-label="Name"
+                                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                                  className={CONTROL_WIDTH}
+                                  value={name}
+                                  onChange={(event) => setNameDraft(event.target.value)}
+                                />
+                              }
+                            />
+                            <Separator />
+                            <ConfigRow
+                              presentation="form"
+                              label="API Key"
+                              required
+                              verticalOnMobile
+                              invalid={keyInvalid}
+                              hint={
+                                catalogProvider?.auth_hint
+                                  ? `Stored in NAC once the setup is saved, or set ${catalogProvider.auth_hint} on the server instead.`
+                                  : "Stored in NAC under a generated name once the setup is saved."
+                              }
+                              control={
+                                <Input
+                                  aria-label="API Key"
+                                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                                  className={CONTROL_WIDTH}
+                                  type="password"
+                                  autoComplete="off"
+                                  placeholder="Paste the provider key"
+                                  leadingSlot={<KeyStatus status={validation.status} />}
+                                  validation={keyInvalid}
+                                  value={apiKey}
+                                  onChange={(event) => setApiKey(event.target.value)}
+                                />
+                              }
+                            />
+                          </>
+                        )}
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            {source.kind === "file" ? (
+              <>
+                <ConfigRow
+                  presentation="form"
+                  label="Config File"
+                  required
+                  hint="A config.toml on this machine; its [model] section is read."
+                  invalid={Boolean(resolveError)}
+                  verticalOnMobile
+                  control={
+                    <Input
+                      aria-label="Config File"
+                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                      className={CONTROL_WIDTH}
+                      placeholder="Select Config File"
+                      trailing={InputTrailing.Button}
+                      trailingIconName={IconName.Folder}
+                      trailingOnClick={() => setPicking(true)}
+                      value={filePath}
+                      onChange={(event) => setFilePath(event.target.value)}
+                    />
+                  }
+                />
+                {filePath.trim() ? <Separator /> : null}
+              </>
+            ) : null}
+
+            {source.kind === "new" ? (
+              <>
+                {preservesInitial ? (
+                  <p role="status" className="text-small !leading-[22px] text-basic-secondary">
+                    Current model:{" "}
+                    <span className="font-medium break-all">
+                      {provider === CUSTOM ? modelDraft.trim() || "Select a model" : chosenModel}
+                    </span>
+                    . This selection keeps the current connection. The name and credentials below
+                    apply to a replacement connection; changing only the name keeps this selection.
+                  </p>
+                ) : null}
+                <ConfigRow
+                  presentation="form"
+                  label="Model Provider"
+                  required
+                  hint="Service that provides the models for this session."
+                  control={
+                    <SmallSelect
+                      presentation="form"
+                      items={PROVIDER_ITEMS}
+                      value={provider}
+                      onValueChange={(id) => {
+                        // SAFETY: the ids are built from PROVIDER_ITEMS, so
+                        // every value the picker can emit is a ProviderChoice.
+                        setProvider(id as ProviderChoice);
+                        setApiKey("");
+                        setDefaultModel("");
+                      }}
+                    />
+                  }
+                />
+                <Separator />
+                {provider === CUSTOM ? (
+                  <>
+                    <ConfigRow
+                      presentation="form"
+                      label="Protocol"
+                      required
+                      hint="Wire format the endpoint speaks; a URL alone cannot say."
                       control={
                         <SmallSelect
-                          items={modelListError ? [] : modelItems(models)}
-                          value={modelListError ? "" : chosenModel}
-                          onValueChange={setDefaultModel}
-                          disabled={Boolean(modelListError)}
-                          placeholder={
-                            loginQuery.isFetching
-                              ? "Reading the model list…"
-                              : modelListError
-                                ? "–"
-                                : "No models offered"
+                          presentation="form"
+                          items={PROTOCOL_ITEMS}
+                          value={protocol}
+                          onValueChange={(id) =>
+                            // SAFETY: the ids are built from PROTOCOL_ITEMS, so
+                            // every value the picker can emit is a BackendKind.
+                            setProtocol(id as BackendKind)
                           }
                         />
                       }
                     />
+                    <Separator />
                   </>
-                ) : null
-              ) : validation.status === "ready" ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    label="Default Model"
-                    hint="The NAC session will start with this default and may switch to another."
-                    control={
-                      <SmallSelect
-                        items={modelItems(validation.models)}
-                        value={chosenModel}
-                        onValueChange={setDefaultModel}
-                        placeholder="No models offered"
+                ) : null}
+                <ConfigRow
+                  presentation="form"
+                  label="Name"
+                  required={!preservesInitial}
+                  hint={
+                    preservesInitial
+                      ? "Used when establishing a replacement connection, alongside its credentials."
+                      : "How this setup is listed the next time a session is created."
+                  }
+                  control={
+                    <Input
+                      aria-label="Name"
+                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                      className={CONTROL_WIDTH}
+                      value={name}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                    />
+                  }
+                />
+                {needsKey ? (
+                  <>
+                    <Separator />
+                    <ConfigRow
+                      presentation="form"
+                      label="API Key"
+                      required={!preservesInitial}
+                      invalid={keyInvalid}
+                      hint={
+                        preservesInitial
+                          ? "Leave blank to keep the current connection's credential. A replacement key must be validated before a new configuration can be used."
+                          : "Stored in NAC under a generated name once the setup is saved."
+                      }
+                      control={
+                        <Input
+                          aria-label="API Key"
+                          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                          className={CONTROL_WIDTH}
+                          type="password"
+                          autoComplete="off"
+                          placeholder="Paste the provider key"
+                          leadingSlot={<KeyStatus status={validation.status} />}
+                          validation={keyInvalid}
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                        />
+                      }
+                    />
+                  </>
+                ) : null}
+                {provider === CUSTOM ? (
+                  <>
+                    <Separator />
+                    <ConfigRow
+                      presentation="form"
+                      label="Model"
+                      required
+                      hint="Model identifier the endpoint expects."
+                      control={
+                        <Input
+                          aria-label="Model"
+                          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                          className={CONTROL_WIDTH}
+                          placeholder="gpt-5.5"
+                          value={modelDraft}
+                          onChange={(event) => setModelDraft(event.target.value)}
+                        />
+                      }
+                    />
+                    <Separator />
+                    <ConfigRow
+                      presentation="form"
+                      label="Base URL"
+                      required
+                      hint="Endpoint the session sends its requests to."
+                      control={
+                        <Input
+                          aria-label="Base URL"
+                          inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                          className={CONTROL_WIDTH}
+                          placeholder="https://api.openai.com/v1"
+                          value={baseUrlDraft}
+                          onChange={(event) => setBaseUrlDraft(event.target.value)}
+                        />
+                      }
+                    />
+                    <Separator />
+                    <ConfigRow
+                      presentation="form"
+                      label="Allow insecure HTTP"
+                      control={
+                        <div className={`${CONTROL_WIDTH} flex flex-col items-start gap-1`}>
+                          <Switch
+                            className="max-md:before:absolute max-md:before:-inset-4"
+                            aria-label="Allow insecure HTTP"
+                            checked={allowInsecureHttp}
+                            onChange={setAllowInsecureHttp}
+                          />
+                          <p className="body-small text-basic-secondary">
+                            Your API key, prompts, source code, tool output, and model responses may
+                            be read or modified in transit.
+                          </p>
+                        </div>
+                      }
+                    />
+                  </>
+                ) : !needsKey ? (
+                  signedIn ? (
+                    <>
+                      <Separator />
+                      <ConfigRow
+                        presentation="form"
+                        label="Default Model"
+                        hint="The NAC session will start with this default and may switch to another."
+                        invalid={Boolean(modelListError)}
+                        control={
+                          <SmallSelect
+                            presentation="form"
+                            items={modelListError ? [] : modelItems(models)}
+                            value={modelListError ? "" : chosenModel}
+                            onValueChange={setDefaultModel}
+                            disabled={Boolean(modelListError)}
+                            placeholder={
+                              loginQuery.isFetching
+                                ? "Reading the model list…"
+                                : modelListError
+                                  ? "–"
+                                  : "No models offered"
+                            }
+                          />
+                        }
                       />
-                    }
-                  />
-                </>
-              ) : null}
-            </>
-          ) : null}
+                    </>
+                  ) : null
+                ) : validation.status === "ready" ? (
+                  <>
+                    <Separator />
+                    <ConfigRow
+                      presentation="form"
+                      label="Default Model"
+                      hint="The NAC session will start with this default and may switch to another."
+                      control={
+                        <SmallSelect
+                          presentation="form"
+                          items={modelItems(validation.models)}
+                          value={chosenModel}
+                          onValueChange={setDefaultModel}
+                          placeholder="No models offered"
+                        />
+                      }
+                    />
+                  </>
+                ) : null}
+              </>
+            ) : null}
 
-          {source.kind === "saved" || source.kind === "file" ? (
-            <ResolvedRows
-              resolving={resolving}
-              resolved={resolved}
-              backend={savedBackend}
-              onBackend={setBackendOverride}
-              baseUrl={savedBaseUrl}
-              onBaseUrl={setBaseUrlOverride}
-              model={chosenModel}
-              onModel={(value) =>
-                resolved?.models.length ? setDefaultModel(value) : setModelOverride(value)
-              }
-              failed={Boolean(resolveError)}
-            />
-          ) : null}
+            {source.kind === "saved" || source.kind === "file" ? (
+              <ResolvedRows
+                resolving={resolving}
+                resolved={resolved}
+                backend={savedBackend}
+                onBackend={setBackendOverride}
+                baseUrl={savedBaseUrl}
+                onBaseUrl={setBaseUrlOverride}
+                model={chosenModel}
+                onModel={(value) =>
+                  resolved?.models.length ? setDefaultModel(value) : setModelOverride(value)
+                }
+                failed={Boolean(resolveError)}
+              />
+            ) : null}
 
-          {/* The account answers for the provider picked above, so it sits with
-              that choice rather than after the execution settings below it. */}
-          {authBackend ? <ManagedAuthCallout backend={authBackend} /> : null}
+            {/* The account answers for the provider picked above, so it sits with
+                that choice rather than after the execution settings below it. */}
+            {authBackend ? <ManagedAuthCallout backend={authBackend} /> : null}
 
-          {children && credentialReady ? (
-            <>
-              <Separator />
-              {children}
-            </>
-          ) : null}
-        </div>
+            {children && credentialReady ? (
+              <>
+                <Separator />
+                {children}
+              </>
+            ) : null}
+          </div>
+        </FormSection>
       </div>
 
       {message ? (
         <div className="flex items-start gap-2">
-          <p className="label-micro text-error-primary flex-1 min-w-0">{message}</p>
+          <p className="text-small !leading-[22px] text-error-primary flex-1 min-w-0">{message}</p>
           {retry ? (
             <Button
               variant={ButtonVariant.Ghost}
-              size={ButtonSize.Medium}
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={() => void retry()}
             >

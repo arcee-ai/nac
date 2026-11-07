@@ -1,2 +1,2 @@
-/** Fixed top bar over a single scrolling region owned by the active page. */
+/** Phone chrome reserves its height; wide chrome floats over the page-owned scroll. */
 export declare function AppShell(): import("react").JSX.Element;

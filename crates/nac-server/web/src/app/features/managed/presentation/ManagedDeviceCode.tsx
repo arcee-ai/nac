@@ -36,7 +36,7 @@ export function ManagedDeviceCode({
         <Loader size={LoaderSize.XSmall} />
         {code ? (
           <>
-            <span className="text-micro text-basic-muted">Code</span>
+            <span className="text-small !leading-[22px] text-basic-secondary">Code</span>
             <span
               className="label-small text-basic-primary tabular-nums select-all"
               data-testid="provider-device-code"
@@ -44,6 +44,7 @@ export function ManagedDeviceCode({
               {code}
             </span>
             <Button
+              className="min-h-11 max-w-full !whitespace-normal"
               variant={ButtonVariant.Secondary}
               size={ButtonSize.Medium}
               content={ButtonContent.IconLeft}
@@ -54,9 +55,12 @@ export function ManagedDeviceCode({
             </Button>
           </>
         ) : (
-          <span className="text-micro text-basic-muted">Waiting for the browser</span>
+          <span className="text-small !leading-[22px] text-basic-secondary">
+            Waiting for the browser
+          </span>
         )}
         <Button
+          className="min-h-11 max-w-full !whitespace-normal"
           variant={ButtonVariant.Ghost}
           size={ButtonSize.Medium}
           content={ButtonContent.IconRight}
@@ -66,6 +70,7 @@ export function ManagedDeviceCode({
           <Icon iconName={IconName.External} />
         </Button>
         <Button
+          className="min-h-11 max-w-full !whitespace-normal"
           variant={ButtonVariant.Ghost}
           size={ButtonSize.Medium}
           content={ButtonContent.Text}
@@ -78,7 +83,9 @@ export function ManagedDeviceCode({
         role="status"
         aria-live="polite"
         className={
-          outcome === "failed" ? "text-micro text-error-primary" : "text-micro text-success-primary"
+          outcome === "failed"
+            ? "text-small !leading-[22px] text-error-primary"
+            : "text-small !leading-[22px] text-success-primary"
         }
       >
         {outcome === "copied"

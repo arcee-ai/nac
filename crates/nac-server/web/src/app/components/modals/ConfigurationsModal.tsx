@@ -1,4 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   Button,
@@ -68,6 +77,9 @@ const REASONING_ITEMS: SelectItem[] = REASONING_OPTIONS.filter(
 /** Sentinel for the sidebar entry that builds a setup instead of editing one. */
 const DRAFT = "__new__";
 
+type ConfigurationField = "name" | "model" | "headers" | "compaction" | "light";
+type ConfigurationError = { message: string; field?: ConfigurationField };
+
 /**
  * Manages the saved provider setups: the sidebar picks one, the form edits it
  * in place, and the footer saves, discards or removes it.
@@ -97,9 +109,14 @@ function ConfigurationsManager({ open, onClose }: { open: boolean; onClose: () =
       open={open}
       onClose={onClose}
       title="Configurations"
+      subheader={
+        isMobile
+          ? undefined
+          : "Save reusable provider and model setups. Project and chat defaults change only when you choose them."
+      }
       size={ModalSize.Large}
       flush
-      className="max-w-[820px] md:h-[720px]"
+      className="max-w-[820px] md:h-[720px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
       bodyClassName="p-0 overflow-hidden"
       footer={footer}
     >
@@ -194,7 +211,49 @@ function ConfigurationForm({
     mode: record?.light_model ? "dual" : "single",
     light: record?.light_model ?? null,
   });
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ConfigurationError | null>(null);
+  const errorId = useId();
+  const formRef = useRef<HTMLDivElement>(null);
+  const globalErrorRef = useRef<HTMLParagraphElement>(null);
+  const feedbackOriginRef = useRef<Element | null>(null);
+  const fieldMessage = (field: ConfigurationField) =>
+    error?.field === field ? error.message : undefined;
+  const fieldError = (field: ConfigurationField) =>
+    fieldMessage(field) ? (
+      <p
+        id={`${errorId}-${field}`}
+        role="alert"
+        className="mt-1 text-small !leading-[22px] text-error-primary"
+      >
+        {fieldMessage(field)}
+      </p>
+    ) : null;
+
+  useEffect(() => {
+    if (!error) return;
+    const dialog = formRef.current?.closest<HTMLElement>('[data-modal-open="true"]');
+    if (!dialog || dialog.hasAttribute("data-covered") || dialog.closest("[inert]")) return;
+    const active = dialog.ownerDocument.activeElement;
+    // A late response must not take focus from a new field, overlay or instance.
+    if (active !== feedbackOriginRef.current && active !== dialog.ownerDocument.body) return;
+    const field = error.field
+      ? formRef.current?.querySelector<HTMLElement>(`[data-configuration-field="${error.field}"]`)
+      : null;
+    const target = error.field
+      ? field?.matches('[aria-invalid="true"]')
+        ? field
+        : field?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      : globalErrorRef.current;
+    target?.focus();
+    if (error.field) field?.scrollIntoView({ block: "nearest" });
+  }, [error]);
+
+  const onLightChange = useCallback((selection: LightSelection) => {
+    setLight(selection);
+    if (selection.mode === "single" || selection.light) {
+      setError((current) => (current?.field === "light" ? null : current));
+    }
+  }, []);
 
   const name = nameDraft ?? autoName(backend, takenNames);
   const needsKey = providerUsesApiKey(backend);
@@ -272,18 +331,19 @@ function ConfigurationForm({
   const edit =
     <T,>(setter: (value: T) => void) =>
     (value: T) => {
-      setError("");
+      setError(null);
       setter(value);
     };
 
   const save = async () => {
     if (busy) return;
+    feedbackOriginRef.current = formRef.current?.ownerDocument.activeElement ?? null;
     if (!name.trim()) {
-      setError("A name is required.");
+      setError({ field: "name", message: "A name is required." });
       return;
     }
     if (!chosenModel.trim()) {
-      setError("A model is required.");
+      setError({ field: "model", message: "A model is required." });
       return;
     }
 
@@ -291,7 +351,7 @@ function ConfigurationForm({
     try {
       extraHeaders = serializeExtraHeaders(headers, {});
     } catch (headerError) {
-      setError(errorMessage(toRunError(headerError)));
+      setError({ field: "headers", message: errorMessage(toRunError(headerError)) });
       return;
     }
 
@@ -300,12 +360,15 @@ function ConfigurationForm({
     // the generated ReasoningEffort values plus the empty "not set" sentinel.
     const selectedReasoning = reasoning ? (reasoning as ReasoningEffort) : null;
     if (!Number.isSafeInteger(threshold) || threshold < 0) {
-      setError("The compaction threshold must be a whole number, or 0 to disable it.");
+      setError({
+        field: "compaction",
+        message: "The compaction threshold must be a whole number, or 0 to disable it.",
+      });
       return;
     }
 
     if (light.mode === "dual" && !light.light) {
-      setError("Pick the light model before saving.");
+      setError({ field: "light", message: "Pick the light model before saving." });
       return;
     }
     const lightModel = light.mode === "dual" ? light.light : null;
@@ -350,19 +413,21 @@ function ConfigurationForm({
         onSaved(saved.config_id);
         toast.success(`Configuration ${saved.name} created`);
       }
+      setError(null);
     } catch (saveError) {
-      setError(humanErrorText(toRunError(saveError), backend));
+      setError({ message: humanErrorText(toRunError(saveError), backend) });
     }
   };
 
   const remove = async () => {
     if (!record || busy) return;
+    feedbackOriginRef.current = formRef.current?.ownerDocument.activeElement ?? null;
     try {
       await deleteConfig.mutateAsync(record.config_id);
       onDeleted();
       toast.success(`Configuration ${record.name} removed`);
     } catch (deleteError) {
-      setError(humanErrorText(toRunError(deleteError)));
+      setError({ message: humanErrorText(toRunError(deleteError)) });
     }
   };
 
@@ -377,13 +442,14 @@ function ConfigurationForm({
   useLayoutEffect(() => {
     const saving = createConfig.isPending || updateConfig.isPending;
     setFooter(
-      <>
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 md:contents">
         {record ? (
           isMobile ? (
             <StickyButton
+              buttonClassName="min-h-11 min-w-11 max-w-full"
               variant={ButtonVariant.SecondaryDestructive}
               content={ButtonContent.Icon}
-              className="mr-auto"
+              className="mr-auto min-h-11 max-w-full"
               aria-label="Delete configuration"
               disabled={busy}
               loading={deleteConfig.isPending}
@@ -408,6 +474,8 @@ function ConfigurationForm({
         ) : null}
         {isMobile ? (
           <StickyButton
+            buttonClassName="min-h-11 min-w-11 max-w-full"
+            className="min-h-11 max-w-full"
             variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             onClick={onClose}
@@ -426,6 +494,8 @@ function ConfigurationForm({
         )}
         {isMobile ? (
           <StickyButton
+            buttonClassName="min-h-11 min-w-11 max-w-full"
+            className="min-h-11 max-w-full"
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
             disabled={busy}
@@ -446,7 +516,7 @@ function ConfigurationForm({
             Save
           </Button>
         )}
-      </>,
+      </div>,
     );
     return () => setFooter(null);
   }, [
@@ -463,18 +533,20 @@ function ConfigurationForm({
   // The provider and its account sit above the scrolling fields: signing in is
   // what makes the rest of the form answerable, so it is never below them.
   return (
-    <div className="flex flex-col flex-1 min-w-0 min-h-0">
+    <div ref={formRef} className="flex flex-col flex-1 min-w-0 min-h-0">
       <section
         aria-label="Provider account"
         className="shrink-0 flex flex-col gap-2 px-4 pt-4 pb-2 border-b border-muted"
       >
         <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3">
           <ConfigRow
+            presentation="form"
             label="Model Provider"
             required
             hint="Service that provides the models for this session."
             control={
               <SmallSelect
+                presentation="form"
                 items={PROVIDER_ITEMS}
                 value={backend}
                 onValueChange={(id) => {
@@ -491,28 +563,49 @@ function ConfigurationForm({
         <ManagedAuthCallout backend={backend} />
       </section>
       <div
-        className={cn("flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}
+        className={cn(
+          "flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
+          isMobile && "pb-32 scroll-pb-32",
+        )}
       >
+        {error && !error.field ? (
+          <p
+            ref={globalErrorRef}
+            tabIndex={-1}
+            role="alert"
+            className="mb-4 text-small !leading-[22px] text-error-primary"
+          >
+            {error.message}
+          </p>
+        ) : null}
         <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
+            presentation="form"
             label="Name"
+            invalid={Boolean(fieldMessage("name"))}
             required
             hint="How this setup is listed the next time a session is created."
             verticalOnMobile
             control={
-              <Input
-                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                className="w-full md:w-[280px]"
-                aria-label="Configuration name"
-                value={name}
-                onChange={(event) => edit(setNameDraft)(event.target.value)}
-              />
+              <div data-configuration-field="name" className="w-full md:w-[280px]">
+                <Input
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  className="w-full md:w-[280px]"
+                  aria-label="Configuration name"
+                  validation={Boolean(fieldMessage("name"))}
+                  aria-describedby={fieldMessage("name") ? `${errorId}-name` : undefined}
+                  value={name}
+                  onChange={(event) => edit(setNameDraft)(event.target.value)}
+                />
+                {fieldError("name")}
+              </div>
             }
           />
           <Separator />
           {needsKey ? (
             <>
               <ConfigRow
+                presentation="form"
                 label="API Key"
                 required
                 invalid={validation.status === "error"}
@@ -524,6 +617,7 @@ function ConfigurationForm({
                 }
                 control={
                   <Input
+                    aria-label="API Key"
                     inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                     className="w-full md:w-[280px]"
                     type="password"
@@ -531,6 +625,7 @@ function ConfigurationForm({
                     placeholder={record?.api_key_env ? MASKED_KEY : "Paste the provider key"}
                     leadingSlot={<KeyStatus status={keyStatus} />}
                     validation={validation.status === "error"}
+                    validationText={validation.status === "error" ? validation.message : undefined}
                     value={apiKey}
                     onChange={(event) => edit(setApiKey)(event.target.value)}
                   />
@@ -540,10 +635,12 @@ function ConfigurationForm({
             </>
           ) : null}
           <ConfigRow
+            presentation="form"
             label="Base URL"
             hint="Endpoint the session sends its requests to; blank uses the provider's own."
             control={
               <Input
+                aria-label="Base URL"
                 inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                 className="w-full md:w-[280px]"
                 placeholder="https://api.openai.com/v1"
@@ -555,10 +652,12 @@ function ConfigurationForm({
           />
           <Separator />
           <ConfigRow
+            presentation="form"
             label="Allow insecure HTTP"
             control={
               <div className="w-full md:w-[280px] flex flex-col items-start gap-1">
                 <Switch
+                  className="max-md:before:absolute max-md:before:-inset-4"
                   aria-label="Allow insecure HTTP"
                   checked={allowInsecureHttp}
                   onChange={edit(setAllowInsecureHttp)}
@@ -573,35 +672,48 @@ function ConfigurationForm({
           />
           <Separator />
           <ConfigRow
+            presentation="form"
             label="Default Model"
+            invalid={Boolean(fieldMessage("model"))}
             required
             hint="Sessions started from this setup begin with this default and may switch to another."
             verticalOnMobile={models.length ? false : true}
             control={
-              models.length ? (
-                <SmallSelect
-                  items={modelItems(models)}
-                  value={chosenModel}
-                  onValueChange={edit(setModel)}
-                  placeholder="No models offered"
-                />
-              ) : (
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  className="w-full md:w-[280px]"
-                  placeholder="gpt-5.5"
-                  value={model}
-                  onChange={(event) => edit(setModel)(event.target.value)}
-                />
-              )
+              <div data-configuration-field="model" className="w-full md:w-[280px]">
+                {models.length ? (
+                  <SmallSelect
+                    aria-invalid={Boolean(fieldMessage("model")) || undefined}
+                    aria-describedby={fieldMessage("model") ? `${errorId}-model` : undefined}
+                    presentation="form"
+                    items={modelItems(models)}
+                    value={chosenModel}
+                    onValueChange={edit(setModel)}
+                    placeholder="No models offered"
+                  />
+                ) : (
+                  <Input
+                    aria-label="Default Model"
+                    validation={Boolean(fieldMessage("model"))}
+                    aria-describedby={fieldMessage("model") ? `${errorId}-model` : undefined}
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    className="w-full md:w-[280px]"
+                    placeholder="gpt-5.5"
+                    value={model}
+                    onChange={(event) => edit(setModel)(event.target.value)}
+                  />
+                )}
+                {fieldError("model")}
+              </div>
             }
           />
           <Separator />
           <ConfigRow
+            presentation="form"
             label="Reasoning Effort"
             hint="Higher effort for deeper reasoning and lower effort for faster responses."
             control={
               <SmallSelect
+                presentation="form"
                 items={reasoningItems}
                 value={reasoning}
                 onValueChange={edit(setReasoning)}
@@ -610,41 +722,66 @@ function ConfigurationForm({
           />
           <Separator />
           <ConfigRow
+            presentation="form"
             label="Context Limit"
+            invalid={Boolean(fieldMessage("compaction"))}
             verticalOnMobile
             labelClassName="max-w-none"
             hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
             control={
-              <div className="flex items-center gap-2">
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  className="w-full md:w-[105px]"
-                  inputClassName="text-right"
-                  placeholder={compactionPlaceholder}
-                  inputMode="numeric"
-                  value={compaction}
-                  onChange={(event) => {
-                    setError("");
-                    compactionAutoRef.current = false;
-                    compactionRef.current = event.target.value;
-                    setCompaction(event.target.value);
-                  }}
-                />
-                <span className="shrink-0 text-micro text-basic-muted">tokens</span>
+              <div data-configuration-field="compaction" className="w-full md:w-[280px]">
+                <div className="flex items-center gap-2">
+                  <Input
+                    aria-label="Context Limit"
+                    validation={Boolean(fieldMessage("compaction"))}
+                    aria-describedby={
+                      fieldMessage("compaction") ? `${errorId}-compaction` : undefined
+                    }
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    className="w-full md:w-[105px]"
+                    inputClassName="text-right"
+                    placeholder={compactionPlaceholder}
+                    inputMode="numeric"
+                    value={compaction}
+                    onChange={(event) => {
+                      setError(null);
+                      compactionAutoRef.current = false;
+                      compactionRef.current = event.target.value;
+                      setCompaction(event.target.value);
+                    }}
+                  />
+                  <span className="shrink-0 text-micro text-basic-muted">tokens</span>
+                </div>
+                {fieldError("compaction")}
               </div>
             }
           />
           <Separator />
-          <LightModelSection initial={record?.light_model ?? null} onChange={setLight} />
+          <div data-configuration-field="light">
+            <LightModelSection
+              initial={record?.light_model ?? null}
+              onChange={onLightChange}
+              aria-invalid={Boolean(fieldMessage("light")) || undefined}
+              aria-describedby={fieldMessage("light") ? `${errorId}-light` : undefined}
+            />
+            {fieldError("light")}
+          </div>
           <Separator />
-          <TextArea
-            label="Extra headers (JSON object)"
-            hintText="Blank sends none; header values must be strings."
-            placeholder='{"X-Title": "NAC"}'
-            value={headers}
-            onChange={(event) => edit(setHeaders)(event.target.value)}
-            textAreaClassName="h-[108px] resize-none"
-          />
+          <div data-configuration-field="headers">
+            <TextArea
+              label="Extra headers (JSON object)"
+              aria-label="Extra headers (JSON object)"
+              validation={Boolean(fieldMessage("headers"))}
+              aria-invalid={Boolean(fieldMessage("headers")) || undefined}
+              aria-describedby={fieldMessage("headers") ? `${errorId}-headers` : undefined}
+              hintText="Blank sends none; header values must be strings."
+              placeholder='{"X-Title": "NAC"}'
+              value={headers}
+              onChange={(event) => edit(setHeaders)(event.target.value)}
+              textAreaClassName="h-[108px] resize-none"
+            />
+            {fieldError("headers")}
+          </div>
           <Separator />
           <TextArea
             label="Initial prompt"
@@ -655,7 +792,6 @@ function ConfigurationForm({
             textAreaClassName="h-[92px] resize-none"
           />
         </div>
-        {error ? <p className="label-micro text-error-primary pt-2">{error}</p> : null}
         <p className="text-micro text-basic-muted pt-2">* Required fields</p>
       </div>
     </div>

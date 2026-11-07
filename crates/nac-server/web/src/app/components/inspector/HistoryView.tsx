@@ -23,7 +23,7 @@ function Row({
     <button
       type="button"
       className={cn(
-        "flex items-start gap-2 w-full p-2 rounded-[8px] text-left",
+        "flex items-start gap-2 w-full min-h-11 p-3 rounded-[8px] text-left",
         selected ? "btn-ghost-highlighted" : "btn-ghost",
       )}
       aria-pressed={selected}
@@ -35,9 +35,11 @@ function Row({
         className="shrink-0 mt-[2px]"
       />
       <span className="flex-1 min-w-0 flex flex-col">
-        <span className="label-medium text-basic-primary truncate">{title}</span>
+        <span className="text-sm leading-5 font-medium text-basic-primary break-words">
+          {title}
+        </span>
         {subtitle ? (
-          <span className="label-small text-basic-muted truncate">{subtitle}</span>
+          <span className="text-xs leading-4 text-basic-tertiary break-words">{subtitle}</span>
         ) : null}
       </span>
       {trailing ? (
@@ -80,7 +82,7 @@ export function HistoryView({
         onClick={() => onSelect(null)}
       />
       {isLoading ? (
-        <div className="flex items-center gap-2 p-2 label-small text-basic-muted">
+        <div className="flex items-center gap-2 p-2 label-small text-basic-tertiary">
           <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
           Reading snapshots…
         </div>
@@ -103,7 +105,7 @@ export function HistoryView({
         />
       ))}
       {!isLoading && revisions.length === 0 ? (
-        <div className="p-2 label-small text-basic-muted">
+        <div className="p-2 label-small text-basic-tertiary">
           No snapshots yet. One is taken every time a run finishes.
         </div>
       ) : null}

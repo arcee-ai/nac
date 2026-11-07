@@ -1,4 +1,4 @@
-import type React from "react";
+import { useId, type ReactNode } from "react";
 
 import { HoverHint, TooltipPosition } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
@@ -44,6 +44,7 @@ export function ConfigRow({
   verticalOnMobile = false,
   labelClassName = "",
   control,
+  presentation,
 }: {
   label: string;
   hint?: string;
@@ -57,29 +58,42 @@ export function ConfigRow({
   verticalOnMobile?: boolean;
   /** Widens the label past the cap a narrow box needs, e.g. `max-w-none`. */
   labelClassName?: string;
-  control: React.ReactNode;
+  control: ReactNode;
+  /** Opt-in readable form layout; legacy compact consumers keep their geometry. */
+  presentation?: "form";
 }) {
+  const labelId = useId();
   return (
     <div
+      role={presentation === "form" ? "group" : undefined}
+      aria-labelledby={presentation === "form" ? labelId : undefined}
       className={cn(
         "flex w-full min-h-9 md:flex-row items-center md:justify-between md:min-h-5",
-        verticalOnMobile
-          ? "flex-col items-stretch justify-center gap-1"
-          : "flex-row items-center justify-between",
+        presentation === "form"
+          ? "flex-col items-stretch gap-2 md:gap-4 min-h-11 md:min-h-9"
+          : verticalOnMobile
+            ? "flex-col items-stretch justify-center gap-1"
+            : "flex-row items-center justify-between",
       )}
     >
       <div
         className={cn(
-          "flex items-center gap-1 min-w-0 md:flex-1 md:max-w-[220px]",
-          verticalOnMobile ? "max-w-none" : "flex-1 max-w-[220px]",
+          "flex gap-1 min-w-0 md:flex-1 md:max-w-[220px]",
+          presentation === "form" ? "flex-col items-start" : "items-center",
+          presentation === "form" || verticalOnMobile ? "max-w-none" : "flex-1 max-w-[220px]",
           labelClassName,
         )}
       >
         <div
+          id={labelId}
           className={cn(
             // Stacked, the label has the whole width and may wrap; side by side
             // it has to give way to the control.
-            verticalOnMobile ? "md:truncate" : "truncate",
+            presentation === "form"
+              ? "whitespace-normal"
+              : verticalOnMobile
+                ? "md:truncate"
+                : "truncate",
             secondary ? "text-small" : "label-small",
             invalid
               ? "text-error-primary"
@@ -93,9 +107,22 @@ export function ConfigRow({
           {label}
           {required ? "*" : ""}
         </div>
-        {hint ? <HoverHint title={hint} position={TooltipPosition.TopCenter} /> : null}
+        {hint ? (
+          presentation === "form" ? (
+            <p className="text-small !leading-[22px] text-basic-secondary">{hint}</p>
+          ) : (
+            <HoverHint title={hint} position={TooltipPosition.TopCenter} />
+          )
+        ) : null}
       </div>
-      <div className={cn("shrink-0", verticalOnMobile && "w-full md:w-auto")}>{control}</div>
+      <div
+        className={cn(
+          "shrink-0 min-w-0",
+          (presentation === "form" || verticalOnMobile) && "w-full md:w-auto",
+        )}
+      >
+        {control}
+      </div>
     </div>
   );
 }

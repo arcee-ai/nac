@@ -86,6 +86,7 @@ export function ManagedAuthCallout({
     </div>
   ) : checkFailed ? (
     <Button
+      className="min-h-11 max-w-full !whitespace-normal"
       variant={ButtonVariant.Secondary}
       size={ButtonSize.Medium}
       content={ButtonContent.IconLeft}
@@ -95,13 +96,14 @@ export function ManagedAuthCallout({
       <span>Retry</span>
     </Button>
   ) : settled ? (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1.5 rounded-[4px] bg-success-secondary py-2 pl-2 pr-4">
         <Icon iconName={IconName.CheckCircle} className="text-success-primary" />
         <span className="label-small text-success-primary">Signed in</span>
       </div>
       {unreachable ? (
         <Button
+          className="min-h-11 max-w-full !whitespace-normal"
           variant={ButtonVariant.Ghost}
           size={ButtonSize.Medium}
           content={ButtonContent.Text}
@@ -112,6 +114,7 @@ export function ManagedAuthCallout({
         </Button>
       ) : null}
       <Button
+        className="min-h-11 max-w-full !whitespace-normal"
         variant={ButtonVariant.Ghost}
         size={ButtonSize.Medium}
         content={ButtonContent.Text}
@@ -123,6 +126,7 @@ export function ManagedAuthCallout({
     </div>
   ) : (
     <Button
+      className="min-h-11 max-w-full !whitespace-normal"
       variant={ButtonVariant.Primary}
       size={ButtonSize.Medium}
       content={ButtonContent.IconRight}
@@ -163,17 +167,17 @@ export function ManagedAuthCallout({
       className={cn(
         // A device code needs more room than a single button, so the
         // controls wrap below the heading rather than squeezing it.
-        "flex flex-col gap-3 rounded-[8px] border bg-elevation-level-2 p-3 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-x-4",
+        "flex min-w-0 flex-col gap-4 rounded-lg border p-4 md:flex-row md:flex-wrap md:items-center md:justify-between",
         invalid ? "border-error-primary" : "border-muted",
         className,
       )}
     >
-      <div className="flex items-start gap-2 min-w-0 md:flex-1 md:basis-[220px]">
+      <div className="flex min-w-0 items-start gap-3 md:flex-1 md:basis-60">
         <Icon
           iconName={PROVIDER_ICONS[provider]}
           className={cn("shrink-0", invalid ? "text-error-primary" : "text-basic-secondary")}
         />
-        <div className="flex flex-col gap-0.5 min-w-0">
+        <div className="flex min-w-0 flex-col gap-1">
           <span
             className={cn("label-small", invalid ? "text-error-primary" : "text-basic-primary")}
           >
@@ -181,17 +185,20 @@ export function ManagedAuthCallout({
           </span>
           <span
             key={checkFailed ? "alert" : "note"}
-            className="text-micro text-basic-muted"
+            className="text-small !leading-[22px] text-basic-secondary"
             role={checkFailed ? "alert" : undefined}
           >
             {description}
           </span>
         </div>
       </div>
-      <div className="flex flex-col items-stretch md:items-end gap-1 shrink-0 md:ml-auto">
+      <div className="flex min-w-0 flex-col items-stretch gap-2 md:ml-auto md:items-end">
         {control}
         {problem ? (
-          <p className="label-micro !text-[10px] !leading-[12px] text-error-primary max-w-[280px] md:text-right pt-1 opacity-70">
+          <p
+            role="alert"
+            className="text-small !leading-[22px] text-error-primary max-w-full break-words md:max-w-[320px] md:text-right pt-1"
+          >
             {problem}
           </p>
         ) : null}

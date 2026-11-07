@@ -124,7 +124,7 @@ export function SourceMenu({
       onClose={() => setOpen(false)}
       placement={PopoverPlacement.BottomLeft}
       size="w-auto"
-      className="shrink-0"
+      className="w-full min-w-0 md:w-auto md:shrink-0"
       panelClassName="max-h-72 overflow-hidden"
       // BottomSheet defaults to overflow-y-auto + [&>*]:shrink-0, which would
       // scroll the whole sheet and collapse the pinned header / list split.
@@ -133,12 +133,15 @@ export function SourceMenu({
     >
       <Button
         variant={ButtonVariant.Secondary}
-        size={ButtonSize.Medium}
+        size={actionSize}
         content={ButtonContent.IconRight}
+        className="w-full max-w-full md:w-auto"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
       >
-        <span className="text-left flex-grow truncate max-w-[96px] md:max-w-[220px]">{label}</span>
+        <span className="text-left flex-grow truncate min-w-0 max-w-full md:max-w-[220px]">
+          {label}
+        </span>
         <Icon
           iconName={IconName.Down}
           className={cn(

@@ -332,12 +332,12 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   ),
               className,
               // Callers size the desktop card through `className`
-              // (CreateProjectModal asks for `h-[680px]`). On a phone the panel
-              // *is* the screen, so
-              // its own sizing has to win: it comes after `className`, which is
-              // where tailwind-merge resolves the conflict, and the min/max pair
-              // clamps anything the caller adds on top.
-              isMobile && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full",
+              // (CreateProjectModal asks for `h-[680px]`). A phone panel fills
+              // its containing wrapper, capped by the dynamic viewport. Keep
+              // height/min/max after caller classes so a contained presentation
+              // cannot paint its anchored footer below the root's clip.
+              isMobile &&
+                "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full",
             )}
           >
             {chromelessClose ? (
