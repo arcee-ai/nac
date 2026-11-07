@@ -76,6 +76,18 @@ async fn open(app: Router, cursor: &str) -> Feed {
     assert_eq!(response.status(), StatusCode::OK);
     Box::pin(response.into_body().into_data_stream())
 }
+async fn retire_feed(
+    manager: &SessionManager,
+    feed: Feed,
+) -> std::result::Result<(), tokio::time::error::Elapsed> {
+    drop(feed);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.inner.attention.0.lock().unwrap().seat.is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+}
 async fn frame(body: &mut Feed, stage: &str) -> serde_json::Value {
     eprintln!(
         "semantic-g2-stage {}",
@@ -368,17 +380,7 @@ async fn interleave(behavior: &str) {
         cutoff["page"]["store_id"].as_str().unwrap(),
         cutoff["page"]["cursor"].as_i64().unwrap()
     );
-    drop(feed);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if manager.inner.attention.0.lock().unwrap().seat.is_none() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    retire_feed(&manager, feed).await.unwrap();
     let mut replay = open(app.clone(), &cursor).await;
     let page = frame(&mut replay, "replay").await;
     assert_eq!(page["kind"], "completions");
@@ -398,7 +400,7 @@ async fn interleave(behavior: &str) {
             "semantic_b":second,"replayed":items,"model_posts":calls.load(Ordering::SeqCst)
         })
     );
-    drop(replay);
+    retire_feed(&manager, replay).await.unwrap();
     drop(barrier);
     drop(service);
     drop(app);
@@ -492,4 +494,90 @@ async fn semantic_g2_real_http_dwo_idle_unverified_before_publication_attempt_ke
 ) {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     interleave("direct-with-orchestrator").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn semantic_fixture_teardown_waits_for_accepted_read_after_sqlite_returns() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!("nac-semantic-retirement-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let _env = ScopedModelEnv::isolated(&root.join("home"), Some("test-key"));
+    store::initialize(&root.join("store.db")).unwrap();
+    let manager = SessionManager::new_async(crate::ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .await
+    .unwrap();
+    manager
+        .inner
+        .attention
+        .configure_native(Uuid::new_v4(), "127.0.0.1:12345".into());
+    let app = crate::router(manager.clone());
+    let mut feed = open(app.clone(), "new").await;
+    assert_eq!(
+        frame(&mut feed, "retirement-cutoff").await["kind"],
+        "completions"
+    );
+    assert_eq!(
+        frame(&mut feed, "retirement-baseline").await["kind"],
+        "baseline"
+    );
+    let (release, receive) = std::sync::mpsc::channel();
+    let gate = Arc::new(ReadGate {
+        reached: Notify::new(),
+        release: Mutex::new(receive),
+    });
+    manager.inner.attention.0.lock().unwrap().after_read_gate = Some(gate.clone());
+    // A dirty hint causes a real accepted metadata read, without seeding a result.
+    manager.inner.attention.deleted("retirement-only");
+    let reached = tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+        .await
+        .is_ok();
+    // The gate runs after SQLite returns, outside the typed executor. This
+    // reproduces why executor drain alone is not a caller-retirement receipt.
+    let drained = tokio::time::timeout(Duration::from_secs(5), async {
+        manager.quiesce_persistence_callers().await;
+        manager.drain_persistence().await
+    })
+    .await;
+    let mut retiring = Box::pin(retire_feed(&manager, feed));
+    let first_poll = std::future::poll_fn(|cx| {
+        std::task::Poll::Ready(std::future::Future::poll(retiring.as_mut(), cx))
+    })
+    .await;
+    let pending = first_poll.is_pending();
+    // Release and settle the original caller before reporting the oracle.
+    // Keep this independent fence so a mutant removing retire_feed's wait
+    // still performs real cleanup before its semantic assertion fails.
+    let released = release.send(());
+    let retired = match first_poll {
+        std::task::Poll::Pending => retiring.await,
+        std::task::Poll::Ready(result) => {
+            drop(retiring);
+            result
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.inner.attention.0.lock().unwrap().seat.is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    drained.unwrap().unwrap();
+    drop(app);
+    drop(manager);
+    std::fs::remove_dir_all(&root).unwrap();
+    assert!(!root.exists());
+    assert!(reached, "accepted read never reached its after-SQLite gate");
+    released.unwrap();
+    retired.unwrap();
+    assert!(
+        pending,
+        "SEMANTIC_TEARDOWN_RETURNED_BEFORE_ACCEPTED_READ_RETIRED"
+    );
 }

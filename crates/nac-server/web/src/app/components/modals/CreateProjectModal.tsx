@@ -15,8 +15,6 @@ import {
   InputSize,
   Modal,
   ModalSize,
-  PopoverPlacement,
-  Select,
   type SelectItem,
   Separator,
   StickyButton,
@@ -24,6 +22,8 @@ import {
   SwitchSize,
   TextArea,
 } from "@/app/atoms";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
@@ -475,17 +475,12 @@ function CreateProjectForm({
     onValueChange: (id: string) => void,
     disabled = false,
   ) => (
-    <Select
+    <SmallSelect
+      presentation="form"
       items={items}
       value={value}
       onValueChange={onValueChange}
       disabled={disabled}
-      size={ButtonSize.Medium}
-      variant={ButtonVariant.Ghost}
-      placement={PopoverPlacement.BottomLeft}
-      // The dialog scrolls its own body, which would clip the list.
-      sticky
-      panelClassName="max-h-64 overflow-auto min-w-[220px]"
     />
   );
 
@@ -496,10 +491,12 @@ function CreateProjectForm({
       title="New Project"
       size={ModalSize.Wide}
       flush
-      className="h-[680px]"
+      className="h-[680px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
       footer={
         isMobile ? (
           <StickyButton
+            buttonClassName="min-h-11 min-w-11 max-w-full"
+            className="min-h-11 max-w-full"
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
             onClick={submit}
@@ -522,23 +519,27 @@ function CreateProjectForm({
         )
       }
     >
-      <div className="flex flex-col gap-8 md:gap-6 [&>*]:shrink-0">
+      <div className="flex flex-col gap-8 [&>*]:shrink-0">
+        <p className="text-small !leading-[22px] text-basic-secondary">
+          Choose where NAC works and the model for your first chat.
+        </p>
         {policy.orchestrationEnabled ? (
           <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
         ) : null}
 
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Environment" hint="Where NAC runs commands and accesses files." />
-          <div className="flex items-start gap-3">
+        <FormSection title="Environment" description="Where NAC runs commands and accesses files.">
+          <div className="flex flex-wrap items-start gap-2">
             {MODES.map((item) => (
               <Button
                 key={item.id}
-                variant={mode === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
-                size={ButtonSize.Medium}
+                variant={
+                  mode === item.id ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
+                }
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
                 content={ButtonContent.Text}
                 onClick={() => changeMode(item.id)}
                 aria-pressed={mode === item.id}
-                className={`${isMobile ? "!rounded-full" : ""}`}
+                className="flex-1 md:flex-none"
               >
                 {item.label}
               </Button>
@@ -546,7 +547,7 @@ function CreateProjectForm({
           </div>
           {/* What the chosen environment means for the project, which the three
               one-word buttons cannot say on their own. */}
-          <p className="pt-1 text-micro text-basic-muted">
+          <p className="text-small !leading-[22px] text-basic-secondary">
             {MODES.find((item) => item.id === mode)?.description}
           </p>
           {mode === "sandbox" && sandboxAvailability && sandboxAvailability.status !== "ready" ? (
@@ -563,7 +564,7 @@ function CreateProjectForm({
               ) : null}
             </div>
           ) : null}
-        </div>
+        </FormSection>
 
         {isSsh ? (
           <SshConnectionBox
@@ -574,51 +575,54 @@ function CreateProjectForm({
         ) : null}
 
         {ready ? (
-          <div className="flex flex-col md:flex-row items-start gap-6 md:gap-4">
-            <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-              <FieldLabel
-                label="Working Folder"
-                hint={
-                  isSsh
-                    ? "The project folder NAC works within on the SSH host."
-                    : "The project folder NAC works within."
-                }
-                required
-                invalid={invalid("cwd")}
-              />
-              <Button
-                variant={ButtonVariant.Secondary}
-                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-                content={ButtonContent.IconRight}
-                className={cn("w-full", invalid("cwd") && "input-validation")}
-                style={CWD_BUTTON_PADDING}
-                onClick={() => setPicking(true)}
-              >
-                <span
-                  className={cn(
-                    "flex-1 min-w-0 truncate text-left font-normal",
-                    cwd ? "text-basic-primary" : "text-basic-muted",
-                  )}
+          <FormSection
+            title="Project location"
+            description={
+              isSsh
+                ? "Choose a folder on the connected SSH host. Your files stay on that host."
+                : "Choose an existing local or Git working folder on the NAC server."
+            }
+          >
+            <div className="flex flex-col md:flex-row items-start gap-4">
+              <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
+                <FieldLabel label="Working Folder" required invalid={invalid("cwd")} />
+                <Button
+                  variant={ButtonVariant.Secondary}
+                  size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
+                  content={ButtonContent.IconRight}
+                  aria-label="Working Folder"
+                  className={cn("w-full", invalid("cwd") && "input-validation")}
+                  style={CWD_BUTTON_PADDING}
+                  onClick={() => setPicking(true)}
                 >
-                  {cwd || "/path/to/project"}
-                </span>
-                <Icon iconName={IconName.Folder} className="shrink-0" />
-              </Button>
-              {invalid("cwd") ? (
-                <p className="pt-1 text-error-primary text-micro">{error?.message}</p>
-              ) : null}
+                  <span
+                    className={cn(
+                      "flex-1 min-w-0 truncate text-left font-normal",
+                      cwd ? "text-basic-primary" : "text-basic-muted",
+                    )}
+                  >
+                    {cwd || "/path/to/project"}
+                  </span>
+                  <Icon iconName={IconName.Folder} className="shrink-0" />
+                </Button>
+                {invalid("cwd") ? (
+                  <p role="alert" className="pt-1 text-error-primary text-small !leading-[22px]">
+                    {error?.message}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
+                <Input
+                  label={<span className="label-small">Project name</span>}
+                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  placeholder="Taken from the git remote"
+                  value={name}
+                  onChange={(e) => edit(setName)(e.target.value)}
+                  className={`${isMobile ? "w-full" : ""}`}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-              <FieldLabel label="Project name" />
-              <Input
-                inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                placeholder="Taken from the git remote"
-                value={name}
-                onChange={(e) => edit(setName)(e.target.value)}
-                className={`${isMobile ? "w-full" : ""}`}
-              />
-            </div>
-          </div>
+          </FormSection>
         ) : null}
 
         {ready ? (
@@ -640,17 +644,20 @@ function CreateProjectForm({
               ) : null}
               <Separator />
               <ConfigRow
+                presentation="form"
                 label="Reasoning Effort"
                 hint="Higher effort for deeper reasoning and lower effort for faster responses."
                 control={smallSelect(reasoningItems, reasoning, edit(setReasoning))}
               />
               <Separator />
               <ConfigRow
+                presentation="form"
                 label="Context Limit"
                 hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
                 control={
                   <div className="flex items-center gap-2">
                     <Input
+                      aria-label="Context Limit"
                       inputSize={isMobile ? InputSize.Large : InputSize.Medium}
                       className="w-full md:w-[120px]"
                       inputClassName="md:text-right"
@@ -667,10 +674,12 @@ function CreateProjectForm({
                 <>
                   <Separator />
                   <ConfigRow
+                    presentation="form"
                     label="Sandbox options"
                     hint="The container the session runs in: image, GPUs, workdir, shared memory and mounts."
                     control={
                       <Switch
+                        className="max-md:before:absolute max-md:before:-inset-4"
                         checked={sandboxOpen}
                         onChange={setSandboxOpen}
                         aria-label="Sandbox options"
@@ -681,12 +690,14 @@ function CreateProjectForm({
                     <>
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="Container image"
                         hint="Image the sandbox runs; empty uses the configured default."
                         control={
                           <Input
-                            inputSize={InputSize.Medium}
-                            className="w-[181px]"
+                            aria-label="Container image"
+                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                            className="w-full md:w-[280px]"
                             placeholder="python:3.13-bookworm"
                             value={sandbox.image}
                             onChange={(e) => setSb({ image: e.target.value })}
@@ -695,12 +706,14 @@ function CreateProjectForm({
                       />
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="GPUs"
                         hint="Comma-separated GPU list, e.g. all."
                         control={
                           <Input
-                            inputSize={InputSize.Medium}
-                            className="w-[181px]"
+                            aria-label="GPUs"
+                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                            className="w-full md:w-[280px]"
                             placeholder="all"
                             value={sandbox.gpu}
                             onChange={(e) => setSb({ gpu: e.target.value })}
@@ -709,12 +722,14 @@ function CreateProjectForm({
                       />
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="Container workdir"
                         hint="Working directory inside the container."
                         control={
                           <Input
-                            inputSize={InputSize.Medium}
-                            className="w-[181px]"
+                            aria-label="Container workdir"
+                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                            className="w-full md:w-[280px]"
                             placeholder="/workspace"
                             value={sandbox.workdir}
                             onChange={(e) => setSb({ workdir: e.target.value })}
@@ -723,12 +738,14 @@ function CreateProjectForm({
                       />
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="Shared memory size"
                         hint="Container /dev/shm size, e.g. 1g."
                         control={
                           <Input
-                            inputSize={InputSize.Medium}
-                            className="w-[181px]"
+                            aria-label="Shared memory size"
+                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                            className="w-full md:w-[280px]"
                             placeholder="0"
                             value={sandbox.shm}
                             onChange={(e) => setSb({ shm: e.target.value })}
@@ -737,12 +754,14 @@ function CreateProjectForm({
                       />
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="Mounts (HOST:GUEST)"
                         hint="Comma-separated bind mounts."
                         control={
                           <Input
-                            inputSize={InputSize.Medium}
-                            className="w-[181px]"
+                            aria-label="Mounts (HOST:GUEST)"
+                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                            className="w-full md:w-[280px]"
                             placeholder="/data:/data"
                             value={sandbox.mounts}
                             onChange={(e) => setSb({ mounts: e.target.value })}
@@ -751,10 +770,12 @@ function CreateProjectForm({
                       />
                       <Separator />
                       <ConfigRow
+                        presentation="form"
                         label="Don't mount the working folder"
                         secondary
                         control={
                           <Switch
+                            className="max-md:before:absolute max-md:before:-inset-4"
                             checked={sandbox.noMount}
                             onChange={(value) => setSb({ noMount: value })}
                             aria-label="Don't mount the working folder"
@@ -769,10 +790,12 @@ function CreateProjectForm({
 
               <Separator />
               <ConfigRow
+                presentation="form"
                 label="Custom HTTP headers"
                 hint="Turn this on only if you need to send additional request metadata."
                 control={
                   <Switch
+                    className="max-md:before:absolute max-md:before:-inset-4"
                     checked={headersOpen}
                     onChange={setHeadersOpen}
                     aria-label="Custom HTTP headers"

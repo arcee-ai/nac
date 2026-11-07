@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { type SelectItem } from "@/app/atoms";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import {
   type ConfigurationsPanelInitial,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
-import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
+import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
@@ -195,12 +196,12 @@ export function PrimaryModelSection({
   );
 
   return (
-    <div className="flex flex-col gap-2 rounded-[8px] border border-muted bg-elevation-level-2 p-3">
-      <FieldLabel
-        label="Primary model"
-        hint="Search one catalog across every connected provider. Provider accounts and advanced presets are managed separately below."
-      />
+    <FormSection
+      title="Primary model"
+      description="Choose a model across your providers. Connection status and advanced presets are available below."
+    >
       <ConfigRow
+        presentation="form"
         label="Model"
         required
         verticalOnMobile
@@ -227,10 +228,12 @@ export function PrimaryModelSection({
         }
       />
       <ConfigRow
+        presentation="form"
         label="Reasoning"
         hint="Stored with this chat and switchable independently of provider setup."
         control={
           <SmallSelect
+            presentation="form"
             items={efforts}
             value={effective?.effort ?? ""}
             placeholder="Model default"
@@ -243,17 +246,17 @@ export function PrimaryModelSection({
         }
       />
       {latest && resolved.isError ? (
-        <p role="alert" className="text-micro text-error-primary">
+        <p role="alert" className="text-small !leading-[22px] text-error-primary">
           The saved project setup could not be resolved. Review it in Advanced or choose another
           model.
         </p>
       ) : null}
       {effective && !preservesInitialRoute && !providerReady ? (
-        <p className="text-micro text-error-primary" role="alert">
+        <p className="text-small !leading-[22px] text-error-primary" role="alert">
           Connect {providerLabel(effective.pick.backend)} in Provider connections or Advanced before
           selecting this model.
         </p>
       ) : null}
-    </div>
+    </FormSection>
   );
 }

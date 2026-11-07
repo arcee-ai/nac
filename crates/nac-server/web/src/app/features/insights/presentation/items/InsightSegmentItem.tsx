@@ -110,7 +110,11 @@ export const InsightSegmentItem = memo(function InsightSegmentItem({
       errorMessage={error.message}
       errorAction={error.action}
     >
-      {content.body?.(state)}
+      {content.body ? (
+        <div className="flex min-w-0 flex-col gap-4 text-sm leading-[22px] text-basic-secondary">
+          {content.body(state)}
+        </div>
+      ) : null}
     </InsightItem>
   );
 });

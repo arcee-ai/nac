@@ -22,7 +22,7 @@ test("Select applies the typed working folder without pressing Enter", async ({
   await page.goto(harness.baseUrl);
   await page.getByRole("button", { name: "New Project", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
-  const folderButton = form.getByRole("button", { name: /workspace|picked folders|nac ü/ });
+  const folderButton = form.getByRole("button", { name: "Working Folder", exact: true });
   await expect(folderButton).toHaveText(workspaceCanonical);
   const picker = page.getByRole("dialog", { name: "Select Working Folder" });
   const draft = picker.getByPlaceholder("/path/to/directory");

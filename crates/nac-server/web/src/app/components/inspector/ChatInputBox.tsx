@@ -789,6 +789,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const sendButton = (
     <ComposerIconButton
       compact={isMobile}
+      className={isMobile ? "!size-11 !min-h-11 !min-w-11" : undefined}
       variant={ButtonVariant.Primary}
       type={stopFromSend ? "button" : "submit"}
       disabled={stopping || (!stopFromSend && !canSend)}
@@ -1274,6 +1275,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 size={ButtonSize.Small}
                 variant={ButtonVariant.Ghost}
                 content={ButtonContent.Icon}
+                className={isMobile ? "!size-11 !min-h-11 !min-w-11" : undefined}
                 aria-label="Session settings"
                 onClick={() => actions.settings(sessionId)}
               >
