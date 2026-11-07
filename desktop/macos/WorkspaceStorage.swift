@@ -57,7 +57,8 @@ final class WorkspaceStorage {
     private var smokeQ1Sequence = 0
     private func smokeQ1Report(_ kind: String, sequence: Int,
                                ordinary: (namespace: String, key: String, value: String?)? = nil,
-                               checkpoint: Data? = nil, durable: Bool? = nil) {
+                               checkpoint: Data? = nil, durable: Bool? = nil,
+                               observer: (([String: Any], String?) -> Void)?) {
         var event: [String: Any] = ["kind": kind, "owner": smokeQ1Owner,
             "profile": profile.digest, "sequence": sequence]
         if kind != "flush" {
@@ -71,7 +72,7 @@ final class WorkspaceStorage {
         }
         if let checkpoint { event["checkpointSHA256"] = Self.smokeQ1Hash(checkpoint) }
         if let durable { event["durable"] = durable }
-        Self.smokeQ1Event?(event, ordinary?.value)
+        observer?(event, ordinary?.value)
     }
     private static func smokeQ1Hash(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -156,15 +157,20 @@ final class WorkspaceStorage {
         guard available else {
             #if PREVIEW_SMOKE && LOCAL_APP
             smokeQ1Report("not-enqueued", sequence: smokeQ1Sequence,
-                          ordinary: (namespace, key, value), checkpoint: data, durable: false)
+                          ordinary: (namespace, key, value), checkpoint: data, durable: false,
+                          observer: Self.smokeQ1Event)
             #endif
             completion(false); return true
         }
         #if PREVIEW_SMOKE && LOCAL_APP
         smokeQ1Sequence += 1
+        // Bind observation at acceptance; a later hook must never receive an
+        // unpaired completion for an earlier write. The disk queue is unchanged.
+        let q1Observer = Self.smokeQ1Event
         let q1Sequence = smokeQ1Sequence
         let q1Ordinary = (namespace: namespace, key: key, value: value)
-        smokeQ1Report("accepted", sequence: q1Sequence, ordinary: q1Ordinary, checkpoint: data)
+        smokeQ1Report("accepted", sequence: q1Sequence, ordinary: q1Ordinary,
+                      checkpoint: data, observer: q1Observer)
         #endif
         pending += 1
         // DispatchQueue order is the accepted-write order, including empty tombstones.
@@ -173,7 +179,7 @@ final class WorkspaceStorage {
             if !durable { available = false }
             #if PREVIEW_SMOKE && LOCAL_APP
             smokeQ1Report("completed", sequence: q1Sequence, ordinary: q1Ordinary,
-                          checkpoint: data, durable: durable && available)
+                          checkpoint: data, durable: durable && available, observer: q1Observer)
             #endif
             completion(durable && available)
             if pending == 0 {
@@ -190,8 +196,9 @@ final class WorkspaceStorage {
     func flush(timeout: TimeInterval = 0.5, completion: @escaping (Bool) -> Void) {
         #if PREVIEW_SMOKE && LOCAL_APP
         let originalCompletion = completion, q1Sequence = smokeQ1Sequence
+        let q1Observer = Self.smokeQ1Event
         let completion: (Bool) -> Void = { [self] durable in
-            smokeQ1Report("flush", sequence: q1Sequence, durable: durable)
+            smokeQ1Report("flush", sequence: q1Sequence, durable: durable, observer: q1Observer)
             originalCompletion(durable)
         }
         #endif
