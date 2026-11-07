@@ -14,7 +14,11 @@ use crate::{
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct StartTraditionalChildRequest {
     pub profile: String,
-    pub description: String,
+    /// Short task label. Required when `child_session_id` is omitted or null;
+    /// continuing an existing child may omit it, and a provided label must
+    /// match that child's immutable label exactly.
+    #[serde(default)]
+    pub description: Option<String>,
     pub prompt: String,
     pub child_session_id: Option<String>,
     #[serde(default)]
