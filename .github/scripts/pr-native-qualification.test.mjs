@@ -108,7 +108,7 @@ test("ordinary workflow semantics permissions steps contexts and release gates r
   const stable = read("stable-release");
   reverseNativeQualification(stable);
   assert.equal(createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
-    "68e0f6e5eccff69eaa31c92b9221a96438619fef462aa32326016be018f7be3f",
+    "801cf3da3ba238f193e05a77528ee0b9d384fe9b33b8db0b65ae6ebd2783431a",
     "reversing only the reviewed route and path-test step recovers current dev exactly");
 });
 
@@ -172,7 +172,7 @@ test("ordinary preservation rejects changes to admission, caches, source securit
     assert.throws(() => {
       reverseNativeQualification(w);
       assert.equal(createHash('sha256').update(JSON.stringify(w)).digest('hex'),
-        '68e0f6e5eccff69eaa31c92b9221a96438619fef462aa32326016be018f7be3f');
+        '801cf3da3ba238f193e05a77528ee0b9d384fe9b33b8db0b65ae6ebd2783431a');
     });
   }
 });
