@@ -45,6 +45,20 @@ class ResolverAdmissionTests(unittest.TestCase):
             checkout.assert_called_once()
             self.assertEqual(list(root.glob('environment-resolver-*')), [])
 
+    def test_legacy_product_is_rejected_before_source_or_compiler(self):
+        from ci_startup_environment import PRODUCT
+        self.assertEqual(PRODUCT, 'ff8c9609abf7bf7ddabe983c96ff31cf80362956')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            with patch('ci_startup_environment.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
+                    patch('ci_startup_environment.subprocess.check_output') as query, \
+                    patch('ci_startup_environment.subprocess.run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'legacy product rejected'):
+                    resolve_environment(root, {})
+            checkout.assert_called_once_with(root, PRODUCT)
+            query.assert_not_called()
+            run.assert_not_called()
+
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Swift Foundation controls unavailable')
 class ProductionEnvironmentControls(unittest.TestCase):

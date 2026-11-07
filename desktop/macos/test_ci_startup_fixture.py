@@ -101,6 +101,19 @@ class StartupFixtureTests(unittest.TestCase):
         self.assertIn('synthetic', admission['scope'])
         self.assertFalse((profile['root'] / 'app-output.json').exists())
 
+    def test_product_pin_rejects_legacy_before_package_or_resolver(self):
+        from ci_startup_environment import PRODUCT as RESOLVER_PRODUCT
+        self.assertEqual(PRODUCT, 'ff8c9609abf7bf7ddabe983c96ff31cf80362956')
+        self.assertEqual(RESOLVER_PRODUCT, PRODUCT)
+        with patch('ci_startup_fixture.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
+                patch('ci_startup_fixture.test_contract') as contract, \
+                patch('ci_startup_fixture.resolve_environment') as resolver:
+            with self.assertRaisesRegex(RuntimeError, 'legacy product rejected'):
+                prepare_configuration({}, self.parent, self.parent, self.parent, self.parent, '1' * 40)
+        checkout.assert_called_once_with(self.parent, PRODUCT)
+        contract.assert_not_called()
+        resolver.assert_not_called()
+
     def test_unknown_process_ownership_preserves_profile(self):
         profile = self.profile('onboarding')
         for proof in ({}, {'owned_processes_settled': True, 'root': '/foreign'},
