@@ -635,7 +635,7 @@ final class RecoverySmoke {
     const awaitDraft = async (id, text, after) => {
       const post = await until(() => posts().find(row => row.sequence > after &&
         row.drafts.every(draft => [plan.a, plan.b].includes(draft[0])) &&
-        (text === '' ? !row.drafts.some(draft => draft[0] === id) :
+        (text === '' ? !row.drafts.some(draft => draft.length === 2 && draft[0] === id) :
           row.drafts.some(draft => draft.length === 2 && draft[0] === id && draft[1] === text))));
       await until(() => acks.some(ack => ack.sequence === post.sequence));
       check(acks.find(ack => ack.sequence === post.sequence).durable === true,
