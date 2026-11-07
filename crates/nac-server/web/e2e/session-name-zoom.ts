@@ -1,9 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium, type TestInfo } from "@playwright/test";
+import { chromium, type Page, type TestInfo } from "@playwright/test";
 
 /** Real Chromium tab zoom, using the same disposable extension lane as navigation acceptance. */
-export async function openNameZoom(info: TestInfo, origin: string) {
+export async function openNameZoom(
+  info: TestInfo,
+  origin: string,
+  preparePage?: (page: Page) => Promise<void>,
+) {
   const extension = info.outputPath("zoom-extension");
   await fs.mkdir(extension, { recursive: true });
   await fs.writeFile(
@@ -31,6 +35,7 @@ export async function openNameZoom(info: TestInfo, origin: string) {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const page = await context.newPage();
+    await preparePage?.(page);
     await page.goto(origin);
     const zoom = await worker.evaluate(async (url) => {
       const { chrome } = globalThis as unknown as {
