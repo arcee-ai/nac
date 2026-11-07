@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 from external_auth_smoke import require_isolated_host
 from instance_console import require_console, record_console
@@ -59,31 +60,102 @@ def git_oid(value):
     return isinstance(value, str) and len(value) == 40 and all(character in '0123456789abcdef' for character in value)
 
 
-def public_candidate(source, parents, environment, pull, *, tree, read_commit):
-    """Admit the exact live candidate, including equivalent synthetic metadata."""
+def commit_object(sha, read_commit):
+    require(git_oid(sha), 'Invalid authenticated commit identity')
+    value = read_commit(sha)
+    require(git_oid(sha) and isinstance(value, dict) and value.get('sha') == sha and
+            isinstance(value.get('tree'), dict) and git_oid(value['tree'].get('sha')) and
+            isinstance(value.get('parents'), list) and
+            all(isinstance(parent, dict) and git_oid(parent.get('sha')) for parent in value['parents']),
+            'Incomplete authenticated commit object')
+    return value
+
+
+def canonical_ref(path, expected, sha, read_service):
+    value = read_service('git/ref/' + path)
+    require(isinstance(value, dict) and value.get('ref') == expected and
+            isinstance(value.get('object'), dict) and value['object'].get('type') == 'commit' and
+            git_oid(sha) and value['object'].get('sha') == sha, 'Public canonical ref moved or is uncertain')
+    return value
+
+
+def candidate_pins(pull):
+    return dict(number=pull.get('number'), state=pull.get('state'),
+                head=pull.get('head', {}).get('sha'), base=pull.get('base', {}).get('sha'),
+                base_ref=pull.get('base', {}).get('ref'), public_merge_sha=pull.get('merge_commit_sha'))
+
+
+def recheck_candidate(candidate, environment, read_service, read_commit):
+    """Rebind mutable public pins before a command; commit objects are immutable."""
+    pull = read_service('pulls/' + environment['CANDIDATE_PR'])
+    require(candidate_pins(pull) == candidate['pins'], 'Public candidate moved during proof collection')
+    canonical_ref('pull/' + environment['CANDIDATE_PR'] + '/merge',
+                  'refs/pull/' + environment['CANDIDATE_PR'] + '/merge',
+                  candidate['public_merge_sha'], read_service)
+    ref = candidate['pins']['base_ref']
+    require(isinstance(ref, str) and ref, 'Missing declared base ref')
+    canonical_ref('heads/' + quote(ref, safe=''), 'refs/heads/' + ref, candidate['base'], read_service)
+    base = commit_object(candidate['base'], read_commit)
+    proof = candidate.get('prepared_parent_proof')
+    if proof:
+        require(base == proof['declared_base'] and pull.get('stack') == candidate['stack'],
+                'Declared base or stack moved during proof collection')
+    return dict(pins=candidate_pins(pull), base=base)
+
+
+def public_candidate(source, parents, environment, pull, *, tree, read_commit, read_service=None):
+    """Admit exact metadata or narrowly proven upper-stack prepared-parent churn."""
     public_merge = pull.get('merge_commit_sha')
     require(pull.get('number') == int(environment['CANDIDATE_PR']) and pull.get('state') == 'open' and
             pull.get('head', {}).get('sha') == environment.get('CANDIDATE_HEAD') and
             pull.get('base', {}).get('sha') == environment.get('CANDIDATE_BASE') and
             git_oid(source) and git_oid(tree) and git_oid(public_merge) and
+            git_oid(pull['head']['sha']) and git_oid(pull['base']['sha']) and
             len(parents) == 2 and all(git_oid(parent) for parent in parents) and
             parents[1] == environment.get('CANDIDATE_HEAD'),
             'Checkout is not the current public candidate merge')
+    proof = None
     equivalent_metadata = public_merge != source
     if equivalent_metadata:
-        # read_commit is the existing authenticated GitHub service reader, never
-        # an environment/caller assertion about source equivalence. Preserve the
-        # composed first parent: it need not be the PR's direct base-ref SHA.
-        current = read_commit(public_merge)
-        require(isinstance(current, dict) and current.get('sha') == public_merge and
-                isinstance(current.get('tree'), dict) and current['tree'].get('sha') == tree and
-                isinstance(current.get('parents'), list) and
-                [parent.get('sha') if isinstance(parent, dict) else None
-                 for parent in current['parents']] == parents,
-                'Current public merge differs in source tree or ordered parents')
-    return dict(source=source, parents=parents, tree=tree, head=pull['head']['sha'],
-                base=pull['base']['sha'], public_merge_sha=public_merge,
-                equivalent_synthetic_metadata=equivalent_metadata)
+        current = commit_object(public_merge, read_commit)
+        current_parents = [parent['sha'] for parent in current['parents']]
+        require(current['tree']['sha'] == tree and len(current_parents) == 2 and
+                current_parents[1] == parents[1], 'Current public merge differs in source tree or ordered parents')
+        if current_parents != parents:
+            # No recursive parent waiver: ONLY the prepared first-parent identity
+            # may differ, with authenticated full root trees and base ancestry.
+            stack = pull.get('stack')
+            require(read_service is not None and isinstance(stack, dict) and
+                    all(type(stack.get(key)) is int and stack[key] > 0
+                        for key in ('id', 'number', 'position', 'size')) and
+                    1 < stack['position'] <= stack['size'] and
+                    isinstance(stack.get('base'), dict) and stack['base'].get('ref') == 'dev' and
+                    git_oid(stack['base'].get('sha')), 'Not an authenticated upper native-stack member')
+            comparison = read_service('compare/' + pull['base']['sha'] + '...' + pull['head']['sha'])
+            require(isinstance(comparison, dict) and comparison.get('status') == 'ahead' and
+                    type(comparison.get('behind_by')) is int and comparison['behind_by'] == 0 and
+                    type(comparison.get('ahead_by')) is int and comparison['ahead_by'] > 0 and
+                    comparison.get('merge_base_commit', {}).get('sha') == pull['base']['sha'],
+                    'Declared base ancestry is unproven')
+            tested = commit_object(source, read_commit)
+            old = commit_object(parents[0], read_commit)
+            prepared = commit_object(current_parents[0], read_commit)
+            base = commit_object(pull['base']['sha'], read_commit)
+            head = commit_object(pull['head']['sha'], read_commit)
+            require([parent['sha'] for parent in tested['parents']] == parents and
+                    tested['tree']['sha'] == current['tree']['sha'] == head['tree']['sha'] == tree and
+                    old['tree']['sha'] == prepared['tree']['sha'] == base['tree']['sha'],
+                    'Prepared-parent full trees do not prove the exact candidate')
+            proof = dict(tested_merge=tested, current_merge=current, old_prepared_base=old,
+                         current_prepared_base=prepared, declared_base=base, exact_head=head,
+                         ancestry=comparison)
+    candidate = dict(source=source, parents=parents, tree=tree, head=pull['head']['sha'],
+                    base=pull['base']['sha'], public_merge_sha=public_merge,
+                    equivalent_synthetic_metadata=equivalent_metadata,
+                    prepared_parent_proof=proof, pins=candidate_pins(pull), stack=pull.get('stack'))
+    if read_service is not None:
+        candidate['final_pin_check'] = recheck_candidate(candidate, environment, read_service, read_commit)
+    return candidate
 
 
 def main():
@@ -106,6 +178,12 @@ def main():
 
     def run(label, arguments, *, environment=None, limit=600):
         deadline = min(action_end, time.monotonic() + limit)
+        require(deadline > time.monotonic(), 'Original native authentication deadline')
+        # Recheck before every compiler/builder/driver. API time consumes the
+        # original command/action deadline; it never renews either budget.
+        candidate['final_pin_check'] = recheck_candidate(candidate, os.environ, service,
+            lambda sha: service('git/commits/' + sha))
+        save('CANDIDATE-PROOF.json', candidate)
         require(deadline > time.monotonic(), 'Original native authentication deadline')
         child = None
         with (evidence / (label + '.log')).open('wb') as stream:
@@ -139,7 +217,8 @@ def main():
         tree = subprocess.check_output(['git', 'rev-parse', source + '^{tree}'], text=True).strip()
         candidate = public_candidate(source, parents, os.environ,
             service('pulls/' + os.environ['CANDIDATE_PR']), tree=tree,
-            read_commit=lambda sha: service('git/commits/' + sha))
+            read_commit=lambda sha: service('git/commits/' + sha), read_service=service)
+        save('CANDIDATE-PROOF.json', candidate)
         jobs = service('actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/jobs?per_page=100')
         require(jobs['total_count'] <= 100, 'Incomplete job metadata')
         job = hosted_job(os.environ, jobs['jobs'], source)
