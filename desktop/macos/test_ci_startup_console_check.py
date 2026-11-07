@@ -22,6 +22,26 @@ class RequiredConsoleTests(unittest.TestCase):
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
         return directory, hashes
 
+    def test_panel_gate_requires_exactly_five_with_zero_skips(self):
+        def skip():
+            raise unittest.SkipTest('panel proof skipped')
+        good = unittest.TextTestRunner(stream=io.StringIO()).run(
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(5)]))
+        check.require_complete(good, 5)
+        bad = unittest.TextTestRunner(stream=io.StringIO()).run(
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(4)]
+                               + [unittest.FunctionTestCase(skip)]))
+        with self.assertRaisesRegex(RuntimeError, 'all 5 tests with zero skips'):
+            check.require_complete(bad, 5)
+        with self.assertRaisesRegex(RuntimeError, 'zero skips'):
+            check.require_complete(good, 4)
+
+    def test_panel_control_cannot_succeed_or_skip_on_linux(self):
+        with patch.object(check.sys, 'platform', 'linux'), patch.object(check, 'admit_source') as source:
+            with self.assertRaisesRegex(RuntimeError, 'requires Darwin'):
+                check.run_required('/unused', panel=True)
+            source.assert_not_called()
+
     def test_resolver_uses_the_current_exact_nomination(self):
         self.assertEqual(check.nominated_revision(), fixture.TEST_SOURCE)
 
@@ -64,7 +84,7 @@ class RequiredConsoleTests(unittest.TestCase):
         for suite in suites:
             result = unittest.TextTestRunner(stream=io.StringIO()).run(suite)
             self.assertTrue(result.wasSuccessful())
-            with self.assertRaisesRegex(RuntimeError, 'all four tests with zero skips'):
+            with self.assertRaisesRegex(RuntimeError, 'all 4 tests with zero skips'):
                 check.require_complete(result)
 
     def test_required_runner_refuses_a_real_skipped_control_after_source_admission(self):
@@ -76,7 +96,7 @@ class RequiredConsoleTests(unittest.TestCase):
             suite = unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(3)]
                                       + [unittest.FunctionTestCase(skip)])
             with patch.object(fixture, 'TEST_FILES', hashes), patch.object(fixture, 'require_checkout'):
-                with self.assertRaisesRegex(RuntimeError, 'all four tests with zero skips'):
+                with self.assertRaisesRegex(RuntimeError, 'all 4 tests with zero skips'):
                     check.run_required(root, suite=suite, stream=io.StringIO())
 
     def test_required_runner_binds_source_and_restores_the_caller_environment(self):
