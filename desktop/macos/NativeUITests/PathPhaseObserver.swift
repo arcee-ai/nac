@@ -5,7 +5,7 @@ import Darwin
 /// H-owned known-file reader. The actual T helper is a separate compiler input.
 @MainActor
 final class PathPhaseObserver {
-    static let product = "a7046174f130727aa3bbc38fc405278073c4d4a7"
+    static let product = "7013a96f2f2fdf3046c6976e018c9bf988eebfe0"
     let path: URL
     let parent: URL
     let parentIdentity: (UInt64, UInt64)

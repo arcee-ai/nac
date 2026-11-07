@@ -36,6 +36,7 @@ class AdapterControls(unittest.TestCase):
                         {'source_sha':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
                         {'source_sha':'476d30089ed2f422da0b335c9bafa8b0fa9b3bf2'},
                         {'source_sha':'28502c9b40a09d48182375d8cbe4317becaa9456'},
+                        {'source_sha':'a7046174f130727aa3bbc38fc405278073c4d4a7'},
                         {'helper_sha256':'0'*64}, {'retry_budget':1},
                         {'scenarios':list(reversed(CASES))}, {'scenario_count':3}):
             with self.subTest(changes=changes), patch.object(Path, 'read_text', return_value=json.dumps({
@@ -52,6 +53,7 @@ class AdapterControls(unittest.TestCase):
                         {'T':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
                         {'T':'476d30089ed2f422da0b335c9bafa8b0fa9b3bf2'},
                         {'T':'28502c9b40a09d48182375d8cbe4317becaa9456'},
+                        {'T':'a7046174f130727aa3bbc38fc405278073c4d4a7'},
                         {'cases':list(reversed(CASES))},
                         {'source_preflight':False}, {'native_eligibility':False}, {'retry_budget':1},
                         {'started_at_epoch':2100}, {'deadline_epoch':2000}, {'deadline_epoch':9999})
