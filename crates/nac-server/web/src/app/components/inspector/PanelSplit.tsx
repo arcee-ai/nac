@@ -205,10 +205,11 @@ export function PanelSplit({
   // same place in both layouts: crossing the breakpoint keeps it mounted, so a
   // live terminal in it is neither reattached nor unfocused.
   const listScreen = compact && showList;
+  // The side box paints the one surface; the columns are divided, not layered.
   return (
     <div ref={containerRef} className={cn("flex flex-1 min-h-0 w-full", compact && "flex-col")}>
       {compact && !showList ? (
-        <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted">
           <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
           {titleAction}
           <span className="flex-1" />
@@ -226,8 +227,8 @@ export function PanelSplit({
         </div>
       ) : null}
       {listScreen ? (
-        <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-          <div className="flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted">
             <Button
               className="shrink-0"
               size={ButtonSize.Medium}
@@ -255,17 +256,14 @@ export function PanelSplit({
         <div
           hidden={listScreen}
           inert={listScreen}
-          className={cn(
-            "flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground",
-            listScreen ? "hidden" : "flex",
-          )}
+          className={cn("flex-col flex-1 min-w-0 min-h-0", listScreen ? "hidden" : "flex")}
         >
           {children}
         </div>
       )}
       {compact ? null : (
         <div
-          className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
+          className="relative flex flex-col shrink-0 min-h-0 border-l border-muted"
           style={{ width: listWidth }}
         >
           {listToolbar}
