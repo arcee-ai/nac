@@ -21,7 +21,7 @@ class ExactSourceTests(unittest.TestCase):
         terminal = select_target('all-352-macos26')
         self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
-        self.assertEqual(startup['source_sha'], '6c578a2c18050e218b83daf80f46731040e4b3e4')
+        self.assertEqual(startup['source_sha'], '9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3')
         self.assertEqual(startup['test_source_sha'], 'ddb2cb82ba9f17e662a96ccfe7b2f08442470d81')
         self.assertEqual(startup['protocol_source_sha'], '25046f450110d1b795d529d046d2c1deee880877')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
@@ -59,7 +59,8 @@ class ExactSourceTests(unittest.TestCase):
         selected = select_target('all-342-startup-macos26')
         target = {key: value for key, value in selected.items()
                   if key not in ('runner', 'envelope', 'developer_directory')}
-        for changed in ({'source_sha': 'ff8c9609abf7bf7ddabe983c96ff31cf80362956'},
+        for changed in ({'source_sha': '6c578a2c18050e218b83daf80f46731040e4b3e4'},
+                        {'source_sha': 'ff8c9609abf7bf7ddabe983c96ff31cf80362956'},
                         {'source_sha': 'd443a2aca506def2817b9afc0c9a20a75f5c4b5d'},
                         {'source_sha': 'f' * 40}, {'test_source_sha': 'f' * 40},
                         {'protocol_source_sha': 'f' * 40}, {'test_files': {}}, {'protocol_files': {}},

@@ -121,12 +121,12 @@ Those have separate owners in the ALL-339 work map.
 ## Ordinary startup supplier binding
 
 The startup fixture and controlled-environment resolver bind exact final product
-`6c578a2c18050e218b83daf80f46731040e4b3e4`, whose direct parent is the
-packaging carry `478895c50034b3d2b200cce5391e098c7ec477ae`. Its Native boundary
-is `e785f5a1c4886a55c1c6edb7f6cc1d61b54879c1`, integrated on actual landed dev
+`9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3`, whose direct parent is the
+packaging carry `4f2a14149558271842a58c6a1591c2b6ffc61306`. Its Native boundary
+is `84c25942f848eccdfa8e7c60c9bcaa37133e418a`, integrated on actual landed dev
 `4b852f065e2200f46c194b4ad2c5ace3fbd766a8`. This is source nomination only;
-no package/engine/app/query/runtime acceptance is inherited from historical Pff8.
-Legacy Pff8/Pd443 substitutions fail admission. The default four cases and
+no package/engine/app/query/runtime acceptance is inherited from historical P6c/Pff8.
+Legacy P6c/Pff8/Pd443 substitutions fail admission. The default four cases and
 protocol supplier remain unchanged; failed episodes and spent allocations are
 not renewed.
 
