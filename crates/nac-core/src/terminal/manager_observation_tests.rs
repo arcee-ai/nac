@@ -27,7 +27,9 @@ async fn model_with_held_eof(command: &str) -> (TerminalManager, String, HeldMod
     std::fs::create_dir(&directory).unwrap();
     let release = directory.join("release");
     let command = format!(
-        "while [ ! -e {} ]; do sleep 0.01; done; {command}",
+        // Dropping portable-pty's writer sends LF/VEOF. Keep that cleanup input
+        // from echoing into this fixture's exact retained-output oracle.
+        "stty -echo || exit 1; while [ ! -e {} ]; do sleep 0.01; done; {command}",
         shell_quote(&release.to_string_lossy())
     );
     let environment = nac_contracts::CommandEnvironmentSnapshot::from_parts(
