@@ -358,8 +358,13 @@ final class WorkspaceSmoke {
     if (expected.kind === 'file') {
       // The desktop FilePane and DiffPane share this detail header/scroller.
       // Text in the chat, file list or a hidden duplicate cannot own the image.
+      const fileDiagnostics = [];
+      const fileFact = (gate, passed, details = {}) => {
+        if (fileDiagnostics.length < 48) fileDiagnostics.push({gate, passed, ...details});
+        return passed;
+      };
       const fileVisible = element => {
-        if (!inspect(element).visible) return false;
+        if (!inspect(element).visible) return fileFact('style-visibility', false);
         const rect = element.getBoundingClientRect();
         let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
         for (let parent = element.parentElement; parent; parent = parent.parentElement) {
@@ -373,24 +378,36 @@ final class WorkspaceSmoke {
             bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
           }
         }
-        return rect.left >= left - 0.5 && rect.top >= top - 0.5 &&
-          rect.right <= right + 0.5 && rect.bottom <= bottom + 0.5;
+        return fileFact('viewport-clipping', rect.left >= left - 0.5 && rect.top >= top - 0.5 &&
+          rect.right <= right + 0.5 && rect.bottom <= bottom + 0.5,
+          {rect:{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom},clip:{left,top,right,bottom}});
       };
       const fileUncovered = element => {
-        if (typeof document.elementFromPoint !== 'function') return false;
+        if (typeof document.elementFromPoint !== 'function') return fileFact('hit-api', false);
         // Inline code may wrap. Check each rendered fragment, not its union's
         // empty space, without dismissing notifications or changing the page.
-        const rectangles = [...element.getClientRects()];
-        if (!rectangles.length) return false;
+        // Inspect text nodes so flexible spans and inline-token padding do not
+        // become glyph evidence. Newline-only ranges may have zero width.
+        const rectangles = [];
+        const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        while (text.nextNode()) {
+          const range = document.createRange();
+          range.selectNodeContents(text.currentNode);
+          rectangles.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
+        }
+        if (!rectangles.length) return fileFact('fragment-count', false);
         for (const rect of rectangles) {
-          if (rect.width <= 0 || rect.height <= 0) return false;
+          if (rect.width <= 0 || rect.height <= 0) return fileFact('fragment-size', false);
           const insetX = Math.min(0.5, rect.width / 4), insetY = Math.min(0.5, rect.height / 4);
           const points = [[(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2],
             [rect.left + insetX, rect.top + insetY], [rect.right - insetX, rect.top + insetY],
             [rect.left + insetX, rect.bottom - insetY], [rect.right - insetX, rect.bottom - insetY]];
           if (!points.every(([x,y]) => {
             const top = document.elementFromPoint(x,y);
-            return top && element.contains(top);
+            return fileFact('hit-owner', !!top && element.contains(top), {x,y,
+              target:element.tagName, targetClass:(element.getAttribute('class') || '').slice(0,128),
+              targetPointerEvents:getComputedStyle(element).pointerEvents,
+              top:top?.tagName || null, topClass:(top?.getAttribute('class') || '').slice(0,128)});
           })) return false;
           // Pointer-events:none paint is absent from hit testing. Production
           // notifications must also stop overlapping the requested text.
@@ -400,8 +417,11 @@ final class WorkspaceSmoke {
               if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
             }
             const bounds = toast.getBoundingClientRect();
-            return bounds.width > 0 && bounds.height > 0 && bounds.left < rect.right &&
+            const overlaps = bounds.width > 0 && bounds.height > 0 && bounds.left < rect.right &&
               bounds.right > rect.left && bounds.top < rect.bottom && bounds.bottom > rect.top;
+            fileFact('notification-overlap', !overlaps,
+              {bounds:{left:bounds.left,top:bounds.top,right:bounds.right,bottom:bounds.bottom}});
+            return overlaps;
           })) return false;
         }
         return true;
@@ -430,7 +450,7 @@ final class WorkspaceSmoke {
         selected.length !== 1 || panes.length !== 1 ? 'selected file detail not uniquely visible' :
         loadingFile ? 'file still loading' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
       return {ready:reason === 'ready', reason, expected, hash, file_api_bound:owned,
-        selected_count:selected.length, detail_count:panes.length, loadingFile, ...observed};
+        selected_count:selected.length, detail_count:panes.length, loadingFile, fileDiagnostics, ...observed};
     }
     let element = expected.kind === 'project' ? null : findText(expected.text);
     if (expected.kind === 'project') {
