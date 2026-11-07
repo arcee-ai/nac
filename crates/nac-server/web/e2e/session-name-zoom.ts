@@ -1,9 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium, type TestInfo } from "@playwright/test";
+import { chromium, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 
 /** Real Chromium tab zoom, using the same disposable extension lane as navigation acceptance. */
-export async function openNameZoom(info: TestInfo, origin: string) {
+export async function openNameZoom(
+  info: TestInfo,
+  origin: string,
+  preparePage?: (page: Page) => Promise<void>,
+  viewport: { width: number; height: number } = { width: 1440, height: 1000 },
+  beforeContextClose?: (context: BrowserContext) => Promise<void>,
+) {
   const extension = info.outputPath("zoom-extension");
   await fs.mkdir(extension, { recursive: true });
   await fs.writeFile(
@@ -24,13 +30,14 @@ export async function openNameZoom(info: TestInfo, origin: string) {
     channel: "chromium",
     headless: true,
     hasTouch: true,
-    viewport: { width: 1440, height: 1000 },
+    viewport,
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   try {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
     const page = await context.newPage();
+    await preparePage?.(page);
     await page.goto(origin);
     const zoom = await worker.evaluate(async (url) => {
       const { chrome } = globalThis as unknown as {
@@ -51,7 +58,30 @@ export async function openNameZoom(info: TestInfo, origin: string) {
     await page.emulateMedia({ reducedMotion: "reduce" });
     return { context, page, zoom };
   } catch (error) {
-    await context.close();
+    // Unrelated callers, including final39, keep the existing failure path.
+    if (!beforeContextClose) {
+      await context.close();
+      throw error;
+    }
+    const failures: unknown[] = [error];
+    // A preparation callback may have installed a sealed frontend before goto,
+    // zoom or later preparation fails. Drain/assert it while its page is alive.
+    try {
+      await beforeContextClose?.(context);
+    } catch (cleanupError) {
+      failures.push(cleanupError);
+    }
+    try {
+      await context.close();
+    } catch (closeError) {
+      failures.push(closeError);
+    }
+    if (failures.length > 1)
+      throw new AggregateError(
+        failures,
+        "Zoom preparation, owned serving disposal or context close failed",
+        { cause: error },
+      );
     throw error;
   }
 }

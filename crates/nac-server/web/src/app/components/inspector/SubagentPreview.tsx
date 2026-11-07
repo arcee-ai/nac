@@ -53,6 +53,7 @@ export function SubagentPreview({
   fallbackText,
   icon,
   header = true,
+  phoneHeaderInFlow = false,
   onOpen,
 }: {
   sessionId: string;
@@ -61,6 +62,8 @@ export function SubagentPreview({
   icon: IconName;
   /** Below the desktop width the panel's own header names it and carries Open. */
   header?: boolean;
+  /** The selected phone detail reserves its header outside this scroll viewport. */
+  phoneHeaderInFlow?: boolean;
   /** Leaves for the session's own page. */
   onOpen: () => void;
 }) {
@@ -174,9 +177,10 @@ export function SubagentPreview({
             variant={ButtonVariant.Ghost}
             content={ButtonContent.IconRight}
             aria-label="Open"
+            aria-description="Open this child’s own Insights and Files"
             onClick={onOpen}
           >
-            Open
+            Open child
             <Icon iconName={IconName.External} />
           </Button>
         </div>
@@ -187,7 +191,7 @@ export function SubagentPreview({
           aria-label={revealed ? undefined : "Loading conversation"}
           className={cn(
             "pointer-events-none absolute inset-0 px-4 transition-opacity duration-150 ease-in-out",
-            isMobile ? "pt-18" : "pt-4",
+            isMobile && !phoneHeaderInFlow ? "pt-18" : "pt-4",
             revealed ? "opacity-0" : "opacity-100 delay-200",
           )}
         >
@@ -197,24 +201,42 @@ export function SubagentPreview({
           ref={scrollRef}
           className={cn("h-full overflow-y-auto", fade, !revealed && "invisible")}
         >
-          {/* A phone's header floats over the top 56px of the scroller and the
-              composer over its foot, so the run-out clears however tall it grows. */}
+          {/* Floating headers need top clearance; in-flow headers already
+              reserve it. The composer still overlays the foot, so the run-out
+              clears however tall it grows. */}
           <div
             ref={contentRef}
             className={cn(
               "flex flex-col px-4 pb-[calc(var(--composer-height,0px)_+_40px)] [&>*]:shrink-0",
-              isMobile ? "pt-16" : "pt-2",
+              isMobile && !phoneHeaderInFlow ? "pt-16" : "pt-2",
             )}
           >
             <ChildTranscriptScope sessionId={sessionId} turns={snapshotTurns}>
+              {snapshot.isError ? (
+                <div
+                  role="alert"
+                  className="flex flex-wrap items-center gap-2 py-4 text-sm leading-5 text-error-primary"
+                >
+                  <span>Couldn’t load the child conversation.</span>
+                  <Button
+                    size={ButtonSize.Medium}
+                    variant={ButtonVariant.Ghost}
+                    className="max-md:!min-h-11"
+                    onClick={() => void snapshot.refetch()}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
               {olderFailed && hasOlder ? (
-                <div role="alert" className="mb-4 flex items-center gap-2">
+                <div role="alert" className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="label-small text-basic-muted">
                     Couldn’t load older messages.
                   </span>
                   <Button
                     size={ButtonSize.Small}
                     variant={ButtonVariant.Ghost}
+                    className="max-md:!min-h-11 max-md:!min-w-11"
                     onClick={() => setOlderFailed(false)}
                   >
                     Try again

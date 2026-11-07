@@ -1,3 +1,4 @@
+import type { AriaAttributes } from "react";
 import {
   ButtonSize,
   ButtonVariant,
@@ -8,6 +9,7 @@ import {
   type SelectItem,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { cn } from "@/app/lib/cn";
 
 export function SmallSelect({
   items,
@@ -20,6 +22,9 @@ export function SmallSelect({
   triggerClassName,
   placement = PopoverPlacement.CenterLeft,
   onOpenChange,
+  presentation,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: {
   items: SelectItem[];
   value: string;
@@ -31,7 +36,8 @@ export function SmallSelect({
   triggerClassName?: string;
   placement?: PopoverPlacement;
   onOpenChange?: (open: boolean) => void;
-}) {
+  presentation?: "form";
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">) {
   const isMobile = useIsMobile();
   return (
     <Select
@@ -40,11 +46,14 @@ export function SmallSelect({
       onValueChange={onValueChange}
       placeholder={placeholder}
       disabled={disabled}
-      size={size}
+      aria-invalid={ariaInvalid}
+      aria-describedby={ariaDescribedBy}
+      size={presentation === "form" && isMobile ? ButtonSize.Large : size}
       trailingIcon={trailingIcon}
-      triggerClassName={triggerClassName}
+      className={presentation === "form" ? "w-full md:w-auto" : undefined}
+      triggerClassName={cn(presentation === "form" && "w-full md:w-[280px]", triggerClassName)}
       itemSize={isMobile ? TabButtonSize.Large : TabButtonSize.Medium}
-      variant={ButtonVariant.Ghost}
+      variant={presentation === "form" ? ButtonVariant.Secondary : ButtonVariant.Ghost}
       placement={placement}
       onOpenChange={onOpenChange}
       // Every form this select appears in scrolls its own body, which clipped

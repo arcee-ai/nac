@@ -531,7 +531,7 @@ export default function ProjectsListPage() {
     return (
       <div className="flex h-full min-h-0">
         {isMobile ? null : <LeftSidebar variant="projects" />}
-        <div className="min-h-0 min-w-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           {!managed.isManaged && (
             <div className="p-4">
               <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>
@@ -568,7 +568,7 @@ export default function ProjectsListPage() {
           drag && "select-none cursor-grabbing",
         )}
       >
-        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-18 pb-8" : "py-4")}>
+        <div className={cn("flex flex-col gap-6 [&>*]:shrink-0", isMobile ? "pt-3 pb-8" : "py-4")}>
           {!managed.isManaged && (
             <div className="flex justify-end">
               <Button onClick={() => navigate(routes.taskSchedules())}>Interval tasks</Button>
