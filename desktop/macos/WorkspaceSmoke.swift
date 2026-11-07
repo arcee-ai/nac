@@ -376,8 +376,6 @@ final class WorkspaceSmoke {
         return rect.left >= left - 0.5 && rect.top >= top - 0.5 &&
           rect.right <= right + 0.5 && rect.bottom <= bottom + 0.5;
       };
-      const selected = [...document.querySelectorAll('button[title][aria-pressed=true]')]
-        .filter(e => e.getAttribute('title') === expected.path);
       const panes = [...document.querySelectorAll('span[title]')].flatMap(title => {
         if (title.getAttribute('title') !== expected.path || title.closest('button,[inert],[role=dialog]')) return [];
         const header = title.parentElement, scroller = header?.nextElementSibling;
@@ -389,6 +387,9 @@ final class WorkspaceSmoke {
         return code.filter(e => fileVisible(e) && fileVisible(title) && fileVisible(scroller))
           .map(element => ({element, scroller}));
       });
+      const panel = panes.length === 1 ? panes[0].scroller.parentElement?.parentElement : null;
+      const selected = [...(panel?.querySelectorAll('button[title][aria-pressed=true]') || [])]
+        .filter(e => e.getAttribute('title') === expected.path);
       const owned = fileState?.path === expected.path && fileState.content === expected.content &&
         fileState.binary === false && fileState.too_large === false;
       const loadingFile = panes.some(p => p.scroller.textContent.includes('Loading file…'));
