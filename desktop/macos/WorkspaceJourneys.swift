@@ -142,7 +142,8 @@ extension WorkspaceSmoke {
             try await self.button("All files")
             _ = try await self.js("const e=[...document.querySelectorAll('button')].find(e => e.textContent.includes('workspace.ts')); if(!e)throw Error('Missing fixture source file'); e.click(); return true;")
             try await self.waitJS("highlighted source file", "return document.body.innerText.includes('export const workspaceFileFixture = 351;');")
-            try await self.snapshot("files.png", expecting: .transcript(id: self.sessionID, message: "WK_RICH_COMPLETE"))
+            try await self.snapshot("files.png", expecting: .file(id: self.sessionID, path: "workspace.ts",
+                content: "export const workspaceFileFixture = 351;\n"))
             return "Production Files list opens actual isolated workspace.ts"
         }
         await check("git") {
