@@ -104,3 +104,25 @@ jobs:
           name: native-macos-${{ inputs.source-sha }}
           path: ${{ runner.temp }}/native-regressions
           if-no-files-found: error
+
+  startup-panel-policy:
+    name: Immutable startup native-folder policy source controls
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+      - name: Resolve immutable startup policy supplier
+        id: policy-source
+        run: python3 -B desktop/macos/ci_startup_console_check.py --resolve >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.policy-source.outputs.revision }}
+          path: .startup-panel-q
+          persist-credentials: false
+      - name: Require five compile-verbatim CoreGraphics policy controls without skips
+        env:
+          NAC342_SWIFT_PANEL_PROOF: "1"
+        run: python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel
