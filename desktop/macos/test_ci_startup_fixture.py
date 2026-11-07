@@ -103,7 +103,7 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_product_pin_rejects_legacy_before_package_or_resolver(self):
         from ci_startup_environment import PRODUCT as RESOLVER_PRODUCT
-        self.assertEqual(PRODUCT, '9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3')
+        self.assertEqual(PRODUCT, 'ef2cce9141973f37bf35e33d113e35eaa7a91f19')
         self.assertEqual(RESOLVER_PRODUCT, PRODUCT)
         with patch('ci_startup_fixture.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
                 patch('ci_startup_fixture.test_contract') as contract, \
