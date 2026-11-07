@@ -1,80 +1,167 @@
 name: Stable release
-run-name: ALL-354 environment-only observation
+run-name: ALL-354 fixed-pair compile-only control
 
 on:
   workflow_dispatch:
+    inputs:
+      compile_clock:
+        description: Root original JSON clock with STARTED, WORK_DEADLINE, CLEANUP_DEADLINE, HARD_DEADLINE epoch numbers
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  observe:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/all-354-xcode-environment-20261107'
-    name: Observe full Xcode environment without builds or input
+  compile:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/all-354-xcode-environment-20261107' && github.run_attempt == 1
+    name: Compile full H and T apps and generated path XCTest without execution
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 40
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      PYTHONDONTWRITEBYTECODE: "1"
+      ROOT_COMPILE_CLOCK: ${{ inputs.compile_clock }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Record exact runner source and existing toolchain versions
-        env:
-          OBSERVED_SOURCE_SHA: ${{ github.sha }}
-          OBSERVED_REF: ${{ github.ref }}
-          OBSERVED_RUN_ID: ${{ github.run_id }}
-          OBSERVED_RUN_ATTEMPT: ${{ github.run_attempt }}
-          OBSERVATION_OUTPUT: ${{ runner.temp }}/nac-xcode-environment
+      - name: Admit original clock before any checkout or tool bootstrap
+        id: clock_initial
+        timeout-minutes: 1
         run: |
           python3 -B - <<'PY'
-          import datetime, json, os, pathlib, subprocess
-          output = pathlib.Path(os.environ['OBSERVATION_OUTPUT'])
-          output.mkdir(mode=0o700)
-          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          identity = {key: os.environ.get(key) for key in (
-              'OBSERVED_SOURCE_SHA', 'OBSERVED_REF', 'OBSERVED_RUN_ID', 'OBSERVED_RUN_ATTEMPT',
-              'RUNNER_OS', 'RUNNER_ARCH', 'RUNNER_NAME', 'ImageOS', 'ImageVersion', 'DEVELOPER_DIR')}
-          identity.update(checked_out_sha=source,
-                          developer_path_exists=pathlib.Path(os.environ['DEVELOPER_DIR']).is_dir())
-          observations = []
-          failure = (source != identity['OBSERVED_SOURCE_SHA']
-                     or identity['OBSERVED_RUN_ATTEMPT'] != '1'
-                     or not identity['developer_path_exists'])
-          commands = [
-              ['uname', '-a'], ['uname', '-m'], ['sw_vers', '-productVersion'], ['sw_vers', '-buildVersion'],
-              ['xcode-select', '-p'], ['xcrun', '--find', 'xcodebuild'], ['xcodebuild', '-version'],
-              ['xcrun', '--find', 'swiftc'], ['xcrun', 'swiftc', '--version'],
-              ['xcrun', '--sdk', 'macosx', '--show-sdk-version'],
-              ['xcrun', '--sdk', 'macosx', '--show-sdk-path'],
-          ]
-          for argv in commands:
-              row = {'argv': argv}
-              try:
-                  result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
-                  row.update(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
-                  failure = failure or result.returncode != 0
-              except (OSError, subprocess.TimeoutExpired) as error:
-                  row.update(error=type(error).__name__, detail=str(error))
-                  failure = True
-              observations.append(row)
-              print(json.dumps(row, ensure_ascii=False), flush=True)
-          receipt = dict(at=datetime.datetime.now(datetime.timezone.utc).isoformat(), identity=identity,
-                         observations=observations, observation_complete=not failure,
-                         qualification=False, compile=False, native_case=False, input=False)
-          encoded = (json.dumps(receipt, indent=2) + '\n').encode()
-          if len(encoded) > 256 * 1024:
-              raise RuntimeError('Environment observation exceeded its fixed bound')
-          (output / 'environment-observation.json').write_bytes(encoded)
-          print(json.dumps(identity), flush=True)
-          raise SystemExit(1 if failure else 0)
+          import json, math, os, pathlib, time
+          evidence = pathlib.Path(os.environ['RUNNER_TEMP']) / 'nac-compile-gate'
+          evidence.mkdir(mode=0o700)
+          receipt = dict(status='FAIL', diagnostic_sha=os.environ['GITHUB_SHA'], compile=False)
+          try:
+              clock = json.loads(os.environ['ROOT_COMPILE_CLOCK'])
+              keys = ('STARTED', 'WORK_DEADLINE', 'CLEANUP_DEADLINE', 'HARD_DEADLINE')
+              assert set(clock) == set(keys), 'exact original clock fields'
+              start, work, cleanup, hard = [float(clock[key]) for key in keys]
+              stamp = time.time()
+              receipt.update(clock=clock, observed_epoch=stamp)
+              assert all(math.isfinite(x) for x in (start, work, cleanup, hard))
+              assert start <= stamp < work < cleanup < hard and hard-start <= 2400
+              assert work <= hard-600 and cleanup <= hard-120, 'original cleanup/retention reserves'
+              minutes = min(1, math.floor((work-stamp-60)/60))
+              assert minutes >= 1, 'insufficient original work budget for diagnostic checkout'
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as stream: stream.write('minutes=' + str(minutes) + '\n')
+              with open(os.environ['GITHUB_ENV'], 'a') as stream:
+                  for key, value in zip(keys, (start, work, cleanup, hard)):
+                      stream.write('COMPILE_' + key + '_EPOCH=' + str(value) + '\n')
+              receipt.update(status='PASS', timeout_minutes=minutes, controller_margin_seconds=60)
+          except BaseException as error:
+              receipt['error'] = type(error).__name__ + ': ' + str(error)
+              raise
+          finally:
+              (evidence/'clock-initial.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
-      - name: Retain raw bounded environment observation
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.clock_initial.outputs.minutes) }}
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic
+          persist-credentials: false
+      - name: Require the frozen pair and original clock before checking out candidates
+        id: pair
+        timeout-minutes: 1
+        run: |
+          python3 -B - <<'PY'
+          import hashlib, importlib.util, json, os, pathlib, re
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / 'diagnostic/.github/scripts/all354-compile'
+          evidence = pathlib.Path(os.environ['RUNNER_TEMP']) / 'nac-compile-gate'
+          evidence.mkdir(mode=0o700, exist_ok=True)
+          receipt = dict(status='FAIL', diagnostic_sha=os.environ['GITHUB_SHA'], compile=False)
+          try:
+              spec = importlib.util.spec_from_file_location('compile_control', root / 'compile-only.py')
+              module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+              clock = json.loads(os.environ['ROOT_COMPILE_CLOCK'])
+              assert set(clock) == {'STARTED', 'WORK_DEADLINE', 'CLEANUP_DEADLINE', 'HARD_DEADLINE'}
+              environment = {'COMPILE_' + key + '_EPOCH': str(value) for key, value in clock.items()}
+              module.clock_inputs(environment)
+              receipt['clock'] = clock
+              pair = json.loads((root / 'compile-pair.json').read_text())
+              receipt['pair'] = pair
+              receipt['files'] = {name: hashlib.sha256((root/name).read_bytes()).hexdigest()
+                                 for name in ('compile-only.py', 'compile-pair.json')}
+              assert all(re.fullmatch('[0-9a-f]{40}', str(pair[key])) for key in ('H', 'T')), 'T is UNBOUND'
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+                  for key in ('H', 'T'): stream.write(key + '=' + pair[key] + '\n')
+              with open(os.environ['GITHUB_ENV'], 'a') as stream:
+                  for key, value in environment.items(): stream.write(key + '=' + value + '\n')
+              receipt['status'] = 'PASS'
+          except BaseException as error:
+              receipt['error'] = type(error).__name__ + ': ' + str(error)
+              raise
+          finally:
+              (evidence/'pair-gate.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - name: Revalidate remaining original budget for Rust bootstrap
+        id: rust_budget
+        timeout-minutes: 1
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py --bootstrap-budget rust
+      - name: Install existing repository Rust pin in the ephemeral runner
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        timeout-minutes: ${{ fromJSON(steps.rust_budget.outputs.minutes) }}
+        with:
+          toolchain: 1.98.0
+      - name: Revalidate remaining original budget for Node bootstrap
+        id: node_budget
+        timeout-minutes: 1
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py --bootstrap-budget node
+      - name: Select existing repository Node pin in the ephemeral runner
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.node_budget.outputs.minutes) }}
+        with:
+          node-version: 24.22.1
+      - name: Revalidate remaining original budget for H checkout
+        id: h_budget
+        timeout-minutes: 1
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py --bootstrap-budget checkout-H
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.h_budget.outputs.minutes) }}
+        with:
+          ref: ${{ steps.pair.outputs.H }}
+          path: source-H
+          persist-credentials: false
+      - name: Revalidate remaining original budget for T checkout
+        id: t_budget
+        timeout-minutes: 1
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py --bootstrap-budget checkout-T
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: ${{ fromJSON(steps.t_budget.outputs.minutes) }}
+        with:
+          ref: ${{ steps.pair.outputs.T }}
+          path: source-T
+          persist-credentials: false
+      - name: Compile once with sequential shared Cargo target and retained copied engines
+        env:
+          H_ROOT: ${{ github.workspace }}/source-H
+          T_ROOT: ${{ github.workspace }}/source-T
+          OUTPUT_ROOT: ${{ runner.temp }}/nac-compile-output
+        run: python3 -B diagnostic/.github/scripts/all354-compile/compile-only.py
+      - name: Bound evidence upload to the original hard deadline
+        id: retention
         if: always()
+        run: |
+          python3 -B - <<'PY'
+          import json, math, os, time
+          minutes = 0
+          try:
+              clock = json.loads(os.environ['ROOT_COMPILE_CLOCK'])
+              start, hard = float(clock['STARTED']), float(clock['HARD_DEADLINE'])
+              if math.isfinite(start) and math.isfinite(hard) and start <= time.time() < hard and 0 < hard-start <= 2400:
+                  minutes = max(0, min(2, math.floor((hard-time.time()-10)/60)))
+          finally:
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as stream: stream.write('minutes=' + str(minutes) + '\n')
+          PY
+      - name: Retain bounded compile and failure evidence only
+        if: always() && steps.retention.outputs.minutes != '0' && steps.retention.outputs.minutes != ''
+        timeout-minutes: ${{ fromJSON(steps.retention.outputs.minutes) }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: nac-xcode-environment-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/nac-xcode-environment
+          name: nac-compile-only-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/nac-compile-gate
+            ${{ runner.temp }}/nac-compile-output/evidence
           if-no-files-found: error
           retention-days: 7

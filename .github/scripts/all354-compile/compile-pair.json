@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "H": "38fe3a1003701876f74e4a667545984cd3ba7626",
+  "T": "a7046174f130727aa3bbc38fc405278073c4d4a7",
+  "host_image": "20261102.0473.1",
+  "rust_version": "1.98.0",
+  "node_version": "v24.22.1",
+  "h_writer_sha256": "ecccb16eabcc823631bf07bb1252d956133673e410eb82ac9c6deb9283ec2879",
+  "h_smoke_sources": [
+    "main.swift",
+    "PreviewApp.swift",
+    "PreviewEngine.swift",
+    "EngineProtocol.swift",
+    "PreviewProfile.swift",
+    "FixtureProvider.swift",
+    "FixtureBootstrap.swift",
+    "PreviewSmoke.swift",
+    "CITerminal.swift"
+  ],
+  "h_smoke_flags": [
+    "-swift-version",
+    "5",
+    "-target",
+    "arm64-apple-macosx14.0",
+    "-O",
+    "-D",
+    "PREVIEW_SMOKE",
+    "-framework",
+    "AppKit",
+    "-framework",
+    "WebKit",
+    "-framework",
+    "Network"
+  ]
+}
