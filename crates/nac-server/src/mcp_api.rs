@@ -1548,31 +1548,6 @@ pub async fn authenticate_oauth_handler(
     let request = payload.map(|Json(value)| value).unwrap_or_default();
     let callback = oauth_callback_target(&manager, &server_name)?;
 
-    let previous_authorization = {
-        let flows = OAUTH_FLOWS.lock().await;
-        match flows.get(&flow_key) {
-            Some(OAuthFlowState::Connecting {
-                authorization_url, ..
-            }) => Some(authorization_url.clone()),
-            _ => None,
-        }
-    };
-    if let Some(previous) = previous_authorization {
-        mcp::discard_mcp_oauth_pending_authorization(
-            manager.root_cwd(),
-            &server_name,
-            &endpoint,
-            &previous,
-        )
-        .map_err(|_| {
-            oauth_error(
-                StatusCode::BAD_REQUEST,
-                "MCP OAuth authentication could not restart",
-            )
-        })?;
-    }
-    remove_oauth_flow(&flow_key).await;
-
     let (listeners, redirect_uri) = match callback {
         OAuthCallbackTarget::Loopback => {
             let listeners = OAuthCallbackListeners::bind(1456).await.map_err(|_| {
@@ -1599,6 +1574,9 @@ pub async fn authenticate_oauth_handler(
             "MCP OAuth authentication could not start",
         )
     })?;
+    // Preparation failures preserve the current task and accepted exchange.
+    // Core publication has now replaced its exact durable authorization.
+    remove_oauth_flow(&flow_key).await;
     let authorization_url = session.authorization_url().to_string();
     let generation = OAUTH_FLOW_GENERATION.fetch_add(1, Ordering::Relaxed);
     let completion_key = flow_key.clone();

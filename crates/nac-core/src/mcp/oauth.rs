@@ -830,7 +830,7 @@ impl StateStore for OAuthProfileStore {
                 now.saturating_sub(value.created_at) <= MCP_OAUTH_STATE_TTL.as_secs()
             });
             profile.states.insert(csrf_token.to_string(), state);
-            if !pending_authorization_is_live(profile) {
+            if !pending_authorization_is_live(profile) && !completion_is_live(profile) {
                 let mut pending = Url::parse("urn:nac:oauth:pending")
                     .context("internal pending authorization URI is invalid")?;
                 pending.query_pairs_mut().append_pair("state", csrf_token);

@@ -72,6 +72,9 @@ pub fn discard_mcp_oauth_pending_authorization(
             .as_deref()
             != Some(&state)
         {
+            // A failed preparation may have persisted this candidate without
+            // publishing its URL. Remove only that state, never another owner.
+            profile.states.remove(&state);
             return Ok(false);
         }
         profile.pending_authorization_url = None;

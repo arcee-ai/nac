@@ -8,6 +8,7 @@ enum Outcome {
     ConcurrentInvalidIssuer,
     ScopeUpgrade,
     RetryScopes,
+    FailedRestart,
     TokenFailure,
     Logout,
     Reconfigure,
@@ -47,6 +48,11 @@ async fn flowless_scope_upgrade_stays_connecting_during_exchange() {
 #[tokio::test]
 async fn authenticate_retry_preserves_pending_only_scopes() {
     complete(Outcome::RetryScopes).await;
+}
+
+#[tokio::test]
+async fn a_failed_replacement_start_preserves_an_accepted_callback() {
+    complete(Outcome::FailedRestart).await;
 }
 
 #[tokio::test]
@@ -320,7 +326,26 @@ async fn complete(outcome: Outcome) {
         get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
     )
     .await;
+    let mut restart_status = None;
     let after_intervention = match outcome {
+        Outcome::FailedRestart => {
+            restart_status = Some(
+                post_json(
+                    app.clone(),
+                    "/mcp_library/servers/slack/oauth/authenticate",
+                    serde_json::json!({"additional_scopes":[""]}),
+                )
+                .await
+                .status(),
+            );
+            Some(
+                response_json(
+                    get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None)
+                        .await,
+                )
+                .await,
+            )
+        }
         Outcome::Logout => Some(
             response_json(
                 post_json(
@@ -423,7 +448,10 @@ async fn complete(outcome: Outcome) {
             );
             assert_eq!(completed["status"], "connected");
         }
-        Outcome::Success | Outcome::ScopeUpgrade | Outcome::RetryScopes => {
+        Outcome::Success
+        | Outcome::ScopeUpgrade
+        | Outcome::RetryScopes
+        | Outcome::FailedRestart => {
             assert_eq!(callback_status, StatusCode::OK);
             assert_eq!(completed["status"], "connected");
         }
@@ -432,17 +460,26 @@ async fn complete(outcome: Outcome) {
             assert_eq!(completed["status"], "failed");
         }
         Outcome::Logout | Outcome::Reconfigure => {
-            assert_eq!(after_intervention.unwrap()["status"], "needs_authorization");
+            assert_eq!(
+                after_intervention.as_ref().unwrap()["status"],
+                "needs_authorization"
+            );
             assert_eq!(callback_status, StatusCode::BAD_REQUEST);
             assert_eq!(completed["status"], "needs_authorization");
         }
         Outcome::Supersede => {
-            let replacement = after_intervention.unwrap();
+            let replacement = after_intervention.as_ref().unwrap();
             assert_eq!(callback_status, StatusCode::BAD_REQUEST);
             assert_eq!(completed["status"], "connecting");
             assert!(replacement["authorization_url"] == completed["authorization_url"]);
             assert!(replacement["authorization_url"].as_str() != Some(authorization.as_str()));
         }
+    }
+    if matches!(outcome, Outcome::FailedRestart) {
+        assert_eq!(restart_status, Some(StatusCode::BAD_REQUEST));
+        let surviving = after_intervention.unwrap();
+        assert_eq!(surviving["status"], "connecting");
+        assert!(surviving.get("authorization_url").is_none());
     }
     if matches!(outcome, Outcome::RetryScopes) {
         let scopes = authorization

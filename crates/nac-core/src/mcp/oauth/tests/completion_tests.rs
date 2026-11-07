@@ -40,6 +40,63 @@ struct BothLoaded {
     inner: OAuthProfileStore,
     barrier: Arc<tokio::sync::Barrier>,
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_prepared_replacement_preserves_the_claimed_exchange() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("completion-failed-replacement");
+    let cwd = Path::new("/workspace");
+    let endpoint = "https://mcp.example.test/mcp";
+    configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
+    let path = oauth_store_path(cwd).unwrap();
+    let winner = adapter(&path);
+    pending(&winner).await;
+    StateStore::delete(&winner, "completion-state")
+        .await
+        .unwrap();
+    prepare_mcp_oauth_scope_step_up(cwd, "slack", endpoint, "mcp:concurrent").unwrap();
+    let candidate = adapter(&path);
+    let state = serde_json::from_value(serde_json::json!({
+        "pkce_verifier":"candidate-verifier", "csrf_token":"candidate-state",
+        "created_at":SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        "requested_scopes":["mcp:concurrent"]
+    }))
+    .unwrap();
+    StateStore::save(&candidate, "candidate-state", state)
+        .await
+        .unwrap();
+    let prepared = read_store(&path).unwrap().profiles.remove("slack").unwrap();
+    let failure = failed_authorization_start(
+        cwd,
+        "slack",
+        endpoint,
+        "https://auth.example.test/authorize?state=candidate-state",
+        anyhow!("candidate credential read failed"),
+    );
+    let failed = read_store(&path).unwrap().profiles.remove("slack").unwrap();
+    let saved = CredentialStore::save(&winner, credentials("winner-after-failed-start")).await;
+    let settled = read_store(&path).unwrap().profiles.remove("slack").unwrap();
+    assert_eq!(failure.to_string(), "candidate credential read failed");
+    assert_eq!(
+        prepared.pending_authorization_url.as_deref(),
+        Some("https://auth.example.test/authorize?state=completion-state")
+    );
+    assert_eq!(
+        failed.pending_authorization_url,
+        prepared.pending_authorization_url
+    );
+    assert!(failed.completing_authorization.is_some());
+    assert!(!failed.states.contains_key("candidate-state"));
+    assert!(
+        saved.is_ok(),
+        "the original claimed completion must still save: {saved:?}"
+    );
+    assert!(settled
+        .pending_scopes
+        .iter()
+        .any(|scope| scope == "mcp:concurrent"));
+    assert!(settled.completing_authorization.is_none());
+}
 #[async_trait]
 impl StateStore for BothLoaded {
     async fn save(
