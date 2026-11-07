@@ -252,7 +252,7 @@ and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
 ### ALL-347 path adapter (source contract; native qualification pending)
 
 `all-347-paths-macos26` selects only product
-`476d30089ed2f422da0b335c9bafa8b0fa9b3bf2` and the ordered fresh-profile cases
+`28502c9b40a09d48182375d8cbe4317becaa9456` and the ordered fresh-profile cases
 `paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
 references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
 T `NativePathJourney.swift` (SHA-256

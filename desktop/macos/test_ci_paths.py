@@ -34,6 +34,7 @@ class AdapterControls(unittest.TestCase):
         self.assertEqual({k: target[k] for k in ci_paths.TARGET}, ci_paths.TARGET)
         for changes in ({'source_sha':'0'*40},
                         {'source_sha':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
+                        {'source_sha':'476d30089ed2f422da0b335c9bafa8b0fa9b3bf2'},
                         {'helper_sha256':'0'*64}, {'retry_budget':1},
                         {'scenarios':list(reversed(CASES))}, {'scenario_count':3}):
             with self.subTest(changes=changes), patch.object(Path, 'read_text', return_value=json.dumps({
@@ -48,6 +49,7 @@ class AdapterControls(unittest.TestCase):
                          started_at_epoch=1000, deadline_epoch=3340, retry_budget=0)
             variants = ({'H':'b'*40}, {'T':'b'*40},
                         {'T':'acbfc63aa2399cff3d34ec5f947a5e86a914b323'},
+                        {'T':'476d30089ed2f422da0b335c9bafa8b0fa9b3bf2'},
                         {'cases':list(reversed(CASES))},
                         {'source_preflight':False}, {'native_eligibility':False}, {'retry_budget':1},
                         {'started_at_epoch':2100}, {'deadline_epoch':2000}, {'deadline_epoch':9999})
