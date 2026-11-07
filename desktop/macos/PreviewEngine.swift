@@ -57,9 +57,47 @@ final class PreviewEngine {
     #if PREVIEW_SMOKE
     func loseChannel() { run?.loseChannel() }
     #endif
+
+    #if PREVIEW_SMOKE && LOCAL_APP
+    private var smokeFaultRun: EngineRun?
+    var smokeFaultReceipt: [String: Any]? { smokeFaultRun?.smokeFaultReceipt }
+    // Fixture-only: no PID or process name is accepted from the controller.
+    func crashOwnedEngineForSmoke(expectedIncarnation: String) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let run, run.receipt?.incarnation == expectedIncarnation else { return false }
+        let issued = run.crashOwnedEngineForSmoke(expectedIncarnation: expectedIncarnation)
+        if run.smokeFaultReceipt != nil { smokeFaultRun = run }
+        return issued
+    }
+    #endif
 }
 
 private final class EngineRun {
+    #if PREVIEW_SMOKE && LOCAL_APP
+    private var smokeCrashUsed = false
+    private(set) var smokeFaultReceipt: [String: Any]?
+    // All retirement and waitpid work is on this same queue. Until waitpid,
+    // this exact spawned child reserves its PID even if it has already exited.
+    func crashOwnedEngineForSmoke(expectedIncarnation: String,
+                                 signal: (pid_t, Int32) -> Int32 = Darwin.kill) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard pid > 0, exitSource != nil, channelFD >= 0, !smokeCrashUsed,
+              receipt?.incarnation == expectedIncarnation else { return false }
+        smokeCrashUsed = true
+        let result = signal(pid, SIGKILL)
+        smokeFaultReceipt = ["owner": "native-smoke-owned-engine-crash",
+            "requested_incarnation": expectedIncarnation, "owned_pid": Int(pid),
+            "signal_requested": Int(SIGKILL), "syscall_result": Int(result), "reaped": false]
+        return result == 0
+    }
+    func recordSmokeFaultReap(waitedPID: pid_t, status: Int32) {
+        guard var fact = smokeFaultReceipt else { return }
+        fact["waited_pid"] = Int(waitedPID)
+        fact["raw_wait_status"] = Int(status)
+        fact["reaped"] = waitedPID == pid
+        smokeFaultReceipt = fact
+    }
+    #endif
     #if PREVIEW_SMOKE
     var holdHello = false
     #endif
@@ -145,7 +183,12 @@ private final class EngineRun {
             // The unreaped leader still reserves this group identity.
             kill(-pid, SIGKILL)
             var status: Int32 = 0
+            #if PREVIEW_SMOKE && LOCAL_APP
+            let waitedPID = waitpid(pid, &status, 0)
+            recordSmokeFaultReap(waitedPID: waitedPID, status: status)
+            #else
             waitpid(pid, &status, 0)
+            #endif
             pid = 0
             channelFD = -1
             output?.cancel(); output = nil
