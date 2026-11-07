@@ -36,7 +36,7 @@ import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useIsMobile, useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, MASKED_KEY, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
@@ -76,6 +76,9 @@ const REASONING_ITEMS: SelectItem[] = REASONING_OPTIONS.filter(
 
 /** Sentinel for the sidebar entry that builds a setup instead of editing one. */
 const DRAFT = "__new__";
+
+/** Tall enough to keep the provider account pinned while the fields scroll. */
+const PINNED_ACCOUNT_QUERY = "(min-height: 560px)";
 
 type ConfigurationField = "name" | "model" | "headers" | "compaction" | "light";
 type ConfigurationError = { message: string; field?: ConfigurationField };
@@ -530,25 +533,29 @@ function ConfigurationForm({
     updateConfig.isPending,
   ]);
 
+  // The provider and its account come first: signing in is what makes the rest
+  // of the form answerable, so it is never below the fields. A window with the
+  // height keeps them pinned while the fields scroll; a short or zoomed one
+  // scrolls the whole form instead, so every field keeps its room. Only the
+  // scrolling changes, so a sign-in in progress survives crossing the bound.
+  const pinAccount = useMediaQuery(PINNED_ACCOUNT_QUERY);
   return (
-    <div ref={formRef} className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div
+    <div
+      ref={formRef}
+      className={cn(
+        "flex flex-col flex-1 min-w-0 min-h-0",
+        !pinAccount && "overflow-auto",
+        !pinAccount && isMobile && "scroll-pb-32",
+      )}
+    >
+      <section
+        aria-label="Provider account"
         className={cn(
-          "flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
-          isMobile && "pb-32 scroll-pb-32",
+          "shrink-0 flex flex-col gap-2 px-4 pt-4",
+          pinAccount && "pb-2 border-b border-muted",
         )}
       >
-        {error && !error.field ? (
-          <p
-            ref={globalErrorRef}
-            tabIndex={-1}
-            role="alert"
-            className="mb-4 text-small !leading-[22px] text-error-primary"
-          >
-            {error.message}
-          </p>
-        ) : null}
-        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
+        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3">
           <ConfigRow
             presentation="form"
             label="Model Provider"
@@ -569,7 +576,28 @@ function ConfigurationForm({
               />
             }
           />
-          <Separator />
+        </div>
+        <ManagedAuthCallout backend={backend} />
+      </section>
+      <div
+        className={cn(
+          "p-4 [&>*]:shrink-0",
+          pinAccount ? "flex-1 min-h-0 overflow-auto" : "shrink-0",
+          isMobile && "pb-32",
+          pinAccount && isMobile && "scroll-pb-32",
+        )}
+      >
+        {error && !error.field ? (
+          <p
+            ref={globalErrorRef}
+            tabIndex={-1}
+            role="alert"
+            className="mb-4 text-small !leading-[22px] text-error-primary"
+          >
+            {error.message}
+          </p>
+        ) : null}
+        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
           <ConfigRow
             presentation="form"
             label="Name"
@@ -783,7 +811,6 @@ function ConfigurationForm({
             textAreaClassName="h-[92px] resize-none"
           />
         </div>
-        <ManagedAuthCallout backend={backend} className="mt-2" />
         <p className="text-micro text-basic-muted pt-2">* Required fields</p>
       </div>
     </div>

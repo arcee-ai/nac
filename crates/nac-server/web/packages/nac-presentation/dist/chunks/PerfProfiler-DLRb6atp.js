@@ -12064,31 +12064,32 @@ gx.Size = lx, gx.Variant = ux, gx.Content = dx;
 // src/app/hooks/useCopyToClipboard.ts
 var _x = 2e3;
 function vx(e) {
-	let t = document.createElement("textarea");
-	t.value = e, t.style.position = "fixed", t.style.top = "-9999px", document.body.appendChild(t);
+	let t = document.activeElement instanceof HTMLElement ? document.activeElement : null, n = document.createElement("textarea");
+	n.value = e, n.style.position = "fixed", n.style.top = "-9999px", document.body.appendChild(n);
 	try {
-		return t.focus(), t.select(), document.execCommand("copy");
+		return n.focus(), n.select(), document.execCommand("copy");
 	} catch {
 		return !1;
 	} finally {
-		document.body.removeChild(t);
+		document.body.removeChild(n), t?.focus();
 	}
 }
 function yx() {
-	let [e, t] = p(!1), n = f(null);
+	let [e, t] = p("idle"), n = f(null);
 	c(() => () => {
 		n.current && clearTimeout(n.current);
 	}, []);
-	let r = o(() => {
-		n.current && clearTimeout(n.current), t(!0), n.current = setTimeout(() => t(!1), _x);
-	}, []);
+	let r = o((e) => {
+		n.current && clearTimeout(n.current), t(e), n.current = e === "copied" ? setTimeout(() => t("idle"), _x) : null;
+	}, []), i = o((e) => {
+		if (!e) return;
+		let t = () => r(vx(e) ? "copied" : "failed");
+		navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(() => r("copied")).catch(t) : t();
+	}, [r]);
 	return {
-		copied: e,
-		copy: o((e) => {
-			e && (navigator.clipboard?.writeText ? navigator.clipboard.writeText(e).then(r).catch(() => {
-				vx(e) && r();
-			}) : vx(e) && r());
-		}, [r])
+		copied: e === "copied",
+		outcome: e,
+		copy: i
 	};
 }
 // src/app/atoms/button/CopyButton.tsx
@@ -20293,4 +20294,4 @@ function SY({ id: e, children: t }) {
 		children: t
 	}) : /* @__PURE__ */ T(w, { children: t });
 }
-export { hJ as $, Ee as $i, ZW as $n, Ap as $r, gK as $t, UJ as A, Qt as Ai, kG as An, dx as Ar, sq as At, xJ as B, Pt as Bi, oG as Bn, Tb as Br, WK as Bt, qJ as C, yr as Ci, UG as Cn, Ax as Cr, Cq as Ct, zJ as D, $t as Di, XG as Dn, bx as Dr, dq as Dt, RJ as E, en as Ei, ZG as En, xx as Er, uq as Et, BJ as F, mn as Fi, $ as Fn, tx as Fr, tq as Ft, MJ as G, Ue as Gi, nG as Gn, ob as Gr, YK as Gt, LJ as H, lt as Hi, sG as Hn, _b as Hr, JK as Ht, DJ as I, sn as Ii, SG as In, Ab as Ir, UK as It, WJ as J, Re as Ji, lG as Jn, sb as Jr, bK as Jt, PJ as K, We as Ki, fG as Kn, ub as Kr, eq as Kt, wJ as L, Xt as Li, wG as Ln, xb as Lr, XK as Lt, TJ as M, ln as Mi, RG as Mn, ux as Mr, iq as Mt, NJ as N, Zt as Ni, eK as Nn, cx as Nr, rq as Nt, OJ as O, Kt as Oi, OG as On, yx as Or, oq as Ot, VJ as P, tn as Pi, MG as Pn, rx as Pr, nq as Pt, mJ as Q, be as Qi, cG as Qn, Ip as Qr, yK as Qt, SJ as R, Ft as Ri, CG as Rn, kb as Rr, ZK as Rt, JJ as S, br as Si, qG as Sn, Lx as Sr, wq as St, YJ as T, Gt as Ti, QG as Tn, kx as Tr, jq as Tt, FJ as U, ot as Ui, JW as Un, yb as Ur, GK as Ut, IJ as V, at as Vi, tG as Vn, Db as Vr, $K as Vt, EJ as W, He as Wi, YW as Wn, vb as Wr, QK as Wt, vJ as X, Ae as Xi, mG as Xn, Pp as Xr, xK as Xt, pJ as Y, je as Yi, pG as Yn, cm as Yr, hK as Yt, uJ as Z, ye as Zi, hG as Zn, Fp as Zr, vK as Zt, nY as _, gi as _i, NG as _n, kw as _r, yq as _t, sY as a, F as ai, sK as an, qW as ar, Lq as at, QJ as b, Sr as bi, VG as bn, sS as br, _q as bt, pY as c, ko as ci, rK as cn, qU as cr, Mq as ct, aY as d, Eo as di, DG as dn, WU as dr, Sq as dt, O as ea, kp as ei, mK as en, QW as er, cJ as et, tY as f, hi as fi, LG as fn, GU as fr, bq as ft, rY as g, wi as gi, tK as gn, pE as gr, hq as gt, eY as h, bi as hi, zG as hn, FF as hr, Eq as ht, lY as i, wp as ii, uK as in, rG as ir, qq as it, HJ as j, Wt as ji, BG as jn, lx as jr, cq as jt, AJ as k, nn as ki, AG as kn, gx as kr, lq as kt, dY as l, Ao as li, iK as ln, JU as lr, Oq as lt, oY as m, Si as mi, jG as mn, PF as mr, vq as mt, bY as n, Op as ni, aK as nn, dG as nr, Qq as nt, cY as o, No as oi, dK as on, HW as or, Rq as ot, iY as p, Ci as pi, $G as pn, NF as pr, Aq as pt, jJ as q, ze as qi, XW as qn, lb as qr, KK as qt, _Y as r, Ep as ri, lK as rn, iG as rr, tJ as rt, uY as s, j as si, cK as sn, KU as sr, gq as st, SY as t, ie as ta, Dp as ti, SK as tn, $W as tr, Zq as tt, fY as u, Mo as ui, YG as un, XU as ur, Tq as ut, ZJ as v, vi, FG as vn, pS as vr, kq as vt, XJ as w, Cr as wi, KG as wn, jx as wr, xq as wt, KJ as x, xr as xi, IG as xn, uS as xr, Dq as xt, $J as y, pi as yi, HG as yn, dS as yr, mq as yt, yJ as z, un as zi, eG as zn, Ob as zr, qK as zt };
+export { hJ as $, be as $i, ZW as $n, Np as $r, gK as $t, UJ as A, nn as Ai, kG as An, dx as Ar, sq as At, xJ as B, un as Bi, oG as Bn, Tb as Br, WK as Bt, qJ as C, br as Ci, UG as Cn, Ax as Cr, Cq as Ct, zJ as D, en as Di, XG as Dn, bx as Dr, dq as Dt, RJ as E, Gt as Ei, ZG as En, xx as Er, uq as Et, BJ as F, tn as Fi, $ as Fn, tx as Fr, tq as Ft, MJ as G, He as Gi, nG as Gn, ob as Gr, YK as Gt, LJ as H, at as Hi, sG as Hn, _b as Hr, JK as Ht, DJ as I, mn as Ii, SG as In, Ab as Ir, UK as It, WJ as J, ze as Ji, lG as Jn, sb as Jr, bK as Jt, PJ as K, Ue as Ki, fG as Kn, ub as Kr, eq as Kt, wJ as L, sn as Li, wG as Ln, xb as Lr, XK as Lt, TJ as M, Wt as Mi, RG as Mn, ux as Mr, iq as Mt, NJ as N, ln as Ni, eK as Nn, cx as Nr, rq as Nt, OJ as O, $t as Oi, OG as On, yx as Or, oq as Ot, VJ as P, Zt as Pi, MG as Pn, rx as Pr, nq as Pt, mJ as Q, ye as Qi, cG as Qn, Ip as Qr, yK as Qt, SJ as R, Xt as Ri, CG as Rn, kb as Rr, ZK as Rt, JJ as S, xr as Si, qG as Sn, Lx as Sr, wq as St, YJ as T, Cr as Ti, QG as Tn, kx as Tr, jq as Tt, FJ as U, lt as Ui, JW as Un, yb as Ur, GK as Ut, IJ as V, Pt as Vi, tG as Vn, Db as Vr, $K as Vt, EJ as W, ot as Wi, YW as Wn, vb as Wr, QK as Wt, vJ as X, je as Xi, mG as Xn, Pp as Xr, xK as Xt, pJ as Y, Re as Yi, pG as Yn, cm as Yr, hK as Yt, uJ as Z, Ae as Zi, hG as Zn, Fp as Zr, vK as Zt, nY as _, wi as _i, NG as _n, kw as _r, yq as _t, sY as a, wp as ai, sK as an, qW as ar, Lq as at, QJ as b, pi as bi, VG as bn, sS as br, _q as bt, pY as c, j as ci, rK as cn, qU as cr, Mq as ct, aY as d, Mo as di, DG as dn, WU as dr, Sq as dt, Ee as ea, Ap as ei, mK as en, QW as er, cJ as et, tY as f, Eo as fi, LG as fn, GU as fr, bq as ft, rY as g, bi as gi, tK as gn, pE as gr, hq as gt, eY as h, Si as hi, zG as hn, FF as hr, Eq as ht, lY as i, Ep as ii, uK as in, rG as ir, qq as it, HJ as j, Qt as ji, BG as jn, lx as jr, cq as jt, AJ as k, Kt as ki, AG as kn, gx as kr, lq as kt, dY as l, ko as li, iK as ln, JU as lr, Oq as lt, oY as m, Ci as mi, jG as mn, PF as mr, vq as mt, bY as n, ie as na, Dp as ni, aK as nn, dG as nr, Qq as nt, cY as o, F as oi, dK as on, HW as or, Rq as ot, iY as p, hi as pi, $G as pn, NF as pr, Aq as pt, jJ as q, We as qi, XW as qn, lb as qr, KK as qt, _Y as r, Op as ri, lK as rn, iG as rr, tJ as rt, uY as s, No as si, cK as sn, KU as sr, gq as st, SY as t, O as ta, kp as ti, SK as tn, $W as tr, Zq as tt, fY as u, Ao as ui, YG as un, XU as ur, Tq as ut, ZJ as v, gi as vi, FG as vn, pS as vr, kq as vt, XJ as w, yr as wi, KG as wn, jx as wr, xq as wt, KJ as x, Sr as xi, IG as xn, uS as xr, Dq as xt, $J as y, vi as yi, HG as yn, dS as yr, mq as yt, yJ as z, Ft as zi, eG as zn, Ob as zr, qK as zt };

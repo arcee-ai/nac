@@ -3898,6 +3898,11 @@
     outline-style: none;
   }
 
+[data-nac-runtime]:is(.select-all), [data-nac-runtime] .select-all {
+    -webkit-user-select: all;
+    user-select: all;
+  }
+
 [data-nac-runtime]:is(.select-none), [data-nac-runtime] .select-none {
     -webkit-user-select: none;
     user-select: none;

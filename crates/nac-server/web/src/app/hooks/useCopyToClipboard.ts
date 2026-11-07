@@ -9,6 +9,9 @@ const ACK_MS = 2000;
  * textarea there.
  */
 function legacyCopy(text: string): boolean {
+  // The throwaway field takes focus to be selected; hand it back afterwards so
+  // a keyboard user stays on the control that asked for the copy.
+  const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const area = document.createElement("textarea");
   area.value = text;
   area.style.position = "fixed";
@@ -22,11 +25,14 @@ function legacyCopy(text: string): boolean {
     return false;
   } finally {
     document.body.removeChild(area);
+    previous?.focus();
   }
 }
 
+export type CopyOutcome = "idle" | "copied" | "failed";
+
 export function useCopyToClipboard() {
-  const [copied, setCopied] = useState(false);
+  const [outcome, setOutcome] = useState<CopyOutcome>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -36,28 +42,28 @@ export function useCopyToClipboard() {
     [],
   );
 
-  const acknowledge = useCallback(() => {
+  const acknowledge = useCallback((next: Exclude<CopyOutcome, "idle">) => {
     if (timer.current) clearTimeout(timer.current);
-    setCopied(true);
-    timer.current = setTimeout(() => setCopied(false), ACK_MS);
+    setOutcome(next);
+    // A failure stays until the next attempt: the user still has to copy by hand.
+    timer.current = next === "copied" ? setTimeout(() => setOutcome("idle"), ACK_MS) : null;
   }, []);
 
   const copy = useCallback(
     (content: string) => {
       if (!content) return;
+      const fallback = () => acknowledge(legacyCopy(content) ? "copied" : "failed");
       if (navigator.clipboard?.writeText) {
         navigator.clipboard
           .writeText(content)
-          .then(acknowledge)
-          .catch(() => {
-            if (legacyCopy(content)) acknowledge();
-          });
+          .then(() => acknowledge("copied"))
+          .catch(fallback);
         return;
       }
-      if (legacyCopy(content)) acknowledge();
+      fallback();
     },
     [acknowledge],
   );
 
-  return { copied, copy };
+  return { copied: outcome === "copied", outcome, copy };
 }
