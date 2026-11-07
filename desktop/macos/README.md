@@ -118,6 +118,15 @@ macOS 14 qualification, signing/notarization, consumer installation, background
 window lifecycle, native menus/bridge, or performance.
 Those have separate owners in the ALL-339 work map.
 
+## Ordinary startup supplier binding
+
+The startup fixture and controlled-environment resolver bind product
+`ff8c9609abf7bf7ddabe983c96ff31cf80362956` (the delivered packaging-owner child of
+7013). Its retained ad-hoc normal-package admission is a separate supplier receipt;
+this source pin is not current-dev, app/query, or full native acceptance. Legacy
+Pd443 is rejected. The default four-case contract and protocol supplier remain
+unchanged; existing failed episodes and spent allocations are not renewed.
+
 ## Private launch contract (ALL-341)
 
 The builder asks the exact bundled executable for `__desktop-identity` and saves
