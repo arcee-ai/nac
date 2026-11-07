@@ -204,6 +204,7 @@ final class WorkspaceSmoke {
         case approval(id: String, requestID: String, path: String)
         case rich(id: String, markdown: String)
         case transcript(id: String, message: String, readOnly: Bool = false, identityText: String? = nil)
+        case file(id: String, path: String, content: String)
 
         var payload: [String: Any] {
             switch self {
@@ -211,6 +212,8 @@ final class WorkspaceSmoke {
             case let .rich(id, markdown): return ["kind": "rich", "id": id, "markdown": markdown]
             case let .approval(id, requestID, path):
                 return ["kind": "approval", "id": id, "requestID": requestID, "text": path]
+            case let .file(id, path, content):
+                return ["kind": "file", "id": id, "path": path, "content": content]
             case let .transcript(id, message, readOnly, identityText):
                 var value: [String: Any] = ["kind": "transcript", "id": id, "text": message, "readOnly": readOnly]
                 if let identityText { value["identityText"] = identityText }
@@ -352,6 +355,51 @@ final class WorkspaceSmoke {
         viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},fonts_ready:!!fonts,surfaces,
         sentinel_observation:richInspect(sentinel), settled_predicates:settledPredicates};
     }
+    if (expected.kind === 'file') {
+      // The desktop FilePane and DiffPane share this detail header/scroller.
+      // Text in the chat, file list or a hidden duplicate cannot own the image.
+      const fileVisible = element => {
+        if (!inspect(element).visible) return false;
+        const rect = element.getBoundingClientRect();
+        let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+          if (/^(auto|scroll|hidden|clip)$/.test(style.overflowX || style.overflow)) {
+            left = Math.max(left, bounds.left + parent.clientLeft);
+            right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+          }
+          if (/^(auto|scroll|hidden|clip)$/.test(style.overflowY || style.overflow)) {
+            top = Math.max(top, bounds.top + parent.clientTop);
+            bottom = Math.min(bottom, bounds.top + parent.clientTop + parent.clientHeight);
+          }
+        }
+        return rect.left >= left - 0.5 && rect.top >= top - 0.5 &&
+          rect.right <= right + 0.5 && rect.bottom <= bottom + 0.5;
+      };
+      const selected = [...document.querySelectorAll('button[title][aria-pressed=true]')]
+        .filter(e => e.getAttribute('title') === expected.path);
+      const panes = [...document.querySelectorAll('span[title]')].flatMap(title => {
+        if (title.getAttribute('title') !== expected.path || title.closest('button,[inert],[role=dialog]')) return [];
+        const header = title.parentElement, scroller = header?.nextElementSibling;
+        if (!header?.classList.contains('header-sm') || !scroller?.classList.contains('overflow-auto')) return [];
+        const code = [...scroller.querySelectorAll('div')].filter(row => row.children.length === 2 &&
+          row.firstElementChild.tagName === 'SPAN' && /^\d+$/.test(row.firstElementChild.textContent.trim()) &&
+          row.lastElementChild.matches('span.code')).map(row => row.lastElementChild)
+          .filter(e => e.textContent === expected.content.replace(/\n$/, ''));
+        return code.filter(e => fileVisible(e) && fileVisible(title) && fileVisible(scroller))
+          .map(element => ({element, scroller}));
+      });
+      const owned = fileState?.path === expected.path && fileState.content === expected.content &&
+        fileState.binary === false && fileState.too_large === false;
+      const loadingFile = panes.some(p => p.scroller.textContent.includes('Loading file…'));
+      const observed = inspect(panes.length === 1 ? panes[0].element : null);
+      const reason = hash !== '#/session/' + expected.id + '/files' ? 'requested file route not current' :
+        !composer || loading ? 'requested workspace not mounted' : !owned ? 'file API identity/content differs' :
+        selected.length !== 1 || panes.length !== 1 ? 'selected file detail not uniquely visible' :
+        loadingFile ? 'file still loading' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
+      return {ready:reason === 'ready', reason, expected, hash, file_api_bound:owned,
+        selected_count:selected.length, detail_count:panes.length, loadingFile, ...observed};
+    }
     let element = expected.kind === 'project' ? null : findText(expected.text);
     if (expected.kind === 'project') {
       // The reorder wrapper shares the card ID. Inspect the rendered title
@@ -404,6 +452,9 @@ final class WorkspaceSmoke {
         }
         if case let .approval(id, _, _) = target {
             arguments["permissionState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/permissions',{cache:'no-store'}); if(!r.ok)throw Error('Permission state unavailable'); return await r.json();")
+        }
+        if case let .file(id, path, _) = target {
+            arguments["fileState"] = try await js("const r=await fetch('/sessions/' + \(quote(id)) + '/workspace/file?' + new URLSearchParams({path:\(quote(path))}),{cache:'no-store'}); if(!r.ok)throw Error('File snapshot unavailable'); return await r.json();")
         }
         guard var value = try await app.webView.callAsyncJavaScript(Self.captureReadinessScript,
             arguments: arguments, in: nil, contentWorld: .page) as? [String: Any] else {
