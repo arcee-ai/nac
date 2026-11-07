@@ -57,7 +57,7 @@ class QualificationTests(unittest.TestCase):
 
     def test_toolchain_drift_and_unpinned_swift_cannot_pass(self):
         expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())
-        actual = {key: value for key, value in expected.items() if key != 'images'}
+        actual = {key: expected[key] for key in ('developer_directory', 'xcode', 'sdk', 'os_version', 'os_build', 'swift')}
         actual.update(image=next(iter(expected['images'])), swift='observed compiler identity')
         self.assertFalse(qualify_toolchain(actual, {**expected, 'swift': None}))
         pinned = {**expected, 'swift': actual['swift']}
@@ -65,6 +65,28 @@ class QualificationTests(unittest.TestCase):
         for field in actual:
             with self.assertRaisesRegex(RuntimeError, 'drift'):
                 qualify_toolchain({**actual, field: 'unexpected'}, pinned)
+
+    def test_current_host_pair_preserves_historical_envelopes_and_rejects_cross_pairs(self):
+        # Exact environment observation: run42332629180/job128282373371; no compile or native case.
+        expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())
+        common = {key: expected[key] for key in ('developer_directory', 'xcode', 'sdk', 'swift')}
+        current = {**common, 'image': '20261102.0473.1', 'os_version': '26.7.2', 'os_build': '25G332'}
+        self.assertTrue(qualify_toolchain(current, expected))
+        for image in ('20261026.0455.2', '20261013.0424.1', '20261021.0445.8'):
+            historical = {**common, 'image': image, 'os_version': '26.6.2', 'os_build': '25G83'}
+            self.assertTrue(qualify_toolchain(historical, expected))
+            with self.assertRaisesRegex(RuntimeError, 'drift'):
+                qualify_toolchain({**current, 'image': image}, expected)
+        without_image = {**expected, 'images': {k: v for k, v in expected['images'].items() if k != current['image']}}
+        with self.assertRaisesRegex(RuntimeError, 'image drift'):
+            qualify_toolchain(current, without_image)  # An OS override never grants image admission.
+        with self.assertRaisesRegex(RuntimeError, 'drift'):
+            qualify_toolchain(current, {**expected, 'image_hosts': {}})
+        for field in current:
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, 'drift'):
+                qualify_toolchain({**current, field: 'foreign'}, expected)
+        with self.assertRaisesRegex(RuntimeError, 'drift'):
+            qualify_toolchain({**current, 'os_version': '26.6.2', 'os_build': '25G83'}, expected)
 
     def test_owned_fixture_environment_and_abort_do_not_change_default_launches(self):
         with tempfile.TemporaryDirectory() as temporary:
