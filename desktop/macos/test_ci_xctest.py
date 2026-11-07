@@ -1,9 +1,14 @@
 import json
+import os
 from pathlib import Path
+import plistlib
 import shutil
+from contextlib import ExitStack
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import ci_xctest
 from ci_support import export_evidence
 from ci_xctest import (authorization_policy, relocation_directory, require_generated_runner,
                        require_prerequisites, require_settled, result_receipt)
@@ -147,6 +152,125 @@ class XCTestPolicyTests(unittest.TestCase):
             (result / 'link').symlink_to('/etc/hosts')
             with self.assertRaisesRegex(RuntimeError, 'symlink'):
                 result_receipt(result)
+
+
+class XCTestLaunchEnvironmentTests(unittest.TestCase):
+    def exercise_launch(self, *, failure=None):
+        """Exercise the real launcher with inert bundle/result/process adapters."""
+        permitted = {'PATH': '/Selected/tools:/usr/bin', 'DEVELOPER_DIR': '/Selected/Xcode',
+                     'SDKROOT': '/Selected/SDK', 'LANG': 'en_US.UTF-8', 'LC_ALL': 'C',
+                     'HOME': '/private/fixture-home', 'TMPDIR': '/private/fixture-tmp',
+                     'NAC_MAC_ENGINE': '/private/fixture-engine', 'NAC_MAC_SKIP_ENGINE_BUILD': '1'}
+        forbidden = {'NAC_MANAGED_CONFIG': 'ambient-managed-canary',
+                     'GITHUB_TOKEN': 'ambient-github-canary', 'OTHER_TOKEN': 'ambient-token-canary',
+                     'OPENAI_API_KEY': 'ambient-api-canary', 'OTHER_API_KEY': 'ambient-other-api-canary'}
+        ambient = {**permitted, **forbidden}
+        observations, cleaned, settled = [], [], []
+        status = {'xcode_helper_accessibility_rows': [
+            {'service': 'kTCCServiceAccessibility', 'client': 'com.apple.dt.Xcode-Helper',
+             'client_type': 0, 'auth_value': 2}],
+            'developer_status': 'Developer mode is enabled.',
+            'automation_status': 'Automation DOES NOT REQUIRE authentication.'}
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            raw = Path(temporary)
+            executable = raw / 'NAC Development Preview Smoke.app/Contents/MacOS/NACPreview'
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b'inert fixture executable; never executed')
+            evidence = raw / 'evidence/ci-terminal-xctest.json'
+            profile = raw / 'removed-profile'
+
+            def fake_run(args, log, timeout, **kwargs):
+                # Capture the effective child environment, including the original
+                # bug's env=None inheritance, without launching any process.
+                environment = kwargs.get('env')
+                observations.append((args[1], dict(os.environ if environment is None else environment)))
+                if args[1] == 'build-for-testing':
+                    if failure == 'build':
+                        raise RuntimeError('inert build failure')
+                    derived = Path(args[args.index('-derivedDataPath') + 1])
+                    products = derived / 'Build/Products'
+                    products.mkdir(parents=True)
+                    config = next(arg.split('=', 1)[1] for arg in args if arg.startswith('NAC_UI_FIXTURE='))
+                    target = {'IsUITestBundle': True, 'BlueprintName': 'NACNativeUITests',
+                              'EnvironmentVariables': {'NAC_UI_FIXTURE': config},
+                              'TestBundlePath': '__TESTROOT__/NACNativeUITests.xctest'}
+                    (products / 'fixture.xctestrun').write_bytes(plistlib.dumps({'TestTargets': [target]}))
+                elif args[1] == 'test-without-building':
+                    evidence.write_text(json.dumps({'app_pid': 100001, 'engine_pid': 100002,
+                        'profile': str(profile), 'engine_reaped': failure is None,
+                        'profile_removed': failure is None}))
+                    result = Path(args[args.index('-resultBundlePath') + 1])
+                    result.mkdir()
+                    (result / 'inert-result.json').write_text('{}')
+                    if failure:
+                        raise RuntimeError('inert test failure')
+                else:
+                    self.fail('Unexpected launch command')
+
+            def cleanup(record, app):
+                self.assertTrue(app.is_dir())
+                self.assertEqual(record, evidence)
+                cleaned.append(str(app))
+                if failure == 'cleanup':
+                    raise RuntimeError('inert cleanup failure')
+
+            def process_status(pid, **kwargs):
+                settled.append(pid)
+                return ''
+
+            stack.enter_context(patch.dict(os.environ, ambient, clear=True))
+            stack.enter_context(patch.object(ci_xctest, 'observe_prerequisites', return_value=status))
+            require_settled = ci_xctest.require_settled
+            stack.enter_context(patch.object(ci_xctest, 'require_settled',
+                side_effect=lambda record: require_settled(record, process_status=process_status)))
+            for name in ('Popen', 'run', 'check_output'):
+                stack.enter_context(patch.object(ci_xctest.subprocess, name,
+                    side_effect=AssertionError('No process execution is allowed in this inert control')))
+            if failure:
+                with self.assertRaisesRegex(RuntimeError, 'inert ' + ('build' if failure == 'build' else 'test') + ' failure'):
+                    ci_xctest.run_terminal(raw, fake_run, lambda args: '{}', cleanup=cleanup,
+                                           validate=lambda record: {'inert': True})
+            else:
+                result = ci_xctest.run_terminal(raw, fake_run, lambda args: '{}', cleanup=cleanup,
+                                                validate=lambda record: {'inert': True})
+                self.assertEqual(result['terminal'], {'inert': True})
+                config = json.loads((raw / 'xctest-fixture.json').read_text())
+                self.assertEqual(config['scenario'], 'ci-terminal-xctest')
+                self.assertEqual(result['runner']['generated_target']['EnvironmentVariables'],
+                                 {'NAC_UI_FIXTURE': str(raw / 'xctest-fixture.json')})
+            self.assertEqual(dict(os.environ), ambient, 'Parent environment must remain unchanged')
+            receipt = json.loads((raw / 'xctest-relocation.json').read_text())
+            retained = failure == 'cleanup'
+            self.assertEqual(receipt['bundle_retained_for_unresolved_cleanup'], retained)
+            self.assertEqual(Path(receipt['path']).exists(), retained)
+            if retained:
+                shutil.rmtree(receipt['path'])  # Inert files only, after retention is asserted.
+            if failure != 'build':
+                outcomes = json.loads((raw / 'xctest-outcomes.json').read_text())
+                self.assertTrue(outcomes['input_launch_requested'])
+                self.assertEqual(bool(outcomes['errors']['test']), failure is not None)
+                self.assertEqual(bool(outcomes['errors']['cleanup']), retained)
+            self.assertEqual(len(cleaned), int(failure in ('test', 'cleanup')))
+            self.assertEqual(settled, [] if failure in ('build', 'cleanup') else [100001, 100002])
+        self.assertEqual([stage for stage, _ in observations],
+                         ['build-for-testing'] if failure == 'build' else ['build-for-testing', 'test-without-building'])
+        for stage, environment in observations:
+            with self.subTest(stage=stage, failure=failure):
+                self.assertEqual(environment, permitted)
+                self.assertTrue(set(forbidden).isdisjoint(environment))
+                self.assertTrue(set(forbidden.values()).isdisjoint(environment.values()))
+
+    def test_both_xcodebuild_children_filter_ambient_credentials(self):
+        self.exercise_launch()
+
+    def test_failed_build_filters_environment_and_removes_unlaunched_bundle(self):
+        self.exercise_launch(failure='build')
+
+    def test_failed_input_filters_environment_and_settles_owned_fixture(self):
+        self.exercise_launch(failure='test')
+
+    def test_failed_cleanup_retains_bundle_and_primary_failure(self):
+        self.exercise_launch(failure='cleanup')
 
 
 if __name__ == '__main__':
