@@ -1,7 +1,6 @@
 """Finite P/Q/R/H ordinary startup qualification; no product test bridge."""
 import hashlib
 import json
-import os
 from pathlib import Path
 import plistlib
 import shutil
@@ -17,7 +16,8 @@ from ci_startup_fixture import (CASES, PRODUCT, TEST_SOURCE, TEST_FILES, digest,
                                prepare_configuration, prepare_profile, remove_profile, require_integrity, test_contract)
 from ci_startup_owner import OwnerWitness
 from ci_startup_protocol import REVISION as PROTOCOL_SOURCE, build as build_protocol, sources as protocol_sources, verify as verify_protocol
-from ci_xctest import (authorization_policy, observe_prerequisites, require_generated_runner, result_receipt)
+from ci_xctest import (authorization_policy, observe_prerequisites, require_generated_runner, result_receipt,
+                       runner_environment)
 from ci_xctest_attachments import AttachmentTool
 from ci_xctest_project import materialize_project
 
@@ -29,12 +29,6 @@ def write(path, value):
     require(len(data) <= 64 * 1024, 'startup_json_evidence_bound')
     path.write_bytes(data)
 
-
-def runner_environment():
-    # Keep Xcode's selected SDK/runtime plumbing, remove all credential/managed
-    # variables before xcodebuild launches Q. Q and the OS witness recheck this.
-    return {name: value for name, value in os.environ.items()
-            if name != 'NAC_MANAGED_CONFIG' and not name.endswith(('_TOKEN', '_API_KEY'))}
 
 
 def generated_runner(folder, config_path, configuration_sha256, config, selection, run):
