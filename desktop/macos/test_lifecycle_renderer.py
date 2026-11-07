@@ -3,8 +3,10 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from lifecycle_renderer import approval_state, DISCONNECTED_DENIAL, PROVIDER_PREFIX, verify_renderer_store
+from lifecycle_renderer import approval_origin, approval_state, DISCONNECTED_DENIAL, PROVIDER_PREFIX, verify_renderer_store
 
 
 class RendererApprovalEvidenceTests(unittest.TestCase):
@@ -13,13 +15,23 @@ class RendererApprovalEvidenceTests(unittest.TestCase):
             call_id='quit-unapproved-command', tool='exec_command'), run_id='original-run',
             run_count=1, model_run_id='independent-model-run')
         self.permissions = dict(approval_mode='manual', grants=[], requests=[self.origin['request']])
-        self.snapshot = dict(metadata=dict(session_id='approval-session', run_count=1),
+        self.snapshot = dict(metadata=dict(session_id='approval-session'),
                              active_run=dict(run_id='original-run'))
 
-    def state(self, permissions=None, snapshot=None, requests=None, outputs=None):
+    def state(self, permissions=None, snapshot=None, requests=None, outputs=None, run_count=1):
         return approval_state(self.origin, self.permissions if permissions is None else permissions,
             self.snapshot if snapshot is None else snapshot,
-            PROVIDER_PREFIX if requests is None else requests, [] if outputs is None else outputs)
+            PROVIDER_PREFIX if requests is None else requests, [] if outputs is None else outputs, run_count)
+
+    def test_origin_reads_run_counter_from_public_summary_not_snapshot_metadata(self):
+        fixture = SimpleNamespace(endpoint='http://inert', session='model',
+                                  approval_session='approval-session', assert_work_running=Mock())
+        rows = {'/sessions/approval-session/permissions': self.permissions,
+                '/sessions/approval-session': self.snapshot,
+                '/sessions': [{'summary': {'session_id': 'approval-session', 'run_count': 1}}],
+                '/sessions/model': {'active_run': {'run_id': 'independent-model-run'}}}
+        with patch('lifecycle_renderer.request', side_effect=lambda endpoint, path: rows[path]):
+            self.assertEqual(approval_origin(fixture), self.origin)
 
     def denied(self):
         permissions = {**self.permissions, 'requests': []}
@@ -50,10 +62,12 @@ class RendererApprovalEvidenceTests(unittest.TestCase):
             ({**self.permissions, 'requests': [{**self.origin['request'], 'id': 'new-request'}]}, self.snapshot),
             (self.permissions, {**self.snapshot, 'active_run': {'run_id': 'new-run'}}),
             (self.permissions, {**self.snapshot, 'metadata': {'session_id': 'other', 'run_count': 1}}),
-            (self.permissions, {**self.snapshot, 'metadata': {'session_id': 'approval-session', 'run_count': 2}}),
         ]:
             with self.subTest(permissions=permissions, snapshot=snapshot), self.assertRaises(AssertionError):
                 self.state(permissions, snapshot)
+        for count in (2, True, None):
+            with self.subTest(count=count), self.assertRaises(AssertionError):
+                self.state(run_count=count)
 
     def test_unknown_denial_repetition_new_provider_work_or_grants_are_rejected(self):
         for outputs in [['approved'], ['Error: permission denied by user'], [DISCONNECTED_DENIAL] * 2]:
