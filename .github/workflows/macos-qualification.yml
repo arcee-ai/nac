@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: ""
+      paths-custody:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -20,6 +24,7 @@ permissions:
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.target.outputs.source_sha }}
       test_source_sha: ${{ steps.target.outputs.test_source_sha }}
@@ -43,7 +48,7 @@ jobs:
     timeout-minutes: 40
     env:
       DEVELOPER_DIR: ${{ needs.resolve.outputs.developer_directory }}
-      CARGO_BUILD_JOBS: "4"
+      CARGO_BUILD_JOBS: ${{ inputs.target == 'all-347-paths-macos26' && '2' || '4' }}
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - name: Check out external CI harness
@@ -84,6 +89,15 @@ jobs:
           shared-key: native-exact-qualification
           prefix-key: nac-ci-v1
           save-if: false
+      - name: Transport the exact ROOT-issued path allocation without changing its clock
+        if: inputs.target == 'all-347-paths-macos26'
+        working-directory: ci-harness
+        env:
+          HARNESS_SHA: ${{ inputs.harness-sha }}
+          NAC_PATHS_CUSTODY_JSON: ${{ inputs.paths-custody }}
+        run: >-
+          python3 -B desktop/macos/ci_paths_custody.py --harness-sha "$HARNESS_SHA"
+          --output-parent "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Qualify the exact supplier without copying or changing its sources
         working-directory: ci-harness
         env:

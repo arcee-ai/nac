@@ -1,5 +1,6 @@
 """Shared public XCTest launcher; never provisions host permissions."""
 import hashlib
+from ci_paths_budget import active, using, check as budget_check, timeout_options, checked_items
 import json
 import os
 from contextlib import contextmanager
@@ -32,26 +33,41 @@ def relocation_directory(raw):
     try:
         yield lease
     finally:
-        if lease['safe_to_remove']:
-            shutil.rmtree(path)
-        (raw / 'xctest-relocation.json').write_text(json.dumps({
-            'path': str(path), 'bundle_retained_for_unresolved_cleanup': not lease['safe_to_remove']}, indent=2) + '\n')
+        bound=active()
+        if bound is not None and bound.owner.failed:lease['safe_to_remove']=False
+        with using(bound.owner.retention if bound else None):
+            try:
+                if lease['safe_to_remove']:
+                    budget_check()
+                    shutil.rmtree(path)
+            finally:
+                (raw / 'xctest-relocation.json').write_text(json.dumps({
+                    'path':str(path),'bundle_retained_for_unresolved_cleanup':not lease['safe_to_remove']},indent=2)+'\n')
+
+
+def observe_process_status(pid, *, strict=False):
+    """Existing exact-PID observer; strict historical checks reject unknown rows."""
+    result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True,text=True,**timeout_options())
+    budget_check()
+    if result.returncode not in (0, 1):
+        raise RuntimeError('Cannot observe owned fixture process settlement')
+    if strict and (type(result.stdout) is not str or type(result.stderr) is not str
+            or result.stderr != '' or (result.returncode == 1 and result.stdout != '')
+            or (result.returncode == 0 and not result.stdout.strip())
+            or len(result.stdout.split()) > 1):
+        raise RuntimeError('Historical engine settlement observation is unknown')
+    return result.stdout.strip()
 
 
 def require_settled(record, process_status=None):
     if type(record.get('app_pid')) is not int or record['app_pid'] <= 0:
         raise RuntimeError('No exact app ownership record; preserve relocated bundle for diagnosis')
-    def status(pid):
-        result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
-        if result.returncode not in (0, 1):
-            raise RuntimeError('Cannot observe owned fixture process settlement')
-        return result.stdout.strip()
     for key in ('app_pid', 'engine_pid'):
         pid = record.get(key, 0)
         if type(pid) is not int or pid < 0:
             raise RuntimeError('Invalid exact fixture process identity')
         if pid:
-            state = (process_status or status)(pid)
+            state = (process_status or observe_process_status)(pid)
             if state and not state.startswith('Z'):
                 raise RuntimeError('Owned XCTest fixture process survived cleanup: ' + key)
     profile = record.get('profile')
@@ -94,9 +110,9 @@ def authorization_policy(observation):
 
 
 def require_generated_runner(data, config_path, expected_target='NACNativeUITests', *, project_selection=None,
-                             startup_binding=None):
+                             startup_binding=None, paths_binding=None):
     """Inspect Xcode's actual generated runner without manufacturing metadata."""
-    if expected_target not in ('NACNativeUITests', 'NACPerformanceUITests', 'NACStartupUITests'):
+    if expected_target not in ('NACNativeUITests', 'NACPerformanceUITests', 'NACStartupUITests', 'NACPathUITests'):
         raise RuntimeError('Unknown generated XCTest target selection')
     def dictionaries(value):
         if isinstance(value, dict):
@@ -114,7 +130,7 @@ def require_generated_runner(data, config_path, expected_target='NACNativeUITest
             or not target.get('TestBundlePath', '').endswith('.xctest')):
         raise RuntimeError('Generated XCTest runner did not bind the exact fixture configuration')
     if expected_target != 'NACNativeUITests':
-        prefix = 'startup' if expected_target == 'NACStartupUITests' else 'performance'
+        prefix = {'NACStartupUITests': 'startup', 'NACPathUITests': 'path'}.get(expected_target, 'performance')
         selection = project_selection or {}
         source = selection.get(prefix + '_source_path', '')
         source_hash = selection.get(prefix + '_source_sha256', '')
@@ -125,6 +141,17 @@ def require_generated_runner(data, config_path, expected_target='NACNativeUITest
                 or environment.get('NAC_' + prefix.upper() + '_SOURCE_PATH') != source
                 or environment.get('NAC_' + prefix.upper() + '_SOURCE_SHA256') != source_hash):
             raise RuntimeError('Generated external runner did not bind the exact materialized source')
+        if prefix == 'path':
+            from ci_paths_protocol import PRODUCT, HELPER
+            binding = paths_binding or {}
+            if (binding.get('harness_sha') != selection.get('harness_sha')
+                    or not re.fullmatch('[0-9a-f]{64}', str(binding.get('configuration_sha256', '')))
+                    or any(environment.get('NAC_PATH_' + name.upper()) != binding.get(name)
+                           for name in ('harness_sha', 'configuration_sha256'))
+                    or selection.get('paths_sha') != PRODUCT or selection.get('helper_sha256') != HELPER
+                    or Path(target['TestBundlePath']).name != 'NACPathUITests.xctest'
+                    or len(selection.get('sources', {})) != 4):
+                raise RuntimeError('Generated path helper/wrapper/compiler source binding differs')
         if prefix == 'startup':
             if Path(target['TestBundlePath']).name != 'NACStartupUITests.xctest':
                 raise RuntimeError('Generated startup bundle path differs')
@@ -145,7 +172,8 @@ def result_receipt(path):
         raise RuntimeError('Xcode did not generate its required result bundle')
     digest = hashlib.sha256()
     count = total = 0
-    for file in sorted(path.rglob('*')):
+    for file in sorted(checked_items(path.rglob('*'))):
+        budget_check()
         if file.is_symlink():
             raise RuntimeError('Unexpected symlink in generated XCTest result')
         if not file.is_file():
@@ -156,7 +184,9 @@ def result_receipt(path):
         digest.update(str(file.relative_to(path)).encode() + b'\0' + str(size).encode() + b'\0')
         with file.open('rb') as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                budget_check()
                 digest.update(chunk)
+    budget_check()
     return {'files': count, 'bytes': total, 'tree_sha256': digest.hexdigest(),
             'retention': 'Sanitized xcresulttool export only; raw result may contain host diagnostics'}
 

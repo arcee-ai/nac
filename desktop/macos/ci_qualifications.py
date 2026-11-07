@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from ci_paths_budget import check as budget_check, time_limit
 
 DIRECTORY = Path(__file__).resolve().parent
 PROFILES = {'macos26': ('macos-26', 'ci-toolchain.json'),
@@ -18,7 +19,7 @@ def select_target(key):
         raise RuntimeError('Unknown/unapproved qualification target')
     target = catalog[key]
     if (not re.fullmatch('[0-9a-f]{40}', target.get('source_sha', ''))
-            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup', 'lifecycle')
+            or target.get('profile') not in PROFILES or target.get('suite') not in ('preview', 'workspace', 'instances', 'terminal', 'startup', 'lifecycle', 'paths')
             or not isinstance(target.get('scenario_count'), int) or target['scenario_count'] < 1):
         raise RuntimeError('Invalid immutable qualification contract')
     if target['suite'] == 'lifecycle' or key == 'all-344-lifecycle-macos26':
@@ -33,6 +34,10 @@ def select_target(key):
             'profile': 'macos26', 'suite': 'startup', 'scenario_count': 4, 'scenarios': list(CASES),
             'test_files': TEST_FILES, 'protocol_files': FILES}:
             raise RuntimeError('Startup P/Q/R four-case source contract differs')
+    if target['suite'] == 'paths':
+        from ci_paths import TARGET
+        if key != 'all-347-paths-macos26' or target != TARGET:
+            raise RuntimeError('Path fixed source/helper/two-case contract differs')
     runner, envelope = PROFILES[target['profile']]
     toolchain = json.loads((DIRECTORY / envelope).read_text())
     return {**target, 'runner': runner, 'envelope': envelope,
@@ -41,7 +46,9 @@ def select_target(key):
 
 def require_checkout(root, expected):
     def git(*args):
-        return subprocess.check_output(['git', *args], cwd=root, text=True, timeout=15).strip()
+        value = subprocess.check_output(['git', *args], cwd=root, text=True, timeout=time_limit(15))
+        budget_check()
+        return value.strip()
     actual = git('rev-parse', 'HEAD')
     dirty = bool(git('status', '--porcelain'))
     if Path(git('rev-parse', '--show-toplevel')).resolve() != root.resolve():
