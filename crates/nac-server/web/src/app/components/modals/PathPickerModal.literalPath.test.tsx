@@ -101,12 +101,15 @@ it.each([literal, "/workspace/ordinary", " relative leading and trailing "])(
   },
 );
 
-it("keeps typed local paths exact and uses the blank fallback only for whitespace", async () => {
+it("keeps typed local paths exact after IME composition and uses the blank fallback only for whitespace", async () => {
   const p = picker("/workspace");
   try {
     const input = screen.getByPlaceholderText("/path/to/directory");
+    await waitFor(() => expect(api.browsePath).toHaveBeenCalledTimes(1));
     fireEvent.change(input, { target: { value: literal } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(api.browsePath).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: false });
     await waitFor(() =>
       expect(api.browsePath).toHaveBeenCalledWith(
         literal,
