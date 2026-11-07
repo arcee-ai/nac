@@ -237,7 +237,9 @@ def require_observation(row, config, configuration_sha256, witness, png):
     if config['scenario'] == 'futureStore':
         require(type(row['expected_private_failure'].get('version')) is int, 'declared_failure_version')
     console = row['console']
-    require(isinstance(console, list) and len(console) == (26 if operations(config) else 4), 'console_count')
+    # Successful normal cases also guard the value-title verifier once.
+    expected_console = {'onboarding': 5, 'configuredLocal': 27, 'invalidConfig': 4, 'futureStore': 4}
+    require(isinstance(console, list) and len(console) == expected_console[config['scenario']], 'console_count')
     for item in console:
         require(isinstance(item, dict) and set(item) == {'on_console', 'login_done', 'root_locked',
                 'session_lock_flag', 'quartz_lock_flag', 'rendered_app_qualification_required'}, 'console_fields')
