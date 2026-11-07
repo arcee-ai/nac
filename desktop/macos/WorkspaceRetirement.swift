@@ -10,6 +10,9 @@ final class WorkspaceRetirement {
     private let dropOwner: () -> Void
     private let deadline: TimeInterval
     private(set) var acknowledged = false
+    #if ATTENTION_SMOKE
+    var attentionFixtureCleanup: () -> Bool = { false }
+    #endif
 
     init(view: WKWebView?, commands: NativeCommands?, dropOwner: @escaping () -> Void) {
         self.view = view
@@ -29,7 +32,11 @@ final class WorkspaceRetirement {
         released = true
         view?.navigationDelegate = nil
         view?.uiDelegate = nil
+        #if ATTENTION_SMOKE
+        if !attentionFixtureCleanup() { view?.window?.makeFirstResponder(nil) }
+        #else
         view?.window?.makeFirstResponder(nil)
+        #endif
         view?.stopLoading()
         view?.removeFromSuperview()
         dropOwner()

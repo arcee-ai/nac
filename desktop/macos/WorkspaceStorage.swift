@@ -49,12 +49,20 @@ final class WorkspaceStorage {
     private(set) var available = true
     private var pending = 0
     private var waiters: [UUID: (Bool) -> Void] = [:]
+    private let notificationOwner = UUID()
+    private var notificationToken: WorkspaceNotificationToken?
+    private var notificationGeneration: UInt64?
+    private var notificationRevision: UInt64 = 0
+    private var notificationState: WorkspaceNotificationState?
+    private var notificationsRestored = false
+    private var notificationBarrierFailed = false
 
     #if PREVIEW_SMOKE && LOCAL_APP
     // Observation only; every actual enqueue has one sequence, including native writes.
     static var smokeQ1Event: (([String: Any], String?) -> Void)?
     private let smokeQ1Owner = UUID().uuidString
     private var smokeQ1Sequence = 0
+    private var smokeQ1Ordinary: (namespace: String, key: String, value: String?)?
     private func smokeQ1Report(_ kind: String, sequence: Int,
                                ordinary: (namespace: String, key: String, value: String?)? = nil,
                                checkpoint: Data? = nil, durable: Bool? = nil,
@@ -124,15 +132,22 @@ final class WorkspaceStorage {
     private func restore(_ data: Data) -> Bool {
         guard data.count <= WorkspaceCheckpoint.limit,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              Set(object.keys) == ["version", "profile", "values"],
               let version = object["version"] as? NSNumber,
-              CFGetTypeID(version) != CFBooleanGetTypeID(), version == 1,
+              CFGetTypeID(version) != CFBooleanGetTypeID(), [1, 2].contains(version.intValue),
+              version.doubleValue == Double(version.intValue),
+              Set(object.keys) == (version == 1 ? ["version", "profile", "values"] : ["version", "profile", "values", "native"]),
               object["profile"] as? String == profile.digest,
               let saved = object["values"] as? [String: [String: String]],
               Set(saved.keys) == ["preferences", "drafts"],
               saved.allSatisfy({ namespace, entries in
                   entries.count <= 256 && entries.allSatisfy { validKey(namespace, $0.key) }
               }) else { return false }
+        if version == 2 {
+            guard let native = object["native"] as? [String: Any], Set(native.keys) == ["notifications"],
+                  let raw = native["notifications"], let state = WorkspaceNotificationState.decode(raw) else { return false }
+            notificationState = state
+            notificationsRestored = true
+        }
         values = saved
         return true
     }
@@ -151,8 +166,7 @@ final class WorkspaceStorage {
         var next = values
         next[namespace, default: [:]][key] = value
         guard (next[namespace]?.count ?? 0) <= 256,
-              let data = try? JSONSerialization.data(withJSONObject: ["version": 1, "profile": profile.digest, "values": next]),
-              data.count <= WorkspaceCheckpoint.limit else { return false }
+              let data = encodeCheckpoint(values: next, notifications: notificationState) else { return false }
         values = next
         guard available else {
             #if PREVIEW_SMOKE && LOCAL_APP
@@ -163,12 +177,31 @@ final class WorkspaceStorage {
             completion(false); return true
         }
         #if PREVIEW_SMOKE && LOCAL_APP
+        smokeQ1Ordinary = (namespace, key, value)
+        #endif
+        enqueue(data, completion: completion)
+        return true
+    }
+
+    private func encodeCheckpoint(values: [String: [String: String]], notifications: WorkspaceNotificationState?) -> Data? {
+        var object: [String: Any] = ["version": notifications == nil ? 1 : 2, "profile": profile.digest, "values": values]
+        if let notifications {
+            guard let native = notifications.encodedObject() else { return nil }
+            object["native"] = ["notifications": native]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object), data.count <= WorkspaceCheckpoint.limit else { return nil }
+        return data
+    }
+
+    private func enqueue(_ data: Data, completion: @escaping (Bool) -> Void) {
+        #if PREVIEW_SMOKE && LOCAL_APP
+        let q1Ordinary = smokeQ1Ordinary
+        smokeQ1Ordinary = nil
         smokeQ1Sequence += 1
         // Bind observation at acceptance; a later hook must never receive an
         // unpaired completion for an earlier write. The disk queue is unchanged.
         let q1Observer = Self.smokeQ1Event
         let q1Sequence = smokeQ1Sequence
-        let q1Ordinary = (namespace: namespace, key: key, value: value)
         smokeQ1Report("accepted", sequence: q1Sequence, ordinary: q1Ordinary,
                       checkpoint: data, observer: q1Observer)
         #endif
@@ -188,7 +221,69 @@ final class WorkspaceStorage {
                 callbacks.forEach { $0(available) }
             }
         }
-        return true
+    }
+
+    /// Capabilities belong to this profile object, never to a page/document or
+    /// persisted engine nonce. A successor generation cannot receive an old ACK.
+    func beginNotifications(generation: UInt64) -> WorkspaceNotificationToken? {
+        guard notificationToken == nil, notificationGeneration.map({ generation > $0 }) ?? true else { return nil }
+        let token = WorkspaceNotificationToken(owner: notificationOwner, profile: profile.identifier, generation: generation)
+        notificationGeneration = generation
+        notificationToken = token
+        return token
+    }
+
+    private func current(_ token: WorkspaceNotificationToken) -> Bool {
+        token == notificationToken && token.matches(owner: notificationOwner, profile: profile.identifier)
+    }
+
+    func readNotifications(_ token: WorkspaceNotificationToken) async -> WorkspaceNotificationRead {
+        guard current(token) else { return .stale }
+        let durable: Bool = await withCheckedContinuation { continuation in flush { continuation.resume(returning: $0) } }
+        guard current(token) else { return .stale }
+        if !durable { notificationBarrierFailed = true }
+        guard durable, !notificationBarrierFailed else { return .unavailable }
+        return .available(revision: notificationRevision, state: notificationState ?? WorkspaceNotificationState(), restored: notificationsRestored)
+    }
+
+    /// Whole typed state replacement shares the existing ordered checkpoint.
+    /// Admission is not durability. nil is an explicit native-only reset.
+    @discardableResult
+    func updateNotifications(_ token: WorkspaceNotificationToken, expectedRevision: UInt64,
+                             next: WorkspaceNotificationState?, completion: @escaping (WorkspaceNotificationWrite) -> Void) -> UInt64? {
+        guard current(token), expectedRevision == notificationRevision, notificationRevision < UInt64.max,
+              let data = encodeCheckpoint(values: values, notifications: next) else { return nil }
+        guard available else { completion(.unavailable(revision: notificationRevision)); return nil }
+        notificationRevision += 1
+        let revision = notificationRevision
+        notificationState = next
+        enqueue(data) { [weak self] durable in
+            guard let self, self.current(token) else { completion(.stale); return }
+            if durable {
+                if revision == self.notificationRevision {
+                    self.notificationsRestored = false
+                    self.notificationBarrierFailed = false
+                }
+                completion(.durable(revision: revision))
+            } else { completion(.unavailable(revision: revision)) }
+        }
+        return revision
+    }
+
+    func flushNotifications(_ token: WorkspaceNotificationToken, completion: @escaping (WorkspaceNotificationWrite) -> Void) {
+        guard current(token) else { completion(.stale); return }
+        let revision = notificationRevision
+        flush { [weak self] durable in
+            guard let self, self.current(token) else { completion(.stale); return }
+            if !durable { self.notificationBarrierFailed = true }
+            completion(durable && !self.notificationBarrierFailed ? .durable(revision: revision) : .unavailable(revision: revision))
+        }
+    }
+
+    func retireNotifications(_ token: WorkspaceNotificationToken, completion: @escaping (UInt64, Bool) -> Void) {
+        guard current(token) else { completion(token.generation, false); return }
+        notificationToken = nil // fence synchronously, before draining accepted writes
+        flush { completion(token.generation, $0) }
     }
 
     /// A bound prevents disk failure from lengthening the existing stop policy.

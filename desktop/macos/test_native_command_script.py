@@ -60,6 +60,84 @@ class NativeCommandScriptTests(unittest.TestCase):
           assert.throws(() => port.connect(callback), /UI owner unavailable/);
         """)
 
+    def test_view_retirement_fences_pending_notification_and_visibility_owners(self):
+        for retirement in ('port.retire(binding)', 'port.retireView()'):
+            with self.subTest(retirement=retirement):
+                self.run_script("""
+                  let resolve, closed = 0, targetCalls = 0, visible = [];
+                  port.connectLifetime(() => closed++);
+                  const visibility = port.connectVisibility(value => visible.push(value));
+                  const targetOwner = port.connectSessionTarget(() => {
+                    targetCalls++; return new Promise(done => resolve=done);
+                  });
+                  port.activateSessionTarget(binding, 'profile');
+                  const target = {version:1, source:'notification-response', request:1,
+                    profile:'profile', ...binding,
+                    target:{session_id:'session', occurrence_id:'store:12'}};
+                  assert.equal(port.dispatchSessionTarget(binding, target), true);
+                  Promise.resolve().then(() => {
+                    assert.equal(targetCalls, 1);
+                    assert.equal(""" + retirement + """, true);
+                    assert.equal(port.retireView(), false);
+                    const count = receipts.length;
+                    // A late native response and stale effect disposers cannot
+                    // reach the retired renderer or publish a settlement.
+                    resolve('opened'); targetOwner(); visibility();
+                    return Promise.resolve().then(() => {
+                      assert.equal(receipts.length, count);
+                      assert.equal(closed, 1);
+                      assert.equal(targetCalls, 1);
+                      assert.equal(port.setVisibility(binding, false), false);
+                      assert.deepEqual(visible, [true]);
+                      assert.equal(port.dispatchSessionTarget(binding, target), false);
+                      assert.equal(port.dispatch(binding, request), false);
+                    });
+                  });
+                """)
+
+    def test_target_correlation_visibility_and_late_async_settlement(self):
+        self.run_script("""
+          let visible = [], resolve, targetCalls = 0;
+          const visibility = port.connectVisibility(next => visible.push(next));
+          assert.deepEqual(visible, [true]);
+          assert.equal(port.setVisibility({...binding, document:'old'}, false), false);
+          assert.equal(port.setVisibility(binding, false), true);
+          assert.deepEqual(visible, [true, false]);
+          const close = port.connectSessionTarget(() => { targetCalls++; return new Promise(done => resolve=done); });
+          assert.equal(port.activateSessionTarget(binding, 'profile'), true);
+          const target = {version:1, source:'notification-response', request:1, profile:'profile', ...binding,
+            target:{session_id:'session', occurrence_id:'store:12'}};
+          assert.equal(port.dispatchSessionTarget(binding, {...target, profile:'wrong'}), false);
+          assert.equal(port.dispatchSessionTarget(binding, target), true);
+          Promise.resolve().then(() => {
+            assert.equal(targetCalls, 1);
+            close(); visibility();
+            resolve('opened');
+            return Promise.resolve();
+          }).then(() => {
+            assert.equal(receipts.filter(r => r.kind==='session_target_settled').length, 0);
+            assert.equal(receipts.filter(r => r.kind==='session_target_retired').length, 1);
+            assert.equal(calls, 0);
+          });
+        """)
+
+    def test_connection_loss_fences_an_already_issued_target(self):
+        self.run_script("""
+          let reject;
+          port.connectSessionTarget(() => new Promise((_, fail) => reject=fail));
+          port.activateSessionTarget(binding, 'profile');
+          const target = {version:1, source:'notification-response', request:1, profile:'profile', ...binding,
+            target:{session_id:'session', occurrence_id:'store:12'}};
+          port.dispatchSessionTarget(binding, target);
+          Promise.resolve().then(() => {
+            port.reportConnectionLost(); reject(Error('late'));
+            return Promise.resolve();
+          }).then(() => {
+            assert.equal(receipts.filter(r => r.kind==='session_target_settled').length, 0);
+            assert.equal(port.dispatchSessionTarget(binding, target), false);
+          });
+        """)
+
     def test_native_retirement_never_notifies_or_reenters_removed_owner(self):
         self.run_script("""
           let notifications = 0;
