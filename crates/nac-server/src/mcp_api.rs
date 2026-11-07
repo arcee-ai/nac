@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use axum::extract::{rejection::JsonRejection, Path as AxumPath, RawQuery, State};
@@ -325,7 +325,9 @@ enum OAuthFlowState {
     Connecting {
         generation: u64,
         authorization_url: String,
+        started_at: std::time::Instant,
         task: Option<tokio::task::JoinHandle<()>>,
+        loopback_listeners: Option<Arc<OAuthCallbackListeners>>,
     },
     Failed,
 }
@@ -335,6 +337,80 @@ type OAuthFlowKey = (PathBuf, String);
 static OAUTH_FLOWS: LazyLock<tokio::sync::Mutex<HashMap<OAuthFlowKey, OAuthFlowState>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 static OAUTH_FLOW_GENERATION: AtomicU64 = AtomicU64::new(1);
+static OAUTH_START_LOCKS: LazyLock<
+    tokio::sync::Mutex<HashMap<OAuthFlowKey, Weak<tokio::sync::Mutex<()>>>>,
+> = LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+// Serialize preparation/publication/task replacement only for the same owner.
+// Weak entries do not retain completed flows or their callback sockets.
+async fn oauth_start_lock(key: &OAuthFlowKey) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = OAUTH_START_LOCKS.lock().await;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(key).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(key.clone(), Arc::downgrade(&lock));
+    lock
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub(crate) enum CallbackTestPhase {
+    PreparingReplacement,
+    WaitingReplacement,
+    Snapshot,
+    PendingFailureRead,
+}
+#[cfg(test)]
+pub(crate) struct CallbackTestGate {
+    pub entered: tokio::sync::Notify,
+    pub release: tokio::sync::Barrier,
+}
+#[cfg(test)]
+type CallbackTestKey = (OAuthFlowKey, CallbackTestPhase);
+#[cfg(test)]
+static CALLBACK_TEST_GATES: LazyLock<
+    std::sync::Mutex<HashMap<CallbackTestKey, std::sync::Arc<CallbackTestGate>>>,
+> = LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+#[cfg(test)]
+pub(crate) struct CallbackTestGuard(CallbackTestKey);
+#[cfg(test)]
+impl Drop for CallbackTestGuard {
+    fn drop(&mut self) {
+        CALLBACK_TEST_GATES.lock().unwrap().remove(&self.0);
+    }
+}
+#[cfg(test)]
+pub(crate) fn callback_test_gate(
+    manager: &SessionManager,
+    name: &str,
+    phase: CallbackTestPhase,
+) -> (CallbackTestGuard, std::sync::Arc<CallbackTestGate>) {
+    let key = (oauth_flow_key(manager, name), phase);
+    let gate = std::sync::Arc::new(CallbackTestGate {
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Barrier::new(2),
+    });
+    assert!(CALLBACK_TEST_GATES
+        .lock()
+        .unwrap()
+        .insert(key.clone(), gate.clone())
+        .is_none());
+    (CallbackTestGuard(key), gate)
+}
+#[cfg(test)]
+async fn callback_test_checkpoint(key: &OAuthFlowKey, phase: CallbackTestPhase) {
+    let gate = CALLBACK_TEST_GATES
+        .lock()
+        .unwrap()
+        .get(&(key.clone(), phase))
+        .cloned();
+    if let Some(gate) = gate {
+        gate.entered.notify_one();
+        gate.release.wait().await;
+    }
+}
 pub const MCP_OAUTH_CALLBACK_ORIGIN_ENV: &str = "NAC_MCP_OAUTH_CALLBACK_ORIGIN";
 
 enum OAuthCallbackTarget {
@@ -1385,16 +1461,34 @@ pub async fn oauth_status_handler(
 ) -> Result<Json<McpOAuthStatusResponse>, ApiError> {
     let endpoint = oauth_endpoint(&manager, &server_name)?;
     let flow_key = oauth_flow_key(&manager, &server_name);
-    let (active_authorization_url, flow_failed) = {
+    let (active_authorization_url, flow_failed, flow_running) = {
         let flows = OAUTH_FLOWS.lock().await;
         match flows.get(&flow_key) {
             Some(OAuthFlowState::Connecting {
-                authorization_url, ..
-            }) => (Some(authorization_url.clone()), false),
-            Some(OAuthFlowState::Failed) => (None, true),
-            None => (None, false),
+                authorization_url,
+                started_at,
+                task,
+                ..
+            }) => (
+                Some(authorization_url.clone()),
+                false,
+                started_at.elapsed() < mcp::MCP_OAUTH_STATE_TTL
+                    && task.as_ref().is_some_and(|task| !task.is_finished()),
+            ),
+            Some(OAuthFlowState::Failed) => (None, true, false),
+            None => (None, false, false),
         }
     };
+    let completing = if let Some(url) = active_authorization_url.as_deref().filter(|_| flow_running)
+    {
+        mcp::mcp_oauth_authorization_is_current(manager.root_cwd(), &server_name, &endpoint, url)
+            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?
+    } else {
+        false
+    };
+    let completing = completing
+        || mcp::mcp_oauth_completion_is_pending(manager.root_cwd(), &server_name, &endpoint)
+            .map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth status is unavailable"))?;
     let (active_authorization_url, pending_authorization_url) = reconcile_oauth_status_urls(
         active_authorization_url,
         mcp::mcp_oauth_pending_authorization_url(manager.root_cwd(), &server_name, &endpoint),
@@ -1405,6 +1499,15 @@ pub async fn oauth_status_handler(
             status: McpOAuthPublicStatus::Connecting,
             message: None,
             authorization_url: Some(active_authorization_url),
+        }));
+    }
+    // Consumed state cannot be replayed or offered as a link. Its still-owned
+    // callback must nevertheless keep the UI polling until exchange settles.
+    if completing && pending_authorization_url.is_none() {
+        return Ok(Json(McpOAuthStatusResponse {
+            status: McpOAuthPublicStatus::Connecting,
+            message: None,
+            authorization_url: None,
         }));
     }
     let status = mcp::mcp_oauth_status(manager.root_cwd(), &server_name, &endpoint)
@@ -1464,21 +1567,36 @@ pub async fn authenticate_oauth_handler(
     let flow_key = oauth_flow_key(&manager, &server_name);
     let request = payload.map(|Json(value)| value).unwrap_or_default();
     let callback = oauth_callback_target(&manager, &server_name)?;
-
-    remove_oauth_flow(&flow_key).await;
+    let start_lock = oauth_start_lock(&flow_key).await;
+    #[cfg(test)]
+    if start_lock.try_lock().is_err() {
+        callback_test_checkpoint(&flow_key, CallbackTestPhase::WaitingReplacement).await;
+    }
+    let _start = start_lock.lock().await;
 
     let (listeners, redirect_uri) = match callback {
         OAuthCallbackTarget::Loopback => {
-            let listeners = OAuthCallbackListeners::bind(1456).await.map_err(|_| {
-                oauth_error(
-                    StatusCode::CONFLICT,
-                    "the local OAuth callback port is unavailable",
-                )
-            })?;
+            let retained = match OAUTH_FLOWS.lock().await.get(&flow_key) {
+                Some(OAuthFlowState::Connecting {
+                    loopback_listeners, ..
+                }) => loopback_listeners.clone(),
+                _ => None,
+            };
+            let listeners = match retained {
+                Some(listeners) => listeners,
+                None => Arc::new(OAuthCallbackListeners::bind(1456).await.map_err(|_| {
+                    oauth_error(
+                        StatusCode::CONFLICT,
+                        "the local OAuth callback port is unavailable",
+                    )
+                })?),
+            };
             (Some(listeners), mcp::MCP_OAUTH_REDIRECT_URI.to_string())
         }
         OAuthCallbackTarget::Remote { redirect_uri } => (None, redirect_uri),
     };
+    #[cfg(test)]
+    callback_test_checkpoint(&flow_key, CallbackTestPhase::PreparingReplacement).await;
     let session = mcp::begin_mcp_oauth_authorization(
         manager.root_cwd(),
         &server_name,
@@ -1493,11 +1611,15 @@ pub async fn authenticate_oauth_handler(
             "MCP OAuth authentication could not start",
         )
     })?;
+    // Preparation failures preserve the current task and accepted exchange.
+    // Core publication has now replaced its exact durable authorization.
+    remove_oauth_flow(&flow_key).await;
     let authorization_url = session.authorization_url().to_string();
     let generation = OAUTH_FLOW_GENERATION.fetch_add(1, Ordering::Relaxed);
     let completion_key = flow_key.clone();
     let completion_endpoint = endpoint.clone();
     let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
+    let loopback_listeners = listeners.clone();
     let task = match listeners {
         Some(listeners) => Some(tokio::spawn(async move {
             if start_receiver.await.is_err() {
@@ -1528,7 +1650,9 @@ pub async fn authenticate_oauth_handler(
         OAuthFlowState::Connecting {
             generation,
             authorization_url: authorization_url.clone(),
+            started_at: std::time::Instant::now(),
             task,
+            loopback_listeners,
         },
     );
     let _ = start_sender.send(());
@@ -1601,6 +1725,23 @@ pub async fn oauth_callback_handler(
             Some(query) => format!("{redirect_uri}?{query}"),
             None => redirect_uri,
         };
+        let pending_before_callback = mcp::mcp_oauth_pending_authorization_url(
+            manager.root_cwd(), &server_name, &endpoint,
+        ).map_err(|_| oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected"))?;
+        let completion_authorization_url = pending_before_callback.clone()
+            .filter(|url| callback_matches_authorization_state(url, &callback_url));
+        let callback_owner = {
+            let flows = OAUTH_FLOWS.lock().await;
+            match flows.get(&flow_key) {
+                Some(OAuthFlowState::Connecting { generation, authorization_url, .. })
+                    if pending_before_callback.as_deref() == Some(authorization_url.as_str())
+                        && callback_matches_authorization_state(authorization_url, &callback_url) =>
+                        Some((*generation, authorization_url.clone())),
+                _ => None,
+            }
+        };
+        #[cfg(test)]
+        callback_test_checkpoint(&flow_key,CallbackTestPhase::Snapshot).await;
         let completion = mcp::complete_mcp_oauth_authorization(
             manager.root_cwd(),
             &server_name,
@@ -1611,10 +1752,14 @@ pub async fn oauth_callback_handler(
         let mut flows = OAUTH_FLOWS.lock().await;
         match completion {
             Ok(()) => {
-                flows.remove(&flow_key);
+                if callback_owner.as_ref().is_some_and(|(generation, _)|
+                    matches!(flows.get(&flow_key), Some(OAuthFlowState::Connecting { generation: current, .. }) if current == generation))
+                {
+                    flows.remove(&flow_key);
+                }
                 Ok::<_, ApiError>(())
             }
-            Err(_) => {
+            Err(error) => {
                 let pending_authorization_url = mcp::mcp_oauth_pending_authorization_url(
                     manager.root_cwd(),
                     &server_name,
@@ -1623,8 +1768,17 @@ pub async fn oauth_callback_handler(
                 .map_err(|_| {
                     oauth_error(StatusCode::BAD_REQUEST, "MCP OAuth callback was rejected")
                 })?;
+                #[cfg(test)]
+                callback_test_checkpoint(&flow_key,CallbackTestPhase::PendingFailureRead).await;
+                let owned_completion = completion_authorization_url.as_ref().filter(|url| {
+                    mcp::mcp_oauth_authorization_is_current(
+                        manager.root_cwd(), &server_name, &endpoint, url,
+                    ).unwrap_or(false)
+                });
+                let expected_authorization_url = pending_authorization_url.as_deref()
+                    .or_else(|| owned_completion.map(String::as_str));
                 let matches_current = callback_matches_pending_authorization(
-                    pending_authorization_url.as_deref(),
+                    expected_authorization_url,
                     &callback_url,
                 );
                 let retryable = mcp::mcp_oauth_callback_is_retryable(
@@ -1634,17 +1788,18 @@ pub async fn oauth_callback_handler(
                     &callback_url,
                 )
                 .unwrap_or(false);
-                if (callback_reports_oauth_error(&callback_url) || !retryable)
-                    && matches_current
+                if let Some(expected) = expected_authorization_url.filter(|_|
+                    (callback_reports_oauth_error(&callback_url) || !retryable) && matches_current)
                 {
-                    match mcp::fail_mcp_oauth_authorization(
+                    match mcp::fail_mcp_oauth_callback(
                         manager.root_cwd(),
                         &server_name,
                         &endpoint,
-                        pending_authorization_url.as_deref(),
+                        expected,
+                        &error,
                     ) {
                         Ok(true) => { flows.insert(flow_key, OAuthFlowState::Failed); }
-                        Ok(false) => { flows.remove(&flow_key); }
+                        Ok(false) => {}
                         Err(error) => eprintln!(
                             "MCP server '{server_name}': failed to clear rejected OAuth authorization: {error:#}"
                         ),
@@ -1676,7 +1831,7 @@ pub async fn oauth_callback_handler(
 }
 
 async fn run_oauth_callback(
-    listeners: OAuthCallbackListeners,
+    listeners: Arc<OAuthCallbackListeners>,
     session: mcp::McpOAuthAuthorizationSession,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + mcp::MCP_OAUTH_STATE_TTL;
@@ -1712,7 +1867,9 @@ async fn run_oauth_callback(
             .await;
             continue;
         }
-        let success = session.handle_callback_url(&callback_url).await.is_ok();
+        let success = tokio::time::timeout_at(deadline, session.handle_callback_url(&callback_url))
+            .await
+            .is_ok_and(|result| result.is_ok());
         let (status, body) = if success {
             (
                 "200 OK",

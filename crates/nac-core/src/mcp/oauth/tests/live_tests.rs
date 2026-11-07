@@ -244,6 +244,7 @@ async fn step_up_tracks_only_missing_scopes_and_accepts_an_omitted_token_scope()
     assert_eq!(profile.pending_scopes, vec!["mcp:write", "mcp:admin"]);
 
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),
@@ -347,6 +348,7 @@ async fn credential_clear_removes_pending_and_dynamic_registration_state() {
     })
     .unwrap();
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "dynamic"),
         path,
         server_name: "dynamic".into(),
@@ -387,6 +389,7 @@ async fn authorization_completing_across_logout_cannot_restore_credentials() {
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let adapter = |logout_generation| OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         path: path.clone(),
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -432,6 +435,7 @@ async fn authorization_setup_paused_across_logout_cannot_publish_callback_state(
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let adapter = |logout_generation| OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         path: path.clone(),
         server_name: "slack".into(),
         endpoint: normalize_endpoint(endpoint).unwrap(),
@@ -481,6 +485,7 @@ async fn authorization_completing_across_delete_and_recreate_cannot_save() {
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let started_before_delete = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
@@ -516,6 +521,7 @@ async fn logout_waits_for_a_refresh_in_progress_and_then_clears_its_token() {
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let refreshing = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
@@ -559,6 +565,7 @@ async fn credential_save_respects_independent_and_refresh_guarded_locking() {
     configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
@@ -637,6 +644,7 @@ async fn credential_save_respects_independent_and_refresh_guarded_locking() {
     })
     .unwrap();
     let guarded_adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),
@@ -953,6 +961,7 @@ async fn scope_step_up_preserves_an_unpublished_live_authorization_state() {
     configure_mcp_oauth(cwd, "slack", endpoint, configuration()).unwrap();
     let path = oauth_store_path(cwd).unwrap();
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
@@ -1019,6 +1028,7 @@ async fn failed_authorization_start_discards_its_unpublished_state() {
     })
     .unwrap();
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path: path.clone(),
         server_name: "slack".into(),
@@ -1235,6 +1245,7 @@ async fn remote_scope_step_up_defers_without_invalidating_an_active_authorizatio
     assert!(published.states.contains_key("replacement"));
 
     let adapter = OAuthProfileStore {
+        completion: CompletionOwnership::default(),
         logout_generation: test_support::logout_generation(&path, "slack"),
         path,
         server_name: "slack".into(),

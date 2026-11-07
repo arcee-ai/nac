@@ -60,6 +60,10 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `main.rs` owns CLI parsing, auth/upgrade/server/worker action dispatch, and
   outermost runtime composition. Library use cases and provider algorithms do
   not belong in the binary.
+- `mcp_api.rs` keeps MCP configuration delivery and OAuth callback/task/listener
+  ownership together above 800 lines. Per-owner start serialization and joined
+  callback replacement share this transport lifecycle; durable profile/state
+  fencing remains in core, and route tests live in sibling test modules.
 - `managed_github.rs` is the HTTP/device-login/clone transport adapter plus the
   Git credential-helper wiring required by that flow. Provider, credential
   persistence, and clone process behavior stay in `nac-managed`.

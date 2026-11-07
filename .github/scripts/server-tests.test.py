@@ -207,6 +207,9 @@ class Controls(unittest.TestCase):
                            original.replace("test-threads = 4", "test-threads = 1"),
                            original.replace("max-threads = 1", "max-threads = 2"),
                            original.replace(runner.CONTROL_LISTENER_FILTER, "all()"),
+                           original.replace(runner.OAUTH_LOOPBACK_FILTER, "all()"),
+                           original.replace("loopback_retry_reuses_only_its_own_live_callback_listener|", ""),
+                           original.replace('test-group = "oauth-loopback-port1456"', 'test-group = "@global"'),
                            original.replace("failed_listener_bind_keeps_accepted_candidate_in_maintenance|", ""),
                            original.replace(")$/)", "|unrelated_test)$/)"),
                            original.replace('test-group = "managed-control-port3211"', 'test-group = "@global"'),
@@ -232,10 +235,12 @@ class Controls(unittest.TestCase):
         self.assertEqual(runner.CONTROL_LISTENER_FILTER,
                          'package(=nac-server) & test(/^managed_control::tests::('
                          + '|'.join(runner.CONTROL_LISTENER_TESTS) + ')$/)')
-        self.assertEqual(runner.POLICY['test-groups'], {'managed-control-port3211': {'max-threads': 1}})
+        self.assertEqual(runner.POLICY['test-groups'], {'managed-control-port3211': {'max-threads': 1},
+                                                        'oauth-loopback-port1456': {'max-threads': 1}})
         self.assertEqual(runner.POLICY['profile']['ci']['test-threads'], 4)
         self.assertEqual(runner.POLICY['profile']['ci']['overrides'],
-                         [{'filter': runner.CONTROL_LISTENER_FILTER, 'test-group': 'managed-control-port3211'}])
+                         [{'filter': runner.CONTROL_LISTENER_FILTER, 'test-group': 'managed-control-port3211'},
+                          {'filter': runner.OAUTH_LOOPBACK_FILTER, 'test-group': 'oauth-loopback-port1456'}])
         fixed_config_files = {str(path.relative_to(runner.ROOT)) for path in
                               (runner.ROOT / 'crates/nac-server/src').rglob('*.rs')
                               if re.search(r'managed_control_bind:.*3211', path.read_text())}
@@ -247,6 +252,22 @@ class Controls(unittest.TestCase):
                               re.split(r'(?m)^(?:async )?fn ', delivery)[1:]}
         control_consumer = delivery_functions['version_two_managed_repair_holds_upgrade_admission_until_completion']
         self.assertNotIn('serve_with_policy(', control_consumer)
+
+    def test_loopback_group_matches_only_the_two_real_callback_port_owners(self):
+        source = (runner.ROOT / 'crates/nac-server/src/tests/mcp_oauth/loopback.rs').read_text()
+        functions = {part.split('(', 1)[0]: part for part in
+                     re.split(r'(?m)^(?:async )?fn ', source)[1:]}
+        owners = {name for name, body in functions.items()
+                  if 'loopback_case(' in body.split('{', 1)[1]}
+        self.assertEqual(owners, set(runner.OAUTH_LOOPBACK_TESTS))
+        self.assertEqual(len(owners), 2)
+        self.assertIn('127.0.0.1:1456', source)
+        self.assertEqual(runner.OAUTH_LOOPBACK_FILTER,
+                         'package(=nac-server) & test(/^tests::mcp_oauth::loopback::('
+                         + '|'.join(runner.OAUTH_LOOPBACK_TESTS) + ')$/)')
+        self.assertEqual(runner.POLICY['profile']['ci']['retries'], 0)
+        self.assertEqual(runner.POLICY['profile']['ci']['test-threads'], 4)
+        self.assertFalse(runner.POLICY['profile']['ci']['fail-fast'])
 
     def test_runtime_rejects_every_compiler_or_workspace_root(self):
         with tempfile.TemporaryDirectory() as d:

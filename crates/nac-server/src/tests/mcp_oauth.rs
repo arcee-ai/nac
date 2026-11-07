@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "mcp_oauth/completion.rs"]
+mod completion;
+#[path = "mcp_oauth/loopback.rs"]
+mod loopback;
+
 struct OAuthEnvRestore {
     values: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
