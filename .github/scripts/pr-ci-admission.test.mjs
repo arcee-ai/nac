@@ -1,3 +1,4 @@
+import {reverseNativeQualification} from './native-qualification-wiring.mjs';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -9,6 +10,7 @@ import {aptProducerSteps} from './browser-apt-wiring.mjs';
 import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
+reverseNativeQualification(stable);
 const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
 const sealedPins={
   ".github/scripts/ci-admission.py": "afa1c74728cdf5646de034a553c32bc5af6552ecc6fdf0bacab67eca31aef04a",

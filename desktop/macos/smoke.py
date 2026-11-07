@@ -99,8 +99,9 @@ def main():
     app, output = map(lambda value: Path(value).resolve(), sys.argv[1:])
     output.mkdir(parents=True, exist_ok=True)
     selection = os.environ.get('NAC_MAC_SMOKE_SCENARIOS')
-    scenarios = tuple(selection.split(',')) if selection else SCENARIOS
-    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(SCENARIOS)
+    available = SCENARIOS + (('ci-terminal',) if os.environ.get('NAC_MAC_CI_TERMINAL') == '1' else ())
+    scenarios = tuple(selection.split(',')) if selection else available
+    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(available)
     metadata = {
         'requested_scenarios': scenarios,
         'full_scenario_run': scenarios == SCENARIOS,
@@ -168,7 +169,7 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
-                    if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
+                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)

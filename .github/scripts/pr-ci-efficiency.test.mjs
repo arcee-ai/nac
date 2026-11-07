@@ -11,6 +11,54 @@ const YAML = require("yaml");
 const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
 const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };
+
+test("exact native supplier qualification is explicit, bounded and separate from publication", () => {
+  const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
+  const input = stable.on.workflow_dispatch.inputs.native_qualification;
+  assert.equal(input.default, "none");
+  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26"]);
+  const caller = stable.jobs["native-qualification"];
+  assert.match(caller.if, /github.event_name == 'workflow_dispatch'/);
+  assert.match(caller.if, /startsWith\(github.ref, 'refs\/heads\/codex\/'\)/);
+  assert.match(caller.if, /inputs.native_qualification == 'all-341-macos26'/);
+  assert.match(caller.if, /inputs.native_qualification == 'all-343-macos26'/);
+  assert.equal(caller.with["harness-sha"], "${{ needs.prepare.outputs.sha }}");
+  assert.equal(caller.uses, "./.github/workflows/macos-qualification.yml");
+  assert.equal(requiredJobs.includes("native-qualification"), false);
+  assert.match(stable.jobs.publish.if, /github.event_name == 'push'/);
+  assert.match(stable.jobs.publish.if, /startsWith\(github.ref, 'refs\/tags\/v'\)/);
+  const exact = workflow("macos-qualification");
+  assert.deepEqual(exact.permissions, { contents: "read" });
+  assert.deepEqual(Object.keys(exact.jobs).sort(), ["native", "resolve"]);
+  assert.equal(exact.jobs.native.strategy, undefined);
+  assert.equal(exact.jobs.native["timeout-minutes"], 40);
+  const checkouts = exact.jobs.native.steps.filter(step => step.uses?.startsWith("actions/checkout@"));
+  assert.equal(checkouts.length, 4);
+  assert.deepEqual(checkouts.map(step => step.with.path), ["ci-harness", "qualification-target", "qualification-tests", "qualification-protocol"]);
+  assert.ok(checkouts.every(step => step.with["persist-credentials"] === false));
+  assert.equal(checkouts[0].with.ref, "${{ inputs.harness-sha }}");
+  assert.equal(checkouts[1].with.ref, "${{ needs.resolve.outputs.source_sha }}");
+  assert.ok(checkouts.slice(0, 2).every(step => step.if === undefined));
+  assert.equal(checkouts[2].if, "needs.resolve.outputs.test_source_sha != ''");
+  assert.equal(checkouts[3].if, "needs.resolve.outputs.protocol_source_sha != ''");
+  assert.equal(checkouts[2].with.ref, "${{ needs.resolve.outputs.test_source_sha }}");
+  assert.equal(checkouts[3].with.ref, "${{ needs.resolve.outputs.protocol_source_sha }}");
+  assert.ok(exact.jobs.native.steps.some(step => step.if === "always()" && step.uses?.startsWith("actions/upload-artifact@")));
+  const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
+  assert.equal(catalog["all-341-macos26"].source_sha, "1a4f9c31f27b4656897673084f3440e05373393d");
+  assert.equal(catalog["all-341-macos26"].profile, "macos26");
+  assert.equal(catalog["all-343-macos26"].source_sha, "f4832ed44f948a88170f5d3bc25322852dbce347");
+  assert.equal(catalog["all-343-macos26"].scenario_count, 8);
+  assert.equal(catalog["all-351-macos14"].source_sha, "fa94a859b648cb36fbdcb251bfe4bc9541de3f48");
+  assert.equal(catalog["all-351-macos14"].profile, "macos14");
+  assert.equal(catalog["all-352-macos26"].source_sha, "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1");
+  assert.equal(catalog["all-352-macos26"].phase_count, 6);
+  assert.equal(catalog["all-342-startup-macos26"].source_sha, "d443a2aca506def2817b9afc0c9a20a75f5c4b5d");
+  assert.equal(catalog["all-342-startup-macos26"].test_source_sha, "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81");
+  assert.equal(catalog["all-342-startup-macos26"].protocol_source_sha, "25046f450110d1b795d529d046d2c1deee880877");
+  assert.deepEqual(catalog["all-342-startup-macos26"].scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
+});
+
 const quality = () => ({
   ...Object.fromEntries(qualityJobs.map(job => [job, { result: "success" }])),
   prepare: { result: "success", outputs: { sha, run: "true" } },
