@@ -114,7 +114,7 @@ def main():
     sys.path.insert(0, str(roots['H'] / 'desktop/macos'))
     import ci
     import ci_startup as startup
-    from ci_paths_budget import Bound, using
+    from ci_paths_budget import Bound, active, using
     from ci_qualifications import require_checkout
     from ci_support import export_evidence, qualify_toolchain, redact_values, require_console
     from ci_xctest import require_generated_runner, runner_environment
@@ -154,7 +154,8 @@ def main():
             write(evidence / 'one-onboarding.json', report)
 
     def bound():
-        return clock.cleanup if clock.cleaning else clock.work
+        current = active()
+        return clock.cleanup if (current is not None and current.kind == 'cleanup') or clock.cleaning else clock.work
 
     def command(argv, cwd=roots['H']):
         with using(bound()):
@@ -208,7 +209,8 @@ def main():
         report['phases'].append(phase)
         save()
         try:
-            with using(clock.work):
+            operation = clock.work if any(x in argv for x in ('build-for-testing', 'test-without-building')) else bound()
+            with using(operation):
                 ci.run(argv, log, cap, cwd=cwd, env=env,
                        abort=lambda: bool(STOP) or (abort is not None and abort()))
                 if 'build-for-testing' in argv:
@@ -250,7 +252,9 @@ def main():
                 require_checkout(root, pair[key])
             # A reused genuine package is inspected, never built or re-signed.
             contract = startup.test_contract(roots['Q'])
-            report['package_before'] = contract.inspect_normal_package(str(manifest), str(app), str(roots['P']), product_sha=pair['P'])
+            report['package_before'] = startup.package_contract(contract, 'inspect_normal_package',
+                [str(manifest), str(app), str(roots['P'])], dict(product_sha=pair['P']),
+                tests=roots['Q'], directory=evidence, name='package-before', run=run)
             selection = materialize_project(roots['H'], pair['H'], startup_root=roots['Q'], startup_sha=pair['Q'],
                 startup_source_sha256=pair['q_swift_sha256'], output=output / 'startup-project')
             report['selection'] = selection['receipt']
@@ -274,7 +278,9 @@ def main():
                 run=run, command=command, native_report=native_report)
             clock.cleaning = True
             report['console_after'] = console('after')
-            report['package_after'] = contract.inspect_normal_package(str(manifest), str(app), str(roots['P']), product_sha=pair['P'])
+            report['package_after'] = startup.package_contract(contract, 'inspect_normal_package',
+                [str(manifest), str(app), str(roots['P'])], dict(product_sha=pair['P']),
+                tests=roots['Q'], directory=evidence, name='package-after', run=run)
             require(report['package_before'] == report['package_after'], 'package admission changed')
             require(not any(profiles.iterdir()), 'unknown/retained owned profile; stop')
             profiles.rmdir()

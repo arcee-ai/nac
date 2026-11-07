@@ -1,6 +1,6 @@
 {
   "scope": "Q04c-on-Pff8-T7013-onboarding-only",
-  "H": "15d4fbe32ce4aca9633011e720ce9b903aa678bd",
+  "H": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "P": "ff8c9609abf7bf7ddabe983c96ff31cf80362956",
   "Q": "04c073bbbead6f4077da0199bacd542e45cf4e57",
   "R_not_executed": "25046f450110d1b795d529d046d2c1deee880877",
@@ -10,5 +10,6 @@
   "sdk_controller": "2cee2f42074a6d7948ca94133ff0e743368a8ae5",
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "q_swift_sha256": "0204753ad10fe6d02045991aa8ad011f39c6142c427ecd2733eb8bbb1a90a6b1",
-  "host_image": "20261102.0473.1"
+  "host_image": "20261102.0473.1",
+  "H_preparation_parent": "15d4fbe32ce4aca9633011e720ce9b903aa678bd"
 }
