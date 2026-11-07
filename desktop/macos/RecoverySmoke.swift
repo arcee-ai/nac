@@ -94,6 +94,19 @@ final class RecoverySmoke {
             #endif
             evidence["baseline"] = ["pid": baselinePID, "launch": baselineLaunch ?? "", "binding": baselineBinding ?? [:]]
         }
+        #if LOCAL_APP
+        if take("engine-crash") {
+            let current = app.commands?.smokeSnapshot["binding"] as? NSDictionary
+            let bound = baselineBinding.map { current?.isEqual(to: $0) == true } == true
+            let admitted = app.canRecoverWorkspace && baselinePID > 0 &&
+                baselinePID == app.engine.pid && baselineLaunch != nil && bound &&
+                app.commands?.smokeSnapshot["ready"] as? Bool == true
+            let issued = baselineLaunch.map { admitted && app.engine.crashOwnedEngineForSmoke(expectedIncarnation: $0) } ?? false
+            evidence["engine_fault_requested"] = issued
+            evidence["engine_fault_refused"] = !issued
+            evidence["fault_kind"] = "owned-engine-sigkill-request"
+        }
+        #endif
         #if !LOCAL_APP
         if take("provider-hold") { app.provider.holdResponses = true }
         if take("provider-release") { app.provider.releaseResponses() }
@@ -208,6 +221,10 @@ final class RecoverySmoke {
 
     private func publish() {
         evidence["recovery"] = app.recovery.smokeSnapshot
+        #if LOCAL_APP
+        // Keep the old run's exact reap witness through the explicit successor.
+        if let fact = app.engine.smokeFaultReceipt { evidence["engine_fault"] = fact }
+        #endif
         evidence["engine_pid"] = app.engine.pid
         evidence["launch"] = app.engine.receipt?.incarnation
         evidence["endpoint"] = app.engine.receipt?.endpoint
