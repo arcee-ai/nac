@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import CryptoKit
 import CoreFoundation
@@ -120,6 +121,70 @@ struct StartupPaths {
     }
 }
 // END PATH POLICY
+
+// BEGIN NATIVE FOLDER POLICY (compiled verbatim with inert projections)
+private enum StartupNativeFolderPolicy {
+    enum Surface: String { case form, panel, goTo }
+
+    static func surface(_ expected: Surface, windows: Int, rootSheets: Int,
+                        nestedSheets: Int, allSheets: Int) -> Bool {
+        guard windows == 1 else { return false }
+        switch expected {
+        case .form: return rootSheets == 0 && nestedSheets == 0 && allSheets == 0
+        case .panel: return rootSheets == 1 && nestedSheets == 0 && allSheets == 1
+        case .goTo: return rootSheets == 1 && nestedSheets == 1 && allSheets == 2
+        }
+    }
+
+    // Opaque public AX identities in the actor, inert scalar identities in tests.
+    // Accepted identities never rebind, even after a panel disappears.
+    struct Binding<Token: Equatable> {
+        private var root: Token?
+        private var panel: Token?
+        private var goTo: Token?
+
+        mutating func accept(_ surface: Surface, root candidateRoot: Token,
+                             panel candidatePanel: Token?, goTo candidateGoTo: Token?) -> Bool {
+            guard root == nil || root == candidateRoot else { return false }
+            switch surface {
+            case .form:
+                guard candidatePanel == nil && candidateGoTo == nil else { return false }
+            case .panel:
+                guard root != nil, let candidatePanel, candidateGoTo == nil,
+                      panel == nil || panel == candidatePanel else { return false }
+            case .goTo:
+                guard let candidatePanel, let candidateGoTo, panel == candidatePanel,
+                      goTo == nil || goTo == candidateGoTo else { return false }
+            }
+            root = candidateRoot
+            if let candidatePanel { panel = candidatePanel }
+            if let candidateGoTo { goTo = candidateGoTo }
+            return true
+        }
+    }
+
+    static func usable(exists: Bool, enabled: Bool, hittable: Bool,
+                       frame: CGRect, owner: CGRect) -> Bool {
+        let numbers = [frame.minX, frame.minY, frame.width, frame.height,
+                       owner.minX, owner.minY, owner.width, owner.height]
+        return exists && enabled && hittable && numbers.allSatisfy { $0.isFinite }
+            && frame.size.width > 0 && frame.size.height > 0 && owner.size.width > 0 && owner.size.height > 0
+            && frame.intersects(owner)
+    }
+
+    static func focused(pid: Int32, expectedPID: Int32, role: String, focused: Bool,
+                        frame: CGRect, expectedFrame: CGRect, value: String,
+                        expectedValue: String) -> Bool {
+        pid > 0 && pid == expectedPID && role == "AXTextField" && focused
+            && usable(exists: true, enabled: true, hittable: true, frame: frame, owner: expectedFrame)
+            && frame == expectedFrame && value == expectedValue
+    }
+
+    static func selected(_ label: String, workspace: String) -> Bool {
+        label == "Choose Working Folder: " + workspace
+    }
+}
+// END NATIVE FOLDER POLICY
 
 // BEGIN ONBOARDING TITLE (compiled verbatim; no AX access in this decision)
 private enum StartupOnboardingTitle {
@@ -308,7 +373,7 @@ final class StartupJourneys: XCTestCase {
     private var observations: [[String: Any]] = []
     // Root-nominated356 contract. The actor observes the unique UI message;
     // actual typed receipt/source inclusion is independently bound by354.
-    private let futureRecovery = "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."
+    private let futureRecovery = "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."
 
     private func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         if !condition() { throw NSError(domain: "NAC342", code: 1,
@@ -470,6 +535,105 @@ final class StartupJourneys: XCTestCase {
         observations.append(try console())
     }
 
+    private struct AXIdentity: Equatable {
+        let element: AXUIElement
+        static func == (left: Self, right: Self) -> Bool { CFEqual(left.element, right.element) }
+    }
+
+    private func axRead(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementSetMessagingTimeout(element, 1) == .success else { return nil }
+        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+    }
+
+    private func axElements(_ element: AXUIElement, _ name: String) -> [AXUIElement]? {
+        guard let values = axRead(element, name) as? [AnyObject], values.count <= 128,
+              values.allSatisfy({ CFGetTypeID($0) == AXUIElementGetTypeID() }) else { return nil }
+        return values.map { $0 as! AXUIElement }
+    }
+
+    private func axFrame(_ element: AXUIElement) -> CGRect? {
+        guard let position = axRead(element, kAXPositionAttribute), let size = axRead(element, kAXSizeAttribute),
+              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        let p = position as! AXValue, s = size as! AXValue
+        var point = CGPoint.zero, dimensions = CGSize.zero
+        guard AXValueGetType(p) == .cgPoint, AXValueGetType(s) == .cgSize,
+              AXValueGetValue(p, .cgPoint, &point), AXValueGetValue(s, .cgSize, &dimensions) else { return nil }
+        return CGRect(origin: point, size: dimensions)
+    }
+
+    // Select the exact root, then only its direct public AXSheet children.
+    // Public AX handles pin sheet incarnations; a fresh same-shaped panel is
+    // not a continuation of this picker. Unsupported hierarchy fails closed.
+    private func axSurface(_ surface: StartupNativeFolderPolicy.Surface, pid: pid_t, frame: CGRect,
+                           binding: inout StartupNativeFolderPolicy.Binding<AXIdentity>) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        guard AXUIElementSetMessagingTimeout(app, 1) == .success,
+              let windows = axElements(app, kAXWindowsAttribute) else { return nil }
+        let roots = windows.filter { axRead($0, kAXRoleAttribute) as? String == "AXWindow" && axFrame($0) == frame }
+        guard roots.count == 1 else { return nil }
+        let root = roots[0]
+        func sheets(_ owner: AXUIElement) -> [AXUIElement]? {
+            guard let children = axElements(owner, kAXChildrenAttribute) else { return nil }
+            var result: [AXUIElement] = []
+            for child in children {
+                guard let role = axRead(child, kAXRoleAttribute) as? String else { return nil }
+                if role == "AXSheet" { result.append(child) }
+            }
+            return result
+        }
+        guard let rootSheets = sheets(root), rootSheets.count == (surface == .form ? 0 : 1) else { return nil }
+        let panel = rootSheets.first
+        let nested: [AXUIElement]
+        if let panel {
+            guard let children = sheets(panel) else { return nil }
+            nested = children
+        } else { nested = [] }
+        guard nested.count == (surface == .goTo ? 1 : 0) else { return nil }
+        let goTo = nested.first
+        let allowed = [root, panel, goTo].compactMap { $0 }
+        guard allowed.allSatisfy({ element in
+            var owner: pid_t = 0
+            return AXUIElementGetPid(element, &owner) == .success && owner == pid
+        }), windows.allSatisfy({ window in allowed.contains { CFEqual(window, $0) } }),
+              binding.accept(surface, root: AXIdentity(element: root),
+                panel: panel.map { AXIdentity(element: $0) }, goTo: goTo.map { AXIdentity(element: $0) }) else { return nil }
+        return goTo ?? panel ?? root
+    }
+
+    // Public, read-only AX probe scoped to the already admitted app PID. No
+    // actions, attribute writes, trust prompts, KVC or private XCTest attributes.
+    // macOS has no public XCUIElement.hasFocus property. Missing AX admission,
+    // unsupported attributes or a different focused element fail closed.
+    @MainActor
+    private func focusedGoToField(_ field: XCUIElement, pid: pid_t, sheet: AXUIElement) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        guard AXUIElementSetMessagingTimeout(app, 1) == .success else { return false }
+        guard let value = axRead(app, kAXFocusedUIElementAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+        let focused = value as! AXUIElement // Type checked before CF bridging.
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(focused, &owner) == .success,
+              let role = axRead(focused, kAXRoleAttribute) as? String,
+              let flag = axRead(focused, kAXFocusedAttribute) as? NSNumber,
+              CFGetTypeID(flag) == CFBooleanGetTypeID(),
+              let text = axRead(focused, kAXValueAttribute) as? String,
+              let expected = field.value as? String, let frame = axFrame(focused) else { return false }
+        var ancestor = focused
+        var attached = false
+        for _ in 0..<16 {
+            if CFEqual(ancestor, sheet) { attached = true; break }
+            guard let parent = axRead(ancestor, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+            let next = parent as! AXUIElement
+            if CFEqual(next, ancestor) { break }
+            ancestor = next
+        }
+        guard attached else { return false }
+        return StartupNativeFolderPolicy.focused(pid: owner, expectedPID: pid, role: role,
+            focused: flag.boolValue, frame: frame,
+            expectedFrame: field.frame, value: text, expectedValue: expected)
+    }
+
     @MainActor
     private func queryDiagnostic(_ ui: XCUIApplication, guardTarget: () throws -> Void,
                                  binding: [String: Any], scenario: String) throws {
@@ -604,10 +768,58 @@ final class StartupJourneys: XCTestCase {
         let number = try XCTUnwrap((owned[0][kCGWindowNumber as String] as? NSNumber)?.intValue)
         targetWindow = number
         var operations: [String] = []
+        let rootWindow = ui.windows.element(boundBy: 0)
+        var folderSurface: StartupNativeFolderPolicy.Surface = .form
+        var folderBinding = StartupNativeFolderPolicy.Binding<AXIdentity>()
+        func panel() throws -> XCUIElement {
+            let sheets = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
+            try require(sheets.count == 1, "Owned root has no unique attached folder panel")
+            return sheets[0]
+        }
+        func goToField() throws -> XCUIElement {
+            let sheets = try panel().children(matching: .sheet).allElementsBoundByAccessibilityElement
+            try require(sheets.count == 1, "Folder panel has no unique attached Go to Folder sheet")
+            let fields = sheets[0].textFields.matching(NSPredicate(format: "label == %@", "Go to the folder:"))
+                .allElementsBoundByAccessibilityElement
+            try require(fields.count == 1, "Owned Go to Folder field absent or ambiguous")
+            let field = fields[0]
+            try require(StartupNativeFolderPolicy.usable(exists: field.exists, enabled: field.isEnabled,
+                hittable: field.isHittable, frame: field.frame, owner: sheets[0].frame),
+                "Owned Go to Folder field is not actionable")
+            return field
+        }
+        func validateFolderSurface() throws {
+            let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
+            let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
+            try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
+                rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count),
+                "Foreign, ambiguous or stale native folder surface")
+            if folderSurface != .form {
+                let sheet = try panel()
+                try require(sheet.exists && !sheet.frame.isEmpty && sheet.frame.intersects(rootWindow.frame),
+                    "Folder panel is not attached to the owned root")
+                if folderSurface == .panel {
+                    try require(StartupNativeFolderPolicy.usable(exists: sheet.exists, enabled: sheet.isEnabled,
+                        hittable: sheet.isHittable, frame: sheet.frame, owner: rootWindow.frame),
+                        "Owned folder panel is not actionable")
+                }
+            }
+            let ownedAX = try XCTUnwrap(axSurface(folderSurface, pid: running.processIdentifier,
+                frame: rootWindow.frame, binding: &folderBinding), "Public AX cannot bind the exact owned folder surface")
+            if folderSurface == .goTo {
+                let field = try goToField()
+                try require(focusedGoToField(field, pid: running.processIdentifier, sheet: ownedAX),
+                    "Public AX cannot prove the owned Go to Folder field has keyboard focus")
+            }
+        }
         func guardTarget() throws {
             try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+            try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                "Frozen fixture configuration changed")
+            if fixture.scenario == "configuredLocal" { try validateFolderSurface() }
         }
-        func dispatch(_ name: String, action: () -> Void) throws {
+        func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
+                      action: () throws -> Void) throws {
             try guardTarget()
             let index = operations.count + 1
             func retain(_ stage: String) throws {
@@ -619,8 +831,9 @@ final class StartupJourneys: XCTestCase {
                     name: String(format: "nac342-dispatch-v1-%02d-%@", index, stage))
             }
             try retain("before")
-            action()
+            try action()
             operations.append(name)
+            if let after { folderSurface = after }
             try guardTarget()
             try retain("after")
         }
@@ -673,16 +886,54 @@ final class StartupJourneys: XCTestCase {
             })
             if fixture.scenario == "configuredLocal" {
                 try click(ui.webViews.buttons, "Get Started")
-                try click(ui.webViews.buttons, fixture.home)
-                let fields = ui.webViews.textFields.matching(NSPredicate(format: "placeholderValue == %@", "/path/to/directory"))
-                try require(fields.firstMatch.waitForExistence(timeout: 15) && fields.count == 1
-                    && fields.firstMatch.isHittable, "Shared folder input absent/ambiguous")
-                try dispatch("click:folder-input") { fields.firstMatch.click() }
-                try dispatch("key:command-a-folder-input") { fields.firstMatch.typeKey("a", modifierFlags: .command) }
-                try dispatch("type:owned-workspace") { fields.firstMatch.typeText(fixture.workspace) }
-                try dispatch("key:return-folder-input") { fields.firstMatch.typeKey(.return, modifierFlags: []) }
-                try require(text("Selected: " + fixture.workspace).waitForExistence(timeout: 20), "Folder selection unconfirmed")
-                try click(ui.webViews.buttons, "Select")
+                func folderControl(_ path: String) throws -> XCUIElement {
+                    let controls = rootWindow.webViews.buttons.matching(
+                        NSPredicate(format: "label == %@", "Choose Working Folder: " + path))
+                    try require(controls.firstMatch.waitForExistence(timeout: 10), "Working Folder control missing")
+                    let matches = controls.allElementsBoundByAccessibilityElement
+                    try require(matches.count == 1, "Working Folder control ambiguous")
+                    let control = matches[0]
+                    try require(StartupNativeFolderPolicy.usable(exists: control.exists, enabled: control.isEnabled,
+                        hittable: control.isHittable, frame: control.frame, owner: rootWindow.frame),
+                        "Working Folder control is not actionable")
+                    return control
+                }
+                let initial = try folderControl(fixture.home)
+                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel) {
+                    initial.click()
+                    try require(rootWindow.children(matching: .sheet).firstMatch.waitForExistence(timeout: 10),
+                        "Owned native folder panel did not appear")
+                }
+                try dispatch("key:command-shift-g-native-folder", after: .goTo) {
+                    try panel().typeKey("g", modifierFlags: [.command, .shift])
+                    let nested = try panel().children(matching: .sheet)
+                    try require(nested.firstMatch.waitForExistence(timeout: 10), "Owned Go to Folder sheet did not appear")
+                }
+                try dispatch("key:command-a-native-go-to-folder") {
+                    try goToField().typeKey("a", modifierFlags: .command)
+                }
+                try dispatch("type:owned-workspace") {
+                    let field = try goToField()
+                    field.typeText(fixture.workspace)
+                    try require(field.value as? String == fixture.workspace, "Go to Folder value differs from declared workspace")
+                }
+                let goTo = try panel().children(matching: .sheet).element(boundBy: 0)
+                try dispatch("key:return-native-go-to-folder", after: .panel) {
+                    try goToField().typeKey(.return, modifierFlags: [])
+                    try require(goTo.waitForNonExistence(timeout: 10), "Owned Go to Folder sheet survived submission")
+                }
+                let selectedPanel = try panel()
+                let select = selectedPanel.buttons.matching(NSPredicate(format: "label == %@", "Select"))
+                try require(select.firstMatch.waitForExistence(timeout: 10) && select.count == 1
+                    && select.firstMatch.isEnabled && select.firstMatch.isHittable,
+                    "Owned native Select absent or ambiguous")
+                try dispatch("click:native-folder-Select", after: .form) {
+                    select.element(boundBy: 0).click()
+                    try require(selectedPanel.waitForNonExistence(timeout: 10), "Owned native folder panel survived selection")
+                }
+                let filled = try folderControl(fixture.workspace)
+                try require(StartupNativeFolderPolicy.selected(filled.label, workspace: fixture.workspace),
+                    "Exact declared workspace did not reach the normal project form")
                 try click(ui.webViews.buttons, "Create Project")
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1

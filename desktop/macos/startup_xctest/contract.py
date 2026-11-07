@@ -18,7 +18,7 @@ TEST_ID = 'StartupJourneys/testOrdinaryStartup'
 FUTURE_FAILURE_CODE = 'store_schema_incompatible'
 FUTURE_FAILURE_STAGE = 'startup'
 FUTURE_RECOVERY_MESSAGE = (
-    'The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
+    'The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. '
     'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.'
 )
 ENVIRONMENT = {'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',

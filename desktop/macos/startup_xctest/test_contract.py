@@ -488,6 +488,16 @@ def fixture():
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_future_recovery_matches_shipped_p9_sentence(self):
+        shipped = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. '
+                   'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
+        typed = {'kind': 'failed', 'version': 1, 'code': 'store_schema_incompatible', 'stage': 'startup'}
+        require_future_recovery(typed, shipped)
+        self.assertEqual(FUTURE_RECOVERY_MESSAGE, shipped)
+        obsolete = shipped.replace('compatible version of NAC', 'compatible newer NAC app')
+        with self.assertRaises(ValueError):
+            require_future_recovery(typed, obsolete)
+
     def test_nominated_serving_failure_and_exact_guidance(self):
         # Synthetic observation only, not a producer implementation claim.
         failure = {'kind': 'failed', 'version': 1, 'code': 'store_schema_incompatible', 'stage': 'startup'}
@@ -737,6 +747,136 @@ print(json.dumps({'source':clean_source(root),'flags':NORMAL_FLAGS,
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.admit(config)
 
+
+
+@unittest.skipUnless(os.environ.get('NAC342_SWIFT_PANEL_PROOF') == '1',
+                     'Compile-verbatim native-folder policy proof not requested')
+class NativeFolderPolicyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-panel-policy-')
+        cls.addClassCleanup(cls.temporary.cleanup)
+        root = Path(cls.temporary.name)
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        source = source.split('// BEGIN NATIVE FOLDER POLICY', 1)[1].split('// END NATIVE FOLDER POLICY', 1)[0]
+        source = source[source.index('\n') + 1:]
+        driver = r"""
+func scalar(_ value: Any) -> Double {
+    if let number = value as? NSNumber { return number.doubleValue }
+    return value as? String == "nan" ? .nan : .infinity
+}
+func rectangle(_ raw: Any) -> CGRect {
+    let a = raw as! [Any]
+    return CGRect(x: scalar(a[0]), y: scalar(a[1]), width: scalar(a[2]), height: scalar(a[3]))
+}
+let rows = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [[String: Any]]
+let results: [Any] = rows.map { row in
+    switch row["mode"] as! String {
+    case "surface":
+        return StartupNativeFolderPolicy.surface(.init(rawValue: row["surface"] as! String)!,
+            windows: row["windows"] as! Int, rootSheets: row["root"] as! Int,
+            nestedSheets: row["nested"] as! Int, allSheets: row["all"] as! Int)
+    case "usable":
+        return StartupNativeFolderPolicy.usable(exists: row["exists"] as! Bool,
+            enabled: row["enabled"] as! Bool, hittable: row["hittable"] as! Bool,
+            frame: rectangle(row["frame"]!), owner: CGRect(x: 0, y: 0, width: 500, height: 500))
+    case "binding":
+        var binding = StartupNativeFolderPolicy.Binding<String>()
+        return (row["steps"] as! [[String: Any]]).map { step in
+            binding.accept(.init(rawValue: step["surface"] as! String)!, root: step["root"] as! String,
+                panel: step["panel"] as? String, goTo: step["goTo"] as? String)
+        }
+    case "focus":
+        return StartupNativeFolderPolicy.focused(pid: Int32(row["pid"] as! Int),
+            expectedPID: 123, role: row["role"] as! String, focused: row["focused"] as! Bool,
+            frame: rectangle(row["frame"]!), expectedFrame: CGRect(x: 10, y: 20, width: 100, height: 30),
+            value: row["value"] as! String, expectedValue: "/owned/workspace with spaces")
+    default:
+        return StartupNativeFolderPolicy.selected(row["label"] as! String, workspace: "/owned/workspace with spaces")
+    }
+}
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: results))
+"""
+        swift = root / 'main.swift'
+        swift.write_text('import Foundation\nimport CoreGraphics\n' + source + '\n' + driver)
+        cls.binary = root / 'proof'
+        result = subprocess.run(['swiftc', '-swift-version', '5', str(swift), '-o', str(cls.binary)],
+                                capture_output=True, text=True, timeout=90)
+        if result.returncode:
+            raise AssertionError(result.stderr)
+
+    def run_rows(self, rows):
+        result = subprocess.run([str(self.binary)], input=json.dumps(rows),
+                                capture_output=True, text=True, timeout=10, check=True)
+        return json.loads(result.stdout)
+
+    def test_exact_owned_surface_shapes_reject_foreign_or_ambiguous_sheets(self):
+        rows, expected = [], []
+        for surface, counts in [('form', (0, 0, 0)), ('panel', (1, 0, 1)), ('goTo', (1, 1, 2))]:
+            valid = dict(mode='surface', surface=surface, windows=1,
+                         root=counts[0], nested=counts[1], all=counts[2])
+            rows.append(valid); expected.append(True)
+            for key in ('windows', 'root', 'nested', 'all'):
+                for value in (-1, 0, 1, 2, 3):
+                    if value != valid[key]:
+                        rows.append({**valid, key: value}); expected.append(False)
+        # A cancelled panel or Go to sheet cannot authorize the next input.
+        rows += [dict(mode='surface', surface='panel', windows=1, root=0, nested=0, all=0),
+                 dict(mode='surface', surface='goTo', windows=1, root=1, nested=0, all=1)]
+        expected += [False, False]
+        self.assertEqual(self.run_rows(rows), expected)
+
+    def test_control_must_exist_be_enabled_hittable_and_have_positive_owned_geometry(self):
+        valid = dict(mode='usable', exists=True, enabled=True, hittable=True,
+                     frame=[10, 20, 100, 30])
+        rows = [valid] + [{**valid, key: False} for key in ('exists', 'enabled', 'hittable')]
+        rows += [{**valid, 'frame': frame} for frame in ([10, 20, 0, 30], [10, 20, -1, 30],
+                 [10, 20, 100, -1], [1000, 1000, 10, 10], ['nan', 20, 10, 10])]
+        self.assertEqual(self.run_rows(rows), [True] + [False] * (len(rows) - 1))
+
+    def sequence(self):
+        return [dict(surface='form', root='root'),
+                dict(surface='panel', root='root', panel='panel'),
+                dict(surface='goTo', root='root', panel='panel', goTo='goTo'),
+                dict(surface='panel', root='root', panel='panel'),
+                dict(surface='form', root='root')]
+
+    def test_same_incarnation_only_no_rebinding_after_cancel_or_replacement(self):
+        valid = self.sequence()
+        self.assertEqual(self.run_rows([dict(mode='binding', steps=valid)]), [[True] * 5])
+        for index, key in [(1, 'root'), (2, 'panel'), (3, 'panel'), (4, 'root')]:
+            steps = self.sequence(); steps[index][key] = 'replacement'
+            got = self.run_rows([dict(mode='binding', steps=steps)])[0]
+            self.assertFalse(got[index])
+        steps = self.sequence() + [dict(surface='panel', root='root', panel='new-panel')]
+        self.assertFalse(self.run_rows([dict(mode='binding', steps=steps)])[0][-1])
+        steps = self.sequence()[:3] + [dict(surface='goTo', root='root', panel='panel', goTo='replacement')]
+        self.assertFalse(self.run_rows([dict(mode='binding', steps=steps)])[0][-1])
+        for steps in [[dict(surface='panel', root='root', panel='panel')],
+                      [dict(surface='form', root='root', panel='foreign')],
+                      [dict(surface='form', root='root'), dict(surface='goTo', root='root', panel='panel', goTo='goTo')]]:
+            self.assertFalse(self.run_rows([dict(mode='binding', steps=steps)])[0][-1])
+
+    def test_focus_requires_exact_pid_role_positive_focus_geometry_and_value(self):
+        valid = dict(mode='focus', pid=123, role='AXTextField', focused=True,
+                     frame=[10, 20, 100, 30], value='/owned/workspace with spaces')
+        rows = [valid]
+        for key, value in [('pid', 0), ('pid', 124), ('role', 'AXSecureTextField'),
+                           ('focused', False), ('value', '/foreign/workspace with spaces'),
+                           ('value', '/owned/workspace with spaces '),
+                           ('frame', [11, 20, 100, 30]), ('frame', [10, 20, 0, 30]),
+                           ('frame', ['nan', 20, 100, 30]), ('frame', [10, 'infinity', 100, 30])]:
+            rows.append({**valid, key: value})
+        self.assertEqual(self.run_rows(rows), [True] + [False] * (len(rows) - 1))
+
+    def test_form_requires_full_declared_workspace_not_just_leaf_or_prefix(self):
+        labels = ['Choose Working Folder: /owned/workspace with spaces',
+                  'Choose Working Folder: /foreign/workspace with spaces',
+                  'Choose Working Folder: /owned/workspace with spaces suffix',
+                  'Choose Working Folder: /owned/workspace with spaces ',
+                  'workspace with spaces', 'Choose Working Folder']
+        self.assertEqual(self.run_rows([dict(mode='selection', label=x) for x in labels]),
+                         [True, False, False, False, False, False])
 
 if __name__ == '__main__':
     unittest.main()

@@ -39,7 +39,7 @@ Root nominated ALL-356's exact source contract (present in P; actual ordinary
 UI remains unqualified): private v1 `kind: failed`, `code: store_schema_incompatible`,
 `stage: startup`, with this exact shell-owned visible guidance:
 
-> The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
+> The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
 
 The public UI actor requires this complete literal in one visible native text
 element. It records `exact_unique_message_observed_producer_binding_required`
@@ -231,6 +231,62 @@ and the original failed 53-file episode as historical evidence. No UI state gain
 qualification; launch/input/PNG remain uncaptured and input completion unknown.
 This repair is local source preparation pending the same bounded affected
 review, root nomination and H's matching observer/source-hash update.
+
+## Native configuredLocal adapter and current recovery sentence
+
+The ordinary full-P9 Local directory capability opens the maintained native
+`NSOpenPanel`. The configuredLocal test therefore uses the exact
+`Choose Working Folder: <home>` control, its owned attached panel, that panel's
+attached Go to Folder sheet, and native Select. It requires the full declared
+workspace in the normal form before Create Project. It does not use the web
+`/path/to/directory` picker, disable native capability, or run ALL347's separate
+reload/Reveal/Unicode mission.
+
+The eleven inputs are Get Started, Choose Working Folder, Cmd+Shift+G, Cmd+A,
+type owned workspace, Return, native Select, Create Project, Message, type the
+fixed prompt, and Send. Every input retains the original before/after dispatch
+records, app/incarnation/path/config/root-window and positive console guards.
+The surface graph admits only one root with its exact attached panel/subsheet;
+public AX handles cannot rebind to a replacement panel. Missing, foreign,
+ambiguous, cancelled or stale surfaces fail closed. The root's single-window
+rule remains; no numeric window-range fallback is introduced.
+
+macOS focus proof uses only read-only public ApplicationServices AX attributes
+on the already admitted PID, with a one-second messaging timeout, exact scoped
+sheet identity, positive focus, role, geometry and value. There is no AX action,
+attribute mutation, trust prompt, permission provisioning, private API or KVC.
+Missing existing AX admission or an unsupported AX/XCTest hierarchy is a gate.
+Public APIs are documented in [Application Services](https://developer.apple.com/documentation/applicationservices)
+and [XCUIElement](https://developer.apple.com/documentation/xcuiautomation/xcuielement).
+Actual full-Xcode typechecking and observed AX coordinate/hierarchy compatibility
+remain required; parser and inert projection controls cannot qualify them.
+
+`NAC342_SWIFT_PANEL_PROOF=1` runs the compile-verbatim surface, stable identity,
+focused-target and exact form-value policy controls. These use synthetic
+Foundation/CoreGraphics projections and never invoke AX or XCTest. The opt-in
+must be supplied in a required source-bound Mac test lane to claim enforcement;
+an ordinary skipped proof is not coverage. Preserve the existing title proof.
+
+Root354 owns H's new exact Q commit/four source hashes, complete operations
+list, generated runner/config source hashes and collector/test/consumer handoff.
+H's `FUTURE_MESSAGE` and R's `GUIDANCE` verify the private engine wire and retain
+its complete `compatible newer NAC app` sentence. They must not be changed to
+the different native UI sentence. Q's Swift/Python visible-message assertion
+uses `compatible version of NAC`; the typed stage/code binds the UI projection
+to the unchanged private producer. Do not unify product wording or permit one
+boundary's literal as proof of the other. Successful source flow still has eleven inputs and console counts
+5/27/4/4 (onboarding/configuredLocal/invalidConfig/futureStore). H must derive and
+assert that exact trace from this successor, not accept a range or reuse the old
+web-picker operation names. If a later qualified SDK requires another input,
+change the explicit trace and exact count together under its source allocation.
+Public-own521's separately recorded missing-Q test-skip gap remains open.
+
+The full futureStore sentence above is now the exact maintained P9 wording,
+including `compatible version of NAC`. Both the Swift unique full-message wait
+and Python exact-equality contract retain typed startup/schema binding, the 35s
+wait, no workspace activation or alternative store, DB/config preservation,
+no WAL/SHM and independently owned cleanup/producer evidence. This is a test
+contract correction; no product wording or generic-message fallback changes.
 
 ## Historical Q55 failure-only onboarding query diagnostics
 
