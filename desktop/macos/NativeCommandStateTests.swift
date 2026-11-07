@@ -75,8 +75,15 @@ struct NativeCommandStateTests {
         lost["kind"] = "ready"
         let lateReady = try lostMessage()
         precondition(!lostState.receive(lateReady, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
+        precondition(lostState.pendingConnectionLoss == lostBinding)
+        lostState.endDocument()
+        precondition(lostState.binding == nil && lostState.pendingConnectionLoss == lostBinding)
+        precondition(!lostState.consumeConnectionLoss(binding))
+        precondition(lostState.consumeConnectionLoss(lostBinding))
+        precondition(!lostState.consumeConnectionLoss(lostBinding))
         let nextLostBinding = lostState.beginDocument(receipt: receipt)!
-        precondition(nextLostBinding.document != lostBinding.document && !lostState.connectionLost)
+        precondition(nextLostBinding.document != lostBinding.document && !lostState.connectionLost &&
+                     lostState.pendingConnectionLoss == nil)
         precondition(!lostState.receive(disconnected, origin: origin, mainFrame: true, currentView: true, receipt: receipt))
         state.retire()
         precondition(state.beginDocument(receipt: receipt) == nil)
