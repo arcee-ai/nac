@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import textwrap
 from unittest.mock import patch
@@ -108,6 +109,62 @@ class ClockRouting(unittest.TestCase):
                 self.assertFalse(receipt['product_build'])
                 self.assertEqual(receipt['status'],'PASS' if actual==expected else 'FAIL')
                 self.assertEqual(output.exists(),actual==expected)
+
+    def test_cache_partial_restore_is_distinct_from_true_miss_and_stale_engine(self):
+        a,_=self.values()
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory).resolve()/'target'
+            deps=target/'aarch64-apple-darwin/release/deps'
+            before=dict(status='PASS',target_absent=True,target=str(target),controller_sha=a['controller_sha'],
+                        allocation_id=a['allocation_id'],original_clock=a['clock'])
+            for hit in ['true','false']:
+                with self.assertRaises(RuntimeError):m.cache_ready(target,before,a,1530,hit)
+            deps.mkdir(parents=True)
+            with self.assertRaises(RuntimeError):m.cache_ready(target,before,a,1530,'false')
+            (deps/'libdependency.rlib').write_bytes(b'inert-cache-fixture')
+            for hit in ['true','false']:
+                self.assertEqual(m.cache_ready(target,before,a,1530,hit)['exact_hit'],hit=='true')
+            for seconds in [1529,0,True,float('nan')]:
+                with self.subTest(seconds=seconds),self.assertRaises(RuntimeError):
+                    m.cache_ready(target,before,a,seconds,'false')
+            for key,value in [('target_absent',False),('controller_sha','b'*40),('allocation_id','old'),('original_clock',{})]:
+                with self.subTest(key=key),self.assertRaises(RuntimeError):
+                    m.cache_ready(target,{**before,key:value},a,1530,'false')
+            with self.assertRaises(RuntimeError):m.cache_ready(target,before,a,1530,None)
+            (deps.parent/'nac-web').write_bytes(b'stale-engine')
+            with self.assertRaises(RuntimeError):m.cache_ready(target,before,a,1530,'true')
+
+    def test_actual_cache_bootstrap_requires_fresh_target_and_binds_receipt(self):
+        source=(HERE/'host-package.py').read_text()
+        for preexisting in [False,True]:
+            with self.subTest(preexisting=preexisting),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory).resolve()
+                workspace=root/'workspace';workspace.mkdir()
+                (root/'ff8-host-package-gate').mkdir()
+                target=workspace/'target'
+                if preexisting:target.mkdir()
+                a,e=self.values()
+                e.update(ROOT_PACKAGE_ADMISSION=json.dumps(a),RUNNER_TEMP=str(root),
+                         GITHUB_WORKSPACE=str(workspace),GITHUB_OUTPUT=str(root/'output'))
+                with patch.dict(os.environ,e,clear=True),patch('time.time',return_value=1001), \
+                     patch.object(sys,'argv',['host-package.py','--bootstrap-budget','restore-cache']):
+                    if preexisting:
+                        with self.assertRaises(RuntimeError):exec(compile(source,'cache-bootstrap-inert','exec'),{'__name__':'__main__'})
+                    else:exec(compile(source,'cache-bootstrap-inert','exec'),{'__name__':'__main__'})
+                receipt=json.loads((root/'ff8-host-package-gate/clock-restore-cache.json').read_text())
+                self.assertEqual(receipt['status'],'FAIL' if preexisting else 'PASS')
+                if not preexisting:
+                    self.assertFalse(target.exists())
+                    self.assertEqual(receipt['controller_sha'],a['controller_sha'])
+                    self.assertEqual(receipt['allocation_id'],a['allocation_id'])
+                    self.assertEqual(receipt['minutes'],2)
+
+    def test_cache_bootstrap_never_renews_original_time(self):
+        a,e=self.values()
+        self.assertEqual(m.CAPS['restore-cache'],2)
+        self.assertEqual(m.minutes(a,e,m.CAPS['restore-cache'],now=1001),2)
+        self.assertEqual(m.minutes(a,e,m.CAPS['restore-cache'],now=2680),1)
+        with self.assertRaises(RuntimeError):m.minutes(a,e,m.CAPS['restore-cache'],now=2741)
 
     def test_workflow_is_exact_guarded_private_package_route(self):
         text=(HERE.parents[1]/'workflows/stable-release.yml').read_text()

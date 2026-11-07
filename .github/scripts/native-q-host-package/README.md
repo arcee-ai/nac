@@ -58,7 +58,21 @@ producer, ad-hoc `--sign -` nested/outer signing, strict signatures/inventory an
 original unsigned plus distinct post-sign receipts. No certificate/Keychain/
 identity query/DeveloperID/notary/installation or runtime action is selected.
 
-Compiler cache is a dedicated job-temp sibling of output and never uploaded.
+Before the driver, an original-clock bootstrap gate permits at most2min for the
+existing pinned Swatinem dependency restore and requires the root target absent.
+The explicit `source-P -> ../target` mapping and additional root archive path match
+the seven existing CI cache paths/version; prefix nac-ci-v1/shared-key
+build-aarch64-apple-darwin-incremental16-v1-build retain environment/manifest hashes.
+A normal prefix restore may report cache-hit=false; a true miss/unknown result or
+missing positive fresh release-dependency inventory stops before production.
+`save-if: false` prevents cache publication/post cleanup. The restored incremental
+archive is unused: no ci-incremental helper, workspace-crate caching or old engine.
+The driver requires1530s remaining (1080engine+390downstream+60handoff) before
+marking its one producer attempt. Original40/30/8/2 and1080 caps stay unchanged.
+P6c has no release/config override: explicit CGU16/nonincremental0 match canonical
+release defaults. The target is a job-owned sibling of all checkouts, outside
+handoff/output and never uploaded. Source identity and locked build stay exact.
+Job01 remains consumed/closed; this successor grants no actual cache/build retry.
 Owned outputs are capped512MiB; exported receipts8MiB (each JSON/log uses owning
 limits). No failed/unknown cleanup is deleted or retried. Retention stages only
 the unedited producer manifest and its original ZIP, bounded receipts and gate

@@ -10,13 +10,14 @@ import platform
 import re
 import shutil
 import signal
+import stat
 import sys
 import time
 
 BRANCH = 'refs/heads/codex/experimental-native-q-host-package-post648'
 SCOPE = 'ff8-hosted-normal-package-only'
 STOP = []
-CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2}
+CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'restore-cache': 2}
 
 
 def need(value, reason):
@@ -63,6 +64,33 @@ def capacity(memory, disk, cpus):
     need(all(type(x) is int for x in (memory, disk, cpus))
          and memory >= 6*1024**3 and disk >= 8*1024**3 and cpus >= 2,
          'host capacity unknown/below6GiB memory,8GiB free,2CPU; no deletion/fallback')
+
+
+def cache_ready(target, before, admission, remaining, hit):
+    need(before.get('status') == 'PASS' and before.get('target_absent') is True
+         and before.get('target') == str(target)
+         and before.get('controller_sha') == admission['controller_sha']
+         and before.get('allocation_id') == admission['allocation_id']
+         and before.get('original_clock') == admission['clock'], 'fresh source/allocation-bound cache restore required')
+    need(hit in ('true', 'false'), 'cache action result unknown')
+    need(type(remaining) in (int, float) and math.isfinite(remaining) and remaining >= 1530,
+         'original work needs1080 engine+390 downstream+60 handoff; no cold/short retry')
+    deps = target/'aarch64-apple-darwin/release/deps'
+    need(target.is_absolute() and deps.resolve() == deps and deps.is_dir(), 'restored release deps absent/aliased')
+    engine = deps.parent/'nac-web'
+    need(not engine.exists() and not engine.is_symlink(), 'cached engine is not an exact-source nomination')
+    count, size = 0, 0
+    for entry in deps.iterdir():
+        if entry.name.endswith('.rlib'):
+            info = entry.lstat()
+            need(stat.S_ISREG(info.st_mode) and info.st_size > 0, 'invalid restored dependency')
+            count += 1
+            size += info.st_size
+            need(count <= 4096, 'bounded dependency inventory')
+    need(count > 0, 'true cache miss: no restored release dependencies; stop before producer')
+    return dict(exact_hit=hit == 'true', restored_release_rlibs=count, bytes=size,
+                remaining_work_seconds=remaining, downstream_reserve_seconds=450,
+                workspace_incremental_used=False, cache_saved=False)
 
 
 def plan(product, output):
@@ -172,7 +200,8 @@ def main():
     for key in tuple(base):
         if key.startswith(('NAC_', 'CARGO_', 'RUST', 'GIT_')):
             del base[key]
-    base.update(CARGO_BUILD_JOBS='2', CARGO_TARGET_DIR=str(output.parent/'ff8-package-cargo'),
+    base.update(CARGO_BUILD_JOBS='2', CARGO_TARGET_DIR=str(product.parent/'target'),
+                CARGO_PROFILE_RELEASE_CODEGEN_UNITS='16', CARGO_INCREMENTAL='0',
                 GIT_OPTIONAL_LOCKS='0', RUSTUP_AUTO_INSTALL='0', RUSTUP_TOOLCHAIN=pair['rust_version'])
 
     def run(label, argv, root, cap):
@@ -211,6 +240,11 @@ def main():
                  and ci.command(['node', '--version']) == pair['node_version'], 'pinned bootstrap tools')
         for label, root in [('H-tools-setup', tools), ('P-setup', product)]:
             run(label, ['make', 'setup'], root, 300)
+        with using(budget.work):
+            gate = Path(os.environ['RUNNER_TEMP'])/'ff8-host-package-gate/clock-restore-cache.json'
+            report['cache'] = cache_ready(Path(base['CARGO_TARGET_DIR']), json.loads(gate.read_text()),
+                admission, budget.work.deadline-budget.monotonic(), os.environ.get('PACKAGE_CACHE_HIT'))
+            observe_capacity()
         report['producer_attempts'] = 1
         save()
         for label, cap, argv in plan(product, output):
@@ -253,6 +287,12 @@ if __name__ == '__main__':
         try:
             value = json.loads(os.environ['ROOT_PACKAGE_ADMISSION'])
             n = minutes(value, os.environ, CAPS[phase])
+            if phase == 'restore-cache':
+                target = Path(os.environ['GITHUB_WORKSPACE'])/'target'
+                need(target.is_absolute() and target.resolve() == target
+                     and not target.exists() and not target.is_symlink(), 'cache target must be fresh job-owned sibling')
+                receipt.update(target=str(target), target_absent=True, controller_sha=value['controller_sha'],
+                               allocation_id=value['allocation_id'])
             receipt.update(status='PASS', original_clock=value['clock'], minutes=n)
             with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                 output.write('minutes='+str(n)+'\n')
