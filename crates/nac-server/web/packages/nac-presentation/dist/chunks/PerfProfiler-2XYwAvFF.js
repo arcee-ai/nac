@@ -12264,7 +12264,7 @@ var Ex = 300, Dx = "pt-14", Ox = "pb-20", kx = /* @__PURE__ */ function(e) {
 					tabIndex: -1,
 					"data-modal-open": e ? "true" : void 0,
 					onOpenAutoFocus: (e) => e.preventDefault(),
-					className: F("pointer-events-auto relative flex flex-col outline-none", w ? F("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", ve, !m && "bg-elevation-ground") : F("fade w-full motion-reduce:!animate-none", o, m ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl", fe && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), y, w && "h-[100dvh] max-h-[100dvh] min-h-[100dvh] w-full min-w-full max-w-full"),
+					className: F("pointer-events-auto relative flex flex-col outline-none", w ? F("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", ve, !m && "bg-elevation-ground") : F("fade w-full motion-reduce:!animate-none", o, m ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl", fe && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), y, w && "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full"),
 					children: [
 						me ? /* @__PURE__ */ T("div", {
 							className: "absolute top-1 right-2 z-10",
@@ -12680,7 +12680,7 @@ var mS = /* @__PURE__ */ function(e) {
 			className: "nac-toast w-full pointer-events-auto",
 			"data-visible": i && !n,
 			children: /* @__PURE__ */ E("div", {
-				className: "rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full",
+				className: "nac-toast-content rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full",
 				children: [
 					/* @__PURE__ */ T(Ep, {
 						iconName: gS[t],
@@ -12690,13 +12690,13 @@ var mS = /* @__PURE__ */ function(e) {
 					/* @__PURE__ */ T("span", {
 						role: t === "error" || t === "danger" ? "alert" : "status",
 						"aria-atomic": "true",
-						className: "flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line",
+						className: "nac-toast-message flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line",
 						children: e
 					}),
 					/* @__PURE__ */ T(gx, {
 						variant: gx.Variant.Ghost,
 						content: gx.Content.Icon,
-						className: "absolute top-1 right-1 !size-11 shrink-0",
+						className: "nac-toast-dismiss absolute top-1 right-1 !size-11 shrink-0",
 						"aria-label": "Dismiss notification",
 						onClick: r,
 						children: /* @__PURE__ */ T(Ep, { iconName: wp.Close })

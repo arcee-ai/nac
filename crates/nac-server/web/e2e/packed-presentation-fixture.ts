@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,29 +13,51 @@ const repository = path.resolve(web, "../../..");
 const packageName = "@arcee-ai/nac-client-all-121";
 
 /** No source alias, repository UI import or second presentation implementation. */
-export async function startPackedPresentation(harness: EmbeddedHarness, id: string) {
+export async function startPackedPresentation(
+  harness: EmbeddedHarness,
+  id: string,
+  options: {
+    twoInstances?: boolean;
+    tarball?: string;
+    stylesheet?: boolean;
+    initialPaths?: Partial<Record<"Left" | "Right" | "Single", string>>;
+  } = {},
+) {
   const consumer = path.join(harness.runRoot, "packed-consumer");
   await fs.mkdir(consumer);
-  const { stdout } = await execute(
-    "npm",
-    [
-      "pack",
-      "--ignore-scripts",
-      "--json",
-      "--cache",
-      path.join(consumer, "cache"),
-      "--pack-destination",
-      consumer,
-    ],
-    { cwd: repository },
-  );
-  const report = JSON.parse(stdout)[0];
+  const preservedTarball = options.tarball ?? process.env.NAC_PRESENTATION_TARBALL;
+  const { stdout } = preservedTarball
+    ? { stdout: "null" }
+    : await execute(
+        "npm",
+        [
+          "pack",
+          "--ignore-scripts",
+          "--json",
+          "--cache",
+          path.join(consumer, "cache"),
+          "--pack-destination",
+          consumer,
+        ],
+        { cwd: repository },
+      );
+  const report = JSON.parse(stdout)?.[0];
+  // A receiving qualification can use the preserved handoff bytes instead of
+  // silently repacking another checkout. The normal lane still tests this head.
+  const tarball = preservedTarball ?? path.join(consumer, report.filename);
+  const tarballBytes = await fs.readFile(tarball);
+  const tarballSha256 = createHash("sha256").update(tarballBytes).digest("hex");
+  const expectedSha = process.env.NAC_PRESENTATION_TARBALL_SHA256;
+  if (expectedSha && tarballSha256 !== expectedSha)
+    throw new Error("Packed artifact SHA256 differs from pinned handoff");
+  const integrity = `sha512-${createHash("sha512").update(tarballBytes).digest("base64")}`;
+  if (report && integrity !== report.integrity) throw new Error("Packed tarball integrity differs");
   await fs.writeFile(
     path.join(consumer, "package.json"),
     JSON.stringify({
       private: true,
       type: "module",
-      dependencies: { [packageName]: `file:./${report.filename}` },
+      dependencies: { [packageName]: `file:${tarball}` },
     }),
   );
   await execute(
@@ -92,8 +115,27 @@ export async function startPackedPresentation(harness: EmbeddedHarness, id: stri
     mathjaxFonts: string[];
   };
   if (!assets.mathjaxFonts.length) throw new Error("Packed font asset manifest is empty");
-  const fontDirectory = path.dirname(assets.mathjaxFonts[0]);
+  if (new Set(assets.assets).size !== assets.assets.length)
+    throw new Error("Duplicate packed assets");
   for (const asset of assets.assets) {
+    if (
+      !asset.startsWith("assets/") ||
+      asset.includes("\\") ||
+      asset.split("/").some((part) => !part || part === "." || part === "..")
+    )
+      throw new Error("Noncanonical packed asset path");
+  }
+  if (assets.mathjaxFonts.some((font) => !assets.assets.includes(font)))
+    throw new Error("Font absent from packed asset inventory");
+  const fontDirectory = path.dirname(assets.mathjaxFonts[0]);
+  if (assets.mathjaxFonts.some((font) => path.dirname(font) !== fontDirectory))
+    throw new Error("MathJax font directories differ");
+  const fontSha256: Record<string, string> = {};
+  for (const asset of assets.assets) {
+    if (assets.mathjaxFonts.includes(asset))
+      fontSha256[asset] = createHash("sha256")
+        .update(await fs.readFile(path.join(packed, asset)))
+        .digest("hex");
     const destination = path.join(consumer, "public/native-assets", asset);
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.copyFile(path.join(packed, asset), destination);
@@ -114,20 +156,29 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, MemoryRouter, useLocation } from "react-router-dom";
 import { createNacClient } from "${packageName}";
 import { createNativeRuntime, NativePresentationRoot, type NativeRuntime } from "${packageName}/presentation";
-import "${packageName}/presentation/styles.css";
+${options.stylesheet === false ? "" : `import "${packageName}/presentation/styles.css";`}
 const configuration=await(await fetch('/fixture-config')).json();
+const sources=new Map<string,EventSource[]>();
 const open=(release:string)=>createNativeRuntime({
  scope:{owner:'fixture-owner',profile:'fixture-profile',organization:'fixture-org',host:'fixture-host',incarnation:'fixture-incarnation',endpoint:'/fixture-runtime',release},
- client:createNacClient({endpoint:'/fixture-runtime',credentials:'omit',headers:()=>({'X-Fixture-Auth':'fixture-only'})}),
+ client:createNacClient({endpoint:'/fixture-runtime',credentials:'omit',headers:()=>({'X-Fixture-Auth':'fixture-only','X-Fixture-Binding':release})}),
  assets:{mathjaxFontUrl:${JSON.stringify("/native-assets/" + fontDirectory)}},
- eventSource:(url,init,context)=>{if(context.headers['x-fixture-auth']!=='fixture-only')throw new Error('missing stream context');return new EventSource(url,init);}
+ eventSource:(url,init,context)=>{if(context.headers['x-fixture-auth']!=='fixture-only')throw new Error('missing stream context');const source=new EventSource(url,init);sources.set(release,[...(sources.get(release)??[]),source]);return source;}
 });
-let runtime:NativeRuntime;let view:ReturnType<typeof createRoot>;
-function mount(release:string){runtime=open(release);view.render(<NativePresentationRoot runtime={runtime} router={children=><MemoryRouter initialEntries={['/session/'+configuration.sessionId+'/files']}>{children}</MemoryRouter>}/>);}
-function Caller(){const location=useLocation();return <><div id="sentinel" tabIndex={0} className="btn title">Caller sentinel</div><div id="caller-math" dangerouslySetInnerHTML={{__html:'<mjx-container jax="CHTML">Caller formula sentinel</mjx-container>'}}/><output aria-label="Product location">{location.pathname}</output><button onClick={()=>{runtime.close();mount('replacement');}}>Replace packed runtime</button><button onClick={()=>{runtime.close();view.render(null);}}>Close packed runtime</button><div id="native-mount" style={{height:'calc(100vh - 115px)'}}/></>;}
+const instances=configuration.twoInstances?['Left','Right']:['Single'];
+const initialPaths:Record<string,string>=${JSON.stringify(options.initialPaths ?? {})};
+const retired:{id:number,release:string,closed:boolean}[]=[];
+const views=new Map<string,{runtime:NativeRuntime,view:ReturnType<typeof createRoot>}>();
+// Caller-owned diagnostics expose identities/counts only, never query payloads.
+Object.assign(globalThis,{__packedRetired:()=>retired.map(entry=>({...entry,openStreams:(sources.get(entry.release)??[]).filter(source=>source.readyState===EventSource.OPEN).length})),__packedQualification:()=>Object.fromEntries([...views].map(([name,{runtime}])=>[name,{id:runtime.id,closed:runtime.isClosed(),queryCount:runtime.queryClient.getQueryCache().getAll().length,fetching:runtime.queryClient.isFetching(),openStreams:(sources.get(runtime.scope.release)??[]).filter(source=>source.readyState===EventSource.OPEN).length,closedStreams:(sources.get(runtime.scope.release)??[]).filter(source=>source.readyState===EventSource.CLOSED).length}]))});
+function retire(runtime:NativeRuntime){runtime.close();retired.push({id:runtime.id,release:runtime.scope.release,closed:runtime.isClosed()});}
+function NativeLocation({name}:{name:string}){const location=useLocation();return <output hidden aria-label={name+' native location'}>{location.pathname}</output>;}
+function mount(name:string,release:string){const current=views.get(name);if(current)retire(current.runtime);const runtime=open(release+'-'+name);const view=current?.view??createRoot(document.getElementById('native-mount-'+name)!);views.set(name,{runtime,view});view.render(<NativePresentationRoot runtime={runtime} router={children=><MemoryRouter initialEntries={[initialPaths[name]??'/session/'+configuration.sessionId+'/files']}><NativeLocation name={name}/>{children}</MemoryRouter>}/>);}
+function close(name:string){const current=views.get(name);if(current&&!current.runtime.isClosed())retire(current.runtime);current?.view.render(null);}
+function Caller(){const location=useLocation();return <><div id="sentinel" tabIndex={0} className="btn title">Caller sentinel</div><label>Host draft<input aria-label="Host draft" style={{maxWidth:"100%",boxSizing:"border-box"}}/></label><div id="caller-math" dangerouslySetInnerHTML={{__html:'<mjx-container jax="CHTML">Caller formula sentinel</mjx-container>'}}/><output aria-label="Product location">{location.pathname}</output><div style={{display:'grid',gridTemplateColumns:configuration.twoInstances?'repeat(auto-fit,minmax(min(100%,680px),1fr))':'1fr',gap:16}}>{instances.map((name:string)=><section key={name} aria-label={name+' presentation'} style={{minWidth:0}}><button onClick={()=>mount(name,'replacement')}>Replace packed runtime</button><button onClick={()=>close(name)}>Close packed runtime</button><div id={'native-mount-'+name} style={{height:'calc(100vh - 155px)',minHeight:500}}/></section>)}</div></>;}
 // A second caller-owned React root does not inherit the product BrowserRouter.
 flushSync(()=>createRoot(document.getElementById('caller')!).render(<BrowserRouter><Caller/></BrowserRouter>));
-view=createRoot(document.getElementById('native-mount')!);mount('first');
+for(const name of instances)mount(name,'first');
 `,
   );
   await fs.writeFile(
@@ -155,6 +206,7 @@ view=createRoot(document.getElementById('native-mount')!);mount('first');
     `export default {root:${JSON.stringify(consumer)},base:'/',build:{outDir:process.env.NAC_HOSTED_FIXTURE_OUTPUT,emptyOutDir:true},resolve:{dedupe:['react','react-dom','react-router','react-router-dom','@tanstack/react-query','@tanstack/query-core']}};\n`,
   );
   const fixture = await startHostedFixture(harness, id, {
+    twoInstances: options.twoInstances,
     build: async (output) => {
       await execute(
         path.join(peers, ".bin/vite"),
@@ -173,5 +225,14 @@ view=createRoot(document.getElementById('native-mount')!);mount('first');
       );
     },
   });
-  return { ...fixture, peerVersions, toolVersions, integrity: report.integrity };
+  return {
+    ...fixture,
+    peerVersions,
+    toolVersions,
+    integrity,
+    tarballSha256,
+    assetInventory: assets.assets,
+    fontAssets: assets.mathjaxFonts,
+    fontSha256,
+  };
 }

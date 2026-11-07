@@ -1,10 +1,39 @@
 [data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
+  container-type: inline-size;
   transform: translateY(-100%);
   transition: transform 150ms ease-out;
 }
 
 [data-nac-runtime]:is(.nac-toast[data-visible="true"]), [data-nac-runtime] .nac-toast[data-visible="true"] {
   transform: translateY(0);
+}
+
+/* A contained toast can be much narrower than the browser viewport. Reserve
+   the first row for its icon and 44px dismiss target instead of squeezing the
+   message between them. The normal 360px presentation keeps its flex layout. */
+@container (max-width: 239px) {
+  [data-nac-runtime]:is(.nac-toast .nac-toast-content), [data-nac-runtime] .nac-toast .nac-toast-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    row-gap: 8px;
+    padding-right: 16px;
+  }
+
+  [data-nac-runtime]:is(.nac-toast .nac-toast-content > svg), [data-nac-runtime] .nac-toast .nac-toast-content > svg {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  [data-nac-runtime]:is(.nac-toast .nac-toast-message), [data-nac-runtime] .nac-toast .nac-toast-message {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  [data-nac-runtime]:is(.nac-toast .nac-toast-dismiss), [data-nac-runtime] .nac-toast .nac-toast-dismiss {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1173,10 +1202,6 @@
     height: 93px;
   }
 
-[data-nac-runtime]:is(.h-\[100dvh\]), [data-nac-runtime] .h-\[100dvh\] {
-    height: 100dvh;
-  }
-
 [data-nac-runtime]:is(.h-\[100px\]), [data-nac-runtime] .h-\[100px\] {
     height: 100px;
   }
@@ -1219,6 +1244,10 @@
 
 [data-nac-runtime]:is(.h-\[calc\(70dvh\)\]), [data-nac-runtime] .h-\[calc\(70dvh\)\] {
     height: 70dvh;
+  }
+
+[data-nac-runtime]:is(.h-\[min\(100\%\,100dvh\)\]),[data-nac-runtime] .h-\[min\(100\%\,100dvh\)\] {
+    height: min(100%, 100dvh);
   }
 
 [data-nac-runtime]:is(.h-\[min\(420px\,70dvh\)\]),[data-nac-runtime] .h-\[min\(420px\,70dvh\)\] {
@@ -1289,10 +1318,6 @@
     max-height: 75dvh;
   }
 
-[data-nac-runtime]:is(.max-h-\[100dvh\]), [data-nac-runtime] .max-h-\[100dvh\] {
-    max-height: 100dvh;
-  }
-
 [data-nac-runtime]:is(.max-h-\[160px\]), [data-nac-runtime] .max-h-\[160px\] {
     max-height: 160px;
   }
@@ -1319,6 +1344,10 @@
 
 [data-nac-runtime]:is(.max-h-\[min\(40vh\,320px\)\]),[data-nac-runtime] .max-h-\[min\(40vh\,320px\)\] {
     max-height: min(40vh, 320px);
+  }
+
+[data-nac-runtime]:is(.max-h-\[min\(100\%\,100dvh\)\]),[data-nac-runtime] .max-h-\[min\(100\%\,100dvh\)\] {
+    max-height: min(100%, 100dvh);
   }
 
 [data-nac-runtime]:is(.max-h-none), [data-nac-runtime] .max-h-none {
@@ -1393,10 +1422,6 @@
     min-height: 72px;
   }
 
-[data-nac-runtime]:is(.min-h-\[100dvh\]), [data-nac-runtime] .min-h-\[100dvh\] {
-    min-height: 100dvh;
-  }
-
 [data-nac-runtime]:is(.min-h-\[112px\]), [data-nac-runtime] .min-h-\[112px\] {
     min-height: 112px;
   }
@@ -1419,6 +1444,10 @@
 
 [data-nac-runtime]:is(.min-h-\[calc\(70vh-316px\)\]), [data-nac-runtime] .min-h-\[calc\(70vh-316px\)\] {
     min-height: calc(70vh - 316px);
+  }
+
+[data-nac-runtime]:is(.min-h-\[min\(100\%\,100dvh\)\]),[data-nac-runtime] .min-h-\[min\(100\%\,100dvh\)\] {
+    min-height: min(100%, 100dvh);
   }
 
 [data-nac-runtime]:is(.min-h-full), [data-nac-runtime] .min-h-full {

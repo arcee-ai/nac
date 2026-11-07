@@ -1,7 +1,7 @@
 import type { Page, Request, Route, TestInfo } from "@playwright/test";
 
 import { expect, test } from "./harness";
-import { captureSetup, serveSetupBaseline, setupBaseline } from "./setup-visual-fixture";
+import { captureSetup, withSetupBaselines, setupBaseline } from "./setup-visual-fixture";
 import { openNameZoom } from "./session-name-zoom";
 
 test.use({ hasTouch: true });
@@ -933,618 +933,630 @@ for (const width of [1440, 768, 390]) {
   test(`managed presentation states and nested controls at ${width}px`, async ({
     harness,
     page,
-  }, info) => {
-    test.setTimeout(120_000);
-    await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await serveSetupBaseline(page, harness.baseUrl);
-    const state = await installManagedDouble(page, true);
-    const secretWrites: string[] = [];
-    page.on("request", (request) => {
-      const path = new URL(request.url()).pathname;
-      if (path.startsWith("/managed/secrets/") && request.method() !== "GET")
-        secretWrites.push(`${request.method()} ${path}`);
-    });
-    state.secrets = ["DEMO_SERVICE_TOKEN", "DEMO_LONG_VARIABLE_NAME_FOR_A_PRIVATE_INTEGRATION"];
-    await page.goto(harness.baseUrl);
-    await openManagedHost(page);
-    await expect(page.getByTestId("managed-host-status")).toBeVisible();
-    if (width === 390 && !setupBaseline())
-      await inspectManagedClose(page, info, "Managed host", "native390-host");
-    await captureSetup(page, info, width, "managed-ready");
-    await captureSetup(page, info, width, "managed-upgrade", page.getByTestId("managed-upgrade"));
-    expect(state.upgradeStarts).toBe(0);
-    await page.getByRole("button", { name: "GitHub", exact: true }).click();
-    await expect(
-      page.getByTestId("managed-github-settings").getByText("Connected", { exact: true }),
-    ).toBeVisible();
-    await captureSetup(page, info, width, "managed-github");
-    await page.getByRole("button", { name: "secrets", exact: true }).click();
-    await expect(page.getByText("DEMO_SERVICE_TOKEN", { exact: true })).toBeVisible();
-    await captureSetup(page, info, width, "managed-secrets");
-    const draftName = page.getByLabel("Variable name", { exact: true });
-    const draftValue = page.getByLabel("New value", { exact: true });
-    await draftName.fill("E2E_UNSAVED_SECRET");
-    await draftValue.fill("synthetic-unsaved-password");
-    await expect(draftValue).toHaveAttribute("type", "password");
-    await expect(page.getByText("synthetic-unsaved-password", { exact: true })).toHaveCount(0);
-    await captureSetup(page, info, width, "managed-secret-draft", draftValue);
-    expect(secretWrites).toEqual([]);
-    await closeManagedHost(page);
-    await openManagedHost(page);
-    await page.getByRole("button", { name: "secrets", exact: true }).click();
-    await expect(draftName).toHaveValue("");
-    await expect(draftValue).toHaveValue("");
-    expect(secretWrites).toEqual([]);
-    await closeManagedHost(page);
-    await page.getByRole("button", { name: "Add repository", exact: true }).first().click();
-    await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
-    if (width === 390 && !setupBaseline())
-      await inspectManagedClose(page, info, "Add repository", "native390-repository");
-    await captureSetup(page, info, width, "managed-checkout");
-    const trigger = page.getByRole("button", { name: "Branch: main", exact: true });
-    if (width === 390) await trigger.tap();
-    else await trigger.click();
-    const search = page.getByRole("combobox", { name: "Find branch" });
-    await search.fill("platform.v2");
-    await expect(page.getByRole("option", { name: alternateBranch })).toBeVisible();
-    await captureSetup(page, info, width, "managed-branches");
-    if (!setupBaseline()) {
-      await search.dispatchEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229 });
-      await expect(search).toBeVisible();
-    }
-    await page.keyboard.press("Escape");
-    await expect(search).toHaveCount(0);
-    await expect(trigger).toBeFocused();
-    await expect(page.getByRole("dialog", { name: "Add repository", exact: true })).toBeVisible();
-    expect(state.cloneRequest).toBeNull();
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
-
-    state.upgradeState = "blocked";
-    await page.reload();
-    await openManagedHost(page);
-    await expect(page.getByText("Wait only", { exact: true })).toBeVisible();
-    await captureSetup(
-      page,
-      info,
-      width,
-      "managed-partial-cleanup",
-      page.getByTestId("managed-upgrade-operation"),
-    );
-    expect(state.terminalStops).toEqual([]);
-    await closeManagedHost(page);
-
-    state.upgradeFacadeStatus = 403;
-    await page.reload();
-    await openManagedHost(page);
-    await expect(page.getByTestId("managed-upgrade-unavailable")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Upgrade to latest beta", exact: true }),
-    ).toHaveCount(0);
-    await captureSetup(
-      page,
-      info,
-      width,
-      "managed-denied",
-      page.getByTestId("managed-upgrade-unavailable"),
-    );
-    await closeManagedHost(page);
-    state.upgradeFacadeStatus = 503;
-    await page.reload();
-    await openManagedHost(page);
-    await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
-    await captureSetup(
-      page,
-      info,
-      width,
-      "managed-offline",
-      page.getByTestId("managed-upgrade-unavailable"),
-    );
-    await info.attach("managed-accessibility-semantics.txt", {
-      body: await page.locator("body").ariaSnapshot(),
-      contentType: "text/plain",
-    });
-    if (!setupBaseline() && width === 390) {
-      await closeManagedHost(page);
-      state.upgradeFacadeStatus = null;
-      state.upgradeState = "available";
-      const githubEndpoint = `${harness.baseUrl}/managed/github`;
-      const hostEndpoint = `${harness.baseUrl}/managed/status`;
-      const privateBody = "invalid model configuration: synthetic private denial detail";
-      let denyGitHub = true;
-      let denyHost = false;
-      const githubReads: number[] = [];
-      const hostReads: number[] = [];
-      const mutations: string[] = [];
-      const providerDiscoveryReads: string[] = [];
-      const discoveryBefore = state.providerRequests.length;
-      const completed: string[] = [];
-      const reconnectWitnesses: { stage: string; monotonicMs: number; online: boolean }[] = [];
-      const githubFreshnessMs = 30_000;
-      let probeFailed = false;
-      const cleanupErrors: { operation: string; error: string }[] = [];
-      const readPublicNetwork = () =>
-        page.evaluate(() => {
-          const browser = globalThis as unknown as {
-            performance: { now(): number };
-            navigator: { onLine: boolean };
-          };
-          return { monotonicMs: browser.performance.now(), online: browser.navigator.onLine };
-        });
-      const journalRequest = (request: Request) => {
-        const url = new URL(request.url());
-        if (
-          request.method() === "POST" &&
-          url.origin === new URL(harness.baseUrl).origin &&
-          url.pathname === "/providers/models"
-        ) {
-          providerDiscoveryReads.push(`POST ${url.pathname}`);
-        } else if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
-          mutations.push(`${request.method()} ${url.pathname}`);
-        }
-      };
-      const githubRead = async (route: Route) => {
-        if (route.request().method() !== "GET") return route.fallback();
-        githubReads.push(denyGitHub ? 403 : 200);
-        if (denyGitHub) return route.fulfill({ status: 403, json: { error: privateBody } });
-        return route.fallback();
-      };
-      const hostRead = async (route: Route) => {
-        if (route.request().method() !== "GET") return route.fallback();
-        hostReads.push(denyHost ? 403 : 200);
-        if (denyHost) return route.fulfill({ status: 403, json: { error: privateBody } });
-        return route.fallback();
-      };
-      page.on("request", journalRequest);
-      try {
-        await page.route(githubEndpoint, githubRead);
-        await page.route(hostEndpoint, hostRead);
-        await test.step("repository initial 403 stays private and recovers by read-only Retry", async () => {
-          // Reload clears the GitHub query cache while the valid host read keeps the public entry.
-          await page.reload();
-          await page.getByRole("button", { name: "Add repository", exact: true }).first().click();
-          const modal = page.getByRole("dialog", { name: "Add repository", exact: true });
-          const alert = modal.getByRole("alert");
-          await expect(alert).toContainText(
-            "GitHub access was denied for this host. Ask the host owner to check access to the GitHub App.",
-          );
-          await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
-          await expect(
-            modal.getByRole("button", { name: "Connect GitHub", exact: true }),
-          ).toHaveCount(0);
-          await expect(
-            modal.getByRole("button", { name: "Clone repository", exact: true }),
-          ).toBeDisabled();
-          expect(mutations).toEqual([]);
-          await captureSetup(page, info, width, "managed-repository-context-denied", alert);
-          denyGitHub = false;
-          const recovered = page.waitForResponse(
-            (response) =>
-              response.url() === githubEndpoint &&
-              response.request().method() === "GET" &&
-              response.status() === 200,
-          );
-          await modal.getByRole("button", { name: "Retry connection check", exact: true }).click();
-          await recovered;
-          await expect(modal.getByRole("button", { name: /arcee-ai\/managed-demo/ })).toBeVisible();
-          expect(githubReads).toEqual([403, 200]);
-          expect(mutations).toEqual([]);
-          completed.push("repository-initial-403");
-        });
-        await test.step("repository cached 403 retains the checkout draft through read-only Retry", async () => {
-          const modal = page.getByRole("dialog", { name: "Add repository", exact: true });
-          await modal.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
-          await modal.getByRole("button", { name: "Branch: main", exact: true }).click();
-          await page.getByRole("combobox", { name: "Find branch" }).fill("platform.v2");
-          await page.getByRole("option", { name: alternateBranch }).click();
-          await modal.getByLabel("Project name", { exact: true }).fill("Retained denial draft");
-          await modal
-            .getByLabel("Checkout directory", { exact: true })
-            .fill("retained-denial-draft");
-          // useManagedGitHub inherits NativeRuntime's documented 30-second freshness policy.
-          const ready = await readPublicNetwork();
-          reconnectWitnesses.push({ stage: "checkout-ready", ...ready });
-          await expect
-            .poll(async () => (await readPublicNetwork()).monotonicMs - ready.monotonicMs, {
-              timeout: githubFreshnessMs + 5_000,
-              intervals: [1_000],
-            })
-            .toBeGreaterThanOrEqual(githubFreshnessMs + 1);
-          const stale = await readPublicNetwork();
-          reconnectWitnesses.push({ stage: "freshness-elapsed", ...stale });
-          expect(stale.online).toBe(true);
-          denyGitHub = true;
-          const denied = page.waitForResponse(
-            (response) =>
-              response.url() === githubEndpoint &&
-              response.request().method() === "GET" &&
-              response.status() === 403,
-          );
-          // A real browser reconnect refetches this stale active read; no private cache hook.
-          try {
-            await page.context().setOffline(true);
-            await expect.poll(async () => (await readPublicNetwork()).online).toBe(false);
-            reconnectWitnesses.push({ stage: "offline", ...(await readPublicNetwork()) });
-          } finally {
-            await page.context().setOffline(false);
-          }
-          await expect.poll(async () => (await readPublicNetwork()).online).toBe(true);
-          reconnectWitnesses.push({ stage: "online", ...(await readPublicNetwork()) });
-          await denied;
-          const alert = modal.getByRole("alert");
-          await expect(alert).toContainText("GitHub access was denied for this host");
-          await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
-          await expect(
-            modal.getByRole("button", { name: "Connect GitHub", exact: true }),
-          ).toHaveCount(0);
-          await expect(modal.getByLabel("Checkout directory", { exact: true })).toHaveCount(0);
-          await expect(
-            modal.getByRole("button", { name: "Clone repository", exact: true }),
-          ).toBeDisabled();
-          expect(mutations).toEqual([]);
-          denyGitHub = false;
-          const recovered = page.waitForResponse(
-            (response) =>
-              response.url() === githubEndpoint &&
-              response.request().method() === "GET" &&
-              response.status() === 200,
-          );
-          await modal.getByRole("button", { name: "Retry connection check", exact: true }).click();
-          await recovered;
-          await expect(
-            modal.getByRole("button", { name: `Branch: ${alternateBranch}`, exact: true }),
-          ).toBeVisible();
-          await expect(modal.getByLabel("Project name", { exact: true })).toHaveValue(
-            "Retained denial draft",
-          );
-          await expect(modal.getByLabel("Checkout directory", { exact: true })).toHaveValue(
-            "retained-denial-draft",
-          );
-          await expect(
-            modal.getByRole("button", { name: "Clone repository", exact: true }),
-          ).toBeEnabled();
-          expect(githubReads).toEqual([403, 200, 403, 200]);
-          expect(mutations).toEqual([]);
-          await modal.getByRole("button", { name: "Cancel", exact: true }).click();
-          completed.push("repository-cached-403");
-        });
-        await test.step("open host cached 403 retains last-known status without model advice", async () => {
-          await openManagedHost(page);
-          const host = page.getByTestId("managed-host-status");
-          await expect(host.getByText("/repositories", { exact: true })).toBeVisible();
-          denyHost = true;
-          await page.waitForResponse(
-            (response) =>
-              response.url() === hostEndpoint &&
-              response.request().method() === "GET" &&
-              response.status() === 403,
-            { timeout: 25_000 },
-          );
-          const alert = host.getByRole("alert");
-          await expect(alert).toContainText("Last known status is shown below");
-          await expect(alert).toContainText(
-            "Access to this managed host was denied. Ask the host owner to check access.",
-          );
-          await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
-          await expect(host.getByText("managed-e2e-host", { exact: true })).toBeVisible();
-          await expect(host.getByText("/repositories", { exact: true })).toBeVisible();
-          await captureSetup(page, info, width, "managed-host-context-denied", alert);
-          expect(hostReads).toContain(403);
-          expect(mutations).toEqual([]);
-          completed.push("host-cached-403");
-        });
-        expect(providerDiscoveryReads).toHaveLength(
-          state.providerRequests.length - discoveryBefore,
-        );
-        expect(secretWrites).toEqual([]);
-        expect(state.cloneRequest).toBeNull();
-        expect(state.upgradeStarts).toBe(0);
-        expect(state.terminalStops).toEqual([]);
-      } catch (error) {
-        probeFailed = true;
-        throw error;
-      } finally {
-        try {
-          await info.attach("managed-denied-read-context.json", {
-            body: JSON.stringify({
-              completed,
-              githubReads,
-              hostReads,
-              mutations,
-              providerDiscoveryReads,
-              githubFreshnessMs,
-              reconnectWitnesses,
-              probeFailed,
-              initialHostNoData:
-                "Component RED/GREEN only: no public managed entry without cached host data",
-              boundaries:
-                "Exact synthetic managed GET fixtures; real browser reconnect and host polling reads",
-            }),
-            contentType: "application/json",
-          });
-        } catch (error) {
-          cleanupErrors.push({ operation: "attach read journal", error: String(error) });
-        }
-        page.off("request", journalRequest);
-        const operations = ["restore network", "unroute GitHub read", "unroute host read"];
-        const cleanup = await Promise.allSettled([
-          page.context().setOffline(false),
-          page.unroute(githubEndpoint, githubRead),
-          page.unroute(hostEndpoint, hostRead),
-        ]);
-        for (const [index, result] of cleanup.entries()) {
-          if (result.status === "rejected")
-            cleanupErrors.push({ operation: operations[index], error: String(result.reason) });
-        }
-        try {
-          await info.attach("managed-denied-read-cleanup.json", {
-            body: JSON.stringify({ probeFailed, cleanupErrors }),
-            contentType: "application/json",
-          });
-        } catch (error) {
-          cleanupErrors.push({ operation: "attach cleanup journal", error: String(error) });
-        }
-      }
-      if (cleanupErrors.length > 0)
-        throw new AggregateError(cleanupErrors, "Managed denied-read cleanup failed");
-    }
-  });
-}
-
-test("managed setup remains reachable at actual 200 percent tab zoom", async ({
-  harness,
-}, info) => {
-  test.setTimeout(120_000);
-  const { context, page, zoom } = await openNameZoom(info, harness.baseUrl);
-  try {
-    await serveSetupBaseline(page, harness.baseUrl);
-    await installManagedDouble(page, true);
-    for (const width of [1440, 768, 390]) {
+  }, info) =>
+    withSetupBaselines(async (baseline) => {
+      test.setTimeout(120_000);
       await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await baseline.serve(page, harness.baseUrl);
+      const state = await installManagedDouble(page, true);
+      const secretWrites: string[] = [];
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path.startsWith("/managed/secrets/") && request.method() !== "GET")
+          secretWrites.push(`${request.method()} ${path}`);
+      });
+      state.secrets = ["DEMO_SERVICE_TOKEN", "DEMO_LONG_VARIABLE_NAME_FOR_A_PRIVATE_INTEGRATION"];
       await page.goto(harness.baseUrl);
-      if (width === 390 && !setupBaseline()) {
-        await openManagedHost(page);
-        await inspectManagedClose(page, info, "Managed host", "zoom200-host");
-        await closeManagedHost(page);
-      }
+      await openManagedHost(page);
+      await expect(page.getByTestId("managed-host-status")).toBeVisible();
+      if (width === 390 && !setupBaseline())
+        await inspectManagedClose(page, info, "Managed host", "native390-host");
+      await captureSetup(page, info, width, "managed-ready");
+      await captureSetup(page, info, width, "managed-upgrade", page.getByTestId("managed-upgrade"));
+      expect(state.upgradeStarts).toBe(0);
+      await page.getByRole("button", { name: "GitHub", exact: true }).click();
+      await expect(
+        page.getByTestId("managed-github-settings").getByText("Connected", { exact: true }),
+      ).toBeVisible();
+      await captureSetup(page, info, width, "managed-github");
+      await page.getByRole("button", { name: "secrets", exact: true }).click();
+      await expect(page.getByText("DEMO_SERVICE_TOKEN", { exact: true })).toBeVisible();
+      await captureSetup(page, info, width, "managed-secrets");
+      const draftName = page.getByLabel("Variable name", { exact: true });
+      const draftValue = page.getByLabel("New value", { exact: true });
+      await draftName.fill("E2E_UNSAVED_SECRET");
+      await draftValue.fill("synthetic-unsaved-password");
+      await expect(draftValue).toHaveAttribute("type", "password");
+      await expect(page.getByText("synthetic-unsaved-password", { exact: true })).toHaveCount(0);
+      await captureSetup(page, info, width, "managed-secret-draft", draftValue);
+      expect(secretWrites).toEqual([]);
+      await closeManagedHost(page);
+      await openManagedHost(page);
+      await page.getByRole("button", { name: "secrets", exact: true }).click();
+      await expect(draftName).toHaveValue("");
+      await expect(draftValue).toHaveValue("");
+      expect(secretWrites).toEqual([]);
+      await closeManagedHost(page);
       await page.getByRole("button", { name: "Add repository", exact: true }).first().click();
       await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
       if (width === 390 && !setupBaseline())
-        await inspectManagedClose(page, info, "Add repository", "zoom200-repository");
-      const clone = page.getByRole("button", { name: "Clone repository", exact: true });
-      await expect(clone).toBeInViewport();
+        await inspectManagedClose(page, info, "Add repository", "native390-repository");
+      await captureSetup(page, info, width, "managed-checkout");
+      const trigger = page.getByRole("button", { name: "Branch: main", exact: true });
+      if (width === 390) await trigger.tap();
+      else await trigger.click();
+      const search = page.getByRole("combobox", { name: "Find branch" });
+      await search.fill("platform.v2");
+      await expect(page.getByRole("option", { name: alternateBranch })).toBeVisible();
+      await captureSetup(page, info, width, "managed-branches");
       if (!setupBaseline()) {
-        await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
-        const bounds = await clone.boundingBox();
-        expect(bounds!.height).toBeGreaterThanOrEqual(44);
-        if (width === 390) {
-          const row = page.getByRole("button", {
-            name: /arcee-ai\/managed-demo/,
-            pressed: true,
+        await search.dispatchEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229 });
+        await expect(search).toBeVisible();
+      }
+      await page.keyboard.press("Escape");
+      await expect(search).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      await expect(page.getByRole("dialog", { name: "Add repository", exact: true })).toBeVisible();
+      expect(state.cloneRequest).toBeNull();
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      state.upgradeState = "blocked";
+      await page.reload();
+      await openManagedHost(page);
+      await expect(page.getByText("Wait only", { exact: true })).toBeVisible();
+      await captureSetup(
+        page,
+        info,
+        width,
+        "managed-partial-cleanup",
+        page.getByTestId("managed-upgrade-operation"),
+      );
+      expect(state.terminalStops).toEqual([]);
+      await closeManagedHost(page);
+
+      state.upgradeFacadeStatus = 403;
+      await page.reload();
+      await openManagedHost(page);
+      await expect(page.getByTestId("managed-upgrade-unavailable")).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Upgrade to latest beta", exact: true }),
+      ).toHaveCount(0);
+      await captureSetup(
+        page,
+        info,
+        width,
+        "managed-denied",
+        page.getByTestId("managed-upgrade-unavailable"),
+      );
+      await closeManagedHost(page);
+      state.upgradeFacadeStatus = 503;
+      await page.reload();
+      await openManagedHost(page);
+      await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+      await captureSetup(
+        page,
+        info,
+        width,
+        "managed-offline",
+        page.getByTestId("managed-upgrade-unavailable"),
+      );
+      await info.attach("managed-accessibility-semantics.txt", {
+        body: await page.locator("body").ariaSnapshot(),
+        contentType: "text/plain",
+      });
+      if (!setupBaseline() && width === 390) {
+        await closeManagedHost(page);
+        state.upgradeFacadeStatus = null;
+        state.upgradeState = "available";
+        const githubEndpoint = `${harness.baseUrl}/managed/github`;
+        const hostEndpoint = `${harness.baseUrl}/managed/status`;
+        const privateBody = "invalid model configuration: synthetic private denial detail";
+        let denyGitHub = true;
+        let denyHost = false;
+        const githubReads: number[] = [];
+        const hostReads: number[] = [];
+        const mutations: string[] = [];
+        const providerDiscoveryReads: string[] = [];
+        const discoveryBefore = state.providerRequests.length;
+        const completed: string[] = [];
+        const reconnectWitnesses: { stage: string; monotonicMs: number; online: boolean }[] = [];
+        const githubFreshnessMs = 30_000;
+        let probeFailed = false;
+        const cleanupErrors: { operation: string; error: string }[] = [];
+        const readPublicNetwork = () =>
+          page.evaluate(() => {
+            const browser = globalThis as unknown as {
+              performance: { now(): number };
+              navigator: { onLine: boolean };
+            };
+            return { monotonicMs: browser.performance.now(), online: browser.navigator.onLine };
           });
-          const identity = row.getByText("arcee-ai/managed-demo", { exact: true });
-          const geometry = await identity.evaluate((element) => {
-            type GeometryNode = {
-              closest(selector: string): GeometryNode | null;
-              parentElement: GeometryNode | null;
-              nextElementSibling: GeometryNode | null;
-              clientWidth: number;
-              clientHeight: number;
-              scrollWidth: number;
-              scrollHeight: number;
-              getBoundingClientRect(): TextBounds;
-            };
-            type TextBounds = {
-              width: number;
-              height: number;
-              top: number;
-              right: number;
-              bottom: number;
-              left: number;
-            };
-            const { getComputedStyle, document } = globalThis as unknown as {
-              getComputedStyle(node: GeometryNode): {
-                paddingLeft: string;
-                paddingRight: string;
-                lineHeight: string;
+        const journalRequest = (request: Request) => {
+          const url = new URL(request.url());
+          if (
+            request.method() === "POST" &&
+            url.origin === new URL(harness.baseUrl).origin &&
+            url.pathname === "/providers/models"
+          ) {
+            providerDiscoveryReads.push(`POST ${url.pathname}`);
+          } else if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+            mutations.push(`${request.method()} ${url.pathname}`);
+          }
+        };
+        const githubRead = async (route: Route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          githubReads.push(denyGitHub ? 403 : 200);
+          if (denyGitHub) return route.fulfill({ status: 403, json: { error: privateBody } });
+          return route.fallback();
+        };
+        const hostRead = async (route: Route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          hostReads.push(denyHost ? 403 : 200);
+          if (denyHost) return route.fulfill({ status: 403, json: { error: privateBody } });
+          return route.fallback();
+        };
+        page.on("request", journalRequest);
+        try {
+          await page.route(githubEndpoint, githubRead);
+          await page.route(hostEndpoint, hostRead);
+          await test.step("repository initial 403 stays private and recovers by read-only Retry", async () => {
+            // Reload clears the GitHub query cache while the valid host read keeps the public entry.
+            await page.reload();
+            await page.getByRole("button", { name: "Add repository", exact: true }).first().click();
+            const modal = page.getByRole("dialog", { name: "Add repository", exact: true });
+            const alert = modal.getByRole("alert");
+            await expect(alert).toContainText(
+              "GitHub access was denied for this host. Ask the host owner to check access to the GitHub App.",
+            );
+            await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
+            await expect(
+              modal.getByRole("button", { name: "Connect GitHub", exact: true }),
+            ).toHaveCount(0);
+            await expect(
+              modal.getByRole("button", { name: "Clone repository", exact: true }),
+            ).toBeDisabled();
+            expect(mutations).toEqual([]);
+            await captureSetup(page, info, width, "managed-repository-context-denied", alert);
+            denyGitHub = false;
+            const recovered = page.waitForResponse(
+              (response) =>
+                response.url() === githubEndpoint &&
+                response.request().method() === "GET" &&
+                response.status() === 200,
+            );
+            await modal
+              .getByRole("button", { name: "Retry connection check", exact: true })
+              .click();
+            await recovered;
+            await expect(
+              modal.getByRole("button", { name: /arcee-ai\/managed-demo/ }),
+            ).toBeVisible();
+            expect(githubReads).toEqual([403, 200]);
+            expect(mutations).toEqual([]);
+            completed.push("repository-initial-403");
+          });
+          await test.step("repository cached 403 retains the checkout draft through read-only Retry", async () => {
+            const modal = page.getByRole("dialog", { name: "Add repository", exact: true });
+            await modal.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
+            await modal.getByRole("button", { name: "Branch: main", exact: true }).click();
+            await page.getByRole("combobox", { name: "Find branch" }).fill("platform.v2");
+            await page.getByRole("option", { name: alternateBranch }).click();
+            await modal.getByLabel("Project name", { exact: true }).fill("Retained denial draft");
+            await modal
+              .getByLabel("Checkout directory", { exact: true })
+              .fill("retained-denial-draft");
+            // useManagedGitHub inherits NativeRuntime's documented 30-second freshness policy.
+            const ready = await readPublicNetwork();
+            reconnectWitnesses.push({ stage: "checkout-ready", ...ready });
+            await expect
+              .poll(async () => (await readPublicNetwork()).monotonicMs - ready.monotonicMs, {
+                timeout: githubFreshnessMs + 5_000,
+                intervals: [1_000],
+              })
+              .toBeGreaterThanOrEqual(githubFreshnessMs + 1);
+            const stale = await readPublicNetwork();
+            reconnectWitnesses.push({ stage: "freshness-elapsed", ...stale });
+            expect(stale.online).toBe(true);
+            denyGitHub = true;
+            const denied = page.waitForResponse(
+              (response) =>
+                response.url() === githubEndpoint &&
+                response.request().method() === "GET" &&
+                response.status() === 403,
+            );
+            // A real browser reconnect refetches this stale active read; no private cache hook.
+            try {
+              await page.context().setOffline(true);
+              await expect.poll(async () => (await readPublicNetwork()).online).toBe(false);
+              reconnectWitnesses.push({ stage: "offline", ...(await readPublicNetwork()) });
+            } finally {
+              await page.context().setOffline(false);
+            }
+            await expect.poll(async () => (await readPublicNetwork()).online).toBe(true);
+            reconnectWitnesses.push({ stage: "online", ...(await readPublicNetwork()) });
+            await denied;
+            const alert = modal.getByRole("alert");
+            await expect(alert).toContainText("GitHub access was denied for this host");
+            await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
+            await expect(
+              modal.getByRole("button", { name: "Connect GitHub", exact: true }),
+            ).toHaveCount(0);
+            await expect(modal.getByLabel("Checkout directory", { exact: true })).toHaveCount(0);
+            await expect(
+              modal.getByRole("button", { name: "Clone repository", exact: true }),
+            ).toBeDisabled();
+            expect(mutations).toEqual([]);
+            denyGitHub = false;
+            const recovered = page.waitForResponse(
+              (response) =>
+                response.url() === githubEndpoint &&
+                response.request().method() === "GET" &&
+                response.status() === 200,
+            );
+            await modal
+              .getByRole("button", { name: "Retry connection check", exact: true })
+              .click();
+            await recovered;
+            await expect(
+              modal.getByRole("button", { name: `Branch: ${alternateBranch}`, exact: true }),
+            ).toBeVisible();
+            await expect(modal.getByLabel("Project name", { exact: true })).toHaveValue(
+              "Retained denial draft",
+            );
+            await expect(modal.getByLabel("Checkout directory", { exact: true })).toHaveValue(
+              "retained-denial-draft",
+            );
+            await expect(
+              modal.getByRole("button", { name: "Clone repository", exact: true }),
+            ).toBeEnabled();
+            expect(githubReads).toEqual([403, 200, 403, 200]);
+            expect(mutations).toEqual([]);
+            await modal.getByRole("button", { name: "Cancel", exact: true }).click();
+            completed.push("repository-cached-403");
+          });
+          await test.step("open host cached 403 retains last-known status without model advice", async () => {
+            await openManagedHost(page);
+            const host = page.getByTestId("managed-host-status");
+            await expect(host.getByText("/repositories", { exact: true })).toBeVisible();
+            denyHost = true;
+            await page.waitForResponse(
+              (response) =>
+                response.url() === hostEndpoint &&
+                response.request().method() === "GET" &&
+                response.status() === 403,
+              { timeout: 25_000 },
+            );
+            const alert = host.getByRole("alert");
+            await expect(alert).toContainText("Last known status is shown below");
+            await expect(alert).toContainText(
+              "Access to this managed host was denied. Ask the host owner to check access.",
+            );
+            await expect(alert).not.toContainText(/model|private denial detail|workspace/i);
+            await expect(host.getByText("managed-e2e-host", { exact: true })).toBeVisible();
+            await expect(host.getByText("/repositories", { exact: true })).toBeVisible();
+            await captureSetup(page, info, width, "managed-host-context-denied", alert);
+            expect(hostReads).toContain(403);
+            expect(mutations).toEqual([]);
+            completed.push("host-cached-403");
+          });
+          expect(providerDiscoveryReads).toHaveLength(
+            state.providerRequests.length - discoveryBefore,
+          );
+          expect(secretWrites).toEqual([]);
+          expect(state.cloneRequest).toBeNull();
+          expect(state.upgradeStarts).toBe(0);
+          expect(state.terminalStops).toEqual([]);
+        } catch (error) {
+          probeFailed = true;
+          throw error;
+        } finally {
+          try {
+            await info.attach("managed-denied-read-context.json", {
+              body: JSON.stringify({
+                completed,
+                githubReads,
+                hostReads,
+                mutations,
+                providerDiscoveryReads,
+                githubFreshnessMs,
+                reconnectWitnesses,
+                probeFailed,
+                initialHostNoData:
+                  "Component RED/GREEN only: no public managed entry without cached host data",
+                boundaries:
+                  "Exact synthetic managed GET fixtures; real browser reconnect and host polling reads",
+              }),
+              contentType: "application/json",
+            });
+          } catch (error) {
+            cleanupErrors.push({ operation: "attach read journal", error: String(error) });
+          }
+          page.off("request", journalRequest);
+          const operations = ["restore network", "unroute GitHub read", "unroute host read"];
+          const cleanup = await Promise.allSettled([
+            page.context().setOffline(false),
+            page.unroute(githubEndpoint, githubRead),
+            page.unroute(hostEndpoint, hostRead),
+          ]);
+          for (const [index, result] of cleanup.entries()) {
+            if (result.status === "rejected")
+              cleanupErrors.push({ operation: operations[index], error: String(result.reason) });
+          }
+          try {
+            await info.attach("managed-denied-read-cleanup.json", {
+              body: JSON.stringify({ probeFailed, cleanupErrors }),
+              contentType: "application/json",
+            });
+          } catch (error) {
+            cleanupErrors.push({ operation: "attach cleanup journal", error: String(error) });
+          }
+        }
+        if (cleanupErrors.length > 0)
+          throw new AggregateError(cleanupErrors, "Managed denied-read cleanup failed");
+      }
+    }));
+}
+
+test("managed setup remains reachable at actual 200 percent tab zoom", async ({ harness }, info) =>
+  withSetupBaselines(async (baseline) => {
+    test.setTimeout(120_000);
+    const { context, page, zoom } = await openNameZoom(
+      info,
+      harness.baseUrl,
+      undefined,
+      undefined,
+      (preparedContext) => baseline.beforeContextClose(preparedContext),
+    );
+    await baseline.withContext(context, async () => {
+      await baseline.serve(page, harness.baseUrl);
+      await installManagedDouble(page, true);
+      for (const width of [1440, 768, 390]) {
+        await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
+        await page.goto(harness.baseUrl);
+        if (width === 390 && !setupBaseline()) {
+          await openManagedHost(page);
+          await inspectManagedClose(page, info, "Managed host", "zoom200-host");
+          await closeManagedHost(page);
+        }
+        await page.getByRole("button", { name: "Add repository", exact: true }).first().click();
+        await page.getByRole("button", { name: /arcee-ai\/managed-demo/ }).click();
+        if (width === 390 && !setupBaseline())
+          await inspectManagedClose(page, info, "Add repository", "zoom200-repository");
+        const clone = page.getByRole("button", { name: "Clone repository", exact: true });
+        await expect(clone).toBeInViewport();
+        if (!setupBaseline()) {
+          await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
+          const bounds = await clone.boundingBox();
+          expect(bounds!.height).toBeGreaterThanOrEqual(44);
+          if (width === 390) {
+            const row = page.getByRole("button", {
+              name: /arcee-ai\/managed-demo/,
+              pressed: true,
+            });
+            const identity = row.getByText("arcee-ai/managed-demo", { exact: true });
+            const geometry = await identity.evaluate((element) => {
+              type GeometryNode = {
+                closest(selector: string): GeometryNode | null;
+                parentElement: GeometryNode | null;
+                nextElementSibling: GeometryNode | null;
+                clientWidth: number;
+                clientHeight: number;
+                scrollWidth: number;
+                scrollHeight: number;
+                getBoundingClientRect(): TextBounds;
               };
-              document: {
-                createRange(): {
-                  selectNodeContents(node: GeometryNode): void;
-                  getClientRects(): ArrayLike<TextBounds>;
+              type TextBounds = {
+                width: number;
+                height: number;
+                top: number;
+                right: number;
+                bottom: number;
+                left: number;
+              };
+              const { getComputedStyle, document } = globalThis as unknown as {
+                getComputedStyle(node: GeometryNode): {
+                  paddingLeft: string;
+                  paddingRight: string;
+                  lineHeight: string;
+                };
+                document: {
+                  createRange(): {
+                    selectNodeContents(node: GeometryNode): void;
+                    getClientRects(): ArrayLike<TextBounds>;
+                  };
                 };
               };
-            };
-            const name = element as unknown as GeometryNode;
-            const row = name.closest("button")!;
-            const list = row.parentElement!;
-            const style = getComputedStyle(row);
-            const identityBounds = name.getBoundingClientRect();
-            const detailBounds = name.nextElementSibling!.getBoundingClientRect();
-            const rowBounds = row.getBoundingClientRect();
-            const listBounds = list.getBoundingClientRect();
-            const text = document.createRange();
-            text.selectNodeContents(name);
-            return {
-              identityWidth: identityBounds.width,
-              identityTop: identityBounds.top,
-              listTop: listBounds.top,
-              contentWidth:
-                row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-              identityLines: identityBounds.height / parseFloat(getComputedStyle(name).lineHeight),
-              identityClientWidth: name.clientWidth,
-              identityScrollWidth: name.scrollWidth,
-              identityClientHeight: name.clientHeight,
-              identityScrollHeight: name.scrollHeight,
-              textRects: Array.from(text.getClientRects(), (rect) => ({
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-              })),
-              identityBounds: {
-                left: identityBounds.left,
-                top: identityBounds.top,
-                right: identityBounds.right,
-                bottom: identityBounds.bottom,
-              },
-              detailBottom: detailBounds.bottom,
-              listBottom: listBounds.bottom,
-              rowHeight: rowBounds.height,
-            };
-          });
-          await info.attach("managed-zoom200-repository-identity-geometry.json", {
-            body: JSON.stringify(geometry),
-            contentType: "application/json",
-          });
-          await expect(row).toHaveAccessibleName("arcee-ai/managed-demo Default branch: main");
-          expect(geometry.identityWidth).toBeGreaterThanOrEqual(geometry.contentWidth - 1);
-          expect(geometry.identityTop).toBeGreaterThanOrEqual(geometry.listTop);
-          expect(geometry.identityScrollWidth).toBeLessThanOrEqual(
-            geometry.identityClientWidth + 1,
-          );
-          expect(geometry.identityScrollHeight).toBeLessThanOrEqual(
-            geometry.identityClientHeight + 1,
-          );
-          expect(geometry.textRects.length).toBeGreaterThan(0);
-          for (const rect of geometry.textRects) {
-            expect(rect.left).toBeGreaterThanOrEqual(geometry.identityBounds.left - 1);
-            expect(rect.right).toBeLessThanOrEqual(geometry.identityBounds.right + 1);
-            expect(rect.top).toBeGreaterThanOrEqual(geometry.identityBounds.top - 1);
-            expect(rect.bottom).toBeLessThanOrEqual(geometry.identityBounds.bottom + 1);
+              const name = element as unknown as GeometryNode;
+              const row = name.closest("button")!;
+              const list = row.parentElement!;
+              const style = getComputedStyle(row);
+              const identityBounds = name.getBoundingClientRect();
+              const detailBounds = name.nextElementSibling!.getBoundingClientRect();
+              const rowBounds = row.getBoundingClientRect();
+              const listBounds = list.getBoundingClientRect();
+              const text = document.createRange();
+              text.selectNodeContents(name);
+              return {
+                identityWidth: identityBounds.width,
+                identityTop: identityBounds.top,
+                listTop: listBounds.top,
+                contentWidth:
+                  row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+                identityLines:
+                  identityBounds.height / parseFloat(getComputedStyle(name).lineHeight),
+                identityClientWidth: name.clientWidth,
+                identityScrollWidth: name.scrollWidth,
+                identityClientHeight: name.clientHeight,
+                identityScrollHeight: name.scrollHeight,
+                textRects: Array.from(text.getClientRects(), (rect) => ({
+                  left: rect.left,
+                  top: rect.top,
+                  right: rect.right,
+                  bottom: rect.bottom,
+                })),
+                identityBounds: {
+                  left: identityBounds.left,
+                  top: identityBounds.top,
+                  right: identityBounds.right,
+                  bottom: identityBounds.bottom,
+                },
+                detailBottom: detailBounds.bottom,
+                listBottom: listBounds.bottom,
+                rowHeight: rowBounds.height,
+              };
+            });
+            await info.attach("managed-zoom200-repository-identity-geometry.json", {
+              body: JSON.stringify(geometry),
+              contentType: "application/json",
+            });
+            await expect(row).toHaveAccessibleName("arcee-ai/managed-demo Default branch: main");
+            expect(geometry.identityWidth).toBeGreaterThanOrEqual(geometry.contentWidth - 1);
+            expect(geometry.identityTop).toBeGreaterThanOrEqual(geometry.listTop);
+            expect(geometry.identityScrollWidth).toBeLessThanOrEqual(
+              geometry.identityClientWidth + 1,
+            );
+            expect(geometry.identityScrollHeight).toBeLessThanOrEqual(
+              geometry.identityClientHeight + 1,
+            );
+            expect(geometry.textRects.length).toBeGreaterThan(0);
+            for (const rect of geometry.textRects) {
+              expect(rect.left).toBeGreaterThanOrEqual(geometry.identityBounds.left - 1);
+              expect(rect.right).toBeLessThanOrEqual(geometry.identityBounds.right + 1);
+              expect(rect.top).toBeGreaterThanOrEqual(geometry.identityBounds.top - 1);
+              expect(rect.bottom).toBeLessThanOrEqual(geometry.identityBounds.bottom + 1);
+            }
+            expect(geometry.detailBottom).toBeLessThanOrEqual(geometry.listBottom);
+            expect(geometry.rowHeight).toBeGreaterThanOrEqual(44);
           }
-          expect(geometry.detailBottom).toBeLessThanOrEqual(geometry.listBottom);
-          expect(geometry.rowHeight).toBeGreaterThanOrEqual(44);
         }
+        await captureSetup(page, info, width, "managed-zoom200-checkout");
+        const trigger = page.getByRole("button", { name: "Branch: main", exact: true });
+        await trigger.click();
+        await page.getByRole("combobox", { name: "Find branch" }).fill("platform.v2");
+        await expect(page.getByRole("option", { name: alternateBranch })).toBeVisible();
+        await captureSetup(page, info, width, "managed-zoom200-branches");
+        await page.keyboard.press("Escape");
+        await expect(trigger).toBeFocused();
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
       }
-      await captureSetup(page, info, width, "managed-zoom200-checkout");
-      const trigger = page.getByRole("button", { name: "Branch: main", exact: true });
-      await trigger.click();
-      await page.getByRole("combobox", { name: "Find branch" }).fill("platform.v2");
-      await expect(page.getByRole("option", { name: alternateBranch })).toBeVisible();
-      await captureSetup(page, info, width, "managed-zoom200-branches");
-      await page.keyboard.press("Escape");
-      await expect(trigger).toBeFocused();
-      await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    }
-    await info.attach("actual-managed-browser-zoom.json", {
-      body: JSON.stringify({
-        zoom,
-        method: "chrome.tabs.setZoom/getZoom",
-        reducedMotion: "reduce",
-        productTheme: "dark",
-        boundaries: "controlled managed HTTP fixtures",
-      }),
-      contentType: "application/json",
+      await info.attach("actual-managed-browser-zoom.json", {
+        body: JSON.stringify({
+          zoom,
+          method: "chrome.tabs.setZoom/getZoom",
+          reducedMotion: "reduce",
+          productTheme: "dark",
+          boundaries: "controlled managed HTTP fixtures",
+        }),
+        contentType: "application/json",
+      });
     });
-  } finally {
-    await context.close();
-  }
-});
+  }));
 
 for (const width of [1440, 768, 390]) {
   test(`managed checking, unconfigured, error, pending and cleanup-only at ${width}px`, async ({
     harness,
     page,
-  }, info) => {
-    test.setTimeout(90_000);
-    await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await serveSetupBaseline(page, harness.baseUrl);
-    const state = await installManagedDouble(page, false);
-    const writes: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname.startsWith("/managed/") && request.method() !== "GET")
-        writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
-    });
-    let connection: "checking" | "unconfigured" | "error" | "signed-out" = "checking";
-    let release!: () => void;
-    const checking = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await page.route("**/managed/github", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      if (connection === "checking") await checking;
-      if (connection === "error")
-        return route.fulfill({
-          status: 403,
-          json: { error: "GitHub access denied for this host." },
-        });
-      return route.fulfill({
-        json: { ...githubStatus(state), configured: connection !== "unconfigured" },
+  }, info) =>
+    withSetupBaselines(async (baseline) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await baseline.serve(page, harness.baseUrl);
+      const state = await installManagedDouble(page, false);
+      const writes: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname.startsWith("/managed/") && request.method() !== "GET")
+          writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
       });
-    });
-    await page.goto(harness.baseUrl);
-    await openManagedHost(page);
-    await page.getByRole("button", { name: "GitHub", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Managed host", exact: true })).toBeVisible();
-    await captureSetup(page, info, width, "managed-checking");
-    expect(writes).toEqual([]);
-    connection = "unconfigured";
-    release();
-    await expect(
-      page
+      let connection: "checking" | "unconfigured" | "error" | "signed-out" = "checking";
+      let release!: () => void;
+      const checking = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/managed/github", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        if (connection === "checking") await checking;
+        if (connection === "error")
+          return route.fulfill({
+            status: 403,
+            json: { error: "GitHub access denied for this host." },
+          });
+        return route.fulfill({
+          json: { ...githubStatus(state), configured: connection !== "unconfigured" },
+        });
+      });
+      await page.goto(harness.baseUrl);
+      await openManagedHost(page);
+      await page.getByRole("button", { name: "GitHub", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Managed host", exact: true })).toBeVisible();
+      await captureSetup(page, info, width, "managed-checking");
+      expect(writes).toEqual([]);
+      connection = "unconfigured";
+      release();
+      await expect(
+        page
+          .getByTestId("managed-github-settings")
+          .getByRole("button", { name: "Connect GitHub", exact: true }),
+      ).toBeVisible();
+      await captureSetup(page, info, width, "managed-unconfigured");
+      await closeManagedHost(page);
+      connection = "error";
+      await page.reload();
+      await openManagedHost(page);
+      const denied = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/managed/github" && response.status() === 403,
+      );
+      await page.getByRole("button", { name: "GitHub", exact: true }).click();
+      await denied;
+      if (!setupBaseline()) await expect(page.getByRole("alert")).toBeVisible();
+      await captureSetup(page, info, width, "managed-connection-error");
+      expect(writes).toEqual([]);
+      await closeManagedHost(page);
+      connection = "signed-out";
+      await page.reload();
+      await openManagedHost(page);
+      await page.getByRole("button", { name: "GitHub", exact: true }).click();
+      await page.route("**/managed/github/login/managed-login-e2e", (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: { state: "pending" } })
+          : route.fallback(),
+      );
+      await page
         .getByTestId("managed-github-settings")
-        .getByRole("button", { name: "Connect GitHub", exact: true }),
-    ).toBeVisible();
-    await captureSetup(page, info, width, "managed-unconfigured");
-    await closeManagedHost(page);
-    connection = "error";
-    await page.reload();
-    await openManagedHost(page);
-    const denied = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/managed/github" && response.status() === 403,
-    );
-    await page.getByRole("button", { name: "GitHub", exact: true }).click();
-    await denied;
-    if (!setupBaseline()) await expect(page.getByRole("alert")).toBeVisible();
-    await captureSetup(page, info, width, "managed-connection-error");
-    expect(writes).toEqual([]);
-    await closeManagedHost(page);
-    connection = "signed-out";
-    await page.reload();
-    await openManagedHost(page);
-    await page.getByRole("button", { name: "GitHub", exact: true }).click();
-    await page.route("**/managed/github/login/managed-login-e2e", (route) =>
-      route.request().method() === "GET"
-        ? route.fulfill({ json: { state: "pending" } })
-        : route.fallback(),
-    );
-    await page
-      .getByTestId("managed-github-settings")
-      .getByRole("button", { name: "Connect GitHub", exact: true })
-      .click();
-    await expect(page.getByTestId("github-device-code")).toBeVisible();
-    await captureSetup(page, info, width, "managed-login-pending");
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(page.getByTestId("github-device-code")).toHaveCount(0);
-    expect(writes).toEqual([
-      "POST /managed/github/login",
-      "DELETE /managed/github/login/managed-login-e2e",
-    ]);
-    await closeManagedHost(page);
-    state.upgradeState = "blocked";
-    await page.route("**/__managed/control/v0/upgrade", (route) => {
-      const snapshot = upgradeSnapshot(state);
-      if (snapshot.operation)
-        snapshot.operation.blockers = snapshot.operation.blockers.filter(
-          (blocker) => !blocker.actionable,
-        );
-      return route.fulfill({ json: snapshot });
-    });
-    await page.reload();
-    await openManagedHost(page);
-    await expect(page.getByText("Wait only", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Stop terminal", exact: true })).toHaveCount(0);
-    await captureSetup(
-      page,
-      info,
-      width,
-      "managed-cleanup-only",
-      page.getByTestId("managed-upgrade-operation"),
-    );
-    expect(state.upgradeStarts).toBe(0);
-    expect(state.terminalStops).toEqual([]);
-  });
+        .getByRole("button", { name: "Connect GitHub", exact: true })
+        .click();
+      await expect(page.getByTestId("github-device-code")).toBeVisible();
+      await captureSetup(page, info, width, "managed-login-pending");
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(page.getByTestId("github-device-code")).toHaveCount(0);
+      expect(writes).toEqual([
+        "POST /managed/github/login",
+        "DELETE /managed/github/login/managed-login-e2e",
+      ]);
+      await closeManagedHost(page);
+      state.upgradeState = "blocked";
+      await page.route("**/__managed/control/v0/upgrade", (route) => {
+        const snapshot = upgradeSnapshot(state);
+        if (snapshot.operation)
+          snapshot.operation.blockers = snapshot.operation.blockers.filter(
+            (blocker) => !blocker.actionable,
+          );
+        return route.fulfill({ json: snapshot });
+      });
+      await page.reload();
+      await openManagedHost(page);
+      await expect(page.getByText("Wait only", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Stop terminal", exact: true })).toHaveCount(0);
+      await captureSetup(
+        page,
+        info,
+        width,
+        "managed-cleanup-only",
+        page.getByTestId("managed-upgrade-operation"),
+      );
+      expect(state.upgradeStarts).toBe(0);
+      expect(state.terminalStops).toEqual([]);
+    }));
 }

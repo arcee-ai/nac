@@ -1,44 +1,100 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/test";
+import type { APIRequestContext, BrowserContext, Locator, Page, TestInfo } from "@playwright/test";
 import { expect, initializeHarnessWorkspace, type EmbeddedHarness } from "./harness";
 import type { ModelCatalog } from "../src/app/types/api";
+import { sealFrontendAssets, serveFrontendAssets } from "./frontend-assets";
 
 export const longModel =
   "GPT-5.6 Terra — a long model name for planning, implementation and careful review";
 export const setupBaseline = () => process.env.NAC_SETUP_BASELINE_DIST;
 
-/** Immutable browser bundles share one real isolated API; this does not run the baseline server. */
-export async function serveSetupBaseline(page: Page, baseUrl: string) {
+/** The test owns every returned serving handle; no page-close event hook. */
+type SetupBaselineLifetime = {
+  serve(page: Page, baseUrl: string): Promise<void>;
+  beforeContextClose(context: BrowserContext): Promise<void>;
+  withContext<T>(context: BrowserContext, body: () => Promise<T>): Promise<T>;
+};
+
+async function withAwaitedCleanup<T>(
+  body: () => Promise<T>,
+  cleanup: (() => Promise<void>)[],
+  label: string,
+): Promise<T> {
+  const failures: unknown[] = [];
+  let value!: T;
+  try {
+    value = await body();
+  } catch (error) {
+    failures.push(error);
+  }
+  for (const dispose of cleanup) {
+    try {
+      await dispose();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 1) throw new AggregateError(failures, label);
+  if (failures.length === 1) throw failures[0];
+  return value;
+}
+
+/** Immutable normal frontend bytes share the real isolated API. */
+async function serveSetupBaseline(page: Page, baseUrl: string) {
   const directory = setupBaseline();
-  if (!directory) return;
-  await page.route(`${baseUrl}/assets/dist/**`, async (route) => {
-    const file = path.resolve(
-      directory,
-      new URL(route.request().url()).pathname.slice("/assets/dist/".length),
-    );
-    if (!file.startsWith(path.resolve(directory) + path.sep)) return route.abort();
-    await route.fulfill({
-      body: await fs.readFile(file),
-      contentType: file.endsWith(".js")
-        ? "application/javascript"
-        : file.endsWith(".css")
-          ? "text/css"
-          : "application/octet-stream",
-    });
-  });
-  await page.route(
-    (url) => url.origin === baseUrl && url.pathname === "/",
-    async (route) => {
-      const live = await (await route.fetch()).text();
-      const binding =
-        live.match(/<script id="nac-presentation-binding"[\s\S]*?<\/script>/)?.[0] ?? "";
-      const html = await fs.readFile(path.join(directory, "index.html"), "utf8");
-      await route.fulfill({
-        body: html.replace("</head>", binding + "</head>"),
-        contentType: "text/html",
-      });
+  if (directory) return serveFrontendAssets(page, baseUrl, await sealFrontendAssets(directory));
+}
+
+/** Explicit test-local serving lifetime, including pages prepared by zoom. */
+export async function withSetupBaselines<T>(
+  body: (baseline: SetupBaselineLifetime) => Promise<T>,
+): Promise<T> {
+  const serving = new Map<
+    Page,
+    {
+      context: BrowserContext;
+      handle: Awaited<ReturnType<typeof serveFrontendAssets>>;
+    }
+  >();
+  let finishing = false;
+  const dispose = async (context?: BrowserContext) => {
+    const selected = [...serving].filter(([, entry]) => !context || entry.context === context);
+    // Claim once, including rejected disposers; no repeated assertion or masking.
+    for (const [page] of selected) serving.delete(page);
+    const settled = await Promise.allSettled(selected.map(([, entry]) => entry.handle.dispose()));
+    const failures = settled
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 1)
+      throw new AggregateError(failures, "Setup baseline pages failed disposal");
+    if (failures.length === 1) throw failures[0];
+  };
+  const baseline: SetupBaselineLifetime = {
+    serve: async (page, baseUrl) => {
+      if (finishing) throw new Error("Setup baseline lifetime already finished");
+      if (serving.has(page)) throw new Error("Setup baseline page already has a serving owner");
+      const handle = await serveSetupBaseline(page, baseUrl);
+      // No-baseline branch touches no Page/Context method and owns no sealer.
+      if (handle) serving.set(page, { context: page.context(), handle });
     },
+    beforeContextClose: (context) => dispose(context),
+    withContext: (context, run) =>
+      withAwaitedCleanup(
+        run,
+        [() => dispose(context), () => context.close()],
+        "Setup zoom body, baseline disposal or context close failed",
+      ),
+  };
+  return withAwaitedCleanup(
+    () => body(baseline),
+    [
+      async () => {
+        finishing = true;
+        await dispose();
+      },
+    ],
+    "Setup test body or baseline disposal failed",
   );
 }
 

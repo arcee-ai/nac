@@ -53,11 +53,52 @@ describe("notification presentation preserves provider ownership", () => {
       "Could not save",
       "Connection lost",
     ]);
+    for (const message of [...screen.getAllByRole("status"), ...screen.getAllByRole("alert")])
+      expect(message.getAttribute("aria-atomic")).toBe("true");
     const closes = screen.getAllByRole("button", { name: "Dismiss notification" });
     fireEvent.click(closes[0]);
     act(() => vi.advanceTimersByTime(150));
     expect(screen.queryByText("Saved")).toBeNull();
     expect(screen.getByText("Queued")).toBeTruthy();
+  });
+
+  it("retains the full long formatted message, link and dismissal without disturbing a peer", () => {
+    let api!: Api;
+    render(
+      <ToastProvider>
+        <Probe
+          ready={(value) => {
+            api = value;
+          }}
+        />
+      </ToastProvider>,
+    );
+    const name = "QUALIFICATION_SUBMITTED_".repeat(8);
+    act(() => {
+      api.success(
+        <>
+          <strong>{name}</strong>
+          {"\n"}
+          Secret saved for future command spawns. <a href="#details">Review details</a>
+        </>,
+        { keep: true },
+      );
+      api.error("Unrelated notification", { keep: true });
+    });
+    const message = screen.getByRole("status");
+    expect(message.textContent).toBe(
+      `${name}\nSecret saved for future command spawns. Review details`,
+    );
+    expect(message.getAttribute("aria-atomic")).toBe("true");
+    expect(within(message).getByText(name).tagName).toBe("STRONG");
+    const link = within(message).getByRole("link", { name: "Review details" });
+    expect(link.getAttribute("href")).toBe("#details");
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss notification" })[0]);
+    act(() => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Unrelated notification");
   });
 
   it("keeps IDs, per-toast life, keep and clear semantics across rerenders", () => {
