@@ -1891,6 +1891,21 @@ exit 0
     fn mounted_model_credential_transport_contains_only_the_read_only_path() {
         use std::os::unix::fs::PermissionsExt;
 
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        struct RestoreKey(Option<std::ffi::OsString>);
+        impl Drop for RestoreKey {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(value) => unsafe { std::env::set_var("ARCEE_API_KEY", value) },
+                    None => unsafe { std::env::remove_var("ARCEE_API_KEY") },
+                }
+            }
+        }
+        let _restore = RestoreKey(std::env::var_os("ARCEE_API_KEY"));
+        // None selects a conventional key when present; this fixture owns only
+        // the trusted file, independently of ambient or parallel-test keys.
+        unsafe { std::env::remove_var("ARCEE_API_KEY") };
+
         let root = std::env::temp_dir().join(format!(
             "nac-mounted-model-transport-{}",
             uuid::Uuid::new_v4()
