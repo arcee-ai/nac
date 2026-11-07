@@ -17,7 +17,7 @@ test('required workflow-lint runs nominated checkout and no-skip console control
   assert.equal(steps[resolve].run, 'python3 -B desktop/macos/ci_startup_console_check.py --resolve >> "$GITHUB_OUTPUT"');
   assert.equal(checkout.uses, 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
   assert.deepEqual(checkout.with, { ref: '${{ steps.startup-console-source.outputs.revision }}', path: '.startup-console-q', 'persist-credentials': false });
-  assert.equal(run.run, 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q');
+  assert.equal(run.run, 'python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q');
   for (const step of steps.slice(resolve, resolve + 3)) {
     assert.equal(step.if, undefined);
     assert.equal(step['continue-on-error'], undefined);
