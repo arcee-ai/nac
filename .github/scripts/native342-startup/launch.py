@@ -103,7 +103,11 @@ def handoff_files(root, value, product):
     return manifest, archive
 
 
-def main():
+def main(*, case_module=None, pair_file=None, entrypoint=None):
+    # A private diagnostic can reuse the exact custody/owned extraction path.
+    global case
+    if case_module is not None:
+        case = case_module
     phase = sys.argv[1]
     gate = Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-startup-gate'
     value = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
@@ -116,7 +120,7 @@ def main():
             stream.write('minutes=' + str(n) + '\n')
         return
     value = inputs()
-    pair = json.loads(Path(__file__).with_name('pair.json').read_text())
+    pair = json.loads((pair_file or Path(__file__).with_name('pair.json')).read_text())
     case.require(os.environ.get('ImageVersion') == pair['host_image'], 'exact image before bootstrap/build')
     if phase == '--gate':
         name = sys.argv[2]
@@ -162,7 +166,7 @@ def main():
             case.require(proof['accepted'] and proof['reaped'] and proof['drain_settled']
                 and not proof['unknown'] and proof['teardown_error'] is None, 'positive launcher helper ownership')
     if phase == '--metadata':
-        owned('producer-metadata', [sys.executable, '-B', str(Path(__file__).resolve()), '--metadata-child'], 60)
+        owned('producer-metadata', [sys.executable, '-B', str(entrypoint or Path(__file__).resolve()), '--metadata-child'], 60)
         return
     case.require(phase == '--prepare', 'fixed launcher operation')
     with using(clock.work):

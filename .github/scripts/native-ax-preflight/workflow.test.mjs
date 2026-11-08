@@ -9,7 +9,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const YAML = require('yaml'); // Existing locked workflow-tooling dependency.
 const workflow = YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml', 'utf8'));
-const job = workflow.jobs.four_startup;
+const job = workflow.jobs.ax_preflight;
 const initial = job.steps[0].run.split('\n').slice(1, -2).join('\n');
 const roots = { DOWNLOAD_ROOT: 'native342-download', PACKAGE_ROOT: 'native342-package', OUTPUT_ROOT: 'native342-episode' };
 
@@ -22,9 +22,9 @@ function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempNa
     if (alias) fs.symlinkSync(actualTemp, runnerTemp);
     const environment = path.join(fixture, 'github-env');
     const output = path.join(fixture, 'github-output');
-    const admission = { scope: 'P10-Q057-R7325-AX-retention-source01', controller_sha: 'a'.repeat(40),
-      allocation_id: 'inert-workflow-source-control', attempt: 1, retries: 0, manifest_sha256: 'b'.repeat(64),
-      producer: {}, clock: { STARTED: 1000, WORK_DEADLINE: 3880, CLEANUP_DEADLINE: 4480, HARD_DEADLINE: 4600, ...clock } };
+    const admission = { scope: 'P10-Q057-external-AX-preflight-source01', controller_sha: 'a'.repeat(40),
+      allocation_id: 'inert-workflow-source-control', attempt: 1, retries: 0, manifest_sha256: '57fef13a3193e0b489e7afdfc1e372c71b169e421e161b6792fc83fcbe4e39b7',
+      producer: {run_id:42426305195,artifact_id:13594999645,controller_sha:"7239e61a0ebc0ee01b28f9d3cb9c1262132a8627",branch:"codex/experimental-native-q-host-package-post657-p10",artifact_name:"ff8-host-package-42426305195-1"}, clock: { STARTED: 1000, WORK_DEADLINE: 3880, CLEANUP_DEADLINE: 4480, HARD_DEADLINE: 4600, ...clock } };
     // Execute only the actual initial inline Python, with a fixed wall clock.
     // No checkout, compiler, network, H import, app, or case is invoked.
     const result = spawnSync('python3', ['-B', '-c', `import time; time.time=lambda: ${now}; exec(${JSON.stringify(initial)})`], {
@@ -71,18 +71,17 @@ test('rejected image, original clock, or multiline root never exports launch roo
 });
 
 
-test('only the new manual four-case source is reachable and independent R is checked out', () => {
+test('only the manual read-only diagnostic is reachable; no protocol or XCTest actor', () => {
   assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
-  assert.deepEqual(Object.keys(workflow.jobs), ['four_startup']);
-  assert.match(job.if, /refs\/heads\/codex\/experimental-native342-ax-observability-source01/);
+  assert.deepEqual(Object.keys(workflow.jobs), ['ax_preflight']);
+  assert.match(job.if, /refs\/heads\/codex\/experimental-native-ax-observer-preflight-20261108/);
   assert.match(job.if, /github.run_attempt == 1/);
   assert.equal(job['timeout-minutes'], 60);
   assert.equal(job.env.ROOT_STARTUP_ADMISSION, '${{ inputs.startup_admission }}');
-  assert.equal(job.env.R_ROOT, '${{ github.workspace }}/protocol');
+  assert.equal(job.env.R_ROOT, undefined);
   const checkouts = job.steps.filter(s => s.uses?.startsWith('actions/checkout@'));
-  assert.deepEqual(checkouts.map(s => s.with.path), ['controller', 'harness', 'product', 'query', 'protocol']);
-  assert.equal(checkouts[4].with.ref, '${{ steps.checkout_H.outputs.R }}');
+  assert.deepEqual(checkouts.map(s => s.with.path), ['controller', 'harness', 'product', 'query']);
   assert.ok(checkouts.every(s => s.with['persist-credentials'] === false));
-  assert.ok(job.steps.some(s => s.run?.endsWith('/four-startup.py')));
-  assert.ok(!job.steps.some(s => /qualify\(|prepare-engine|rust-cache|one-onboarding.py/.test(s.run || s.uses || '')));
+  assert.ok(job.steps.some(s => s.run?.endsWith('/preflight.py')));
+  assert.ok(!job.steps.some(s => /qualify\(|prepare-engine|rust-cache|one-onboarding.py|four-startup.py|test-without-building|build-for-testing/.test(s.run || s.uses || '')));
 });
