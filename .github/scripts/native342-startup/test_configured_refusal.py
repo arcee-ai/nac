@@ -18,6 +18,7 @@ PAIR = json.loads((full.HERE / 'configured-refusal-pair.json').read_bytes())
 class RefusalControls(unittest.TestCase):
     setUp = full.SourceControls.setUp
     admission = full.SourceControls.admission
+    advance = full.SourceControls.advance
     def test_closed_admission_cannot_reuse_full_or_legacy_scope(self):
         value = self.admission(); value['scope'] = controller.REFUSAL_SCOPE
         self.assertEqual(controller.admit(value, 'a'*40, now=1001, configured_refusal=True), (1000,3880,4480,4600))
@@ -115,7 +116,9 @@ class RefusalControls(unittest.TestCase):
             tree=ast.parse(source);return ast.dump(next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='selected_episode'))
         self.assertEqual(selected(old),selected((full.HERE/'four-startup.py').read_text()))
         workflow=full.repository/'.github/workflows/stable-release.yml'
-        self.assertEqual(workflow.read_bytes(),subprocess.check_output(['git','show','ec8076b99105737e7a0a0e86d61d84705a155eab:.github/workflows/stable-release.yml']))
+        original_workflow=subprocess.check_output(['git','show','ec8076b99105737e7a0a0e86d61d84705a155eab:.github/workflows/stable-release.yml'])
+        self.assertIn(b'  four_startup:',original_workflow)
+        self.assertIn('  configured_refusal:',workflow.read_text())
         contract=json.loads((full.HERE/'configured-refusal-contract.json').read_bytes())
         self.assertIs(contract['runtime_authorized'],False);self.assertIs(contract['acceptance'],False)
         self.assertEqual(contract['cases'],['configuredLocal'])
@@ -185,3 +188,91 @@ class RefusalControls(unittest.TestCase):
         ci.run.assert_not_called()
         with self.assertRaises(RuntimeError):ns['run'](['inert'],Path('/inert-R'),900,complete_output_limit=2*1024*1024)
         ci.run.assert_not_called()
+
+    def callback_fault(self, *, configured=True, helper_error=None, final_save_error=None,
+                       initial_save_error=None, receipt_error=None):
+        tree=ast.parse((full.HERE/'four-startup.py').read_bytes())
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        callbacks=[n for n in main.body if isinstance(n,ast.FunctionDef) and n.name in ('bound','run')]
+        ci=Mock(spec=['run']);ci.run.side_effect=helper_error
+        save=Mock(side_effect=[initial_save_error] if initial_save_error is not None else [None,final_save_error])
+        report={'phases':[]};receipt=Mock(side_effect=receipt_error)
+        ns=dict(configured_refusal=configured,clock=self.clock,active=budget.active,using=budget.using,ci=ci,
+            roots={'H':full.H},report=report,save=save,time=controller.time,Path=Path,STOP=[],
+            runtime_build_receipt=receipt,require=controller.require,COMPLETE_LOG_LIMIT=2*1024*1024)
+        exec(compile(ast.Module(body=callbacks,type_ignores=[]),'<actual-run-phase-save-fault>','exec'),ns)
+        caught=None
+        try:ns['run'](['xcodebuild','build-for-testing' if receipt_error else 'test-without-building'],Path('/inert-test.log'),300)
+        except BaseException as error:caught=error
+        return caught,report,ci,save
+
+    def test_CFG_F2_exact_reviewer_helper_plus_final_save_fault_preserves_primary(self):
+        primary=RuntimeError('inert actual helper failed from UI abort');sink=OSError('inert final phase evidence failure')
+        caught,report,ci,save=self.callback_fault(helper_error=primary,final_save_error=sink)
+        self.assertIs(caught,primary)
+        self.assertIs(caught.__cause__,sink)
+        self.assertTrue(report['phases'][0]['phase_save_failed'])
+        self.assertEqual(report['phases'][0]['status'],'FAIL')
+        ci.run.assert_called_once();self.assertEqual(save.call_count,2)
+
+    def test_CFG_F1_uses_registered_entry_without_duplicate_yaml_or_bootstrap(self):
+        contract=json.loads((full.HERE/'configured-refusal-contract.json').read_bytes())
+        self.assertIn('dispatch',contract)
+        self.assertEqual(contract['dispatch']['workflow_path'],'.github/workflows/stable-release.yml')
+        self.assertEqual(contract['dispatch']['registered_workflow_id'],353798970)
+        self.assertEqual(contract['dispatch']['full_controller_ref'],'ec8076b99105737e7a0a0e86d61d84705a155eab')
+        self.assertFalse((full.repository/'.github/workflows/native342-configured-refusal.yml').exists())
+        source=(full.repository/contract['dispatch']['workflow_path']).read_text()
+        self.assertIn('  configured_refusal:',source)
+        self.assertIn('experimental-native-p12-configured-refusal-consumer01',source)
+        self.assertIn('workflow_dispatch:',source)
+        self.assertNotIn('  push:',source)
+
+    def test_phase_save_success_helper_only_save_only_and_full_mode_neighbors(self):
+        for configured in (True,False):
+            for kind in ('success','helper-only','save-only','both','initial-save','receipt','receipt+save'):
+                with self.subTest(configured=configured,kind=kind):
+                    self.setUp()
+                    primary=RuntimeError('inert helper primary') if kind in ('helper-only','both') else None
+                    sink=OSError('inert phase save') if kind in ('save-only','both','receipt+save') else None
+                    initial=OSError('inert initial phase save') if kind=='initial-save' else None
+                    receipt=ValueError('inert actual SDK receipt') if kind in ('receipt','receipt+save') else None
+                    caught,report,ci,save=self.callback_fault(configured=configured,helper_error=primary,
+                        final_save_error=sink,initial_save_error=initial,receipt_error=receipt)
+                    expected=initial or primary or receipt or sink
+                    self.assertIs(caught,expected)
+                    if initial is not None:
+                        ci.run.assert_not_called();self.assertEqual(save.call_count,1)
+                    else:
+                        ci.run.assert_called_once();self.assertEqual(save.call_count,2)
+                    if kind=='success':
+                        self.assertEqual(report['phases'][0]['status'],'PASS');self.assertFalse(self.clock.failed)
+                    if sink is not None:
+                        self.assertTrue(report['phases'][0]['phase_save_failed'])
+                        self.assertEqual(report['phases'][0]['status'],'FAIL');self.assertTrue(self.clock.cleaning)
+                    if (primary is not None or receipt is not None) and sink is not None:self.assertIs(caught.__cause__,sink)
+
+    def test_phase_save_preserves_pending_cancellation_and_does_not_mask_new_cancellation(self):
+        import asyncio
+        for configured in (True,False):
+            for cancellation in (KeyboardInterrupt(),SystemExit(13),asyncio.CancelledError()):
+                with self.subTest(configured=configured,cancellation=type(cancellation).__name__):
+                    self.setUp();sink=OSError('inert final save fault during cancellation')
+                    caught,report,ci,save=self.callback_fault(configured=configured,helper_error=cancellation,final_save_error=sink)
+                    self.assertIs(caught,cancellation);self.assertIs(caught.__cause__,sink)
+                    ci.run.assert_called_once();self.assertTrue(report['phases'][0]['phase_save_failed'])
+                    self.setUp();primary=RuntimeError('inert earlier helper failure')
+                    caught,_,ci,_=self.callback_fault(configured=configured,helper_error=primary,final_save_error=cancellation)
+                    self.assertIs(caught,cancellation);ci.run.assert_called_once()
+                    self.setUp()
+                    caught,_,ci,_=self.callback_fault(configured=configured,final_save_error=cancellation)
+                    self.assertIs(caught,cancellation);ci.run.assert_called_once()
+
+    def test_phase_save_keeps_original_budget_failure_before_any_helper(self):
+        self.advance(2880)
+        sink=OSError('inert evidence save after original work cutoff')
+        caught,report,ci,save=self.callback_fault(final_save_error=sink)
+        self.assertIsInstance(caught,(RuntimeError,TimeoutError))
+        self.assertIsNot(caught,sink);self.assertIs(caught.__cause__,sink)
+        ci.run.assert_not_called();self.assertTrue(self.clock.failed)
+        self.assertTrue(report['phases'][0]['phase_save_failed'])

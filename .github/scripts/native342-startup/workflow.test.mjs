@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const YAML = require('yaml'); // Existing locked workflow-tooling dependency.
-const workflow = YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml', 'utf8'));
+const workflow = YAML.parse(execFileSync('git', ['show', 'ec8076b99105737e7a0a0e86d61d84705a155eab:.github/workflows/stable-release.yml'], { encoding: 'utf8' }));
 const job = workflow.jobs.four_startup;
 const initial = job.steps[0].run.split('\n').slice(1, -2).join('\n');
 const roots = { DOWNLOAD_ROOT: 'native342-download', PACKAGE_ROOT: 'native342-package', OUTPUT_ROOT: 'native342-episode' };

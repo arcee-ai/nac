@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const YAML = require('yaml'); // Existing locked workflow-tooling dependency.
-const workflow = YAML.parse(fs.readFileSync('.github/workflows/native342-configured-refusal.yml', 'utf8'));
+const workflow = YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml', 'utf8'));
 const job = workflow.jobs.configured_refusal;
 const initial = job.steps[0].run.split('\n').slice(1, -2).join('\n');
 const roots = { DOWNLOAD_ROOT: 'native342-download', PACKAGE_ROOT: 'native342-package', OUTPUT_ROOT: 'native342-episode' };
@@ -86,4 +86,14 @@ test('only the closed configured diagnostic is reachable and no R checkout exist
   assert.ok(checkouts.every(s => s.with['persist-credentials'] === false));
   assert.ok(job.steps.some(s => s.run?.endsWith('/configured-refusal.py')));
   assert.ok(!job.steps.some(s => /qualify\(|prepare-engine|rust-cache|one-onboarding.py/.test(s.run || s.uses || '')));
+});
+
+
+test('registered path is reused without a duplicate workflow or bootstrap trigger', () => {
+  const contract = JSON.parse(fs.readFileSync('.github/scripts/native342-startup/configured-refusal-contract.json', 'utf8'));
+  assert.equal(contract.dispatch.workflow_path, '.github/workflows/stable-release.yml');
+  assert.equal(contract.dispatch.registered_workflow_id, 353798970);
+  assert.equal(contract.dispatch.full_controller_ref, 'ec8076b99105737e7a0a0e86d61d84705a155eab');
+  assert.equal(fs.existsSync('.github/workflows/native342-configured-refusal.yml'), false);
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
 });

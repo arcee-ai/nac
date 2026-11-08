@@ -158,13 +158,16 @@ bind any later exact controller SHA and original epochs.
 ## Closed configured-refusal diagnostic (source only)
 
 `configured-refusal.py` and `configured-refusal-launch.py` are fixed entry points
-for `native342-configured-refusal.yml`, only on
+for the already registered `stable-release.yml` (workflow353798970), only on
 `codex/experimental-native-p12-configured-refusal-consumer01`. They use the same
 maintained launcher, normal-role artifact admission, generated SDK runner,
 configuredLocal case, process/fixture owners, original clock and strict exporter.
 No caller can select another case. The new pair deliberately pins H `ebdbd340`,
-unchanged Qba and original normal P12 artifact13607980704. The full four-case/R
-workflow, pair, qualification contract and serial episode remain intact.
+unchanged Qba and original normal P12 artifact13607980704. The original full four-case/R
+workflow remains at immutable published ec807/ref; its pair, qualification
+contract and serial episode/default R requirements remain intact. This
+NEVERMERGE branch uses the established workflow path solely for this diagnostic;
+there is no duplicate YAML or trunk registration/bootstrap change.
 
 This role checks out and sets up controller/H/P/Q only. It omits independent R
 entirely and claims no fresh R acceptance. One maintained configuredLocal case
@@ -180,3 +183,9 @@ SDK/XCTest/provider/engine/console/package/evidence role and original caps. No
 actual epochs or runtime grant are supplied. Root must separately publish/admit
 an exact controller SHA and queue-inclusive <=60/48/10/2 clock. A successful
 source review is not a diagnostic runtime, native acceptance or full startup pass.
+
+The shared helper callback keeps an existing helper/budget/receipt exception
+primary if the final phase save fails. Its static in-memory phase flag and
+exception cause retain the secondary save failure. Save-only errors still fail,
+and cancellation raised by the save is never converted to an ordinary helper
+error; a pending helper cancellation remains primary through ordinary save faults.

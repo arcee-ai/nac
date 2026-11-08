@@ -151,5 +151,14 @@
     "readonly_receipt": true,
     "private_field_text_exported": false,
     "positive_app_engine_companion_cleanup_required": true
+  },
+  "dispatch": {
+    "workflow_path": ".github/workflows/stable-release.yml",
+    "registered_workflow_id": 353798970,
+    "experimental_branch": "codex/experimental-native-p12-configured-refusal-consumer01",
+    "full_controller_ref": "ec8076b99105737e7a0a0e86d61d84705a155eab",
+    "full_workflow_git_object": "ec8076b99105737e7a0a0e86d61d84705a155eab:.github/workflows/stable-release.yml",
+    "registration_basis": "Root independently verified existing registered/default-branch workflow, not a newly introduced workflow",
+    "actual_dispatch_authorized": false
   }
 }

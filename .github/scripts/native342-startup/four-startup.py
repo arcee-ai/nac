@@ -359,6 +359,7 @@ def main(*, configured_refusal=False):
             phase['complete_output_limit_bytes'] = complete_output_limit
         report['phases'].append(phase)
         save()
+        primary = None
         try:
             operation = clock.work if any(x in argv for x in ('build-for-testing', 'test-without-building')) else bound()
             if operation.kind == 'work':
@@ -370,14 +371,24 @@ def main(*, configured_refusal=False):
                 if 'build-for-testing' in argv:
                     runtime_build_receipt(argv)
             phase['status'] = 'PASS'
-        except BaseException:
+        except BaseException as error:
+            primary = error
             clock.fail('helper failed/unknown')
             clock.cleaning = True
             phase['status'] = 'FAIL'
             raise
         finally:
             phase['ended_epoch'] = time.time()
-            save()
+            try:
+                save()
+            except Exception as evidence_error:
+                phase['phase_save_failed'] = True
+                phase['status'] = 'FAIL'
+                clock.fail('final phase evidence save failed')
+                clock.cleaning = True
+                if primary is not None:
+                    raise primary from evidence_error
+                raise
 
     try:
         with using(clock.work):
