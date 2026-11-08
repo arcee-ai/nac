@@ -145,3 +145,95 @@ test('zero-width newline fragments do not hide nonempty rendered text', () => {
 test('no rendered text fragments cannot qualify a matching code span', () => {
   assert.equal(check(row + pane.replace('class="code"', 'class="code" data-no-text-fragments')).ready, false);
 });
+
+
+// Preselection uses the actual journey expressions; modeled DOM is not WK evidence.
+const journeys = fs.readFileSync(process.env.NAC_WORKSPACE_JOURNEYS_SOURCE ||
+  new URL('WorkspaceJourneys.swift', import.meta.url), 'utf8');
+const rowExpression = journeys.match(/let fileRow = """\n([\s\S]*?)\n            """/);
+const oldRowAction = journeys.match(/self\.js\("(const e=\[\.\.\.document\.querySelectorAll\('button'\)\][^\n]+?)"\)/);
+function rowFixture({route = '#/session/owned-session/files', extra = '', row = ''} = {}) {
+  const dom = new JSDOM('<style>*{opacity:1;visibility:visible}</style><div id=list>' +
+    '<button aria-label="All files" aria-pressed="true">All files</button><div id=rows>' + row +
+    '</div><div role=separator aria-label="Resize list panel"></div></div>' + extra,
+    {url:'http://127.0.0.1:351/' + route, runScripts:'outside-only'});
+  const {window} = dom;
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return new window.DOMRect(0,0,this.hasAttribute('data-zero') ? 0 : 100,24);
+  };
+  window.HTMLElement.prototype.getClientRects = function () { return [this.getBoundingClientRect()]; };
+  let clicks = 0;
+  window.document.addEventListener('click', event => {
+    if (event.target.matches('button[title="workspace.ts"]')) clicks++;
+  });
+  const lookup = rowExpression?.[1].replace('\\(self.quote(self.sessionID))', JSON.stringify('owned-session'));
+  const source = fragment => {
+    if (!rowExpression) return oldRowAction[1];
+    const expression = journeys.match(fragment)[1];
+    return expression.replace('\\(fileRow)', lookup);
+  };
+  return {window, dom,
+    ready:() => window.Function(source(/self\.waitJS\("owned Files workspace\.ts row", "([^\n]+)"\)/))(),
+    act:() => window.Function(source(/self\.js\("(const rows=\(\(\) => \{ [^\n]+)"\)/))(),
+    count:() => clicks, mount:html => window.document.querySelector('#rows').innerHTML = html,
+    close:() => window.close()};
+}
+const ownedRow = '<button title="workspace.ts">workspace.ts</button>';
+test('actual Files admission waits through delayed row mount and clicks only once', () => {
+  const f = rowFixture();
+  try {
+    for (let poll = 0; poll < 4; poll++) {
+      assert.equal(f.ready(), false); assert.equal(f.count(), 0);
+    }
+    f.mount(ownedRow);
+    for (let poll = 0; poll < 4; poll++) assert.equal(f.ready(), true);
+    assert.equal(f.count(), 0);
+    assert.equal(f.act(), true); assert.equal(f.count(), 1);
+    assert.equal(f.ready(), true); assert.equal(f.count(), 1);
+  } finally { f.close(); }
+});
+test('actual Files admission rejects missing, foreign, ambiguous and unusable rows', () => {
+  const cases = [
+    {}, {extra:ownedRow}, {row:'<button title="folder/workspace.ts">workspace.ts</button>'},
+    {row:'<button title="workspace.ts.old">workspace.ts</button>'},
+    {row:'<button>workspace.ts</button>'}, {row:ownedRow + ownedRow},
+    {row:ownedRow.replace('<button','<button disabled')},
+    {row:'<div inert>' + ownedRow + '</div>'},
+    {row:ownedRow.replace('<button','<button hidden')},
+    {row:ownedRow.replace('<button','<button data-zero')},
+    {row:ownedRow.replace('<button','<button style="opacity:0"')},
+    {row:ownedRow.replace('<button','<button style="visibility:hidden"')},
+    {row:ownedRow,route:'#/session/foreign/files'},
+    {row:ownedRow,route:'#/session/owned-session/insights'},
+    {row:ownedRow,extra:'<div><button aria-label="All files" aria-pressed="true"></button>' + ownedRow +
+      '<div role=separator aria-label="Resize list panel"></div></div>'},
+  ];
+  for (const data of cases) {
+    const f = rowFixture(data);
+    try { assert.equal(f.ready(),false); assert.throws(() => f.act()); assert.equal(f.count(),0); }
+    finally { f.close(); }
+  }
+  for (const change of [
+    f => f.window.document.querySelector('[aria-label="All files"]').remove(),
+    f => f.window.document.querySelector('[aria-label="All files"]').setAttribute('aria-pressed','false'),
+    f => f.window.document.querySelector('[role=separator]').remove(),
+  ]) {
+    const f = rowFixture({row:ownedRow});
+    try { change(f); assert.equal(f.ready(),false); assert.throws(() => f.act()); assert.equal(f.count(),0); }
+    finally { f.close(); }
+  }
+});
+test('actual Files action rechecks readiness without click retry', () => {
+  for (const change of [
+    f => f.mount(''),
+    f => f.window.location.hash = '#/session/foreign/files',
+    f => f.window.document.querySelector('#list').setAttribute('inert',''),
+    f => f.mount(ownedRow + ownedRow),
+  ]) {
+    const f = rowFixture({row:ownedRow});
+    try {
+      assert.equal(f.ready(),true); change(f);
+      assert.throws(() => f.act()); assert.equal(f.count(),0);
+    } finally { f.close(); }
+  }
+});

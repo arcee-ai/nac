@@ -22,6 +22,7 @@ class FileCaptureControls(unittest.TestCase):
     func check(_ name: String, _ action: () async throws -> String) async { _ = try! await action() }
     func navigate(_ path: String) async throws {}
     func button(_ title: String) async throws {}
+    func quote(_ value: String) -> String { String(data: try! JSONSerialization.data(withJSONObject: [value]), encoding: .utf8)!.dropFirst().dropLast().description }
     func js(_ script: String) async throws -> Any { true }
     func waitJS(_ detail: String, _ script: String) async throws {}
     func snapshot(_ name: String, expecting target: CaptureTarget?) async throws { captured = target }
@@ -44,6 +45,70 @@ class FileCaptureControls(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='nac-file-target-pure-') as temporary:
             root = Path(temporary)
             swift, binary = root / 'FileTarget.swift', root / 'file-target'
+            swift.write_text(fixture)
+            compiled = subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-warnings-as-errors',
+                '-parse-as-library', str(swift), '-o', str(binary)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            executed = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+
+    def test_actual_row_wait_keeps_its_deadline_and_engine_failure(self):
+        owner = Path(__file__).parent
+        wait = member((owner / 'WorkspaceSmoke.swift').read_text(), 'func waitJS(')
+        fixture = r'''import Foundation
+struct Date: Comparable {
+    static var now: Double = 0
+    let value: Double
+    init() { value = Self.now }
+    init(_ value: Double) { self.value = value }
+    func addingTimeInterval(_ seconds: TimeInterval) -> Date { Date(value + seconds) }
+    static func < (a: Date, b: Date) -> Bool { a.value < b.value }
+}
+enum Task {
+    static func sleep(nanoseconds: UInt64) async throws { Date.now += Double(nanoseconds) / 1e9 }
+}
+enum PreviewError: Error { case message(String) }
+struct Root { let path = "owned-profile" }
+struct Profile { let root = Root() }
+struct Engine { let pid = 351 }
+@MainActor final class App {
+    var failure: String?
+    let profile: Profile? = Profile()
+    let engine = Engine()
+}
+@MainActor final class WorkspaceSmoke {
+    let app = App()
+    var polls = 0
+    var records = 0
+    var admitAt = Int.max
+    func record(_ value: [String: Any]) { records += 1 }
+    func js(_ source: String) async throws -> Any { polls += 1; return polls >= admitAt }
+    // ACTUAL_WAIT
+}
+@main enum WaitControls {
+    @MainActor static func main() async throws {
+        Date.now = 0
+        let delayed = WorkspaceSmoke(); delayed.admitAt = 5
+        try await delayed.waitJS("owned row", "readonly")
+        precondition(delayed.polls == 5 && delayed.records == 5)
+        precondition(Date.now > 0.19 && Date.now < 0.21)
+        Date.now = 0
+        let absent = WorkspaceSmoke()
+        do { try await absent.waitJS("owned row", "readonly"); fatalError("Missing timeout") }
+        catch PreviewError.message(let text) { precondition(text == "Timed out waiting for owned row") }
+        precondition(Date.now >= 20 && Date.now < 20.051)
+        precondition(absent.polls >= 399 && absent.polls <= 401)
+        Date.now = 0
+        let failed = WorkspaceSmoke(); failed.app.failure = "owned engine stopped"
+        do { try await failed.waitJS("owned row", "readonly"); fatalError("Missing engine failure") }
+        catch PreviewError.message(let text) { precondition(text == "owned engine stopped") }
+        precondition(failed.polls == 0 && failed.records == 1 && Date.now == 0)
+    }
+}
+'''.replace('    // ACTUAL_WAIT', wait)
+        with tempfile.TemporaryDirectory(prefix='nac-files-row-wait-pure-') as temporary:
+            root = Path(temporary)
+            swift, binary = root / 'RowWait.swift', root / 'row-wait'
             swift.write_text(fixture)
             compiled = subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-warnings-as-errors',
                 '-parse-as-library', str(swift), '-o', str(binary)], capture_output=True, text=True, timeout=60)

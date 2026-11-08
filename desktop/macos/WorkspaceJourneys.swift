@@ -141,7 +141,26 @@ extension WorkspaceSmoke {
             try await self.navigate("files")
             if (try? await self.js("return !!document.querySelector('button[aria-label=\"Show panel\"]');")) as? Bool == true { try await self.button("Show panel") }
             try await self.button("All files")
-            _ = try await self.js("const e=[...document.querySelectorAll('button')].find(e => e.textContent.includes('workspace.ts')); if(!e)throw Error('Missing fixture source file'); e.click(); return true;")
+            let fileRow = """
+            if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
+            const lists = [...document.querySelectorAll('[role="separator"][aria-label="Resize list panel"]')]
+              .map(e => e.parentElement).filter(e => e &&
+                e.querySelector('button[aria-label="All files"][aria-pressed="true"]'));
+            if (lists.length !== 1) return [];
+            return [...lists[0].querySelectorAll('button[title="workspace.ts"]')].filter(e => {
+              const rect = e.getBoundingClientRect();
+              if (e.disabled || e.closest('[inert]') || !e.getClientRects().length ||
+                  rect.width <= 0 || rect.height <= 0) return false;
+              for (let node = e; node; node = node.parentElement) {
+                const style = getComputedStyle(node);
+                if (node.hidden || style.display === 'none' || style.visibility !== 'visible' ||
+                    Number(style.opacity) === 0) return false;
+              }
+              return true;
+            });
+            """
+            try await self.waitJS("owned Files workspace.ts row", "const rows=(() => { \(fileRow) })(); return rows.length === 1;")
+            _ = try await self.js("const rows=(() => { \(fileRow) })(); if(rows.length !== 1)throw Error('Missing or ambiguous owned fixture source file'); rows[0].click(); return true;")
             try await self.waitJS("highlighted source file", "return document.body.innerText.includes('export const workspaceFileFixture = 351;');")
             try await self.snapshot("files.png", expecting: .file(id: self.sessionID, path: "workspace.ts",
                 content: "export const workspaceFileFixture = 351;\n"))
