@@ -115,10 +115,16 @@ unknown result. Preserve the generated runner/target/scheme and complete tree
 hash/origin evidence for Root's explicit qualification decision.
 
 The separately nominated caller branch is
-`codex/experimental-native-p12-lifecycle-capture-consumer01`, one clean child of
-reviewed `259d3614273b45d685a8e26c37be293ce2139ff8`. Its admission names the ACTUAL
+`codex/experimental-native-p12-lifecycle-capture-consumer01`. Initial caller74
+was one clean child of reviewed `259d3614273b45d685a8e26c37be293ce2139ff8`. Its admission names the ACTUAL
 consumer HEAD/GITHUB_SHA and preserves original H_base ebdbd. The original259
 source branch/ref stays frozen. Only admission branch/parent constants change;
 the reviewed capture implementation is otherwise byte-identical. The private
 caller uses the already registered stable-release.yml manual workflow; see
 .github/scripts/native344-capture/README.md for fixed roles and remaining gates.
+
+The first caller phase-fitting repair nominates exact parent
+`74dc6f79c08c2f18883acce2c36888896e9ba7c9`; original source259 and H_baseebdbd
+remain unchanged. Non-episode caller phases require the full original phase
+cap before acquisition; episode/retention clocks and the reviewed controller
+implementation remain unchanged. The nomination keeps actual GITHUB_SHA honest.

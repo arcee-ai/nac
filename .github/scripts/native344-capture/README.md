@@ -7,7 +7,8 @@ producer0210 remain immutable Git objects/refs. Default dev, public PRs/stacks,
 C/H8 and the original capture-source259 branch are untouched. No unregistered
 workflow, synthetic GITHUB_SHA, extra bootstrap workflow or source rebuild is used.
 
-The caller must be one clean child of reviewed259d3614273b45d685a8e26c37be293ce2139ff8
+The phase-fitting repair is one clean child of preserved caller
+74dc6f79c08c2f18883acce2c36888896e9ba7c9; reviewed259 remains its original source
 on codex/experimental-native-p12-lifecycle-capture-consumer01. Actual consumer
 HEAD is `${{ github.sha }}`; Root's literal controller_sha must match that same
 GITHUB_SHA. Original H_baseebdbd and exact P4b7 remain. Only branch/parent admission
@@ -83,3 +84,11 @@ PR, re-read branch/workflow353798970/producer nonexpiration, issue one fresh Roo
 literal with this ACTUAL head/original clock/unspent counts, and dispatch the
 existing stable-release.yml at this branch with capture_admission. None of those
 runtime, network, push or dispatch actions is performed by this source unit.
+
+Non-episode gates now require their FULL nominated phase cap to fit inside the
+original work allowance, including the existing60s outer reserve. If not, they
+refuse before emitting minutes or acquiring any helper/action. In particular,
+a700s remaining work clock cannot issue a10m setup step and then admit a600s
+helper after identity checks. Exact boundary and earlier clocks admit the same
+original cap; later clocks refuse. Episode/retention/740 and all actual caps are
+unchanged. This is first caller phase-fitting repair1/4, not new runtime authority.

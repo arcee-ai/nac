@@ -37,6 +37,8 @@ def minutes(value,phase,*,now=None):
     else:
         require(phase in CAPS,'fixed caller phase');deadline,cap=value['clock']['WORK_DEADLINE'],CAPS[phase]
     result=min(cap,math.floor((deadline-now-60)/60));require(result>=1,'original queue-inclusive phase exhausted')
+    if phase!='episode':
+        require(result==cap,'insufficient original allowance for complete caller phase and owner settlement')
     return result
 
 

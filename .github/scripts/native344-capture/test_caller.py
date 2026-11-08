@@ -41,7 +41,7 @@ class Caller(unittest.TestCase):
             self.assertEqual(c.context(value(),now=1001),value())
             for key,bad in [('GITHUB_SHA','b'*40),('GITHUB_REF','refs/heads/codex/private-native-lifecycle-capture-source01'),('GITHUB_WORKFLOW_REF','unregistered.yml'),('GITHUB_JOB','other'),('ImageVersion','wrong')]:
                 with patch.dict(os.environ,{key:bad}),self.assertRaises(RuntimeError):c.context(value(),now=1001)
-        self.assertEqual(a.SOURCE_PARENT,'259d3614273b45d685a8e26c37be293ce2139ff8');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
+        self.assertEqual(a.SOURCE_PARENT,'74dc6f79c08c2f18883acce2c36888896e9ba7c9');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
     def test_all_caps_original_clock_and_cleanup_retention(self):
         with patch.dict(os.environ,env(),clear=True):
             for phase in (*c.CAPS,'episode'):
@@ -51,6 +51,29 @@ class Caller(unittest.TestCase):
             self.assertEqual(c.retention_minutes(value(),now=4480),1)
             with self.assertRaises(RuntimeError):c.retention_minutes(value(),now=4600)
             with self.assertRaises(RuntimeError):c.minutes(value(),'arbitrary',now=1001)
+    def test_partial_setup_700_seconds_is_refused(self):
+        with patch.dict(os.environ,env(),clear=True),self.assertRaises(RuntimeError):c.minutes(value(),'setup-controller',now=3180)
+    def test_every_non_episode_phase_full_exact_boundary_and_late_refusal(self):
+        with patch.dict(os.environ,env(),clear=True):
+            for phase,cap in c.CAPS.items():
+                boundary=value()['clock']['WORK_DEADLINE']-60-cap*60
+                with self.subTest(phase=phase):
+                    self.assertEqual(c.minutes(value(),phase,now=boundary),cap)
+                    self.assertEqual(c.minutes(value(),phase,now=boundary-0.25),cap)
+                    for now in (boundary+0.001,boundary+30,3879,3880,4480):
+                        with self.subTest(now=now),self.assertRaises(RuntimeError):c.minutes(value(),phase,now=now)
+    def test_refused_setup_gate_publishes_no_short_minutes_or_helper(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t).resolve();out=root/'output';fixture=dict(env(),CAPTURE_GATE=str(root),GITHUB_OUTPUT=str(out),ROOT_LIFECYCLE_CAPTURE_ADMISSION=json.dumps(value()))
+            with patch.dict(os.environ,fixture,clear=True),patch.object(c.time,'time',return_value=3180),patch.object(c.sys,'argv',['caller.py','--gate','setup-controller']),patch.object(c,'Task',side_effect=AssertionError('helper must not be acquired')),self.assertRaises(RuntimeError):c.main()
+            self.assertFalse(out.exists());self.assertFalse((root/'clock-setup-controller.json').exists())
+    def test_episode_and_retention_still_use_original_global_cutoffs(self):
+        with patch.dict(os.environ,env(),clear=True):
+            self.assertEqual(c.minutes(value(),'episode',now=3180),20)
+            self.assertEqual(c.retention_minutes(value(),now=4480),1)
+            with self.assertRaises(RuntimeError):c.minutes(value(),'episode',now=3880)
+            with self.assertRaises(RuntimeError):c.retention_minutes(value(),now=4600)
+
     def test_original_producer_identity_exact_and_nonexpired(self):
         run,artifact=identities();self.assertEqual(c.transfer.artifact_identity(value(),run,artifact)['producer_sha'],a.PRODUCER['controller_sha'])
         for field,bad in [('expired',True),('digest','sha256:'+'x'*64),('size_in_bytes',1),('id',1),('name','other')]:
@@ -146,6 +169,18 @@ class Bootstrap(unittest.TestCase):
                 root=Path(t).resolve();fixture=dict(env(),RUNNER_TEMP=str(root),GITHUB_ENV=str(root/'env'),GITHUB_OUTPUT=str(root/'output'),ROOT_LIFECYCLE_CAPTURE_ADMISSION=json.dumps(value()));fixture.update(change)
                 with patch.dict(os.environ,fixture,clear=True),patch.object(c.time,'time',return_value=1001),self.assertRaises(RuntimeError):exec(compile(source,'inert-refusal-bootstrap','exec'),{})
                 self.assertFalse((root/'output').exists())
+    def test_initial_one_minute_checkout_cannot_authorize_short_setup(self):
+        source=(Path(os.environ['NAC_CALLER_TEST_PACKET'])/'inline-0.py').read_text()
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t).resolve();output=root/'output';environment=root/'env'
+            fixture=dict(env(),RUNNER_TEMP=str(root),GITHUB_ENV=str(environment),GITHUB_OUTPUT=str(output),ROOT_LIFECYCLE_CAPTURE_ADMISSION=json.dumps(value()))
+            with patch.dict(os.environ,fixture,clear=True),patch.object(c.time,'time',return_value=3180):exec(compile(source,'inert-bootstrap-to-setup','exec'),{})
+            self.assertEqual(output.read_bytes(),b'minutes=1\n')
+            fixture.update(dict(line.split('=',1) for line in environment.read_text().splitlines()))
+            with patch.dict(os.environ,fixture,clear=True),patch.object(c.time,'time',return_value=3180),patch.object(c.sys,'argv',['caller.py','--gate','setup-controller']),patch.object(c,'Task',side_effect=AssertionError('no helper acquisition')),self.assertRaises(RuntimeError):c.main()
+            self.assertEqual(output.read_bytes(),b'minutes=1\n')
+            self.assertFalse((root/'native344-capture-retained/caller/clock-setup-controller.json').exists())
+
     def test_inline_hard_deadline_retention_does_not_renew_work(self):
         source=(Path(os.environ['NAC_CALLER_TEST_PACKET'])/'inline-1.py').read_text();ast.parse(source)
         with tempfile.TemporaryDirectory() as t:
