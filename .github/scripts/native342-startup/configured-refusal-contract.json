@@ -1,12 +1,12 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-Qba-Hebdb-configured-refusal-diagnostic01",
+  "scope": "P12-Qba-Hbc596-configured-drain-diagnostic01",
   "acceptance": false,
   "runtime_authorized": false,
   "cases": [
     "configuredLocal"
   ],
-  "H": "ebdbd340bdc1220318446180c0a0df579489392c",
+  "H": "bc596148c88e00a4e8e25c1ff09ec34d568913bc",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
   "independent_R_required": false,
@@ -155,7 +155,7 @@
   "dispatch": {
     "workflow_path": ".github/workflows/stable-release.yml",
     "registered_workflow_id": 353798970,
-    "experimental_branch": "codex/experimental-native-p12-configured-refusal-consumer01",
+    "experimental_branch": "codex/experimental-native-p12-configured-drain-consumer01",
     "full_controller_ref": "ec8076b99105737e7a0a0e86d61d84705a155eab",
     "full_workflow_git_object": "ec8076b99105737e7a0a0e86d61d84705a155eab:.github/workflows/stable-release.yml",
     "registration_basis": "Root independently verified existing registered/default-branch workflow, not a newly introduced workflow",

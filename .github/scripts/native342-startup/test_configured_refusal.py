@@ -30,6 +30,30 @@ class RefusalControls(unittest.TestCase):
         self.assertEqual(PAIR['H'], controller.REFUSAL_H)
         self.assertNotIn('R', PAIR)
 
+    def test_Hbc_nomination_rejects_old_scope_branch_and_H(self):
+        self.assertEqual(controller.REFUSAL_H, 'bc596148c88e00a4e8e25c1ff09ec34d568913bc')
+        contract=json.loads((full.HERE/'configured-refusal-contract.json').read_bytes())
+        self.assertEqual(contract['H'],PAIR['H']);self.assertEqual(contract['scope'],controller.REFUSAL_SCOPE)
+        self.assertEqual(contract['dispatch']['experimental_branch'],controller.REFUSAL_BRANCH.removeprefix('refs/heads/'))
+        value=self.admission();value['scope']=controller.REFUSAL_SCOPE
+        for old_scope in ('P12-Qba-Hebdb-configured-refusal-diagnostic01',controller.SCOPE):
+            with self.assertRaises(RuntimeError):
+                controller.admit({**value,'scope':old_scope},'a'*40,now=1001,configured_refusal=True)
+        env=dict(ROOT_STARTUP_ADMISSION=json.dumps(value),GITHUB_SHA='a'*40,
+            GITHUB_REF='refs/heads/codex/experimental-native-p12-configured-refusal-consumer01',
+            GITHUB_EVENT_NAME='workflow_dispatch',GITHUB_RUN_ATTEMPT='1',GITHUB_REPOSITORY='arcee-ai/nac')
+        with patch.dict(launcher.launch.os.environ,env),patch.object(launcher.launch.time,'time',return_value=1001):
+            with self.assertRaises(RuntimeError):launcher.launch.inputs(configured_refusal=True)
+        main=next(n for n in ast.parse((full.HERE/'four-startup.py').read_bytes()).body
+            if isinstance(n,ast.FunctionDef) and n.name=='main')
+        gate=next(n for n in main.body if isinstance(n,ast.If) and isinstance(n.test,ast.Name)
+                  and n.test.id=='configured_refusal')
+        code=compile(ast.Module(body=[gate],type_ignores=[]),'<actual-H-pin-gate>','exec')
+        for field,bad in (('H','ebdbd340bdc1220318446180c0a0df579489392c'),('H','0'*40),('P','0'*40),('Q','0'*40)):
+            ns=dict(controller.__dict__,configured_refusal=True,pair={**PAIR,field:bad})
+            with self.assertRaises(RuntimeError):exec(code,ns)
+        exec(code,dict(controller.__dict__,configured_refusal=True,pair=PAIR))
+
     def proof(self):
         return dict(scenario='configuredLocal',H=PAIR['H'],P=PAIR['P'],Q=PAIR['Q'],passed=False,
             public_test_requested=True,input_completion_unknown=True,rendered_UI_reload_observed=False,errors={},
@@ -224,7 +248,7 @@ class RefusalControls(unittest.TestCase):
         self.assertFalse((full.repository/'.github/workflows/native342-configured-refusal.yml').exists())
         source=(full.repository/contract['dispatch']['workflow_path']).read_text()
         self.assertIn('  configured_refusal:',source)
-        self.assertIn('experimental-native-p12-configured-refusal-consumer01',source)
+        self.assertIn('experimental-native-p12-configured-drain-consumer01',source)
         self.assertIn('workflow_dispatch:',source)
         self.assertNotIn('  push:',source)
 

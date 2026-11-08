@@ -159,10 +159,10 @@ bind any later exact controller SHA and original epochs.
 
 `configured-refusal.py` and `configured-refusal-launch.py` are fixed entry points
 for the already registered `stable-release.yml` (workflow353798970), only on
-`codex/experimental-native-p12-configured-refusal-consumer01`. They use the same
+`codex/experimental-native-p12-configured-drain-consumer01`. They use the same
 maintained launcher, normal-role artifact admission, generated SDK runner,
 configuredLocal case, process/fixture owners, original clock and strict exporter.
-No caller can select another case. The new pair deliberately pins H `ebdbd340`,
+No caller can select another case. The new pair deliberately pins reviewed H `bc596148c`,
 unchanged Qba and original normal P12 artifact13607980704. The original full four-case/R
 workflow remains at immutable published ec807/ref; its pair, qualification
 contract and serial episode/default R requirements remain intact. This
@@ -189,3 +189,14 @@ primary if the final phase save fails. Its static in-memory phase flag and
 exception cause retain the secondary save failure. Save-only errors still fail,
 and cancellation raised by the save is never converted to an ordinary helper
 error; a pending helper cancellation remains primary through ordinary save faults.
+
+This source-only drain nomination uses the new closed scope
+`P12-Qba-Hbc596-configured-drain-diagnostic01`. Hbc retains the already-owned
+read-only diagnostic under the original work/case cutoff, with original-work
+prelaunch admission and at most five seconds inside the existing20-second stop.
+Parent input/UI/collector failure remains sticky; CFEqual, own-refusal/no-ready,
+original error, UNKNOWN input completion and all case/actor counts remain unchanged.
+No global cross-owner Ready-publication guarantee is claimed. Controller325/
+H-ebdbd actual01 remains frozen FAIL/incomplete; this nomination neither retags
+that actual nor grants another one. Root must separately review and admit an exact
+new consumer head; no actual epochs, dispatch or availability grant is supplied.

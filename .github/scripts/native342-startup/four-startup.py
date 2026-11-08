@@ -15,9 +15,9 @@ import time
 STOP = []
 BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
 SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
-REFUSAL_SCOPE = 'P12-Qba-Hebdb-configured-refusal-diagnostic01'
-REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-configured-refusal-consumer01'
-REFUSAL_H = 'ebdbd340bdc1220318446180c0a0df579489392c'
+REFUSAL_SCOPE = 'P12-Qba-Hbc596-configured-drain-diagnostic01'
+REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-configured-drain-consumer01'
+REFUSAL_H = 'bc596148c88e00a4e8e25c1ff09ec34d568913bc'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'

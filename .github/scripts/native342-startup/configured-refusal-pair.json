@@ -1,6 +1,6 @@
 {
-  "scope": "P12-Qba-Hebdb-configured-refusal-diagnostic01",
-  "H": "ebdbd340bdc1220318446180c0a0df579489392c",
+  "scope": "P12-Qba-Hbc596-configured-drain-diagnostic01",
+  "H": "bc596148c88e00a4e8e25c1ff09ec34d568913bc",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
   "product_parent": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
@@ -9,7 +9,7 @@
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "q_swift_sha256": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
   "host_image": "20261102.0473.1",
-  "H_preparation_parent": "6c0ccdb077844c8cb1173cb558c988e30b07d874",
+  "H_preparation_parent": "ebdbd340bdc1220318446180c0a0df579489392c",
   "native_boundary": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
   "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",
