@@ -249,7 +249,8 @@ def qualify(raw, product, tests, protocol, harness_sha, run, command, native_rep
             raw / ('startup-package-' + label + '.log'), 90, cwd=product)
     verify_package('before')
     admission = {'provenance': test_contract(tests).inspect_normal_package(str(manifest), str(app), str(product), product_sha=PRODUCT)}
-    private, receipt = build_protocol(protocol, raw / 'startup-protocol-runner', run)
+    private, receipt = build_protocol(protocol, raw / 'startup-protocol-runner', run,
+        product=product, manifest=manifest, package_admission=admission)
     process_proof = verify_protocol(private, receipt, app, manifest, admission, raw / 'startup-protocol', run)
     verify_package('after-protocol')
     selection = materialize_project(ROOT, harness_sha, startup_root=tests, startup_sha=TEST_SOURCE,

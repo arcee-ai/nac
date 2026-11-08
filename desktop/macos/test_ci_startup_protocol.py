@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import ci_startup_protocol as protocol
 from ci_startup_fixture import FUTURE_MESSAGE, PRODUCT
 from ci_startup_protocol import FILES, REVISION, SCENARIOS, TESTS, build, validate_record, verify
 
@@ -102,8 +103,9 @@ class ProtocolConsumerTests(unittest.TestCase):
                     self.assertEqual(args[1:], ['adapter_', '--nocapture'])
                     self.assertEqual(options['env']['PATH'], '/usr/bin:/bin:/usr/sbin:/sbin')
                     log.write_text('synthetic adapter control success\n')
-            with patch('ci_startup_protocol.sources', return_value=root):
-                private, receipt = build(root, root / 'private', run)
+            with patch('ci_startup_protocol.schema_alignment', return_value={'admitted': 'inert'}):
+                private, receipt = build(root, root / 'private', run, product=root,
+                    manifest=root / 'manifest.json', package_admission={})
             self.assertEqual(private.read_bytes(), compiler_output.read_bytes())
             self.assertEqual(private.stat().st_mode & 0o777, 0o500)
             self.assertEqual(receipt['R'], REVISION)
@@ -120,7 +122,7 @@ class ProtocolConsumerTests(unittest.TestCase):
             engine.parent.mkdir(parents=True)
             engine.write_bytes(b'synthetic package; never executed')
             manifest = root / 'manifest.json'
-            manifest.write_text('{}\n')
+            manifest.write_text(json.dumps({'identity': {'source': {'revision': PRODUCT, 'store_schema': 50}}}) + '\n')
             private = root / 'private-test'
             private.write_bytes(b'synthetic external test; never executed')
             sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -128,7 +130,11 @@ class ProtocolConsumerTests(unittest.TestCase):
             admission = {'provenance': {'engine_identity': identity, 'manifest_sha256': sha(manifest),
                          'post_sign_receipt': {'engine_sha256': sha(engine)}}}
             runner = {'R': REVISION, 'P': PRODUCT, 'R_files': FILES,
-                      'private_executable': str(private), 'test_executable_sha256': sha(private)}
+                      'private_executable': str(private), 'test_executable_sha256': sha(private),
+                      'schema_alignment': dict(R=REVISION, P=PRODUCT, manifest_sha256=sha(manifest),
+                          R_schema_source_sha256=protocol.SCHEMA_SHA256, P_schema_source_sha256=protocol.SCHEMA_SHA256,
+                          R_supported_schema=50, P_supported_schema=50, manifest_store_schema=50,
+                          fixture_main_schema=50, fixture_future_schema=51)}
             def run(args, log, timeout, **options):
                 self.assertEqual(args, [str(private), '--exact', *TESTS, '--nocapture'])
                 env = options['env']
@@ -149,6 +155,111 @@ class ProtocolConsumerTests(unittest.TestCase):
             self.assertFalse(receipt['native_UI_qualified'])
             with self.assertRaises(RuntimeError):
                 verify(private, {**runner, 'R': '0' * 40}, app, manifest, admission, root / 'rejected', run)
+            forbidden = Mock(side_effect=AssertionError('No runtime before aligned receipt'))
+            for changed in ({}, {**runner['schema_alignment'], 'manifest_store_schema': 40}):
+                with self.assertRaises(RuntimeError):
+                    verify(private, {**runner, 'schema_alignment': changed}, app, manifest, admission, root / 'never', forbidden)
+            forbidden.assert_not_called()
+
+
+class SchemaAlignmentTests(unittest.TestCase):
+    def source(self, version):
+        return ('const STORE_SCHEMA_VERSION: i64 = ' + str(version) + ';\n').encode()
+
+    def manifest(self, version=50):
+        return json.dumps({'identity': {'source': {'revision': PRODUCT, 'store_schema': version}}}).encode()
+
+    def admit(self, r, p, manifest=None, **changes):
+        data = self.manifest() if manifest is None else manifest
+        sha = lambda value: hashlib.sha256(value).hexdigest()
+        return protocol.admit_protocol_schema(r, p, data, **{
+            **dict(r_sha256=sha(r), p_sha256=sha(p), manifest_sha256=sha(data), product_sha=PRODUCT), **changes})
+
+    def test_exact_equality_not_just_numerically_future_and_true_WAL_pair(self):
+        selected = self.admit(self.source(50), self.source(50))
+        self.assertEqual((selected['fixture_main_schema'], selected['fixture_future_schema']), (50, 51))
+        self.assertEqual(selected['manifest_store_schema'], 50)
+        for r in (40, 51):
+            with self.subTest(R=r), self.assertRaisesRegex(RuntimeError, 'R_P_manifest_schema_equality'):
+                self.admit(self.source(r), self.source(50))
+
+    def test_missing_nonliteral_duplicate_hash_and_overflow_refuse(self):
+        bad = [b'', b'const STORE_SCHEMA_VERSION: i64 = current();\n',
+               self.source(50) + self.source(50), self.source(50) + b'const STORE_SCHEMA_VERSION: i64 = next();\n',
+               self.source(-1), self.source(2147483647), self.source(99999999999999999999)]
+        for source in bad:
+            with self.subTest(source=source), self.assertRaises(RuntimeError):
+                self.admit(source, self.source(50))
+        for changed in ({'r_sha256': '0' * 64}, {'p_sha256': ''}, {'manifest_sha256': '0' * 64}):
+            with self.subTest(changed=changed), self.assertRaises(RuntimeError):
+                self.admit(self.source(50), self.source(50), **changed)
+        for manifest in (b'{}', b'not-json', self.manifest(51), self.manifest(True), self.manifest(50.0),
+                         b'{"identity":{"source":{"revision":"' + PRODUCT.encode() +
+                         b'","store_schema":50,"store_schema":50}}}'):
+            with self.subTest(manifest=manifest), self.assertRaises(RuntimeError):
+                self.admit(self.source(50), self.source(50), manifest)
+
+    def test_missing_required_build_alignment_cannot_reach_executor(self):
+        run = Mock(side_effect=AssertionError('No executor allowed'))
+        with self.assertRaises(TypeError):
+            build(Path('/missing'), Path('/absent-output'), run)
+        run.assert_not_called()
+
+    def test_actual_build_admission_refuses_before_executor_and_records_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            R, P = root / 'R', root / 'P'
+            for source in (R, P):
+                file = source / protocol.SCHEMA_PATH
+                file.parent.mkdir(parents=True)
+                file.write_bytes(self.source(50))
+            files = {}
+            for name in FILES:
+                file = R / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b'inert selected source bytes')
+                files[name] = hashlib.sha256(file.read_bytes()).hexdigest()
+            manifest = root / 'manifest.json'
+            manifest.write_bytes(self.manifest())
+            sha = lambda file: hashlib.sha256(file.read_bytes()).hexdigest()
+            admission = {'provenance': dict(source_sha=PRODUCT, engine_identity={'source_revision': PRODUCT},
+                                          manifest_sha256=sha(manifest))}
+            def checkout(source, revision):
+                self.assertIn((source, revision), ((R, REVISION), (P, PRODUCT)))
+            with patch.object(protocol, 'FILES', files), patch.object(protocol, 'SCHEMA_SHA256', sha(R / protocol.SCHEMA_PATH)), \
+                    patch.object(protocol, 'require_checkout', side_effect=checkout):
+                reject = Mock(side_effect=AssertionError('No executor before alignment'))
+                for version in (40, 51):
+                    (R / protocol.SCHEMA_PATH).write_bytes(self.source(version))
+                    with self.subTest(version=version), self.assertRaises(RuntimeError):
+                        build(R, root / 'never-created', reject, product=P, manifest=manifest, package_admission=admission)
+                (R / protocol.SCHEMA_PATH).write_bytes(self.source(50))
+                for data in (self.manifest(51), b'{}'):
+                    manifest.write_bytes(data)
+                    changed = {'provenance': {**admission['provenance'], 'manifest_sha256': sha(manifest)}}
+                    with self.assertRaises(RuntimeError):
+                        build(R, root / 'never-created', reject, product=P, manifest=manifest, package_admission=changed)
+                manifest.write_bytes(self.manifest())
+                with self.assertRaises(RuntimeError):
+                    build(R, root / 'never-created', reject, product=P, manifest=manifest,
+                          package_admission={'provenance': {**admission['provenance'], 'manifest_sha256': '0' * 64}})
+                reject.assert_not_called()
+                self.assertFalse((root / 'never-created').exists())
+                compiled = root / 'inert-artifact'
+                compiled.write_bytes(b'inert compiler artifact; never executed')
+                calls = []
+                def run(argv, log, cap, **options):
+                    calls.append((argv[0], cap))
+                    if argv[0] == 'cargo':
+                        log.write_text(json.dumps(dict(reason='compiler-artifact', target=dict(name='desktop_schema_contract', kind=['test']),
+                                                      profile=dict(test=True), executable=str(compiled))) + '\n')
+                    else:
+                        log.write_text('inert adapter result\n')
+                private, receipt = build(R, root / 'admitted', run, product=P, manifest=manifest, package_admission=admission)
+                self.assertEqual([cap for _, cap in calls], [900, 90])
+                self.assertEqual(private.read_bytes(), compiled.read_bytes())
+                self.assertEqual(receipt['schema_alignment']['fixture_future_schema'], 51)
+                self.assertEqual(receipt['schema_alignment']['manifest_sha256'], sha(manifest))
 
 
 if __name__ == '__main__':
