@@ -27,13 +27,48 @@ class QuitPresentationTests(unittest.TestCase):
     def test_original_boundaries_and_originating_transaction(self):
         owner = (OWNER / 'AppQuit.swift').read_text()
         fixture = (OWNER / 'QuitPresentationFixture.swift').read_text()
-        for name, flags in [('ordinary', ()),
+        for name, flags in [('ordinary', ()), ('preview', ('-D', 'PREVIEW_SMOKE')),
                             ('attention', ('-D', 'PREVIEW_SMOKE', '-D', 'ATTENTION_SMOKE'))]:
             with self.subTest(role=name), tempfile.TemporaryDirectory(prefix='nac-quit-presentation-') as directory:
                 binary = self.compile_control(Path(directory), owner, fixture, flags)
                 executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=35, check=False)
                 self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
                 print(executed.stdout, end='')
+
+    def test_minimized_presentation_mutants_fail_the_affected_controls(self):
+        owner = (OWNER / 'AppQuit.swift').read_text()
+        fixture = (OWNER / 'QuitPresentationFixture.swift').read_text()
+        first = '        if window.isMiniaturized { window.deminiaturize(nil) }\n'
+        second = '                if self.app.window.isMiniaturized { self.app.window.deminiaturize(nil) }\n'
+        self.assertEqual(owner.count(first), 1)
+        self.assertEqual(owner.count(second), 1)
+        mutants = [
+            ('original-omission', owner.replace(first, '').replace(second, ''), 'Minimized confirmation presentation order'),
+            ('missing-confirmation', owner.replace(first, ''), 'Minimized confirmation presentation order'),
+            ('missing-timeout', owner.replace(second, ''), 'Timed-out owned status remained minimized'),
+            ('foreign-confirmation', owner.replace('window.deminiaturize(nil)',
+                'let other = Window(); other.isMiniaturized = true; other.deminiaturize(nil)', 1),
+                'Restored a foreign confirmation window'),
+            ('foreign-timeout', owner.replace('self.app.window.deminiaturize(nil)',
+                'let other = Window(); other.isMiniaturized = true; other.deminiaturize(nil)'),
+                'Timed-out owned status remained minimized'),
+            ('late-confirmation', owner.replace(first + '        window.makeKeyAndOrderFront(nil)\n',
+                '        window.makeKeyAndOrderFront(nil)\n' + first), 'Minimized confirmation presentation order'),
+            ('late-timeout', owner.replace(second + '                self.app.window.makeKeyAndOrderFront(nil)\n',
+                '                self.app.window.makeKeyAndOrderFront(nil)\n' + second), 'Timed-out status presentation order'),
+            ('unconditional-confirmation', owner.replace(first, '        window.deminiaturize(nil)\n'),
+                'Non-minimized window was restored'),
+            ('unconditional-timeout', owner.replace(second, '                self.app.window.deminiaturize(nil)\n'),
+                'Non-minimized window was restored'),
+        ]
+        for name, candidate, reason in mutants:
+            with self.subTest(mutant=name), tempfile.TemporaryDirectory(prefix='nac-quit-mini-mutant-') as directory:
+                self.assertNotEqual(candidate, owner)
+                binary = self.compile_control(Path(directory), candidate, fixture)
+                executed = subprocess.run([str(binary)], text=True, capture_output=True, timeout=35, check=False)
+                self.assertNotEqual(executed.returncode, 0, name)
+                self.assertIn(reason, executed.stdout + executed.stderr, name)
+                print('Rejected presentation mutant:', name)
 
     @unittest.skipUnless(os.environ.get('NAC_QUIT_RED_SOURCE'), 'Explicit immutable preimage needed for original RED')
     def test_original_owner_reproduces_premature_termination_cancel(self):

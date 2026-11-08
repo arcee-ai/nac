@@ -25,7 +25,13 @@ enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn }
 final class Button { var keyEquivalent = "" }
 @MainActor final class Window {
     var attachedSheet: Window?
-    func makeKeyAndOrderFront(_ sender: Any?) { NSApp.trace.append("front") }
+    var isMiniaturized = false
+    var presentation: [String] = []
+    func deminiaturize(_ sender: Any?) {
+        precondition(isMiniaturized, "Non-minimized window was restored")
+        presentation.append("restore"); NSApp.trace.append("restore"); isMiniaturized = false
+    }
+    func makeKeyAndOrderFront(_ sender: Any?) { presentation.append("front"); NSApp.trace.append("front") }
     func endSheet(_ sheet: Window, returnCode: ModalResponse) {
         NSAlert.presented.first { $0.window === sheet }?.answer?(returnCode)
     }
@@ -119,12 +125,40 @@ final class Button { var keyEquivalent = "" }
         stopApp.completion?(); drain()
         precondition(NSApp.replies == [true] && stopApp.stops == 1)
     }
+    @MainActor static func minimizedConfirmationPreservesDecisionOwner() {
+        for stop in [false, true] {
+            reset()
+            let app = PreviewApp(); NSApp.delegate = app
+            let launch = app.quit.beginLaunch()
+            app.window.isMiniaturized = true
+            precondition(app.quit.shouldTerminate() == .terminateLater)
+            precondition(NSApp.trace.isEmpty && NSApp.replies.isEmpty)
+            drain()
+            precondition(NSApp.trace == ["restore", "front", "activate", "sheet"], "Minimized confirmation presentation order")
+            precondition(!app.window.isMiniaturized && app.stops == 0, "Restored a foreign confirmation window")
+            NSApp.terminate(nil); drain()
+            precondition(NSAlert.presented.count == 1 && NSApp.publicAdmissions == 0)
+            NSAlert.presented[0].answer?(stop ? .alertSecondButtonReturn : .alertFirstButtonReturn)
+            drain()
+            if stop {
+                precondition(app.stops == 1 && NSApp.replies.isEmpty)
+                app.engine.pid = 0; app.completion?(); drain()
+                precondition(NSApp.replies == [true] && app.stops == 1)
+            } else {
+                precondition(NSApp.replies == [false] && app.stops == 0)
+                precondition(app.quit.launch == launch && app.engine.pid == 42)
+            }
+        }
+    }
     @MainActor static func ordinaryTimeoutAndLateCompletion() {
         reset()
         let idleApp = PreviewApp(), waitingApp = PreviewApp()
         for app in [idleApp, waitingApp] {
             _ = app.quit.beginLaunch(); _ = app.quit.shouldTerminate(); drain()
             NSAlert.presented.last!.answer?(.alertSecondButtonReturn)
+            // Keep one visible neighbor while the other waits minimized.
+            app.window.isMiniaturized = app === idleApp
+            app.window.presentation = []
         }
         // Real owner Timer, bounded once for both branches; no deadline seam.
         RunLoop.main.run(until: Date().addingTimeInterval(26.1)); drain()
@@ -132,6 +166,9 @@ final class Button { var keyEquivalent = "" }
         for app in [idleApp, waitingApp] {
             guard case .shutdownFailed = app.quit.lifecycle.phase else { preconditionFailure() }
             precondition(app.stops == 1 && !app.quit.terminationPending && !app.statuses.isEmpty)
+            precondition(!app.window.isMiniaturized, "Timed-out owned status remained minimized")
+            precondition(app.window.presentation == (app === idleApp ? ["restore", "front"] : ["front"]),
+                         "Timed-out status presentation order")
         }
         idleApp.engine.pid = 0; idleApp.completion?(); drain()
         precondition(NSApp.replies == [false, false] && NSApp.terminations == 0)
@@ -144,7 +181,9 @@ final class Button { var keyEquivalent = "" }
     @MainActor static func attentionCleanupJoins() {
         reset()
         let app = PreviewApp(); NSApp.delegate = app
+        app.window.isMiniaturized = true
         _ = app.quit.beginLaunch(); app.quit.cleanupAttentionFixture(); app.quit.cleanupAttentionFixture()
+        precondition(NSApp.trace.isEmpty && app.window.isMiniaturized, "Minimized attention cleanup presented UI")
         precondition(app.stops == 1 && NSAlert.presented.isEmpty && !app.quit.terminationPending)
         app.engine.pid = 0; app.completion?(); drain()
         precondition(NSApp.replies.isEmpty && NSApp.terminations == 1)
@@ -171,6 +210,7 @@ final class Button { var keyEquivalent = "" }
         let late = PreviewApp(), latePending = PreviewApp()
         _ = late.quit.beginLaunch(); late.quit.cleanupAttentionFixture()
         _ = latePending.quit.beginLaunch(); _ = latePending.quit.shouldTerminate(); drain()
+        late.window.isMiniaturized = true; latePending.window.isMiniaturized = true
         latePending.quit.cleanupAttentionFixture()
         let timeoutTrace = NSApp.trace
         RunLoop.main.run(until: Date().addingTimeInterval(26.1)); drain()
@@ -179,6 +219,8 @@ final class Button { var keyEquivalent = "" }
         }
         precondition(NSApp.replies.isEmpty && NSApp.trace == timeoutTrace && NSApp.terminations == 0)
         precondition(latePending.quit.terminationPending)
+        precondition(late.window.isMiniaturized && latePending.window.isMiniaturized,
+                     "Minimized attention timeout restored a window")
         NSApp.delegate = late; late.engine.pid = 0; late.completion?(); drain()
         precondition(NSApp.terminations == 1 && NSApp.replies.isEmpty)
         NSApp.delegate = latePending; latePending.engine.pid = 0; latePending.completion?(); drain()
@@ -188,6 +230,7 @@ final class Button { var keyEquivalent = "" }
     #endif
     @MainActor static func main() {
         originalBoundariesAndOSFirstFence()
+        minimizedConfirmationPreservesDecisionOwner()
         #if ATTENTION_SMOKE
         attentionCleanupJoins()
         #else

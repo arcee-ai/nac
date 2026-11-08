@@ -150,6 +150,7 @@ final class AppQuit {
         #if PREVIEW_SMOKE
         smokeSheetPresentations += 1
         #endif
+        if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         alert.beginSheetModal(for: window) { [weak self, weak alert] response in
@@ -213,6 +214,7 @@ final class AppQuit {
                 }
                 #endif
                 self.app.showShutdownStatus("NAC could not finish stopping within the shutdown wait. The workspace has been closed and cannot accept commands. The original engine shutdown is still pending. Quit again to continue waiting.")
+                if self.app.window.isMiniaturized { self.app.window.deminiaturize(nil) }
                 self.app.window.makeKeyAndOrderFront(nil)
                 self.reply(false)
             }
