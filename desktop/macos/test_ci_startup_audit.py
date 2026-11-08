@@ -114,7 +114,7 @@ class StartupAuditTests(unittest.TestCase):
                 bodies.append(data)
             node = {'pid': 20, 'parent': 10, 'uid': 501, 'start_seconds': 100,
                     'start_microseconds': 1, 'executable': '/owned/nac-web', 'kind': 'engine', 'serving': True}
-            witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None,
+            witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None, ui_terminal=False, ui_root=17,
                                       app={'pid': 10}, latest=[node])
             audit = LiveAudit(witness, {'scenario': 'onboarding', 'engine_identity': IDENTITY}, source)
             opener = MagicMock()
@@ -208,7 +208,7 @@ class StartupAuditTests(unittest.TestCase):
         app = {'pid': 10}
         node = {'pid': 20, 'parent': 10, 'uid': 501, 'start_seconds': 100, 'start_microseconds': 1,
                 'executable': '/owned/NAC.app/Contents/Resources/nac-web', 'kind': 'engine', 'serving': True}
-        witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None, app=app, latest=[node])
+        witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None, ui_terminal=False, ui_root=17, app=app, latest=[node])
         audit = LiveAudit(witness, {'scenario': 'onboarding', 'engine_identity': {}}, None)
         with patch('ci_startup_audit.owned_listener', side_effect=['http://127.0.0.1:4321', OSError()]), \
                 patch('ci_startup_audit.require_readiness', return_value={}), \

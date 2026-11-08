@@ -111,6 +111,8 @@ class ProtocolConsumerTests(unittest.TestCase):
             self.assertEqual(receipt['R'], REVISION)
             self.assertEqual(calls[0][1]['env']['NAC_SOURCE_REVISION'], REVISION)
             self.assertIn('--locked', calls[0][0])
+            self.assertEqual(calls[0][1]['complete_output_limit'], protocol.COMPLETE_LOG_LIMIT)
+            self.assertNotIn('complete_output_limit', calls[1][1])
             compiler_output.write_bytes(b'changed shared target')
             self.assertNotEqual(private.read_bytes(), compiler_output.read_bytes())
 

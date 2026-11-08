@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 
-from ci_support import (console_state, export_evidence, qualify_toolchain, redact_values,
+from ci_support import (COMPLETE_LOG_LIMIT, console_state, export_evidence, qualify_toolchain, redact_values,
                         require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
@@ -49,14 +49,21 @@ def native_report(args, log):
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, retain_ownership=False):
+def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, retain_ownership=False,
+        complete_output_limit=None):
     """Retain every accepted handle through thread startup, waits and teardown."""
     print(f'Native CI phase: {log.name}', flush=True)
     process,thread=None,None
     primary,teardown=None,None
     reaped=False
     bound=active()
-    chunks=deque(maxlen=64)
+    if complete_output_limit is not None and (type(complete_output_limit) is not int
+            or not 0 < complete_output_limit <= COMPLETE_LOG_LIMIT):
+        raise ValueError('Invalid complete output capture limit')
+    chunks=deque(maxlen=64 if complete_output_limit is None else None)
+    bytes_seen=bytes_retained=0
+    overflow=drain_finished=False
+    drain_error=capture_failure=None
     try:
         if abort is not None and abort():
             raise RuntimeError('Native fixture ownership unavailable before helper launch')
@@ -65,7 +72,21 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, 
                                  stderr=subprocess.STDOUT,start_new_session=True,env=env)
         budget_check()
         def drain():
-            while chunk:=process.stdout.read(4096):chunks.append(chunk)
+            nonlocal bytes_seen,bytes_retained,overflow,drain_error,drain_finished
+            try:
+                while chunk:=process.stdout.read(4096):
+                    if complete_output_limit is None:
+                        chunks.append(chunk)
+                    else:
+                        bytes_seen+=len(chunk)
+                        kept=chunk[:max(0,complete_output_limit-bytes_retained)]
+                        if kept:chunks.append(kept)
+                        bytes_retained+=len(kept)
+                        overflow=bytes_seen>complete_output_limit
+                drain_finished=True
+            except BaseException as error:
+                if complete_output_limit is None:raise
+                drain_error=error
         thread=threading.Thread(target=drain,daemon=True)
         budget_check()
         thread.start()
@@ -75,14 +96,18 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, 
             budget_check()
             if abort is not None and abort():
                 raise RuntimeError('Native fixture ownership unavailable during helper execution')
+            if complete_output_limit is not None:
+                if overflow:raise RuntimeError('Native complete output exceeds capture limit')
+                if drain_error is not None:raise RuntimeError('Native complete output drain failed')
             remaining=deadline-time.monotonic()
             if remaining<=0:raise subprocess.TimeoutExpired(args,seconds)
             try:
-                code=process.wait(timeout=min(.1,remaining) if abort is not None or bound is not None else remaining)
+                code=process.wait(timeout=min(.1,remaining) if abort is not None or bound is not None
+                                  or complete_output_limit is not None else remaining)
                 reaped=True
                 break
             except subprocess.TimeoutExpired:
-                if abort is None and bound is None:raise
+                if abort is None and bound is None and complete_output_limit is None:raise
         budget_check()
         if code:raise RuntimeError(f'{args[0]} failed ({code}); see {log.name}')
     except BaseException as error:
@@ -108,21 +133,32 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, 
             if process is not None and (thread is None or not thread.is_alive()):process.stdout.close()
             log.write_bytes(b''.join(chunks))
         except BaseException as error:teardown=teardown or error
-        if bound is not None or retain_ownership:
+        unknown=(process is not None and not reaped) or (thread is not None and thread.is_alive())
+        if complete_output_limit is not None and primary is None and (overflow or drain_error is not None or not drain_finished or unknown):
+            capture_failure=RuntimeError('Native complete output exceeds capture limit' if overflow else
+                                         'Native complete output drain failed')
+            primary=capture_failure
+        if bound is not None or retain_ownership or complete_output_limit is not None:
             owner=bound.owner if bound is not None else None
-            unknown=(process is not None and not reaped) or (thread is not None and thread.is_alive())
             if owner is not None and (teardown is not None or unknown):owner.fail('helper finalization unknown')
             try:
                 with using(owner.retention if owner is not None else None):
-                    log.with_name(log.name+'.ownership.json').write_text(json.dumps(dict(
+                    receipt=dict(
                         accepted=process is not None,pid=process.pid if process else None,
                         reaped=reaped,drain_settled=thread is None or not thread.is_alive(),unknown=unknown,
                         primary_error=type(primary).__name__ if primary else None,
-                        teardown_error=type(teardown).__name__ if teardown else None))+'\n')
+                        teardown_error=type(teardown).__name__ if teardown else None)
+                    if complete_output_limit is not None:
+                        receipt['output_capture']=dict(mode='complete',limit_bytes=complete_output_limit,
+                            bytes_seen=bytes_seen,bytes_retained=bytes_retained,overflow=overflow,
+                            complete=drain_finished and not overflow and drain_error is None and teardown is None and not unknown,
+                            sha256=hashlib.sha256(b''.join(chunks)).hexdigest())
+                    log.with_name(log.name+'.ownership.json').write_text(json.dumps(receipt)+'\n')
             except BaseException:
                 if owner is not None:owner.fail('retention: helper ownership receipt unknown')
                 elif primary is None:raise  # Explicit custody cannot silently lose its receipt.
-        if teardown is not None and (primary is None or bound is None):raise teardown
+        if teardown is not None and (primary is None or (bound is None and complete_output_limit is None)):raise teardown
+        if capture_failure is not None:raise capture_failure
         if primary is None:budget_check()
         elif bound is not None:
             try:budget_check()
