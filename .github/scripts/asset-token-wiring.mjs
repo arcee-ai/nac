@@ -12,7 +12,9 @@ export function reverseAssetTokens(workflow) {
     "Managed NAC image construction": [
       ["scanner-qualification", "Qualify real OS/Node advisory matching and runtime/DB negatives"],
       ["build-smoke", "Inventory the exact tested image"],
+      ["build-smoke", "Scan the same tested image with reviewed policy"],
     ],
+    "Daily managed image security": [["rescan", "Rescan retained unchanged managed image inventory"]],
   }[workflow.name];
   assert.ok(roles, "known asset-consuming workflow");
   assert.equal(workflow.env?.GITHUB_TOKEN, undefined, "token must not be workflow-wide");

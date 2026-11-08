@@ -82,6 +82,14 @@ class Controls(unittest.TestCase):
                 self.assert_safe_output(diagnostic)
         self.assertIsNone(asset.NoRedirect().redirect_request(None, None, 302, "", {}, SIGNED))
 
+    def test_gh_token_is_not_an_asset_authentication_fallback(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "ghp_SYNTHETIC_LOCAL_PAT"}):
+            calls, data, diagnostic, error = self.run_download([Response()], token="")
+        self.assertIsNone(error)
+        self.assertEqual(data, b"archive")
+        self.assertIsNone(calls[0][0].get_header("Authorization"))
+        self.assertNotIn("ghp_SYNTHETIC_LOCAL_PAT", diagnostic)
+
     def test_http_error_response_reports_only_allowlisted_facts_without_retry(self):
         for code in [403, 404, 429, 504]:
             response = urllib.error.HTTPError(API, code, CANARY, {

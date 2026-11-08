@@ -23,6 +23,7 @@ jobs:
           ref: dev
       - name: Rescan retained unchanged managed image inventory
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: |
           scan_status=0

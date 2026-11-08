@@ -96,11 +96,12 @@ for (const mode of ["failed", "corrupt", "cached-corrupt"])
   });
 
 
-test("existing read token is confined to the five exact installer steps", () => {
+test("existing read token is confined to the seven exact asset-consuming steps", () => {
   const YAML = createRequire(import.meta.url)("yaml");
-  for (const file of ["stable-release", "managed-image-build", "source-security"]) {
+  for (const file of ["stable-release", "managed-image-build", "source-security", "image-security-rescan"]) {
     const value = YAML.parse(fs.readFileSync(`.github/workflows/${file}.yml`, "utf8"));
-    assert.equal(value.permissions.contents, "read");
+    assert.deepEqual(value.permissions, file === "image-security-rescan"
+      ? { contents: "read", actions: "read" } : { contents: "read" });
     const clean = structuredClone(value);
     reverseAssetTokens(clean);
     for (const mutate of [

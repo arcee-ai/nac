@@ -202,6 +202,7 @@ jobs:
       - name: Scan the same tested image with reviewed policy
         if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.inventory.outcome == 'success' }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           IMAGE_ID: ${{ steps.image.outputs.id }}
           SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
           POLICY_MODE: ${{ needs.prepare.outputs.policy_mode }}
