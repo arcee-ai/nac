@@ -209,10 +209,10 @@ test("startup catalog binds the delivered product and four-file query supplier",
   assert.equal(startup.source_sha, "ef2cce9141973f37bf35e33d113e35eaa7a91f19");
   assert.equal(startup.test_source_sha, "057adebe72355fb7e95dc98b821c0a3de17a1167");
   assert.deepEqual(startup.test_files, {
-    "README.md": "6c61f4f0b726f2f1fc5eb5e0cbc4cb647913b0b0fcad6aa5100a05405cb393e3",
+    "README.md": "6ecdc1bc67285f553966941499917133d9ca75ed60d6154c02ed9e19f0d423ca",
     "StartupJourneys.swift": "dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518",
     "contract.py": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
-    "test_contract.py": "d111ad946ea80b69d1a1c21a73a6818b46380829719a00054013105716aa776e",
+    "test_contract.py": "689117ef0432d93fce4be6525359bb5ea88709bdb2afee6f42889b108d31a438",
   });
   assert.equal(startup.protocol_source_sha, "7325c48b3c9ec7036e255a6bd92f31c1a98c1607");
   assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
