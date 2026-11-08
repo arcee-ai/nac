@@ -120,25 +120,23 @@ Those have separate owners in the ALL-339 work map.
 
 ## Ordinary startup supplier binding
 
-The startup fixture and controlled-environment resolver bind exact final product
-`ef2cce9141973f37bf35e33d113e35eaa7a91f19`, whose direct parent is the
-full Native source `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Its Native boundary
-is `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`, integrated on actual landed dev
-`42231f447fef5d9d63d82943ae35e8c0d6c424b6`. This is source nomination only;
-no package/engine/app/query/runtime acceptance is inherited from historical P9/P6c/Pff8.
-Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases and
-protocol supplier remain unchanged; failed episodes and spent allocations are
-not renewed.
+This private P12 nomination binds product
+`4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
+`1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
+`8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the repaired immutable
+nine-file supplier `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`; its journey
+SHA256 is `7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8`.
+The normal P12 package has independent genuine supplier evidence; that evidence
+supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
+historical startup/SDK results keep their original source and consumed counters.
 
-The query supplier is final post-657 `057adebe72355fb7e95dc98b821c0a3de17a1167`, with
-`StartupJourneys.swift` SHA-256 `dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518`.
-All four supplier files remain immutable. The separate SDK-only receipt measured
-harness `9863b7714c32ed77bd66867973de6d5b02a753f8` with historical
-P `ff8c9609abf7bf7ddabe983c96ff31cf80362956` and historical Q04c;
-it proves that compiler gate only, not the current product. This updated harness
-and final post-648 product have no execution receipt.
-The default four cases, protocol R, future-store promise and spent runtime caps
-remain unchanged; source integration does not renew an execution allocation.
+The H2 plus canonical Q2 observer inputs come from `observer_sources`; callers
+must compile all four, retaining the original guards/receipt/custody contracts.
+All four ordinary startup cases and independent R7325 remain required. R's actual
+compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
+under a separate Root admission; schema50 alone is insufficient. No runtime or
+publication is authorized by this nomination. Functional H/Q behavior is unchanged.
 
 ## Private launch contract (ALL-341)
 

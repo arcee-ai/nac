@@ -9,7 +9,7 @@ from ci_qualifications import require_checkout
 from ci_startup_process import capture
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
+PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
 SOURCE = 'desktop/macos/CommandEnvironment.swift'
 SOURCE_SHA256 = 'c4b64f8bed76285c9455c48256180ff5cec5e775eabb832cf326ab4da3ca14a2'
 
