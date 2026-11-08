@@ -24,16 +24,17 @@ class StartupSupervisorTests(unittest.TestCase):
             self.assertEqual(runner_environment(), {'DEVELOPER_DIR': '/Selected/Xcode'})
 
     def exercise(self, *, sdk_failure=False, cleanup_failure=False, test_failure=False, integrity_failure=False,
-                 diagnostic_error=None, witness_rejection=False):
+                 diagnostic_error=None, witness_rejection=False, configured=False, ax_failure=False):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary).resolve()
+            scenario = 'configuredLocal' if configured else 'onboarding'
             profiles, folder = root / 'profiles', root / 'case'
             profiles.mkdir()
             fixture = profiles / 'nac342-xctest-onboarding-synthetic'
             fixture.mkdir()
             config_path = fixture / 'startup-config.json'
             config_path.write_text('{}\n')
-            config = {'app_path': str(fixture / 'NAC.app'), 'scenario': 'onboarding', 'fixture_root': str(fixture)}
+            config = {'app_path': str(fixture / 'NAC.app'), 'scenario': scenario, 'fixture_root': str(fixture)}
             profile = {'root': fixture}
             calls = []
             witness = MagicMock(failure=None)
@@ -42,6 +43,21 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.settle.side_effect = RuntimeError('unknown owner') if cleanup_failure else None
             witness.settle.return_value = {'root': str(fixture), 'owned_processes_settled': True, 'observed_processes': []}
             witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
+            companion = MagicMock(failure=None)
+            companion.stop.return_value = {'owned_processes_settled': True}
+            companion.reconcile_retirement.return_value = {'terminal_observed': False}
+            if configured:
+                def stop_companion():
+                    calls.append('ax-stopped')
+                    if ax_failure: raise RuntimeError('unknown companion custody')
+                    return {'owned_processes_settled': True}
+                def settle_app(*args):
+                    calls.append('app-settled')
+                    return {'root': str(fixture), 'owned_processes_settled': True, 'observed_processes': []}
+                companion.stop.side_effect = stop_companion
+                witness.settle.side_effect = settle_app
+            setup = MagicMock()
+            setup.__enter__.return_value = {'base_url': 'http://inert-fixture', 'scope': 'synthetic; no engine'}
             audit = MagicMock(failure=None)
             audit.stop.return_value = {'scope': 'synthetic unit API'}
             audit.failure_snapshot.return_value = {'schema': 'nac-startup-api-diagnostic-v1', 'rejected': False}
@@ -92,9 +108,11 @@ class StartupSupervisorTests(unittest.TestCase):
                     raise RuntimeError('Interrupted test has no complete dispatch receipt')
                 attachments = folder / 'attachments'
                 attachments.mkdir()
-                (attachments / 'nac342-ordinary-onboarding.png').write_bytes(b'unit-placeholder-never-decoded')
+                (attachments / ('nac342-ordinary-' + scenario + '.png')).write_bytes(b'unit-placeholder-never-decoded')
                 return {'complete': True, 'scope': 'synthetic unit attachments'}
             replacements = {
+                'AXCompanion': MagicMock(return_value=companion), 'ax_declaration': MagicMock(return_value={}),
+                'setup_engine': MagicMock(return_value=setup), 'seed_model': MagicMock(return_value={}), 'persisted_audit': MagicMock(return_value={}),
                 'Provider': MagicMock(return_value=provider), 'prepare_profile': MagicMock(return_value=profile),
                 'prepare_configuration': MagicMock(return_value=(config, config_path, {})),
                 'configuration_selection': MagicMock(return_value={}), 'immutable_snapshot': MagicMock(return_value={}),
@@ -107,12 +125,12 @@ class StartupSupervisorTests(unittest.TestCase):
                 replacements['require_integrity'].side_effect = RuntimeError('protected bytes changed')
             for name, replacement in replacements.items():
                 stack.enter_context(patch('ci_startup.' + name, replacement))
-            if sdk_failure or cleanup_failure or test_failure or integrity_failure or diagnostic_error is not None:
+            if sdk_failure or cleanup_failure or test_failure or integrity_failure or diagnostic_error is not None or ax_failure:
                 with self.assertRaises(RuntimeError):
-                    run_case(folder, profiles, 'onboarding', root, root, root, root, 'a' * 40, {}, root, root,
+                    run_case(folder, profiles, scenario, root, root, root, root, 'a' * 40, {}, root, root,
                              run, MagicMock(), MagicMock(return_value={'scope': 'synthetic OCR'}))
             else:
-                run_case(folder, profiles, 'onboarding', root, root, root, root, 'a' * 40, {}, root, root,
+                run_case(folder, profiles, scenario, root, root, root, root, 'a' * 40, {}, root, root,
                          run, MagicMock(), MagicMock(return_value={'scope': 'synthetic OCR'}))
             result = json.loads((folder / 'case.json').read_text())
             if sdk_failure:
@@ -121,15 +139,21 @@ class StartupSupervisorTests(unittest.TestCase):
                 self.assertFalse(result['public_test_requested'])
                 self.assertTrue(result['input_completion_unknown'])
             else:
-                self.assertEqual(calls, ['full-sdk-build', 'preinstalled', 'test-request', 'collect'])
+                self.assertEqual(calls, ['full-sdk-build', 'preinstalled', 'test-request', 'ax-stopped', 'collect', 'app-settled']
+                                 if configured else ['full-sdk-build', 'preinstalled', 'test-request', 'collect'])
                 witness.settle.assert_called_once()
                 witness.stop.assert_called_once()
                 self.assertTrue(result['public_test_requested'])
-            if sdk_failure or cleanup_failure or integrity_failure:
+            if sdk_failure or cleanup_failure or integrity_failure or ax_failure:
                 replacements['remove_profile'].assert_not_called()
                 self.assertTrue((folder / 'retained-fixture.json').exists())
             else:
                 replacements['remove_profile'].assert_called_once()
+            if configured:
+                companion.start.assert_called_once()
+                companion.stop.assert_called_once()
+                self.assertEqual(result['errors']['ax_owner'] is not None, ax_failure)
+                self.assertEqual(replacements['persisted_audit'].call_count, 0 if ax_failure else 1)
             if test_failure:
                 self.assertFalse(result['passed'])
                 self.assertEqual(result['errors']['test']['type'], 'RuntimeError')
@@ -161,6 +185,12 @@ class StartupSupervisorTests(unittest.TestCase):
                 self.assertIn('integrity', retained['retention_reasons'])
                 self.assertEqual(result['protected_before'], {})
                 self.assertEqual(result['protected_after'], {})
+
+    def test_unknown_ax_companion_retains_profile_after_successful_app_settlement(self):
+        self.exercise(configured=True, ax_failure=True)
+
+    def test_settled_ax_companion_allows_existing_profile_cleanup(self):
+        self.exercise(configured=True)
 
     def test_sdk_failure_never_starts_observer_or_requests_input(self):
         self.exercise(sdk_failure=True)

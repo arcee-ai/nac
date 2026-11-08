@@ -20,21 +20,26 @@ class StartupFixtureTests(unittest.TestCase):
     def profile(self, case):
         return prepare_profile(self.parent, case, 'http://127.0.0.1:4173/models-dev')
 
-    def test_query_pin_and_four_files_reject_tamper_before_contract_import(self):
+    def test_ax_pin_and_complete_inventory_reject_tamper_before_contract_import(self):
         import ci_startup_fixture as fixture
-        self.assertEqual(TEST_SOURCE, '057adebe72355fb7e95dc98b821c0a3de17a1167')
+        self.assertEqual(TEST_SOURCE, 'ba266ba1b3bea331768d91fc8a0b2ee66b484d01')
         self.assertEqual(fixture.TEST_FILES, {
-            'README.md': '6ecdc1bc67285f553966941499917133d9ca75ed60d6154c02ed9e19f0d423ca',
-            'StartupJourneys.swift': 'dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518',
-            'contract.py': '1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86',
-            'test_contract.py': '689117ef0432d93fce4be6525359bb5ea88709bdb2afee6f42889b108d31a438',
+            'README.md': '39c0b3aec37188e18eb141ef5537711e6f60b1fd384920d47d248cfd19758ed9',
+            'StartupJourneys.swift': '7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8',
+            'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
+            'test_contract.py': '493457530363e6992941960a6de2911c65da463db7452deb17f3af24443f916d',
+            'StartupAXGuard.swift': '3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18',
+            'StartupAXReceipt.swift': 'a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217',
+            'AX-WITNESS-CONTRACT.md': '1041bcef5739ebc1fe146673f7460ab82448d13dbb763af93c78f9cbf53c3bf6',
+            'test_ax_witness.py': '26e3fb9b290a03642e43eb07965564d2beb8013cc28d3294a6e07c946289cdc3',
+            'AGENTS.md': '074ff7d390c45a739b80048cf155274607ba3db5da74183cd5e4f673286a20fe',
         })
         directory = self.parent / 'desktop/macos/startup_xctest'
         directory.mkdir(parents=True)
         (directory / 'README.md').write_text('tampered inert fixture')
         with patch('ci_startup_fixture.require_checkout') as checkout, \
                 patch('ci_startup_fixture.importlib.util.spec_from_file_location') as load:
-            with self.assertRaisesRegex(RuntimeError, 'four-file startup source differs'):
+            with self.assertRaisesRegex(RuntimeError, 'startup source inventory differs'):
                 fixture.test_contract(self.parent)
         checkout.assert_called_once_with(self.parent, TEST_SOURCE)
         load.assert_not_called()

@@ -510,6 +510,9 @@ enum StartupObserver {
 
     @MainActor
     static func main() {
+        if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--ax-witness" {
+            StartupAXWitnessMode.main(CommandLine.arguments[2], CommandLine.arguments[3]); return
+        }
         if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--ax-preflight" {
             StartupAXPreflight.main(CommandLine.arguments[2], CommandLine.arguments[3])
         }

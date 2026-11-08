@@ -55,7 +55,7 @@ def replace_once(text, old, new):
     return text.replace(old, new)
 
 
-def source_variant(base, native_path, external_path, source_hash, target, prefix):
+def source_variant(base, native_path, external_path, source_hash, target, prefix, support=()):
     # Exact base pin resolves EVERY inherited file reference: the native Swift
     # file becomes absolute; built-products refs remain Xcode outputs. Groups,
     # build configurations and framework phases contain no other input paths.
@@ -89,6 +89,19 @@ def source_variant(base, native_path, external_path, source_hash, target, prefix
         ('children = (A10000000000000000000006);', 'children = (A10000000000000000000006, B10000000000000000000006);'),
     ):
         text = replace_once(text, old, new)
+    if support:
+        file_ids, build_ids = [], []
+        for index, path in enumerate(support, 1):
+            file_id, build_id = 'C1' + f'{index:022d}', 'C2' + f'{index:022d}'
+            file_ids.append(file_id); build_ids.append(build_id)
+            clones += [f'    {file_id} = {{\n      isa = PBXFileReference;\n      lastKnownFileType = sourcecode.swift;\n'
+                       f'      path = {quote(path)};\n      sourceTree = "<absolute>";\n    }};',
+                       f'    {build_id} = {{\n      isa = PBXBuildFile;\n      fileRef = {file_id};\n    }};']
+        # Change only the cloned startup source phase, never the original target.
+        clones = [item.replace('files = (B10000000000000000000009);',
+                    'files = (B10000000000000000000009, ' + ', '.join(build_ids) + ');') for item in clones]
+        text = replace_once(text, 'children = (A10000000000000000000005, B10000000000000000000005, A10000000000000000000003);',
+            'children = (A10000000000000000000005, B10000000000000000000005, ' + ', '.join(file_ids) + ', A10000000000000000000003);')
     text = replace_once(text, '  };\n  rootObject', '\n'.join(clones) + '\n  };\n  rootObject')
     return text.encode()
 
@@ -136,7 +149,12 @@ def materialize_project(harness_root, harness_sha, *, performance_root=None, per
     if (not output.is_absolute() or output.resolve() != output or output.exists()
             or not output.parent.is_dir() or output.is_relative_to(harness) or output.is_relative_to(external)):
         raise RuntimeError('Generated project destination must be absent, canonical and outside source checkouts')
-    generated = source_variant(base, native_path, external_path, external_hash, target, prefix)
+    support = {}
+    if startup:
+        for name in ('StartupAXGuard.swift', 'StartupAXReceipt.swift'):
+            path, value = source_file(external, STARTUP.with_name(name))
+            support[path] = value
+    generated = source_variant(base, native_path, external_path, external_hash, target, prefix, tuple(support))
     selected_scheme = scheme.replace(b'NACNativeUITests', target.encode())
     selected_scheme = selected_scheme.replace(b'A10000000000000000000004', b'B10000000000000000000004')
     # The private container retains the maintained project's name; only the
@@ -152,6 +170,9 @@ def materialize_project(harness_root, harness_sha, *, performance_root=None, per
     require_checkout(external, external_sha)
     if source_file(harness, NATIVE)[1] != native or source_file(external, relative)[1] != source:
         raise RuntimeError('XCTest source changed during materialization')
+    for path, value in support.items():
+        if source_file(external, STARTUP.with_name(path.name))[1] != value:
+            raise RuntimeError('Startup support source changed during materialization')
     output.mkdir(mode=0o700)
     project = output / PROJECT.name
     schemes = project / SCHEME.parent
@@ -166,5 +187,7 @@ def materialize_project(harness_root, harness_sha, *, performance_root=None, per
                    selected_scheme_sha256=digest(selected_scheme),
                    source_resolution='All inherited input references reviewed under exact base pins; H/P Swift refs absolute')
     receipt['sources'][str(external_path)] = digest(source)
+    for path, value in support.items():
+        receipt['sources'][str(path)] = digest(value)
     (output / 'project-selection.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return {'project': str(project), 'scheme': target, 'receipt': receipt}
