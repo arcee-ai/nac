@@ -55,6 +55,143 @@ class StartupAttachmentTests(unittest.TestCase):
                      (f'nac342-cleanup-v1-{case}', json.dumps(cleanup).encode())])
         return config, config_hash, witness, rows
 
+    def test_ax_refusal_retains_before_missing_cleanup_but_never_qualifies(self):
+        config, config_hash, witness, _ = self.fixture('configuredLocal')
+        row = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha', 'startup_source_sha256')}
+        row.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
+        row.update(schema='nac342-ax-refusal-v1', scenario='configuredLocal', surface='form', acceptance=False,
+                   configuration_sha256=config_hash,
+                   first_observed_refusal={'stage': 'attribute_error', 'attribute': 'AXWindows', 'api_code': -25204},
+                   terminal_refusal={'stage': 'windows_unavailable'})
+        for invalid in (None, 'binding', 'private', 'duplicate', 'oversize', 'passed'):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary); value = copy.deepcopy(row)
+                if invalid == 'binding': value['test_source_sha'] = '0' * 40
+                if invalid == 'private': value['first_observed_refusal']['raw_text'] = 'FOREIGN-MUST-NOT-BE-RETAINED'
+                data = json.dumps(value).encode()
+                if invalid == 'duplicate': data = data[:-1] + b',"acceptance":false}'
+                if invalid == 'oversize': data += b' ' * 8192
+                rows = [('nac342-ax-refusal-v1-configuredLocal', data)]
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(self.tool(raw, rows, result='Passed' if invalid == 'passed' else 'Failed'),
+                            raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+                self.assertEqual(index['ax_refusal']['retention'], 'retained' if invalid is None else 'rejected')
+                self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists(), invalid is None)
+
+    def test_ax_optional_cannot_qualify_passed_or_failed_canonical_payloads(self):
+        config, hashed, witness, rows = self.fixture('configuredLocal')
+        _, _, _, row = self.ax_row()
+        rows.append(('nac342-ax-refusal-v1-configuredLocal', json.dumps(row).encode()))
+        for result, reason in (('Passed', 'unexpected_ax_refusal'), ('Failed', 'actual_test_result')):
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    collect(self.tool(raw, rows, result=result), raw / 'unit.xcresult', config, hashed, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_bytes())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+                self.assertEqual(index['ax_refusal']['retention'], 'rejected' if result == 'Passed' else 'retained')
+
+    def ax_row(self):
+        config, hashed, witness, _ = self.fixture('configuredLocal')
+        row = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha', 'startup_source_sha256')}
+        row.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
+        row.update(schema='nac342-ax-refusal-v1', scenario='configuredLocal', surface='form', acceptance=False,
+                   configuration_sha256=hashed,
+                   first_observed_refusal={'stage': 'attribute_error', 'attribute': 'AXWindows', 'api_code': -25204},
+                   terminal_refusal={'stage': 'windows_unavailable'})
+        return config, hashed, witness, row
+
+    def ax_collect_failure(self, raw, data, *, mutate=None):
+        config, hashed, witness, _ = self.ax_row()
+        with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+            collect(self.tool(raw, [('nac342-ax-refusal-v1-configuredLocal', data)], result='Failed', mutate=mutate),
+                    raw / 'unit.xcresult', config, hashed, witness, raw / 'selected')
+        index = json.loads((raw / 'selected/index.json').read_bytes())
+        self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+        return index
+
+    def test_ax_closed_schema_types_bindings_nonfinite_and_partial_JSON_are_rejected(self):
+        _, _, _, original = self.ax_row()
+        changes = [{'source_sha': '0' * 40}, {'test_source_sha': '0' * 40}, {'harness_sha': '0' * 40},
+                   {'startup_source_sha256': '0' * 64}, {'configuration_sha256': '0' * 64},
+                   {'app_pid': True}, {'window_number': 0}, {'app_launch_epoch': float('nan')},
+                   {'app_launch_epoch': float('inf')}, {'acceptance': 0}, {'surface': []}, {'extra': 'PRIVATE-MARKER'},
+                   {'first_observed_refusal': {'stage': 'unknown'}},
+                   {'first_observed_refusal': {'stage': 'attribute_error', 'api_code': True}},
+                   {'first_observed_refusal': {'stage': 'attribute_error', 'api_code': 2**31}},
+                   {'first_observed_refusal': {'stage': 'root_matches', 'count': -1}},
+                   {'first_observed_refusal': {'stage': 'root_matches', 'count': 2**63}},
+                   {'first_observed_refusal': {'stage': 'root_frame_mismatch', 'frame': [0, 0, True, 2]}},
+                   {'first_observed_refusal': {'stage': 'root_frame_mismatch', 'frame': [0, 0, 2]}},
+                   {'first_observed_refusal': {'stage': 'root_frame_mismatch', 'frame': [0, 0, float('inf'), 2]}},
+                   {'terminal_refusal': {'stage': 'windows_unavailable', 'api_code': 0}}]
+        payloads = [json.dumps({**original, **change}).encode() for change in changes]
+        payloads.extend([b'{"partial":', b'[]', b'true'])
+        for data in payloads:
+            with self.subTest(data=data[:80]), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary); index = self.ax_collect_failure(raw, data)
+                self.assertEqual(index['ax_refusal']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists())
+                self.assertNotIn('PRIVATE-MARKER', json.dumps(index))
+
+    def test_ax_inventory_alias_symlink_and_unsafe_path_cannot_retain(self):
+        _, _, _, row = self.ax_row(); data = json.dumps(row).encode()
+        def mutation(kind):
+            def apply(export, groups):
+                entries = groups[0]['attachments']; first = entries[0]
+                if kind == 'name-alias':
+                    (export / 'duplicate').write_bytes(data)
+                    entries.append({**first, 'exportedFileName': 'duplicate'})
+                elif kind == 'file-alias': entries.append({**first, 'suggestedHumanReadableName': 'Automatic alias'})
+                elif kind == 'unsafe': first['exportedFileName'] = '../outside'
+                else:
+                    file = export / first['exportedFileName']; file.unlink()
+                    if kind == 'symlink': file.symlink_to(export / 'automatic.png')
+                    else: file.mkdir()
+            return apply
+        for kind in ('name-alias', 'file-alias', 'unsafe', 'symlink', 'directory'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary); index = self.ax_collect_failure(raw, data, mutate=mutation(kind))
+                self.assertEqual(index['ax_refusal']['retention'], 'rejected')
+                self.assertFalse((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists())
+
+    def test_ax_failed_optional_receipt_survives_real_export_without_cleanup(self):
+        from ci_support import export_evidence
+        _, _, _, row = self.ax_row(); data = json.dumps(row).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary); index = self.ax_collect_failure(raw, data)
+            export_evidence(raw / 'selected', raw / 'exported', [], include_hashes=True)
+            destination = raw / 'exported/nac342-ax-refusal-v1-configuredLocal.json'
+            self.assertEqual(destination.read_bytes(), data)
+            self.assertEqual(index['ax_refusal']['sha256'], digest(destination.read_bytes()))
+            self.assertFalse(json.loads((raw / 'exported/index.json').read_bytes())['complete'])
+
+    def test_ax_optional_write_partial_failure_and_destination_symlink_are_safe(self):
+        _, _, _, row = self.ax_row(); data = json.dumps(row).encode()
+        real = __import__('os').fdopen
+        class Partial:
+            def __init__(self, fd): self.stream = real(fd, 'wb')
+            def __enter__(self): return self
+            def __exit__(self, *args): self.stream.close()
+            def write(self, value):
+                self.stream.write(value[:20]); raise OSError('PRIVATE-MARKER')
+        def opened(fd, mode, *args, **kwargs):
+            return Partial(fd) if mode == 'wb' else real(fd, mode, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as temporary, patch('ci_startup_attachments.os.fdopen', side_effect=opened):
+            raw = Path(temporary); index = self.ax_collect_failure(raw, data)
+            self.assertEqual(index['ax_refusal']['retention'], 'rejected')
+            self.assertFalse((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists())
+            self.assertNotIn('PRIVATE-MARKER', json.dumps(index))
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary); outside = raw / 'outside'; outside.write_bytes(b'UNTOUCHED')
+            def alias(export, groups):
+                (raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').symlink_to(outside)
+            index = self.ax_collect_failure(raw, data, mutate=alias)
+            self.assertEqual(index['ax_refusal']['retention'], 'rejected')
+            self.assertEqual(outside.read_bytes(), b'UNTOUCHED')
+
     def png(self):
         def chunk(kind, body):
             return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)

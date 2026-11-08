@@ -122,7 +122,7 @@ jobs:
           ref: ${{ steps.policy-source.outputs.revision }}
           path: .startup-panel-q
           persist-credentials: false
-      - name: Require five compile-verbatim CoreGraphics policy controls without skips
+      - name: Require six geometry and three AX diagnostic controls without skips
         env:
           NAC342_SWIFT_PANEL_PROOF: "1"
         run: python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel
