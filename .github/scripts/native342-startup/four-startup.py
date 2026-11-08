@@ -15,9 +15,20 @@ import time
 STOP = []
 BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
 SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
-REFUSAL_SCOPE = 'P12-Qba-Hbc596-configured-drain-diagnostic01'
-REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-configured-drain-consumer01'
-REFUSAL_H = 'bc596148c88e00a4e8e25c1ff09ec34d568913bc'
+REFUSAL_SCOPE = 'P12-Qba-H148-configured-context-diagnostic01'
+REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-context-consumer01'
+REFUSAL_H = '148f51f887a823bbc517e34aa607615393aa2875'
+REFUSAL_SUPPLIERS = {
+    "H": {
+        "desktop/macos/CIStartupObserver.swift": "1a8141134d45838aa150cb903b5483bd22b2e3b7c163505812108af37b151b95",
+        "desktop/macos/CIStartupAXWitness.swift": "9c9aa03b8a02e752a947d0b39760314ffb51408981d70362dde14fb5daf6fd00",
+        "desktop/macos/ci_startup_ax.py": "9497a839c4043cfae92a683dce0dd07e8c352dbb8028b5eb2150aef896b45e53"
+    },
+    "Q": {
+        "desktop/macos/startup_xctest/StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
+        "desktop/macos/startup_xctest/StartupAXReceipt.swift": "a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217"
+    }
+}
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
@@ -35,6 +46,19 @@ def require(condition, reason):
 def digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def _refusal_sources(roots):
+    """Exact reviewed passive-context and canonical helper bytes; no actor."""
+    observed = {}
+    for role, files in REFUSAL_SUPPLIERS.items():
+        observed[role] = {}
+        for name, expected in files.items():
+            path = roots[role] / name
+            require(path.is_file() and path.resolve() == path, 'canonical diagnostic supplier file')
+            observed[role][name] = digest(path)
+            require(observed[role][name] == expected, 'reviewed diagnostic supplier bytes')
+    return observed
 
 
 def write(path, value):
@@ -243,7 +267,8 @@ def main(*, configured_refusal=False):
     scope = REFUSAL_SCOPE if configured_refusal else SCOPE
     require(pair['scope'] == scope, 'fixed source scope')
     if configured_refusal:
-        require(pair['H'] == REFUSAL_H and pair['P'] == PRODUCER_PRODUCT and pair['Q'] == PRODUCER_QUERY, 'closed diagnostic sources')
+        require(pair['H'] == REFUSAL_H and pair['P'] == PRODUCER_PRODUCT and pair['Q'] == PRODUCER_QUERY
+                and pair.get('supplier_sha256') == REFUSAL_SUPPLIERS, 'closed diagnostic sources')
     admission = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
     start, work, cleanup, hard = admit(admission, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal)
     roots = {key: Path(os.environ[key + '_ROOT']) for key in (('H', 'P', 'Q') if configured_refusal else ('H', 'P', 'Q', 'R'))}
@@ -395,6 +420,8 @@ def main(*, configured_refusal=False):
             require_checkout(controller, admission['controller_sha'])
             for key, root in roots.items():
                 require_checkout(root, pair[key])
+            if configured_refusal:
+                report['supplier_sources_sha256'] = _refusal_sources(roots)
             require(startup.PRODUCT == pair['P'] and startup.TEST_SOURCE == pair['Q']
                     and startup.TEST_FILES['StartupJourneys.swift'] == pair['q_swift_sha256']
                     and (configured_refusal or startup.PROTOCOL_SOURCE == pair['R'] == protocol.REVISION), 'actual H/P/Q/R pins')
