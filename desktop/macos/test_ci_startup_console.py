@@ -33,7 +33,7 @@ class StartupConsoleTests(unittest.TestCase):
         self.assertEqual(guard.count('try guardWindow('), 1)
         dispatch = main.split('func dispatch(', 1)[1].split('func text(', 1)[0]
         self.assertEqual(dispatch.count('try guardTarget()'), 2)
-        for anchor in ('try guardTarget()\n        if ["invalidConfig", "futureStore"]',
+        for anchor in ('try guardTarget()\n        initialGuardPending = false\n        if ["invalidConfig", "futureStore"]',
                        'try guardTarget()\n        let screenshot',
                        'try guardTarget()\n        if let axClient'):
             self.assertEqual(main.count(anchor), 1)

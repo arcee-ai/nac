@@ -54,3 +54,5 @@ Never retry AX after that diagnostic, infer CG-to-AX membership, or export field
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.
+
+The private ci_startup_client_rejection owner validates and retains only the bounded optional client status-rejection attachment. It must remain failure-only, exact-source bound and inert to ordinary observation, pairing, inputs, process custody and acceptance. The original complete-case and positive retirement requirements remain unchanged. No receipt or field-value export.

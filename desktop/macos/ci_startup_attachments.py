@@ -10,6 +10,7 @@ import struct
 import tempfile
 import zlib
 
+from ci_startup_client_rejection import retain as retain_client_rejection
 from ci_startup_fixture import CASES, PRODUCT, TEST_SOURCE, TEST_FILES, SCHEMA, operations
 from ci_xctest_attachments import bounded_file, digest, json_data, metadata_value
 
@@ -351,7 +352,7 @@ def select_inventory(export, entries, fixed, pattern, index):
             row['kind'] = kind
             if dispatch:
                 row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
-            limit = MAX_QUERY_DIAGNOSTIC if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
+            limit = 2048 if kind == 'client_rejection' else MAX_QUERY_DIAGNOSTIC if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
             require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
             total += info.st_size
             selected.append((ordinal, file, canonical, kind))
@@ -372,7 +373,8 @@ def collect(tool, result, config, configuration_sha256, witness, output):
     output.mkdir()
     index = {'complete': False, 'selected': [], 'dispatches': [], 'automatic_omitted': 0,
              'input_completion_unknown': True, 'visible_paint': 'requires_actual_image_review',
-             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'}}
+             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'},
+             'client_rejection': {'retention': 'missing'}}
     try:
         require(config['scenario'] in CASES and witness.get('preinstalled') is True
                 and witness.get('owned_incarnation_verified') is True, 'external_witness')
@@ -409,7 +411,8 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             fixed = {f'nac342-ordinary-{scenario}': 'png', f'nac342-failure-{scenario}': 'failure',
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup',
                      QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal',
-                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards'}
+                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards',
+                     'nac342-ax-client-rejection-v1-configuredLocal': 'client_rejection'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
             selected = select_inventory(export, entries, fixed, pattern, index)
@@ -420,9 +423,11 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                                                       witness, output, inventory_valid)
             diagnostic_bytes += retain_ax_refusal(selected, entries, index, config, configuration_sha256,
                                                   witness, output, inventory_valid)
+            diagnostic_bytes += retain_client_rejection(selected, entries, index, config, configuration_sha256,
+                                                        witness, output, inventory_valid)
             values, images, total = {}, {}, diagnostic_bytes
             for file, name, kind in selected:
-                if kind in ('query_diagnostic', 'ax_refusal'):
+                if kind in ('query_diagnostic', 'ax_refusal', 'client_rejection'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
                 total += len(data)
@@ -460,6 +465,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             require(test['result'] == 'Passed', 'actual_test_result')
             require(index['query_diagnostic']['retention'] == 'missing', 'unexpected_failure_diagnostic')
             require(index['ax_refusal']['retention'] == 'missing', 'unexpected_ax_refusal')
+            require(index['client_rejection']['retention'] == 'missing', 'unexpected_client_rejection')
             if scenario == 'configuredLocal':
                 from ci_startup_ax import require_guard_proof
                 require('ax_guards' in values, 'ax_guards_missing')
