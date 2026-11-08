@@ -120,15 +120,23 @@ Those have separate owners in the ALL-339 work map.
 
 ## Ordinary startup supplier binding
 
-The startup fixture and controlled-environment resolver bind exact final product
-`ef2cce9141973f37bf35e33d113e35eaa7a91f19`, whose direct parent is the
-full Native source `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Its Native boundary
-is `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`, integrated on actual landed dev
-`42231f447fef5d9d63d82943ae35e8c0d6c424b6`. This is source nomination only;
-no package/engine/app/query/runtime acceptance is inherited from historical P9/P6c/Pff8.
-Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases and
-protocol supplier remain unchanged; failed episodes and spent allocations are
-not renewed.
+This private P12 nomination binds product
+`4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
+`1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
+`8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the repaired immutable
+nine-file supplier `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`; its journey
+SHA256 is `7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8`.
+The normal P12 package has independent genuine supplier evidence; that evidence
+supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
+historical startup/SDK results keep their original source and consumed counters.
+
+The H2 plus canonical Q2 observer inputs come from `observer_sources`; callers
+must compile all four, retaining the original guards/receipt/custody contracts.
+All four ordinary startup cases and independent R7325 remain required. R's actual
+compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
+under a separate Root admission; schema50 alone is insufficient. No runtime or
+publication is authorized by this nomination. Functional H/Q behavior is unchanged.
 
 ## Private launch contract (ALL-341)
 
@@ -240,3 +248,36 @@ hashes. It rejects an engine from another source revision or source changes
 during compilation. This is unsigned compiler provenance for the packaging
 owner; signing requires a separate final artifact manifest. The local builder's
 development bundle identifier is not the distribution or track identity contract.
+
+
+### External AX environment preflight (source only)
+
+`CIStartupObserver --ax-preflight CONFIG REQUEST` is an explicit one-shot
+read-only diagnostic, separate from the unchanged `nac342-owner-v1` stream.
+`ci_startup_owner.capture_ax_preflight` captures its bounded closed receipt
+through the existing process/clock owner (10 seconds), retaining helper failure
+before propagating it. Neither entry point is wired into startup qualification.
+A caller must first obtain a separate finite admission and own a new disposable
+ordinary app through the existing preinstalled owner; cleaned prior episodes
+are never available for probing. The parent binds exact source/binary hashes,
+configuration, latest kernel lifetime and sole window; helper rechecks canonical
+resources/lifetime/window before and after the read. Signing status/flags and
+the static app-sandbox entitlement are context only, not a claim about effective
+sandbox policy. A missing signing observation is retained as unknown.
+
+The helper calls plain `AXIsProcessTrusted()` once, never prompts or grants.
+False means zero AX messaging. True permits one `AXWindows` read with the
+existing one-second messaging policy, bounded type/count/PID checks and unique
+root geometry from that same array. It never traverses children, reads user
+text, performs actions, changes focus/value or posts input. Only closed facts
+and binding digests enter its receipt; acceptance is always false. Success
+proves host API availability only, never persistent CFEqual identity, picker
+focus/value/ancestry, all27 guard freshness, or native four-case acceptance.
+
+A live preflight controller is UNAPPLIED: it needs an independently reviewed
+ordinary diagnostic launch owner, exact package/source/artifact prerequisites,
+Root literal clock, exact-host image gate before bootstrap, attempt1/no retry,
+always-retained failure evidence and existing positive cleanup. Reusing the
+four-case driver would request unauthorized XCTest/input; changing that driver
+or inventing a launch path is outside this source unit. Q057, all guards and
+inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.
