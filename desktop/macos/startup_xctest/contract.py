@@ -18,7 +18,7 @@ TEST_ID = 'StartupJourneys/testOrdinaryStartup'
 FUTURE_FAILURE_CODE = 'store_schema_incompatible'
 FUTURE_FAILURE_STAGE = 'startup'
 FUTURE_RECOVERY_MESSAGE = (
-    'The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
+    'The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. '
     'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.'
 )
 ENVIRONMENT = {'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
@@ -117,6 +117,21 @@ def _declarations(config, receipt):
     # remain ordinary if the additional field exists.
     require(receipt.get('instance_smoke_instrumentation', False) is False,
             'Instance smoke cannot qualify ordinary paint')
+    if 'ax_witness' in config:
+        witness = config['ax_witness']
+        require(config['scenario'] == 'configuredLocal' and type(witness) is dict
+            and set(witness) == {'path', 'nonce', 'helper_path', 'helper_sha256', 'support_sha256', 'owner_pid', 'deadline_ns'},
+            'Invalid external AX declaration')
+        require(path(witness['path']) == root + '/ax-witness/receipt.json'
+            and type(witness['owner_pid']) is int and 0 < witness['owner_pid'] < 2**31
+            and type(witness['deadline_ns']) is str and re.fullmatch('[1-9][0-9]*', witness['deadline_ns'])
+            and 0 < int(witness['deadline_ns']) < 2**64, 'Invalid external AX owner/deadline')
+        path(witness['helper_path'])
+        for key in ('nonce', 'helper_sha256'):
+            hexadecimal(witness[key], 64)
+        require(type(witness['support_sha256']) is dict and set(witness['support_sha256']) == {'StartupAXGuard.swift', 'StartupAXReceipt.swift'}, 'AX source inventory differs')
+        for value in witness['support_sha256'].values():
+            hexadecimal(value, 64)
     return {'scope': 'declaration_admission_only', 'scenario': config['scenario'],
             'actual_ui_run': False, 'paint_qualified': False}
 
