@@ -135,3 +135,12 @@ the existing original work bound with initial and between-command expiry checks.
 Original source259, H_baseebdbd,15s Git caps,600s make owners and all capture
 implementation remain unchanged. This is caller candidate3/4, CALLER-F1 first
 repair1/4; all earlier repair counters and actual0 are preserved.
+
+The first two-error Swift compiler repair nominates exact parent
+`2af8c5bc3efcb6789ba164859699cc0b58d5200a`, preserved remotely and in a local
+backup. The dictionary conversion now requires CFDictionaryGetTypeID before
+conversion; AX role/title reads retain throwing short-circuit behavior. No
+geometry/ownership/input/clock policy is relaxed. Candidate capture3/4, caller4/4
+last nomination, firstSwiftrepair1/4; phase1/4, CALLER-F1first1/4, CAPfirst1/4,
+actualordinal1/cases0 remain. The unpublished repair child uses its own local
+branch; future publication must explicitly nominate it on the fixed consumer ref.

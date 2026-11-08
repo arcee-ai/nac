@@ -73,6 +73,27 @@ class Protocol(Fixture):
         self.origin['nodeIdentifierURL']=expected.replace('/NACNativeUITests/','/NACLifecycleCaptureUITests/',1)
         with self.assertRaises(RuntimeError):c.selected_test({'testNodes':[self.origin]},'run')
 
+    def test_witness_geometry_shapes_cannot_bypass_join(self):
+        for field in ('root_frame','sheet_frame','cancel_frame','stop_frame','screen_frame'):
+            for invalid in (None,{},'rectangle',[0,0,500],[0,0,False,500],[0,0,0,500],[0,0,500,-1]):
+                with self.subTest(field=field,invalid=invalid):
+                    saved=self.found[(1,'caption')]
+                    self.edit(1,lambda m:[m[k].update({field:invalid}) for k in ('before','after')])
+                    with self.assertRaises(RuntimeError):self.joined()
+                    self.found[(1,'caption')]=saved
+    def test_missing_or_replaced_witness_control_owner_refused(self):
+        for field in ('root_token','sheet_token','cancel_token','stop_token'):
+            for invalid in (None,'',False):
+                with self.subTest(field=field,invalid=invalid):
+                    saved=self.found[(1,'caption')]
+                    self.edit(1,lambda m:[m[k].update({field:invalid}) for k in ('before','after')])
+                    with self.assertRaises(RuntimeError):self.joined()
+                    self.found[(1,'caption')]=saved
+            saved=self.found[(1,'caption')]
+            self.edit(1,lambda m:m['after'].update({field:'replaced-owner'}))
+            with self.assertRaises(RuntimeError):self.joined()
+            self.found[(1,'caption')]=saved
+
     def test_private_after_owner_changed(self):
         self.fences[1]=copy.deepcopy(self.fences[1]);self.fences[1]['after']['engine_pid']=999
         with self.assertRaises(RuntimeError):self.joined()

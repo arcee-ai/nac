@@ -7,8 +7,8 @@ producer0210 remain immutable Git objects/refs. Default dev, public PRs/stacks,
 C/H8 and the original capture-source259 branch are untouched. No unregistered
 workflow, synthetic GITHUB_SHA, extra bootstrap workflow or source rebuild is used.
 
-The setup work-bound repair is one clean child of preserved caller
-54f8f7ae3c3d794f049bce43fa5083f6938bee5c; reviewed259 remains its original source
+The first Swift compiler repair is one clean child of preserved caller
+2af8c5bc3efcb6789ba164859699cc0b58d5200a; reviewed259 remains its original source
 on codex/experimental-native-p12-lifecycle-capture-consumer01. Actual consumer
 HEAD is `${{ github.sha }}`; Root's literal controller_sha must match that same
 GITHUB_SHA. Original H_baseebdbd and exact P4b7 remain. Only branch/parent admission
@@ -100,3 +100,12 @@ check prevents a later Git command after expiry. No setup helper is acquired on
 identity failure. Early checks and the owned600s make setup path stay unchanged.
 This is caller candidate3/4; phase-fitting firstrepair1/4, original capture2/4,
 CAP-F1/F2 firstrepair1/4 and actual0 remain unchanged.
+
+The first two-error Swift compiler repair nominates exact parent
+`2af8c5bc3efcb6789ba164859699cc0b58d5200a`, preserved remotely and in a local
+backup. The dictionary conversion now requires CFDictionaryGetTypeID before
+conversion; AX role/title reads retain throwing short-circuit behavior. No
+geometry/ownership/input/clock policy is relaxed. Candidate capture3/4, caller4/4
+last nomination, firstSwiftrepair1/4; phase1/4, CALLER-F1first1/4, CAPfirst1/4,
+actualordinal1/cases0 remain. The unpublished repair child uses its own local
+branch; future publication must explicitly nominate it on the fixed consumer ref.

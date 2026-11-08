@@ -161,8 +161,10 @@ struct LifecycleCaptureWitness {
                 let sheetRows = owned.filter { $0[kCGWindowNumber as String] as? Int == owner["sheet_window"] as? Int }
                 try CapturePort.need(owned.count == 2 && rootRows.count == 1 && sheetRows.count == 1, "Exact lifecycle workspace/sheet CG roles")
                 func bounds(_ row: [String: Any]) throws -> CGRect {
-                    guard let data = row[kCGWindowBounds as String] as? CFDictionary,
-                          let rectangle = CGRect(dictionaryRepresentation: data) else { throw NSError(domain: "LifecycleCapture", code: 8) }
+                    guard let value = row[kCGWindowBounds as String],
+                          CFGetTypeID(value as CFTypeRef) == CFDictionaryGetTypeID() else { throw NSError(domain: "LifecycleCapture", code: 8) }
+                    let data = unsafeBitCast(value as CFTypeRef, to: CFDictionary.self)
+                    guard let rectangle = CGRect(dictionaryRepresentation: data) else { throw NSError(domain: "LifecycleCapture", code: 8) }
                     return rectangle
                 }
                 let rootFrame = try bounds(rootRows[0]), sheetFrame = try bounds(sheetRows[0]), screen = CGDisplayBounds(CGMainDisplayID())
@@ -184,7 +186,10 @@ struct LifecycleCaptureWitness {
                 let sheet = candidates[0]
                 let children = try elements(sheet, kAXChildrenAttribute)
                 let controls = try ["Cancel", "Stop and Quit"].map { title -> AXUIElement in
-                    let found = try children.filter { (try attr($0, kAXRoleAttribute)) as? String == "AXButton" && (try attr($0, kAXTitleAttribute)) as? String == title }
+                    let found = try children.filter {
+                        guard (try attr($0, kAXRoleAttribute)) as? String == "AXButton" else { return false }
+                        return (try attr($0, kAXTitleAttribute)) as? String == title
+                    }
                     try CapturePort.need(found.count == 1, "Exact sheet controls"); return found[0]
                 }
                 for button in controls {

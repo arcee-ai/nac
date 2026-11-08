@@ -33,7 +33,7 @@ class Composition(Fixture):
         with self.assertRaises(RuntimeError):a.admit(value,dict(env,GITHUB_REF='refs/heads/dev'),now=1001)
         with self.assertRaises(RuntimeError):a.admit(value,env,now=4000)
     def test_exact_consumer_parent_preserves_original_h_base(self):
-        self.assertEqual(a.SOURCE_PARENT,'54f8f7ae3c3d794f049bce43fa5083f6938bee5c')
+        self.assertEqual(a.SOURCE_PARENT,'2af8c5bc3efcb6789ba164859699cc0b58d5200a')
         self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
         value,env=self.admission();value['H_base']=a.SOURCE_PARENT
         with self.assertRaises(RuntimeError):a.admit(value,env,now=1001)
