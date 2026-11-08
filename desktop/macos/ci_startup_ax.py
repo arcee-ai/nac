@@ -42,7 +42,7 @@ def _failure_context(row):
     fields = {'first_counter_transition', 'closing_lifetime_context'} & set(row)
     if not fields:
         return
-    require(row['stage'] == 'closing_lifetime' and 'pre_refusal_paired' not in row,
+    require(row['stage'] in ('lifetime', 'closing_lifetime') and 'pre_refusal_paired' not in row,
             'AX passive context scope')
     if 'first_counter_transition' in row:
         first = row['first_counter_transition']
@@ -56,6 +56,7 @@ def _failure_context(row):
             require(first['cause'] == 'ax_predicate_refused' and first['reader_terminal'] in _READER_TERMINALS,
                     'AX reader terminal cause')
     if 'closing_lifetime_context' in row:
+        require(row['stage'] == 'closing_lifetime', 'AX closing context stage')
         context = row['closing_lifetime_context']
         require(type(context) is dict
             and set(context) == _CLOSING_BOOLS | {'app_count', 'window_count', 'latched', 'retirement_matches'}

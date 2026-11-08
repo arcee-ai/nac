@@ -129,10 +129,12 @@ private enum StartupAXFailureContext {
     }
 
     static func attach(_ record: [String: Any], first: [String: String]?, closing: [String: Any]?) -> [String: Any] {
-        guard record["stage"] as? String == "closing_lifetime", record["pre_refusal_paired"] == nil else { return record }
+        guard let stage = record["stage"] as? String,
+              stage == "lifetime" || stage == "closing_lifetime",
+              record["pre_refusal_paired"] == nil else { return record }
         var candidate = record
         if let first { candidate["first_counter_transition"] = first }
-        if let closing { candidate["closing_lifetime_context"] = closing }
+        if stage == "closing_lifetime", let closing { candidate["closing_lifetime_context"] = closing }
         guard let bytes = try? JSONSerialization.data(withJSONObject: candidate, options: [.sortedKeys]),
               bytes.count < 2048 else { return record }
         return candidate // Optional overflow/malformed context leaves the original record intact.

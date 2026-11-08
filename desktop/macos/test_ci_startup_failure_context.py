@@ -49,6 +49,18 @@ class ContextParserControls(unittest.TestCase):
             value = self.value(); value.pop(field)
             self.assertEqual(self.read(value), value)
 
+    def test_lifetime_retains_only_first_counter_and_never_stale_closing_context(self):
+        value = self.value(); value['stage'] = 'lifetime'
+        value.pop('closing_lifetime_context')
+        self.assertEqual(self.read(value), value)
+        self.assertFalse(self.read(value)['acceptance'])
+        self.assertIsNone(self.read(dict(value, closing_lifetime_context=self.context())))
+        self.assertIsNone(self.read(dict(value, pre_refusal_paired={})))
+        self.assertIsNone(self.read(dict(value, first_counter_transition={
+            **value['first_counter_transition'], 'reader_terminal': 'PRIVATE-CANARY'})))
+        old = dict(value); old.pop('first_counter_transition')
+        self.assertEqual(self.read(old), old)  # Missing proof remains missing.
+
     def test_all_counter_causes_and_verified_reader_terminals(self):
         for cause in parent._COUNTER_CAUSES:
             value = self.value(); first = value['first_counter_transition']
@@ -185,13 +197,17 @@ class PassiveSwiftSourceControls(unittest.TestCase):
 
     def test_pair_and_stage_omit_context_and_overflow_cannot_replace_fatal(self):
         attach = self.block.split('static func attach(', 1)[1]
-        self.assertIn('record["stage"] as? String == "closing_lifetime", record["pre_refusal_paired"] == nil', attach)
+        self.assertIn('stage == "lifetime" || stage == "closing_lifetime"', attach)
+        self.assertIn('record["pre_refusal_paired"] == nil', attach)
+        self.assertIn('if stage == "closing_lifetime", let closing', attach)
         self.assertIn('bytes.count < 2048 else { return record }', attach)
         self.assertNotIn('pairedDiagnostic =', self.block)
         self.assertNotIn('"ready"', self.block)
         def projected(record, optional):
-            if record['stage'] != 'closing_lifetime' or 'pre_refusal_paired' in record: return record
-            candidate = dict(record, **optional)
+            if record['stage'] not in ('lifetime', 'closing_lifetime') or 'pre_refusal_paired' in record: return record
+            permitted = dict(optional)
+            if record['stage'] != 'closing_lifetime': permitted.pop('closing_lifetime_context', None)
+            candidate = dict(record, **permitted)
             try: fits = len(json.dumps(candidate, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()) < 2048
             except (ValueError, TypeError): fits = False
             return candidate if fits else record
@@ -202,8 +218,13 @@ class PassiveSwiftSourceControls(unittest.TestCase):
                                   sort_keys=True, separators=(',', ':')).encode())
         self.assertIsNot(projected(base, {'first_counter_transition': 'x' * (2047 - overhead)}), base)
         self.assertIs(projected(base, {'first_counter_transition': 'x' * (2048 - overhead)}), base)
-        for record in [dict(base, stage='lifetime'), dict(base, pre_refusal_paired={'acceptance': False})]:
+        for record in [dict(base, stage='snapshot'), dict(base, pre_refusal_paired={'acceptance': False})]:
             self.assertIs(projected(record, {'first_counter_transition': 'ignored'}), record)
+        lifetime = dict(base, stage='lifetime')
+        observed = projected(lifetime, {'first_counter_transition': {'cause': 'sample_deadline'},
+                                        'closing_lifetime_context': {'stale': True}})
+        self.assertIn('first_counter_transition', observed)
+        self.assertNotIn('closing_lifetime_context', observed)
         self.assertIn('record = StartupAXFailureContext.attach(record, first: firstCounter, closing: closingContext)', self.source)
         self.assertIn('StartupAXFailureDiagnostic.emit(record, write: { try FileHandle.standardError.write(contentsOf: $0) })\n            exit(1)', self.source)
 
