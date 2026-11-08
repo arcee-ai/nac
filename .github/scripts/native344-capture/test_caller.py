@@ -41,7 +41,7 @@ class Caller(unittest.TestCase):
             self.assertEqual(c.context(value(),now=1001),value())
             for key,bad in [('GITHUB_SHA','b'*40),('GITHUB_REF','refs/heads/codex/private-native-lifecycle-capture-source01'),('GITHUB_WORKFLOW_REF','unregistered.yml'),('GITHUB_JOB','other'),('ImageVersion','wrong')]:
                 with patch.dict(os.environ,{key:bad}),self.assertRaises(RuntimeError):c.context(value(),now=1001)
-        self.assertEqual(a.SOURCE_PARENT,'74dc6f79c08c2f18883acce2c36888896e9ba7c9');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
+        self.assertEqual(a.SOURCE_PARENT,'54f8f7ae3c3d794f049bce43fa5083f6938bee5c');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
     def test_all_caps_original_clock_and_cleanup_retention(self):
         with patch.dict(os.environ,env(),clear=True):
             for phase in (*c.CAPS,'episode'):
@@ -73,6 +73,58 @@ class Caller(unittest.TestCase):
             self.assertEqual(c.retention_minutes(value(),now=4480),1)
             with self.assertRaises(RuntimeError):c.minutes(value(),'episode',now=3880)
             with self.assertRaises(RuntimeError):c.retention_minutes(value(),now=4600)
+
+    def setup_control(self, selector, start, elapsed, *, dirty=False):
+        from ci_paths_budget import active
+        state=dict(wall=float(start),mono=100.);calls=[];makes=[];clocks=[]
+        source=c.ROOT if selector=='controller' else self.root
+        expected=value()['controller_sha'] if selector=='controller' else a.P
+        original_clock=c.make_clock
+        def clock_factory(v):
+            clock=original_clock(v);clocks.append(clock);return clock
+        def git(argv,**kw):
+            self.assertEqual(kw['cwd'],source)
+            calls.append(dict(argv=argv,timeout=kw['timeout'],wall=state['wall'],bound=active() is clocks[0].work))
+            state['wall']+=elapsed;state['mono']+=elapsed
+            if argv[1:]==['rev-parse','HEAD']:return expected+'\n'
+            if argv[1:]==['status','--porcelain']:return ' M dirty\n' if dirty else ''
+            self.assertEqual(argv[1:],['rev-parse','--show-toplevel']);return str(source)+'\n'
+        def owned(argv,log,seconds,clock,**kw):
+            clock.work.check();makes.append((argv,seconds,clock));return None
+        fixture=dict(env(),CAPTURE_GATE=str(self.root),P_ROOT=str(self.root),ROOT_LIFECYCLE_CAPTURE_ADMISSION=json.dumps(value()))
+        with patch.dict(os.environ,fixture,clear=True),patch.object(c.sys,'argv',['caller.py','--setup',selector]),patch.object(c.time,'time',side_effect=lambda:state['wall']),patch.object(c.time,'monotonic',side_effect=lambda:state['mono']),patch.object(c,'make_clock',side_effect=clock_factory),patch('subprocess.check_output',side_effect=git),patch.object(c,'owned',side_effect=owned):
+            try:c.main()
+            except (RuntimeError,TimeoutError) as error:outcome=error
+            else:outcome=None
+        self.assertIsNone(active())
+        return calls,makes,outcome,clocks
+    def test_setup_work_cutoff_clamps_first_git_and_stops_between_checks(self):
+        from ci_paths_budget import BudgetExpired
+        for selector in ('controller','P'):
+            for elapsed in (1,2):
+                with self.subTest(selector=selector,elapsed=elapsed):
+                    calls,makes,error,clocks=self.setup_control(selector,3879,elapsed)
+                    self.assertIsInstance(error,BudgetExpired);self.assertEqual(len(calls),1)
+                    self.assertEqual(calls[0]['timeout'],1);self.assertTrue(calls[0]['bound']);self.assertFalse(makes)
+    def test_setup_expired_initial_bound_starts_no_git_or_make(self):
+        from ci_paths_budget import BudgetExpired
+        for selector in ('controller','P'):
+            with self.subTest(selector=selector),patch.object(c,'context',return_value=value()):
+                calls,makes,error,_=self.setup_control(selector,3880,0)
+                self.assertIsInstance(error,BudgetExpired);self.assertFalse(calls);self.assertFalse(makes)
+    def test_setup_early_path_keeps_three_identity_checks_and_original_make(self):
+        for selector in ('controller','P'):
+            with self.subTest(selector=selector):
+                calls,makes,error,clocks=self.setup_control(selector,1001,2)
+                self.assertIsNone(error);self.assertEqual(len(calls),3)
+                self.assertTrue(all(x['timeout']==15 and x['bound'] for x in calls))
+                source=c.ROOT if selector=='controller' else self.root
+                self.assertEqual(makes,[(['make','-C',str(source),'setup'],600,clocks[0])])
+    def test_setup_identity_failure_still_acquires_no_make(self):
+        for selector in ('controller','P'):
+            with self.subTest(selector=selector):
+                calls,makes,error,_=self.setup_control(selector,1001,2,dirty=True)
+                self.assertIsInstance(error,RuntimeError);self.assertEqual(len(calls),3);self.assertFalse(makes)
 
     def test_original_producer_identity_exact_and_nonexpired(self):
         run,artifact=identities();self.assertEqual(c.transfer.artifact_identity(value(),run,artifact)['producer_sha'],a.PRODUCER['controller_sha'])

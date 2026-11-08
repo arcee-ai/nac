@@ -171,7 +171,9 @@ def main():
         from ci_qualifications import require_checkout
         source=ROOT if args==['controller'] else Path(os.environ['P_ROOT'])
         require(args in (['controller'],['P']),'fixed setup source')
-        require_checkout(source,value['controller_sha'] if args==['controller'] else P)
+        from ci_paths_budget import using
+        with using(clock.work):
+            require_checkout(source,value['controller_sha'] if args==['controller'] else P)
         from ci_xctest import runner_environment
         owned(['make','-C',str(source),'setup'],gate/('setup-'+args[0]+'.log'),600,clock,
             env=dict(runner_environment(),RUSTUP_AUTO_INSTALL='0',GIT_OPTIONAL_LOCKS='0'));return

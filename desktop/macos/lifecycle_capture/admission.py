@@ -9,7 +9,7 @@ import time
 from .protocol import P, CASES, closed, digest, require
 
 BASE='ebdbd340bdc1220318446180c0a0df579489392c'
-SOURCE_PARENT='74dc6f79c08c2f18883acce2c36888896e9ba7c9'
+SOURCE_PARENT='54f8f7ae3c3d794f049bce43fa5083f6938bee5c'
 BRANCH='refs/heads/codex/experimental-native-p12-lifecycle-capture-consumer01'
 SCOPE='P12-six-composited-lifecycle-confirmations-source01'
 MANIFEST='1ddcf153b7dabeb82b3e662b8770ab57ea734566343e16496c4932c72391cf78'

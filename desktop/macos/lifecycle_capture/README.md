@@ -128,3 +128,10 @@ The first caller phase-fitting repair nominates exact parent
 remain unchanged. Non-episode caller phases require the full original phase
 cap before acquisition; episode/retention clocks and the reviewed controller
 implementation remain unchanged. The nomination keeps actual GITHUB_SHA honest.
+
+The CALLER-F1 setup work-bound repair nominates exact parent
+`54f8f7ae3c3d794f049bce43fa5083f6938bee5c`; both source identity checks use
+the existing original work bound with initial and between-command expiry checks.
+Original source259, H_baseebdbd,15s Git caps,600s make owners and all capture
+implementation remain unchanged. This is caller candidate3/4, CALLER-F1 first
+repair1/4; all earlier repair counters and actual0 are preserved.
