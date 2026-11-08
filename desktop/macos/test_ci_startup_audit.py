@@ -1,14 +1,30 @@
 """Canonical API fixtures only; no product process, app or UI execution."""
 import threading
 import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ci_startup_audit import (EntryAssets, LiveAudit, PROMPT, RESPONSE, entry_asset_source, entry_assets,
+from ci_startup_audit import (EntryAssets, LiveAudit, PROMPT, RESPONSE, _entry_document, entry_asset_source, entry_assets,
                               persisted_audit, session_facts, transcript)
+from ci_startup_api import FixtureFailure, ListenerPending, failure_metadata
+from ci_startup_fixture import PRODUCT
+
+IDENTITY = {'product_version': '0.1.4', 'build_id': 'dev-' + PRODUCT,
+            'track': 'dev', 'source_revision': PRODUCT}
+
+
+def presentation_document(index=None, **changes):
+    # Exact P's public document contract, using a fixed test-only UUID.
+    scope = dict.fromkeys(('owner', 'organization', 'host', 'incarnation'), '12345678-1234-4567-8123-123456789abc')
+    scope.update(profile='standalone', release=json.dumps(list(IDENTITY.values()), separators=(',', ':')))
+    scope.update(changes)
+    data = json.dumps({'version': 1, 'scope': scope}, separators=(',', ':')).encode()
+    script = b'<script id="nac-presentation-binding" type="application/json">' + data + b'</script>'
+    return (PRODUCT_INDEX if index is None else index).replace(b'</head>', script + b'</head>', 1)
 
 # Exact immutable P d443a2ac index bytes, test data only. Mock asset bodies below
 # do not replace product build inputs or imply native asset/runtime acceptance.
@@ -35,6 +51,82 @@ PRODUCT_INDEX = b'''<!doctype html>
 
 
 class StartupAuditTests(unittest.TestCase):
+    def test_first_oversize_asset_keeps_sentinel_without_expanding_read_or_acceptance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            dist = source / 'crates/nac-server/assets/dist'
+            (dist / 'assets').mkdir(parents=True)
+            (dist / 'index.html').write_bytes(PRODUCT_INDEX)
+            parser = EntryAssets(); parser.feed(PRODUCT_INDEX.decode())
+            for path in parser.paths:
+                (dist / path.removeprefix('/assets/dist/')).write_bytes(b'inert asset')
+            sentinel = 8 * 1024 * 1024 + 1
+            body = b'private-canary' + b'x' * (sentinel - len(b'private-canary'))
+            opener = MagicMock()
+            response = opener.open.return_value.__enter__.return_value
+            response.read.return_value = body
+            response.status = 200
+            with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener), \
+                    patch('ci_startup_audit._entry_document') as document, self.assertRaises(FixtureFailure) as caught:
+                entry_assets('http://127.0.0.1:4321', source, identity=IDENTITY)
+            response.read.assert_called_once_with(sentinel)
+            opener.open.assert_called_once()
+            document.assert_not_called()
+            metadata = failure_metadata(caught.exception)
+            self.assertEqual(metadata['guard_code'], 'served_entry_asset_bytes')
+            self.assertEqual(metadata['operands']['actual_bytes'], sentinel)
+            self.assertEqual(metadata['operands']['expected_bytes'], len(PRODUCT_INDEX))
+            self.assertEqual(metadata['operands']['asset_ordinal'], 0)
+            self.assertEqual(metadata['operands']['actual_sha256'], hashlib.sha256(body).hexdigest())
+            self.assertNotIn('private-canary', json.dumps(metadata))
+
+    def test_transcript_schema_failure_snapshot_remains_named_redacted_and_failed(self):
+        for messages in (None, True, {'body': 'private-canary'}, 'private-canary'):
+            with self.subTest(kind=type(messages).__name__):
+                audit = LiveAudit(SimpleNamespace(), {'scenario': 'configuredLocal'}, None)
+                audit.phase = 'configured_session'
+                def invalid_transcript(): transcript(messages)
+                audit.sample = invalid_transcript
+                audit.start(); audit.thread.join(timeout=2)
+                snapshot = audit.failure_snapshot()
+                self.assertFalse(audit.thread.is_alive())
+                self.assertTrue(snapshot['rejected'])
+                self.assertEqual(snapshot['phase'], 'configured_session')
+                self.assertEqual(snapshot['failure'], {'exception_type': 'FixtureFailure',
+                    'guard_code': 'transcript_schema', 'operands': {}})
+                self.assertFalse(snapshot['progress']['proof_observed'])
+                self.assertNotIn('private-canary', json.dumps(snapshot))
+                with self.assertRaises(RuntimeError): audit.stop()
+                self.assertEqual(audit.failure_snapshot(), snapshot)
+
+    def test_actual_P_entry_document_is_not_the_raw_embedded_index(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            dist = source / 'crates/nac-server/assets/dist'
+            (dist / 'assets').mkdir(parents=True)
+            (dist / 'index.html').write_bytes(PRODUCT_INDEX)
+            parser = EntryAssets()
+            parser.feed(PRODUCT_INDEX.decode())
+            bodies = []
+            for path in sorted(parser.paths):
+                data = ('test asset ' + path).encode()
+                (dist / path.removeprefix('/assets/dist/')).write_bytes(data)
+                bodies.append(data)
+            node = {'pid': 20, 'parent': 10, 'uid': 501, 'start_seconds': 100,
+                    'start_microseconds': 1, 'executable': '/owned/nac-web', 'kind': 'engine', 'serving': True}
+            witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None,
+                                      app={'pid': 10}, latest=[node])
+            audit = LiveAudit(witness, {'scenario': 'onboarding', 'engine_identity': IDENTITY}, source)
+            opener = MagicMock()
+            opener.open.return_value.__enter__.return_value.read.side_effect = [presentation_document(), *bodies]
+            with patch('ci_startup_audit.owned_listener', return_value='http://127.0.0.1:4321'), \
+                    patch('ci_startup_audit.require_readiness', return_value={}), \
+                    patch('ci_startup_audit.request', side_effect=[{}, {'projects': []}, []]), \
+                    patch('ci_startup_audit.urllib.request.build_opener', return_value=opener):
+                audit.sample()
+            self.assertTrue(audit.proof['onboarding_empty_store'])
+            self.assertEqual(len(audit.assets['observations']), 5)
+
     def fixture(self):
         config = {'workspace': '/owned/workspace', 'expected_store': '/owned/nac/dev.db',
                   'provider_base': 'http://127.0.0.1:1234', 'scenario': 'configuredLocal'}
@@ -145,14 +237,98 @@ class StartupAuditTests(unittest.TestCase):
             for path, data in bodies.items():
                 (dist / path.removeprefix('/assets/dist/')).write_bytes(data)
             opener = MagicMock()
-            opener.open.return_value.__enter__.return_value.read.side_effect = [index, *[bodies[path] for path in sorted(bodies)]]
+            opener.open.return_value.__enter__.return_value.read.side_effect = [presentation_document(index), *[bodies[path] for path in sorted(bodies)]]
             with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener):
-                receipt = entry_assets('http://127.0.0.1:4321', root)
+                receipt = entry_assets('http://127.0.0.1:4321', root, identity=IDENTITY)
             self.assertEqual([row['path'] for row in receipt['observations']], ['/', *sorted(bodies)])
             self.assertNotIn('synthetic body', str(receipt))
-            opener.open.return_value.__enter__.return_value.read.side_effect = [index, b'foreign bytes']
-            with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener), self.assertRaises(RuntimeError):
-                entry_assets('http://127.0.0.1:4321', root)
+            ordered = [bodies[path] for path in sorted(bodies)]
+            for ordinal in range(4):
+                changed = ordered.copy()
+                changed[ordinal] = b'foreign bytes'
+                opener.open.return_value.__enter__.return_value.read.side_effect = [presentation_document(index), *changed]
+                with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener), \
+                        self.subTest(ordinal=ordinal), self.assertRaises(FixtureFailure) as caught:
+                    entry_assets('http://127.0.0.1:4321', root, identity=IDENTITY)
+                self.assertEqual(caught.exception.code, 'served_entry_asset_bytes')
+                self.assertEqual(caught.exception.facts['asset_ordinal'], ordinal + 1)
+
+    def test_entry_document_only_accepts_actual_P_binding_and_exact_other_bytes(self):
+        valid = presentation_document()
+        metadata = _entry_document(valid, PRODUCT_INDEX, IDENTITY, {})
+        self.assertTrue(metadata['otherwise_exact_source_index'])
+        self.assertNotIn('12345678', json.dumps(metadata))
+        start = valid.index(b'<script id="nac-presentation-binding"')
+        end = valid.index(b'</script>', start) + len(b'</script>')
+        script = valid[start:end]
+        invalid = [PRODUCT_INDEX, valid + b' ', valid.replace(b'NAC</title>', b'Other</title>'),
+                   valid.replace(b'</script></head>', b'</script><script>unexpected()</script></head>'),
+                   valid.replace(script, script + script), valid.replace(script, b'').replace(b'</body>', script + b'</body>'),
+                   valid.replace(b'"version":1', b'"version":true'), valid.replace(b'"version":1', b'"version":2'),
+                   valid.replace(b'"version":1', b'"version":1,"version":1'),
+                   valid.replace(b'"scope":{', b'"scope":{"owner":"foreign",'),
+                   valid.replace(b'"version":1', b'"unexpected":0,"version":1'),
+                   valid.replace(b'"scope":{', b'"scope":{"unexpected":0,'),
+                   valid.replace(b'"version":1', b'"version":null'), valid.replace(b'"version":1', b'"version":[]'),
+                   valid.replace(b'"version":1', b'broken'), valid.replace(b'"version":1', b'"version":NaN'),
+                   valid.replace(b'"version":1', b'\xff'), valid.replace(script, script[:-9] + b' ' * 8192 + b'</script>')]
+        for changes in ({'owner': 'other'}, {'organization': 'other'}, {'host': 'other'}, {'profile': 'managed'},
+                        {'incarnation': '12345678-1234-1567-8123-123456789abc'},
+                        {'incarnation': '12345678123445678123123456789abc'},
+                        {'incarnation': '12345678-1234-4567-8123-123456789ABC'}, {'incarnation': 'invalid'},
+                        {'release': 'foreign-build'}, {'release': json.dumps(['0.1.4', 'foreign', 'dev', PRODUCT])},
+                        {'release': []}, {'owner': None}, {'profile': True}):
+            invalid.append(presentation_document(**changes))
+        for document in invalid:
+            with self.subTest(document_sha256=hashlib.sha256(document).hexdigest()), self.assertRaises(FixtureFailure):
+                _entry_document(document, PRODUCT_INDEX, IDENTITY, {})
+        for identity in (None, {}, {**IDENTITY, 'build_id': 'foreign'}, {**IDENTITY, 'track': 'stable'},
+                         {**IDENTITY, 'extra': 'unbound'}, {**IDENTITY, 'source_revision': False}):
+            with self.subTest(identity=identity), self.assertRaises(FixtureFailure):
+                _entry_document(valid, PRODUCT_INDEX, identity, {})
+
+    def test_audit_thread_preserves_guard_metadata_and_transient_classification(self):
+        for transient in (OSError('private ignored'), ListenerPending('private ignored')):
+            witness = SimpleNamespace()
+            audit = LiveAudit(witness, {'scenario': 'onboarding'}, None)
+            complete = threading.Event()
+            def sample():
+                if not complete.is_set():
+                    complete.set()
+                    raise transient
+                audit.proof = {'done': True}
+            audit.sample = sample
+            audit.start()
+            audit.thread.join(timeout=2)
+            self.assertFalse(audit.thread.is_alive())
+            self.assertIsNone(audit.failure)
+            self.assertIsNotNone(audit.proof)
+        audit = LiveAudit(witness, {'scenario': 'onboarding'}, None)
+        audit.phase = 'entry_assets'
+        failure = FixtureFailure('served_entry_asset_bytes', {'asset_ordinal': 2, 'actual_bytes': 7,
+                                                            'expected_bytes': 9, 'actual_sha256': 'a' * 64})
+        def fail():
+            raise failure
+        audit.sample = fail
+        audit.start()
+        audit.thread.join(timeout=2)
+        snapshot = audit.failure_snapshot()
+        self.assertEqual(snapshot['failure']['guard_code'], 'served_entry_asset_bytes')
+        self.assertEqual(snapshot['failure']['operands']['asset_ordinal'], 2)
+        self.assertEqual(snapshot['phase'], 'entry_assets')
+        with self.assertRaises(RuntimeError):
+            audit.stop()
+        self.assertEqual(audit.failure_snapshot(), snapshot)
+        # Failure reporting itself must never prevent the original rejection.
+        other = LiveAudit(witness, {'scenario': 'onboarding'}, None)
+        other.sample = fail
+        with patch('ci_startup_audit.failure_metadata', side_effect=ValueError('private-marker')):
+            other.start()
+            other.thread.join(timeout=2)
+        self.assertFalse(other.thread.is_alive())
+        self.assertEqual(other.failure, 'ordinary_api_audit_rejected')
+        self.assertEqual(other.failure_snapshot()['failure'],
+                         {'exception_type': 'unknown', 'guard_code': 'unknown', 'operands': {}})
 
     def test_entry_mapping_rejects_foreign_absolute_escaped_traversal_and_symlink_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
