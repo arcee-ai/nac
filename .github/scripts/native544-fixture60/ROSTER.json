@@ -1,0 +1,286 @@
+{
+  "base": "9bcec861fdcf56c380919211b9d6bbd16a44142a",
+  "base_tree": "187f6a70d916e028eb65cbcfaa453092df79e4c9",
+  "default_pattern": "test_*.py",
+  "expected_static_discovery_count": 545,
+  "own_methods": 521,
+  "imported_duplicate_methods": 24,
+  "tests": [
+    {
+      "path": "desktop/macos/test_ci.py",
+      "sha256": "b7b051f8a7a456072328caf95b93d96341ccb0c9eb448a6cf9398ef7f906544e"
+    },
+    {
+      "path": "desktop/macos/test_ci_cleanup.py",
+      "sha256": "c0d68e2eefa878aafb11b5374ea40d6541e0fa79c222391635a88488894235ee"
+    },
+    {
+      "path": "desktop/macos/test_ci_complete_output.py",
+      "sha256": "dcf2b2d99ae7daf4c261b6261d9388226df4dee01fa7c801ba1675f16d4fbdf3"
+    },
+    {
+      "path": "desktop/macos/test_ci_evidence.py",
+      "sha256": "e7eef101b1be3347e6f30ba3babe9cd2b84e867b80d1d70df704fc82706b8753"
+    },
+    {
+      "path": "desktop/macos/test_ci_instance_capture_attachments.py",
+      "sha256": "914a8fa2c839cd98979613ed5e883b8487437dbf16e4ebedd81d19975084b891"
+    },
+    {
+      "path": "desktop/macos/test_ci_instance_capture_contract.py",
+      "sha256": "cc36f0ecc6a6bf83e0d2d35891f4882608164b17c5cdca4270db497b1c497661"
+    },
+    {
+      "path": "desktop/macos/test_ci_instances.py",
+      "sha256": "a6333c34ea6bd35d4d8186bb11cd85ef3dcc6d56ba6824bbd0ae030664f51395"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle.py",
+      "sha256": "677d6f00c3aa7a4108c4179fa945a537c4eb5070c524aa4e4a5b6c50a06cdc43"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_capacity.py",
+      "sha256": "714b91a5d0ba7107b62e8deaaaac30319c2785340f7c381947d51bb250f65283"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_contract.py",
+      "sha256": "5c6114cca8a666325dc8c29c1841bbbf0ba15c818e4eb6c6e14b0f74f0696f18"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_delivery.py",
+      "sha256": "0a1f8f5d51e7caee0109bc69fda72af8abdff6f4f782aabff25ec0ebf48cf491"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_evidence.py",
+      "sha256": "14bbaa729bf0e56da20121414adbd7f1cd69c1264d4ab365e5f8778b2ff445da"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_failure_export.py",
+      "sha256": "b8b0f37fea7b17267eac72cb19fe36496cea35b119d31052c0bcf2625eeda596"
+    },
+    {
+      "path": "desktop/macos/test_ci_lifecycle_finalization.py",
+      "sha256": "f7a83b0de9810e40fad08c3a06eadbc60b0561f07d2572982bc1e1239ab52992"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths.py",
+      "sha256": "b949dfdc464d89c6a9916be98993da05d6ef20af7a5f19ef6934776e9a2273fd"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_budget.py",
+      "sha256": "2a36dfb3b015dc001d9e90ecb1a007cf2b204dfae832de89905f08f9ebd0a89d"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_custody.py",
+      "sha256": "ca1859ffa3ff8e6aef3ae15dabfcb64a07f085b3752417d999a0d03002d36136"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_finalization.py",
+      "sha256": "f6449a72f6ce95deae86cc05bb3303452e26a905ca03e01c5e98978df7d972d0"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_main.py",
+      "sha256": "06efdc98daa4bd5307a124db5af2794bd49cee0415ec75e3eae8ac68abb5c29c"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_observer.py",
+      "sha256": "5da64a1ec3d7f5bc199261a76351a4fcd510fb72e1c8b3424cd926f82aed1227"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_protocol.py",
+      "sha256": "9c8f603c9cd3cd75d6fd8c652d81ce37b7240cb3dc38d154772a0736ef923dc4"
+    },
+    {
+      "path": "desktop/macos/test_ci_paths_settlement.py",
+      "sha256": "5e287de95ea1ef06aa7c2b7a05b50af281f0d648de6e1799f704d0156ddbd1a5"
+    },
+    {
+      "path": "desktop/macos/test_ci_qualifications.py",
+      "sha256": "6334f039ffdf854c925c030f95a003bfc34aa1a9bf9af6a21acbacb865d7c43b"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup.py",
+      "sha256": "4498a536b48af1faf7744ad5c85e660cc808e9d96235150fce977f970c8be39f"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_api.py",
+      "sha256": "cf52f9e76349e4f3bdacdfa920d598fed1cdc2db9600c05c40cf58a1f0193c96"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_attachments.py",
+      "sha256": "1b1050cc2a749ddb8a6ba920f85f7b18120faeb581b35e9cca20490bf19e5409"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_audit.py",
+      "sha256": "e13e8c801bd090a73aa2f61f493bad57e6128a60473dce0f6e46c4ae1937b805"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax.py",
+      "sha256": "d2e948022e9a92d00e4cccfb639989645f65c7dac527466c5274fedce595f8df"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax_clock.py",
+      "sha256": "91b0b2d168d08df82cb7a247c3ca9b42ad14c938fd8bf99ca2abbf54be88d752"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax_diagnostics.py",
+      "sha256": "580434e31026961b92408aac97f432df30db4eb055efa0edafff1b00e2347359"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax_lifetime.py",
+      "sha256": "611df1fa96e064f74bed0017ac0e821caaa34f099f90646e300ca1c6e9b6d79d"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax_preemption.py",
+      "sha256": "e0621f4af17c7f1cdd8abdfe343100ba2ca536620e26a92e05b236015c3b9178"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ax_preflight.py",
+      "sha256": "70173afb37697065dcb743ef3d39d1db9d15f5ca98120f332bcfd5796d49f2d1"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_clock.py",
+      "sha256": "7c0a70bfa550f7f66c14a77f0d41e0d0e2194013b5ec5540fef2afd0f8522eec"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_console.py",
+      "sha256": "5fed3a8101c14023dccb749aae6d906f66cca6d65665ff5279b2257ee6c49b81"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_console_check.py",
+      "sha256": "444c89ed32bb68127ea83045c420468703652922a766d5af6fa8e247dd0e803a"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_environment.py",
+      "sha256": "12d7491477db616eb97281958ab4823933f74cb1190e6a97d90e0c741789ded6"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_fixture.py",
+      "sha256": "e938f83e9df8c4bc8915849aec31deaa63f16cf4d445d204d3ed2f1e05bd72cc"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_observer.py",
+      "sha256": "332fb6beb3ca4efc7b3401b5432ef4bc39435dff55e87ad7bcd342a37f1b8043"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_owner.py",
+      "sha256": "7f7756fc0a6a10256f3ed7928ea2374ecd92aa69885dc100e839d94f7cab930f"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_paired_diagnostic.py",
+      "sha256": "9dffcab9a6e61dea26676cfc2d6ac523a2914c0e5aac75936fc1e90805d75bec"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_protocol.py",
+      "sha256": "83e43cde7f496bd92dc3b6d71d0f31260197cce9b06d51ff2bb69e4c31ec9124"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_stream_diagnostics.py",
+      "sha256": "173553396945874fb34d759aa62a1a8e9cbfab60fa3f61c1eaf1ebe17f695cb6"
+    },
+    {
+      "path": "desktop/macos/test_ci_startup_ui_custody.py",
+      "sha256": "d03910d14d039adfaa3f27775dde2641b7e8b0ed39315868245418f8a2cbe1ef"
+    },
+    {
+      "path": "desktop/macos/test_ci_terminal.py",
+      "sha256": "a49ab6e957f9d2b4df490fa1e69eca038040aac7f9c6e02bdab6f97e28a79398"
+    },
+    {
+      "path": "desktop/macos/test_ci_xctest.py",
+      "sha256": "ae7c0ad1edaf6a4329bf3be6300ba6528e8ca0cb9231442159e20669df2f237d"
+    },
+    {
+      "path": "desktop/macos/test_ci_xctest_attachments.py",
+      "sha256": "1c46d3a84b9e8cb955f89f0aa83350487d6ea99fb1691a25c672712263a165dd"
+    },
+    {
+      "path": "desktop/macos/test_ci_xctest_project.py",
+      "sha256": "608787c79454f88ff134500242d9241bc0f8a76c2287f2588a3b292919991a5a"
+    },
+    {
+      "path": "desktop/macos/test_preview_capture.py",
+      "sha256": "27fe964f2301d1294cd2d016c5939f54b5f29c704a8a3e208d73d75a023a96ef"
+    },
+    {
+      "path": "desktop/macos/test_smoke.py",
+      "sha256": "1a0c385a71e4e3739a0be274cf400d436dcb1790dfc66d7e64322ea484c901ff"
+    },
+    {
+      "path": "desktop/macos/test_startup_custody.py",
+      "sha256": "7cf9a9e0525186e3bc7f6d87ed77b27a8b6910d1cbd3560480ec59ded6c64882"
+    },
+    {
+      "path": "desktop/macos/test_startup_fixture.py",
+      "sha256": "88c5125dbcbcf21ca37e6251a217345d1bf74ee5f0506baa185835d97001729e"
+    }
+  ],
+  "qualification": "Static actor inventory, not executed collection. Candidate calls include mocked ports; no runtime settlement inferred.",
+  "future_admission_gates": [
+    "Default test_startup_fixture runs a real local Node loopback provider and finish receipt. Root must explicitly adjudicate this against no-provider scope; do not omit/filter it.",
+    "test_smoke starts sleep and shell fake-engine fixtures with start_new_session=True; original outer process-group cleanup does not establish their retirement if interrupted. Root must adjudicate finite nested custody before an actual.",
+    "Existing Darwin compiler/extracted Foundation subprocesses and protocol reader threads remain unchanged; no new app/AX/CG acquisition or provider/vendor journey is added."
+  ],
+  "finite_fixture_profiles": [
+    {
+      "owner": "test_ci.QualificationTests",
+      "actors": "Python subprocess with scoped environment; sleeping Python abort control; original ci.run process-group and pipe/drainer cleanup",
+      "bounds": "3 seconds each, existing cleanup grace; no app"
+    },
+    {
+      "owner": "test_ci_evidence.ReaderDiagnosticControls / TerminalTokenControls",
+      "actors": "Two extracted Swift Foundation/CryptoKit compiler fixtures; stub image adapters and exact token predicates; compiled fixture subprocesses",
+      "bounds": "45 seconds each compile; 5 seconds each invocation"
+    },
+    {
+      "owner": "test_ci_paths_observer.ObserverCompilerControls",
+      "actors": "Four original/mutant arm64/x86_64 SDK typecheck commands; no produced executable launch",
+      "bounds": "60 seconds each; aggregate fixture60 still outer bound"
+    },
+    {
+      "owner": "test_ci_instances.DriverInterruptionTests",
+      "actors": "Temporary Git repository and Python target/wrapper interruption control, SIGTERM/finally marker",
+      "bounds": "4-second ready and wait limits; kill/wait3 cleanup"
+    },
+    {
+      "owner": "test_ci_qualifications / test_ci_xctest_project",
+      "actors": "Temporary Git repository commands for exact source qualification",
+      "bounds": "No individual Git timeout in unchanged tests; outer fixture60 only"
+    },
+    {
+      "owner": "test_ci_startup / test_ci_startup_audit / test_ci_startup_ax / test_ci_startup_ax_preflight",
+      "actors": "Synthetic metadata/companion fixtures with existing synchronization threads, conditions and events; fake owned execution/identity ports",
+      "bounds": "Original per-owner waits and joins; no real AX helper added"
+    },
+    {
+      "owner": "test_ci_startup_environment.ProductionEnvironmentControls",
+      "actors": "Extracted Foundation environment fixture compile and executable data invocation",
+      "bounds": "45-second compile; 5-second invocation"
+    },
+    {
+      "owner": "test_ci_startup_observer.FoundationURLResourceControls / ProductionObserverControls",
+      "actors": "Two extracted Foundation compiler fixtures; URL-resource and observer protocol subprocesses; argument-exit reader thread and stdin settlement demands",
+      "bounds": "45-second compile; 5/10-second invocations; frame/select/join5; owner wait protocol unchanged"
+    },
+    {
+      "owner": "test_preview_capture.CaptureReadinessTests",
+      "actors": "Node in-memory JavaScript fixture control",
+      "bounds": "15 seconds; no browser/app"
+    },
+    {
+      "owner": "test_smoke.CleanupTests",
+      "actors": "Detached /bin/sleep60 and detached temporary shell fake-engine loop; owned private bundle/profile cleanup control",
+      "bounds": "Original local finally; outer process group cannot prove detached retirement on interruption; Root custody gate"
+    },
+    {
+      "owner": "test_startup_fixture.StartupProviderLifetime",
+      "actors": "Node startup_provider.mjs local loopback listener, immediate finish request, zero provider requests expected",
+      "bounds": "5-second wait/cleanup; Root no-provider-scope gate"
+    },
+    {
+      "owner": "test_ci_startup_ax_lifetime.LifetimeControls",
+      "actors": "Optional Q Foundation/AX guard compile and inert executable only when original NAC342_AX_WITNESS_PROOF=1",
+      "bounds": "Original default three skips; do not enable/disable variable; 60-second compile/3-second invocation if separately admitted"
+    }
+  ]
+}
