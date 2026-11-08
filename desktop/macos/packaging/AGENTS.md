@@ -1,15 +1,14 @@
 # Mac package owner
 
-Current private P11 composition consumes the same reviewed packaging owner on
-full Native `21257259dfe34243aeb0cf8b3b966a6972cc4529`, based on landed dev
-`42231f447fef5d9d63d82943ae35e8c0d6c424b6`. Among39normal Swift and3support
-inputs, only AppQuit.swift differs from P10: the reviewed conditional
-miniaturized-window changes. Assets, locks, API and the source roster stay exact;
-all current Native/test/Q057 inputs are inherited, never replaced with an old tree.
-The nine operational/test Python files are byte-identical to P10. Earlier genuine
-P10 artifacts/R/onboarding evidence retain their old source and do not qualify
-P11, actual minimized/G3/trusted-input behavior or current distribution. P11 needs
-its own source nomination and finite evidence; publication remains held.
+Current private P12 is a NEVERMERGE test integration of exact Native
+`8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and landed CAN658 dev
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`, join
+`64df258aeb54093cdc5c410aede25f8c4d2e6aea`. The join differs from Native only
+by CAN658's test delta; existing P11 eleven-file packaging carry is preserved.
+All42 normal inputs and83 assets remain P11-exact. The three current maintained
+lifecycle fixture postimages are inherited from Native8685 without edits.
+Old P10/P11 artifacts and runtime evidence retain their original source/scope;
+none may be retagged to this integration. This is source preparation only.
 
 ALL-355 owns this outer packaging/manifest/signature boundary. Read root and
 `desktop/macos/AGENTS.md`. Reuse the existing native builder and committed web
@@ -59,3 +58,16 @@ failed receipts. No fixture runtime or minimum-OS qualification is implied.
 The Rust embedded assets input tree must exactly match Git-tracked paths;
 ignored files/symlinks/extra directories there cannot be reviewed-source input.
 Do not apply that guard to unrelated ignored caches, dependencies or local config.
+
+The separate `lifecycle-build` packaging command calls the canonical builder's
+existing mode of that name once, reusing the same private engine. It keeps the
+original unsigned compiler-output receipt and bytes unchanged so the maintained
+runner's original hash checks remain valid. It does not sign that fixture or
+claim signature qualification. Its typed manifest/ZIP contains the canonical
+five-file app plus separately inventoried InstanceObservation helper. The closed
+normal13-file package, schema-1 PackageIdentity, source roster, signing and strict
+Q normal admission are unchanged. Never admit the fixture through normal Q.
+`lifecycle_receipt.py` admits the exact41-source/3-support compiler contract;
+`lifecycle_package.py` owns bounded fixture integrity, source/role separation,
+original normal before/after snapshot and no hardlink/alias proof. No product,
+fixture journey logic, new compiler/source writer or runtime policy lives here.

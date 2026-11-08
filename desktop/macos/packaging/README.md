@@ -1,15 +1,14 @@
 # Mac package preparation (ALL-355)
 
-Current private P11 composition consumes the same reviewed packaging owner on
-full Native `21257259dfe34243aeb0cf8b3b966a6972cc4529`, based on landed dev
-`42231f447fef5d9d63d82943ae35e8c0d6c424b6`. Among39normal Swift and3support
-inputs, only AppQuit.swift differs from P10: the reviewed conditional
-miniaturized-window changes. Assets, locks, API and the source roster stay exact;
-all current Native/test/Q057 inputs are inherited, never replaced with an old tree.
-The nine operational/test Python files are byte-identical to P10. Earlier genuine
-P10 artifacts/R/onboarding evidence retain their old source and do not qualify
-P11, actual minimized/G3/trusted-input behavior or current distribution. P11 needs
-its own source nomination and finite evidence; publication remains held.
+Current private P12 is a NEVERMERGE test integration of exact Native
+`8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and landed CAN658 dev
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`, join
+`64df258aeb54093cdc5c410aede25f8c4d2e6aea`. The join differs from Native only
+by CAN658's test delta; existing P11 eleven-file packaging carry is preserved.
+All42 normal inputs and83 assets remain P11-exact. The three current maintained
+lifecycle fixture postimages are inherited from Native8685 without edits.
+Old P10/P11 artifacts and runtime evidence retain their original source/scope;
+none may be retagged to this integration. This is source preparation only.
 
 The outer package writer reuses `desktop/macos/preview.sh`, the locked `nac-web`
 build, root `version.txt`, existing engine identity and committed embedded web
@@ -239,3 +238,51 @@ Portable boundary tests:
 ```sh
 python3 -B -m unittest discover -s desktop/macos/packaging -p 'test_*.py' -v
 ```
+
+## Separate canonical lifecycle fixture (private P12)
+
+For a separately reviewed and admitted build, `package.py lifecycle-build
+--engine-receipt ENGINE/engine-build.json --output NEW_FIXTURE_ROOT` invokes the
+existing preview.sh lifecycle-build once. This compiles41 Swift inputs (normal39
+plus LifecycleSmoke and RecoverySmoke), using exact normal flags plus
+PREVIEW_SMOKE/LIFECYCLE_SMOKE. The canonical builder also compiles its existing
+InstanceObservation helper with AppKit. No second Rust engine is built.
+
+The maintained lifecycle runner checks the original unsigned build-receipt's
+engine/native/plist hashes against actual bytes. Therefore this role deliberately
+retains canonical compiler output: no outer packaging signature, plist rewrite,
+PackageIdentity insertion or original receipt rewrite. Compiler/linker signatures
+are not represented as verified packaging signatures. The normal app still uses
+the unchanged ad-hoc nested/outer signature path and13-file inventory. A distinct
+`canonical-lifecycle-fixture-v1` manifest seals full source/tree/assets/schema,
+engine input/build identity, original native receipt,41+3 input hashes, exact
+three maintained journey postimages, observer source/flags/digest/mode and declared
+signature role. All runtime, signature, minimumOS and distribution qualification
+fields stay false/null. This is an instrumented fixture, not a consumer package.
+
+`NAC-lifecycle-fixture-arm64.zip` has exactly six regular entries: the original
+five-file `NAC Lifecycle Smoke.app` and `InstanceObservation`. No runner/source,
+expanded normal app, profile, compiler/cache or provider state is included.
+`package.py verify-lifecycle FIXTURE/manifest.json` checks every original file,
+mode, unsigned receipt, archive CRC/hash/layout and bounded sizes without launching
+anything. ZIP bounds are128MiB compressed/256MiB expanded, observer16MiB and
+manifest256KiB; duplicate/case/escape/symlink/special/encrypted entries fail.
+Extract only after digest/strict layout admission, into an absent private path,
+preserving0755/0644 modes. The original manifest and ZIP must remain unedited.
+
+The hosted controller snapshots the sealed normal manifest/ZIP/all bundle files
+BEFORE fixture production, then requires equality afterward and independent
+regular-file inodes across both roles. Both roles bind the same original private
+engine receipt. No hardlink/shared signing mutation may alter the sealed normal
+package. Current-source validation and strict normal Q admission remain mandatory.
+
+P12 source adds no actual runtime actor. Later Root briefs must explicitly name
+all selected compiler roles: canonical Rust engine, normal Swift, lifecycle Swift,
+canonical InstanceObservation; any separately selected H Foundation configuration
+resolver (inherited45s compile), external observer/AX helper, generated XCTest
+build-for-testing and independent R compilation must be separately declared and
+admitted. This producer selects none of the latter roles and executes no
+configuration resolver, lifecycle runner, app, OS Quit, AX or SDK case. R
+`7325c48b3c9ec7036e255a6bd92f31c1a98c1607` is provenance only here; future full-source
+R/P/manifest schema checks and actual independent R protocol evidence remain
+required. No onboarding-only wrapper can establish full startup/all-four evidence.
