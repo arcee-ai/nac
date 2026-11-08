@@ -217,7 +217,7 @@ class CompanionCustodyControls(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='nac-ui-custody-inert-') as temporary:
             root = Path(temporary).resolve()
             declaration = {'path': str(root / 'receipt.json'), 'nonce': 'a' * 64, 'helper_sha256': 'b' * 64}
-            owner = AXCompanion(SimpleNamespace(), {'ax_witness': declaration}, root / 'config', root / 'helper', root, Mock())
+            owner = AXCompanion(SimpleNamespace(ui_failure=None, process_failure=None), {'ax_witness': declaration}, root / 'config', root / 'helper', root, Mock())
             owner.thread = Mock()
             owner.thread.is_alive.return_value = False
             owner.identity = {'pid': 12, 'parent': 1, 'uid': 501, 'start_seconds': 1,

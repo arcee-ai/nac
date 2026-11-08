@@ -8,7 +8,7 @@ import re
 import threading
 import time
 
-from ci_paths_budget import active, check, time_limit, using
+from ci_paths_budget import BudgetExpired, active, check, time_limit, using
 from ci_startup_owner import native_identity, signature
 from ci_xctest import runner_environment
 from ci_xctest_attachments import bounded_file
@@ -93,6 +93,7 @@ class AXCompanion:
         self.identity = None
         self.terminal = None
         self.settlement = None
+        self.work_admitted = False
 
     @property
     def failure(self):
@@ -102,17 +103,31 @@ class AXCompanion:
             return self.ui_failure
         return None
 
+    def _abort(self):
+        # ci.run invokes this before Popen. Failed work cannot acquire a helper;
+        # after admission, only this read-only owner may retain its old bound.
+        if not self.work_admitted:
+            if self.bound is not None:
+                self.bound.check()
+            self.work_admitted = True
+        return bool(self.witness.process_failure
+                    or self.witness.ui_failure not in (None, 'app_windows'))
+
     def start(self):
         require(self.thread is None and self.witness.ready and not self.witness.failure and not self.witness.ui_terminal, 'AX metadata owner not ready')
         self.case_deadline_ns = min(int(self.declaration['deadline_ns']), int((time.monotonic() + time_limit(300)) * 1e9))
         def owned():
             try:
-                with using(self.bound):
+                retained = (self.bound.owner.cleanup.capped(min(self.bound.deadline, self.case_deadline_ns / 1e9))
+                            if self.bound is not None else None)
+                with using(retained):
                     remaining = self.case_deadline_ns / 1e9 - time.monotonic()
                     require(remaining > 0, 'AX companion original deadline')
                     self.phase = dict(started_epoch=time.time(), cap_seconds=min(300, remaining))
+                    # Only this already-owned read-only diagnostic may outlive
+                    # app_windows; parent input and every other UI rejection abort.
                     self.run([str(self.helper), '--ax-witness', str(self.config_path), str(self.case_deadline_ns)], self.folder / 'ax-companion.log',
-                             min(300, remaining), env=runner_environment(), abort=lambda: bool(self.witness.failure), retain_ownership=True)
+                             min(300, remaining), env=runner_environment(), abort=self._abort, retain_ownership=True)
             except BaseException as error:
                 self.error = error
             finally:
@@ -158,14 +173,33 @@ class AXCompanion:
         if self.thread is None:
             return None
         self.stopping = True
+        # Share the original stop allowance with teardown; never renew it.
+        stop_deadline, budget_error = time.monotonic(), None
+        try:
+            stop_deadline += time_limit(20)
+        except BudgetExpired as error:
+            budget_error = error  # Still publish stop and attempt a nonblocking join.
         path = Path(self.declaration['path'] + '.stop')
         temporary = path.with_suffix('.next')
         require(path.parent.resolve() == path.parent and not path.exists() and not temporary.exists(), 'AX stop custody')
+        if (self.identity is not None and self.witness.ui_failure == 'app_windows'
+                and self.witness.process_failure is None):
+            # Input already failed. Give only this existing read-only owner a
+            # chance to emit its fatal diagnostic, retaining 15s for teardown.
+            diagnostic_deadline = min(stop_deadline - 15, self.case_deadline_ns / 1e9)
+            while not self.finished.is_set() and self.witness.process_failure is None:
+                remaining = diagnostic_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.finished.wait(min(.05, remaining))
         with temporary.open('xb') as stream:
             stream.write(self.declaration['nonce'].encode())
         temporary.chmod(0o400)
         os.replace(temporary, path)
-        self.thread.join(timeout=time_limit(20))
+        if budget_error is not None:
+            self.thread.join(timeout=0)
+            raise budget_error
+        self.thread.join(timeout=time_limit(max(0, stop_deadline - time.monotonic())))
         require(not self.thread.is_alive(), 'AX companion process owner not settled')
         log = self.folder / 'ax-companion.log.ownership.json'
         owner = json.loads(bounded_file(log, 32768))

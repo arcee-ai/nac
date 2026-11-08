@@ -23,7 +23,7 @@ class CompanionControls(unittest.TestCase):
             identity=dict(pid=123,parent=os.getpid(),uid=os.getuid(),start_seconds=1,start_microseconds=2,executable=str(helper))
             declaration=dict(path=str(private/'receipt.json'),nonce='a'*64,helper_path=str(helper),helper_sha256='b'*64,
                              support_sha256={'inert':'c'*64},owner_pid=os.getpid(),deadline_ns=str(int((time.monotonic()+60)*1e9)))
-            witness=SimpleNamespace(ready=True,failure=None,ui_terminal=False)
+            witness=SimpleNamespace(ready=True,failure=None,ui_terminal=False,ui_failure=None,process_failure=None)
             begun=threading.Event()
             retire_now=threading.Event();retired_published=threading.Event()
             primary=ValueError('inert original helper failure')
@@ -63,7 +63,7 @@ class CompanionControls(unittest.TestCase):
                     retire_now.set();self.assertTrue(retired_published.wait(.5))
                     self.assertIsNone(owner.failure);self.assertFalse(owner.finished.is_set())
                 if metadata_loss:
-                    witness.failure='inert stream failure'
+                    witness.failure=witness.process_failure='inert stream failure'
                     self.assertTrue(begun.wait(.2))
                     owner.finished.wait(.5)
                     self.assertEqual(owner.failure,'ax_companion_unavailable')
