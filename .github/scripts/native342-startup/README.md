@@ -1,199 +1,134 @@
-# NEVERMERGE: exact post-657 four startup cases plus independent R
+# PRIVATE NEVERMERGE: genuine P12, repaired Q/H, four startup cases plus R
 
-This private successor starts at frozen consumerf716, retaining consumer6c052d2's
-exact-artifact handoff and maintained H callbacks. Both spent branches, their
-evidence and original allocations remain unchanged. Only this new branch's manual
-workflow is reachable; source publication and any actual episode require Root.
-No source declaration, test success or JSON example grants execution authority.
+This maintained successor starts from frozen actual03 consumer4df. Its separate
+H nomination starts from repaired Hd371 and changes only product/source metadata
+and matching oracles/docs. Functional H/Q behavior is preserved. The supplier is
+frozen before this consumer, avoiding a self-referential H pin. Historical P10/P11
+sources, failed actual03 AXWindows-25211 and all previous receipts/allocations
+retain their original attribution. No execution, publication or new goal is
+issued by this source preparation.
 
-`pair.json` binds P10ef2c, Q057, current H successor and independent R7325. P10's sole parent
-and full Native boundary are7325, on current dev422. Historical SDK controller,
-measured H, original preparation origin and landed-auth provenance are retained
-as historical fields. They provide no current binary/configuration/SDK credit.
-The reviewed producer source is7239 on its exact post657-P10 branch. Root verified
-producer04 run42426305195 and artifact13594999645, original manifest57fef13a,
-without granting this new scope an actual allocation. A new admission must bind
-the exact genuine artifact and full manifest hash; no implicit reuse grant exists.
-An old P9 receipt, producer source, onboarding scope or branch is rejected.
+`pair.json` binds genuine normal P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
+repaired Q `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`, nominated H
+`f7ba055284f112dbc19f21aecb3fe00fe50dcb80`, and independent R
+`7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. P12's direct parent is1cd48f9,
+Native boundary8685729 and source context04c22a7. Historical SDK controller/H and
+old preparation/authentication fields are provenance only. P12's genuine supplier
+success does not inherit P10's SDK/onboarding or qualify this repaired Q/H pair.
 
-## Existing ownership and validation
+## Closed normal artifact admission
 
-The pinned ordinary checkout/Rust/Node/download/upload actions are unchanged.
-The exact image20261102.0473.1 is required before the first checkout/bootstrap;
-the maintained exact Xcode/SDK/Swift/OS tuple is also required. Wrong/unknown
-fleet image stops unavailable without fallback, requeue or relaxed admission.
+Only producer0210a3c52062ec28e9c6ae74098040e432e09a65 on
+`codex/experimental-native-p12-lifecycle-package-20261108`, successful first manual
+same-repository run42455455480/artifact13607980704,
+`ff8-host-package-42455455480-1`, is admitted. Original outer ZIP66384125bytes has
+SHA256 `b51fb4fe4ae8d017f2f30f45f1da886244d537bc0df5ab467ee686252bb60312`.
+GitHub metadata must match that size/digest, original source/run/branch/attempt,
+repository ownership and nonexpiry before download. The initial inline gate
+checks exact producer/normal-manifest declaration and image before any checkout.
 
-The launcher preserves successful same-repository first-manual-run provenance,
-exact artifact ID/run/source, sealed producer receipt, Root-bound manifest,
-original ZIP bytes/size, canonical private transfer and maintained `ci.run`
-extraction ownership. No latest/name search, custom transport, package/engine
-rebuild or re-sign is introduced. Q's normal inventory/source/post-sign and
-canonical relocation admission still runs against the actual retained P10 app.
+`artifact.json` seals all34 original outer file names/sizes/hashes from Root's
+independently verified original artifact. Canonical, no-follow, regular, same-UID,
+single-link members and exact directory/file inventory are required. Extra/missing
+files/directories, changed bytes, symlinks/hardlinks and foreign roles reject.
+The normal role alone is transferred/extracted: manifest34298bytes SHA256
+`b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e`, normal ZIP
+32794219bytes SHA256
+`f3255d4dcf01b9e632895cd2971a52b425bd235859d46e7380752d954917b9ba`.
+The package-only receipt, source, normal purpose and recorded handoff hashes
+remain required. Separate lifecycle files are sealed for custody but are never
+selected, extracted or used for startup acceptance. Q's normal13/input42/assets83
+source, inventory, original/post-signature/engine identity and relocation checks
+remain the actual runtime admission owners. No package rebuild or re-signing.
 
-After exact H/P/Q/R clean checkout and locked setup, H materializes the actual
-external full Q Swift source/hash and compiles the existing observation helpers.
-The controller calls maintained `ci_startup_protocol.build`, then its `verify`
-against the retained P10 in-bundle engine and original package admission. H's
-four typed R records, private-wire literal, original engine identity/digest,
-nonce, integrity, lease reacquisition and positive process/profile retirement
-are required. The test's default compiled engine is never the runtime override.
-Missing/failed R stops before any UI case, including futureStore.
+## Maintained runtime route, pending separate Root admission
 
-It then calls maintained `ci_startup.run_case` serially in its exact order:
-onboarding, configuredLocal, invalidConfig, futureStore. First failure or unknown
-stops the sequence. Every case retains real configuration, generated runner and
-new runtime binary/configuration/xctestrun receipts, owned input, OwnerWitness,
-API/provider/persisted audit where applicable, inventory/integrity, policy,
-console, original PNG/results/attachments, and positive process/profile cleanup.
-Q's exact eleven configuredLocal operations and console5/27/4/4 are unchanged.
-Native UI guidance and R/private-wire guidance remain distinct literal contracts.
+This is the full four-case/R route, never the one-read ad8d diagnostic. It retains
+exact image20261102.0473.1 before bootstrap, macOS26/Xcode26.6(17F113)/SDK26.5,
+pinned actions, isolated H/P/Q/R/controller checkouts and locked setup. The actual
+Q target is materialized from its immutable nine-file source roster. The observer
+compile calls H's `observer_sources` for BOTH H files and BOTH canonical Q support
+files, records their hashes and rechecks those bytes after compilation.
 
-The existing Bound/ci.run owner is reused without a replacement supervisor.
-A successful case uses its original cleanup bound locally, then permits the next
-case's work on the SAME original clock. Failure, timeout, signal, discontinuity
-or unknown finalization latches; successful cleanup cannot revive work. Original
-cleanup/retention bounds remain available on failure. Unknown profiles remain
-retained; no PID discovery or unconditional deletion is added.
+Required independent R builds its exact source/locked compiler graph and then
+executes all four typed protocol observations against the original retained P12
+engine. Original compiler/test/source/engine/nonce/private message/schema/manifest,
+store/config integrity, lease and process/profile retirement checks are preserved.
+Static schema50/fixture51 cannot substitute for that actual contract. R failure
+stops before any UI case.
 
-## Proposed finite allocation, not an actual grant
+Cases remain serial: onboarding, configuredLocal, invalidConfig, futureStore.
+Each uses the maintained full generated target/build-for-testing and actual test,
+source/binary/config/xctestrun receipts, provider/API/persisted evidence where
+applicable, protected store, authorization policy, console/PNG/attachments and
+positive metadata app/engine cleanup. configuredLocal additionally owns the
+reviewed finite AX companion, readonly receipt, retained CF objects and terminal
+retirement reconciliation. Preserve27 console observations/26 fresh AX proofs,
+11 public inputs/22 dispatch records, zero-next-input refusal, privacy, EOF/time/
+bounds, exact resource/kernel/helper/source/nonce and phase custody. Failed input
+completion stays UNKNOWN; cleanup never creates success. All cases need current
+original PNG/API/store evidence. Sandbox, TCC, OS, permissions and backend stay
+unchanged; there is no host fallback or acceptance weakening.
 
-Recommend a NEW queue-inclusive maximum60-minute episode: up to48 minutes work,
-at least10 minutes cleanup and at least2 minutes retention, with four absolute
-Root-issued epochs fixed BEFORE queue/bootstrap/checkout/download/setup. This
-never expands or renews the historical23-minute one-onboarding allocation.
-All phases and uploads clamp to those original epochs; source/producer clocks
-are separate. The maintained per-command caps are preserved: setup600s per
-checkout, R build900s plus adapter90s and verify120s, observation helpers90s,
-each actual SDK build240s and each XCTest300s. No cache restore is added.
+## Future compiler and clock declaration (not a grant)
 
-This60-minute limit is a fail-closed budget, not a worst-case completion promise.
-R's three caps plus four SDK/test caps alone total3270s, exceeding the2880s work
-maximum before setup/queue/other preparation. The controller admits R only with
-1155s remaining, each next case only with615s, and every work helper only with
-its full original cap plus15s remaining. If earlier phases consume their caps,
-a later phase is refused and the episode ends FAIL with original cleanup and
-retention; it never extends time or starts a shortened expensive phase. Root
-must explicitly accept this bounded stop-on-insufficient-time choice before any
-actual allocation. Guaranteed completion at every cap would require a separate
-scope/budget decision outside this <=60-minute source proposal.
+A separately reviewed Root admission must bind this final consumer SHA, exact
+producer/artifact/normal manifest, a new allocation ID, attempt1/retries0 and four
+absolute original epochs before queue/setup. The existing maximum60m total,
+maximum48m work, minimum10m cleanup and minimum2m retention remain. No epochs are
+invented here. Work failures latch; cleanup/retention use their original reserves,
+and successful cleanup cannot renew work or admit the next input/case.
 
-Full Q057 ApplicationServices/AppKit SDK compilation and native AX/input remain
-UNKNOWN. The existing first case builds its actual generated SDK runner before
-starting owner/input. There is no maintained way to prebuild that same runtime
-runner before R without preparing/holding a live case configuration outside
-`run_case`. The historical compile-only controller2cee is pinned to old sources
-and invalid configuration. If Root wants a current SDK fail-fast episode first,
-that needs separately reviewed/pinned source and a separate finite admission;
-this consumer neither silently invokes it nor claims the nine pure geometry/AX
-controls establish full SDK/runtime acceptance.
+For a full successful run, count every role explicitly:
 
-## Manual declaration
+- One independent R `cargo test --locked --no-run` compiler graph (900s), then
+  adapter90s and actual typed-protocol120s. Count its actual Rust compiler work
+  from retained logs; it is not a P12 engine runtime build or static-schema proof.
+- One complete H2+Q2 observer compile90s; one CIEvidence compile90s and one CIGUI
+  compile90s. These are three direct Swift invocations, with the observer's four
+  inputs retained separately.
+- Four existing pure-Foundation CommandEnvironment/CIStartupEnvironment resolver
+  compiles45s, one per case, plus each controlled resolver invocation5s. Compiler
+  lookup/version commands are metadata, not extra compiler invocations.
+- Four full generated-Q `xcodebuild build-for-testing` commands240s, with actual
+  runner/test-bundle target compiler commands and output identities retained in
+  their complete logs. Count both generated target roles; do not summarize this
+  as four single-file Swift compiles. Four test-without-building commands300s
+  follow. No P12 app/engine rebuild is selected.
 
-The guarded workflow input is `startup_admission`, exposed only as
-`ROOT_STARTUP_ADMISSION`. It has exactly these fields; this unusable example
-allocates nothing and zero IDs/epochs/placeholders are rejected:
+That is seven direct Swift compile invocations plus four full SDK build commands
+and one R build graph if all four cases are reached. Early stop records actual
+counts, later cases UNRUN. Existing five locked setup phases are preparation;
+setup is not represented as evidence that any compiled actor qualified.
 
-```json
-{
-  "scope": "P10-Q057-R7325-AX-retention-source01",
-  "controller_sha": "<reviewed new consumer SHA>",
-  "allocation_id": "<Root NEW finite episode>",
-  "attempt": 1,
-  "retries": 0,
-  "manifest_sha256": "<verified genuine P10 producer manifest hash>",
-  "producer": {
-    "run_id": 0,
-    "artifact_id": 0,
-    "controller_sha": "7239e61a0ebc0ee01b28f9d3cb9c1262132a8627",
-    "branch": "codex/experimental-native-q-host-package-post657-p10",
-    "artifact_name": "<verified exact artifact name>"
-  },
-  "clock": {
-    "STARTED": 0,
-    "WORK_DEADLINE": 0,
-    "CLEANUP_DEADLINE": 0,
-    "HARD_DEADLINE": 0
-  }
-}
-```
+The caps do not promise worst-case completion inside48m. R is admitted only with
+1155s remaining; each next case requires615s and every expensive work callback
+requires its original full cap plus15s. Queue, package checks, setup, helper builds,
+resolvers and other work consume the SAME clock. If insufficient allowance remains,
+refuse the next phase and retain failure/cleanup, never shorten an expensive phase,
+renew the clock or substitute a diagnostic subset. Any future partial diagnostic
+must be separately named and cannot replace the four-case goal.
 
-Root owns one-use ledger enforcement, exact source availability/review, actual
-producer verification and runtime-category admission. A JSON schema alone does
-not enforce cross-run replay protection. The workflow requires attempt1 and the
-new exact branch; it never autochains or retries. Always-retention uses the same
-original hard cutoff and exports only gate facts and maintained bounded/redacted
-evidence with original hashes. Package/DerivedData/profile/store/cache contents
-are excluded. Root must inspect actual original PNGs and complete receipts.
+## Source controls and limits
 
-## Source-only controls and preserved evidence
+Pure Python admission/orchestration/real-Bound/failure-export controls and actual
+inline-workflow controls use only inert data/doubles. They load H's exact immutable
+Python sources into a temporary source fixture from Git objects in this owned repo;
+no other active checkout or new worktree is used. Artifact controls read Root's
+already acquired bytes without executing/extracting binaries, plus synthetic
+adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
+is invoked by these tests. Actual helper compilation, full SDK/sandboxed receipt
+access, real focus/value/CFEqual/freshness/input/PNG/API/store/custody and minimum-OS
+qualification remain UNRUN. Root routes original-G1 affected alignment and then
+any private source availability/actual admission. No automatic next unit follows.
 
-Run the inert controls with an explicit clean exact H source input:
 
-```sh
-NAC_STARTUP_H_ROOT=/absolute/exact-H-checkout PYTHONDONTWRITEBYTECODE=1 \
-  python3 -m unittest discover -s .github/scripts/native342-startup -p 'test_*.py' -v
-node --test .github/scripts/native342-startup/workflow.test.mjs
-```
-
-The tests load only H's immutable Bound module, inject inert R/case callbacks,
-and exercise serial success, required R failure/absence, case2 fail-first,
-actual owned callback work/cleanup selection, signal/discontinuity latches,
-nonrenewal, old scope/ref/producer rejection and strict artifact handoff.
-They never invoke main, an SDK/R build, engine/provider/app, AX or OS input.
-
-Historical onboarding04/producer03 and SDK PASS remain old Q04c/H1b9/P9 evidence.
-Clock F1 count1 remains7PASS/1 canonical fixture ERROR; count2/4 source fix remains
-historical. This new extension creates no count3, retry reset or runtime credit.
-Four prior failed Q cases, lifecycle531 spent1, private345 STOP and all one-shots
-remain unchanged. The old ALL354 goal remains BLOCKED/unfinished. New-source publication, current full Q SDK, aligned R7325 runtime, four UI
-cases, minOS and full Native acceptance remain pending separate Root decisions
-and observed evidence; producer04 package success remains package-only.
-
-## Source correction01: stale R schema nomination
-
-Actual episode01 on frozen fd221/R2504 is CONSUMED_FAIL before any full-Q SDK
-or UI request. Root's read-only source diagnosis established R supported40 and
-fixture41 against P10 supported50. That pair did not qualify a future store;
-no production future-store bug is established by its two failed R tests. The
-two retained profiles and missing after-byte/cleanup evidence remain failures.
-
-This new scope/branch changes R to retained Native7325 with the SAME complete
-reviewed Rust test bytes0eb70, supported50 and true future51 (WAL main50). H's
-protocol owner now mandates exact clean R/P, pinned schema-source hashes and
-original normal-manifest/admission SHA binding, with literal
-R_supported == P_supported == manifest.store_schema BEFORE any Cargo/executor.
-Missing/malformed/duplicate/hash/overflow/version mismatch, including R51/P50,
-refuses before creating build output. The build receipt records versions and
-source/manifest hashes; runtime verification requires the aligned receipt.
-No Rust test edit, target-schema environment override, production API, generic
-failure acceptance, bytes/mtime/lease/profile or typed-record weakening occurs.
-
-All existing caps, original clock and four-case fail-first behavior remain.
-Old fd221 is spent/frozen. This SOURCE correction01/4 grants no repeat of its
-allocation; a new source review, publication and finite actual admission remain
-Root-owned. Genuine P10 producer04/artifact13594999645/manifest57fef remains the
-same package; no rebuild or retag is introduced. Current full Q SDK and all four
-native UI cases remain unrun, and no automatic continuation follows.
-
-## AX observability Source01/4 — no new actual allocation
-
-This branch nominates Q057 and the matching retained-diagnostic H successor on
-current P10/R7325. Only optional failed configuredLocal AX JSON is added to the
-closed named inventory, <=8192bytes, with exact P/Q/H/source/config/PID/launch/
-window binding and fixed first/terminal observation fields. It is retained
-before missing canonical cleanup/success checks, never qualifies the failed
-case and never clears input_completion_unknown. The actual unchanged consumer
-finally-export call is exercised with an inert failed cleanup-missing export.
-The required immutable Mac lane now loads exact geometry6+AX3=9 with0skips;
-portable console4 and traces5/27/4/4 remain unchanged. No extra AX read/action,
-permission/trust option, fallback, geometry tolerance or acceptance change.
-
-Actual02 on old Q993/H e47/f716 remains CONSUMED_FAIL: R4passed, two full SDK
-builds passed and onboarding passed with its original PNG, but configuredLocal
-AX binding failed with input unknown/no PNG; later UI unrun. None is retagged
-as Q057 evidence. Full Q057 SDK/runtime and actual diagnostic export are UNRUN.
-P10/genuine artifact13594999645/manifest57fef remain the CURRENT source tuple;
-a separate505/P11 change is not included or invented. Root may later supply a
-new exact P composition and must separately review/publish/admit any episode.
-Old f716/e47 refs, old failed profiles and all prior counters remain untouched.
-No new reviewer, actual POST, retry, Source publication or automatic chain.
+The inherited full-startup closing-report defect is repaired once in this unit
+with Root approval: an exception at cleanup-scope exit restores FAIL first in
+the existing handler. The original exception/export and acceptance predicates
+remain unchanged. Inert actual-main closing-body/except/finally controls with
+real H Bound reproduce expiry PASS!=FAIL before repair, then verify expiry and
+ordinary failure export FAIL while normal exit retains PASS without acceptance.
+This is first repair1/4 for that distinct reporting issue; no historical source
+or runtime counter is reset. Initial invalid test-fixture construction attempts
+are retained separately and are not the meaningful RED result.

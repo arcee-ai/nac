@@ -1,0 +1,99 @@
+{
+  "state": "SOURCE_ONLY_UNADMITTED",
+  "scope": "P12-Qba-R7325-AX-witness-startup-source01",
+  "cases": [
+    "onboarding",
+    "configuredLocal",
+    "invalidConfig",
+    "futureStore"
+  ],
+  "independent_R_required": true,
+  "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "H": "f7ba055284f112dbc19f21aecb3fe00fe50dcb80",
+  "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
+  "image": "20261102.0473.1",
+  "xcode": "26.6 (17F113)",
+  "SDK": "26.5",
+  "compiler_roles": [
+    {
+      "role": "independent R locked Cargo compiler graph",
+      "invocations": 1,
+      "cap_seconds": 900,
+      "actual_compiler_work": "Retain all Rust compiler invocations in full build log; graph is a role, not one rustc"
+    },
+    {
+      "role": "complete H2+canonicalQ2 observer",
+      "invocations": 1,
+      "inputs": 4,
+      "cap_seconds": 90
+    },
+    {
+      "role": "CIEvidence",
+      "invocations": 1,
+      "cap_seconds": 90
+    },
+    {
+      "role": "CIGUI",
+      "invocations": 1,
+      "cap_seconds": 90
+    },
+    {
+      "role": "retained Foundation configuration resolver",
+      "invocations": 4,
+      "cap_seconds": 45
+    },
+    {
+      "role": "full generated Q SDK build-for-testing",
+      "invocations": 4,
+      "cap_seconds": 240,
+      "target_roles": [
+        "generated runner",
+        "Q test bundle"
+      ],
+      "actual_compiler_work": "Retain actual target/compiler logs and all binary identities; count does not collapse their compiler invocations"
+    }
+  ],
+  "direct_Swift_compile_invocations_if_full_run": 7,
+  "full_SDK_build_commands_if_full_run": 4,
+  "R_build_graphs_if_full_run": 1,
+  "actual_XCTest_commands_if_full_run": 4,
+  "existing_locked_setup_checkouts": 5,
+  "product_engine_app_rebuilds": 0,
+  "clock": {
+    "authority": "Separate Root literal admission only; no runtime epochs supplied here",
+    "fields": [
+      "STARTED",
+      "WORK_DEADLINE",
+      "CLEANUP_DEADLINE",
+      "HARD_DEADLINE"
+    ],
+    "queue_inclusive": true,
+    "max_total_seconds": 3600,
+    "max_work_seconds": 2880,
+    "min_cleanup_seconds": 600,
+    "min_retention_seconds": 120,
+    "renewal": false,
+    "admission_checks": {
+      "required_R_remaining_seconds": 1155,
+      "next_case_remaining_seconds": 615,
+      "expensive_helper_full_cap_plus_seconds": 15
+    },
+    "worst_case_completion_guaranteed": false
+  },
+  "configured_invariants": {
+    "console": 27,
+    "fresh_AX_proofs": 26,
+    "public_inputs": 11,
+    "before_after_dispatch_records": 22,
+    "failed_input_completion": "UNKNOWN",
+    "retained_CFEqual_identity": true,
+    "zero_next_input_on_refusal": true,
+    "readonly_receipt": true,
+    "private_field_text_exported": false,
+    "positive_app_engine_companion_cleanup_required": true
+  },
+  "stop": "First failure/unknown prevents later cases; never a diagnostic subset success",
+  "acceptance": "All four original current-source PNG/API/store/policy/input/custody oracles; Source/inert tests establish none",
+  "runtime_authorized": false
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import atexit
 from unittest.mock import Mock, patch
 
 HERE = Path(__file__).parent
@@ -15,11 +16,19 @@ PAIR = json.loads((HERE / 'pair.json').read_bytes())
 spec = importlib.util.spec_from_file_location('four_startup', HERE / 'four-startup.py')
 controller = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controller)
-# The consumer deliberately consumes H's owner rather than vendoring a clone.
-# This explicit source-only test input admits exact H, then loads ONLY Bound.
-H = Path(os.environ['NAC_STARTUP_H_ROOT']).resolve()
-assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=H, text=True).strip() == PAIR['H']
-assert not subprocess.check_output(['git', 'status', '--porcelain'], cwd=H)
+# Load exact immutable H Python owner sources as an inert temporary fixture.
+# No checkout/worktree is made or another owner's active loan inspected.
+repository = HERE.parents[2]
+fixture = tempfile.TemporaryDirectory(prefix='nac-exact-H-python-source-')
+atexit.register(fixture.cleanup)
+H = Path(fixture.name)
+paths = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', PAIR['H'], 'desktop/macos'],
+                                cwd=repository, text=True).splitlines()
+for name in paths:
+    if name.endswith('.py') or name in ('desktop/macos/ci-qualifications.json', 'desktop/macos/ci-toolchain.json'):
+        target = H / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(subprocess.check_output(['git', 'show', PAIR['H'] + ':' + name], cwd=repository))
 spec = importlib.util.spec_from_file_location('exact_H_budget', H / 'desktop/macos/ci_paths_budget.py')
 budget = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(budget)
@@ -42,9 +51,9 @@ class SourceControls(unittest.TestCase):
 
     def admission(self):
         return dict(scope=controller.SCOPE, controller_sha='a' * 40, allocation_id='Root-new-four-source-schema',
-                    attempt=1, retries=0, manifest_sha256='b' * 64,
-                    producer=dict(run_id=123, artifact_id=456, controller_sha=controller.PRODUCER,
-                                  branch=controller.PRODUCER_BRANCH, artifact_name='package-123-1'),
+                    attempt=1, retries=0, manifest_sha256=controller.MANIFEST_SHA256,
+                    producer=dict(run_id=controller.PRODUCER_RUN, artifact_id=controller.PRODUCER_ARTIFACT, controller_sha=controller.PRODUCER,
+                                  branch=controller.PRODUCER_BRANCH, artifact_name=controller.PRODUCER_ARTIFACT_NAME),
                     clock=dict(STARTED=1000, WORK_DEADLINE=3880, CLEANUP_DEADLINE=4480, HARD_DEADLINE=4600))
 
     def test_original_queue_inclusive_clock_and_new_scope_never_reuse_old_admission(self):
@@ -55,7 +64,11 @@ class SourceControls(unittest.TestCase):
                         dict(scope='P10-Q9931-R7325-schema50-four-startup'), dict(attempt=2), dict(retries=1),
                         dict(controller_sha='c' * 40), dict(extra=True), dict(manifest_sha256=''),
                         dict(producer={**value['producer'], 'controller_sha': 'c' * 40}),
-                        dict(producer={**value['producer'], 'branch': 'codex/old-P9'})):
+                        dict(producer={**value['producer'], 'branch': 'codex/old-P9'}),
+                        dict(producer={**value['producer'], 'run_id': 42426305195}),
+                        dict(producer={**value['producer'], 'artifact_id': 13594999645}),
+                        dict(producer={**value['producer'], 'artifact_name': 'lifecycle-role'}),
+                        dict(manifest_sha256='0' * 64)):
             with self.subTest(changed=changed), self.assertRaises(RuntimeError):
                 controller.admit({**value, **changed}, 'a' * 40, now=1001)
         for key, entry in [('WORK_DEADLINE', 3881), ('CLEANUP_DEADLINE', 4479), ('HARD_DEADLINE', 4601),
@@ -76,13 +89,13 @@ class SourceControls(unittest.TestCase):
         def build(root, output, run, *, product, manifest, package_admission):
             events.append('R-build')
             self.assertEqual((product, manifest, package_admission),
-                ('exact-P10-checkout', 'actual-manifest', {'provenance': 'actual'}))
+                ('exact-P12-checkout', 'actual-manifest', {'provenance': 'actual'}))
             self.assertIs(budget.active(), self.clock.work)
             return 'private-R', {'actual': 'inert receipt'}
         def verify(private, receipt, app, manifest, admission, output, run):
             events.append('R-verify')
             self.assertEqual((private, receipt, app, manifest, admission),
-                ('private-R', {'actual': 'inert receipt'}, 'actual-P10-app', 'actual-manifest', {'provenance': 'actual'}))
+                ('private-R', {'actual': 'inert receipt'}, 'actual-P12-app', 'actual-manifest', {'provenance': 'actual'}))
             if protocol_failure:
                 raise RuntimeError('inert R retirement failure')
             return None if missing_protocol else dict(R=PAIR['R'], P=PAIR['P'], observations=[
@@ -109,8 +122,8 @@ class SourceControls(unittest.TestCase):
         def execute():
             with tempfile.TemporaryDirectory() as tmp:
                 return controller.selected_episode(startup, protocol, self.clock, budget.using,
-                    evidence=Path(tmp), profiles='owned-profiles', app='actual-P10-app', manifest='actual-manifest',
-                    product='exact-P10-checkout', tests='exact-Q-checkout', protocol_root='independent-R-checkout',
+                    evidence=Path(tmp), profiles='owned-profiles', app='actual-P12-app', manifest='actual-manifest',
+                    product='exact-P12-checkout', tests='exact-Q-checkout', protocol_root='independent-R-checkout',
                     harness_sha=PAIR['H'], package_admission={'provenance': 'actual'}, selection='actual-selection',
                     observer='actual-observer', image_reader='actual-reader', run=Mock(), command=Mock(),
                     native_report=Mock(), progress=lambda **v: progress.append(v))
@@ -225,6 +238,111 @@ class SourceControls(unittest.TestCase):
                 self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
         finally:
             sys.path[:] = previous
+
+    def test_complete_helper_compilation_uses_H_service_and_all_four_pinned_inputs(self):
+        tree = ast.parse((HERE / 'four-startup.py').read_bytes())
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+        scope = next(n for n in ast.walk(main) if isinstance(n, ast.With)
+                     and any(isinstance(x, ast.Assign) and any(isinstance(t, ast.Name)
+                         and t.id == 'helper_sources' for t in x.targets) for x in n.body))
+        start = next(i for i,n in enumerate(scope.body) if isinstance(n, ast.Assign)
+                     and any(isinstance(t,ast.Name) and t.id=='helper_sources' for t in n.targets))
+        stop = next(i for i,n in enumerate(scope.body[start:],start) if isinstance(n,ast.Assign)
+                    and any(isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name)
+                        and t.value.id=='report' and isinstance(t.slice,ast.Constant)
+                        and t.slice.value=='observer_sources_sha256' for t in n.targets))
+        code = compile(ast.Module(body=scope.body[start:stop+1],type_ignores=[]),'<actual-helper-composition>','exec')
+        for mutate in (False, True):
+            with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);files=[]
+                for name in ('CIStartupObserver.swift','CIStartupAXWitness.swift','StartupAXGuard.swift','StartupAXReceipt.swift'):
+                    file=root/name;file.write_bytes(b'inert source');files.append(str(file))
+                startup=Mock(spec=['observer_sources']);startup.observer_sources.return_value=files
+                calls=[];report={}
+                def run(argv,*args,**kwargs):
+                    calls.append(argv)
+                    if mutate and len(calls)==1:Path(files[1]).write_bytes(b'changed source')
+                namespace=dict(startup=startup,roots={'H':Path('/exact-H'),'Q':Path('/exact-Q')},digest=controller.digest,
+                    observer=root/'observer',image_reader=root/'image',gui_reader=root/'gui',evidence=root,
+                    runner_environment=lambda:{},run=run,require=controller.require,report=report,str=str)
+                if mutate:
+                    with self.assertRaisesRegex(RuntimeError,'source inputs changed'):exec(code,namespace)
+                    self.assertNotIn('observer_sources_sha256',report)
+                else:
+                    exec(code,namespace)
+                    self.assertEqual(set(report['observer_sources_sha256']),set(files))
+                startup.observer_sources.assert_called_once_with(Path('/exact-H'),Path('/exact-Q'))
+                self.assertEqual(len(calls),3)
+                self.assertEqual(calls[0][5:9],files)
+                self.assertIn('-parse-as-library',calls[0])
+
+    def closing_main(self, expire, ordinary_failure=False):
+        from contextlib import contextmanager
+        tree=ast.parse((HERE/'four-startup.py').read_bytes())
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        actual=next(n for n in main.body if isinstance(n,ast.Try))
+        final=actual.body[-1]
+        self.assertIsInstance(final,ast.With)
+        code=compile(ast.fix_missing_locations(ast.Module(body=[ast.Try(body=[final],handlers=actual.handlers,
+            orelse=actual.orelse,finalbody=actual.finalbody)],type_ignores=[])),'<actual-main-closing>','exec')
+        observed=[];original=[]
+        ordinary=ValueError("inert original final-check failure")
+        @contextmanager
+        def using(bound):
+            try:
+                with budget.using(bound):
+                    yield
+                    if expire and bound.kind=='cleanup':
+                        self.advance(self.clock.cleanup.deadline-self.mono+1)
+            except BaseException as error:
+                original.append(error)
+                raise
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);profiles=root/'profiles';profiles.mkdir()
+            raw=root/'raw';raw.mkdir();exported=root/'exported';exported.mkdir()
+            report=dict(status='FAIL',package_before={'exact':'inert-package'},
+                prefix_binary_acceptance=False,final_integrated_native_acceptance=False)
+            startup=Mock(spec=['package_contract']);startup.package_contract.return_value=report['package_before']
+            def save():controller.write(raw/'four-startup.json',report)
+            def export(*args,**kwargs):
+                observed.append('export');controller.write(exported/'four-startup.json',report)
+            def checkout(*args):
+                if ordinary_failure:raise ordinary
+            namespace=dict(clock=self.clock,using=using,report=report,console=lambda _: {},startup=startup,
+                contract=object(),manifest=root/'manifest',app=root/'app',roots={k:root/k for k in ('H','P','Q','R')},pair=PAIR,
+                evidence=raw,profiles=profiles,run=Mock(),require=controller.require,require_checkout=checkout,
+                controller=root/'controller',admission={'controller_sha':'a'*40},STOP=controller.STOP,
+                time=controller.time,save=save,export_evidence=export,redact_values=lambda:[],
+                package=root/'package',output=root,exported=exported)
+            caught=None
+            try:exec(code,namespace)
+            except BaseException as error:caught=error
+            value=json.loads((exported/'four-startup.json').read_bytes())
+            self.assertEqual(value,json.loads((raw/'four-startup.json').read_bytes()))
+            self.assertFalse(profiles.exists(),repr(caught))
+            self.assertEqual(observed,['export'])
+            self.assertFalse(value['prefix_binary_acceptance']);self.assertFalse(value['final_integrated_native_acceptance'])
+            return value,caught,original
+
+    def test_actual_main_cleanup_exit_expiry_exports_failure(self):
+        value,caught,original=self.closing_main(True)
+        self.assertTrue(original)
+        self.assertIs(caught,original[0])
+        self.assertEqual(value['status'],'FAIL')
+        self.assertEqual(value['error_type'],type(caught).__name__)
+        self.assertIn('episode failed/unknown',value['clock_failures'])
+
+    def test_actual_main_ordinary_failure_retains_original_exception_and_failure_export(self):
+        value,caught,original=self.closing_main(False,ordinary_failure=True)
+        self.assertIsInstance(caught,ValueError)
+        self.assertIs(caught,original[0])
+        self.assertEqual(value['status'],'FAIL');self.assertEqual(value['error_type'],'ValueError')
+        self.assertIn('episode failed/unknown',value['clock_failures'])
+
+    def test_actual_main_normal_cleanup_exit_preserves_success_without_acceptance(self):
+        value,caught,original=self.closing_main(False)
+        self.assertIsNone(caught);self.assertEqual(original,[])
+        self.assertEqual(value['status'],'PASS');self.assertEqual(value['clock_failures'],[])
 
     def test_actual_owned_callback_returns_work_after_test_and_latches_failure(self):
         tree = ast.parse((HERE / 'four-startup.py').read_bytes())

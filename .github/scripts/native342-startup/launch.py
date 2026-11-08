@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Private four-case/R launcher: original clocks and ordinary exact artifact custody."""
+import hashlib
 import importlib.util
 import json
 import math
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import sys
 import time
 import urllib.request
@@ -15,6 +17,7 @@ spec = importlib.util.spec_from_file_location('four_startup', Path(__file__).wit
 case = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(case)
 REPOSITORY = 'arcee-ai/nac'
+ARTIFACT = json.loads(Path(__file__).with_name('artifact.json').read_bytes())
 CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'checkout-Q': 2, 'checkout-R': 2,
         'metadata': 2, 'download': 2, 'prepare': 2}
 
@@ -63,7 +66,9 @@ def artifact_identity(value, run, artifact):
         'producer must be the exact successful same-repository first manual run')
     owner = artifact.get('workflow_run', {})
     case.require(artifact.get('id') == p['artifact_id'] and artifact.get('name') == p['artifact_name']
-        and artifact.get('expired') is False and owner.get('id') == p['run_id']
+        and artifact.get('expired') is False and artifact.get('size_in_bytes') == ARTIFACT['outer_bytes']
+        and artifact.get('digest') == 'sha256:' + ARTIFACT['outer_sha256']
+        and owner.get('id') == p['run_id']
         and owner.get('head_sha') == p['controller_sha'] and owner.get('head_branch') == p['branch']
         and type(owner.get('repository_id')) is int and owner['repository_id'] > 0
         and owner.get('head_repository_id') == owner['repository_id'], 'exact producer artifact custody')
@@ -73,25 +78,45 @@ def artifact_identity(value, run, artifact):
 
 def handoff_files(root, value, product):
     case.require(root.is_absolute() and root.resolve() == root and root.is_dir(), 'canonical downloaded artifact root')
-    manifests = [f for f in root.rglob('manifest.json') if (f.parent / 'host-package.json').is_file()]
-    case.require(len(manifests) == 1, 'one original manifest beside producer handoff receipt')
-    manifest = manifests[0]
+    # The exact original outer artifact includes independent normal/lifecycle
+    # roles. Admit its closed bytes, then transfer ONLY the normal role.
+    expected = ARTIFACT['files']
+    files, directories = {}, set()
+    for file in root.rglob('*'):
+        case.require(not file.is_symlink() and file.resolve() == file, 'artifact no-follow canonical member')
+        relative = file.relative_to(root).as_posix()
+        if file.is_dir():
+            directories.add(relative)
+        else:
+            files[relative] = file
+    parents = {str(parent) for name in expected for parent in Path(name).parents if str(parent) != '.'}
+    case.require(set(files) == set(expected) and directories == parents, 'closed original outer artifact layout')
+    for name, file in files.items():
+        fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            case.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.getuid()
+                and info.st_size == expected[name]['bytes'], 'regular bounded single-link artifact member')
+            observed = hashlib.file_digest(stream, 'sha256').hexdigest()
+        case.require(observed == expected[name]['sha256'], 'exact original artifact member digest')
+    manifest = files[ARTIFACT['normal_manifest']]
     receipt_file = manifest.parent / 'host-package.json'
-    case.require(manifest.resolve() == manifest and receipt_file.resolve() == receipt_file
-        and not manifest.is_symlink() and manifest.stat().st_size <= 256 * 1024
-        and receipt_file.stat().st_size <= 256 * 1024
-        and case.digest(manifest) == value['manifest_sha256'], 'Root-bound manifest bytes')
+    case.require(case.digest(manifest) == value['manifest_sha256'], 'Root-bound normal manifest bytes')
     body = json.loads(manifest.read_bytes())
     receipt = json.loads(receipt_file.read_bytes())
-    case.require(receipt.get('status') == 'PASS' and receipt.get('runtime') is False
+    case.require(product == ARTIFACT['P'] and receipt.get('scope') == ARTIFACT['producer_scope']
+        and receipt.get('clock_failures') == [] and receipt.get('stop_signals') == []
+        and receipt.get('status') == 'PASS' and receipt.get('runtime') is False
         and receipt.get('SDK_actor') is False and receipt.get('producer_attempts') == 1
         and receipt.get('retries') == 0 and receipt.get('pair', {}).get('P') == product
         and receipt.get('admission', {}).get('controller_sha') == value['producer']['controller_sha']
-        and body.get('identity', {}).get('source', {}).get('revision') == product,
+        and body.get('identity', {}).get('source', {}).get('revision') == product
+        and body.get('identity', {}).get('purpose') == 'normal-app-preparation',
         'successful exact-current-product package-only receipt')
     name = body['container']['name']
     case.require(Path(name).name == name and name.endswith('.zip'), 'one original container name')
     archive = manifest.parent / name
+    case.require(archive == files[ARTIFACT['normal_archive']], 'only the admitted normal archive role')
     case.require(archive.resolve() == archive and not archive.is_symlink() and archive.is_file()
         and type(body['container']['size']) is int and 0 < body['container']['size'] <= 512 * 1024**2
         and archive.stat().st_size == body['container']['size']

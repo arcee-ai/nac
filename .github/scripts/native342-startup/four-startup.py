@@ -13,11 +13,15 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native342-ax-observability-source01'
-SCOPE = 'P10-Q057-R7325-AX-retention-source01'
+BRANCH = 'refs/heads/codex/experimental-native-p12-ax-startup-source01'
+SCOPE = 'P12-Qba-R7325-AX-witness-startup-source01'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
-PRODUCER = '7239e61a0ebc0ee01b28f9d3cb9c1262132a8627'
-PRODUCER_BRANCH = 'codex/experimental-native-q-host-package-post657-p10'
+PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
+PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
+PRODUCER_RUN = 42455455480
+PRODUCER_ARTIFACT = 13607980704
+PRODUCER_ARTIFACT_NAME = 'ff8-host-package-42455455480-1'
+MANIFEST_SHA256 = 'b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e'
 
 
 def require(condition, reason):
@@ -53,8 +57,9 @@ def admit(value, controller_sha, *, now=None):
             and re.fullmatch('[0-9a-f]{40}', str(producer['controller_sha']))
             and re.fullmatch('codex/[A-Za-z0-9_./-]{1,150}', str(producer['branch']))
             and re.fullmatch('[A-Za-z0-9_.-]{1,200}', str(producer['artifact_name'])), 'exact named producer run/artifact/source')
-    require(producer['controller_sha'] == PRODUCER and producer['branch'] == PRODUCER_BRANCH,
-            'only the reviewed current P10 producer source; actual run/artifact remain Root-bound')
+    require(producer == dict(run_id=PRODUCER_RUN, artifact_id=PRODUCER_ARTIFACT, controller_sha=PRODUCER,
+            branch=PRODUCER_BRANCH, artifact_name=PRODUCER_ARTIFACT_NAME)
+            and value['manifest_sha256'] == MANIFEST_SHA256, 'exact genuine P12 producer and normal manifest')
     clock = value['clock']
     keys = ('STARTED', 'WORK_DEADLINE', 'CLEANUP_DEADLINE', 'HARD_DEADLINE')
     require(set(clock) == set(keys) and all(type(clock[k]) in (int, float) for k in keys),
@@ -325,10 +330,15 @@ def main():
             report['selection'] = selection['receipt']
             observer, image_reader = output / 'startup-owner-observer', output / 'startup-image-reader'
             gui_reader = output / 'native-gui-reader'
+            helper_sources = startup.observer_sources(roots['H'], roots['Q'])
+            helper_inventory = {path: digest(path) for path in helper_sources}
             for source, target, extra in [('CIStartupObserver.swift', observer, ['-parse-as-library']),
                                           ('CIEvidence.swift', image_reader, []), ('CIGUI.swift', gui_reader, [])]:
-                run(['xcrun', 'swiftc', '-swift-version', '5', *extra, 'desktop/macos/' + source, '-o', str(target)],
+                inputs = helper_sources if source == 'CIStartupObserver.swift' else ['desktop/macos/' + source]
+                run(['xcrun', 'swiftc', '-swift-version', '5', *extra, *inputs, '-o', str(target)],
                     evidence / (source + '.log'), 90, env=runner_environment())
+            require({path: digest(path) for path in helper_sources} == helper_inventory, 'observer source inputs changed')
+            report['observer_sources_sha256'] = helper_inventory
             report['compiled_helpers'] = {name: digest(path) for name, path in
                 [('owner_observer', observer), ('image_reader', image_reader), ('gui_reader', gui_reader)]}
             report['console_before'] = console('before')
@@ -362,6 +372,7 @@ def main():
             require(not clock.failed and not STOP, 'clock/ownership failure remains latched')
             report['status'] = 'PASS'
     except BaseException as error:
+        report['status'] = 'FAIL'
         clock.fail('episode failed/unknown')
         clock.cleaning = True
         report.update(error_type=type(error).__name__, error='selected experiment failed; retain stage evidence')
