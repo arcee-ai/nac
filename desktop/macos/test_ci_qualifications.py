@@ -31,7 +31,7 @@ class ExactSourceTests(unittest.TestCase):
         self.assertEqual(terminal['phase_count'], 6)
         older = select_target('all-351-macos14')
         self.assertEqual(older['runner'], 'macos-14')
-        self.assertEqual(older['source_sha'], '24d757734480a56eeeb772d33de8f23a8549719a')
+        self.assertEqual(older['source_sha'], '8e8f18d7f479b3514d19b2754fee53ea47c6115c')
         self.assertEqual(older['developer_directory'], '/Applications/Xcode_16.2.app/Contents/Developer')
         for unknown in ('', 'all-341-macos14', 'macos-26-xlarge', '../ci-toolchain.json'):
             with self.assertRaisesRegex(RuntimeError, 'Unknown/unapproved'):
