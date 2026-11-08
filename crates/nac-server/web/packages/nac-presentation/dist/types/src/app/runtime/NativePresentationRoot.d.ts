@@ -1,3 +1,4 @@
+import type { DesktopCommandPort } from "../features/desktop-commands/adapter";
 import { type ReactNode } from "react";
 import type { NativeRuntime } from "./nativeRuntime";
 export interface NativePresentationRootProps {
@@ -11,5 +12,7 @@ export interface NativePresentationRootProps {
     styles?: ReactNode;
     /** Standalone entry owns document shortcuts; embedded views own focused shortcuts. */
     globalKeyboard?: boolean;
+    /** Optional UI-only native menu capability, owned by this presentation. */
+    desktopCommands?: DesktopCommandPort;
 }
 export declare function NativePresentationRoot(props: NativePresentationRootProps): import("react").JSX.Element;
