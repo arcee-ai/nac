@@ -292,9 +292,11 @@ blobs, fixture, builder and observer are unchanged. Historical local bundle hash
 are custody evidence; fresh hosted binary hashes are checked against fresh build
 receipts, rather than assumed equal across toolchains.
 
-The root coordinator is the cross-host authority for allocation
-`nac344-ordering-7e-one`. Its original three cases were blocked before dispatch
-and remain unspent until separately admitted. Before the one workflow dispatch,
+The root coordinator's live transfer/custody ledger is authoritative for
+admission and consumption of allocation `nac344-ordering-7e-one`. The original
+pre-dispatch blocked record is historical; it does not establish an unspent
+balance. Documentation grants no admission or retry, restores no consumed counts,
+and never resets the original clock. Under the fixed one-dispatch contract,
 root must atomically reserve its durable transfer/custody record, bind the exact
 published harness and supplier, and supply `lifecycle_custody` JSON. The capsule
 must contain exactly the fields checked by `require_capsule`: version, allocation,
@@ -315,6 +317,15 @@ evidence stops all remaining cases. The case envelope is six minutes, including
 the four-minute driver bound; the supervisor reserves an additional 150 seconds
 for the target's cleanup and 120 seconds for upload. Budget shortage stops
 before reserving the next case.
+
+`require_budget` requires the remaining case count times 360 seconds, plus
+150 seconds for cleanup and 120 seconds for upload. Before the first of the
+three ordered cases, this is `3 * 360 + 150 + 120 = 1350` seconds. All preparation
+shares the original 1800-second deadline, leaving at most 450 seconds of
+preparation headroom before that first-case threshold. These conservative checks
+fail before reservation when time is insufficient; they do not guarantee that
+healthy preparation always fits. Full lifecycle/native acceptance still requires
+all three cases and their evidence and cleanup guards.
 
 The external child installs interruption handling before executing the unchanged
 supplier entry point. The supplier owns native/engine/descendant settlement.
