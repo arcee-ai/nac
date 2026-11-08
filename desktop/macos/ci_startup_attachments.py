@@ -1,6 +1,7 @@
 """Collect only the nominated ordinary-startup test's named public attachments."""
 import json
 import math
+import os
 from collections import Counter
 from pathlib import Path
 import re
@@ -147,6 +148,68 @@ def retain_query_diagnostic(selected, entries, index, config, configuration_sha2
         return 0
 
 
+def retain_ax_refusal(selected, entries, index, config, configuration_sha256, witness, output, inventory_valid):
+    """Optional failure-only receipt; never substitutes for mandatory evidence."""
+    receipt = index['ax_refusal']
+    if not any(isinstance(e, dict) and isinstance(e.get('suggestedHumanReadableName'), str)
+               and e['suggestedHumanReadableName'].startswith('nac342-ax-refusal-') for e in entries):
+        return 0
+    receipt.update(retention='rejected', reason='ax_inventory')
+    files = [file for file, _, kind in selected if kind == 'ax_refusal']
+    if len(files) != 1 or not inventory_valid or index['selection_errors']:
+        return 0
+    destination = output / 'nac342-ax-refusal-v1-configuredLocal.json'
+    created = False
+    try:
+        require(config['scenario'] == 'configuredLocal' and index['actual_test']['result'] == 'Failed', 'ax_failure_only')
+        data = bounded_file(files[0], 8192)
+        def unique(pairs):
+            require(len(pairs) == len(dict(pairs)), 'ax_duplicate_key')
+            return dict(pairs)
+        row = json.loads(data, object_pairs_hook=unique,
+                         parse_constant=lambda _: require(False, 'ax_nonfinite'))
+        expected = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha', 'startup_source_sha256')}
+        expected.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
+        expected.update(schema='nac342-ax-refusal-v1', scenario='configuredLocal',
+                        configuration_sha256=configuration_sha256, acceptance=False)
+        require(type(row) is dict and set(row) == set(expected) | {'surface', 'first_observed_refusal', 'terminal_refusal'}, 'ax_fields')
+        require(all(row[k] == v and type(row[k]) is type(v) for k, v in expected.items() if k != 'app_launch_epoch')
+                and type(row['app_launch_epoch']) in (int, float) and math.isfinite(row['app_launch_epoch'])
+                and row['app_launch_epoch'] == witness['app_launch_epoch']
+                and row['surface'] in ('form', 'panel', 'goTo'), 'ax_binding')
+        stages = {'attribute_timeout', 'attribute_error', 'attribute_missing', 'elements_type', 'elements_count',
+                  'elements_member_type', 'frame_value_type', 'frame_encoding', 'frame_position_decode', 'frame_size_decode',
+                  'application_timeout', 'windows_unavailable', 'root_role_or_type', 'root_frame_mismatch', 'root_matches',
+                  'child_role_type', 'root_children', 'root_sheet_count', 'panel_children', 'nested_sheet_count',
+                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding'}
+        attributes = {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize'}
+        for key in ('first_observed_refusal', 'terminal_refusal'):
+            fact = row[key]
+            allowed = {'stage', 'count'} if key == 'terminal_refusal' else {'stage', 'attribute', 'api_code', 'count', 'frame', 'expected_frame'}
+            require(type(fact) is dict and 'stage' in fact and set(fact) <= allowed
+                    and type(fact['stage']) is str and fact['stage'] in stages, 'ax_fact')
+            for name, value in fact.items():
+                if name == 'attribute': require(type(value) is str and value in attributes, 'ax_attribute')
+                elif name == 'api_code': require(type(value) is int and -(2**31) <= value < 2**31, 'ax_code')
+                elif name == 'count': require(type(value) is int and 0 <= value <= 2**63-1, 'ax_count')
+                elif name in ('frame', 'expected_frame'):
+                    require(type(value) is list and len(value) == 4 and all(x is None or
+                            (type(x) in (int, float) and math.isfinite(x)) for x in value), 'ax_frame')
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        with os.fdopen(descriptor, 'wb') as stream:
+            require(stream.write(data) == len(data), 'ax_partial_write')
+        receipt.clear()
+        receipt.update(retention='retained', file=destination.name, bytes=len(data), sha256=digest(data))
+        return len(data)
+    except BaseException as error:
+        receipt['reason'] = error.reason if isinstance(error, StartupAttachmentError) else 'ax_unavailable_or_invalid'
+        if created:
+            try: destination.unlink(missing_ok=True)
+            except OSError: pass
+        return 0
+
+
 def selected_test(tree):
     def cases(value):
         if isinstance(value, dict):
@@ -288,7 +351,7 @@ def select_inventory(export, entries, fixed, pattern, index):
             row['kind'] = kind
             if dispatch:
                 row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
-            limit = MAX_QUERY_DIAGNOSTIC if kind == 'query_diagnostic' else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
+            limit = MAX_QUERY_DIAGNOSTIC if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
             require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
             total += info.st_size
             selected.append((ordinal, file, canonical, kind))
@@ -309,7 +372,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
     output.mkdir()
     index = {'complete': False, 'selected': [], 'dispatches': [], 'automatic_omitted': 0,
              'input_completion_unknown': True, 'visible_paint': 'requires_actual_image_review',
-             'query_diagnostic': {'retention': 'missing'}}
+             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'}}
     try:
         require(config['scenario'] in CASES and witness.get('preinstalled') is True
                 and witness.get('owned_incarnation_verified') is True, 'external_witness')
@@ -345,7 +408,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             scenario = config['scenario']
             fixed = {f'nac342-ordinary-{scenario}': 'png', f'nac342-failure-{scenario}': 'failure',
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup',
-                     QUERY_DIAGNOSTIC: 'query_diagnostic'}
+                     QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
             selected = select_inventory(export, entries, fixed, pattern, index)
@@ -354,9 +417,11 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             inventory_valid = not any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in export.rglob('*'))
             diagnostic_bytes = retain_query_diagnostic(selected, entries, index, config, configuration_sha256,
                                                       witness, output, inventory_valid)
+            diagnostic_bytes += retain_ax_refusal(selected, entries, index, config, configuration_sha256,
+                                                  witness, output, inventory_valid)
             values, images, total = {}, {}, diagnostic_bytes
             for file, name, kind in selected:
-                if kind == 'query_diagnostic':
+                if kind in ('query_diagnostic', 'ax_refusal'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
                 total += len(data)
@@ -393,6 +458,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             require(len(index['dispatches']) == len(operations(config)) * 2, 'dispatch_completion')
             require(test['result'] == 'Passed', 'actual_test_result')
             require(index['query_diagnostic']['retention'] == 'missing', 'unexpected_failure_diagnostic')
+            require(index['ax_refusal']['retention'] == 'missing', 'unexpected_ax_refusal')
             index.update(complete=True, image=image, observation=observation, input_completion_unknown=False)
         return index
     except BaseException as error:
