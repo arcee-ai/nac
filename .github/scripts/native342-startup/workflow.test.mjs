@@ -22,7 +22,7 @@ function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempNa
     if (alias) fs.symlinkSync(actualTemp, runnerTemp);
     const environment = path.join(fixture, 'github-env');
     const output = path.join(fixture, 'github-output');
-    const admission = { scope: 'P10-Q9931-R7325-schema50-four-startup', controller_sha: 'a'.repeat(40),
+    const admission = { scope: 'P10-Q057-R7325-AX-retention-source01', controller_sha: 'a'.repeat(40),
       allocation_id: 'inert-workflow-source-control', attempt: 1, retries: 0, manifest_sha256: 'b'.repeat(64),
       producer: {}, clock: { STARTED: 1000, WORK_DEADLINE: 3880, CLEANUP_DEADLINE: 4480, HARD_DEADLINE: 4600, ...clock } };
     // Execute only the actual initial inline Python, with a fixed wall clock.
@@ -74,7 +74,7 @@ test('rejected image, original clock, or multiline root never exports launch roo
 test('only the new manual four-case source is reachable and independent R is checked out', () => {
   assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
   assert.deepEqual(Object.keys(workflow.jobs), ['four_startup']);
-  assert.match(job.if, /refs\/heads\/codex\/experimental-native342-four-startup-r7325-source01/);
+  assert.match(job.if, /refs\/heads\/codex\/experimental-native342-ax-observability-source01/);
   assert.match(job.if, /github.run_attempt == 1/);
   assert.equal(job['timeout-minutes'], 60);
   assert.equal(job.env.ROOT_STARTUP_ADMISSION, '${{ inputs.startup_admission }}');

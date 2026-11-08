@@ -1,12 +1,12 @@
 # NEVERMERGE: exact post-657 four startup cases plus independent R
 
-This private successor starts at frozen consumerfd221, retaining consumer6c052d2's
+This private successor starts at frozen consumerf716, retaining consumer6c052d2's
 exact-artifact handoff and maintained H callbacks. Both spent branches, their
 evidence and original allocations remain unchanged. Only this new branch's manual
 workflow is reachable; source publication and any actual episode require Root.
 No source declaration, test success or JSON example grants execution authority.
 
-`pair.json` binds P10ef2c, Q9931, current H successor and independent R7325. P10's sole parent
+`pair.json` binds P10ef2c, Q057, current H successor and independent R7325. P10's sole parent
 and full Native boundary are7325, on current dev422. Historical SDK controller,
 measured H, original preparation origin and landed-auth provenance are retained
 as historical fields. They provide no current binary/configuration/SDK credit.
@@ -77,14 +77,14 @@ must explicitly accept this bounded stop-on-insufficient-time choice before any
 actual allocation. Guaranteed completion at every cap would require a separate
 scope/budget decision outside this <=60-minute source proposal.
 
-Full Q9931 ApplicationServices/AppKit SDK compilation and native AX/input remain
+Full Q057 ApplicationServices/AppKit SDK compilation and native AX/input remain
 UNKNOWN. The existing first case builds its actual generated SDK runner before
 starting owner/input. There is no maintained way to prebuild that same runtime
 runner before R without preparing/holding a live case configuration outside
 `run_case`. The historical compile-only controller2cee is pinned to old sources
 and invalid configuration. If Root wants a current SDK fail-fast episode first,
 that needs separately reviewed/pinned source and a separate finite admission;
-this consumer neither silently invokes it nor claims the five pure Mac policy
+this consumer neither silently invokes it nor claims the nine pure geometry/AX
 controls establish full SDK/runtime acceptance.
 
 ## Manual declaration
@@ -95,7 +95,7 @@ allocates nothing and zero IDs/epochs/placeholders are rejected:
 
 ```json
 {
-  "scope": "P10-Q9931-R7325-schema50-four-startup",
+  "scope": "P10-Q057-R7325-AX-retention-source01",
   "controller_sha": "<reviewed new consumer SHA>",
   "allocation_id": "<Root NEW finite episode>",
   "attempt": 1,
@@ -174,3 +174,26 @@ allocation; a new source review, publication and finite actual admission remain
 Root-owned. Genuine P10 producer04/artifact13594999645/manifest57fef remains the
 same package; no rebuild or retag is introduced. Current full Q SDK and all four
 native UI cases remain unrun, and no automatic continuation follows.
+
+## AX observability Source01/4 — no new actual allocation
+
+This branch nominates Q057 and the matching retained-diagnostic H successor on
+current P10/R7325. Only optional failed configuredLocal AX JSON is added to the
+closed named inventory, <=8192bytes, with exact P/Q/H/source/config/PID/launch/
+window binding and fixed first/terminal observation fields. It is retained
+before missing canonical cleanup/success checks, never qualifies the failed
+case and never clears input_completion_unknown. The actual unchanged consumer
+finally-export call is exercised with an inert failed cleanup-missing export.
+The required immutable Mac lane now loads exact geometry6+AX3=9 with0skips;
+portable console4 and traces5/27/4/4 remain unchanged. No extra AX read/action,
+permission/trust option, fallback, geometry tolerance or acceptance change.
+
+Actual02 on old Q993/H e47/f716 remains CONSUMED_FAIL: R4passed, two full SDK
+builds passed and onboarding passed with its original PNG, but configuredLocal
+AX binding failed with input unknown/no PNG; later UI unrun. None is retagged
+as Q057 evidence. Full Q057 SDK/runtime and actual diagnostic export are UNRUN.
+P10/genuine artifact13594999645/manifest57fef remain the CURRENT source tuple;
+a separate505/P11 change is not included or invented. Root may later supply a
+new exact P composition and must separately review/publish/admit any episode.
+Old f716/e47 refs, old failed profiles and all prior counters remain untouched.
+No new reviewer, actual POST, retry, Source publication or automatic chain.

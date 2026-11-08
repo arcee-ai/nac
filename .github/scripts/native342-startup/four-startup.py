@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native342-four-startup-r7325-source01'
-SCOPE = 'P10-Q9931-R7325-schema50-four-startup'
+BRANCH = 'refs/heads/codex/experimental-native342-ax-observability-source01'
+SCOPE = 'P10-Q057-R7325-AX-retention-source01'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '7239e61a0ebc0ee01b28f9d3cb9c1262132a8627'
 PRODUCER_BRANCH = 'codex/experimental-native-q-host-package-post657-p10'

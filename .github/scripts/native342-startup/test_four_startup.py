@@ -51,7 +51,8 @@ class SourceControls(unittest.TestCase):
         value = self.admission()
         self.assertEqual(controller.admit(value, 'a' * 40, now=3700), (1000, 3880, 4480, 4600))
         for changed in (dict(scope='Q04c-on-final-post648-P-onboarding-only'),
-                        dict(scope='P10-Q9931-H1c9-R2504-four-startup'), dict(attempt=2), dict(retries=1),
+                        dict(scope='P10-Q9931-H1c9-R2504-four-startup'),
+                        dict(scope='P10-Q9931-R7325-schema50-four-startup'), dict(attempt=2), dict(retries=1),
                         dict(controller_sha='c' * 40), dict(extra=True), dict(manifest_sha256=''),
                         dict(producer={**value['producer'], 'controller_sha': 'c' * 40}),
                         dict(producer={**value['producer'], 'branch': 'codex/old-P9'})):
@@ -189,6 +190,41 @@ class SourceControls(unittest.TestCase):
             with budget.using(self.clock.cleanup), budget.using(self.clock.retention):
                 pass
             controller.STOP.clear()
+
+    def test_failed_AX_JSON_reaches_actual_consumer_final_export_without_cleanup(self):
+        import sys
+        previous = list(sys.path)
+        sys.path.insert(0, str(H / 'desktop/macos'))
+        try:
+            spec = importlib.util.spec_from_file_location('exact_H_attachment_fixtures', H / 'desktop/macos/test_ci_startup_attachments.py')
+            module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+            from ci_startup_attachments import collect
+            from ci_support import export_evidence
+            helper = module.StartupAttachmentTests()
+            config, hashed, witness, row = helper.ax_row()
+            config['harness_sha'] = row['harness_sha'] = PAIR['H']
+            self.assertEqual(row['test_source_sha'], PAIR['Q'])
+            self.assertEqual(row['startup_source_sha256'], PAIR['q_swift_sha256'])
+            with tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(helper.tool(raw, [('nac342-ax-refusal-v1-configuredLocal', json.dumps(row).encode())], result='Failed'),
+                        raw / 'unit.xcresult', config, hashed, witness, raw / 'selected')
+                tree = ast.parse((HERE / 'four-startup.py').read_bytes())
+                calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                         and n.func.id == 'export_evidence']
+                self.assertEqual(len(calls), 1)
+                namespace = dict(export_evidence=export_evidence, evidence=raw / 'selected', exported=raw / 'exported',
+                    redact_values=lambda: [], roots={'H': H}, package=raw / 'package', output=raw)
+                exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.Expr(value=calls[0])], type_ignores=[])),
+                             '<actual-consumer-final-export>', 'exec'), namespace)
+                exported = raw / 'exported/nac342-ax-refusal-v1-configuredLocal.json'
+                self.assertEqual(json.loads(exported.read_bytes()), row)
+                index = json.loads((raw / 'exported/index.json').read_bytes())
+                self.assertEqual(index['ax_refusal']['retention'], 'retained')
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+        finally:
+            sys.path[:] = previous
 
     def test_actual_owned_callback_returns_work_after_test_and_latches_failure(self):
         tree = ast.parse((HERE / 'four-startup.py').read_bytes())
