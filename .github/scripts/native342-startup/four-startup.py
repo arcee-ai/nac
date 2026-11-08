@@ -15,18 +15,22 @@ import time
 STOP = []
 BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
 SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
-REFUSAL_SCOPE = 'P12-Qba-H54-configured-lifetime-context-diagnostic01'
-REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-lifetime-context-consumer01'
-REFUSAL_H = '54c0b7db66c19c9b676e46933bfc89944c3b6f2a'
+REFUSAL_SCOPE = 'P12-Q2c070-H76df9-configured-passive-rejection01'
+REFUSAL_BRANCH = 'refs/heads/codex/private-native354-passive-C01'
+REFUSAL_H = '76df91f86c0050167c4c8741da451faf31a5c065'
+REFUSAL_Q = '2c0705f62c9f0761466f60a64d54323fa87a7a79'
 REFUSAL_SUPPLIERS = {
     "H": {
         "desktop/macos/CIStartupObserver.swift": "1a8141134d45838aa150cb903b5483bd22b2e3b7c163505812108af37b151b95",
         "desktop/macos/CIStartupAXWitness.swift": "78bb7e28f6262efe309ac0d70508dc988b52187e4ee0bf9a251d43e38bb5f695",
-        "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a"
+        "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a",
+        "desktop/macos/ci_startup_attachments.py": "6cbdbc11043fcee4a805102c9c7a3d493956bf6d8bf061ba26cc869082bc3708",
+        "desktop/macos/ci_startup_client_rejection.py": "265c72098896cc394f7f93010b35c7d63dc52818ef6537186a1b017c8550159e",
+        "desktop/macos/ci_startup_fixture.py": "ae50b3fb50174e3a031079d4d4d14a2afcfaa3dcecb080d6866beb131e49bd39"
     },
     "Q": {
         "desktop/macos/startup_xctest/StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
-        "desktop/macos/startup_xctest/StartupAXReceipt.swift": "a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217"
+        "desktop/macos/startup_xctest/StartupAXReceipt.swift": "77bb1e3d48279b2b42f458cbeb66f158548a41ffed8b2111ad5bfa8546823ac3"
     }
 }
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
@@ -178,7 +182,7 @@ def selected_refusal(startup, clock, using, *, evidence, profiles, app, manifest
                 case_bytes = read(folder / 'case.json', 65536)
                 proof = json.loads(case_bytes)
                 require(proof.get('scenario') == 'configuredLocal' and proof.get('H') == REFUSAL_H
-                    and proof.get('P') == PRODUCER_PRODUCT and proof.get('Q') == PRODUCER_QUERY
+                    and proof.get('P') == PRODUCER_PRODUCT and proof.get('Q') == REFUSAL_Q
                     and proof.get('passed') is False and proof.get('public_test_requested') is True
                     and proof.get('input_completion_unknown') is True
                     and proof.get('rendered_UI_reload_observed') is False, 'actual failed configured case only')
@@ -198,7 +202,7 @@ def selected_refusal(startup, clock, using, *, evidence, profiles, app, manifest
                 require(diagnostic.get('acceptance') is False and diagnostic.get('stage') == 'lifetime'
                     and diagnostic.get('code') == 'ownership_invalid' and diagnostic.get('refusal_generation') == '0'
                     and all(diagnostic.get('binding', {}).get(k) == v for k, v in
-                        [('harness_sha', REFUSAL_H), ('source_sha', PRODUCER_PRODUCT), ('test_source_sha', PRODUCER_QUERY)]),
+                        [('harness_sha', REFUSAL_H), ('source_sha', PRODUCER_PRODUCT), ('test_source_sha', REFUSAL_Q)]),
                     'first original CG refusal source binding')
                 paired = validate_pair(diagnostic['pre_refusal_paired'])
                 require(paired['original_window_number'] == owner.get('original_window_number'), 'original pinned root diagnostic')
@@ -267,7 +271,7 @@ def main(*, configured_refusal=False):
     scope = REFUSAL_SCOPE if configured_refusal else SCOPE
     require(pair['scope'] == scope, 'fixed source scope')
     if configured_refusal:
-        require(pair['H'] == REFUSAL_H and pair['P'] == PRODUCER_PRODUCT and pair['Q'] == PRODUCER_QUERY
+        require(pair['H'] == REFUSAL_H and pair['P'] == PRODUCER_PRODUCT and pair['Q'] == REFUSAL_Q
                 and pair.get('supplier_sha256') == REFUSAL_SUPPLIERS, 'closed diagnostic sources')
     admission = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
     start, work, cleanup, hard = admit(admission, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal)

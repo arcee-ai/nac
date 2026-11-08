@@ -159,7 +159,7 @@ bind any later exact controller SHA and original epochs.
 
 `configured-refusal.py` and `configured-refusal-launch.py` are fixed entry points
 for the already registered `stable-release.yml` (workflow353798970), only on
-`codex/experimental-native-p12-lifetime-context-consumer01`. They use the same
+`codex/private-native354-passive-C01`. They use the same
 maintained launcher, normal-role artifact admission, generated SDK runner,
 configuredLocal case, process/fixture owners, original clock and strict exporter.
 No caller can select another case. The new pair deliberately pins reviewed H `54c0b7db6`,
@@ -191,7 +191,7 @@ and cancellation raised by the save is never converted to an ordinary helper
 error; a pending helper cancellation remains primary through ordinary save faults.
 
 This source-only passive-context nomination uses the new closed scope
-`P12-Qba-H54-configured-lifetime-context-diagnostic01`. Inherited Hbc retention preserves the already-owned
+`P12-Q2c070-H76df9-configured-passive-rejection01`. Inherited Hbc retention preserves the already-owned
 read-only diagnostic under the original work/case cutoff, with original-work
 prelaunch admission and at most five seconds inside the existing20-second stop.
 Parent input/UI/collector failure remains sticky; CFEqual, own-refusal/no-ready,
@@ -201,8 +201,10 @@ H-ebdbd actual01 remains frozen FAIL/incomplete; this nomination neither retags
 that actual nor grants another one. Root must separately review and admit an exact
 new consumer head; no actual epochs, dispatch or availability grant is supplied.
 
-This final source-only nomination adds reviewed H54 passive first-counter context at lifetime or
-closing_lifetime, with same-closing-snapshot context only at closing_lifetime, with five pinned H/Q supplier hashes checked
+## Historical H54 preparation
+
+The preceding H54 source-only nomination added reviewed H54 passive first-counter context at lifetime or
+closing_lifetime, with same-closing-snapshot context only at closing_lifetime, with the preceding five pinned H/Q supplier hashes checked
 inside the original work bound before compiler/actor admission. Its internal
 optional context remains acceptance=false and cannot satisfy the unchanged
 first-CG lifetime/generation0 pair gate. Unknown context remains incomplete;
@@ -213,3 +215,8 @@ Xcode/SDK/native evidence remains separately required. This source creates no
 actual nonce, epochs, dispatch, publication or runtime admission.
 
 The extra nomination pins H54 as the exact child of H148. The first-counter facts reuse the existing frozen transition; no new read, native call, counter increment, input or acceptance is added. Closing operands remain closing_lifetime only, so an earlier closing snapshot is never relabeled as a later opening failure. Missing first-counter facts remain missing; prior gen2 is not two proven AX failures. The current local CLT compile consumed one reviewed H2/Q2 command with zero launches; its packet is compiler evidence only. Original H/consumer4/4 and all old actual/repair counts stay preserved; this is one expressly approved extra consumer source nomination, not a runtime grant.
+
+
+Current private passive client-rejection successor uses authentic Q `2c0705f62c9f0761466f60a64d54323fa87a7a79` and H `76df91f86c0050167c4c8741da451faf31a5c065`, each with its exact immutable predecessor and actual configured Git metadata. Configured Q is explicitly distinct from original producer/full-R Qba; producer/package/normal-role bindings remain unchanged. Eight direct H/Q supplier hashes cover the existing observer/witness/parser, canonical guard/client and changed collector/fixture owners. H pins every changed Q caller/test/doc source; Cpair.q_swift_sha256 equals H.TEST_FILES journey and SHA256 of the exact Q journey.
+
+The optional <=2048-byte record projects only already-decoded non-ready client facts at the unchanged original rejection, with an initial/later guard label. Safe serialization preflight, first-only emission and sink failure preserve the original error. Strict failed-test collection rejects unsafe files and unbound/private/malformed data; no diagnostic substitutes for ordinary observation, AX guards, inputs, pristine-gen0, positive retirement or acceptance. Source and inert qualification confer no runtime admission, nonce or epochs. Publication/integration and any configuredLocal actual require Root's separate exact admission after affected review.

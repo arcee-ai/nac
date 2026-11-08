@@ -31,7 +31,7 @@ class RefusalControls(unittest.TestCase):
         self.assertNotIn('R', PAIR)
 
     def test_H54_nomination_rejects_old_scope_branch_and_H(self):
-        self.assertEqual(controller.REFUSAL_H, '54c0b7db66c19c9b676e46933bfc89944c3b6f2a')
+        self.assertEqual(controller.REFUSAL_H, '76df91f86c0050167c4c8741da451faf31a5c065')
         contract=json.loads((full.HERE/'configured-refusal-contract.json').read_bytes())
         self.assertEqual(contract['H'],PAIR['H']);self.assertEqual(contract['scope'],controller.REFUSAL_SCOPE)
         self.assertEqual(contract['dispatch']['experimental_branch'],controller.REFUSAL_BRANCH.removeprefix('refs/heads/'))
@@ -248,7 +248,7 @@ class RefusalControls(unittest.TestCase):
         self.assertFalse((full.repository/'.github/workflows/native342-configured-refusal.yml').exists())
         source=(full.repository/contract['dispatch']['workflow_path']).read_text()
         self.assertIn('  configured_refusal:',source)
-        self.assertIn('experimental-native-p12-lifetime-context-consumer01',source)
+        self.assertIn('private-native354-passive-C01',source)
         self.assertIn('workflow_dispatch:',source)
         self.assertNotIn('  push:',source)
 

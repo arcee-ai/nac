@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   configured_refusal:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-p12-lifetime-context-consumer01' && github.run_attempt == 1
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/private-native354-passive-C01' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -38,7 +38,7 @@ jobs:
           try:
               a = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','manifest_sha256','clock','producer'}
-              assert a['scope'] == 'P12-Qba-H54-configured-lifetime-context-diagnostic01' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['scope'] == 'P12-Q2c070-H76df9-configured-passive-rejection01' and a['controller_sha'] == os.environ['GITHUB_SHA']
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
               assert a['manifest_sha256'] == 'b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e'
               assert a['producer'] == dict(run_id=42455455480, artifact_id=13607980704, controller_sha='0210a3c52062ec28e9c6ae74098040e432e09a65', branch='codex/experimental-native-p12-lifecycle-package-20261108', artifact_name='ff8-host-package-42455455480-1')

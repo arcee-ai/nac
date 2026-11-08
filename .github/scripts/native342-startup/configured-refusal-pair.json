@@ -1,15 +1,15 @@
 {
-  "scope": "P12-Qba-H54-configured-lifetime-context-diagnostic01",
-  "H": "54c0b7db66c19c9b676e46933bfc89944c3b6f2a",
+  "scope": "P12-Q2c070-H76df9-configured-passive-rejection01",
+  "H": "76df91f86c0050167c4c8741da451faf31a5c065",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
+  "Q": "2c0705f62c9f0761466f60a64d54323fa87a7a79",
   "product_parent": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
   "source_context_dev": "04c22a7fa1e06a72219f59f37e811813cf64cd98",
   "sdk_controller": "2cee2f42074a6d7948ca94133ff0e743368a8ae5",
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
-  "q_swift_sha256": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
+  "q_swift_sha256": "8ae3c6485fb1d91f1d84613568f2d504acafb9ffd656bf123cd3d5f450cfcd8c",
   "host_image": "20261102.0473.1",
-  "H_preparation_parent": "148f51f887a823bbc517e34aa607615393aa2875",
+  "H_preparation_parent": "54c0b7db66c19c9b676e46933bfc89944c3b6f2a",
   "native_boundary": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
   "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",
@@ -19,11 +19,14 @@
     "H": {
       "desktop/macos/CIStartupObserver.swift": "1a8141134d45838aa150cb903b5483bd22b2e3b7c163505812108af37b151b95",
       "desktop/macos/CIStartupAXWitness.swift": "78bb7e28f6262efe309ac0d70508dc988b52187e4ee0bf9a251d43e38bb5f695",
-      "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a"
+      "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a",
+      "desktop/macos/ci_startup_attachments.py": "6cbdbc11043fcee4a805102c9c7a3d493956bf6d8bf061ba26cc869082bc3708",
+      "desktop/macos/ci_startup_client_rejection.py": "265c72098896cc394f7f93010b35c7d63dc52818ef6537186a1b017c8550159e",
+      "desktop/macos/ci_startup_fixture.py": "ae50b3fb50174e3a031079d4d4d14a2afcfaa3dcecb080d6866beb131e49bd39"
     },
     "Q": {
       "desktop/macos/startup_xctest/StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
-      "desktop/macos/startup_xctest/StartupAXReceipt.swift": "a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217"
+      "desktop/macos/startup_xctest/StartupAXReceipt.swift": "77bb1e3d48279b2b42f458cbeb66f158548a41ffed8b2111ad5bfa8546823ac3"
     }
   }
 }

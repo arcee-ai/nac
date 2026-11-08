@@ -1,4 +1,4 @@
-"""H54 closed supplier/context composition with inert ports; no actor or compiler."""
+"""Authentic passive client supplier/context composition; inert ports, no actor or compiler."""
 import ast
 import json
 from pathlib import Path
@@ -23,13 +23,15 @@ class ContextNominationControls(unittest.TestCase):
     exercise_refusal = refusal.RefusalControls.exercise_refusal
 
     def test_exact_H54_scope_parent_and_roster_are_closed(self):
-        self.assertEqual(C.REFUSAL_H, '54c0b7db66c19c9b676e46933bfc89944c3b6f2a')
-        self.assertEqual(C.REFUSAL_SCOPE, 'P12-Qba-H54-configured-lifetime-context-diagnostic01')
-        self.assertEqual(C.REFUSAL_BRANCH, 'refs/heads/codex/experimental-native-p12-lifetime-context-consumer01')
-        self.assertEqual(PAIR['H_preparation_parent'], '148f51f887a823bbc517e34aa607615393aa2875')
+        self.assertEqual(C.REFUSAL_H, '76df91f86c0050167c4c8741da451faf31a5c065')
+        self.assertEqual(C.REFUSAL_SCOPE, 'P12-Q2c070-H76df9-configured-passive-rejection01')
+        self.assertEqual(C.REFUSAL_BRANCH, 'refs/heads/codex/private-native354-passive-C01')
+        self.assertEqual(PAIR['H_preparation_parent'], '54c0b7db66c19c9b676e46933bfc89944c3b6f2a')
         self.assertEqual(PAIR['supplier_sha256'], C.REFUSAL_SUPPLIERS)
+        self.assertEqual(PAIR['Q'], C.REFUSAL_Q)
+        self.assertEqual(C.PRODUCER_QUERY, 'ba266ba1b3bea331768d91fc8a0b2ee66b484d01')
         self.assertEqual(set(C.REFUSAL_SUPPLIERS), {'H', 'Q'})
-        self.assertEqual(sum(map(len, C.REFUSAL_SUPPLIERS.values())), 5)
+        self.assertEqual(sum(map(len, C.REFUSAL_SUPPLIERS.values())), 8)
         gate = next(n for n in ast.parse((full.HERE / 'four-startup.py').read_text()).body
                     if isinstance(n, ast.FunctionDef) and n.name == 'main')
         gate = next(n for n in gate.body if isinstance(n, ast.If)
@@ -104,6 +106,33 @@ class ContextNominationControls(unittest.TestCase):
             progress, parsed = self.exercise_refusal(passive)
             self.assertEqual(progress[-1]['diagnostic']['status'], 'INCOMPLETE')
             self.assertEqual(parsed, [])
+
+    def test_actual_Q_H_journey_registry_and_original_producer_roles_are_separate(self):
+        from types import SimpleNamespace
+        import hashlib
+        source=subprocess.check_output(['git','show',PAIR['H']+':desktop/macos/ci_startup_fixture.py'])
+        values={n.targets[0].id:ast.literal_eval(n.value) for n in ast.parse(source).body
+            if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)
+            and n.targets[0].id in ('TEST_FILES','TEST_SOURCE','PRODUCT')}
+        journey=subprocess.check_output(['git','show',PAIR['Q']+':desktop/macos/startup_xctest/StartupJourneys.swift'])
+        self.assertEqual(values['TEST_FILES']['StartupJourneys.swift'],PAIR['q_swift_sha256'])
+        self.assertEqual(PAIR['q_swift_sha256'],hashlib.sha256(journey).hexdigest())
+        self.assertEqual(values['TEST_SOURCE'],PAIR['Q'])
+        self.assertNotEqual(PAIR['Q'],C.PRODUCER_QUERY)
+        tree=ast.parse((full.HERE/'four-startup.py').read_text())
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        gate=next(n for n in ast.walk(main) if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call)
+            and any(isinstance(arg,ast.Constant) and arg.value=='actual H/P/Q/R pins' for arg in n.value.args))
+        code=compile(ast.Module(body=[gate],type_ignores=[]),'<unchanged-mandatory-H-Q-digest-gate>','exec')
+        startup=SimpleNamespace(PRODUCT=values['PRODUCT'],TEST_SOURCE=values['TEST_SOURCE'],TEST_FILES=values['TEST_FILES'])
+        exec(code,dict(C.__dict__,startup=startup,pair=PAIR,configured_refusal=True))
+        for change in [{'Q':C.PRODUCER_QUERY},{'Q':'3f02938c3785328916e4feeb0af6241741b8f590'},
+                       {'q_swift_sha256':'f59ba77cbcd4d871834d4fe03f98ded0317bd96187b62dc9a9abca84ab4df849'},
+                       {'q_swift_sha256':'0'*64}]:
+            with self.subTest(change=change),self.assertRaises(RuntimeError):
+                exec(code,dict(C.__dict__,startup=startup,pair={**PAIR,**change},configured_refusal=True))
+        original=json.loads((full.HERE/'pair.json').read_text())
+        self.assertEqual(original['Q'],C.PRODUCER_QUERY)
 
     def test_operator_caps_roles_and_first_CG_binding_are_preserved(self):
         contract = json.loads((full.HERE / 'configured-refusal-contract.json').read_text())
