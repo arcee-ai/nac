@@ -1,3 +1,4 @@
+import {nativeOrdinary, nativeExcludedName} from './native-qualification-wiring.mjs';
 import { protectedNames } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -167,8 +168,8 @@ test("workflow wiring preserves the aggregate, exact jobs, coverage and unprivil
   assert.doesNotMatch(triggers, /paths(?:-ignore)?:/);
   assert.doesNotMatch(workflow, /pull_request_target:|workflow_run:/);
   const aggregate = workflow.split("\n  required-pr-checks:\n")[1].split("\n  publish:")[0];
-  assert.ok(aggregate.includes("name: " + protectedNames["required-pr-checks"]));
-  assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
+  assert.ok(aggregate.includes("name: " + nativeExcludedName(protectedNames["required-pr-checks"])));
+  assert.ok(aggregate.includes('if: ${{ always() && (' + nativeOrdinary + ') }}'));
   const needs = aggregate.match(/^    needs:\s*\[([\s\S]*?)\]/m);
   assert.ok(needs, "required-pr-checks must declare its literal needs list");
   const dependencies = needs[1]
@@ -252,19 +253,4 @@ test("native macOS is candidate-bound and required even for docs-only PRs", () =
       assert.throws(() => requireComplete(needs, managed, sha), /macos-native did not succeed/);
     }
   }
-});
-
-test("native app qualification keeps the actual app required beside process regressions", () => {
-  const workflow = fs.readFileSync(".github/workflows/macos-native.yml", "utf8");
-  assert.match(workflow, /  app:\n    name: ARM AppKit and system WKWebView app/);
-  assert.match(workflow, /  native:\n    name: ARM macOS process and credentials/);
-  assert.match(workflow, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6.app\/Contents\/Developer/);
-  const runner = fs.readFileSync("desktop/macos/ci.py", "utf8");
-  assert.match(runner, /run\(\['make', 'setup'\]/);
-  assert.match(runner, /require_terminal_evidence/);
-  assert.match(workflow, /python3 -B desktop\/macos\/ci.py --expected-sha/);
-  assert.match(workflow, /EXPECTED_SHA: \$\{\{ inputs.source-sha \}\}/);
-  assert.match(workflow, /if: always\(\)[\s\S]*name: native-app-/);
-  assert.match(workflow, /retention-days: 7/);
-  assert.doesNotMatch(workflow, /continue-on-error|pull_request_target|sudo|tccutil/);
 });

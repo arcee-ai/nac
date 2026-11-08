@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build and qualify the actual development app on a dedicated hosted Mac."""
 import argparse
-from ci_paths_budget import active, check as budget_check, time_limit, using
+from ci_paths_budget import active, check as budget_check, time_limit, timeout_options, using, PathBudget
 from collections import deque
 import hashlib
 import importlib.util
@@ -280,6 +280,10 @@ def main():
     terminal = False
     startup = False
     lifecycle = False
+    paths = False
+    path_allocation = None
+    path_budget = None
+    path_scope = None
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -294,8 +298,21 @@ def main():
             terminal = target['suite'] == 'terminal'
             startup = target['suite'] == 'startup'
             lifecycle = target['suite'] == 'lifecycle'
+            paths = target['suite'] == 'paths'
+            if paths:
+                from ci_paths import require_allocation
+                path_allocation = require_allocation(os.environ.get('NAC_PATHS_CUSTODY', ''), args.expected_sha)
+                report['paths_allocation'] = path_allocation
+                path_budget=PathBudget(path_allocation,RUN_DEADLINE)
+                path_scope=using(path_budget.work)
+                path_scope.__enter__()
+                report['paths_clock']=path_budget.evidence
+                report['paths_clock'].update(hard=path_budget.hard,work=path_budget.work.deadline,
+                    cleanup=path_budget.cleanup.deadline)
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
+            if paths and (not args.source_root.is_absolute() or args.source_root.resolve() != args.source_root):
+                raise RuntimeError('Paths require a canonical absolute product checkout')
             source_root = args.source_root.resolve()
             if source_root == ROOT or source_root.is_relative_to(ROOT):
                 raise RuntimeError('Supplier source must be a separate checkout, not part of the harness')
@@ -350,7 +367,8 @@ def main():
         report['toolchain'] = actual
         report['xcode_select_default'] = command(['xcode-select', '-p'])
         compiler_pinned = qualify_toolchain(actual, expected)
-        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'])
+        console = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], **timeout_options(30))
+        budget_check()
         report['console_state'] = console_state(console, os.getuid())
         gui_helper = raw / 'native-gui-reader'
         run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIGUI.swift',
@@ -367,7 +385,7 @@ def main():
             os.environ.pop(key, None)
         os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
                           NAC_BUILD_ID='dev-' + report['source_sha'])
-        if target and not instances and not startup and not lifecycle:
+        if target and not instances and not startup and not lifecycle and not paths:
             # Reuse the exact source owner's failure cleanup, including its
             # native fixture helpers. No code is copied into that checkout.
             sys.path.insert(0, str(source_root / 'desktop/macos'))
@@ -378,7 +396,11 @@ def main():
                 target_module = loaded
             finally:
                 sys.path.pop(0)
-        if lifecycle:
+        if paths:
+            from ci_paths import qualify as qualify_paths
+            report.update(qualify_paths(raw, source_root, target, args.expected_sha, run, command,
+                                       settle_apps, path_allocation, budget=path_budget))
+        elif lifecycle:
             report.update(qualify_lifecycle(raw, source_root, target, args.expected_sha,
                                            run, command, lifecycle_image_report, RUN_DEADLINE, report=report))
         elif startup:
@@ -455,10 +477,12 @@ def main():
         report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
         if lifecycle:
             lifecycle_gui_guard(report['quartz_end'], [(str(source_root), '<target-checkout>'), *redact_values()])
-        console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
+        console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=time_limit(15))
+        budget_check()
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
         require_checkout(source_root, report['source_sha'])
         require_checkout(ROOT, args.expected_sha)
+        if path_budget is not None:path_budget.require_success()
         report['result'] = 'passed' if compiler_pinned else 'unqualified-swift'
         if not compiler_pinned:
             raise RuntimeError('Smoke completed; pin observed Swift compiler identity before acceptance')
@@ -472,7 +496,10 @@ def main():
                     report['instance_cleanup'] = audit_instances(raw / 'instances', raw / 'instance-dev/InstanceObservation', command)
                 finally:
                     report['instance_receipt_index'] = retain_instances(raw / 'instances')
-            if startup:
+            if paths:
+                report['cleanup'] = {'owner': 'accepted H541 settlement in per-case finally',
+                                     'missing_proof_retains_bundle': True, 'Finder_window_left_open': True}
+            elif startup:
                 report['cleanup'] = {'owner': 'startup preinstalled OS witness; per-case receipts',
                                      'generic_JSON_PID_cleanup_used': False}
             elif lifecycle:
@@ -487,22 +514,54 @@ def main():
             report['result'] = 'failed'
             raise
         finally:
+            primary_info = sys.exc_info()
+            scope_error = None
+            if path_scope is not None:
+                try:
+                    # Throw the real pending failure through the work scope;
+                    # its failed normal-exit check must not gate retention.
+                    path_scope.__exit__(*primary_info)
+                except BaseException as error:
+                    scope_error = error
+                    report['result'] = 'failed'
+                    report.setdefault('error', str(error))
+                finally:
+                    path_scope = None
             crashes = Path.home() / 'Library/Logs/DiagnosticReports'
             if lifecycle:
                 report['elapsed_seconds'] = round(time.time() - started, 3)
                 finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
                                    crashes=crashes, started=started)
             else:
-                count = 0
-                for crash in sorted(crashes.glob('NACPreview*')):
-                    if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
-                        with crash.open('rb') as stream:
-                            (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
-                        count += 1
-                report['crash_reports'] = count
-                report['elapsed_seconds'] = round(time.time() - started, 3)
-                (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
-                export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
+                try:
+                    with using(path_budget.retention if path_budget else None):
+                        count = 0
+                        for crash in sorted(crashes.glob('NACPreview*')):
+                            if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
+                                with crash.open('rb') as stream:
+                                    (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
+                                count += 1
+                        report['crash_reports'] = count
+                        report['elapsed_seconds'] = round(time.time() - started, 3)
+                        (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
+                        export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
+                        if path_budget is not None:path_budget.require_success()
+                except BaseException as error:
+                    report['result'] = 'failed'
+                    if paths:report['finalization_error'] = str(error)
+                    try:
+                        (raw / 'ci-report.json').write_text(json.dumps(report,indent=2)+'\n')
+                        if (output / 'ci-report.json').exists():
+                            (output / 'ci-report.json').write_text(json.dumps({'result':'failed','retention_complete':False})+'\n')
+                    except BaseException:
+                        if not paths or (primary_info[1] is None and scope_error is None):
+                            raise
+                    # Retention may fail too, but cannot replace the path
+                    # owner's original exception or its failed scope exit.
+                    if not paths or (primary_info[1] is None and scope_error is None):
+                        raise
+            if scope_error is not None and primary_info[1] is None:
+                raise scope_error
 
 
 if __name__ == '__main__':

@@ -220,9 +220,7 @@ class XCTestLaunchEnvironmentTests(unittest.TestCase):
 
             stack.enter_context(patch.dict(os.environ, ambient, clear=True))
             stack.enter_context(patch.object(ci_xctest, 'observe_prerequisites', return_value=status))
-            require_settled = ci_xctest.require_settled
-            stack.enter_context(patch.object(ci_xctest, 'require_settled',
-                side_effect=lambda record: require_settled(record, process_status=process_status)))
+            stack.enter_context(patch.object(ci_xctest, 'observe_process_status', side_effect=process_status))
             for name in ('Popen', 'run', 'check_output'):
                 stack.enter_context(patch.object(ci_xctest.subprocess, name,
                     side_effect=AssertionError('No process execution is allowed in this inert control')))

@@ -25,8 +25,25 @@ on:
           - all-352-macos26
           - all-342-startup-macos26
           - all-344-lifecycle-macos26
+          - all-347-paths-macos26
       lifecycle_custody:
         description: Root-admitted ALL-344 custody JSON; required only for its fixed three-case qualification
+        type: string
+        required: false
+        default: ""
+      paths_custody:
+        description: ROOT-issued ALL-347 allocation JSON with exact source, cases and original clock
+        type: string
+        required: false
+        default: ""
+      native-qualification:
+        description: "Native-only qualification; none preserves ordinary CI"
+        type: choice
+        required: false
+        default: none
+        options: [none, all-347-paths-macos26]
+      native-paths-custody:
+        description: "Exact ROOT-issued one-use JSON with its original clock"
         type: string
         required: false
         default: ""
@@ -45,7 +62,7 @@ jobs:
 
   prepare:
     needs: ci-admission
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs['native-qualification'] == '' || inputs['native-qualification'] == 'none') }}
     runs-on: ubuntu-latest
     outputs:
       admission_mode: ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && needs.ci-admission.result == 'success' && needs.ci-admission.outputs.mode == 'pure' && 'pure' || 'full' }}
@@ -151,6 +168,8 @@ jobs:
           persist-credentials: false
       - name: Require startup console producer and collector controls with zero skips
         run: python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
+      - name: Check portable path adapter contracts without native execution
+        run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v
       - name: Check workflows and scripts, then prove enforcement
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -1022,18 +1041,6 @@ jobs:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source-sha: ${{ needs.prepare.outputs.sha }}
 
-  native-qualification:
-    needs: prepare
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      startsWith(github.ref, 'refs/heads/codex/') &&
-      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26' || inputs.native_qualification == 'all-344-lifecycle-macos26')
-    uses: ./.github/workflows/macos-qualification.yml
-    with:
-      harness-sha: ${{ needs.prepare.outputs.sha }}
-      target: ${{ inputs.native_qualification }}
-      lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
-
   managed-image:
     needs: prepare
     if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}
@@ -1091,8 +1098,8 @@ jobs:
       trusted-policy-sha: ${{ needs.prepare.outputs.source_policy_sha }}
 
   required-pr-checks:
-    name: ${{ needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure' && 'NAC metadata checks omitted' || 'Required PR checks' }}
-    if: ${{ always() }}
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none' && 'Native-only aggregate excluded' || needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure' && 'NAC metadata checks omitted' || 'Required PR checks' }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs['native-qualification'] == '' || inputs['native-qualification'] == 'none') }}
     needs: [prepare, lint, test-server, test-server-web, test-core, test-workspace, quality, browser-binary, browser-apt, browser-shards, browser-proof, browser, test, build, managed-image, managed-fault, managed-quality, managed, source-security, workflow-lint, macos-native]
     runs-on: ubuntu-latest
     steps:
@@ -1138,3 +1145,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$RELEASE_TAG" dist/* --clobber
+
+  native-qualification:
+    needs: prepare
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/codex/') &&
+      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26' || inputs.native_qualification == 'all-344-lifecycle-macos26' || inputs.native_qualification == 'all-347-paths-macos26')
+    uses: ./.github/workflows/macos-qualification.yml
+    with:
+      harness-sha: ${{ needs.prepare.outputs.sha }}
+      target: ${{ inputs.native_qualification }}
+      lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
+      paths-custody: ${{ inputs.paths_custody || '' }}
+
+
+  native-admission:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate native-only dispatch before requesting a Mac runner
+        id: admit
+        working-directory: desktop/macos
+        env:
+          HARNESS_SHA: ${{ github.sha }}
+          QUALIFICATION: ${{ inputs['native-qualification'] }}
+          NAC_PATHS_CUSTODY_JSON: ${{ inputs['native-paths-custody'] }}
+        run: |
+          python3 -B - <<'PY'
+          import os
+          from ci_paths import validate_allocation
+          from ci_paths_protocol import decode, require
+          require(os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+                  and os.environ['GITHUB_REF'].startswith('refs/heads/codex/')
+                  and os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+                  and os.environ['GITHUB_SHA'] == os.environ['HARNESS_SHA']
+                  and os.environ['QUALIFICATION'] == 'all-347-paths-macos26',
+                  'first explicit codex path qualification only')
+          data = os.environ['NAC_PATHS_CUSTODY_JSON'].encode()
+          require(len(data) <= 8192, 'external custody JSON bound')
+          validate_allocation(decode(data), os.environ['HARNESS_SHA'])
+          PY
+
+
+  native-exact:
+    needs: native-admission
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs['native-qualification'] == 'all-347-paths-macos26' }}
+    uses: ./.github/workflows/macos-qualification.yml
+    with:
+      harness-sha: ${{ github.sha }}
+      target: ${{ inputs['native-qualification'] }}
+      paths-custody: ${{ inputs['native-paths-custody'] }}
