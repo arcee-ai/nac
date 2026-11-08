@@ -130,6 +130,7 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
     let text = top1.compactMap { $0?.string }.joined(separator: " ")
     let markers = ["chat": ["Hello from the isolated NAC Mac preview"], "terminal": ["NAC354_TRUSTED_XY"],
                    "workspace": ["WK_RICH_COMPLETE"], "approval": ["Permission required"],
+                   "workspace-rich": ["export const webkitFixture = 351", "System WebKit", "shared React", "A formula"],
                    "instance-empty": ["No projects yet", "Get Started"],
                    "instance-conflict": ["Another NAC process", "Retry", "store-path"],
                    "instance-drain": ["Native instance", "drain"],
@@ -158,15 +159,20 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
         throw NSError(domain: "NACCI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Fixture transcript is not readable in WKWebView snapshot"])
     }
     diagnostic.phase = "passed"
-    return ["file": url.lastPathComponent, "width": bitmap.pixelsWide,
+    var result: [String: Any] = ["file": url.lastPathComponent, "width": bitmap.pixelsWide,
             "height": bitmap.pixelsHigh,
             "readable_fixture_text": true, "fixture_kind": kind,
             "logical_width": image.size.width]
+    if kind == "workspace-rich" {
+        result["rich_anchors"] = expected
+        result["completion_sentinel_observed"] = normalized(text).contains(normalized("WK_RICH_COMPLETE"))
+    }
+    return result
 }
 
 do {
     var paths = Array(CommandLine.arguments.dropFirst())
-    let modes = ["--terminal": "terminal", "--workspace": "workspace", "--approval": "approval",
+    let modes = ["--terminal": "terminal", "--workspace": "workspace", "--workspace-rich": "workspace-rich", "--approval": "approval",
                  "--instance-empty": "instance-empty", "--instance-conflict": "instance-conflict", "--instance-drain": "instance-drain",
                  "--startup-configured": "startup-configured", "--startup-invalid": "startup-invalid", "--startup-future": "startup-future",
                  "--terminal-unicode": "terminal-unicode", "--terminal-completed": "terminal-completed"]

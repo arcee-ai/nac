@@ -1,11 +1,13 @@
 from pathlib import Path
+import copy
+import hashlib
 import json
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from ci_qualifications import require_checkout, require_full_preview, require_workspace, select_target
+from ci_qualifications import require_checkout, require_full_preview, require_workspace, require_rich_capture, select_target
 
 
 class ExactSourceTests(unittest.TestCase):
@@ -29,7 +31,7 @@ class ExactSourceTests(unittest.TestCase):
         self.assertEqual(terminal['phase_count'], 6)
         older = select_target('all-351-macos14')
         self.assertEqual(older['runner'], 'macos-14')
-        self.assertEqual(older['source_sha'], 'fa94a859b648cb36fbdcb251bfe4bc9541de3f48')
+        self.assertEqual(older['source_sha'], '24d757734480a56eeeb772d33de8f23a8549719a')
         self.assertEqual(older['developer_directory'], '/Applications/Xcode_16.2.app/Contents/Developer')
         for unknown in ('', 'all-341-macos14', 'macos-26-xlarge', '../ci-toolchain.json'):
             with self.assertRaisesRegex(RuntimeError, 'Unknown/unapproved'):
@@ -111,6 +113,52 @@ class ExactSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'failed'):
             require_workspace(matrix, {**episodes, 'workspace-direct': {**case, 'checks': {
                 'visible-paint': {'status': 'unavailable'}}}}, baseline, target)
+
+
+class RichCaptureTests(unittest.TestCase):
+    def test_exact_fixture_receipt_and_affected_negative_controls(self):
+        # Source/receipt contract only. The native OCR/painting gate is separate.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            fixture, png = directory / 'WorkspaceFixture.swift', directory / 'rich.png'
+            fixture.write_text('    static let rich = #"""\n    fixture full answer Ω\n    """#\n')
+            expected = 'fixture full answer Ω'
+            png.write_bytes(b'fixture PNG bytes; not an image qualification')
+            digest = hashlib.sha256(expected.encode()).hexdigest()
+            identity = dict(source_head='1' * 40, engine_sha256='a' * 64, native_sha256='b' * 64)
+            observation = dict(ready=True, reason='ready', expected=dict(kind='rich', id='owned'),
+                hash='#/session/owned/insights', full_answer=expected, loadingConversation=False,
+                fonts_ready=True, visibility='visible', sentinel_observation=dict(visible=False),
+                message_identity=dict(session_id='owned', visible_index=1, created_at='fixture', message_count=2),
+                surfaces=[dict(visible=True, within_frame=True) for _ in range(5)])
+            capture = dict(source_identity=identity, expected_answer_sha256=digest,
+                settled_answer_sha256_before=digest, settled_answer_sha256_after=digest,
+                png_sha256=hashlib.sha256(png.read_bytes()).hexdigest(), semantic_ready=True,
+                animation_frame_observed=True, window_visible=True, window_occlusion_visible=True,
+                window_visible_after_snapshot=True, readiness=copy.deepcopy(observation),
+                after_snapshot_readiness=copy.deepcopy(observation))
+            def qualify(value):
+                return require_rich_capture(dict(paint_diagnostics={'rich-chat.png': value}), identity, png, fixture)
+            self.assertEqual(qualify(capture)['settled_answer_sha256'], digest)
+            variants = []
+            for field in ('source_head', 'engine_sha256', 'native_sha256'):
+                value = copy.deepcopy(capture); value['source_identity'][field] = 'different'; variants.append((field, value))
+            for field in ('expected_answer_sha256', 'settled_answer_sha256_after', 'png_sha256'):
+                value = copy.deepcopy(capture); value[field] = 'different'; variants.append((field, value))
+            for field in ('animation_frame_observed', 'window_visible', 'window_occlusion_visible', 'window_visible_after_snapshot'):
+                value = copy.deepcopy(capture); value[field] = False; variants.append((field, value))
+            for field, replacement in (('full_answer', 'marker only'), ('hash', '#/session/other/insights'),
+                                       ('ready', False), ('loadingConversation', True), ('fonts_ready', False)):
+                value = copy.deepcopy(capture); value['after_snapshot_readiness'][field] = replacement
+                variants.append((field, value))
+            value = copy.deepcopy(capture); value['after_snapshot_readiness']['message_identity']['created_at'] = 'other'
+            variants.append(('changed message identity', value))
+            value = copy.deepcopy(capture); value['readiness']['surfaces'][0]['within_frame'] = False
+            variants.append(('clipped actual target', value))
+            variants.append(('old receipt with no new binding', {}))
+            for name, value in variants:
+                with self.subTest(name=name), self.assertRaises(RuntimeError):
+                    qualify(value)
 
 
 if __name__ == '__main__':
