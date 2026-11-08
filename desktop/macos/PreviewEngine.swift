@@ -42,6 +42,12 @@ final class PreviewEngine {
             }
             environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
         }
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "external-auth" {
+            environment["NAC_TELEMETRY"] = "stderr"
+            environment["NAC_TELEMETRY_SCENARIO"] = "native-external-auth"
+        }
         return environment
     }
     #endif

@@ -168,6 +168,72 @@ def require_terminal(record, scenario, build, profile=None):
     require_actor_exit(record.get('engine_pid'))
 
 
+def require_callback_witness(record, build):
+    """Two retained positive rows, not a complete capture of the bounded log tail."""
+    result = record.get('external_auth', {})
+    proof = result.get('wrong_state_callback_witness', {})
+    def need(value):
+        if not value:
+            raise AssertionError('Incomplete callback rejection/custody witness')
+    def integer(value):
+        need(type(value) is int and value >= 0)
+        return value
+    def decimal(value):
+        need(isinstance(value, str) and value.isascii() and value.isdigit() and str(int(value)) == value)
+        return int(value)
+    def runtime(value):
+        need(isinstance(value, dict) and set(value) == {
+            'source_revision', 'build_id', 'schema_version', 'scenario', 'store_engine', 'journal_mode'})
+        need(value['source_revision'] == build['source_revision'] and value['build_id'] == build['build_id']
+             and integer(value['schema_version']) == record['ready_schema']
+             and value['scenario'] == 'native-external-auth' and value['store_engine'] == 'sqlite'
+             and value['journal_mode'] == 'wal')
+    need(result.get('wrong_state_rejected_then_canceled') is True
+         and proof.get('state_rejection_observed') is True and proof.get('rejection_before_cancel') is True
+         and proof.get('complete_stream_capture') is False)
+    need(proof.get('source') == build['source_revision'] and proof.get('build') == build['build_id']
+         and integer(proof.get('schema')) == record['ready_schema']
+         and integer(proof.get('engine_pid')) == record['engine_pid']
+         and proof.get('engine_incarnation') == record['launch_incarnation'])
+    for key in ['engine_incarnation', 'document', 'view', 'launch', 'recorder_id']:
+        need(isinstance(proof.get(key), str) and uuid.UUID(proof[key]).int != 0)
+    integer(record['ready_schema'])
+    integer(record['engine_pid'])
+    owner = decimal(proof.get('owner'))
+    need(owner > 0 and 0 < decimal(proof.get('rejection_observed_ns')) < decimal(proof.get('cancel_issued_ns')))
+    before, after = proof.get('token_counts_before'), proof.get('token_counts_after')
+    need(isinstance(before, list) and isinstance(after, list) and len(before) == len(after) == 2)
+    need([integer(v) for v in before] == [integer(v) for v in after])
+    observations = proof.get('observations')
+    need(isinstance(observations, list) and len(observations) == 2)
+    for row, name, outcome in zip(observations,
+            ['nac.mcp.oauth.callback.listening', 'nac.mcp.oauth.callback.state_rejected'], ['started', 'error']):
+        need(isinstance(row, dict) and set(row) == {'timestamp_unix_ms', 'export_recorder_id',
+            'name', 'kind', 'outcome', 'correlation', 'runtime'})
+        need(integer(row['timestamp_unix_ms']) > 0 and row['export_recorder_id'] == proof['recorder_id']
+             and row['name'] == name and row['kind'] == 'diagnostic' and row['outcome'] == outcome)
+        need(isinstance(row['correlation'], dict) and set(row['correlation']) == {'generation'}
+             and integer(row['correlation']['generation']) == owner)
+        runtime(row['runtime'])
+    finals = []
+    for line in record.get('engine_log_after_shutdown', '').splitlines():
+        if line.startswith('nac-telemetry-export '):
+            row = json.loads(line[len('nac-telemetry-export '):])
+            if row.get('final_receipt') is True and row.get('process_id') == record['engine_pid']:
+                finals.append(row)
+    need(len(finals) == 1)
+    final = finals[0]
+    need(integer(final['process_id']) == record['engine_pid'] and final['recorder_id'] == proof['recorder_id']
+         and 1 <= integer(final['capacity']) <= 4096 and integer(final['receipt_failures']) == 0)
+    runtime(final['runtime'])
+    stats = final['stats']
+    need(isinstance(stats, dict) and set(stats) == {'accepted', 'exported', 'dropped', 'failures'})
+    counts = {key: integer(value) for key, value in stats.items()}
+    need(counts['accepted'] == counts['exported'] >= 2 and counts['dropped'] == counts['failures'] == 0)
+    need(record.get('engine_reaped') is True and record.get('identity_retired') is True
+         and record.get('profile_removed') is True and record.get('commands_retired') is True)
+
+
 def main():
     source_app, output, observer = auth_arguments(sys.argv[1:])
     console = require_isolated_host(observer)
@@ -208,8 +274,11 @@ def main():
                     raise TimeoutError('Actual external-auth app did not finish within 180 seconds')
                 if launch.wait(timeout=0) != 0:
                     raise AssertionError('Actual external-auth scenario failed; inspect sanitized evidence')
+                if time.monotonic() > deadline:
+                    raise TimeoutError('External-auth terminal receipt exceeded original app deadline')
                 record = json.loads(evidence.read_text())
                 require_terminal(record, 'external-auth', build)
+                require_callback_witness(record, build)
                 snapshot = fixture.snapshot()
                 (output / 'browser-observations.json').write_text(json.dumps(snapshot, indent=2) + '\n')
             except BaseException as error:

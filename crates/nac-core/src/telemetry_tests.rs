@@ -808,3 +808,40 @@ fn transaction_observation_keeps_savepoints_inside_one_lifetime() {
         .iter()
         .all(|e| e.outcome == Some(TelemetryOutcome::Ok)));
 }
+
+#[test]
+fn oauth_callback_observations_are_content_free_and_disabled_safe() {
+    let _lock = telemetry_test_lock();
+    {
+        let _guard = install_test_recorder(TelemetryRecorder::disabled());
+        observe_oauth_callback(7, OAuthCallbackObservation::Listening);
+        observe_oauth_callback(7, OAuthCallbackObservation::StateRejected);
+        assert!(!enabled());
+    }
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 8);
+    let _guard = install_test_recorder(recorder);
+    observe_oauth_callback(7, OAuthCallbackObservation::Listening);
+    observe_oauth_callback(7, OAuthCallbackObservation::StateRejected);
+    let events = wait_for_events(&exporter, 2);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].name, TelemetryName::McpOAuthCallbackListening);
+    assert_eq!(events[1].name, TelemetryName::McpOAuthCallbackStateRejected);
+    for event in events {
+        assert_eq!(event.kind, TelemetryKind::Diagnostic);
+        assert_eq!(event.correlation, Correlation::default().with_generation(7));
+        assert!(event.route.is_none() && event.error.is_none() && event.pid.is_none());
+        assert!(event.operation.is_none() && event.activity.is_none() && event.value.is_none());
+        let encoded = serde_json::to_string(&event).unwrap();
+        for forbidden in [
+            "code=",
+            "state=",
+            "token",
+            "localhost",
+            "server-name",
+            "store.db",
+        ] {
+            assert!(!encoded.contains(forbidden));
+        }
+    }
+}

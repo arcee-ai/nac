@@ -1,6 +1,7 @@
 #if PREVIEW_SMOKE && !LOCAL_APP
 import AppKit
 import WebKit
+import CoreFoundation
 
 /// Uses production React MCP controls and the real NSWorkspace opener. DOM
 /// automation is explicit; this is not trusted physical-input qualification.
@@ -91,14 +92,33 @@ final class ExternalAuthSmoke {
         try await wait("same created session after fixture setup") {
             try await self.js(Self.sessionReadyScript, arguments: ["expectedRoute": sessionRoute]) as? Bool == true
         }
+        guard let receipt = app.engine.receipt, let identity = receipt.identity, let schema = receipt.schema else {
+            throw PreviewError.message("Missing owned auth engine identity")
+        }
+        var witness = ExternalAuthCallbackWitness(source: identity.source_revision, build: identity.build_id,
+            schema: schema, pid: Int(app.engine.pid))
         var results: [String: Any] = ["physical_input_qualified": false, "device_server_owner_qualified": false]
         for mode in ["success", "denied", "wrong-state", "hold"] {
             try await configure(mode, credential: credential)
             try await openPanel()
+            guard let binding = currentDocument else { throw PreviewError.message("Auth document unavailable") }
+            try witness.ingest(app.engine.log)
+            let baseline = witness.owners
             try await clickButton("Authenticate")
             try await wait("production authorization link") {
                 try await self.js("return [...document.querySelectorAll('a')].some(a => a.textContent.trim() === 'Continue OAuth authorization')") as? Bool == true
             }
+            var owner: UInt64?
+            try await wait("bound callback listener observation") {
+                guard self.currentDocument == binding, self.app.engine.pid == enginePID,
+                      self.app.engine.receipt?.incarnation == receipt.incarnation,
+                      self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                try witness.ingest(self.app.engine.log)
+                owner = try witness.newOwner(after: baseline)
+                return owner != nil
+            }
+            guard let owner else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+            let tokenBaseline = try await tokenCounts()
             let before = try await observations()
             _ = try await js("[...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Continue OAuth authorization').click(); return true")
             try await wait("external browser request") { try await self.observations() > before }
@@ -109,11 +129,49 @@ final class ExternalAuthSmoke {
             case "denied":
                 try await oauthStatus("Authorization failed")
                 results["production_mcp_denied"] = true
-            case "wrong-state", "hold":
+            case "wrong-state":
+                var rejectionObserved: UInt64 = 0
+                var cancelIssued: UInt64 = 0
+                try await ExternalAuthCallbackWitness.rejectThenCancel(rejection: {
+                    try await self.wait("received wrong-state callback rejection") {
+                        guard self.currentDocument == binding, self.app.engine.pid == enginePID,
+                              self.app.engine.receipt?.incarnation == receipt.incarnation,
+                              self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                        try witness.ingest(self.app.engine.log)
+                        return try witness.rejection(owner: owner, baseline: baseline)
+                    }
+                    guard try await self.tokenCounts() == tokenBaseline else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                    rejectionObserved = DispatchTime.now().uptimeNanoseconds
+                }, waiting: { try await self.oauthStatus("Waiting for authorization") },
+                   cancel: {
+                       guard try await self.tokenCounts() == tokenBaseline else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                       guard self.currentDocument == binding, self.app.engine.pid == enginePID,
+                             self.app.engine.receipt?.incarnation == receipt.incarnation,
+                             self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                       try witness.ingest(self.app.engine.log)
+                       guard try witness.rejection(owner: owner, baseline: baseline) else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                       cancelIssued = DispatchTime.now().uptimeNanoseconds
+                       try await self.clickButton("Cancel authorization")
+                   },
+                   settled: { try await self.oauthStatus("Ready to connect") })
+                guard try await tokenCounts() == tokenBaseline else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                guard rejectionObserved > 0, cancelIssued > rejectionObserved else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+                var proof = try witness.proof(owner: owner)
+                proof["engine_incarnation"] = receipt.incarnation
+                proof["document"] = binding.document
+                proof["view"] = binding.view
+                proof["launch"] = binding.launch
+                proof["rejection_observed_ns"] = String(rejectionObserved)
+                proof["cancel_issued_ns"] = String(cancelIssued)
+                proof["token_counts_before"] = tokenBaseline
+                proof["token_counts_after"] = try await tokenCounts()
+                results["wrong_state_callback_witness"] = proof
+                results["wrong_state_rejected_then_canceled"] = true
+            case "hold":
                 try await oauthStatus("Waiting for authorization")
                 try await clickButton("Cancel authorization")
                 try await oauthStatus("Ready to connect")
-                results[mode == "wrong-state" ? "wrong_state_rejected_then_canceled" : "pending_authorization_canceled"] = true
+                results["pending_authorization_canceled"] = true
             default: break
             }
             guard let base = app.baseURL, app.webView?.url?.host == base.host, app.webView?.url?.port == base.port,
@@ -209,6 +267,14 @@ final class ExternalAuthSmoke {
         return value
     }
 
+    private func tokenCounts() async throws -> [Int] {
+        let evidence = try await fixtureEvidence()
+        guard let issued = evidence["tokens_issued"] as? Int, let events = evidence["events"] as? [[String: Any]] else {
+            throw ExternalAuthCallbackWitness.Refusal.invalid
+        }
+        return [issued, events.filter { $0["kind"] as? String == "token_exchange" }.count]
+    }
+
     private func observations() async throws -> Int {
         let events = try await fixtureEvidence()["events"] as? [[String: Any]] ?? []
         return events.filter { $0["kind"] as? String == "browser_observation" }.count
@@ -254,4 +320,128 @@ final class ExternalAuthSmoke {
         throw PreviewError.message("Timed out waiting for \(label)")
     }
 }
+// BEGIN EXTERNAL AUTH CALLBACK WITNESS (Foundation-only inert controls)
+struct ExternalAuthCallbackWitness {
+    enum Refusal: Error { case invalid }
+    let source: String
+    let build: String
+    let schema: Int
+    let pid: Int
+    private(set) var recorder: String?
+    private(set) var owners: Set<UInt64> = []
+    private var rejected: Set<UInt64> = []
+    private var seen: [String: String] = [:]
+    private var processBound = false
+
+    init(source: String, build: String, schema: Int, pid: Int) {
+        self.source = source
+        self.build = build
+        self.schema = schema
+        self.pid = pid
+    }
+
+    private func integer(_ value: Any?) throws -> UInt64 {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              !["d", "f"].contains(String(cString: number.objCType)),
+              let value = UInt64(number.stringValue) else { throw Refusal.invalid }
+        return value
+    }
+
+    private func flag(_ value: Any?) throws -> Bool {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { throw Refusal.invalid }
+        return number.boolValue
+    }
+
+    private func runtime(_ row: [String: Any]) throws {
+        guard let runtime = row["runtime"] as? [String: Any],
+              Set(runtime.keys) == Set(["source_revision", "build_id", "scenario", "store_engine", "journal_mode", "schema_version"]),
+              runtime["source_revision"] as? String == source, runtime["build_id"] as? String == build,
+              runtime["scenario"] as? String == "native-external-auth",
+              runtime["store_engine"] as? String == "sqlite", runtime["journal_mode"] as? String == "wal",
+              try integer(runtime["schema_version"]) == UInt64(schema), runtime["host"] == nil else {
+            throw Refusal.invalid
+        }
+    }
+
+    mutating func ingest(_ log: String) throws {
+        // The final fragment may still be in flight. It can never qualify a row.
+        let complete = log.split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+        var occurrences: Set<String> = []
+        for line in complete.map(String.init) {
+            let event = line.hasPrefix("nac-telemetry ")
+            let accounting = line.hasPrefix("nac-telemetry-export ")
+            guard event || accounting else { continue }
+            let prefix = event ? "nac-telemetry " : "nac-telemetry-export "
+            guard let data = String(line.dropFirst(prefix.count)).data(using: .utf8),
+                  let row = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Refusal.invalid }
+            if event {
+                guard let name = row["name"] as? String else { throw Refusal.invalid }
+                guard ["nac.mcp.oauth.callback.listening", "nac.mcp.oauth.callback.state_rejected"].contains(name) else { continue }
+                try runtime(row)
+                guard Set(row.keys) == Set(["timestamp_unix_ms", "export_recorder_id", "name", "kind", "outcome", "correlation", "runtime"]),
+                      row["kind"] as? String == "diagnostic",
+                      let correlation = row["correlation"] as? [String: Any], Set(correlation.keys) == ["generation"],
+                      let id = row["export_recorder_id"] as? String, UUID(uuidString: id) != nil else { throw Refusal.invalid }
+                let owner = try integer(correlation["generation"])
+                guard owner > 0, try integer(row["timestamp_unix_ms"]) > 0,
+                      recorder == nil || recorder == id else { throw Refusal.invalid }
+                recorder = id
+                let key = "\(owner):\(name)"
+                guard occurrences.insert(key).inserted else { throw Refusal.invalid }
+                if let previous = seen[key] {
+                    guard previous == line else { throw Refusal.invalid }
+                    continue
+                }
+                if name.hasSuffix(".listening") {
+                    guard row["outcome"] as? String == "started", owners.insert(owner).inserted else { throw Refusal.invalid }
+                } else {
+                    guard row["outcome"] as? String == "error", owners.contains(owner), rejected.insert(owner).inserted else { throw Refusal.invalid }
+                }
+                seen[key] = line
+            } else {
+                try runtime(row)
+                guard let id = row["recorder_id"] as? String, UUID(uuidString: id) != nil,
+                      recorder == nil || recorder == id, try integer(row["process_id"]) == UInt64(pid),
+                      try flag(row["final_receipt"]) == false,
+                      let stats = row["stats"] as? [String: Any],
+                      try integer(stats["dropped"]) == 0, try integer(stats["failures"]) == 0,
+                      try integer(row["receipt_failures"]) == 0 else { throw Refusal.invalid }
+                recorder = id
+                processBound = true
+            }
+        }
+    }
+
+    func newOwner(after baseline: Set<UInt64>) throws -> UInt64? {
+        let added = owners.subtracting(baseline)
+        guard added.count <= 1 else { throw Refusal.invalid }
+        return processBound ? added.first : nil
+    }
+
+    func rejection(owner: UInt64, baseline: Set<UInt64>) throws -> Bool {
+        guard owners == baseline.union([owner]), processBound else { throw Refusal.invalid }
+        return rejected.contains(owner)
+    }
+
+    func proof(owner: UInt64) throws -> [String: Any] {
+        guard processBound, owners.contains(owner), rejected.contains(owner), let recorder else { throw Refusal.invalid }
+        let rows = try ["nac.mcp.oauth.callback.listening", "nac.mcp.oauth.callback.state_rejected"].map { name -> Any in
+            guard let line = seen["\(owner):\(name)"], let data = String(line.dropFirst("nac-telemetry ".count)).data(using: .utf8) else { throw Refusal.invalid }
+            return try JSONSerialization.jsonObject(with: data)
+        }
+        return ["observations": rows, "owner": String(owner), "recorder_id": recorder, "source": source, "build": build,
+                "schema": schema, "engine_pid": pid, "state_rejection_observed": true,
+                "rejection_before_cancel": true, "complete_stream_capture": false]
+    }
+
+    static func rejectThenCancel(rejection: () async throws -> Void, waiting: () async throws -> Void,
+                                 cancel: () async throws -> Void, settled: () async throws -> Void) async throws {
+        try await rejection()
+        try await waiting()
+        try await cancel()
+        try await settled()
+    }
+}
+// END EXTERNAL AUTH CALLBACK WITNESS
+
 #endif

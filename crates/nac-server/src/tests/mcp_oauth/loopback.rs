@@ -1,5 +1,37 @@
 use super::*;
 
+#[derive(Default)]
+struct CallbackExporter {
+    events: std::sync::Mutex<Vec<nac_core::telemetry::TelemetryEvent>>,
+    paused: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+    entered: std::sync::atomic::AtomicBool,
+}
+impl nac_core::telemetry::TelemetryExporter for CallbackExporter {
+    fn export(
+        &self,
+        event: &nac_core::telemetry::TelemetryEvent,
+    ) -> Result<(), nac_core::telemetry::TelemetryExportError> {
+        self.events.lock().unwrap().push(event.clone());
+        let mut paused = self.paused.lock().unwrap();
+        if *paused {
+            self.entered
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        while *paused {
+            paused = self.wake.wait(paused).unwrap();
+        }
+        Ok(())
+    }
+}
+struct ReleaseCallbackExporter(std::sync::Arc<CallbackExporter>);
+impl Drop for ReleaseCallbackExporter {
+    fn drop(&mut self) {
+        *self.0.paused.lock().unwrap() = false;
+        self.0.wake.notify_all();
+    }
+}
+
 #[tokio::test]
 async fn loopback_retry_reuses_only_its_own_live_callback_listener() {
     loopback_case(false).await;
@@ -92,6 +124,15 @@ async fn loopback_case(replace_accepted: bool) {
         .await;
         assert_eq!(configured.status(), StatusCode::OK);
     }
+    let exporter = std::sync::Arc::new(CallbackExporter::default());
+    let release_exporter = ReleaseCallbackExporter(exporter.clone());
+    let recorder = nac_core::telemetry::TelemetryRecorder::bounded(
+        exporter.clone(),
+        nac_core::telemetry::RuntimeMetadata::sqlite("callback-test", "source-test", 1, None, None),
+        4,
+    );
+    let _telemetry = nac_core::telemetry::install_test_recorder(recorder.clone());
+    let case_exporter = exporter.clone();
     let body_app = app.clone();
     let result = tokio::spawn(async move {
         let app = body_app;
@@ -125,6 +166,57 @@ async fn loopback_case(replace_accepted: bool) {
         assert_eq!(other.status(), StatusCode::CONFLICT);
         assert!(callback(&first_url).await.starts_with("HTTP/1.1 400"));
         assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
+        // A second invalid state stays on the same listener and cannot emit another rejection.
+        assert!(callback(&first_url).await.starts_with("HTTP/1.1 400"));
+        let pending = response_json(
+            get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
+        )
+        .await;
+        assert_eq!(pending["status"], "connecting");
+        let observed = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let events = case_exporter.events.lock().unwrap().clone();
+                if let Some(rejected) = events.iter().find(|e| {
+                    e.name == nac_core::telemetry::TelemetryName::McpOAuthCallbackStateRejected
+                }) {
+                    assert_eq!(events.iter().filter(|e| e.name == rejected.name).count(), 1);
+                    assert!(events.iter().any(|e| e.name
+                        == nac_core::telemetry::TelemetryName::McpOAuthCallbackListening
+                        && e.correlation.generation == rejected.correlation.generation));
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await;
+        assert!(observed.is_ok());
+        // Stall the actual exporter and overflow its queue. The remaining real callbacks,
+        // replacement abort/join, token completion and logout must still finish below.
+        *case_exporter.paused.lock().unwrap() = true;
+        nac_core::telemetry::emit_http_duration(
+            "/fixture-control",
+            Default::default(),
+            Duration::ZERO,
+            nac_core::telemetry::TelemetryOutcome::Ok,
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !case_exporter
+                .entered
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..100 {
+            nac_core::telemetry::emit_http_duration(
+                "/fixture-control",
+                Default::default(),
+                Duration::ZERO,
+                nac_core::telemetry::TelemetryOutcome::Ok,
+            );
+        }
 
         // Two simultaneous starts share one per-owner preparation boundary.
         let (guard, gate) = crate::mcp_api::callback_test_gate(
@@ -256,6 +348,11 @@ async fn loopback_case(replace_accepted: bool) {
             .is_ok(),
         "logout retained callback sockets"
     );
+    assert!(
+        recorder.stats().dropped > 0,
+        "stalled exporter did not exercise overflow"
+    );
+    drop(release_exporter);
     result.unwrap();
 }
 
