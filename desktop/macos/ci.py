@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 
-from ci_support import (COMPLETE_LOG_LIMIT, console_state, export_evidence, qualify_toolchain, redact_values,
+from ci_support import (COMPLETE_LOG_LIMIT, console_state, export_evidence, qualify_toolchain, redact_values, retain_path_failure_report,
                         require_console, require_terminal_evidence)
 from smoke import cleanup_failed_case
 from ci_qualifications import require_checkout, require_full_preview, require_workspace, require_rich_capture, select_target
@@ -533,6 +533,7 @@ def main():
                 finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
                                    crashes=crashes, started=started)
             else:
+                export_complete = False
                 try:
                     with using(path_budget.retention if path_budget else None):
                         count = 0
@@ -545,17 +546,23 @@ def main():
                         report['elapsed_seconds'] = round(time.time() - started, 3)
                         (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
                         export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup or paths, strict_json=paths, essential_first=paths)
+                        export_complete = True
                         if path_budget is not None:path_budget.require_success()
                 except BaseException as error:
                     report['result'] = 'failed'
-                    if paths:report['finalization_error'] = str(error)
+                    if paths:
+                        report['finalization_error'] = str(error)
+                        report['retention_complete'] = export_complete
                     try:
                         (raw / 'ci-report.json').write_text(json.dumps(report,indent=2)+'\n')
-                        if (output / 'ci-report.json').exists():
+                        if paths:
+                            retain_path_failure_report(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()])
+                        elif (output / 'ci-report.json').exists():
                             (output / 'ci-report.json').write_text(json.dumps({'result':'failed','retention_complete':False})+'\n')
-                    except BaseException:
-                        if not paths or (primary_info[1] is None and scope_error is None):
+                    except BaseException as retention_error:
+                        if not paths:
                             raise
+                        error.add_note('Failure report retention: ' + type(retention_error).__name__)
                     # Retention may fail too, but cannot replace the path
                     # owner's original exception or its failed scope exit.
                     if not paths or (primary_info[1] is None and scope_error is None):

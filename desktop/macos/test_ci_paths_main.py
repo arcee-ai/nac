@@ -9,12 +9,13 @@ from unittest.mock import patch
 import ci
 import ci_paths
 import ci_qualifications
+import ci_support
 from ci_paths_budget import BudgetExpired, active, using
 from test_ci_paths_budget import Clock
 
 
 class MainClockControls(unittest.TestCase):
-    def exercise(self, mode, *, export_error=False, ordinary=False):
+    def exercise(self, mode, *, export_error=False, ordinary=False, real_export=None):
         clock = Clock()
         budget = clock.budget()
         owner_error = RuntimeError('original owner failure')
@@ -50,7 +51,8 @@ class MainClockControls(unittest.TestCase):
             stack.enter_context(patch('ci.qualify_toolchain', return_value=True))
             stack.enter_context(patch('ci.console_state', return_value={}))
             stack.enter_context(patch('ci.require_console', return_value={}))
-            stack.enter_context(patch('ci.redact_values', return_value=[]))
+            secret = 'fresh-retention-secret-value'
+            stack.enter_context(patch('ci.redact_values', return_value=[(secret, '<redacted>')]))
             stack.enter_context(patch('ci.settle_apps', return_value={}))
             def reader(args, log):
                 if mode == 'scope-exit' and log.name == 'gui-reader.log':
@@ -71,20 +73,27 @@ class MainClockControls(unittest.TestCase):
                     if mode == 'owner-expiry':clock.to(budget.work.deadline)
                     if mode == 'retention-expiry':clock.to(budget.retention.deadline)
                     raise owner_error
-                return {}
+                return {'paths': {'source': sha, 'cases': [{'error': secret, 'receipt': 'fresh-path-receipt'}]}}
             stack.enter_context(patch('ci_paths.qualify', side_effect=qualify))
             def export(raw, out, *args, **kwargs):
                 self.assertEqual(active().kind if active() is not None else None,
                                  'retention' if not ordinary else None)
                 record = json.loads((raw / 'ci-report.json').read_text())
                 exports.append(record)
+                if real_export:
+                    if real_export == 'partial':
+                        (raw / 'zz-invalid.json').write_text('{invalid')
+                    ci_support.export_evidence(raw, out, *args, **kwargs)
+                    if real_export == 'late-latch':budget.fail('fresh late failure after complete export')
+                    if real_export == 'late-expiry':clock.to(budget.retention.deadline)
+                    return
                 (out / 'ci-report.json').write_text(json.dumps(record))
                 if export_error:raise retention_error
             stack.enter_context(patch('ci.export_evidence', side_effect=export))
             caught = None
             # A real enclosing context must be restored by both work and
             # retention owners; it is independent of the failed work latch.
-            with using(budget.retention if not ordinary and mode != 'retention-expiry' else None):
+            with using(budget.retention if not ordinary and mode != 'retention-expiry' and real_export != 'late-expiry' else None):
                 parent = active()
                 try:ci.main()
                 except BaseException as error:caught = error
@@ -108,6 +117,8 @@ class MainClockControls(unittest.TestCase):
             elif mode in ('scope-exit', 'end-zero', 'end-cross'):
                 self.assertIsInstance(caught, BudgetExpired)
             elif export_error:self.assertIs(caught, retention_error)
+            elif real_export in ('late-latch', 'late-expiry'):self.assertIsInstance(caught, BudgetExpired)
+            elif real_export == 'partial':self.assertIsInstance(caught, json.JSONDecodeError)
             else:self.assertIsNone(caught)
             if caught is not None:
                 self.assertEqual(raw_report['result'], 'failed')
@@ -117,6 +128,25 @@ class MainClockControls(unittest.TestCase):
             if mode in ('owner', 'owner-expiry', 'scope-exit'):
                 self.assertEqual(exports[0]['result'], 'failed')
             if export_error:self.assertEqual(raw_report['finalization_error'], str(retention_error))
+            if real_export:
+                self.assertEqual(public_report['harness_sha'], sha)
+                self.assertEqual(public_report['source_sha'], sha)
+                self.assertEqual(public_report['paths_clock'], raw_report['paths_clock'])
+                self.assertEqual(public_report['cleanup'], raw_report['cleanup'])
+                if mode != 'owner':
+                    self.assertEqual(public_report['paths']['cases'][0], {'error':'<redacted>', 'receipt':'fresh-path-receipt'})
+                self.assertEqual(public_report['retention_complete'], real_export in ('late-latch','late-expiry'))
+                self.assertNotIn(secret, (output / 'ci-report.json').read_text())
+                if caught is not None:self.assertEqual(public_report['result'], 'failed')
+                index = json.loads((output / 'export.json').read_text())
+                entry = next(row for row in index if row['file'] == 'ci-report.json')
+                import hashlib
+                self.assertEqual(entry['exported_sha256'], hashlib.sha256((output/'ci-report.json').read_bytes()).hexdigest())
+                self.assertEqual(entry['raw_source_sha256'], hashlib.sha256(raw_path.read_bytes()).hexdigest())
+                self.assertEqual(entry['bytes'], (output/'ci-report.json').stat().st_size)
+                if real_export == 'late-expiry':
+                    self.assertEqual(clock.mono(), budget.retention.deadline)
+                    self.assertIn('retention: original cutoff', budget.failed)
 
 
     def test_latched_owner_failure_still_exports_once(self):self.exercise('owner')
@@ -130,6 +160,10 @@ class MainClockControls(unittest.TestCase):
     def test_end_console_positive_remaining_clamps(self):self.exercise('end-clamp')
     def test_end_console_crossing_blocks_final_checkout(self):self.exercise('end-cross')
     def test_ordinary_initial_console_keeps_previous_no_timeout(self):self.exercise('ordinary', ordinary=True)
+    def test_late_latched_failure_preserves_complete_sanitized_report_and_index(self):self.exercise('normal', real_export='late-latch')
+    def test_late_retention_expiry_preserves_report_without_renewing_clock(self):self.exercise('normal', real_export='late-expiry')
+    def test_partial_export_preserves_sanitized_full_failure_report_and_index(self):self.exercise('normal', real_export='partial')
+    def test_partial_export_cannot_replace_original_owner_error(self):self.exercise('owner', real_export='partial')
 
 
 class CheckoutClockControls(unittest.TestCase):

@@ -28,7 +28,7 @@ def runner_environment():
 @contextmanager
 def relocation_directory(raw):
     """Never remove an input-launched bundle before ownership cleanup settles."""
-    path = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-'))
+    path = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-')).resolve()
     lease = {'path': path, 'safe_to_remove': True}
     try:
         yield lease

@@ -156,6 +156,72 @@ def export_evidence(raw, output, replacements, *, include_hashes=False, strict_j
     (output / 'export.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
+def retain_path_failure_report(raw, output, replacements):
+    """Repair only already exported failure metadata; never retry the export.
+
+    This bounded finally writer preserves the original retention-completeness
+    fact and prefix index. It acquires no actor or new work/retention allowance.
+    """
+    def read(path, limit):
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+                raise RuntimeError('Failure report metadata exceeds its regular-file bound')
+            data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise RuntimeError('Failure report metadata changed beyond its bound')
+        return data
+
+    def overwrite(path, data):
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise RuntimeError('Failure report destination is not regular')
+            stream.truncate(0)
+            stream.write(data)
+
+    target, index = output / 'ci-report.json', output / 'export.json'
+    if raw.resolve() != raw or output.resolve() != output:
+        raise RuntimeError('Failure report roots must remain canonical')
+    if not target.exists():
+        return  # No successfully exported report; never invent retained evidence.
+    read(target, MAX_FILE)  # Reject a substituted symlink/nonregular destination.
+    data = read(raw / 'ci-report.json', MAX_FILE)
+    json.loads(data)
+    text = data.decode('utf-8')
+    for original, replacement in replacements:
+        if original:
+            text = text.replace(original, replacement)
+    exported = text.encode()
+    if len(exported) > MAX_FILE:
+        raise RuntimeError('Redacted failure report exceeds evidence limit')
+    json.loads(exported)
+    manifest = json.loads(read(index, MAX_TOTAL)) if index.exists() else []
+    if type(manifest) is not list or any(type(row) is not dict or type(row.get('file')) is not str for row in manifest):
+        raise RuntimeError('Failure report prefix index is invalid')
+    # Include a final written-but-not-yet-indexed payload from a partial export.
+    total = len(exported)
+    for path in output.rglob('*'):
+        if path not in (target, index) and not path.is_symlink() and path.is_file():
+            total += path.stat().st_size
+            if total > MAX_TOTAL:
+                raise RuntimeError('Fixture evidence exceeds total upload limit')
+    if total > MAX_TOTAL:
+        raise RuntimeError('Fixture evidence exceeds total upload limit')
+    entry = dict(file='ci-report.json', bytes=len(exported), truncated=False,
+                 raw_source_sha256=hashlib.sha256(data).hexdigest(), raw_source_bytes=len(data),
+                 exported_sha256=hashlib.sha256(exported).hexdigest())
+    manifest = [entry if row['file'] == 'ci-report.json' else row for row in manifest]
+    if not any(row['file'] == 'ci-report.json' for row in manifest):
+        manifest.append(entry)
+    encoded_index = (json.dumps(manifest, indent=2) + '\n').encode()
+    if len(encoded_index) > MAX_TOTAL:
+        raise RuntimeError('Failure report prefix index exceeds evidence limit')
+    overwrite(target, exported)
+    overwrite(index, encoded_index)
+
+
 def redact_values():
     values = [(os.environ.get('HOME', ''), '<runner-home>'),
               (str(Path.cwd()), '<checkout>'), ('must-not-reach-engine', '<fixture-key>')]
