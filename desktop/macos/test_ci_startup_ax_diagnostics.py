@@ -68,7 +68,7 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
         mapper=source.split('// BEGIN AX FAILURE DIAGNOSTICS',1)[1].split('// END AX FAILURE DIAGNOSTICS',1)[0]
         for forbidden in ('localizedDescription','userInfo','String(describing:','AXUIElement','AppKit','FileHandle','CommandLine'):
             self.assertNotIn(forbidden,mapper)
-        self.assertIn('data.count < 2048',source)
+        self.assertIn('$0.count < 2048',source)
         self.assertIn('exit(1)',source)
 
 

@@ -47,6 +47,10 @@ a sticky UI rejection never authorizes input or a new window binding. Positive
 process history plus a fresh exact kernel identity may still support cleanup.
 Helper, app/engine, and profile settlement are separate proofs. Cleanup success
 cannot clear the original UI failure, infer completed input, or admit another case.
+The companion's single pre-refusal paired diagnostic is false-acceptance evidence
+only: it may reuse its canonical reader once under exact original ownership and
+pristine lifetime, then must terminate with the original extra-window refusal.
+Never retry AX after that diagnostic, infer CG-to-AX membership, or export field values.
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.

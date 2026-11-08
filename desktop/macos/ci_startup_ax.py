@@ -31,6 +31,37 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def paired_diagnostic(row):
+    """Closed false-acceptance projection; no AX facts become authority."""
+    import uuid
+    keys = {'schema', 'acceptance', 'cg_window_count', 'cg_window_ids', 'cg_ids_truncated',
+            'original_window_number', 'outcome', 'closing_valid'}
+    require(type(row) is dict and keys <= set(row) <= keys | {'canonical'}
+        and row['schema'] == 'nac342-ax-pre-refusal-paired-v1' and row['acceptance'] is False,
+        'AX paired diagnostic fields')
+    count, ids, original = row['cg_window_count'], row['cg_window_ids'], row['original_window_number']
+    require(type(count) is int and 2 <= count <= 128 and type(ids) is list
+        and len(ids) == min(count, 8) and all(type(n) is int and 0 < n < 2**64 for n in ids)
+        and len(set(ids)) == len(ids) and type(original) is int and ids[0] == original
+        and row['cg_ids_truncated'] is (count > len(ids)) and type(row['closing_valid']) is bool
+        and row['outcome'] in ('observed', 'reader_refused', 'closing_refused'), 'AX paired diagnostic inventory')
+    if row['outcome'] != 'observed':
+        require('canonical' not in row and (row['outcome'] != 'closing_refused' or not row['closing_valid']),
+                'AX paired refused projection')
+        return row
+    canonical = row.get('canonical')
+    require(row['closing_valid'] is True and type(canonical) is dict
+        and set(canonical) == {'surface', 'root_id', 'retained_root_equal', 'panel_id', 'go_to_id'}
+        and canonical['surface'] in ('form', 'panel', 'goTo') and canonical['retained_root_equal'] is True,
+        'AX paired canonical projection')
+    for key in ('root_id', 'panel_id', 'go_to_id'):
+        value = canonical[key]
+        expected = key == 'root_id' or (key == 'panel_id' and canonical['surface'] != 'form') or (key == 'go_to_id' and canonical['surface'] == 'goTo')
+        require((type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()) if expected else value is None,
+                'AX paired opaque identity')
+    return row
+
+
 def declaration(profile, helper, tests):
     check()
     folder = profile['root'] / 'ax-witness'
@@ -172,8 +203,9 @@ class AXCompanion:
                     row[key] = value
                 return row
             row = json.loads(data, object_pairs_hook=unique)
-            require(type(row) is dict and set(row) == {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
+            required = {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
                 'observed_uptime_ns', 'sequence', 'refusal_generation', 'binding'}
+            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired'}
                 and row['schema'] == 'nac342-ax-failure-diagnostic-v1' and row['acceptance'] is False
                 and row['stage'] in DIAGNOSTIC_STAGES and row['code'] in DIAGNOSTIC_CODES
                 and row['clock_basis'] == 'DispatchTime.uptimeNanoseconds', 'AX diagnostic fields')
@@ -184,6 +216,8 @@ class AXCompanion:
             expected = {key: self.config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha')}
             expected.update(configuration_sha256=digest(self.config_path), helper_sha256=self.declaration['helper_sha256'])
             require(type(row['binding']) is dict and row['binding'] == expected, 'AX diagnostic source binding')
+            if 'pre_refusal_paired' in row:
+                paired_diagnostic(row['pre_refusal_paired'])
             return row
         except BaseException:
             return None  # No new acceptance, stop, cleanup or failure precedence.
