@@ -122,120 +122,7 @@ struct StartupPaths {
 }
 // END PATH POLICY
 
-// BEGIN NATIVE FOLDER POLICY (compiled verbatim with inert projections)
-private enum StartupNativeFolderPolicy {
-    enum Surface: String { case form, panel, goTo }
 
-    static func surface(_ expected: Surface, windows: Int, rootSheets: Int,
-                        nestedSheets: Int, allSheets: Int) -> Bool {
-        guard windows == 1 else { return false }
-        switch expected {
-        case .form: return rootSheets == 0 && nestedSheets == 0 && allSheets == 0
-        case .panel: return rootSheets == 1 && nestedSheets == 0 && allSheets == 1
-        case .goTo: return rootSheets == 1 && nestedSheets == 1 && allSheets == 2
-        }
-    }
-
-    // Opaque public AX identities in the actor, inert scalar identities in tests.
-    // Accepted identities never rebind, even after a panel disappears.
-    struct Binding<Token: Equatable> {
-        private var root: Token?
-        private var panel: Token?
-        private var goTo: Token?
-
-        mutating func accept(_ surface: Surface, root candidateRoot: Token,
-                             panel candidatePanel: Token?, goTo candidateGoTo: Token?) -> Bool {
-            guard root == nil || root == candidateRoot else { return false }
-            switch surface {
-            case .form:
-                guard candidatePanel == nil && candidateGoTo == nil else { return false }
-            case .panel:
-                guard root != nil, let candidatePanel, candidateGoTo == nil,
-                      panel == nil || panel == candidatePanel else { return false }
-            case .goTo:
-                guard let candidatePanel, let candidateGoTo, panel == candidatePanel,
-                      goTo == nil || goTo == candidateGoTo else { return false }
-            }
-            root = candidateRoot
-            if let candidatePanel { panel = candidatePanel }
-            if let candidateGoTo { goTo = candidateGoTo }
-            return true
-        }
-    }
-
-    // Attachment stays valid while a Go to Folder sub-sheet obscures its parent.
-    // Interaction state is checked separately by usable, not by this geometry guard.
-    static func attached(exists: Bool, frame: CGRect, owner: CGRect) -> Bool {
-        let numbers = [frame.minX, frame.minY, frame.width, frame.height,
-                       owner.minX, owner.minY, owner.width, owner.height]
-        return exists && numbers.allSatisfy { $0.isFinite }
-            && !frame.isInfinite && !owner.isInfinite
-            && frame.size.width > 0 && frame.size.height > 0 && owner.size.width > 0 && owner.size.height > 0
-            && frame.intersects(owner)
-    }
-
-    static func usable(exists: Bool, enabled: Bool, hittable: Bool,
-                       frame: CGRect, owner: CGRect) -> Bool {
-        enabled && hittable && attached(exists: exists, frame: frame, owner: owner)
-    }
-
-    static func focused(pid: Int32, expectedPID: Int32, role: String, focused: Bool,
-                        frame: CGRect, expectedFrame: CGRect, value: String,
-                        expectedValue: String) -> Bool {
-        pid > 0 && pid == expectedPID && role == "AXTextField" && focused
-            && usable(exists: true, enabled: true, hittable: true, frame: frame, owner: expectedFrame)
-            && frame == expectedFrame && value == expectedValue
-    }
-
-    static func selected(_ label: String, workspace: String) -> Bool {
-        label == "Choose Working Folder: " + workspace
-    }
-}
-// END NATIVE FOLDER POLICY
-
-// BEGIN AX REFUSAL (inert extracted-source controls; never grants acceptance)
-private struct StartupAXRefusal {
-    private(set) var first: [String: Any]?
-    private(set) var terminal: [String: Any]?
-
-    private func geometry(_ frame: CGRect) -> [Any] {
-        [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height].map {
-            $0.isFinite ? NSNumber(value: Double($0)) : NSNull()
-        }
-    }
-
-    mutating func note(_ stage: String, attribute: String? = nil, code: Int32? = nil,
-                       count: Int? = nil, frame: CGRect? = nil, expected: CGRect? = nil) {
-        guard first == nil else { return }
-        var fact: [String: Any] = ["stage": stage]
-        if let attribute { fact["attribute"] = attribute }
-        if let code { fact["api_code"] = Int(code) }
-        if let count { fact["count"] = count }
-        if let frame { fact["frame"] = geometry(frame) }
-        if let expected { fact["expected_frame"] = geometry(expected) }
-        first = fact
-    }
-
-    mutating func stop(_ stage: String, count: Int? = nil) {
-        note(stage, count: count)
-        guard terminal == nil else { return }
-        terminal = ["stage": stage]
-        if let count { terminal?["count"] = count }
-    }
-
-    func record(binding: [String: Any]) -> [String: Any]? {
-        guard let first, let terminal else { return nil }
-        var result = binding
-        result["schema"] = "nac342-ax-refusal-v1"
-        result["first_observed_refusal"] = first
-        result["terminal_refusal"] = terminal
-        result["acceptance"] = false
-        guard let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
-              data.count <= 8192 else { return nil }
-        return result
-    }
-}
-// END AX REFUSAL
 
 // BEGIN ONBOARDING TITLE (compiled verbatim; no AX access in this decision)
 private enum StartupOnboardingTitle {
@@ -406,7 +293,7 @@ private enum StartupQueryDiagnostic {
 // END QUERY DIAGNOSTIC
 
 /// Proposed external public-XCTest actor. ALL-354 must include this source in
-/// an actual generated runner before it is runnable. No app bridge or file IPC.
+/// an actual generated runner. H owns the read-only AX receipt; no product bridge.
 final class StartupJourneys: XCTestCase {
     struct Fixture: Decodable {
         let schema, scenario, contract_baseline, source_sha, bundle_id: String
@@ -417,6 +304,7 @@ final class StartupJourneys: XCTestCase {
         let manifest_sha256, package_identity_sha256, engine_identity_sha256: String
         let engine_identity: Identity
         let environment: [String: String]
+        let ax_witness: StartupAXDeclaration?
     }
     struct Identity: Decodable, Equatable {
         let product_version, source_revision, track, build_id: String
@@ -586,167 +474,6 @@ final class StartupJourneys: XCTestCase {
         observations.append(try console())
     }
 
-    private struct AXIdentity: Equatable {
-        let element: AXUIElement
-        static func == (left: Self, right: Self) -> Bool { CFEqual(left.element, right.element) }
-    }
-
-    private var axRefusal = StartupAXRefusal()
-
-    private func axRead(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-        var value: CFTypeRef?
-        let timeout = AXUIElementSetMessagingTimeout(element, 1)
-        guard timeout == .success else {
-            axRefusal.note("attribute_timeout", attribute: name, code: timeout.rawValue); return nil
-        }
-        let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
-        guard status == .success else {
-            axRefusal.note("attribute_error", attribute: name, code: status.rawValue); return nil
-        }
-        if value == nil { axRefusal.note("attribute_missing", attribute: name) }
-        return value
-    }
-
-    private func axElements(_ element: AXUIElement, _ name: String) -> [AXUIElement]? {
-        guard let raw = axRead(element, name) else { return nil }
-        guard let values = raw as? [AnyObject] else {
-            axRefusal.note("elements_type", attribute: name); return nil
-        }
-        guard values.count <= 128 else {
-            axRefusal.note("elements_count", attribute: name, count: values.count); return nil
-        }
-        guard values.allSatisfy({ CFGetTypeID($0) == AXUIElementGetTypeID() }) else {
-            axRefusal.note("elements_member_type", attribute: name); return nil
-        }
-        return values.map { $0 as! AXUIElement }
-    }
-
-    private func axFrame(_ element: AXUIElement) -> CGRect? {
-        guard let position = axRead(element, kAXPositionAttribute), let size = axRead(element, kAXSizeAttribute) else { return nil }
-        guard CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else {
-            axRefusal.note("frame_value_type"); return nil
-        }
-        let p = position as! AXValue, s = size as! AXValue
-        var point = CGPoint.zero, dimensions = CGSize.zero
-        guard AXValueGetType(p) == .cgPoint, AXValueGetType(s) == .cgSize else {
-            axRefusal.note("frame_encoding"); return nil
-        }
-        guard AXValueGetValue(p, .cgPoint, &point) else {
-            axRefusal.note("frame_position_decode"); return nil
-        }
-        guard AXValueGetValue(s, .cgSize, &dimensions) else {
-            axRefusal.note("frame_size_decode"); return nil
-        }
-        return CGRect(origin: point, size: dimensions)
-    }
-
-    // Select the exact root, then only its direct public AXSheet children.
-    // Public AX handles pin sheet incarnations; a fresh same-shaped panel is
-    // not a continuation of this picker. Unsupported hierarchy fails closed.
-    // Diagnostics use only these original reads; no post-refusal AX polling.
-    private func axSurface(_ surface: StartupNativeFolderPolicy.Surface, pid: pid_t, frame: CGRect,
-                           binding: inout StartupNativeFolderPolicy.Binding<AXIdentity>) -> AXUIElement? {
-        axRefusal = StartupAXRefusal()
-        let app = AXUIElementCreateApplication(pid)
-        let timeout = AXUIElementSetMessagingTimeout(app, 1)
-        guard timeout == .success else {
-            axRefusal.note("application_timeout", code: timeout.rawValue)
-            axRefusal.stop("application_timeout"); return nil
-        }
-        guard let windows = axElements(app, kAXWindowsAttribute) else {
-            axRefusal.stop("windows_unavailable"); return nil
-        }
-        let roots = windows.filter {
-            guard axRead($0, kAXRoleAttribute) as? String == "AXWindow" else {
-                axRefusal.note("root_role_or_type"); return false
-            }
-            guard let observed = axFrame($0) else { return false }
-            guard observed == frame else {
-                axRefusal.note("root_frame_mismatch", frame: observed, expected: frame); return false
-            }
-            return true
-        }
-        guard roots.count == 1 else {
-            axRefusal.stop("root_matches", count: roots.count); return nil
-        }
-        let root = roots[0]
-        func sheets(_ owner: AXUIElement) -> [AXUIElement]? {
-            guard let children = axElements(owner, kAXChildrenAttribute) else { return nil }
-            var result: [AXUIElement] = []
-            for child in children {
-                guard let role = axRead(child, kAXRoleAttribute) as? String else {
-                    axRefusal.note("child_role_type"); return nil
-                }
-                if role == "AXSheet" { result.append(child) }
-            }
-            return result
-        }
-        guard let rootSheets = sheets(root) else { axRefusal.stop("root_children"); return nil }
-        guard rootSheets.count == (surface == .form ? 0 : 1) else {
-            axRefusal.stop("root_sheet_count", count: rootSheets.count); return nil
-        }
-        let panel = rootSheets.first
-        let nested: [AXUIElement]
-        if let panel {
-            guard let children = sheets(panel) else { axRefusal.stop("panel_children"); return nil }
-            nested = children
-        } else { nested = [] }
-        guard nested.count == (surface == .goTo ? 1 : 0) else {
-            axRefusal.stop("nested_sheet_count", count: nested.count); return nil
-        }
-        let goTo = nested.first
-        let allowed = [root, panel, goTo].compactMap { $0 }
-        for element in allowed {
-            var owner: pid_t = 0
-            let status = AXUIElementGetPid(element, &owner)
-            guard status == .success && owner == pid else {
-                axRefusal.note(status == .success ? "pid_mismatch" : "pid_error", code: status.rawValue)
-                axRefusal.stop("owned_pid"); return nil
-            }
-        }
-        guard windows.allSatisfy({ window in allowed.contains { CFEqual(window, $0) } }) else {
-            axRefusal.stop("foreign_window"); return nil
-        }
-        guard binding.accept(surface, root: AXIdentity(element: root),
-            panel: panel.map { AXIdentity(element: $0) }, goTo: goTo.map { AXIdentity(element: $0) }) else {
-            axRefusal.stop("incarnation_binding"); return nil
-        }
-        return goTo ?? panel ?? root
-    }
-
-    // Public, read-only AX probe scoped to the already admitted app PID. No
-    // actions, attribute writes, trust prompts, KVC or private XCTest attributes.
-    // macOS has no public XCUIElement.hasFocus property. Missing AX admission,
-    // unsupported attributes or a different focused element fail closed.
-    @MainActor
-    private func focusedGoToField(_ field: XCUIElement, pid: pid_t, sheet: AXUIElement) -> Bool {
-        let app = AXUIElementCreateApplication(pid)
-        guard AXUIElementSetMessagingTimeout(app, 1) == .success else { return false }
-        guard let value = axRead(app, kAXFocusedUIElementAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
-        let focused = value as! AXUIElement // Type checked before CF bridging.
-        var owner: pid_t = 0
-        guard AXUIElementGetPid(focused, &owner) == .success,
-              let role = axRead(focused, kAXRoleAttribute) as? String,
-              let flag = axRead(focused, kAXFocusedAttribute) as? NSNumber,
-              CFGetTypeID(flag) == CFBooleanGetTypeID(),
-              let text = axRead(focused, kAXValueAttribute) as? String,
-              let expected = field.value as? String, let frame = axFrame(focused) else { return false }
-        var ancestor = focused
-        var attached = false
-        for _ in 0..<16 {
-            if CFEqual(ancestor, sheet) { attached = true; break }
-            guard let parent = axRead(ancestor, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
-            let next = parent as! AXUIElement
-            if CFEqual(next, ancestor) { break }
-            ancestor = next
-        }
-        guard attached else { return false }
-        return StartupNativeFolderPolicy.focused(pid: owner, expectedPID: pid, role: role,
-            focused: flag.boolValue, frame: frame,
-            expectedFrame: field.frame, value: text, expectedValue: expected)
-    }
-
     @MainActor
     private func queryDiagnostic(_ ui: XCUIApplication, guardTarget: () throws -> Void,
                                  binding: [String: Any], scenario: String) throws {
@@ -883,7 +610,17 @@ final class StartupJourneys: XCTestCase {
         var operations: [String] = []
         let rootWindow = ui.windows.element(boundBy: 0)
         var folderSurface: StartupNativeFolderPolicy.Surface = .form
-        var folderBinding = StartupNativeFolderPolicy.Binding<AXIdentity>()
+        let axClient: StartupAXClient?
+        if fixture.scenario == "configuredLocal" {
+            let declaration = try XCTUnwrap(fixture.ax_witness, "External AX declaration missing")
+            try require(declaration.path == fixture.fixture_root + "/ax-witness/receipt.json"
+                && declaration.nonce.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+                && Set(declaration.support_sha256.keys) == ["StartupAXGuard.swift", "StartupAXReceipt.swift"],
+                "External AX declaration differs")
+            axClient = StartupAXClient(declaration, configurationSHA: digest(bytes),
+                pid: running.processIdentifier, launch: launch.timeIntervalSince1970,
+                window: number, executable: paths.native.path)
+        } else { axClient = nil }
         var axRefusalEmitted = false
         func panel() throws -> XCUIElement {
             let sheets = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
@@ -902,7 +639,7 @@ final class StartupJourneys: XCTestCase {
                 "Owned Go to Folder field is not actionable")
             return field
         }
-        func validateFolderSurface() throws {
+        func validateFolderSurface(_ ticket: StartupAXClient.Ticket) throws {
             let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
             let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
@@ -919,32 +656,33 @@ final class StartupJourneys: XCTestCase {
                         "Owned folder panel is not actionable")
                 }
             }
-            let observedAX = axSurface(folderSurface, pid: running.processIdentifier,
-                frame: rootWindow.frame, binding: &folderBinding)
-            if observedAX == nil && !axRefusalEmitted {
-                axRefusalEmitted = true
-                if let record = axRefusal.record(binding: ["scenario": fixture.scenario,
-                    "surface": folderSurface.rawValue, "source_sha": fixture.source_sha,
-                    "test_source_sha": fixture.test_source_sha, "harness_sha": fixture.harness_sha,
-                    "startup_source_sha256": fixture.startup_source_sha256,
-                    "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
-                    "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number]) {
-                    // Retain before XCTUnwrap; diagnostic failure never replaces the refusal.
-                    try? attachment(record, name: "nac342-ax-refusal-v1-" + fixture.scenario)
-                }
-            }
-            let ownedAX = try XCTUnwrap(observedAX, "Public AX cannot bind the exact owned folder surface")
+            let field: (CGRect, String)?
             if folderSurface == .goTo {
-                let field = try goToField()
-                try require(focusedGoToField(field, pid: running.processIdentifier, sheet: ownedAX),
-                    "Public AX cannot prove the owned Go to Folder field has keyboard focus")
-            }
+                let target = try goToField()
+                field = (target.frame, try XCTUnwrap(target.value as? String))
+            } else { field = nil }
+            _ = try XCTUnwrap(axClient).consume(ticket, surface: folderSurface, rootFrame: rootWindow.frame, field: field)
         }
         func guardTarget() throws {
-            try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
-            try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
-                "Frozen fixture configuration changed")
-            if fixture.scenario == "configuredLocal" { try validateFolderSurface() }
+            do {
+                let ticket = try axClient?.begin()
+                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                    "Frozen fixture configuration changed")
+                if let ticket { try validateFolderSurface(ticket) }
+            } catch {
+                if !axRefusalEmitted, let data = axClient?.failureData,
+                   var record = try? json(data) {
+                    axRefusalEmitted = true
+                    record.merge(["scenario": fixture.scenario, "surface": folderSurface.rawValue,
+                        "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                        "harness_sha": fixture.harness_sha, "startup_source_sha256": fixture.startup_source_sha256,
+                        "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
+                        "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number]) { _, new in new }
+                    try? attachment(record, name: "nac342-ax-refusal-v1-" + fixture.scenario)
+                }
+                throw error
+            }
         }
         func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
                       action: () throws -> Void) throws {
@@ -1086,6 +824,17 @@ final class StartupJourneys: XCTestCase {
         add(imageAttachment)
         captured = true
         try guardTarget()
+        if let axClient {
+            try require(axClient.evidence.count == 26, "External AX guard trace incomplete")
+            let rows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.evidence))
+            try attachment(["schema": "nac342-ax-guards-v1", "configuration_sha256": digest(bytes),
+                "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                "harness_sha": fixture.harness_sha, "app_pid": Int(running.processIdentifier),
+                "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number,
+                "helper_sha256": axClient.declaration.helper_sha256,
+                "support_sha256": axClient.declaration.support_sha256, "rows": rows],
+                name: "nac342-ax-guards-v1-configuredLocal")
+        }
         let expectedPrivateFailure: [String: Any] = fixture.scenario == "futureStore"
             ? ["kind": "failed", "version": 1, "code": "store_schema_incompatible", "stage": "startup"] : [:]
         try attachment(["schema": fixture.schema, "scenario": fixture.scenario,

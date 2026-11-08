@@ -488,6 +488,24 @@ def fixture():
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_external_ax_declaration_is_closed_canonical_and_configured_only(self):
+        config, receipt = fixture()
+        config['scenario'] = 'configuredLocal'
+        declaration = dict(path=config['fixture_root'] + '/ax-witness/receipt.json', nonce='a' * 64,
+            helper_path='/private/owned-helper', helper_sha256='b' * 64, owner_pid=123, deadline_ns='1000000000',
+            support_sha256={'StartupAXGuard.swift': 'c' * 64, 'StartupAXReceipt.swift': 'd' * 64})
+        config['ax_witness'] = declaration
+        self.assertFalse(validate(config, receipt)['actual_ui_run'])
+        for change in [{'path': config['home'] + '/receipt.json'}, {'nonce': 'a' * 63}, {'owner_pid': True},
+                       {'owner_pid': 2**31}, {'deadline_ns': '01'}, {'deadline_ns': '١'}, {'deadline_ns': '0'},
+                       {'deadline_ns': str(2**64)}, {'support_sha256': None}, {'support_sha256': {}},
+                       {'support_sha256': {'StartupAXGuard.swift': 'x' * 64, 'StartupAXReceipt.swift': 'd' * 64}},
+                       {'extra': 'unowned'}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate({**config, 'ax_witness': {**declaration, **change}}, receipt)
+        with self.assertRaises(ValueError):
+            validate({**config, 'scenario': 'onboarding'}, receipt)
+
     def test_future_recovery_matches_shipped_p9_sentence(self):
         shipped = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. '
                    'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
@@ -757,7 +775,7 @@ class NativeFolderPolicyTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-panel-policy-')
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name)
-        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        source = Path(__file__).with_name('StartupAXGuard.swift').read_text()
         source = source.split('// BEGIN NATIVE FOLDER POLICY', 1)[1].split('// END NATIVE FOLDER POLICY', 1)[0]
         source = source[source.index('\n') + 1:]
         driver = r"""
@@ -917,21 +935,24 @@ class AXRefusalTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-ax-refusal-')
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name)
-        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        source = Path(__file__).with_name('StartupAXGuard.swift').read_text()
         def block(start, end):
             value = source.split(start, 1)[1].split(end, 1)[0]
             return value[value.index('\n') + 1:]
         policy = block('// BEGIN NATIVE FOLDER POLICY', '// END NATIVE FOLDER POLICY')
         diagnostic = block('// BEGIN AX REFUSAL', '// END AX REFUSAL')
-        methods = source[source.index('    private struct AXIdentity:'):source.index('    // Public, read-only AX probe')]
+        identity = block('// BEGIN AX IDENTITY', '// END AX IDENTITY')
+        methods = source[source.index('    private typealias AXIdentity ='):source.index('    func observe(pid:')]
         # All public AX names below are inert local stubs, never framework calls.
         stubs = r"""
 typealias AXUIElement = CFString
 typealias AXValue = CFArray
-enum AXError: Int32 { case success = 0, failure = -25204 }
+enum AXError: Int32 { case success = 0, failure = -25204; static var cannotComplete: AXError { .failure } }
 enum AXValueType: Int { case cgPoint = 1, cgSize = 2, illegal = 0 }
 let kAXWindowsAttribute = "AXWindows", kAXChildrenAttribute = "AXChildren"
 let kAXRoleAttribute = "AXRole", kAXPositionAttribute = "AXPosition", kAXSizeAttribute = "AXSize"
+let kAXFocusedUIElementAttribute = "AXFocusedUIElement", kAXFocusedAttribute = "AXFocused"
+let kAXValueAttribute = "AXValue", kAXParentAttribute = "AXParent"
 var attributes = [String: [String: AnyObject]]()
 var mode = "", calls = [String]()
 func token(_ name: String) -> CFString { name as CFString }
@@ -952,7 +973,7 @@ func AXUIElementCopyAttributeValue(_ element: AXUIElement, _ name: CFString,
     return .success
 }
 func AXUIElementGetPid(_ element: AXUIElement, _ result: UnsafeMutablePointer<pid_t>) -> AXError {
-    calls.append("pid:" + (element as String)); result.pointee = mode == "pid" ? 124 : 123
+    calls.append("pid:" + (element as String)); result.pointee = ["pid", "focus_pid"].contains(mode) ? 124 : 123
     return .success
 }
 func AXValueGetType(_ value: AXValue) -> AXValueType {
@@ -971,6 +992,19 @@ func prepare(_ selected: String) {
     attributes = ["app": ["AXWindows": [token("root")] as NSArray],
                   "root": ["AXRole": "AXWindow" as NSString, "AXPosition": value(1, 10, 20),
                            "AXSize": value(2, 100, 30), "AXChildren": [] as NSArray]]
+    if mode.hasPrefix("focus_") {
+        attributes["app"]?["AXFocusedUIElement"] = token("field")
+        attributes["field"] = ["AXRole": "AXTextField" as NSString, "AXFocused": kCFBooleanTrue,
+            "AXValue": "/owned/workspace with spaces" as NSString, "AXPosition": value(1,10,20),
+            "AXSize": value(2,100,30), "AXParent": token("goTo")]
+        if mode == "focus_cycle" { attributes["field"]?["AXParent"] = token("field") }
+        if mode == "focus_foreign_ancestor" { attributes["field"]?["AXParent"] = token("foreign") }
+        if mode == "focus_false" { attributes["field"]?["AXFocused"] = kCFBooleanFalse }
+        if mode == "focus_number" { attributes["field"]?["AXFocused"] = 1 as NSNumber }
+        if mode == "focus_role" { attributes["field"]?["AXRole"] = "AXSecureTextField" as NSString }
+        if mode == "focus_zero" { attributes["field"]?["AXSize"] = value(2,0,30) }
+        if mode == "focus_value_type" { attributes["field"]?["AXValue"] = 1 as NSNumber }
+    }
     switch mode {
     case "missing": attributes["app"]?.removeValue(forKey: "AXWindows")
     case "type": attributes["app"]?["AXWindows"] = 1 as NSNumber
@@ -1001,6 +1035,9 @@ func prepare(_ selected: String) {
 """
         driver = r"""
     func run() -> [String: Any] {
+        if mode.hasPrefix("focus_") {
+            return ["accepted": focusedGoToField(pid:123, sheet:token("goTo")) != nil]
+        }
         var binding = StartupNativeFolderPolicy.Binding<AXIdentity>()
         let surface: StartupNativeFolderPolicy.Surface = ["goTo_valid", "nested_missing"].contains(mode) ? .goTo
             : ["panel_valid", "nested_unexpected"].contains(mode) ? .panel : .form
@@ -1028,9 +1065,9 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows)
 """
         swift = root / 'main.swift'
         swift.write_text('import Foundation\nimport CoreFoundation\nimport CoreGraphics\nimport Darwin\n'
-                         + stubs + policy + diagnostic + '\nprivate final class Probe {\n' + methods + driver)
+                         + stubs + policy + diagnostic + identity + '\nprivate final class Probe {\n' + methods + driver)
         cls.binary = root / 'proof'
-        result = subprocess.run(['swiftc', '-swift-version', '5', str(swift), '-o', str(cls.binary)],
+        result = subprocess.run(['swiftc', '-swift-version', '5', str(Path(__file__).with_name('StartupAXReceipt.swift')), str(swift), '-o', str(cls.binary)],
                                 capture_output=True, text=True, timeout=90)
         if result.returncode:
             raise AssertionError(result.stderr)
@@ -1062,6 +1099,11 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows)
         self.assertEqual(rows[1]['record']['terminal_refusal']['count'], 2)
         self.assertEqual(rows[2]['record']['first_observed_refusal']['frame'], [11, 20, 100, 30])
         self.assertEqual(rows[3]['record']['terminal_refusal']['stage'], 'foreign_window')
+
+    def test_focused_field_requires_typed_flag_role_pid_and_real_ancestor_walk(self):
+        modes = ['focus_valid', 'focus_cycle', 'focus_foreign_ancestor', 'focus_false', 'focus_number',
+                 'focus_role', 'focus_zero', 'focus_value_type', 'focus_pid']
+        self.assertEqual([r['accepted'] for r in self.run_modes(modes)], [True] + [False] * (len(modes) - 1))
 
     def test_panel_and_goTo_hierarchy_acceptance_and_nested_refusals_stay_distinct(self):
         rows = self.run_modes(['panel_valid', 'goTo_valid', 'nested_unexpected', 'nested_missing'])

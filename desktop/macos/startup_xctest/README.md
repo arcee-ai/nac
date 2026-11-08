@@ -1,3 +1,19 @@
+# Current private AX witness source unit
+
+The canonical test target now consists of StartupJourneys.swift plus
+StartupAXGuard.swift and StartupAXReceipt.swift. H compiles the two shared files
+alongside its owned finite companion; the Runner only reads its private receipt.
+[AX-WITNESS-CONTRACT.md](AX-WITNESS-CONTRACT.md) defines the bounds and refusal
+semantics. This supersedes the historical four-file/one-Swift supplier statements
+below for a new explicit Q nomination. No app/runtime source is supplied.
+
+The required macOS policy lane retains the six geometry and three original AX
+diagnostic controls, adds an ancestry control and five whole-client inert tests,
+and rejects skips. Run the new controls with
+`NAC342_AX_WITNESS_PROOF=1 python3 -B -m unittest discover -s desktop/macos/startup_xctest -p test_ax_witness.py -v`.
+The Swift test driver invokes fake receipt/input ports, never the live AX reader.
+Complete helper compilation is additional source evidence, not SDK/native proof.
+
 # Ordinary startup XCTest proposal (ALL-342)
 
 Preparation only. `StartupJourneys.swift` is not included in an Xcode target in
