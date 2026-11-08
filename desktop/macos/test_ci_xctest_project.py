@@ -155,6 +155,8 @@ class ProjectSelectionTests(unittest.TestCase):
         source = root / STARTUP
         source.parent.mkdir(parents=True)
         source.write_text('// Synthetic external startup test, never app/runtime evidence.\n')
+        for name in ('StartupAXGuard.swift', 'StartupAXReceipt.swift'):
+            source.with_name(name).write_text('// Inert canonical support source\n')
         revision = self.initialize(root)
         arguments = {'startup_root': root, 'startup_sha': revision,
                      'startup_source_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
@@ -164,6 +166,9 @@ class ProjectSelectionTests(unittest.TestCase):
         text = (Path(result['project']) / 'project.pbxproj').read_text()
         self.assertIn('path = "' + str(source) + '";', text)
         self.assertIn('name = NACStartupUITests;', text)
+        for name in ('StartupAXGuard.swift', 'StartupAXReceipt.swift'):
+            self.assertIn('path = \"' + str(source.with_name(name)) + '\";', text)
+            self.assertIn(str(source.with_name(name)), result['receipt']['sources'])
         self.assertNotIn('NACPerformanceUITests', text)
         self.assertEqual(result['receipt']['startup_sha'], revision)
         self.assertEqual(result['receipt']['startup_source_path'], str(source))

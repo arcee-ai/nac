@@ -123,7 +123,8 @@ jobs:
           ref: ${{ steps.policy-source.outputs.revision }}
           path: .startup-panel-q
           persist-credentials: false
-      - name: Require six geometry and three AX diagnostic controls without skips
+      - name: Require geometry, AX diagnostic and whole-client witness controls without skips
         env:
           NAC342_SWIFT_PANEL_PROOF: "1"
+          NAC342_AX_WITNESS_PROOF: "1"
         run: python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel

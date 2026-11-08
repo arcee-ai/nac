@@ -53,6 +53,23 @@ class StartupAttachmentTests(unittest.TestCase):
         rows.extend([(f'nac342-ordinary-{case}', png),
                      (f'nac342-ordinary-v1-{case}', json.dumps(observation).encode()),
                      (f'nac342-cleanup-v1-{case}', json.dumps(cleanup).encode())])
+        if case == 'configuredLocal':
+            config['ax_witness'] = {'helper_sha256': 'e' * 64, 'support_sha256': {'StartupAXGuard.swift': 'f' * 64}}
+            phases = ['form','form','form','form','form','panel','panel','goTo','goTo','goTo','goTo','goTo',
+                      'goTo','panel','panel','form','form','form','form','form','form','form','form','form','form','form']
+            facts = []
+            for i, phase in enumerate(phases, 1):
+                fact = dict(sequence=str(i), entered_ns=str(i * 100), began_ns=str(i * 100 + 1),
+                            ended_ns=str(i * 100 + 2), consumed_ns=str(i * 100 + 3), surface=phase,
+                            root_id='00000000-0000-0000-0000-000000000001', focus_checked=phase == 'goTo')
+                if phase != 'form': fact['panel_id'] = '00000000-0000-0000-0000-000000000002'
+                if phase == 'goTo': fact['go_to_id'] = '00000000-0000-0000-0000-000000000003'
+                facts.append(fact)
+            proof = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha')}
+            proof.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
+            proof.update(schema='nac342-ax-guards-v1', configuration_sha256=config_hash,
+                         helper_sha256=config['ax_witness']['helper_sha256'], support_sha256=config['ax_witness']['support_sha256'], rows=facts)
+            rows.insert(len(rows) - 2, ('nac342-ax-guards-v1-configuredLocal', json.dumps(proof).encode()))
         return config, config_hash, witness, rows
 
     def test_ax_refusal_retains_before_missing_cleanup_but_never_qualifies(self):

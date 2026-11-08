@@ -1,0 +1,120 @@
+"""Inert companion/process-port controls; no subprocess, AX, app or signal."""
+import json
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from ci_startup_ax import AXCompanion, guard_phases, require_guard_proof
+
+
+class CompanionControls(unittest.TestCase):
+    def exercise(self, *, wrong_nonce=False, unknown=False, fail=False, metadata_loss=False):
+        events=[]
+        with tempfile.TemporaryDirectory(prefix='nac-ax-parent-inert-') as temporary:
+            root=Path(temporary).resolve(); private=root/'ax';private.mkdir(mode=0o700)
+            config_path=root/'config.json';config_path.write_text('{}')
+            helper=root/'helper';helper.write_text('inert; never executed')
+            identity=dict(pid=123,parent=os.getpid(),uid=os.getuid(),start_seconds=1,start_microseconds=2,executable=str(helper))
+            declaration=dict(path=str(private/'receipt.json'),nonce='a'*64,helper_path=str(helper),helper_sha256='b'*64,
+                             support_sha256={'inert':'c'*64},owner_pid=os.getpid(),deadline_ns=str(int((time.monotonic()+60)*1e9)))
+            witness=SimpleNamespace(ready=True,failure=None)
+            begun=threading.Event()
+            primary=ValueError('inert original helper failure')
+            def owned(argv,log,cap,**kwargs):
+                events.append('owned-start')
+                if fail: raise primary
+                row=dict(schema='nac342-ax-witness-v1',status='waiting',sequence='0',trusted=True,
+                         nonce='wrong' if wrong_nonce else declaration['nonce'],configuration_sha256='d'*64,
+                         helper_sha256=declaration['helper_sha256'],support_sha256=declaration['support_sha256'],
+                         case_deadline_ns=argv[-1],helper=identity)
+                Path(declaration['path']).write_text(json.dumps(row));Path(declaration['path']).chmod(0o400)
+                begun.set()
+                until=time.monotonic()+2
+                while not Path(declaration['path']+'.stop').exists() and time.monotonic()<until:
+                    if kwargs['abort'](): raise RuntimeError('inert metadata loss')
+                    time.sleep(.005)
+                log.write_text('inert')
+                log.with_name(log.name+'.ownership.json').write_text(json.dumps(dict(accepted=True,reaped=not unknown,
+                    drain_settled=True,unknown=unknown,teardown_error=None)))
+                events.append('owned-reaped')
+            owner=AXCompanion(witness,{'ax_witness':declaration},config_path,helper,root,owned)
+            with patch('ci_startup_ax.digest',return_value='d'*64),patch('ci_startup_ax.native_identity',return_value=identity):
+                # Helper hash is independent of configuration digest in this inert port.
+                if wrong_nonce or fail:
+                    with self.assertRaises(RuntimeError):owner.start()
+                else:owner.start()
+                if metadata_loss:
+                    witness.failure='inert stream failure'
+                    self.assertTrue(begun.wait(.2))
+                    owner.finished.wait(.5)
+                    self.assertEqual(owner.failure,'ax_companion_unavailable')
+                if unknown or fail or metadata_loss:
+                    with self.assertRaises(BaseException) as raised:owner.stop()
+                    if fail:self.assertIs(raised.exception,primary)
+                else:
+                    proof=owner.stop();self.assertTrue(proof['owned_processes_settled'])
+                self.assertFalse(owner.thread.is_alive())
+            return events
+
+    def test_positive_owned_completion_and_no_target_signal(self):
+        self.assertEqual(self.exercise(),['owned-start','owned-reaped'])
+
+    def test_wrong_readiness_nonce_prevents_next_phase_and_still_settles(self):
+        self.assertEqual(self.exercise(wrong_nonce=True),['owned-start','owned-reaped'])
+
+    def test_unknown_child_settlement_never_qualifies(self):
+        self.exercise(unknown=True)
+
+    def test_original_helper_failure_survives_stop(self):
+        self.exercise(fail=True)
+
+    def test_metadata_failure_aborts_companion_without_blocking_metadata_port(self):
+        self.exercise(metadata_loss=True)
+
+
+class GuardProofControls(unittest.TestCase):
+    def fixture(self):
+        config=dict(source_sha='a'*40,test_source_sha='b'*40,harness_sha='c'*40,
+                    ax_witness=dict(helper_sha256='d'*64,support_sha256={}))
+        witness=dict(app_pid=1,app_launch_epoch=2.5,window_number=3)
+        row={k:config[k] for k in ['source_sha','test_source_sha','harness_sha']}
+        row.update(witness,schema='nac342-ax-guards-v1',configuration_sha256='e'*64,
+                   helper_sha256='d'*64,support_sha256={},rows=[])
+        for i,phase in enumerate(guard_phases(),1):
+            entry=dict(sequence=str(i),entered_ns=str(i*100),began_ns=str(i*100+1),ended_ns=str(i*100+2),
+                consumed_ns=str(i*100+3),surface=phase,root_id='00000000-0000-0000-0000-000000000001',focus_checked=phase=='goTo')
+            if phase!='form':entry['panel_id']='00000000-0000-0000-0000-000000000002'
+            if phase=='goTo':entry['go_to_id']='00000000-0000-0000-0000-000000000003'
+            row['rows'].append(entry)
+        return config,witness,row
+
+    def test_exact_26_guards_and_all_existing_11_action_phases(self):
+        config,witness,row=self.fixture()
+        self.assertEqual(len(row['rows']),26)
+        self.assertEqual(guard_phases(),['form','form','form','form','form','panel','panel','goTo','goTo','goTo','goTo','goTo',
+                                      'goTo','panel','panel','form','form','form','form','form','form','form','form','form','form','form'])
+        self.assertIs(require_guard_proof(row,config,'e'*64,witness),row)
+
+    def test_missing_stale_replayed_replaced_private_or_wrong_source_proof_is_refused(self):
+        import copy
+        config,witness,original=self.fixture()
+        for mode in ['count','source','stale','replay','replacement','value_dump','focus','phase']:
+            row=copy.deepcopy(original)
+            if mode=='count':row['rows'].pop()
+            if mode=='source':row['test_source_sha']='0'*40
+            if mode=='stale':row['rows'][1]['began_ns']=row['rows'][1]['entered_ns']
+            if mode=='replay':row['rows'][1]['sequence']=row['rows'][0]['sequence']
+            if mode=='replacement':row['rows'][-1]['root_id']='00000000-0000-0000-0000-000000000009'
+            if mode=='value_dump':row['rows'][0]['private_value']='must-not-retain'
+            if mode=='focus':row['rows'][7]['focus_checked']=False
+            if mode=='phase':row['rows'][7]['surface']='form'
+            with self.subTest(mode=mode),self.assertRaises((RuntimeError,ValueError)):
+                require_guard_proof(row,config,'e'*64,witness)
+
+
+if __name__=='__main__':unittest.main()

@@ -16,15 +16,20 @@ from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
-TEST_SOURCE = '057adebe72355fb7e95dc98b821c0a3de17a1167'
+TEST_SOURCE = 'cc7500b1621a21d8c68c4b3636344e12ff532dc2'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': '6ecdc1bc67285f553966941499917133d9ca75ed60d6154c02ed9e19f0d423ca',
-    'StartupJourneys.swift': 'dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518',
-    'contract.py': '1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86',
-    'test_contract.py': '689117ef0432d93fce4be6525359bb5ea88709bdb2afee6f42889b108d31a438',
+    'README.md': 'f9900d12ef226b0da00d3b4395e88b5f957b0d38cb7bd03597df45b843032fd8',
+    'StartupJourneys.swift': '7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8',
+    'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
+    'test_contract.py': '493457530363e6992941960a6de2911c65da463db7452deb17f3af24443f916d',
+    'StartupAXGuard.swift': '3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18',
+    'StartupAXReceipt.swift': '565da16e6311e9367973c70dca4b485475cc380fa34c2d46a87eea7ec98bf345',
+    'AX-WITNESS-CONTRACT.md': '81e2e7f08d71c8c46ae45350a8d2b1bfe756b9fb295bd3361a716cf2690255ab',
+    'test_ax_witness.py': '5832469cec1b4ef6661244dcc0102971d6b47dc044fce344ba31ed2d70477452',
+    'AGENTS.md': '074ff7d390c45a739b80048cf155274607ba3db5da74183cd5e4f673286a20fe',
 }
 FUTURE_MESSAGE = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
                   'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
@@ -49,7 +54,7 @@ def test_contract(root):
     for name, expected in TEST_FILES.items():
         file = canonical(directory / name)
         if not file.is_file() or hashlib.sha256(bounded_file(file, 256 * 1024)).hexdigest() != expected:
-            raise RuntimeError('Nominated four-file startup source differs')
+            raise RuntimeError('Nominated startup source inventory differs')
     spec = importlib.util.spec_from_file_location('nac342_nominated_startup_contract', directory / 'contract.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -137,7 +142,7 @@ def require_integrity(profile, before):
     return {'protected_before': before, 'protected_after': after, 'no_alternate_database': True}
 
 
-def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha, *, run=None, directory=None):
+def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha, *, run=None, directory=None, ax_witness=None):
     """Host-side only; public XCTest reads the resulting frozen file and bundle."""
     product_root = canonical(product_root)
     require_checkout(product_root, PRODUCT)
@@ -168,6 +173,8 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
         config[key] = proof[key]
     for key in ('native_sha256', 'engine_sha256', 'info_plist_sha256'):
         config[key] = proof['post_sign_receipt'][key]
+    if ax_witness is not None:
+        config['ax_witness'] = ax_witness
     admission = package_contract(contract, 'validate_normal_package', [config, str(manifest), str(product_root)],
         dict(product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha),
         tests=test_root, directory=directory, name='package-configuration', run=run)
