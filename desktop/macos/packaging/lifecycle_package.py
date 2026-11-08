@@ -7,6 +7,7 @@ PackageIdentity into this bundle. This format is test-only, not distribution.
 import hashlib
 import json
 import plistlib
+import re
 from pathlib import Path, PurePosixPath
 import stat
 import subprocess
@@ -149,12 +150,15 @@ def build_lifecycle(args):
 
 
 def verify_lifecycle_files(manifest, directory, source_root=None):
-    require(manifest.get('schema_version') == 1 and manifest.get('role') == ROLE,
+    require(type(manifest.get('schema_version')) is int and manifest['schema_version'] == 1
+            and manifest.get('role') == ROLE,
             'Typed canonical lifecycle manifest required')
     require(manifest.get('consumer_distribution') is False and manifest.get('signature_role') == SIGNATURE_ROLE
-            and manifest.get('qualification') == QUALIFICATION, 'Fixture cannot claim signing/runtime/distribution qualification')
+            and set(manifest.get('qualification', {})) == set(QUALIFICATION)
+            and all(value is False for value in manifest['qualification'].values()),
+            'Fixture cannot claim signing/runtime/distribution qualification')
     source, receipt = manifest['source'], manifest['native_build_receipt']
-    require(receipt.get('version') == 1 and receipt.get('phase') == 'unsigned-build'
+    require(type(receipt.get('version')) is int and receipt['version'] == 1 and receipt.get('phase') == 'unsigned-build'
             and receipt.get('mode') == 'lifecycle-build' and receipt.get('source_head') == source['revision']
             and receipt.get('compiler_flags') == LIFECYCLE_FLAGS
             and set(receipt.get('native_source_files', {})) == LIFECYCLE_SOURCES
@@ -178,6 +182,14 @@ def verify_lifecycle_files(manifest, directory, source_root=None):
             and info['CFBundleIdentifier'].endswith('.instance-smoke.lifecycle')
             and info.get('CFBundleName') == receipt['bundle_name']
             and info.get('LSMinimumSystemVersion') == '14.0', 'Canonical lifecycle plist/receipt role mismatch')
+    for row in [*manifest['files'].values(), *bundle['files'].values(),
+                {k: observer.get(k) for k in ('sha256', 'size', 'mode')}]:
+        require(set(row) == {'sha256', 'size', 'mode'} and type(row['size']) is int
+                and 0 <= row['size'] <= MAX_ZIP and type(row['mode']) is int
+                and type(row['sha256']) is str and re.fullmatch('[0-9a-f]{64}', row['sha256']),
+                'Strict lifecycle inventory row types/digests required')
+    require(type(container['size']) is int and 0 < container['size'] <= MAX_ZIP,
+            'Strict lifecycle container size required')
     require(rows == manifest['files'] and object_digest(rows) == manifest['inventory_sha256']
             and inventory(app) == bundle['files'] and object_digest(bundle['files']) == bundle['sha256'],
             'Lifecycle file inventory/digest mismatch')

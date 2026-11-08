@@ -165,6 +165,16 @@ class LifecycleFixture(unittest.TestCase):
         path.write_bytes(b' '* (256*1024+1))
         with self.assertRaisesRegex(ValueError,'size bound'):m.load_manifest(path)
 
+    def test_schema_uses_literal_booleans_integers_and_typed_inventory(self):
+        changed=copy.deepcopy(self.manifest);changed['schema_version']=True
+        with self.assertRaisesRegex(ValueError,'Typed'):self.verify(changed)
+        changed=copy.deepcopy(self.manifest);changed['qualification']['consumer_ready']=0
+        with self.assertRaisesRegex(ValueError,'qualification'):self.verify(changed)
+        changed=copy.deepcopy(self.manifest);changed['container']['size']=float(changed['container']['size'])
+        with self.assertRaisesRegex(ValueError,'size'):self.verify(changed)
+        changed=copy.deepcopy(self.manifest);changed['files'][m.OBSERVER]['size']=float(changed['files'][m.OBSERVER]['size'])
+        with self.assertRaisesRegex(ValueError,'row types'):self.verify(changed)
+
     def make_normal(self):
         import package
         root=self.root/'normal';app=root/'NAC.app'
