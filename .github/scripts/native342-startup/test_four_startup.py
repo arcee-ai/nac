@@ -369,6 +369,31 @@ class SourceControls(unittest.TestCase):
         with self.assertRaises((RuntimeError, TimeoutError)):
             self.clock.work.check()
 
+    def test_actual_owned_callback_forwards_complete_R_capture_without_new_owner_or_budget(self):
+        tree = ast.parse((HERE / 'four-startup.py').read_bytes())
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+        callbacks = [n for n in main.body if isinstance(n, ast.FunctionDef) and n.name in ('bound', 'run')]
+        report, ci = {'phases': []}, Mock(spec=['run'])
+        namespace = dict(clock=self.clock, active=budget.active, using=budget.using, ci=ci,
+            roots={'H': H}, report=report, save=Mock(), time=controller.time, Path=Path, STOP=controller.STOP,
+            runtime_build_receipt=Mock(), COMPLETE_LOG_LIMIT=2*1024*1024, require=controller.require)
+        exec(compile(ast.Module(body=callbacks, type_ignores=[]), '<actual-complete-R-callback>', 'exec'), namespace)
+        argv = ['cargo', 'test', '--locked', '-p', 'nac-server', '--test',
+                'desktop_schema_contract', '--no-run', '--message-format=json']
+        log = Path('/inert/startup-protocol-runner/protocol-build.log')
+        namespace['run'](argv, log, 900, complete_output_limit=2*1024*1024)
+        self.assertEqual(ci.run.call_count, 1)
+        self.assertEqual(ci.run.call_args.kwargs['complete_output_limit'], 2*1024*1024)
+        self.assertEqual(report['phases'][0]['complete_output_limit_bytes'], 2*1024*1024)
+        self.assertEqual(report['phases'][0]['status'], 'PASS')
+        self.assertFalse(self.clock.cleaning)
+        for command, path, cap in [(['xcodebuild'], log, 2*1024*1024),
+                                   (argv, Path('/inert/other.log'), 2*1024*1024),
+                                   (argv, log, 2*1024*1024+1)]:
+            with self.subTest(command=command), self.assertRaises(RuntimeError):
+                namespace['run'](command, path, 900, complete_output_limit=cap)
+        self.assertEqual(ci.run.call_count, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

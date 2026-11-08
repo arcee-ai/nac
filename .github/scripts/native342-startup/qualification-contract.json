@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-Qba-R7325-AX-witness-startup-source01",
+  "scope": "P12-Qba-R7325-AX-diagnostics-source01",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,7 +9,7 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "f7ba055284f112dbc19f21aecb3fe00fe50dcb80",
+  "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
   "image": "20261102.0473.1",
@@ -20,7 +20,10 @@
       "role": "independent R locked Cargo compiler graph",
       "invocations": 1,
       "cap_seconds": 900,
-      "actual_compiler_work": "Retain all Rust compiler invocations in full build log; graph is a role, not one rustc"
+      "actual_compiler_work": "Retain all Rust compiler invocations in full build log; graph is a role, not one rustc",
+      "capture_mode": "bounded complete through existing ci.run accepted handle/drainer",
+      "complete_output_limit_bytes": 2097152,
+      "overflow": "FAIL, retained prefix marked incomplete; no successful subset claim"
     },
     {
       "role": "complete H2+canonicalQ2 observer",
@@ -95,5 +98,11 @@
   },
   "stop": "First failure/unknown prevents later cases; never a diagnostic subset success",
   "acceptance": "All four original current-source PNG/API/store/policy/input/custody oracles; Source/inert tests establish none",
-  "runtime_authorized": false
+  "runtime_authorized": false,
+  "failure_diagnostics": {
+    "metadata": "failure-side allowlisted stage/code/time/last-accepted/bytes/safe-shape counts",
+    "companion": "one bounded static typed failure JSON via existing stderr/case export",
+    "acceptance": false,
+    "missing_or_malformed": "never changes acceptance, failure precedence or cleanup authority"
+  }
 }

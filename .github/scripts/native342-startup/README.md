@@ -1,16 +1,23 @@
 # PRIVATE NEVERMERGE: genuine P12, repaired Q/H, four startup cases plus R
 
-This maintained successor starts from frozen actual03 consumer4df. Its separate
-H nomination starts from repaired Hd371 and changes only product/source metadata
-and matching oracles/docs. Functional H/Q behavior is preserved. The supplier is
-frozen before this consumer, avoiding a self-referential H pin. Historical P10/P11
-sources, failed actual03 AXWindows-25211 and all previous receipts/allocations
-retain their original attribution. No execution, publication or new goal is
-issued by this source preparation.
+This source-only successor of consumer073 uses diagnostic H299, frozen first as
+an exact child of Hf7. It retains safe failure detail from the existing metadata
+reader and finite companion, plus bounded complete R compiler output through the
+existing accepted handle/drainer. All original ownership, window/CFEqual, input,
+privacy, receipt, clock and acceptance predicates remain strict. P12/Qba/R and the
+original normal artifact are unchanged.
+
+Prior run42461321245 remains FAIL: configured-local input completion UNKNOWN,
+process/profile settlement unproven and fixture retained; later cases UNRUN.
+R4, SDK2 and onboarding passed in that earlier run, with a genuine full-R-log
+retention gap. These source diagnostics do not identify its runtime cause or
+qualify the changed candidate. Old actual03 AXWindows-25211, all historical
+attempts, first reporting repair and exhausted/STOP pools retain attribution.
+No execution, publication, actual allocation or goal is issued here.
 
 `pair.json` binds genuine normal P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
 repaired Q `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`, nominated H
-`f7ba055284f112dbc19f21aecb3fe00fe50dcb80`, and independent R
+`29931101ff7ad50bfc80bf048681ab05de028ec6`, and independent R
 `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. P12's direct parent is1cd48f9,
 Native boundary8685729 and source context04c22a7. Historical SDK controller/H and
 old preparation/authentication fields are provenance only. P12's genuine supplier
@@ -84,6 +91,11 @@ For a full successful run, count every role explicitly:
 - One independent R `cargo test --locked --no-run` compiler graph (900s), then
   adapter90s and actual typed-protocol120s. Count its actual Rust compiler work
   from retained logs; it is not a P12 engine runtime build or static-schema proof.
+  Only this R graph opts into complete capture, finite2MiB, through the SAME
+  ci.run handle/drainer and original900s cap. Overflow/drain loss fails; a retained
+  partial prefix is explicitly incomplete. The narrow R-log export verifies
+  its bounded no-follow ownership receipt and raw digest, preserving both ends
+  within2MiB; all other log limits and the12MiB aggregate limit stay unchanged.
 - One complete H2+Q2 observer compile90s; one CIEvidence compile90s and one CIGUI
   compile90s. These are three direct Swift invocations, with the observer's four
   inputs retained separately.
@@ -117,14 +129,16 @@ Python sources into a temporary source fixture from Git objects in this owned re
 no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
-is invoked by these tests. Actual helper compilation, full SDK/sandboxed receipt
-access, real focus/value/CFEqual/freshness/input/PNG/API/store/custody and minimum-OS
-qualification remain UNRUN. Root routes original-G1 affected alignment and then
+is invoked by these consumer tests. The source packet separately records one
+complete H2+Q2 compatibility compile (output never executed) and the explicitly
+admitted pure Foundation diagnostic mapping control. Current hosted full SDK,
+sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
+custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.
 
 
-The inherited full-startup closing-report defect is repaired once in this unit
-with Root approval: an exception at cleanup-scope exit restores FAIL first in
+The inherited full-startup closing-report defect was repaired once in the prior
+P12 nomination/consumer Source01 unit with Root approval: an exception at cleanup-scope exit restores FAIL first in
 the existing handler. The original exception/export and acceptance predicates
 remain unchanged. Inert actual-main closing-body/except/finally controls with
 real H Bound reproduce expiry PASS!=FAIL before repair, then verify expiry and
@@ -132,3 +146,11 @@ ordinary failure export FAIL while normal exit retains PASS without acceptance.
 This is first repair1/4 for that distinct reporting issue; no historical source
 or runtime counter is reset. Initial invalid test-fixture construction attempts
 are retained separately and are not the meaningful RED result.
+
+This diagnostic/source unit is first repair1/4 for each distinct diagnostic-loss
+and compiler-log-loss issue. Its invalid inert-mapper extraction compile is
+retained as a fixture error; Root authorized one fixture-only correction and
+replacement compile inside the same original clock. No runtime or historical
+repair counter is reset, and no real helper/companion was executed. New runtime
+source scope and branch reject the consumed073 admission; Root must separately
+bind any later exact controller SHA and original epochs.

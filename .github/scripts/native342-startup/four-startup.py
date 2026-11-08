@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native-p12-ax-startup-source01'
-SCOPE = 'P12-Qba-R7325-AX-witness-startup-source01'
+BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
+SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
@@ -204,7 +204,7 @@ def main():
     import ci_startup_protocol as protocol
     from ci_paths_budget import Bound, active, using
     from ci_qualifications import require_checkout
-    from ci_support import export_evidence, qualify_toolchain, redact_values, require_console
+    from ci_support import COMPLETE_LOG_LIMIT, export_evidence, qualify_toolchain, redact_values, require_console
     from ci_xctest import require_generated_runner, runner_environment
     from ci_xctest_project import materialize_project
 
@@ -271,8 +271,16 @@ def main():
         report.setdefault('runtime_builds', {})[derived.parent.name] = receipt
         write(derived.parent / 'runtime-build.json', receipt)
 
-    def run(argv, log, cap, cwd=roots['H'], *, env=None, abort=None):
+    def run(argv, log, cap, cwd=roots['H'], *, env=None, abort=None, complete_output_limit=None):
+        if complete_output_limit is not None:
+            require(complete_output_limit == COMPLETE_LOG_LIMIT
+                    and argv == ['cargo', 'test', '--locked', '-p', 'nac-server', '--test',
+                                 'desktop_schema_contract', '--no-run', '--message-format=json']
+                    and log.name == 'protocol-build.log' and log.parent.name == 'startup-protocol-runner',
+                    'complete output is reserved for the exact required R compiler graph')
         phase = dict(argv=argv, cap_seconds=cap, started_epoch=time.time(), status='RUNNING')
+        if complete_output_limit is not None:
+            phase['complete_output_limit_bytes'] = complete_output_limit
         report['phases'].append(phase)
         save()
         try:
@@ -281,7 +289,8 @@ def main():
                 clock.require_phase('helper-' + Path(str(argv[0])).name, cap + 15)
             with using(operation):
                 ci.run(argv, log, cap, cwd=cwd, env=env,
-                       abort=lambda: bool(STOP) or (abort is not None and abort()))
+                       abort=lambda: bool(STOP) or (abort is not None and abort()),
+                       complete_output_limit=complete_output_limit)
                 if 'build-for-testing' in argv:
                     runtime_build_receipt(argv)
             phase['status'] = 'PASS'
