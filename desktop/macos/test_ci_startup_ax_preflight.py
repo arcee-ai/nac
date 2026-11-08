@@ -102,6 +102,38 @@ class AXPreflightTests(unittest.TestCase):
         self.change = lambda v: self.witness.app.update(start_microseconds=99)
         with self.assertRaises(RuntimeError): self.capture()
 
+    def test_rejects_latest_app_retirement_after_successful_helper(self):
+        cached = self.witness.app.copy()
+        self.change = lambda v: self.witness.latest.clear()
+        with self.assertRaises(RuntimeError):
+            self.capture()
+        self.assertEqual(self.witness.app, cached)
+        self.assertIsNone(self.witness.failure)
+        self.assertEqual(self.run.call_count, 1)
+        self.assertTrue(json.loads((self.root / 'ax-preflight.log').read_bytes())['bound'])
+        self.assertFalse((self.root / 'ax-preflight.json').exists())
+
+    def test_rejects_latest_window_loss_after_successful_helper(self):
+        cached = self.witness.app.copy()
+        self.change = lambda v: self.witness.latest[0].update(windows=[])
+        with self.assertRaises(RuntimeError):
+            self.capture()
+        self.assertEqual(self.witness.app, cached)
+        self.assertEqual(self.witness.latest[0]['windows'], [])
+        self.assertIsNone(self.witness.failure)
+        self.assertEqual(self.run.call_count, 1)
+        self.assertTrue(json.loads((self.root / 'ax-preflight.log').read_bytes())['bound'])
+        self.assertFalse((self.root / 'ax-preflight.json').exists())
+
+    def test_latest_loss_preserves_original_failed_helper_error(self):
+        self.change = lambda v: self.witness.latest.clear()
+        self.helper_failure = True
+        with self.assertRaisesRegex(RuntimeError, 'original helper failure'):
+            self.capture()
+        self.assertTrue((self.root / 'ax-preflight.log').exists())
+        self.assertEqual(self.run.call_count, 1)
+        self.assertFalse((self.root / 'ax-preflight.json').exists())
+
     def test_rejects_helper_mutation(self):
         self.change = lambda v: self.helper.write_bytes(b'changed')
         with self.assertRaises(RuntimeError): self.capture()
