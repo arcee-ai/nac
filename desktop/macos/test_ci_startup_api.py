@@ -7,11 +7,55 @@ from unittest.mock import patch
 from types import SimpleNamespace
 import urllib.request
 
-from ci_startup_api import Provider, endpoint, owned_listener, require_readiness, seed_model
+from ci_startup_api import (FixtureFailure, Provider, endpoint, failure_metadata, owned_listener,
+                           require, require_readiness, seed_model)
 from ci_startup_fixture import PRODUCT
 
 
 class StartupAPITests(unittest.TestCase):
+    def test_diagnostic_byte_sentinel_is_bounded_and_only_applies_to_actual_bytes(self):
+        limit = 8 * 1024 * 1024
+        for value in (0, limit, limit + 1):
+            metadata = failure_metadata(FixtureFailure('served_entry_asset_bytes', {'actual_bytes': value}))
+            self.assertEqual(metadata['operands'], {'actual_bytes': value})
+        for key in ('expected_bytes', 'asset_ordinal', 'http_status'):
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {key: limit}))['operands'],
+                             {key: limit})
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {key: limit + 1}))['operands'], {})
+        for value in (True, False, -1, limit + 2, 10**100, float(limit), str(limit)):
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {'actual_bytes': value}))['operands'], {})
+
+    def test_named_transcript_guard_keeps_closed_redacted_operands(self):
+        metadata = failure_metadata(FixtureFailure('transcript_schema', {'actual_bytes': 9,
+            'body': 'private-canary', 'path': '/private-canary', 'url': 'https://private-canary.invalid'}))
+        self.assertEqual(metadata, {'exception_type': 'FixtureFailure', 'guard_code': 'transcript_schema',
+                                    'operands': {'actual_bytes': 9}})
+        self.assertNotIn('private-canary', json.dumps(metadata))
+
+    def test_failure_metadata_never_formats_unknown_exception_or_exports_arbitrary_operands(self):
+        class PrivateError(Exception):
+            def __str__(self):
+                raise AssertionError('Must never format private URL/token/body')
+        for error in (PrivateError(), RuntimeError('https://private.invalid/token/secret'),
+                      ValueError('private body'), json.JSONDecodeError('private', 'secret-document', 0)):
+            metadata = failure_metadata(error)
+            self.assertNotIn('private', json.dumps(metadata))
+            self.assertNotIn('secret', json.dumps(metadata))
+            self.assertEqual(metadata['guard_code'], 'unknown')
+            self.assertEqual(metadata['operands'], {})
+        with self.assertRaises(RuntimeError) as caught:
+            require(False, 'served_entry_asset_bytes', facts={'actual_bytes': 7, 'expected_bytes': 9,
+                'asset_ordinal': 0, 'http_status': 200, 'actual_sha256': 'a' * 64, 'expected_sha256': 'b' * 64,
+                'body': 'private-token', 'path': '/private/profile', 'URL': 'https://private.invalid'})
+        metadata = failure_metadata(caught.exception)
+        self.assertEqual(metadata['guard_code'], 'served_entry_asset_bytes')
+        self.assertEqual(len(metadata['operands']), 6)
+        self.assertNotIn('private', json.dumps(metadata))
+        for facts in ({'actual_bytes': True, 'asset_ordinal': -1}, {'http_status': 10**50},
+                      {'actual_sha256': 'secret'}, {'expected_sha256': 'A' * 64}):
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', facts))['operands'], {})
+        self.assertEqual(failure_metadata(FixtureFailure('private-unknown-reason'))['guard_code'], 'unknown')
+
     def test_owned_dummy_provider_matches_shared_script_and_records_no_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / 'provider.log'
