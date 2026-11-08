@@ -125,6 +125,8 @@ jobs:
       - name: Install locked workflow-parser dependencies
         run: npm --prefix .github/scripts ci --ignore-scripts
       - name: Check workflows and scripts, then prove enforcement
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: make lint-workflows test-workflow-lint test-manual-stack-override
 
   lint:
@@ -195,6 +197,8 @@ jobs:
           node-version: 24.22.1
 
       - name: Run nac-server tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/server-tests.py
 
       - name: Exercise stable binary readiness and status identity

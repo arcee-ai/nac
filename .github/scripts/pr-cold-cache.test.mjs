@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -63,6 +64,8 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  reverseAssetTokens(normalized["stable-release"]);
+  reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
   // and all prior source/provenance/profile/quality fingerprints remain fixed.
   reverseBrowserApt(normalized["stable-release"]);
