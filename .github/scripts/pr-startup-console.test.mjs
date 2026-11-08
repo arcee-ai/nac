@@ -52,7 +52,7 @@ test('ordinary-CI projection removes only the exact reviewed three-step contract
   }
 });
 
-test('required Mac workflow compiles only the nominated five panel policy controls', () => {
+test('required Mac workflow compiles only the nominated nine geometry and AX controls', () => {
   const mac = require('yaml').parse(readFileSync('.github/workflows/macos-native.yml', 'utf8'));
   assert.ok(requiredJobs.includes('macos-native'));
   assert.ok(workflow.jobs['required-pr-checks'].needs.includes('macos-native'));

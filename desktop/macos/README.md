@@ -130,8 +130,8 @@ Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases an
 protocol supplier remain unchanged; failed episodes and spent allocations are
 not renewed.
 
-The query supplier is final post-657 `993102af913b94acfcf0f4f866f9350e6ca3650b`, with
-`StartupJourneys.swift` SHA-256 `5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471`.
+The query supplier is final post-657 `057adebe72355fb7e95dc98b821c0a3de17a1167`, with
+`StartupJourneys.swift` SHA-256 `dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518`.
 All four supplier files remain immutable. The separate SDK-only receipt measured
 harness `9863b7714c32ed77bd66867973de6d5b02a753f8` with historical
 P `ff8c9609abf7bf7ddabe983c96ff31cf80362956` and historical Q04c;

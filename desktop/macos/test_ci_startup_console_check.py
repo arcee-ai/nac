@@ -22,19 +22,34 @@ class RequiredConsoleTests(unittest.TestCase):
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
         return directory, hashes
 
-    def test_panel_gate_requires_exactly_five_with_zero_skips(self):
+    def test_panel_gate_requires_exactly_nine_with_zero_skips(self):
         def skip():
             raise unittest.SkipTest('panel proof skipped')
         good = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(5)]))
-        check.require_complete(good, 5)
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(9)]))
+        check.require_complete(good, 9)
         bad = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(4)]
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(8)]
                                + [unittest.FunctionTestCase(skip)]))
-        with self.assertRaisesRegex(RuntimeError, 'all 5 tests with zero skips'):
-            check.require_complete(bad, 5)
+        with self.assertRaisesRegex(RuntimeError, 'all 9 tests with zero skips'):
+            check.require_complete(bad, 9)
         with self.assertRaisesRegex(RuntimeError, 'zero skips'):
-            check.require_complete(good, 4)
+            check.require_complete(good, 8)
+
+    def test_nine_total_cannot_hide_wrong_six_plus_three_class_distribution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); directory, hashes = self.source(root)
+            text = 'import unittest\n'
+            for name, count in (('NativeFolderPolicyTests', 5), ('AXRefusalTests', 4)):
+                text += 'class ' + name + '(unittest.TestCase):\n'
+                text += ''.join('    def test_' + str(n) + '(self): pass\n' for n in range(count))
+            (directory / 'test_contract.py').write_text(text)
+            hashes['test_contract.py'] = hashlib.sha256(text.encode()).hexdigest()
+            with patch.object(check.sys, 'platform', 'darwin'), patch.object(fixture, 'TEST_FILES', hashes), \
+                    patch.object(fixture, 'require_checkout'), patch.object(check.unittest, 'TextTestRunner') as runner:
+                with self.assertRaisesRegex(RuntimeError, 'exact six geometry and three AX'):
+                    check.run_required(root, panel=True)
+                runner.assert_not_called()
 
     def test_panel_control_cannot_succeed_or_skip_on_linux(self):
         with patch.object(check.sys, 'platform', 'linux'), patch.object(check, 'admit_source') as source:

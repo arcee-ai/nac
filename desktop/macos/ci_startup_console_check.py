@@ -49,11 +49,15 @@ def run_required(root, *, suite=None, stream=None, panel=False):
                 spec = importlib.util.spec_from_file_location('nominated_Q_panel_controls', source.with_name('test_contract.py'))
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
-                suite = unittest.defaultTestLoader.loadTestsFromTestCase(module.NativeFolderPolicyTests)
+                policy = unittest.defaultTestLoader.loadTestsFromTestCase(module.NativeFolderPolicyTests)
+                diagnostic = unittest.defaultTestLoader.loadTestsFromTestCase(module.AXRefusalTests)
+                if policy.countTestCases() != 6 or diagnostic.countTestCases() != 3:
+                    raise RuntimeError('Require exact six geometry and three AX diagnostic controls')
+                suite = unittest.TestSuite([policy, diagnostic])
             else:
                 suite = unittest.defaultTestLoader.loadTestsFromName('test_ci_startup_console.StartupConsoleTests')
         result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-        require_complete(result, 5 if panel else 4)
+        require_complete(result, 9 if panel else 4)
         return result
     finally:
         if panel:
