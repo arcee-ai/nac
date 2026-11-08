@@ -207,10 +207,10 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
 test("startup catalog binds the delivered product and four-file query supplier", () => {
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
   assert.equal(startup.source_sha, "ef2cce9141973f37bf35e33d113e35eaa7a91f19");
-  assert.equal(startup.test_source_sha, "993102af913b94acfcf0f4f866f9350e6ca3650b");
+  assert.equal(startup.test_source_sha, "057adebe72355fb7e95dc98b821c0a3de17a1167");
   assert.deepEqual(startup.test_files, {
     "README.md": "6c61f4f0b726f2f1fc5eb5e0cbc4cb647913b0b0fcad6aa5100a05405cb393e3",
-    "StartupJourneys.swift": "5be5f393f4f74fe631e258994623f79515f7db8efaada8a81a0f0f6e28c40471",
+    "StartupJourneys.swift": "dc318b90407902b68127652fde7c84952e9637177f70c9a9925609c788183518",
     "contract.py": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
     "test_contract.py": "d111ad946ea80b69d1a1c21a73a6818b46380829719a00054013105716aa776e",
   });
