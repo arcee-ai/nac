@@ -76,10 +76,9 @@ def artifact_identity(value, run, artifact):
                 producer_sha=p['controller_sha'], branch=p['branch'], repository=REPOSITORY)
 
 
-def handoff_files(root, value, product):
+def outer_files(root):
     case.require(root.is_absolute() and root.resolve() == root and root.is_dir(), 'canonical downloaded artifact root')
-    # The exact original outer artifact includes independent normal/lifecycle
-    # roles. Admit its closed bytes, then transfer ONLY the normal role.
+    # Exact closed original outer bytes; role selection is a separate check.
     expected = ARTIFACT['files']
     files, directories = {}, set()
     for file in root.rglob('*'):
@@ -99,6 +98,11 @@ def handoff_files(root, value, product):
                 and info.st_size == expected[name]['bytes'], 'regular bounded single-link artifact member')
             observed = hashlib.file_digest(stream, 'sha256').hexdigest()
         case.require(observed == expected[name]['sha256'], 'exact original artifact member digest')
+    return files
+
+
+def handoff_files(root, value, product):
+    files = outer_files(root)
     manifest = files[ARTIFACT['normal_manifest']]
     receipt_file = manifest.parent / 'host-package.json'
     case.require(case.digest(manifest) == value['manifest_sha256'], 'Root-bound normal manifest bytes')

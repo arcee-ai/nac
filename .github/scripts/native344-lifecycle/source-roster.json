@@ -1,0 +1,534 @@
+{
+  "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
+  "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "product_tree": "74e011e8f619555fe31cab063c457a9225cfa6c7",
+  "native_sources": {
+    "desktop/macos/AppInstance.swift": "c03ac5d5288095e5dd51d59e3966c50b512c197eb1075c837be8763a0b99d262",
+    "desktop/macos/AppLifecycle.swift": "2edcd5dc4e555263c6aca3c8115521382fb73cec9c5d2632c5e0a6221c8806c0",
+    "desktop/macos/AppQuit.swift": "5b7fe4c0a67906909dc7aaf238632d725bd08d689c96afa48fdc535137e34ad5",
+    "desktop/macos/AttentionCompletions.swift": "4181bf16d31e5f9b3b5f4bd28e0f1bd1777a930027856d0fb82d7c63166da248",
+    "desktop/macos/AttentionFeedProtocol.swift": "889a3c1ee2a4e31ff7a62912d5ffda26046724a83691512c667b8f3a8c954272",
+    "desktop/macos/AttentionProjection.swift": "81ff03ae122a2212b55dcf2271952eea0063b61379e37edbc6ddefb46cd372e7",
+    "desktop/macos/CommandEnvironment.swift": "c4b64f8bed76285c9455c48256180ff5cec5e775eabb832cf326ab4da3ca14a2",
+    "desktop/macos/DesktopStartup.swift": "654aa87f358babc2f24169dd2057a4bae6ed2f19570fff83d2fabad5e44b35a5",
+    "desktop/macos/EngineFailure.swift": "d61047e5dcac74a4f0e45ded1f5344969e3a124258689f1f57af974b458a94d4",
+    "desktop/macos/EngineProtocol.swift": "946d1bb4e49004d87e4340b4be4ef57815bc9529ecad3c91b306c0d56db9add9",
+    "desktop/macos/ExternalNavigation.swift": "09ee0251fa51a3313e3f559e4f685b4ec52f09cf93b99b848865059274a0777f",
+    "desktop/macos/LifecycleSmoke.swift": "9652347f2547c92faee656665c6c6b956dff640c16d65c179aa5159187d874ec",
+    "desktop/macos/NativeAttentionCoordinator.swift": "08136e1f322f9bbf40672aa03900e9a9470d07ca253b49c424b8926ebbd7aa0c",
+    "desktop/macos/NativeAttentionDelivery.swift": "d89725f51e5fedcf943c94bf5cfe40a33c5e5d7351043731d37bb7edfb08ba22",
+    "desktop/macos/NativeAttentionIndicator.swift": "7adf8138fd6e634528ead8269b93c96f77c25ee2093c6b36eebacbde99fb91bb",
+    "desktop/macos/NativeAttentionMenu.swift": "c7e39d81a999de965346410506e8f13dda7ebadb202f9f971a2e848a7a072b21",
+    "desktop/macos/NativeAttentionObserver.swift": "2eacf32ad109a31df2f4743768b1379ff58633a7ca3457d21fa7234497efdf07",
+    "desktop/macos/NativeCommandBridge.swift": "61361fdcdcc494c515970f8dd4623cfe13057187a7f39fdc13fd7df55a970cba",
+    "desktop/macos/NativeCommandScript.swift": "292eeb104161168cb0dc86aa5a999460e03fff314b7cf4a37b1f4793f4604501",
+    "desktop/macos/NativeCommandState.swift": "17ef11e11c88660a45ca5037900e6a68549f900e9b042c5b56a8048e78028210",
+    "desktop/macos/NativeCommands.swift": "0475d11f085bd56e4d6fed8ffb2e3e3150e2cb9d82963f787d76206e53bff6ac",
+    "desktop/macos/NativeFolderPanel.swift": "a9ec1acfb629ae46e9a22d39dead98091d6942b833306070adcbeff962380158",
+    "desktop/macos/NativeFolderSelection.swift": "10d5db108167bfd7bffcb27f6c4a2212609bcff67d0104598cb781223ebf6a18",
+    "desktop/macos/NativeNotificationCenter.swift": "bcc0921b44618eb18bd00539edd8fc03400ee28c801d25af4f39048ac2c9cfad",
+    "desktop/macos/NativePathBridge.swift": "8d3ef9002876a810efcdc839f73a20772279225acebd219dfbb469b3298430e4",
+    "desktop/macos/NativePathRequest.swift": "bada3e93d71d49f74ab4de2397191c1abe256687d1cd6bb612412113dc65e3f8",
+    "desktop/macos/NativePathScript.swift": "b0593c52baf0b4cde49446265dde09cfb30c7be0697207147bdc9d9711b38a94",
+    "desktop/macos/NativeSessionTarget.swift": "dbf6d7665d7c88d5c583770ffeb37621b6f909f80cf6f23edb1119d9b17f5f57",
+    "desktop/macos/PreviewApp.swift": "a3ad55d4947655f1e2dc008ac8ed457495f8d73edda491ca81e8a31fba626be2",
+    "desktop/macos/PreviewEngine.swift": "f65eac4015d62a6d67f2fdf18fce1c143560879030012fdb10147d0bd596ade8",
+    "desktop/macos/RecoverySmoke.swift": "d49eab611e6f8f5ac2882198fdcd8571e1045f7d68f7a8124834fe26f6e414e5",
+    "desktop/macos/StoreConflict.swift": "3e9d3968b96352665f10698d4453ba88ef1714518b2bba29a8b98fc40b3c606d",
+    "desktop/macos/WorkspaceCheckpoint.swift": "a89c87d03a18b9787eff1a9c053ac24aa69915973cb7176de206cc44933a8bf3",
+    "desktop/macos/WorkspaceNotificationState.swift": "033bec52e73c88e0e8b525d702403a5d7eb74242cfebc3438eacaf4ba314c869",
+    "desktop/macos/WorkspaceReadiness.swift": "d236fdd7e4bdd732aaef19db898fd331f7b702a8bce4462c781aa79f73d4bbba",
+    "desktop/macos/WorkspaceRecovery.swift": "cfe69d81f0cce33d709b2f1ea25bfdf2fd2a71faebb8a2203a50966c7bb640a7",
+    "desktop/macos/WorkspaceRetirement.swift": "f712fd099dc70069f49b02526e5ff2250bcd64136dc601de809ef3b5784d7e96",
+    "desktop/macos/WorkspaceStorage.swift": "efb78cd6dd21460b30462dd3023b3a8a1e095dcf0a17185c7c144d9e0ab88bc8",
+    "desktop/macos/WorkspaceStorageBridge.swift": "e90e8677bf91a94b225f70bf9c79d2e9d8c86576aa7e6839ac976e968384e256",
+    "desktop/macos/WorkspaceStorageScript.swift": "9b746e022fe993e73f09d4b9086b7f6a230e8c6b9196e160574d3ec953894609",
+    "desktop/macos/main.swift": "2337f80723e942a1a02dfc2528cedfd50db7165960100b15814cbb65c51fa803"
+  },
+  "build_support": {
+    "desktop/macos/BundleIdentity.sh": "6be66c50e452d8fa71c46771443ccfe766cd4ef06ae3411b795c53151efed270",
+    "desktop/macos/build_receipt.py": "c2488286ab7153624d9dddcfdb070446d60882687b988a9512a914986cb74d96",
+    "desktop/macos/preview.sh": "c9bab860c80623042ea8e61bf9ccc0a0e5112cc901496683a383db30ad136ac9"
+  },
+  "observer": {
+    "desktop/macos/InstanceObservation.swift": "5bf6d753eefb7d289cb296229103c834938be47164f832c4c838a19a73a862f8"
+  },
+  "journey_sources": {
+    "desktop/macos/LifecycleSmoke.swift": "9652347f2547c92faee656665c6c6b956dff640c16d65c179aa5159187d874ec",
+    "desktop/macos/lifecycle_smoke.py": "8b7abeb982ff974f4630e19662c7ce9b44d02666975f0347d3e660f661dd74cf",
+    "desktop/macos/test_lifecycle_composition.py": "f432917c6962ec88e6da08830563090b4976712d417082f2e562ae8ce2c24af0"
+  },
+  "product_python_closure": {
+    "desktop/macos/engine_contract.py": "00ae4ce0bf9e279a423c37c548d930092849161f88384d58caa7486eccfe3b15",
+    "desktop/macos/instance_console.py": "1a99ae91a3bea5ae3ffe03f57847bef541a3967629324b9838e6a8e28695f2d8",
+    "desktop/macos/instance_contract.py": "8cae89611c6f58c6c31505b29c5f3775e636d57f2d943a96b5c281aaf129d0e0",
+    "desktop/macos/instance_smoke.py": "459e4a8556e8f87d0f850dfe1eeffffe888f627be30c1947d4493368b42ef740",
+    "desktop/macos/lifecycle_fixture.py": "8020952fdc807f83d54ac1f7ba317b6e946156b5af3cfdaf0c202d2c27ae660a",
+    "desktop/macos/lifecycle_renderer.py": "1f34db6f9d00112628bf01f416ae4b31f5f9eed578a931d6498cb49130d94d6a",
+    "desktop/macos/lifecycle_smoke.py": "8b7abeb982ff974f4630e19662c7ce9b44d02666975f0347d3e660f661dd74cf",
+    "desktop/macos/quit_fixture.py": "670d60a4ec667ea99213b338e32519c54f5e8675d2a752c31f1f764a3458b461",
+    "desktop/macos/smoke.py": "40d004ddebd41ac43817f08bede38caacc7c70ad54817f2264ac393ead1d84d4"
+  },
+  "immutable_H_python_closure": {
+    "desktop/macos/ci.py": "0840a3430bb336b0bd9a37edb4338d8ef7725317e3ce11eb2a5a31529f412e11",
+    "desktop/macos/ci_instances.py": "97d1ec29dfca42748c9ebfbff6f7ea941732f46ca8c606d2d7a7db5f984e7232",
+    "desktop/macos/ci_lifecycle.py": "ca0c26274e0aacf62e6422494ed4909535bca8d10b86e968b144959fbdedca9f",
+    "desktop/macos/ci_lifecycle_evidence.py": "2e758291de7c626c5e1812de15d4f2a7449aaf9fd22b07338b48844905c172f5",
+    "desktop/macos/ci_lifecycle_finalization.py": "53cc05dc3ee307e78b415651822d2ee5d1ac8ce7761ca2b6a6297f23e1b278cf",
+    "desktop/macos/ci_paths.py": "124d9effb53184ad3ee0321ecb8cb7eb2fe7d77daefe5a6ed903eb59ddd3fe93",
+    "desktop/macos/ci_paths_attachments.py": "53996af68c01dfc34293d175a8280f48fb1f11378a156c9c701abb77c87ddfcb",
+    "desktop/macos/ci_paths_budget.py": "97e0f11ff4802e664976abbdd059bdbf6d3b8d7289dba5f757facb0b8b05781d",
+    "desktop/macos/ci_paths_protocol.py": "4a46fc6a327ba5c1627146cfac97eb376f6ba5592e4d3b0ff08160a164275c18",
+    "desktop/macos/ci_qualifications.py": "24cbef550169d71223019bd8177f37ce64d72107ff9ebce7c25df072f25173bc",
+    "desktop/macos/ci_startup.py": "bf2d8ee5d3ff8c5dcd0095e81b74d232d80823ebb638024950eea90254ce6a9c",
+    "desktop/macos/ci_startup_api.py": "b21bdceaf696a6d11c8b245822377a211815c83884bea9d8b9000effbe073050",
+    "desktop/macos/ci_startup_attachments.py": "0f5e60c50a9ef50455d1af2dec7a2f9c87b4745ec88edbd33ca8ff2c4c6521b9",
+    "desktop/macos/ci_startup_audit.py": "12e0483f64b76f3736703a6742570fedff16f0e9361d3929cb8faff8983c4fe6",
+    "desktop/macos/ci_startup_ax.py": "c8710f15d2c0ea73e44d6f8fb0992a31c89393fa254fa82a6a2a5d2bf2e620e7",
+    "desktop/macos/ci_startup_environment.py": "39b0a97b1a584ec4c98a3190e02fdb647401d6dde63e49c3b532a8da4583a3df",
+    "desktop/macos/ci_startup_fixture.py": "8c503ac349dc3f9f17eaa9854dfa0356dff24a66fc30a488414fce061a38b97a",
+    "desktop/macos/ci_startup_owner.py": "6a804a73afbe29372cf8c2e196604842f7ae4a4f9fb821c7d776652ce1e7ed81",
+    "desktop/macos/ci_startup_process.py": "b57640b541352f1155865321c41bfb2a91e6a26a4e4f3b4a634c2fceec54cc18",
+    "desktop/macos/ci_startup_protocol.py": "fc0f934b3b7272df97a33087992ebdb29c2c45702dedae86ccf781ceb9de8fb4",
+    "desktop/macos/ci_support.py": "bab384b6c14f9d0cc449aa96308c724350e821fc088e87e51ea549c403abcf4d",
+    "desktop/macos/ci_terminal.py": "d8d3089cce9582a0fa6bfdeca96b85cd8ceda2c15db128cca1dceca4252b2769",
+    "desktop/macos/ci_xctest.py": "47d3a399f9d1546b30bb30f7d2cd818780001f4daafa5cb01ec0d25131f3654b",
+    "desktop/macos/ci_xctest_attachments.py": "0459a62ad26bc9c0a70169a45138be373f1d9d8076f5f17f0063258d7cea7397",
+    "desktop/macos/ci_xctest_project.py": "8de5ed4260e693d92074af7505c1fba87e302996d9dbf628b38e4459a21ef609",
+    "desktop/macos/engine_contract.py": "00ae4ce0bf9e279a423c37c548d930092849161f88384d58caa7486eccfe3b15",
+    "desktop/macos/lifecycle_fixture.py": "8020952fdc807f83d54ac1f7ba317b6e946156b5af3cfdaf0c202d2c27ae660a",
+    "desktop/macos/smoke.py": "074622ff2a5c32dd478d0bffa415e08cf26a394603a5862dd30e9dd99387e466"
+  },
+  "product_assets": {
+    "files": {
+      "assets/Asap-Bold-DgK4od1r.woff2": {
+        "mode": 420,
+        "sha256": "fec7008fecf2771cb9fe42c9f6351bf351c87d0299e1e07b74f8f8d4d006fee2",
+        "size": 30104
+      },
+      "assets/DesignPreviewPage-CqjCe_OE.js": {
+        "mode": 420,
+        "sha256": "f1a18fcd6c99c5634250b2368ef0573c091e1806b7c916dada195c3fedfcf6cb",
+        "size": 49810
+      },
+      "assets/DesktopSessionTargetOwner-Bobhlhae.js": {
+        "mode": 420,
+        "sha256": "8041188f3fc11ff4b2daea516d591fc88b35b8d19ad39f8591da2d0bd6ec4a94",
+        "size": 2144
+      },
+      "assets/IBMPlexMono-Medium-DNBbcQit.ttf": {
+        "mode": 420,
+        "sha256": "e61d37ab6b5470dc32ed35eeb150ed98a7dc3f6eda9fca7f8093d3c3c9ea5b13",
+        "size": 134880
+      },
+      "assets/IBMPlexMono-Medium-wiOH_00Y.woff": {
+        "mode": 420,
+        "sha256": "79f19a8539d4fdd431a399674c122c6c59b5ad56edf51368266064ac6c8adff8",
+        "size": 58240
+      },
+      "assets/Inter24pt-Bold-rHWffXx5.woff2": {
+        "mode": 420,
+        "sha256": "aa6ac411d27bc31c988e22c53748aa577e0e6fe0b5a020e01db1197c16a674b8",
+        "size": 119772
+      },
+      "assets/Inter24pt-BoldItalic-dEqOMfZE.woff2": {
+        "mode": 420,
+        "sha256": "430c22b2d5e941b95ff30603282e3b735b80a8c95794db39cf12082842e93a7a",
+        "size": 126052
+      },
+      "assets/Inter24pt-Italic-DDL7mCfB.woff2": {
+        "mode": 420,
+        "sha256": "bed65510316d7dffd903ebff33ebe755709f2e66a7e144b6fea31721e3f3e086",
+        "size": 122928
+      },
+      "assets/Inter24pt-Medium-BhExgSSR.woff2": {
+        "mode": 420,
+        "sha256": "fd4cfccd76be3ef45fba1114e16b9cc57b013f082e0808f07d41815e27413d8c",
+        "size": 119404
+      },
+      "assets/Inter24pt-MediumItalic-PKvsdnhf.woff2": {
+        "mode": 420,
+        "sha256": "714bcf00ea28e44d300c66de422197d77f874461902315f19a1cb688f181c903",
+        "size": 125596
+      },
+      "assets/Inter24pt-Regular-qvK65rjz.woff2": {
+        "mode": 420,
+        "sha256": "1f629f208d7f6bf70bdea47d45b18e1aaad5455377207abeba8bd9846e286f96",
+        "size": 116380
+      },
+      "assets/Inter24pt-SemiBold-KBifbP54.woff2": {
+        "mode": 420,
+        "sha256": "068ca76eef4f1d0dcd838550905629752deb5028bda5d98db9423a79978190ad",
+        "size": 119528
+      },
+      "assets/Inter24pt-SemiBoldItalic-Bwo8gK01.woff2": {
+        "mode": 420,
+        "sha256": "75eb89c2992b308d4e8f3852ea2d827642e8e886856fe1fafc06c198e5cd6438",
+        "size": 125736
+      },
+      "assets/PresentationBoundary-DKAxTJob.js": {
+        "mode": 420,
+        "sha256": "265105e81eb5e9dc717f258f01399700bd1db23bff277e5d715bd9e950b766eb",
+        "size": 19130
+      },
+      "assets/bash-CVTB3cr6.js": {
+        "mode": 420,
+        "sha256": "48923a3ffbefedd56ee6600db1afe46c587b035aa9f73e82db4f102059d3d86e",
+        "size": 52
+      },
+      "assets/c-NZxYjD9R.js": {
+        "mode": 420,
+        "sha256": "f80ab641844963bbff9d359c7d18efc54bf39c7161f1122eb98838d1e1043497",
+        "size": 72179
+      },
+      "assets/core-DIIltR0p.js": {
+        "mode": 420,
+        "sha256": "748f68e4f66b7b4be155c7b809577ed8cfb279831874e95425f181e7bb85302b",
+        "size": 93546
+      },
+      "assets/cpp-D4FY7gDX.js": {
+        "mode": 420,
+        "sha256": "9f1b48c314aac9db77e6ec0996d2498643bc74c89835409dc962277d1217b552",
+        "size": 796960
+      },
+      "assets/csharp-oqKa8noW.js": {
+        "mode": 420,
+        "sha256": "3e00ef56588e872dce4531d4b62f0bda2e854f66073297deb435dc0011f8b35e",
+        "size": 90182
+      },
+      "assets/css-BsVw1vtW.js": {
+        "mode": 420,
+        "sha256": "719c0b08e7db5e31f32321a99f6e619565c25f20dd090c809895dc4fa0816326",
+        "size": 49034
+      },
+      "assets/diff-woXpYk--.js": {
+        "mode": 420,
+        "sha256": "80befa61827dedd8e1a37e5521dd2ef55fad173bbbd9f36db966fc0b088079e6",
+        "size": 2562
+      },
+      "assets/engine-javascript-CSTKOSDq.js": {
+        "mode": 420,
+        "sha256": "264e17eac89e5968c588c1e00f3c8487e0607ff582c90130af106b888c37a508",
+        "size": 57608
+      },
+      "assets/favicon-BxL16L46.svg": {
+        "mode": 420,
+        "sha256": "0a7e3933422e931f86cab06473d9e691f30bd335c27f7a24ea05d38804c3a1f1",
+        "size": 2028
+      },
+      "assets/go-rLFTqkRN.js": {
+        "mode": 420,
+        "sha256": "ee035f34de70dac3319923bcfa0415cc576769462e60f09183c352f305de335e",
+        "size": 46811
+      },
+      "assets/html-BY76lXLH.js": {
+        "mode": 420,
+        "sha256": "9cf910364d275a0e86edbb3b2e8450d14922710d8176727b2337e8e601fb6a94",
+        "size": 57244
+      },
+      "assets/index-BAXly4zr.js": {
+        "mode": 420,
+        "sha256": "f2f56fef7ac3ce836d78c08cb0d5190fb435f5ad1c93b20eef75cd4f571cd86d",
+        "size": 1541506
+      },
+      "assets/index-DeeB02Hm.css": {
+        "mode": 420,
+        "sha256": "bd13793f18e8091ebd8d6c095a88a59599ef8b588f9a1cd08da1c4565aaf38ed",
+        "size": 150920
+      },
+      "assets/ini-B5eOa1yu.js": {
+        "mode": 420,
+        "sha256": "e192d3a30c17886e1366926606314b37568768ff6c7790d71b58c8cd2ae68f4d",
+        "size": 1518
+      },
+      "assets/java-DmZF03nx.js": {
+        "mode": 420,
+        "sha256": "1efc407cae4339f87fa1c31a87284d06c53fd05c37454bd07c89c7a4ce15a608",
+        "size": 27285
+      },
+      "assets/javascript-BgS3c2Ky.js": {
+        "mode": 420,
+        "sha256": "03c9deebead01027aeae2794a9ea2dc97dac5b9e93c55fac775856c913ddb7a9",
+        "size": 174820
+      },
+      "assets/json-qhed-kSA.js": {
+        "mode": 420,
+        "sha256": "cde89b6485baf9a68c80f28098ff191e7ba063cd0c5c50d2f9abf57f5e4be826",
+        "size": 2817
+      },
+      "assets/jsonc-CYpm1nAK.js": {
+        "mode": 420,
+        "sha256": "60b006733ee4e7b7d220af80da422980966b9527c91438aec90040c9dbde1088",
+        "size": 3102
+      },
+      "assets/jsx-vimVRUsC.js": {
+        "mode": 420,
+        "sha256": "5002b6969bd5d79618123f48db6c533417a1268d98011311d4b11bdb737465fb",
+        "size": 177858
+      },
+      "assets/kotlin-DhhofPvG.js": {
+        "mode": 420,
+        "sha256": "26daf37ac3c38cb6385e619be24b677a4277d90bb885632d856479c1d6ea95de",
+        "size": 8778
+      },
+      "assets/less-DVTAwKKz.js": {
+        "mode": 420,
+        "sha256": "eaae91cdf46dc79d5a386af2a1513267af2f6ecfb82ca935bb25c19fd36e3987",
+        "size": 97626
+      },
+      "assets/lib-BUbwJnvT.js": {
+        "mode": 420,
+        "sha256": "0beb7f419309398bffc18e9ff6825b14ae9d18d9b6dfd65632996531028a3780",
+        "size": 18618
+      },
+      "assets/markdown-BYOwaDjH.js": {
+        "mode": 420,
+        "sha256": "024bf1ea6f860d9477d5ef72a2553f1ae4b0ff3d07f5d24d2e270e4f4f5a9b95",
+        "size": 59328
+      },
+      "assets/markdown-mathjax-DLdBKfWx.js": {
+        "mode": 420,
+        "sha256": "19e696c490a209a94c1bfb477e9514f9764fcf11ab3c4136dca71c05d692da27",
+        "size": 858841
+      },
+      "assets/markdown-renderer-v8egEQYB.js": {
+        "mode": 420,
+        "sha256": "ee7ca21947122bf3487fd95ab90da84456e27bb4a33d53733ff4aa2c97d06f02",
+        "size": 144195
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_AMS-Regular.woff": {
+        "mode": 420,
+        "sha256": "3de784d07b9fa8f104c10928a878ee879cf3305cae5195cba663c9c2bb0195eb",
+        "size": 40808
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Calligraphic-Bold.woff": {
+        "mode": 420,
+        "sha256": "af04542b29eaac04550a140c5f1760a649783989426f2540855bf4157819367d",
+        "size": 9908
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Calligraphic-Regular.woff": {
+        "mode": 420,
+        "sha256": "26683bf201fb258a2237d9754616de9d4ecf4cc1cd39dd1902476df7d75f1d16",
+        "size": 9600
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Fraktur-Bold.woff": {
+        "mode": 420,
+        "sha256": "721921bab0d001ebff0206c24cb5de6ca136467bf1843a7aa32030ba061d1e92",
+        "size": 22340
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Fraktur-Regular.woff": {
+        "mode": 420,
+        "sha256": "870673df72e70f87c91a5a317d558c2c3b54392264ad79bbadc6d424ae8765fe",
+        "size": 21480
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Main-Bold.woff": {
+        "mode": 420,
+        "sha256": "88b98cad3688915e50da55553ff6ad185e0dce134b47f176e91b100f8a9b175c",
+        "size": 34464
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Main-Italic.woff": {
+        "mode": 420,
+        "sha256": "355254db9ca10a09a3b5f0929d74eb4670f44fbe864c07526a06213e0a0caf6c",
+        "size": 20832
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Main-Regular.woff": {
+        "mode": 420,
+        "sha256": "1cb1c39ea642f26a4dfed230b4aea1c3c218689421f6e9c0a7c1811693c4fa07",
+        "size": 34160
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Math-BoldItalic.woff": {
+        "mode": 420,
+        "sha256": "8ea8dbb1b02e6f730f55b4cb5d413b785b9f5c39807d0a0fa7da206a0824a457",
+        "size": 19776
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Math-Italic.woff": {
+        "mode": 420,
+        "sha256": "a009bea404f7a500ded48f8b9ad9cf16e12504b3195dd9e25975289b8256b0f0",
+        "size": 19360
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Math-Regular.woff": {
+        "mode": 420,
+        "sha256": "c01d3321e89b403c4b811aa153c4e618eda3421f92d8a072a02c8d190782a191",
+        "size": 19288
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_SansSerif-Bold.woff": {
+        "mode": 420,
+        "sha256": "32792104b5ef69eded905b6d1598ed05d8087684d38e7a94d52e3c38ba16f47e",
+        "size": 15944
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_SansSerif-Italic.woff": {
+        "mode": 420,
+        "sha256": "fc6ddf5df402b263cfb158aed8e89972542c34b719cd87b1db30461985f7bd5b",
+        "size": 14628
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_SansSerif-Regular.woff": {
+        "mode": 420,
+        "sha256": "b418136e3b384baaadecb70bd3c48a8da9825210130b2897db808c44efc883cb",
+        "size": 12660
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Script-Regular.woff": {
+        "mode": 420,
+        "sha256": "af96f67d7accf5fd2a4a682d0b9f8b339f8ea6fe34c310c1694c8ba7f6ddc96f",
+        "size": 11852
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Size1-Regular.woff": {
+        "mode": 420,
+        "sha256": "c49810b53ecc0d87d8028762c518924197dd9d3f905b08f99ea241301085b9cb",
+        "size": 5792
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Size2-Regular.woff": {
+        "mode": 420,
+        "sha256": "30e889b58cbc51adfbb038ab1a96dc4025aa3542a3cff7712fc55ece510675e2",
+        "size": 5464
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Size3-Regular.woff": {
+        "mode": 420,
+        "sha256": "5cda41563a095bd70c78e2dda13d0f8cb922c71c90fffd0a0044c65173a66e83",
+        "size": 3244
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Size4-Regular.woff": {
+        "mode": 420,
+        "sha256": "3bc6ecaae7ecf6f8d7f8ea07bddbaca8601e2cb6e89d6aef58e78d9f6d8a398f",
+        "size": 5148
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Typewriter-Regular.woff": {
+        "mode": 420,
+        "sha256": "c56da8d69f1a0208b8e0703656c3264b6dd748bd452524c82b0385b60f6a68c1",
+        "size": 17604
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Vector-Bold.woff": {
+        "mode": 420,
+        "sha256": "36e0d72d8a7afc696a3e7a5c7369807634640de9b02257bca447bdf126221a27",
+        "size": 1116
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Vector-Regular.woff": {
+        "mode": 420,
+        "sha256": "72bc573386dd1d48c5bbd286302ca9e3400c5eb0f298e7cfbf945b9d08fc688f",
+        "size": 1136
+      },
+      "assets/mathjax-3.2.1/fonts/MathJax_Zero.woff": {
+        "mode": 420,
+        "sha256": "481e39042508ae313a60618af1e37146ab93e9324c98e4c78b8f17fe55d41e0b",
+        "size": 1368
+      },
+      "assets/php-BnKEXIJU.js": {
+        "mode": 420,
+        "sha256": "47a1d91bc44da597cd93582b2b2c24b4f924b1e46675d1d65b830450f63b98ac",
+        "size": 113060
+      },
+      "assets/python-gzcpVVnB.js": {
+        "mode": 420,
+        "sha256": "be0bae300e9d8dbae905d9faa24b84adc622796c87170848bf0460d01ad4049c",
+        "size": 69945
+      },
+      "assets/rolldown-runtime-XKyaHtl9.js": {
+        "mode": 420,
+        "sha256": "548d1dbf321e7d2ae804fcc158b588706a7c52f8ca175de1490c6ccb4dbe55b7",
+        "size": 726
+      },
+      "assets/ruby-D0lk-lLI.js": {
+        "mode": 420,
+        "sha256": "a3c191ff0405580abfa955b916fcddceb9a284b1a88c5a2caaec5e0cb14c8fe0",
+        "size": 88036
+      },
+      "assets/rust-Cfkwpbl8.js": {
+        "mode": 420,
+        "sha256": "8fedcfe76b25574d9afbb86db6b972ab86d8231284e91fe3b10779a30129a5a5",
+        "size": 15062
+      },
+      "assets/scss-CE9zIoHq.js": {
+        "mode": 420,
+        "sha256": "1a730f444263bb59cd88829da840151132f0a2ad02194f03eb3ffb07af54f798",
+        "size": 27201
+      },
+      "assets/shellscript-CqHdAlCp.js": {
+        "mode": 420,
+        "sha256": "b277ff21ef7079c7afb321dd2b92375209fa761eaf8f468a29bf978c5984faf8",
+        "size": 41466
+      },
+      "assets/sql-BsFa4tDR.js": {
+        "mode": 420,
+        "sha256": "c2abc1436e2e3d5ae036e2b940ae01a59e25b15443b2cd0b7468d94d670768b0",
+        "size": 23421
+      },
+      "assets/swift-CyEgAFGc.js": {
+        "mode": 420,
+        "sha256": "17c2179fc022acc48683a5cab6feee30b7e482741b57361c817ec6c55fe1b791",
+        "size": 87224
+      },
+      "assets/toml-CcmNWLt0.js": {
+        "mode": 420,
+        "sha256": "94ca31c8af75679cb84cc087aaaeb024df25dd9cf20c75e7a4e6b26914ec4c9e",
+        "size": 6419
+      },
+      "assets/tsx-r6-X8vM1.js": {
+        "mode": 420,
+        "sha256": "1dbf6d6d0bb38c46af93d918b0eb5303ea8ab7cd2064fd80f87677da7e7d8d45",
+        "size": 175602
+      },
+      "assets/typescript-Dvuj33DD.js": {
+        "mode": 420,
+        "sha256": "b46984bb3033d87102647ea5f28ac9a8909014f98aa0aa6d6de5a8ccf4b60d3b",
+        "size": 181146
+      },
+      "assets/xml-D6KT6h9Z.js": {
+        "mode": 420,
+        "sha256": "78dac591e8149dbb3585f8e3e6744133fc94de081c7e1fac301975fcfd487b24",
+        "size": 5386
+      },
+      "assets/xterm-BMsy1fDS.js": {
+        "mode": 420,
+        "sha256": "c3486a738e868fc70309aa552bb70fd02630160cf17cb3ac1d7be34904800adc",
+        "size": 330929
+      },
+      "assets/yaml-rwi0_p6S.js": {
+        "mode": 420,
+        "sha256": "db14bd07972e830c86a4c8109530090c59def0c02864c923507b272d069b41a0",
+        "size": 10499
+      },
+      "index.html": {
+        "mode": 420,
+        "sha256": "87bd6fda9c31aaf2bd23f73946621b950d2af60494933ae2dbe3548413723036",
+        "size": 1044
+      },
+      "licenses/floating-ui.txt": {
+        "mode": 420,
+        "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce",
+        "size": 1089
+      },
+      "licenses/lucide.txt": {
+        "mode": 420,
+        "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+        "size": 3208
+      },
+      "licenses/radix-ui.txt": {
+        "mode": 420,
+        "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+        "size": 1063
+      },
+      "licenses/shadcn-ui.txt": {
+        "mode": 420,
+        "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f",
+        "size": 1063
+      },
+      "licenses/xterm.txt": {
+        "mode": 420,
+        "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+        "size": 1261
+      }
+    },
+    "path": "crates/nac-server/assets/dist",
+    "sha256": "f103c59db53b9263ec49348e46e2614e84a4a54230a47d3c540370a2aa2e8cce"
+  },
+  "P_packaging_verifier": "desktop/macos/packaging/lifecycle_package.py",
+  "package_verifier_sha256": "d445adbed01408b95c95d9d5ea5fecf06e8534f950d91a745c98667f75462ff6",
+  "artifact_inventory_shared": "../native342-startup/artifact.json",
+  "product_packaging_verifier_closure": {
+    "desktop/macos/packaging/lifecycle_package.py": "d445adbed01408b95c95d9d5ea5fecf06e8534f950d91a745c98667f75462ff6",
+    "desktop/macos/packaging/lifecycle_receipt.py": "aced8d9d038217c61056084ab242f03851116616eaeaaf5e50ca0dcf132d8082",
+    "desktop/macos/packaging/native_receipt.py": "61906e02a5dba9c3d6e7130c7ca63b676ff2981639a04877ef65fcfa283246c9",
+    "desktop/macos/packaging/package.py": "0cbf1a2ecef7da395d033968b671045306bf88ef6f52d3f1e4f750c5be0e1866",
+    "desktop/macos/packaging/provenance.py": "89c25a0efba3943f1ab4190ff37226aaa843280bdaa58570b691ae24819fd398",
+    "desktop/macos/packaging/signing.py": "255e03ddd2e68cf735f0a4ee776f8266a06761aa284bb96992db79ab7e887933"
+  }
+}

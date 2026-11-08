@@ -1,11 +1,11 @@
-name: PRIVATE NEVERMERGE P12 repaired AX four startup with R
-run-name: PRIVATE NEVERMERGE exact P12 Qba AX witness four startup
+name: PRIVATE NEVERMERGE P12 maintained lifecycle transactions
+run-name: PRIVATE NEVERMERGE exact P12 lifecycle run approval terminal
 
 on:
   workflow_dispatch:
     inputs:
-      startup_admission:
-        description: Root exact four-case/R source/producer/artifact/original-clock admission
+      lifecycle_admission:
+        description: Root exact P12 lifecycle role, custody and original clock
         required: true
         type: string
 
@@ -14,34 +14,45 @@ permissions:
   actions: read
 
 jobs:
-  four_startup:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01' && github.run_attempt == 1
+  lifecycle_transactions:
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-p12-lifecycle-consumer-source01' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       PYTHONDONTWRITEBYTECODE: "1"
-      ROOT_STARTUP_ADMISSION: ${{ inputs.startup_admission }}
+      ROOT_LIFECYCLE_ADMISSION: ${{ inputs.lifecycle_admission }}
       H_ROOT: ${{ github.workspace }}/harness
       P_ROOT: ${{ github.workspace }}/product
-      Q_ROOT: ${{ github.workspace }}/query
-      R_ROOT: ${{ github.workspace }}/protocol
     steps:
       - name: Admit original clock and exact image before checkout or bootstrap
         id: initial
         timeout-minutes: 1
         run: |
           python3 -B - <<'PYCODE'
-          import json, math, os, pathlib, time
-          gate = pathlib.Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-startup-gate'
+          import json, math, os, pathlib, re, time
+          gate = pathlib.Path(os.environ['RUNNER_TEMP']).resolve() / 'native344-lifecycle-gate'
           gate.mkdir(mode=0o700)
           report = dict(status='FAIL', observed_image=os.environ.get('ImageVersion'), compile=False, runtime=False)
           try:
-              a = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
-              assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','manifest_sha256','clock','producer'}
-              assert a['scope'] == 'P12-Qba-R7325-AX-diagnostics-source01' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              raw = os.environ['ROOT_LIFECYCLE_ADMISSION']; assert 0 < len(raw.encode()) <= 8192
+              def unique(pairs):
+                  result = {}
+                  for key,value in pairs:
+                      assert key not in result, 'duplicate Root declaration key'
+                      result[key] = value
+                  return result
+              a = json.loads(raw, object_pairs_hook=unique)
+              assert set(a) == {'scope','controller_sha','H','P','role','allocation_id','admission_nonce','prior_dispatch_counts','attempt','retries','manifest_sha256','clock','producer'}
+              assert a['scope'] == 'P12-maintained-three-case-lifecycle-transactions-source01' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['H'] == '29931101ff7ad50bfc80bf048681ab05de028ec6'
+              assert a['P'] == '4b7a1f3e0bf6175a77c5ebf627fe965860e99976' and a['role'] == 'canonical-lifecycle-fixture-v1'
+              assert re.fullmatch('[0-9a-f]{40}', a['controller_sha']) and re.fullmatch('[0-9a-f]{64}', a['admission_nonce'])
+              assert re.fullmatch('[A-Za-z0-9_-]{1,100}', a['allocation_id'])
+              assert a['prior_dispatch_counts'] == dict.fromkeys(('run','approval','terminal'), 0)
+              assert all(type(x) is int for x in a['prior_dispatch_counts'].values())
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
-              assert a['manifest_sha256'] == 'b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e'
+              assert a['manifest_sha256'] == '1ddcf153b7dabeb82b3e662b8770ab57ea734566343e16496c4932c72391cf78'
               assert a['producer'] == dict(run_id=42455455480, artifact_id=13607980704, controller_sha='0210a3c52062ec28e9c6ae74098040e432e09a65', branch='codex/experimental-native-p12-lifecycle-package-20261108', artifact_name='ff8-host-package-42455455480-1')
               c = a['clock']; keys = ('STARTED','WORK_DEADLINE','CLEANUP_DEADLINE','HARD_DEADLINE')
               assert set(c) == set(keys) and all(type(c[k]) in (int,float) for k in keys)
@@ -52,7 +63,7 @@ jobs:
               assert os.environ.get('ImageVersion') == '20261102.0473.1', 'different fleet image: unavailable, no fallback/retry'
               minutes = min(1, math.floor((work-now-60)/60)); assert minutes >= 1
               with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as f:
-                  for name,suffix in (('DOWNLOAD_ROOT','native342-download'), ('PACKAGE_ROOT','native342-package'), ('OUTPUT_ROOT','native342-episode')):
+                  for name,suffix in (('DOWNLOAD_ROOT','native344-download'), ('LIFECYCLE_OUTPUT','native344-episode'), ('PRODUCER_RUN_METADATA','native344-lifecycle-gate/producer-run.json'), ('PRODUCER_ARTIFACT_METADATA','native344-lifecycle-gate/producer-artifact.json')):
                       path = str(gate.parent / suffix)
                       assert '\n' not in path and '\r' not in path, 'single-line canonical runner path'
                       f.write(name+'='+path+'\n')
@@ -69,11 +80,12 @@ jobs:
         with:
           ref: ${{ github.sha }}
           path: controller
+          fetch-depth: 2
           persist-credentials: false
       - name: Bound Rust bootstrap
         id: rust
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate rust
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate rust
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         timeout-minutes: ${{ fromJSON(steps.rust.outputs.minutes) }}
         with:
@@ -82,7 +94,7 @@ jobs:
       - name: Bound Node bootstrap
         id: node
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate node
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate node
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.node.outputs.minutes) }}
         with:
@@ -90,80 +102,53 @@ jobs:
       - name: Bound H source checkout
         id: checkout_H
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-H
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate checkout-H
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.checkout_H.outputs.minutes) }}
         with:
-          ref: ${{ steps.checkout_H.outputs.H }}
+          ref: 29931101ff7ad50bfc80bf048681ab05de028ec6
           path: harness
           persist-credentials: false
       - name: Bound P source checkout
         id: checkout_P
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-P
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate checkout-P
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         timeout-minutes: ${{ fromJSON(steps.checkout_P.outputs.minutes) }}
         with:
-          ref: ${{ steps.checkout_H.outputs.P }}
+          ref: 4b7a1f3e0bf6175a77c5ebf627fe965860e99976
           path: product
-          persist-credentials: false
-      - name: Bound Q source checkout
-        id: checkout_Q
-        timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-Q
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        timeout-minutes: ${{ fromJSON(steps.checkout_Q.outputs.minutes) }}
-        with:
-          ref: ${{ steps.checkout_H.outputs.Q }}
-          path: query
-          persist-credentials: false
-      - name: Bound independent R source checkout
-        id: checkout_R
-        timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate checkout-R
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        timeout-minutes: ${{ fromJSON(steps.checkout_R.outputs.minutes) }}
-        with:
-          ref: ${{ steps.checkout_H.outputs.R }}
-          path: protocol
           persist-credentials: false
       - name: Bound metadata from original clock
         id: metadata
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate metadata
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate metadata
       - name: Verify exact successful producer run and artifact identity
         timeout-minutes: ${{ fromJSON(steps.metadata.outputs.minutes) }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --metadata
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --metadata
       - name: Bound download from original clock
         id: download
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate download
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate download
       - name: Download only the Root-bound same-repository run and artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         timeout-minutes: ${{ fromJSON(steps.download.outputs.minutes) }}
         with:
-          artifact-ids: ${{ steps.download.outputs.artifact_id }}
-          run-id: ${{ steps.download.outputs.run_id }}
+          artifact-ids: 13607980704
+          run-id: 42455455480
           repository: arcee-ai/nac
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/native342-download
+          path: ${{ runner.temp }}/native344-download
           merge-multiple: true
-      - name: Bound prepare from original clock
-        id: prepare
-        timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate prepare
-      - name: Verify sealed original manifest ZIP and extract without rebuilding
-        timeout-minutes: ${{ fromJSON(steps.prepare.outputs.minutes) }}
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --prepare
-      - name: Bound required R and four cases from original clock
+      - name: Bound maintained lifecycle and original cleanup reserve
         id: episode
         timeout-minutes: 1
-        run: python3 -B controller/.github/scripts/native342-startup/launch.py --gate episode
-      - name: Run maintained R and four serial startup cases with original cleanup reserve
+        run: python3 -B controller/.github/scripts/native344-lifecycle/launch.py --gate episode
+      - name: Run original three-case lifecycle driver with artifact and cleanup owners
         timeout-minutes: ${{ fromJSON(steps.episode.outputs.minutes) }}
-        run: python3 -B controller/.github/scripts/native342-startup/four-startup.py
+        run: python3 -B controller/.github/scripts/native344-lifecycle/episode.py
       - name: Bound always-retention to the original hard deadline
         id: retention
         if: always()
@@ -173,7 +158,7 @@ jobs:
           import json, math, os, time
           minutes = 0
           try:
-              c = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])['clock']
+              c = json.loads(os.environ['ROOT_LIFECYCLE_ADMISSION'])['clock']
               start,hard = c['STARTED'],c['HARD_DEADLINE']; now = time.time()
               assert all(type(x) in (int,float) and math.isfinite(x) for x in (start,hard))
               assert start <= now < hard and 0 < hard-start <= 3600
@@ -186,9 +171,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         timeout-minutes: ${{ fromJSON(steps.retention.outputs.minutes) }}
         with:
-          name: p12-ax-startup4-${{ github.run_id }}-${{ github.run_attempt }}
+          name: p12-lifecycle-transactions-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/native342-startup-gate
-            ${{ runner.temp }}/native342-episode/evidence
+            ${{ runner.temp }}/native344-lifecycle-gate
+            ${{ runner.temp }}/native344-episode/evidence
           if-no-files-found: error
           retention-days: 3

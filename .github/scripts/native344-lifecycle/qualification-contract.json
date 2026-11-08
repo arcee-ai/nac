@@ -1,0 +1,101 @@
+{
+  "state": "SOURCE_ONLY_UNADMITTED",
+  "scope": "P12-maintained-three-case-lifecycle-transactions-source01",
+  "base": "ec8076b99105737e7a0a0e86d61d84705a155eab",
+  "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
+  "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "workflow": "stable-release.yml",
+  "branch": "codex/experimental-native-p12-lifecycle-consumer-source01",
+  "image": "20261102.0473.1",
+  "Xcode": "26.6 (17F113)",
+  "SDK": "26.5",
+  "role": "canonical-lifecycle-fixture-v1",
+  "producer_run": 42455455480,
+  "artifact": 13607980704,
+  "outer_bytes": 66384125,
+  "outer_sha256": "b51fb4fe4ae8d017f2f30f45f1da886244d537bc0df5ab467ee686252bb60312",
+  "manifest_sha256": "1ddcf153b7dabeb82b3e662b8770ab57ea734566343e16496c4932c72391cf78",
+  "lifecycle_zip_bytes": 33455110,
+  "lifecycle_zip_sha256": "e7dc33e4e8c0025dfed792beb4b339fbda7f0c807120cfb599ebca2c98bd9eca",
+  "compiler_roles": [
+    {
+      "role": "H299 CILifecycleImages.swift only",
+      "invocations": 1,
+      "inputs": 1,
+      "cap_seconds": 90,
+      "purpose": "PNG decoding/Vision readability only; manual inspection required"
+    }
+  ],
+  "Rust_build_graphs": 0,
+  "SDK_builds": 0,
+  "app_engine_observer_rebuilds": 0,
+  "locked_setup": {
+    "checkouts": [
+      "controller",
+      "H299",
+      "P12"
+    ],
+    "invocations": 3,
+    "cap_each_seconds": 600,
+    "work": "locked Cargo fetch, npm install and Playwright browser availability; no Rust/SDK/app compiler graphs"
+  },
+  "actors": {
+    "durable_cases": [
+      "run",
+      "approval",
+      "terminal"
+    ],
+    "driver_processes": 3,
+    "fixture_app_incarnations": 3,
+    "LaunchServices_launch_reopen_calls": 6,
+    "replacement_engine_reacquisitions": 3,
+    "controlled_loopback_provider_instances": 3,
+    "controlled_terminal_descendants": 3,
+    "public_owned_OS_termination_requests": 2,
+    "fixed_image_reader_invocations": 15,
+    "console_python_children": 4,
+    "metadata_python_children": 1,
+    "observer_readonly_and_focus_calls": "Maintained driver/guard polling, bounded by each existing operation and finite driver/cleanup deadlines; not a fixed invocation count"
+  },
+  "case_budget": {
+    "pre_reservation_remaining_seconds": 555,
+    "driver_seconds": 240,
+    "driver_native_cleanup_grace_seconds": 150,
+    "direct_owned_handle_force_reap_seconds": 5,
+    "image_read_seconds_each": 10,
+    "image_count_each": 5,
+    "cleanup": "Existing exact-incarnation product finally; positive H residual audit, no arbitrary JSON PID signal"
+  },
+  "clock": {
+    "authority": "Separate Root literal allocation only; NO epochs or execution authority in this source",
+    "fields": [
+      "STARTED",
+      "WORK_DEADLINE",
+      "CLEANUP_DEADLINE",
+      "HARD_DEADLINE"
+    ],
+    "queue_inclusive": true,
+    "max_total_seconds": 3600,
+    "max_work_seconds": 2880,
+    "min_cleanup_seconds": 600,
+    "min_retention_seconds": 120,
+    "renewal": false,
+    "worst_case_all_caps_fit_guaranteed": false
+  },
+  "export": {
+    "PNG_each_bytes": 2097152,
+    "PNG_count": 15,
+    "PNG_total_bytes": 31457280,
+    "non_image_payload_bytes": 12320768,
+    "index_bytes": 262144,
+    "total_bytes": 44040192,
+    "reserved_final_metadata_within_non_image_bytes": 4194304,
+    "owner": "immutable H299 ci_lifecycle_evidence/finalization"
+  },
+  "failure": "First failed/unknown driver, cleanup, image, custody, result, export or ledger prevents next reservation. Retain original failed attempts and private fixture as required. No retries.",
+  "actual": false,
+  "full_G3_acceptance": false,
+  "composited_paint_acceptance": false,
+  "trusted_or_physical_input_acceptance": false,
+  "minimum_OS_signing_vendor_distribution_acceptance": false
+}

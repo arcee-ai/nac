@@ -1,0 +1,9 @@
+{
+  "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
+  "original_source_sha256": {
+    "ci_lifecycle_contract.py": "e8cbdf465ecfd4208273231ca6c2a3b20125916e740be5260eee3f4005fcb01e",
+    "ci_lifecycle_ownership.py": "1b433b2477279284c7ee95e37ce19b811ed5de4fd2037ff22023bcba37fe7f89",
+    "ci_lifecycle.py": "ca0c26274e0aacf62e6422494ed4909535bca8d10b86e968b144959fbdedca9f"
+  },
+  "rule": "Explicit finite P12 binding adaptation; historical defaults remain. Never the historical qualifier/capsule selector."
+}
