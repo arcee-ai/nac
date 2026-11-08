@@ -8,7 +8,7 @@ import shutil
 import stat
 import subprocess
 import tarfile
-import urllib.request
+from github_asset import download_asset
 
 VERSION = "0.9.151"
 COMMIT = "6b3f994577a98874a2e0ea5bef77fbbab3434044"
@@ -78,9 +78,7 @@ def install(destination, archive=None):
     try:
         download = destination / "download.tar.gz"
         if archive is None:
-            request = urllib.request.Request(URL, headers={"Accept": "application/octet-stream"})
-            with urllib.request.urlopen(request, timeout=60) as source, download.open("xb") as target:
-                copy_bounded(source, target, ARCHIVE_BYTES)
+            download_asset(URL, download, ARCHIVE_BYTES)
         else:
             archive = Path(archive)
             if not stat.S_ISREG(archive.lstat().st_mode):

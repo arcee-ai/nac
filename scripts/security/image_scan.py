@@ -109,7 +109,11 @@ def install_tools(cache, names=None):
         url = tool_download_url(name, pin, host)
         archive = cache / f"{name}_{pin['version']}_{host}.tar.gz"
         if not archive.exists():
-            archive.write_bytes(download(url, accept="application/octet-stream"))
+            if url.startswith("https://api.github.com/"):
+                subprocess.run([sys.executable, ROOT / ".github/scripts/github_asset.py", "--url", url,
+                                "--output", archive, "--max-bytes", str(150 * 1024 * 1024)], check=True)
+            else:
+                archive.write_bytes(download(url, accept="application/octet-stream"))
         require(sha256(archive) == pin[host], f"{name} archive checksum mismatch")
         with tarfile.open(fileobj=io.BytesIO(archive.read_bytes())) as bundle:
             member = bundle.getmember(name)

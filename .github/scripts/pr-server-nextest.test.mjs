@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,7 +14,7 @@ const trust = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev
 const sort = value => Array.isArray(value) ? value.map(sort) : value && typeof value === "object"
   ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)])) : value;
 function verify(workflow) {
-  workflow = structuredClone(workflow); reverseAdmission(workflow);
+  workflow = structuredClone(workflow); reverseAssetTokens(workflow); reverseAdmission(workflow);
   const job = workflow.jobs["test-server"];
   assert.equal(job["runs-on"], "ubuntu-latest");
   assert.equal(job.needs, "prepare");

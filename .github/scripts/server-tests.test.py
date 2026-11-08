@@ -96,44 +96,42 @@ class Controls(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"unrecognized arguments", result.stderr)
 
-    def test_public_asset_request_verifies_bytes_before_extraction_without_credentials(self):
+    def test_public_asset_download_still_verifies_bytes_before_extraction(self):
         payload = b"pinned archive response"
         import hashlib
+        def transport(url, destination, bound):
+            self.assertEqual(url, tool.URL)
+            self.assertEqual(bound, len(payload))
+            destination.write_bytes(payload)
         def extract(archive, destination):
             self.assertEqual(archive.read_bytes(), payload)
             destination.write_bytes(b"not executed")
         with tempfile.TemporaryDirectory() as d, mock.patch.object(
                 tool, "ARCHIVE_BYTES", len(payload)), mock.patch.object(
                 tool, "SHA256", hashlib.sha256(payload).hexdigest()), mock.patch.object(
-                tool.urllib.request, "urlopen", return_value=io.BytesIO(payload)) as read, mock.patch.object(
+                tool, "download_asset", side_effect=transport) as read, mock.patch.object(
                 tool, "extract_binary", side_effect=extract), mock.patch.object(tool, "verify_version") as version:
             binary = tool.install(Path(d) / "tool")
             self.assertEqual(binary.read_bytes(), b"not executed")
-            request = read.call_args.args[0]
-            self.assertEqual(request.full_url, tool.URL)
-            self.assertEqual(dict(request.header_items()), {"Accept": "application/octet-stream"})
-            self.assertEqual(read.call_args.kwargs, {"timeout": 60})
+            read.assert_called_once()
             version.assert_called_once()
 
     def test_api_error_or_corrupt_success_never_tries_another_route(self):
-        from urllib.error import HTTPError
-        for response in [HTTPError(tool.URL, code, "failed", {}, None) for code in [403, 404, 429, 504]] + [b"bad"]:
+        for response in [OSError("HTTP403"), OSError("HTTP429"), OSError("HTTP504"), b"bad"]:
+            def transport(url, destination, bound):
+                if isinstance(response, Exception):
+                    raise response
+                destination.write_bytes(response)
             with self.subTest(response=response), tempfile.TemporaryDirectory() as d, mock.patch.object(
-                    tool.urllib.request, "urlopen") as read, mock.patch.object(tool, "extract_binary") as extract:
-                if isinstance(response, bytes):
-                    read.return_value = io.BytesIO(response)
-                else:
-                    read.side_effect = response
+                    tool, "download_asset", side_effect=transport) as read, mock.patch.object(tool, "extract_binary") as extract:
                 with self.assertRaises((OSError, ValueError)):
                     tool.install(Path(d) / "tool")
                 self.assertEqual(read.call_count, 1)
                 extract.assert_not_called()
                 self.assertFalse((Path(d) / "tool").exists())
-                if isinstance(response, HTTPError):
-                    response.close()
 
     def test_download_failure_cleans_only_created_leaf(self):
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(tool.urllib.request, "urlopen", side_effect=OSError("offline")):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(tool, "download_asset", side_effect=OSError("offline")):
             destination = Path(d) / "tool"
             with self.assertRaisesRegex(OSError, "offline"):
                 tool.install(destination)

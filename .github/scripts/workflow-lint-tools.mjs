@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 export const pins = JSON.parse(
   fs.readFileSync(new URL("./workflow-lint-tools.json", import.meta.url)),
@@ -54,7 +55,11 @@ export function installTools(cache = path.join(os.homedir(), ".cache/nac/workflo
       const archive = path.join(cache, filename);
       if (!fs.existsSync(archive)) {
         const download = path.join(directory, filename);
-        execFileSync(
+        if (url.startsWith("https://api.github.com/")) {
+          execFileSync("python3", [fileURLToPath(new URL("./github_asset.py", import.meta.url)),
+            "--url", url, "--output", download, "--max-bytes", String(150 * 1024 * 1024)],
+          { stdio: "inherit" });
+        } else execFileSync(
           "curl",
           [
             "--fail",

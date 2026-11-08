@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -19,7 +20,7 @@ const hash=v=>createHash('sha256').update(JSON.stringify(sort(v))).digest('hex')
 // composed with this layer's required startup-custody control.
 const parentHash='363778dde3000bacc7771f6e0fbf23680c73bfc4ad65a0f383af30ddfa686e85';
 function validate(value) {
-  const old=structuredClone(value);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
+  const old=structuredClone(value);reverseAssetTokens(old);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');
   for(const role of ['browser-shards','browser-proof']) {
     const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary','browser-apt']);

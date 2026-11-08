@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -46,7 +47,7 @@ test("ordinary test-granularity shards execute the inventoried exclusion while p
 });
 
 function verifyGranularity(value) {
-  const before = structuredClone(value);
+  const before = structuredClone(value); reverseAssetTokens(before);
   // Authenticate and reverse the later relay before the historical S02 guard.
   reverseBrowserApt(before);
   for (const step of [

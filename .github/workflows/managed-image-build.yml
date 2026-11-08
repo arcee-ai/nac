@@ -99,6 +99,8 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
       - name: Qualify real OS/Node advisory matching and runtime/DB negatives
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/security/image_qualify.py --output image-security-fixtures \
             --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
@@ -189,6 +191,7 @@ jobs:
         id: inventory
         if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.smoke.outcome == 'success' }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           IMAGE_ID: ${{ steps.image.outputs.id }}
           SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |

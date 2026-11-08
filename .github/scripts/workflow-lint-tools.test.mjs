@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import childProcess from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
+import { syncBuiltinESMExports, createRequire } from "node:module";
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import test from "node:test";
 import { downloadUrl, installTools, pins } from "./workflow-lint-tools.mjs";
 
@@ -42,10 +43,9 @@ function installerFixture(t, mode) {
   const original = childProcess.execFileSync;
   childProcess.execFileSync = (command, args) => {
     calls.push({ command, args });
-    if (command === "curl") {
-      assert.ok(args.includes("Accept: application/octet-stream"));
-      assert.equal(args[args.indexOf("--proto-redir") + 1], "=https");
-      assert.equal(args[args.indexOf("--retry") + 1], "2");
+    if (command === "python3") {
+      assert.match(args[0], /github_asset\.py$/);
+      assert.equal(args[args.indexOf("--max-bytes") + 1], String(150 * 1024 * 1024));
       assert.ok(!args.some(a => /authorization|token|--user|--netrc|location-trusted/i.test(a)));
       const url = args.find(a => a.startsWith("https://"));
       // Characterize the original HTTP504 browser route; only qualified API works.
@@ -76,12 +76,12 @@ function installerFixture(t, mode) {
 test("API bytes pass original checksum/cache admission; cached bytes require no network", t => {
   const { cache, calls } = installerFixture(t, "valid");
   const first = installTools(cache);
-  assert.equal(calls.filter(c => c.command === "curl").length, 2);
+  assert.equal(calls.filter(c => c.command === "python3").length, 2);
   assert.equal(calls.filter(c => c.command === "tar").length, 2);
   first.cleanup();
   calls.length = 0;
   installTools(cache).cleanup();
-  assert.equal(calls.filter(c => c.command === "curl").length, 0);
+  assert.equal(calls.filter(c => c.command === "python3").length, 0);
   assert.equal(calls.filter(c => c.command === "tar").length, 2);
 });
 for (const mode of ["failed", "corrupt", "cached-corrupt"])
@@ -90,7 +90,28 @@ for (const mode of ["failed", "corrupt", "cached-corrupt"])
     const filename = pins.actionlint.assets["linux-x64"][0];
     if (mode === "cached-corrupt") fs.writeFileSync(path.join(cache, filename), "corrupt");
     assert.throws(() => installTools(cache), mode === "failed" ? /HTTP 504/ : /checksum mismatch/);
-    assert.equal(calls.filter(c => c.command === "curl").length, mode === "cached-corrupt" ? 0 : 1);
+    assert.equal(calls.filter(c => c.command === "python3").length, mode === "cached-corrupt" ? 0 : 1);
     assert.equal(calls.filter(c => c.command === "tar").length, 0);
     if (mode !== "cached-corrupt") assert.deepEqual(fs.readdirSync(cache), []);
   });
+
+
+test("existing read token is confined to the five exact installer steps", () => {
+  const YAML = createRequire(import.meta.url)("yaml");
+  for (const file of ["stable-release", "managed-image-build", "source-security"]) {
+    const value = YAML.parse(fs.readFileSync(`.github/workflows/${file}.yml`, "utf8"));
+    assert.equal(value.permissions.contents, "read");
+    const clean = structuredClone(value);
+    reverseAssetTokens(clean);
+    for (const mutate of [
+      w => { w.env = { GITHUB_TOKEN: "${{ github.token }}" }; },
+      w => { Object.values(w.jobs)[0].env = { GITHUB_TOKEN: "${{ github.token }}" }; },
+      w => { const step = Object.values(w.jobs).flatMap(j => j.steps ?? []).find(s => s.env?.GITHUB_TOKEN); step.env.GITHUB_TOKEN = "untrusted"; },
+      w => { const step = Object.values(w.jobs).flatMap(j => j.steps ?? []).find(s => s.env?.GITHUB_TOKEN); delete step.env.GITHUB_TOKEN; },
+      w => { const step = Object.values(w.jobs).flatMap(j => j.steps ?? []).find(s => !s.env?.GITHUB_TOKEN); step.env = { ...step.env, GITHUB_TOKEN: "${{ github.token }}" }; },
+    ]) {
+      const candidate = structuredClone(value); mutate(candidate);
+      assert.throws(() => reverseAssetTokens(candidate));
+    }
+  }
+});

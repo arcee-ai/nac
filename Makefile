@@ -271,6 +271,7 @@ lint-workflows:
 
 ## Prove workflow/shell enforcement with real pinned tools and invalid fixtures
 test-workflow-lint:
+	python3 -B .github/scripts/github-asset.test.py
 	node --test .github/scripts/workflow-lint.test.mjs .github/scripts/workflow-lint-tools.test.mjs
 
 ## Lint frontend and production Rust targets

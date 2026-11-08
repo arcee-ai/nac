@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -41,7 +42,7 @@ function state(mode='full'){
 function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
 
 test('FULL split projection preserves the landed graph; six authority pins unchanged and two explicitly rebound',()=>{
- const normalized=structuredClone(stable);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
+ const normalized=structuredClone(stable);reverseAssetTokens(normalized);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
  for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
 });
 test('actual pre-prepare routing isolates edits and ready before pending-source replacement',()=>{
@@ -110,6 +111,6 @@ test('normalization rejects changed trust, defaults, coverage, APT or extra work
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence')['continue-on-error']=true,
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload browser shard failure artifacts').with.path='crates/nac-server/web/test-results']){
   const value=structuredClone(stable);mutate(value);
-  assert.throws(()=>{reverseAdmission(value);reverseParallelApt(value,aptProducerSteps);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
+  assert.throws(()=>{reverseAssetTokens(value);reverseAdmission(value);reverseParallelApt(value,aptProducerSteps);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
  }
 });

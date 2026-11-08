@@ -270,6 +270,9 @@ test("installer rejects mismatched binary digest before installation", (t) => {
     '#!/bin/sh\nwhile [ "$1" != --output ]; do shift; done\nprintf bad-binary > "$2"\n',
     { mode: 0o755 },
   );
+  // Cover the Linux API branch too; the fake transport only emits corrupt bytes.
+  writeFileSync(join(w.directory, "python3"), readFileSync(curl), { mode: 0o755 });
+  writeFileSync(join(w.directory, "uname"), '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n', { mode: 0o755 });
   const result = spawnSync(
     "sh",
     [

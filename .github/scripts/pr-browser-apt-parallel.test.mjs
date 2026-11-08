@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -25,7 +26,7 @@ function evaluate(code,state) {
 }
 function project(value,required=requiredJobs) {
   assert.equal(required.filter(name=>name==='browser-apt').length,1);
-  const old=structuredClone(value);
+  const old=structuredClone(value);reverseAssetTokens(old);
   reverseAdmission(old);reverseParallelApt(old,aptProducerSteps);reverseElapsedEvidence(old);
   const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
   // Full pre-admission APT graph plus this layer's required startup-custody control.

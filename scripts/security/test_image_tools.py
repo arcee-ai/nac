@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tarfile
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -72,8 +73,17 @@ class ToolTransportTests(unittest.TestCase):
             if isinstance(response, Exception):
                 raise response
             return response
+        def api_transport(args, **kwargs):
+            self.assertEqual(args[1], scan.ROOT / ".github/scripts/github_asset.py")
+            url = args[args.index("--url") + 1]
+            self.assertEqual(url, "https://api.github.com/repos/anchore/syft/releases/assets/657153873")
+            self.assertEqual(kwargs, {"check": True})
+            self.assertEqual(args[args.index("--max-bytes") + 1], str(150 * 1024 * 1024))
+            if isinstance(response, Exception):
+                raise subprocess.CalledProcessError(1, args)
+            Path(args[args.index("--output") + 1]).write_bytes(response)
         with patch.object(scan, "PINS", pinfile), patch.object(scan.platform, "system", return_value="Linux"), patch.object(
-                scan.platform, "machine", return_value="x86_64"), patch.object(scan, "download", side_effect=transport) as read:
+                scan.platform, "machine", return_value="x86_64"), patch.object(scan.subprocess, "run", side_effect=api_transport) as read:
             try:
                 return scan.install_tools(cache, names={"syft"})
             finally:
@@ -94,7 +104,7 @@ class ToolTransportTests(unittest.TestCase):
         cases += [(False, b"corrupt"), (True, b"corrupt")]
         for cached, response in cases:
             with self.subTest(cached=cached, response=response), tempfile.TemporaryDirectory() as d:
-                with self.assertRaises((ValueError, OSError)):
+                with self.assertRaises((ValueError, OSError, subprocess.CalledProcessError)):
                     self.install(Path(d), payload, response, cached=cached)
                 self.assertEqual(self.calls, 0 if cached else 1)
                 self.assertFalse((Path(d) / "cache/syft").exists())

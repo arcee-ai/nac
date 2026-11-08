@@ -1,6 +1,7 @@
 #!/bin/sh
 # Immutable upstream v2.7.0 release assets, verified against GitHub release digests.
 set -eu
+version=2.7.0
 destination=${1:?usage: install-osv-scanner.sh DESTINATION}
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) asset=linux_amd64; sha=160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b ;;
@@ -11,9 +12,17 @@ case "$(uname -s)/$(uname -m)" in
 esac
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-curl --fail --location --retry 2 --connect-timeout 20 --max-time 180 \
-  "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_$asset" \
-  --output "$temporary/osv-scanner"
+if [ "$asset" = linux_amd64 ]; then
+  test "$version" = 2.7.0 || { echo 'unqualified OSV release asset mapping' >&2; exit 1; }
+  # Qualified v2.7.0 Linux asset; the original SHA below remains authoritative.
+  python3 "$(dirname "$0")/github_asset.py" \
+    --url https://api.github.com/repos/google/osv-scanner/releases/assets/632251666 \
+    --output "$temporary/osv-scanner" --max-bytes 57725088
+else
+  curl --fail --location --retry 2 --connect-timeout 20 --max-time 180 \
+    "https://github.com/google/osv-scanner/releases/download/v$version/osv-scanner_$asset" \
+    --output "$temporary/osv-scanner"
+fi
 if command -v sha256sum >/dev/null 2>&1; then
   actual=$(sha256sum "$temporary/osv-scanner" | cut -d ' ' -f 1)
 else
