@@ -281,6 +281,7 @@ always-retained failure evidence and existing positive cleanup. Reusing the
 four-case driver would request unauthorized XCTest/input; changing that driver
 or inventing a launch path is outside this source unit. Q057, all guards and
 inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.
+
 ## Fixed hosted lifecycle qualification (ALL-344)
 
 `all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
