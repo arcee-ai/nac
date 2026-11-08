@@ -8,8 +8,9 @@ spent attempts, public stacks and unrelated qualification defaults are unchanged
 
 P is exactly `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`; the canonical six-file
 lifecycle app, engine, packaged observer and journey imports remain unchanged.
-H starts at `ebdbd340bdc1220318446180c0a0df579489392c`. The new controller must be
-one clean child of that H. It accepts only its exact private branch, first manual
+H starts at `ebdbd340bdc1220318446180c0a0df579489392c`. Initial candidate484
+was its clean child; the CAP repair must be one clean child of exact candidate
+`484876634043ace52ec0bca4a6d0126c69414178`, preserving the original H base. It accepts only its exact private branch, first manual
 job, original producer/artifact/manifest, unspent three-case allocation and
 literal queue-inclusive Root clock. No allocation, epoch or nonce is issued here.
 The original sealed lifecycle package must already have been transferred and
@@ -89,3 +90,26 @@ source review, an explicit new compiler/SDK/actor admission, Root's original
 producer transfer/setup/prerequisite owners, the exact hosted image/toolchain,
 existing authorization without mutation, and a new literal unspent capsule.
 There is deliberately no ready-to-run actual capsule or public dispatch here.
+
+CAP-F1/F2 source repair uses the public Darwin `renamex_np(RENAME_EXCL)` file
+operation to move a fully written/fsynced single-link inode atomically without
+clobbering any destination. No hard-link window, pending-record retry, relaxed
+reader, extra helper process or fallback rename is introduced. The platform
+port is macOS-only, matching the declared host; unavailable exclusivity fails
+closed. Its only new native-library entry point is this inert filesystem call,
+not a compiler/SDK/app/AX/process actor. Both strict readers remain unchanged.
+The task owner retains the original helper/budget/cancel exception as primary,
+with custody-read failure as cause and a sticky uncertainty latch; even later
+positive cleanup evidence cannot make a once-unknown task pass.
+
+The maintained project remains `NACNativeUITests.xcodeproj`. The selected target
+and scheme are `NACLifecycleCaptureUITests`; retained actual startup sibling
+results use project/target namespaces `NACNativeUITests/NACStartupUITests`.
+The strict lifecycle URI therefore uses `NACNativeUITests/NACLifecycleCaptureUITests`.
+This is an evidence-backed source inference, not new SDK qualification. In the
+first separately admitted actual test, collect the actual `xcresulttool get
+test-results tests --path RESULT` tree BEFORE exporting attachments and require
+exactly the nominated successful method with that URI. Any other namespace,
+method or schema stops the episode; do not accept alternatives or retry an
+unknown result. Preserve the generated runner/target/scheme and complete tree
+hash/origin evidence for Root's explicit qualification decision.

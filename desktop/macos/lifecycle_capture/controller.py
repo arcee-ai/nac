@@ -7,7 +7,7 @@ import platform
 import plistlib
 import signal
 import sys
-from .admission import admit, make_clock, verify_package, BASE, STOP
+from .admission import admit, make_clock, verify_package, BASE, SOURCE_PARENT, STOP
 from .protocol import CASES, CASE_ALLOWANCE, P, digest, encoded, private, publish, read, require
 from .transaction import contract, ownership, supervisor
 from .owners import Task
@@ -63,7 +63,7 @@ def episode(source,package,output):
         run(argv,log,15,limit=256*1024);return log.read_text().strip()
     def guards():
         admit(value);require_checkout(ROOT,value['controller_sha']);require_checkout(source,P)
-        require(command(['git','-C',str(ROOT),'rev-parse','HEAD^'])==BASE,'one exact reviewed H child')
+        require(command(['git','-C',str(ROOT),'rev-parse','HEAD^'])==SOURCE_PARENT,'one exact reviewed capture-candidate repair child')
         return verify_package(source,package)
     def console():
         log=raw/f'console-{len(completed)}.log'

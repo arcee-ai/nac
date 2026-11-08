@@ -13,7 +13,7 @@ from unittest.mock import patch
 from .test_protocol import Fixture
 from . import admission as a,protocol as p,materialize,evidence
 from .capture_case import Capture
-from .owners import Task,positive
+from .owners import Task,positive,settle_independently
 
 
 class Composition(Fixture):
@@ -32,6 +32,12 @@ class Composition(Fixture):
             with self.assertRaises(RuntimeError):a.admit(bad,env,now=1001)
         with self.assertRaises(RuntimeError):a.admit(value,dict(env,GITHUB_REF='refs/heads/dev'),now=1001)
         with self.assertRaises(RuntimeError):a.admit(value,env,now=4000)
+    def test_exact_repair_parent_preserves_original_h_base(self):
+        self.assertEqual(a.SOURCE_PARENT,'484876634043ace52ec0bca4a6d0126c69414178')
+        self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
+        value,env=self.admission();value['H_base']=a.SOURCE_PARENT
+        with self.assertRaises(RuntimeError):a.admit(value,env,now=1001)
+
     def test_case_clock_expiry_latched_without_renewal(self):
         value,_=self.admission();value['clock']=dict(STARTED=0,WORK_DEADLINE=100,CLEANUP_DEADLINE=700,HARD_DEADLINE=820)
         with patch.object(a.time,'monotonic',return_value=10),patch.object(a.time,'time',return_value=50):
@@ -176,6 +182,113 @@ class FinalOwners(Fixture):
             saved=self.found[(1,'caption')];self.edit(1,edit)
             with self.assertRaises(RuntimeError):self.joined()
             self.found[(1,'caption')]=saved
+
+
+from types import SimpleNamespace
+class Publication(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve();self.target=self.root/'request-1.json'
+    def test_exact_old_link_interleaving_never_exposes_rejected_record(self):
+        real=p.os.link;rejections=[]
+        def linked(source,destination):
+            real(source,destination)
+            try:p.read(destination)
+            except BaseException as error:rejections.append(error)
+        with patch.object(p.os,'link',side_effect=linked):p.publish(self.target,{'nonce':'complete'})
+        self.assertEqual(rejections,[],'visible publication must never fail its own strict reader')
+        self.assertEqual(p.read(self.target),{'nonce':'complete'})
+    def test_real_atomic_commit_boundary_is_complete_single_link(self):
+        real=p.rename_exclusive;observations=[]
+        def committed(source,destination):
+            self.assertFalse(destination.exists());self.assertEqual(source.stat().st_nlink,1)
+            self.assertEqual(p.read(source),{'nonce':'complete'})
+            real(source,destination)
+            observations.append((destination.stat().st_nlink,p.read(destination)))
+            self.assertFalse(source.exists())
+        with patch.object(p,'rename_exclusive',side_effect=committed):p.publish(self.target,{'nonce':'complete'})
+        self.assertEqual(observations,[(1,{'nonce':'complete'})])
+        self.assertEqual(list(self.root.iterdir()),[self.target])
+    def test_concurrent_target_creation_cannot_be_overwritten(self):
+        real=p.rename_exclusive
+        def race(source,destination):
+            destination.write_bytes(p.encoded({'original':'wins'}));real(source,destination)
+        with patch.object(p,'rename_exclusive',side_effect=race),self.assertRaises(FileExistsError):p.publish(self.target,{'new':'loses'})
+        self.assertEqual(p.read(self.target),{'original':'wins'})
+        self.assertEqual(list(self.root.iterdir()),[self.target])
+    def test_dangling_symlink_and_hardlink_reentry_refused(self):
+        self.target.symlink_to(self.root/'absent')
+        with self.assertRaises(RuntimeError):p.publish(self.target,{'nonce':'x'})
+        self.assertTrue(self.target.is_symlink());self.target.unlink()
+        original=self.root/'original';original.write_bytes(p.encoded({'nonce':'x'}));os.link(original,self.target)
+        with self.assertRaises(RuntimeError):p.read(self.target)
+        with self.assertRaises(RuntimeError):p.publish(self.target,{'nonce':'new'})
+    def test_commit_failure_removes_temp_and_never_publishes(self):
+        with patch.object(p,'rename_exclusive',side_effect=OSError('inert commit failure')),self.assertRaises(OSError):p.publish(self.target,{'nonce':'complete'})
+        self.assertEqual(list(self.root.iterdir()),[])
+
+
+class Custody(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
+    def make(self,variant,primary=None):
+        log=self.root/(variant+'-'+str(len(list(self.root.iterdir())))+'.log')
+        def fake(*args,**kwargs):
+            log.write_text('inert')
+            if variant!='missing':
+                row=dict(accepted=True,reaped=True,drain_settled=True,unknown=False,teardown_error=None,pid=123)
+                if variant=='invalid':row.update(reaped=False,unknown=True)
+                Path(str(log)+'.ownership.json').write_bytes(p.encoded(row))
+            if primary is not None:raise primary
+        return Task(['inert'],log,1,SimpleNamespace(work=None,require_phase=lambda *args:None),env={},run=fake).start()
+    def test_original_helper_error_survives_missing_and_invalid_receipts(self):
+        for variant in ('missing','invalid'):
+            with self.subTest(variant=variant):
+                original=ValueError('original helper failure');task=self.make(variant,original)
+                with self.assertRaises(ValueError) as caught:task.finish(1)
+                self.assertIs(caught.exception,original);self.assertIsNotNone(caught.exception.__cause__)
+                self.assertIsNotNone(task.settlement_error)
+    def test_helper_budget_cancel_failures_with_each_receipt(self):
+        for error_type in (ValueError,TimeoutError,KeyboardInterrupt):
+            for variant in ('missing','invalid','valid'):
+                for cancel in (False,True):
+                    with self.subTest(error=error_type.__name__,receipt=variant,cancel=cancel):
+                        original=error_type('original');task=self.make(variant,original)
+                        with self.assertRaises(error_type) as caught:(task.cancel if cancel else task.finish)(1)
+                        self.assertIs(caught.exception,original)
+                        self.assertEqual(task.settlement_error is None,variant=='valid')
+                        self.assertEqual(task.cancelled.is_set(),cancel)
+    def test_success_and_receipt_only_failure(self):
+        self.assertTrue(self.make('valid').finish(1)['reaped'])
+        for variant in ('missing','invalid'):
+            task=self.make(variant)
+            with self.assertRaises((FileNotFoundError,RuntimeError)):task.finish(1)
+            self.assertIsNotNone(task.settlement_error)
+    def test_unfinished_owner_latches_unknown_then_records_late_settlement(self):
+        task=Task(['inert'],self.root/'unfinished.log',1,None,env={});original=ValueError('already stored original')
+        task.error=original
+        class Pending:
+            alive=True
+            def join(self,timeout):pass
+            def is_alive(self):return self.alive
+        task.thread=Pending()
+        with self.assertRaises(ValueError) as caught:task.finish(0)
+        self.assertIs(caught.exception,original);self.assertIsInstance(task.settlement_error,RuntimeError)
+        task.thread.alive=False
+        Path(str(task.log)+'.ownership.json').write_bytes(p.encoded(dict(accepted=True,reaped=True,drain_settled=True,unknown=False,teardown_error=None,pid=123)))
+        with self.assertRaises(ValueError):task.finish(0)
+        self.assertTrue(task.settlement['reaped']);self.assertIsNotNone(task.settlement_error)
+        # Even with no original helper error, a once-unknown owner cannot later pass.
+        task.error=None
+        with self.assertRaises(RuntimeError):task.finish(0)
+    def test_cleanup_attempts_all_owners_and_keeps_first_cause(self):
+        original=TimeoutError('original budget');events=[]
+        tasks=[self.make('missing',original),self.make('invalid',RuntimeError('secondary helper'))]
+        def action(index):
+            def run():events.append(index);return tasks[index].cancel(1)
+            return run
+        with self.assertRaises(TimeoutError) as caught:settle_independently([('SDK',action(0)),('witness',action(1)),('last',lambda:events.append(2))],original)
+        self.assertIs(caught.exception,original);self.assertEqual(events,[0,1,2]);self.assertIsInstance(original.__cause__,FileNotFoundError)
 
 
 if __name__=='__main__':unittest.main()

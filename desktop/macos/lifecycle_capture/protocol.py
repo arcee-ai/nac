@@ -1,4 +1,6 @@
 """Closed two-phase per-case rendezvous. Releases are NEVER screenshot proof."""
+import ctypes
+import sys
 import hashlib
 import json
 import math
@@ -12,7 +14,7 @@ import uuid
 P = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
 CASES = ('run', 'approval', 'terminal')
 PHASES = ('confirming', 'reconfirming')
-TESTS = {case: 'test://com.apple.xcode/NACLifecycleCaptureUITests/NACLifecycleCaptureUITests/LifecycleCaptureJourneys/testCapture' + case.title() for case in CASES}
+TESTS = {case: 'test://com.apple.xcode/NACNativeUITests/NACLifecycleCaptureUITests/LifecycleCaptureJourneys/testCapture' + case.title() for case in CASES}
 PNG_MAX = 2 * 1024**2
 SUPPLEMENT_MAX = 12 * 1024**2
 TOTAL_MAX = 54 * 1024**2
@@ -75,6 +77,23 @@ def decoded(data):
 def read(path,limit=256*1024):return decoded(raw(path,limit))
 
 
+def rename_exclusive(source, destination):
+    """Darwin atomic no-clobber file commit; no target ever has two names.
+
+    SDK sys/stdio.h: RENAME_EXCL=0x4, renamex_np available since macOS10.12.
+    This is only an inert-filesystem port, not a process/AX/SDK actor. No
+    ordinary rename/link fallback: unavailable exclusivity fails closed.
+    """
+    require(sys.platform=='darwin','exclusive publication requires the declared macOS host')
+    library=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
+    operation=library.renamex_np
+    operation.argtypes=(ctypes.c_char_p,ctypes.c_char_p,ctypes.c_uint)
+    operation.restype=ctypes.c_int
+    if operation(os.fsencode(source),os.fsencode(destination),0x4)!=0:
+        error=ctypes.get_errno()
+        raise OSError(error,os.strerror(error),str(destination))
+
+
 def publish(path, value):
     path=Path(path);require(not path.exists() and not path.is_symlink(),'immutable record/reentry')
     data=encoded(value);require(len(data)<=256*1024,'publication limit')
@@ -82,8 +101,9 @@ def publish(path, value):
     try:
         with temporary.open('xb') as f:
             os.chmod(temporary,0o400);f.write(data);f.flush();os.fsync(f.fileno())
-        # link is exclusive: a competing/stale publisher cannot be overwritten.
-        os.link(temporary,path);temporary.unlink()
+        # One atomic move of the complete single-link inode, refusing ANY
+        # preexisting destination. Readers remain unchanged and strict.
+        rename_exclusive(temporary,path)
         fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
         try:os.fsync(fd)
         finally:os.close(fd)

@@ -17,7 +17,7 @@ def positive(log):
 class Task:
     def __init__(self,argv,log,cap,clock,*,env,run=None,limit=512*1024):
         self.argv,self.log,self.cap,self.clock,self.env=argv,Path(log),cap,clock,env
-        self.limit=limit
+        self.limit=limit;self.settlement_error=None;self.settlement=None
         self.run=run;self.thread=None;self.error=None;self.cancelled=threading.Event();self.done=threading.Event()
     def start(self):
         require(self.thread is None,'one process-owner acquisition')
@@ -34,12 +34,23 @@ class Task:
             finally:self.done.set()
         self.thread=threading.Thread(target=owned,daemon=True);self.thread.start();return self
     def finish(self,seconds):
-        require(self.thread is not None,'accepted owner thread')
-        self.thread.join(timeout=seconds)
-        require(not self.thread.is_alive(),'process owner/drainer unsettled; preserve fixture')
-        proof=positive(self.log)
-        if self.error is not None:raise self.error
-        return proof
+        try:
+            require(self.thread is not None,'accepted owner thread')
+            self.thread.join(timeout=seconds)
+            require(not self.thread.is_alive(),'process owner/drainer unsettled; preserve fixture')
+            self.settlement=positive(self.log)
+        except BaseException as secondary:
+            # Retain the first custody uncertainty even if a later cleanup call
+            # observes settlement. It must never become episode success.
+            if self.settlement_error is None:self.settlement_error=secondary
+        if self.error is not None:
+            if self.settlement_error is not None and self.settlement_error is not self.error:
+                note='Owned helper custody also failed: '+type(self.settlement_error).__name__
+                if hasattr(self.error,'add_note') and note not in getattr(self.error,'__notes__',[]):self.error.add_note(note)
+                raise self.error from self.settlement_error
+            raise self.error
+        if self.settlement_error is not None:raise self.settlement_error
+        return self.settlement
     def cancel(self,seconds=45):
         if self.thread is None:return None
         self.cancelled.set();return self.finish(seconds)

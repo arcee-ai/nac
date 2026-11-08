@@ -66,6 +66,13 @@ class Protocol(Fixture):
                        lambda r:r['binding'].update(ready_store='/tmp/other.db'),lambda r:r.update(extra='x')]:
             row=copy.deepcopy(self.requests[0]);mutate(row)
             with self.assertRaises(RuntimeError):p.require_request(row,self.config,1)
+    def test_selected_uri_uses_project_namespace_and_refuses_old_prefix(self):
+        expected='test://com.apple.xcode/NACNativeUITests/NACLifecycleCaptureUITests/LifecycleCaptureJourneys/testCaptureRun'
+        self.assertEqual(p.TESTS['run'],expected)
+        self.assertIs(c.selected_test({'testNodes':[self.origin]},'run'),self.origin)
+        self.origin['nodeIdentifierURL']=expected.replace('/NACNativeUITests/','/NACLifecycleCaptureUITests/',1)
+        with self.assertRaises(RuntimeError):c.selected_test({'testNodes':[self.origin]},'run')
+
     def test_private_after_owner_changed(self):
         self.fences[1]=copy.deepcopy(self.fences[1]);self.fences[1]['after']['engine_pid']=999
         with self.assertRaises(RuntimeError):self.joined()
