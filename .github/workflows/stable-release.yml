@@ -70,7 +70,7 @@ jobs:
           spec=importlib.util.spec_from_file_location('route',f); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
           m.admit(json.loads(os.environ['ROOT_PACKAGE_ADMISSION']),os.environ)
           p=json.loads(f.with_name('pair.json').read_text())
-          assert p['P']=='1cd48f95fbd239a43ef091c43b92649207fc86f5'
+          assert p['P']=='4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
           assert p['H_tools']=='9863b7714c32ed77bd66867973de6d5b02a753f8'
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('P='+p['P']+'\nH='+p['H_tools']+'\n')
