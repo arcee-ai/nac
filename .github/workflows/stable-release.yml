@@ -13,6 +13,17 @@ on:
         type: boolean
         required: false
         default: false
+      native_qualification:
+        description: One explicit immutable native supplier qualification
+        type: choice
+        default: none
+        options:
+          - none
+          - all-341-macos26
+          - all-343-macos26
+          - all-351-macos14
+          - all-352-macos26
+          - all-342-startup-macos26
 
 permissions:
   contents: read
@@ -995,6 +1006,16 @@ jobs:
       cold_caches: ${{ needs.prepare.outputs.cold_caches == 'true' }}
       source-sha: ${{ needs.prepare.outputs.sha }}
 
+  native-qualification:
+    needs: prepare
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/codex/') &&
+      (inputs.native_qualification == 'all-341-macos26' || inputs.native_qualification == 'all-343-macos26' || inputs.native_qualification == 'all-351-macos14' || inputs.native_qualification == 'all-352-macos26' || inputs.native_qualification == 'all-342-startup-macos26')
+    uses: ./.github/workflows/macos-qualification.yml
+    with:
+      harness-sha: ${{ needs.prepare.outputs.sha }}
+      target: ${{ inputs.native_qualification }}
   managed-image:
     needs: prepare
     if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.managed_applicable == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}

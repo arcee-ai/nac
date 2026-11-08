@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme version="1.7">
+  <BuildAction parallelizeBuildables="NO" buildImplicitDependencies="YES">
+    <BuildActionEntries>
+      <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">
+        <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000004" BuildableName="NACNativeUITests.xctest" BlueprintName="NACNativeUITests" ReferencedContainer="container:NACNativeUITests.xcodeproj"/>
+      </BuildActionEntry>
+    </BuildActionEntries>
+  </BuildAction>
+  <TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="NO" codeCoverageEnabled="NO">
+    <Testables>
+      <TestableReference skipped="NO" parallelizable="NO">
+        <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000004" BuildableName="NACNativeUITests.xctest" BlueprintName="NACNativeUITests" ReferencedContainer="container:NACNativeUITests.xcodeproj"/>
+      </TestableReference>
+    </Testables>
+    <MacroExpansion>
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A10000000000000000000004" BuildableName="NACNativeUITests.xctest" BlueprintName="NACNativeUITests" ReferencedContainer="container:NACNativeUITests.xcodeproj"/>
+    </MacroExpansion>
+    <EnvironmentVariables>
+      <EnvironmentVariable key="NAC_UI_FIXTURE" value="$(NAC_UI_FIXTURE)" isEnabled="YES"/>
+    </EnvironmentVariables>
+  </TestAction>
+</Scheme>
