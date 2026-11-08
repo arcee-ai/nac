@@ -74,7 +74,7 @@ enum StartupAXFiles {
     }
     static func read(_ path: String) throws -> Data {
         try parent(path)
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         if fd < 0 && errno == ENOENT { throw StartupAXReceiptError.missing }
         try need(fd >= 0)
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
@@ -185,6 +185,7 @@ final class StartupAXClient {
     let now: () -> UInt64
     let pause: () -> Void
     let load: () throws -> Data
+    private var portLost = false
     private var helper: StartupAXProcess?
     private var target: StartupAXProcess?
     private var lastTime: UInt64 = 0
@@ -220,7 +221,10 @@ final class StartupAXClient {
         try StartupAXFiles.need(hex(declaration.nonce) && hex(declaration.helper_sha256) && hex(configurationSHA)
             && Set(declaration.support_sha256.keys) == ["StartupAXGuard.swift", "StartupAXReceipt.swift"]
             && declaration.support_sha256.values.allSatisfy(hex))
-        let data = try load()
+        try StartupAXFiles.need(!portLost)
+        let data: Data
+        do { data = try load() }
+        catch { if target != nil { portLost = true }; throw error }
         let receipt = try StartupAXFiles.decode(data)
         let incoming = try StartupAXFiles.number(receipt.sequence)
         let refusal = try StartupAXFiles.number(receipt.refusal_generation)
@@ -277,6 +281,7 @@ final class StartupAXClient {
                 return Ticket(sequence: try StartupAXFiles.number(baseline.sequence),
                     refusal: try StartupAXFiles.number(baseline.refusal_generation), entered: entered, deadline: min(deadline, caseDeadline!))
             } catch StartupAXReceiptError.missing {
+                if portLost { throw StartupAXReceiptError.missing }
                 if try time() >= deadline { throw StartupAXReceiptError.expired }
                 pause() // Initial publication only; malformed/refused never retries.
             }

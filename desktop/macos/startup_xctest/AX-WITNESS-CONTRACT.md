@@ -70,3 +70,11 @@ must qualify this implementation with all original PNG/API/store/cleanup oracles
 H uses its existing owned `ci.run` supervisor for this separate process, with a
 finite per-helper phase and drained/reaped ownership receipt. A helper failure
 or unknown settlement retains the profile even if app settlement succeeded.
+
+Review repairs F1/F2/F3: receipt acquisition is O_NONBLOCK before regular-file
+admission, so a writerless FIFO cannot consume the guard allowance. Initial
+publication may wait; after a positive target receipt has been admitted, any
+load loss latches refusal for that client. Positive exact known-app retirement
+produces only a terminal non-ready receipt. It never restores AX/input authority
+or rebinds a target. H reconciles it only after complete original case proofs
+and positive exact app/engine metadata settlement; missing app alone is failure.

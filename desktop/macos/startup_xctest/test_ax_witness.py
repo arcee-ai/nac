@@ -47,6 +47,7 @@ func run(_ mode: String) -> [String: Any] {
         case "future_end": candidate["ended_ns"] = "4000000000"
         case "long_sample": candidate["began_ns"] = "1"
         case "refusal_overwritten": candidate["refusal_generation"] = "1"
+        case "retired": candidate["status"] = "retired"; candidate.removeValue(forKey:"observation")
         case "refused": candidate["status"] = "refused"; candidate["refusal_stage"] = "ax_predicate_refused"
         case "extra": candidate["foreign"] = true
         case "replacement": var o = candidate["observation"] as! [String: Any]; o["root_id"] = UUID().uuidString; candidate["observation"] = o
@@ -83,6 +84,30 @@ func run(_ mode: String) -> [String: Any] {
 }
 
 
+func lossRun(_ mode: String) -> [String: Any] {
+    var stamp: UInt64 = 3_000_000_000, loads=0, inputs=0, pauses=0, last=Data()
+    let process=StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+    let target=StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+    let declaration=StartupAXDeclaration(path:"/inert/receipt",nonce:String(repeating:"a",count:64),helper_path:process.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
+    let client=StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
+        now:{stamp += 1_000_000;return stamp},pause:{pauses += 1;stamp += 10_000_000},load:{
+            loads += 1
+            if mode == "loss_second_begin" && loads == 3 { throw StartupAXReceiptError.missing }
+            if mode == "loss_initial" && loads == 1 { throw StartupAXReceiptError.missing }
+            let index=loads - (mode == "loss_initial" ? 1 : 0)
+            if index == 3 && mode != "loss_second_begin" && mode != "loss_retired" { return last }
+            let sequence=index == 1 ? 1 : index == 2 ? 2 : index == 3 ? 3 : index-1
+            let began:UInt64=index == 1 ? 1_000_000_000 : index == 2 ? 3_100_000_000 : UInt64(index)*100_000_000+3_000_000_000
+            let ended=began+10_000_000;stamp=max(stamp,ended+10_000_000)
+            last=try JSONEncoder().encode(StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:process,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),refusal_generation:"0",began_ns:String(began),ended_ns:String(ended),status:mode == "loss_retired" && index == 3 ? "retired" : "ready",case_deadline_ns:"50000000000",observation:StartupAXSurface(surface:"form",root_id:"00000000-0000-0000-0000-000000000001",panel_id:nil,go_to_id:nil,root_frame:[10,20,100,30],focus:nil),refusal_stage:nil,refusal:nil))
+            return last
+        })
+    do {
+        for _ in 0..<2 { let ticket=try client.begin();_ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30));inputs += 1 }
+    } catch { }
+    return ["inputs":inputs,"loads":loads,"pauses":pauses]
+}
+
 func focusRun(_ mode: String) -> [String: Any] {
     var stamp: UInt64 = 3_000_000_000, call = 0, sequence = 1, last = Data()
     let root = "00000000-0000-0000-0000-000000000001", panel = "00000000-0000-0000-0000-000000000002", goTo = "00000000-0000-0000-0000-000000000003"
@@ -113,7 +138,7 @@ func focusRun(_ mode: String) -> [String: Any] {
 }
 
 func fileRun(_ mode: String) -> [String: Any] {
-    var directory = FileManager.default.temporaryDirectory.appendingPathComponent("nac-ax-files-"+UUID().uuidString)
+    var directory = URL(fileURLWithPath:ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"] ?? FileManager.default.temporaryDirectory.path).appendingPathComponent("nac-ax-files-"+UUID().uuidString)
     do {
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
         defer { try? FileManager.default.removeItem(at:directory) }
@@ -135,9 +160,11 @@ func fileRun(_ mode: String) -> [String: Any] {
             let files = try FileManager.default.contentsOfDirectory(atPath:directory.path)
             return ["accepted":stable == before && before != after && decoded.sequence == "2" && files == ["receipt.json"]]
         }
+        if mode == "file_fifo" { guard mkfifo(file,0o400) == 0 else { throw StartupAXReceiptError.invalid } }
+        if mode == "file_directory" { try FileManager.default.createDirectory(atPath:file,withIntermediateDirectories:false,attributes:[.posixPermissions:0o400]) }
         let data = Data(mode == "file_oversize" ? String(repeating:" ",count:8193).utf8 : "{}".utf8)
         let target = directory.appendingPathComponent("target.json").path
-        FileManager.default.createFile(atPath:mode == "file_symlink" ? target : file,contents:data,attributes:[.posixPermissions:0o400])
+        if !["file_fifo","file_directory"].contains(mode) { FileManager.default.createFile(atPath:mode == "file_symlink" ? target : file,contents:data,attributes:[.posixPermissions:0o400]) }
         if mode == "file_symlink" { try FileManager.default.createSymbolicLink(atPath:file,withDestinationPath:target) }
         if mode == "file_hardlink" { try FileManager.default.linkItem(atPath:file,toPath:target) }
         if mode == "file_foreign_parent" { try FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:directory.path) }
@@ -159,7 +186,7 @@ func identityProof() -> [String: Any] {
     return ["accepted":a && b && c,"retained":retained != nil,"replacement_rejected": !replacement]
 }
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0 == "identity" ? identityProof() : $0.hasPrefix("focus_") ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : $0.hasPrefix("focus_") ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -179,8 +206,22 @@ class ReceiptControls(unittest.TestCase):
                        capture_output=True, text=True, timeout=60)
         if result.returncode: raise AssertionError(result.stderr)
 
-    def rows(self, modes):
-        return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=10))
+    def rows(self, modes, timeout=10):
+        return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
+                         env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_fifo_without_writer_and_directory_are_refused_by_actual_file_port(self):
+        self.assertEqual(self.rows(['file_fifo','file_directory'],timeout=1),[{'accepted':False}]*2)
+
+    def test_second_guard_port_loss_is_not_erased_by_future_positive_samples(self):
+        row=self.rows(['loss_second_begin'])[0]
+        self.assertEqual(row,dict(inputs=1,loads=3,pauses=0))
+        positive,initial=self.rows(['loss_positive','loss_initial'])
+        self.assertEqual(positive['inputs'],2)
+        self.assertEqual(initial['inputs'],2)
+        self.assertEqual(initial['pauses'],1)
+        self.assertEqual(self.rows(['retired'])[0]['inputs'],0)
+        self.assertEqual(self.rows(['loss_retired'])[0]['inputs'],1)
 
     def test_actual_client_accepts_only_fresh_bound_receipt_before_next_input(self):
         self.assertEqual(self.rows(['positive'])[0], dict(accepted=True,inputs=1,loads=2,proof=1))

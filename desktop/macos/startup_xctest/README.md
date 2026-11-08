@@ -8,7 +8,7 @@ semantics. This supersedes the historical four-file/one-Swift supplier statement
 below for a new explicit Q nomination. No app/runtime source is supplied.
 
 The required macOS policy lane retains the six geometry and three original AX
-diagnostic controls, adds an ancestry control and five whole-client inert tests,
+diagnostic controls, adds an ancestry control and seven whole-client inert tests,
 and rejects skips. Run the new controls with
 `NAC342_AX_WITNESS_PROOF=1 python3 -B -m unittest discover -s desktop/macos/startup_xctest -p test_ax_witness.py -v`.
 The Swift test driver invokes fake receipt/input ports, never the live AX reader.
