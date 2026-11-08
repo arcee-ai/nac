@@ -1,14 +1,124 @@
 """Fresh bounded failure-report files only; no actor, host profile or process."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ci_support import MAX_FILE, MAX_TOTAL, export_evidence, retain_path_failure_report
 
 
 class FailureReportControls(unittest.TestCase):
+    def test_short_write_completes_and_zero_progress_restores_previous_pair(self):
+        for zero in (False,True):
+            with self.subTest(zero=zero), tempfile.TemporaryDirectory() as temporary:
+                raw,output=self.fixture(Path(temporary).resolve())
+                report,index=output/'ci-report.json',output/'export.json'
+                original=(report.read_bytes(),index.read_bytes())
+                inode=index.stat().st_ino
+                writing=os.write
+                calls=[]
+                def write(fd,data):
+                    if os.fstat(fd).st_ino==inode and not calls:
+                        calls.append(True)
+                        return 0 if zero else writing(fd,data[:7])
+                    return writing(fd,data)
+                with patch('ci_support.os.write',side_effect=write):
+                    if zero:
+                        with self.assertRaisesRegex(OSError,'no progress'):
+                            retain_path_failure_report(raw,output,[])
+                    else:retain_path_failure_report(raw,output,[])
+                if zero:self.assertEqual((report.read_bytes(),index.read_bytes()),original)
+                else:
+                    entry=next(x for x in json.loads(index.read_text()) if x['file']=='ci-report.json')
+                    self.assertEqual(entry['exported_sha256'],hashlib.sha256(report.read_bytes()).hexdigest())
+
+    def test_duplicate_acquisition_failure_restores_missing_index_and_closes_handles(self):
+        for missing_index in (False,True):
+            with self.subTest(missing_index=missing_index), tempfile.TemporaryDirectory() as temporary:
+                raw,output=self.fixture(Path(temporary).resolve())
+                report,index=output/'ci-report.json',output/'export.json'
+                if missing_index:index.unlink()
+                original=(report.read_bytes(),None if missing_index else index.read_bytes())
+                opening,duplicating=os.open,os.dup
+                descriptors=[]
+                duplicates=[]
+                primary=OSError('inert duplicate acquisition failure')
+                def open_file(path,flags,*args,**kwargs):
+                    fd=opening(path,flags,*args,**kwargs)
+                    if flags & os.O_WRONLY:descriptors.append(fd)
+                    return fd
+                def duplicate(fd):
+                    if duplicates:raise primary
+                    result=duplicating(fd);duplicates.append(result);descriptors.append(result);return result
+                with patch('ci_support.os.open',side_effect=open_file),patch('ci_support.os.dup',side_effect=duplicate):
+                    with self.assertRaises(OSError) as caught:retain_path_failure_report(raw,output,[])
+                self.assertIs(caught.exception,primary)
+                self.assertEqual(report.read_bytes(),original[0])
+                self.assertEqual(None if not index.exists() else index.read_bytes(),original[1])
+                for fd in descriptors:
+                    with self.assertRaises(OSError):os.fstat(fd)
+
+    def test_persistent_storage_failure_reports_restoration_failure_without_masking_primary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            raw,output=self.fixture(Path(temporary).resolve())
+            inode=(output/'export.json').stat().st_ino
+            writing=os.write
+            primary=OSError('inert persistent storage failure')
+            def write(fd,data):
+                if os.fstat(fd).st_ino==inode:raise primary
+                return writing(fd,data)
+            with patch('ci_support.os.write',side_effect=write):
+                with self.assertRaises(OSError) as caught:retain_path_failure_report(raw,output,[])
+            self.assertIs(caught.exception,primary)
+            self.assertIn('Failure report/index restoration: OSError',caught.exception.__notes__)
+            self.assertEqual((output/'receipt.json').read_text(),'{"proof":"fresh independent prefix"}')
+
+    def test_second_destination_faults_preserve_old_report_and_index_pair(self):
+        for mode in ('open','truncate','write','partial-write','close','closed-then-error'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                raw, output = self.fixture(Path(temporary).resolve())
+                report, index = output/'ci-report.json', output/'export.json'
+                original = (report.read_bytes(), index.read_bytes())
+                payload = (output/'receipt.json').read_bytes()
+                identity = index.stat().st_ino
+                primary = OSError('inert second metadata destination failure')
+                triggered = []
+                opening, writing, truncating, closing = os.open, os.write, os.ftruncate, os.close
+                def is_index(fd):return os.fstat(fd).st_ino == identity
+                def opening_fault(path,flags,*args,**kwargs):
+                    if mode=='open' and Path(path)==index and flags & os.O_WRONLY:
+                        triggered.append(True);raise primary
+                    return opening(path,flags,*args,**kwargs)
+                def writing_fault(fd,data):
+                    if mode in ('write','partial-write') and is_index(fd) and not triggered:
+                        triggered.append(True)
+                        if mode=='partial-write':writing(fd,data[:7])
+                        raise primary
+                    return writing(fd,data)
+                def truncating_fault(fd,length):
+                    if mode=='truncate' and is_index(fd) and not triggered:
+                        triggered.append(True);truncating(fd,0);raise primary
+                    return truncating(fd,length)
+                def closing_fault(fd):
+                    if mode in ('close','closed-then-error') and is_index(fd) and not triggered:
+                        triggered.append(True)
+                        if mode=='closed-then-error':closing(fd)
+                        raise primary
+                    return closing(fd)
+                with patch('ci_support.os.open',side_effect=opening_fault), \
+                        patch('ci_support.os.write',side_effect=writing_fault), \
+                        patch('ci_support.os.ftruncate',side_effect=truncating_fault), \
+                        patch('ci_support.os.close',side_effect=closing_fault):
+                    with self.assertRaises(OSError) as caught:
+                        retain_path_failure_report(raw,output,[('secret-canary','<redacted>')])
+                self.assertIs(caught.exception,primary)
+                self.assertTrue(triggered)
+                self.assertEqual((report.read_bytes(),index.read_bytes()),original)
+                self.assertEqual((output/'receipt.json').read_bytes(),payload)
+
     def fixture(self, root):
         raw, output = root / 'raw', root / 'out'
         raw.mkdir()

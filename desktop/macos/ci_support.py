@@ -173,20 +173,22 @@ def retain_path_failure_report(raw, output, replacements):
             raise RuntimeError('Failure report metadata changed beyond its bound')
         return data
 
-    def overwrite(path, data):
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-        with os.fdopen(descriptor, 'wb') as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise RuntimeError('Failure report destination is not regular')
-            stream.truncate(0)
-            stream.write(data)
+    def overwrite(descriptor, data):
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        os.ftruncate(descriptor, 0)
+        remaining = memoryview(data)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError('Failure metadata write made no progress')
+            remaining = remaining[written:]
 
     target, index = output / 'ci-report.json', output / 'export.json'
     if raw.resolve() != raw or output.resolve() != output:
         raise RuntimeError('Failure report roots must remain canonical')
     if not target.exists():
         return  # No successfully exported report; never invent retained evidence.
-    read(target, MAX_FILE)  # Reject a substituted symlink/nonregular destination.
+    old_report = read(target, MAX_FILE)  # Reject a substituted symlink/nonregular destination.
     data = read(raw / 'ci-report.json', MAX_FILE)
     json.loads(data)
     text = data.decode('utf-8')
@@ -197,7 +199,8 @@ def retain_path_failure_report(raw, output, replacements):
     if len(exported) > MAX_FILE:
         raise RuntimeError('Redacted failure report exceeds evidence limit')
     json.loads(exported)
-    manifest = json.loads(read(index, MAX_TOTAL)) if index.exists() else []
+    old_index = read(index, MAX_TOTAL) if index.exists() else None
+    manifest = json.loads(old_index) if old_index is not None else []
     if type(manifest) is not list or any(type(row) is not dict or type(row.get('file')) is not str for row in manifest):
         raise RuntimeError('Failure report prefix index is invalid')
     # Include a final written-but-not-yet-indexed payload from a partial export.
@@ -218,8 +221,53 @@ def retain_path_failure_report(raw, output, replacements):
     encoded_index = (json.dumps(manifest, indent=2) + '\n').encode()
     if len(encoded_index) > MAX_TOTAL:
         raise RuntimeError('Failure report prefix index exceeds evidence limit')
-    overwrite(target, exported)
-    overwrite(index, encoded_index)
+    destinations, writers = [], []
+    changed = False
+    primary = None
+    try:
+        # Both destinations must be open and regular before either is changed.
+        # Retain original descriptors through writer close for bounded rollback.
+        for path in (target, index):
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            destinations.append(descriptor)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise RuntimeError('Failure report destination is not regular')
+        for descriptor in destinations:
+            writers.append(os.dup(descriptor))
+        changed = True
+        for descriptor, data in zip(writers, (exported, encoded_index)):
+            overwrite(descriptor, data)
+        for descriptor in list(writers):
+            os.close(descriptor)
+            writers.remove(descriptor)
+    except BaseException as error:
+        primary = error
+        try:
+            if changed:
+                overwrite(destinations[0], old_report)
+                if old_index is not None:
+                    overwrite(destinations[1], old_index)
+            if old_index is None and len(destinations) == 2:
+                current, opened = index.lstat(), os.fstat(destinations[1])
+                if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise RuntimeError('Failure report index binding changed during rollback')
+                index.unlink()
+        except BaseException as rollback_error:
+            # Persistent storage failure can defeat rollback too. Preserve the
+            # first failure and report this explicitly; no atomicity is claimed.
+            error.add_note('Failure report/index restoration: ' + type(rollback_error).__name__)
+        raise
+    finally:
+        close_error = None
+        for descriptor in writers + destinations:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                close_error = close_error or error
+        if close_error is not None:
+            if primary is None:
+                raise close_error  # Pair is complete, but descriptor cleanup failed.
+            primary.add_note('Failure metadata descriptor cleanup: ' + type(close_error).__name__)
 
 
 def redact_values():
