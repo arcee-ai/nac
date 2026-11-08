@@ -1,5 +1,28 @@
 # NAC Mac development preview
 
+Normal `LOCAL_APP` storage uses a persistent WebKit profile and a private
+presentation checkpoint selected from the verified track, canonical Rust store
+and launch home. This does not copy Rust session/query/credential ownership into
+Swift. Ports and launch nonces remain live runtime fences; only nonsecret
+preferences and existing ALL-336 draft/review text use a stable persistence
+binding. The UI never restores an approval, shell intent, terminal bytes or a
+pending send request. Unknown submission outcomes remain text for review. Cold
+checkpoint drafts also require explicit review/Restore because a valid old file
+cannot prove that a later accepted send or clear reached disk. Fresh typing and
+sending remain usable while that text awaits review; preferences are separate.
+
+Presentation files use private no-follow descriptors, an exclusive profile
+lease and ordered atomic replacements. An acknowledged native write is separate
+from merely posting a WebKit message. Failed or timed-out persistence uses
+memory, reports unavailable recovery and cannot prove durable clear or the last
+unacknowledged keystroke. Cross-Quit, new-port/profile isolation, file failures
+and replacement require actual system WKWebView evidence. Source and pure
+JavaScript tests alone do not qualify these native behaviors. Disposable preview
+keeps its ephemeral website store and existing owned cleanup. The non-GUI
+`WorkspaceStorageRecoveryTests.swift` fixture characterizes actual dual write/
+unlink failure and fresh owner snapshots using an externally owned private root;
+it does not establish app/WK window, cross-Quit or trusted-input acceptance.
+
 ALL-340 wraps NAC's existing production workspace in AppKit and system
 WKWebView. It is a disposable development fixture, with a deterministic local
 Responses provider. Each launch starts empty; closing the window quits the
@@ -69,6 +92,44 @@ The pending ALL-342 integration at `3e6d834d` exercised 600 methods (595 passed,
 five existing optional skips). That evidence belongs to its candidate, not this
 dev baseline. This resource adjustment changes no test inventory and requires
 no startup feature changes. Startup UI acceptance remains a separate gate.
+
+## Pending profile initialization (ALL-349)
+
+Normal profile selection is app-owned and coalesced across renderer retirement.
+Every document continuation revalidates its launch/profile and document ownership
+after the shared open. Missing, invalid or foreign normal profiles fail explicitly;
+a valid profile with unavailable/corrupt storage retains the existing explicit
+memory capability. Sleep/wake never turns a pending normal selection into ordinary
+origin storage. Stop and common failure retire pending selection ownership.
+
+`test_profile_initialization.py --evidence EXTERNAL_DIRECTORY` runs a bounded
+headless oracle under the coordinated browser/compiler gate. It binds verbatim
+`PreviewApp.load`, retirement, failure/shutdown and recovery methods plus the real
+profile/receipt/lifecycle types. Platform, checkpoint I/O and product-document
+construction remain doubles. Its 14 cases cover both sides of the delayed open,
+pre-base retirement, repeated wake, stale/foreign identity, Stop/common failure,
+valid degradation, initial loading and Quit. `--source-revision COMMIT` binds an
+immutable baseline. A missing-symbol compile failure is never semantic RED.
+This oracle does not prove actual WK persistence, file leases or OS sleep.
+
+For a separately admitted actual-app episode, a `LOCAL_APP` lifecycle-smoke build
+uses `RecoverySmoke` and the `PREVIEW_SMOKE`-only bounded profile-open barrier.
+The external owner creates a private `nac-all349-profile-*` root and private
+`control` directory, then runs `profile_initialization_smoke.py arm --root ROOT
+--case CASE` before launching the exact qualified fixture bundle with its existing
+`--recovery-control ROOT/control --recovery-output ROOT/recovery.json` arguments.
+After launch, `observe` with the same arguments advances the case and records its
+bounded observations. Cases are `wake-before-release`, `release-while-suspended`,
+`sleep-before-base`, `common-failure` and `stop-pending`. The before-base case must
+observe that ordering or fails rather than claiming it. The barrier expires after
+five seconds; timeout is a failed fixture episode, never permission to retry.
+
+This controller neither launches an app nor admits Aqua/OS input. Sleep/wake is
+callback injection, and native Stop uses the existing fixture Quit owner. The
+external owner retains exact source/binary/profile custody and must stop, reap and
+clean up every episode even after controller failure. Actual normal-app/WK data
+restoration across Quit/new port and profile isolation remain required separately;
+headless or compile-only results do not establish that acceptance.
 
 ## Acceptance checks
 

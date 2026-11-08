@@ -156,6 +156,11 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
                 guard self.app.canRecoverWorkspace else {
                     throw PreviewError.message("Finish the Quit confirmation, then choose Reload Workspace.")
                 }
+                try await self.app.prepareWorkspaceStorage(receipt: pinned)
+                guard self.current(expected), self.sameEngine(pinned) else { return }
+                guard self.app.canRecoverWorkspace else {
+                    throw PreviewError.message("Finish the Quit confirmation, then choose Reload Workspace.")
+                }
                 self.app.replaceWorkspace(receipt: pinned, fragment: self.routeFragment,
                     requireTerminalAcknowledgement: true)
             } catch {

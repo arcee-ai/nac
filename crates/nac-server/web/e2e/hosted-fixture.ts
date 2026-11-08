@@ -15,6 +15,7 @@ export async function startHostedFixture(
     build?: (output: string) => Promise<void>;
     twoInstances?: boolean;
     nameSurfaces?: boolean;
+    preferenceStorage?: { projectId: string; otherSessionId: string };
   } = {},
 ) {
   const output = path.join(harness.runRoot, "hosted-dist");
@@ -38,6 +39,7 @@ export async function startHostedFixture(
     });
   const calls: { method: string; path: string }[] = [];
   const upstream = new Set<http.ClientRequest>();
+  const streams = new Set<http.ClientRequest>();
   const loseResponses = new Set<string>();
   const lostResponses: { method: string; path: string; status: number }[] = [];
   const server = http.createServer((request, response) => {
@@ -53,6 +55,7 @@ export async function startHostedFixture(
           sessionId,
           twoInstances: options.twoInstances ?? false,
           nameSurfaces: options.nameSurfaces ?? false,
+          preferenceStorage: options.preferenceStorage,
         }),
       );
       return;
@@ -100,7 +103,9 @@ export async function startHostedFixture(
         },
       );
       upstream.add(proxy);
+      if (isStream) streams.add(proxy);
       proxy.once("close", () => upstream.delete(proxy));
+      proxy.once("close", () => streams.delete(proxy));
       response.once("close", () => proxy.destroy());
       proxy.once("error", () => {
         if (!response.headersSent) response.writeHead(502);
@@ -143,6 +148,7 @@ export async function startHostedFixture(
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     calls,
+    activeStreams: () => streams.size,
     lostResponses,
     /** Lose one actual upstream response after native settlement, without dispatching again. */
     loseNextResponse: (method: string, resource: string) =>

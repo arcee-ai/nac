@@ -1,14 +1,14 @@
 import { useState } from "react";
 
-import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useCopyToClipboard } from "@/app/hooks/useCopyToClipboard";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SubagentChatInputBox } from "@/app/components/inspector/SubagentChatInputBox";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import type { PromptRecovery } from "@/app/store/promptDraftStore";
+import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
+import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
+import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
 import {
   useCancelManagedOrchestrator,
   useCancelTraditionalChild,
@@ -25,66 +25,6 @@ export interface SubagentTarget {
   description: string;
   status: TraditionalChildStatus;
   background: boolean;
-}
-
-function RecoveryMessage({
-  recovery,
-  hasDraft,
-  onRestore,
-  onDismiss,
-}: {
-  recovery: PromptRecovery;
-  hasDraft: boolean;
-  onRestore: () => void;
-  onDismiss: () => void;
-}) {
-  const { copy, copied } = useCopyToClipboard();
-  return (
-    <div className="rounded-[4px] bg-elevation-level-2 p-3 text-small">
-      <p role="status">
-        {recovery.status === "pending"
-          ? "Sending message…"
-          : recovery.status === "not-sent"
-            ? "Message was not sent."
-            : "Message delivery is unconfirmed. Check the transcript before sending it again."}
-      </p>
-      <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words">{recovery.text}</p>
-      {recovery.status !== "pending" ? (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            disabled={hasDraft}
-            onClick={onRestore}
-          >
-            Restore to composer
-          </Button>
-          <Button
-            type="button"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            onClick={() => copy(recovery.text)}
-          >
-            {copied ? "Copied" : "Copy message"}
-          </Button>
-          <Button
-            type="button"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            onClick={onDismiss}
-          >
-            Dismiss
-          </Button>
-        </div>
-      ) : null}
-      {recovery.status !== "pending" && hasDraft ? (
-        <p className="text-basic-tertiary">
-          Your current draft is preserved. Clear it before restoring this message.
-        </p>
-      ) : null}
-    </div>
-  );
 }
 
 /** Sends, steers, or stops one existing parent-owned subagent. */
@@ -118,7 +58,9 @@ export function SubagentComposer({
   // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
-  const recoveries = drafts.useRecoveries(target.id);
+  const recoveries = [...drafts.useUnreviewed(target.id), ...drafts.useRecoveries(target.id)];
+  const retentionLimited = drafts.useRetentionLimited();
+  const unretainedSubmission = drafts.useUnretainedSubmission(target.id);
   // Held in the runtime store, so a remount cannot start the same target twice.
   const starting = drafts.useSubmitting(target.id);
   const [selectedBackground, setBackground] = useState<boolean | null>(null);
@@ -130,45 +72,50 @@ export function SubagentComposer({
     const submitted = drafts.get(target.id);
     const prompt = submitted.text.trim();
     if (!prompt) return;
-    // A start waits for the target; a running target takes further steering meanwhile.
-    const finish = drafts.claimSubmission(target.id);
-    if (!finish && !running) return;
-    let recovery: PromptRecovery | null = null;
+    // One start at a time; a running target accepts distinct fresh steering.
+    if (!running && drafts.isSubmitting(target.id)) return;
+    const finish = drafts.claimSubmission(target.id, submitted);
+    if (!finish) return;
+    let retained = false;
     try {
-      // Retain exact text before clearing the captured revision. This is recovery
-      // evidence, not an outbox: navigation/reload must never replay it.
-      recovery = drafts.retainSubmission(target.id, submitted);
-      if (!recovery) return;
-      drafts.acknowledge(target.id, submitted);
-      if (target.mode === "orchestrator") {
-        await startOrchestrator.mutateAsync({
-          sessionId: parentSessionId,
-          payload: {
-            description: target.description,
-            prompt,
-            background,
-            orchestrator_session_id: target.id,
-          },
-        });
-      } else {
-        await startChild.mutateAsync({
-          sessionId: parentSessionId,
-          payload: {
-            profile: "general",
-            description: target.description,
-            prompt,
-            background,
-            child_session_id: target.id,
-          },
-        });
-      }
-      drafts.settleSubmission(target.id, recovery, "confirmed");
+      await withPromptRecovery(
+        drafts,
+        target.id,
+        submitted,
+        async () => {
+          if (target.mode === "orchestrator") {
+            return startOrchestrator.mutateAsync({
+              sessionId: parentSessionId,
+              payload: {
+                description: target.description,
+                prompt,
+                background,
+                orchestrator_session_id: target.id,
+              },
+            });
+          }
+          return startChild.mutateAsync({
+            sessionId: parentSessionId,
+            payload: {
+              profile: "general",
+              description: target.description,
+              prompt,
+              background,
+              child_session_id: target.id,
+            },
+          });
+        },
+        () => {
+          retained = true;
+          drafts.acknowledge(target.id, submitted);
+        },
+      );
+      // Without a recovery entry, preserve the captured live revision until
+      // definite acknowledgement. A newer (even identical) edit never matches.
+      if (drafts.hasSubmission(target.id, submitted)) drafts.acknowledge(target.id, submitted);
     } catch (error) {
-      // A lost response can follow a successful delivery. Preserve it separately
-      // from the next draft and require an explicit human recovery decision.
-      // Foreground endpoints can fail after admission, even with 4xx; an HTTP
-      // error alone cannot prove that no delivery happened.
-      if (recovery) drafts.settleSubmission(target.id, recovery, "uncertain");
+      if (!drafts.hasSubmission(target.id, submitted)) return;
+      if (!retained) drafts.noteUnretainedSubmission(target.id, submitted);
       toast.error(`Unable to update the subagent: ${errorMessage(toRunError(error))}`);
     } finally {
       finish?.();
@@ -224,6 +171,28 @@ export function SubagentComposer({
           ) : null
         }
       />
+      {retentionLimited ? (
+        <p role="status" className="text-small text-basic-secondary">
+          Text recovery storage is full or unavailable. You can keep typing and sending; new edits
+          may not restore. Review or dismiss older text to free space.
+        </p>
+      ) : null}
+      {unretainedSubmission ? (
+        <div role="status" className="text-small text-basic-secondary">
+          <p>
+            Message delivery is unconfirmed. Submitted text was not saved for recovery. Check the
+            transcript before sending again.
+          </p>
+          <Button
+            type="button"
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            onClick={() => drafts.dismissUnretainedSubmission(target.id, unretainedSubmission)}
+          >
+            Acknowledge delivery uncertainty
+          </Button>
+        </div>
+      ) : null}
       {recoveries.length ? (
         <div
           role="region"
@@ -231,7 +200,7 @@ export function SubagentComposer({
           className="pointer-events-auto flex max-h-48 flex-col gap-2 overflow-y-auto"
         >
           {recoveries.map((recovery) => (
-            <RecoveryMessage
+            <PromptRecoveryMessage
               key={recovery.id}
               recovery={recovery}
               hasDraft={!!draft.text}
