@@ -382,3 +382,87 @@ are preserved. A manual stable workflow also starts its existing ordinary CI job
 on their isolated standard hosts; this adapter does not reroute them. Publication
 and the actual hosted admission require separate root decisions. Source controls
 and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
+
+### ALL-347 path adapter (source contract; native qualification pending)
+
+`all-347-paths-macos26` selects only product
+`7013a96f2f2fdf3046c6976e018c9bf988eebfe0` and the ordered fresh-profile cases
+`paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
+references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
+T `NativePathJourney.swift` (SHA-256
+`c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21`), with
+`NATIVE_UI_TESTS`. No helper copy, standalone extraction or fabricated xctestrun
+is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
+their compiler-input, engine identity and output hashes are checked.
+
+The product owner and coordinator froze this supplier on the final UI foundation
+`a6098e3655119075a349a8c923ef82f37f25bee4`. The unchanged helper hash is not
+runtime acceptance. Relative to the original producer, it adds `expected_path_root`
+to its denial probe; its phase schema, ordered transitions and helper interface
+remain unchanged. Actual picker/Finder execution and captures remain **UNRUN**.
+
+The later `ci.py --qualification all-347-paths-macos26 --expected-sha <H>
+--source-root <canonical-T-checkout> --output <absent-private-output>` invocation
+also needs an explicit `NAC_PATHS_CUSTODY` capsule from ROOT's separately reviewed
+source/host/custody allocation and `CARGO_BUILD_JOBS=2`. The bounded capsule binds
+version 1, H, T, both ordered cases, `source_preflight=true`,
+`native_eligibility=true`, one allocation ID, original start/deadline epochs
+(maximum 2340 queue-inclusive seconds), and zero retries. Exclusive `.consumed` creation prevents
+reusing it. The maintained manual selector transports the optional `paths_custody` JSON
+through `macos-qualification.yml`. The additional native-only dispatcher uses
+`native-qualification=all-347-paths-macos26` and `native-paths-custody`; it validates
+the original capsule on an Ubuntu admission job before requesting a Mac. Ordinary
+CI and the legacy underscore input remain separate, unchanged interfaces. Its
+skipped aggregate has a distinct name and cannot supply `Required PR checks`.
+Both actual path xcodebuild calls use the shared runner environment filter,
+removing ambient managed configuration, tokens and API keys while preserving
+selected Xcode/SDK, private fixture and locale plumbing. The path-only step validates the original
+contract and writes those exact bytes into a fresh private runner directory,
+then sets `NAC_PATHS_CUSTODY` for the existing CLI. Missing, stale, foreign or
+reused handoffs fail closed. The runner creates no eligibility or deadline,
+and hosted rerun attempts are rejected. Selecting or transporting this contract
+does not itself allocate a run. Local/hosted envelope qualification remains an
+independent prerequisite; no SDK, TCC, toolchain or settings changes are implied.
+
+The actor reads only H's predeclared private app JSON through a no-follow regular
+file descriptor, permits atomic inode replacement and identical rereads, and
+rejects mutated, skipped, backward or foreign phases. Normal phases are ready0,
+document-reloaded1 (one successor UUID), folder-moved2, folder-restored3,
+reveal-observed4; failure is ready0 then failure-panel-observed1 on the initial
+document. Authorization before helper input checks exact app/engine bytes,
+launch/start identity, owner/window, current document/phase, unlocked same-user
+console and unchanged existing helper/developer/automation policy. It never
+activates Finder, sends Finder input or claims Finder close authority.
+
+Named original PNGs bind chooser/Unicode, replacement form, moved-folder error,
+successful session/Files and Finder's unique selected leaf; the failure case
+retains its pending panel. Actual readable paint and non-occlusion review is
+mandatory and cannot be replaced by AX labels, PNG framing, OCR or app receipts.
+Each PNG is at most 2 MiB; the existing exporter retains at most 12 MiB total,
+with complete essential JSON (256 KiB each) before verbose diagnostics. Missing
+proof preserves relocated roots. Case finalization always attempts the existing
+H cleanup owner independently of SDK collection failure. Known Finder residual
+windows stay open and explicit. The original B499-2 disappearance repair stays
+owned by `settle_apps`; this adapter does not duplicate it.
+
+Portable source controls run with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v`
+and are discovered by the existing workflow-lint job. They establish no compiled
+XCTest import/target, sandbox readability, trusted input, actual chooser/Finder,
+minimum-OS or complete ALL-354/ALL-347 acceptance. Those gates remain **UNRUN**
+until a separate frozen-source native allocation.
+
+The path clock uses one original ROOT allocation started before its one exact
+dispatch, at most2340s including queues. ROOT’s operation ledger must bind the
+actual repository/ref/H/run/firstattempt and exact original capsule bytes; local
+`.consumed` is not cross-run replay evidence. `native_eligibility=true` expresses
+conditional ROOT authorization; actual clean source/toolchain/console/policy
+checks before input remain mandatory. It does not attest to a future host.
+
+Under the existing synchronized-UTC engineering premise, a declared60s allowance
+shortens the ROOT deadline once; it is not measured skew evidence. C' is the
+earlier of that conservative conversion and H's original import+1800s deadline.
+Work/collection ends C'-600, cleanup C'-120 and retention C'. Build1200s and
+sharedcases900s only shorten those fixed bounds. Clock discontinuity, expiry or
+unknown cleanup latches failure, retains relocated bundles and permits only
+independent bounded cleanup/retention; it never renews a case or grants input.

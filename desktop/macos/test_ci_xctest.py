@@ -15,6 +15,32 @@ from ci_xctest import (authorization_policy, relocation_directory, require_gener
 
 
 class XCTestPolicyTests(unittest.TestCase):
+    def test_fresh_symlink_temporary_parent_publishes_canonical_owned_relocation(self):
+        create = tempfile.mkdtemp
+        for outcome in ('normal', 'settled-failure', 'unknown-custody'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                actual = root / 'actual'; actual.mkdir()
+                alias = root / 'alias'; alias.symlink_to(actual, target_is_directory=True)
+                raw = root / 'raw'; raw.mkdir()
+                primary = RuntimeError('fresh inert failure after owned cleanup')
+                with patch('ci_xctest.tempfile.mkdtemp', side_effect=lambda **kw: create(dir=alias, **kw)):
+                    try:
+                        with relocation_directory(raw) as lease:
+                            location = lease['path']
+                            lease['safe_to_remove'] = outcome != 'unknown-custody'
+                            self.assertEqual(location, location.resolve(), 'actor requires canonical app URL')
+                            app = location / 'Moved folder with spaces 日本語' / 'Fixture.app'
+                            app.mkdir(parents=True)
+                            self.assertEqual(app, app.resolve())
+                            if outcome == 'settled-failure': raise primary
+                    except RuntimeError as error:
+                        self.assertIs(error, primary)
+                self.assertEqual(location.exists(), outcome == 'unknown-custody')
+                receipt = json.loads((raw / 'xctest-relocation.json').read_text())
+                self.assertEqual(receipt['path'], str(location))
+                self.assertEqual(receipt['bundle_retained_for_unresolved_cleanup'], outcome == 'unknown-custody')
+
     def test_relocation_is_retained_until_owned_cleanup_is_observed(self):
         with tempfile.TemporaryDirectory() as temporary:
             raw = Path(temporary)
@@ -220,9 +246,7 @@ class XCTestLaunchEnvironmentTests(unittest.TestCase):
 
             stack.enter_context(patch.dict(os.environ, ambient, clear=True))
             stack.enter_context(patch.object(ci_xctest, 'observe_prerequisites', return_value=status))
-            require_settled = ci_xctest.require_settled
-            stack.enter_context(patch.object(ci_xctest, 'require_settled',
-                side_effect=lambda record: require_settled(record, process_status=process_status)))
+            stack.enter_context(patch.object(ci_xctest, 'observe_process_status', side_effect=process_status))
             for name in ('Popen', 'run', 'check_output'):
                 stack.enter_context(patch.object(ci_xctest.subprocess, name,
                     side_effect=AssertionError('No process execution is allowed in this inert control')))
