@@ -17,6 +17,8 @@ final class LifecycleSmoke {
     private var originalPID: Int32 = 0
     private var originalReceipt: EngineReceipt?
     private var originalWindow = 0
+    private weak var originalNativeWindow: NSWindow?
+    private var pendingMinimization: String?
     private var duplicateDeadline: TimeInterval?
 
     init(app: PreviewApp) {
@@ -79,6 +81,7 @@ final class LifecycleSmoke {
             originalPID = app.engine.pid
             originalReceipt = receipt
             originalWindow = app.window.windowNumber
+            originalNativeWindow = app.window
             publish("ready")
         }
         if take("prepare") {
@@ -122,6 +125,8 @@ final class LifecycleSmoke {
             }
             stage = "checking-reopen"
         }
+        pollMinimizedQuit()
+        guard stage != "failed" else { return }
         for command in ["quit", "quit-again", "duplicate-quit"] where take(command) {
             if command == "duplicate-quit" {
                 invokeDuplicate()
@@ -137,8 +142,8 @@ final class LifecycleSmoke {
             }
         }
         if case .confirming = app.quit.lifecycle.phase, let sheet = app.window.attachedSheet {
-            if stage.hasSuffix("-requested") || stage == "work-ready" || stage == "reopened" {
-                guard intact() else { fail("Confirmation changed workspace ownership"); return }
+            if stage.hasSuffix("-requested") || stage == "minimize-quit-ready" || stage == "minimize-quit-again-ready" {
+                guard recordRestoredQuit(sheet, command: seen.contains("quit-again") ? "minimize-quit-again" : "minimize-quit") else { return }
                 evidence["confirmation_retained_owners"] = true
                 publish(seen.contains("quit-again") ? "reconfirming" : "confirming")
             }
@@ -160,12 +165,66 @@ final class LifecycleSmoke {
             if take("stop") { app.window.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
         }
         if seen.contains("cancel"), !seen.contains("quit-again"), app.quit.lifecycle.phase == .running,
-           stage != "cancelled" {
-            guard intact() else { fail("Cancel changed workspace ownership"); return }
+           !app.quit.terminationPending, evidence["cancel_retained_owners"] as? Bool != true {
+            guard intact(), app.window.attachedSheet == nil else { fail("Cancel changed workspace ownership"); return }
+            evidence["cancel_after_minimized_quit"] = quitWindowObservation()
             evidence["cancel_retained_owners"] = true
             publish("cancelled")
         }
     }
+
+    // BEGIN MINIMIZED QUIT JOURNEY (compiled with inert native boundaries)
+    private func quitWindowObservation() -> [String: Any] {
+        let window = app.window!
+        var confirmation = ""
+        if case .confirming(let episode) = app.quit.lifecycle.phase { confirmation = episode.id.uuidString }
+        return ["window_number": window.windowNumber,
+            "document": app.webView.map { String(describing: ObjectIdentifier($0)) } ?? "",
+            "engine_pid": app.engine.pid, "launch_incarnation": app.engine.receipt?.incarnation ?? "",
+            "miniaturized": window.isMiniaturized, "visible": window.isVisible,
+            "front": NSApp.isActive && (window.isKeyWindow || window.attachedSheet?.isKeyWindow == true),
+            "sheet_window": window.attachedSheet?.windowNumber ?? 0,
+            "confirmation_id": confirmation, "termination_pending": app.quit.terminationPending,
+            "owners_intact": intact(), "stop_started": app.stopping,
+            "observed_uptime": ProcessInfo.processInfo.systemUptime]
+    }
+
+    private func pollMinimizedQuit() {
+        for command in ["minimize-quit", "minimize-quit-again"] where take(command) {
+            let expected = command == "minimize-quit" ? "reopened" : "cancelled"
+            guard stage == expected, intact(), app.window === originalNativeWindow,
+                  NSApp.isActive, app.window.isKeyWindow, !app.window.isMiniaturized,
+                  app.window.attachedSheet == nil, !app.quit.terminationPending else {
+                fail("Minimization lost its owned active workspace"); return
+            }
+            pendingMinimization = command
+            app.window.miniaturize(nil)
+        }
+        // Poll the actual property; issuing miniaturize is not an observation.
+        // No new timeout/RunLoop or cleanup block: the existing driver bounds waits.
+        if let command = pendingMinimization, app.window.isMiniaturized {
+            guard intact(), app.window === originalNativeWindow else {
+                fail("Minimization replaced the owned workspace"); return
+            }
+            evidence[command] = quitWindowObservation()
+            pendingMinimization = nil
+            publish(command + "-ready")
+        }
+    }
+
+    private func recordRestoredQuit(_ sheet: NSWindow, command: String) -> Bool {
+        guard let before = evidence[command] as? [String: Any], before["miniaturized"] as? Bool == true,
+              intact(), app.window === originalNativeWindow, app.window.attachedSheet === sheet else {
+            fail("Quit changed its minimized window or attached sheet ownership"); return false
+        }
+        // Observe readiness on later existing polls if AppKit is still presenting.
+        // Never restore/focus here or extend the driver's original stage deadline.
+        guard !app.window.isMiniaturized, app.window.isVisible, sheet.isVisible,
+              NSApp.isActive, app.window.isKeyWindow || sheet.isKeyWindow else { return false }
+        evidence["restored-" + command] = quitWindowObservation()
+        return true
+    }
+    // END MINIMIZED QUIT JOURNEY
 
     private func sameEngine() -> Bool {
         app.engine.pid == originalPID && originalPID > 0 && app.engine.receipt != nil &&
@@ -276,7 +335,7 @@ final class LifecycleSmoke {
         app.webView === originalView && app.engine.pid == originalPID && app.engine.receipt != nil &&
             app.engine.receipt?.incarnation == originalReceipt?.incarnation &&
             app.engine.receipt?.endpoint == originalReceipt?.endpoint && app.engine.receipt?.store == originalReceipt?.store &&
-            app.window.windowNumber == originalWindow && !app.stopping &&
+            app.window === originalNativeWindow && app.window.windowNumber == originalWindow && !app.stopping &&
             app.commands.smokeSnapshot["installed"] as? Bool == true
     }
 
@@ -372,6 +431,7 @@ final class LifecycleSmoke {
         stage = next
         evidence.merge(["stage": next, "scenario": scenario, "app_pid": getpid(), "engine_pid": app.engine.pid,
             "workspace_window_count": NSApp.windows.filter { $0 === app.window }.count,
+            "workspace_window_number": originalWindow,
             "owned_engine_pid": originalPID, "base_url": app.baseURL?.absoluteString ?? "",
             "quit_delegate_requests": app.quit.smokeQuitRequests,
             "quit_confirmation_decisions": app.quit.smokeConfirmationDecisions,

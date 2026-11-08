@@ -34,6 +34,54 @@ def console_state():
     return dict(observed=bool(values), locked=any(values) if values else None)
 
 
+def minimize_before_quit(journey, command, ready_pid):
+    """Actual native property receipt before the existing public Quit request."""
+    assert command in ('minimize-quit', 'minimize-quit-again')
+    journey.guard_focus()
+    journey.command_file(command)
+    record = journey.stage(command + '-ready')[command]
+    assert record['miniaturized'] is True and record['owners_intact'] is True, record
+    assert record['termination_pending'] is False and record['sheet_window'] == 0, record
+    assert record['engine_pid'] == ready_pid and record['window_number'] > 0, record
+    return record
+
+
+def verify_minimized_quit(stopped):
+    """Programmatic AppKit evidence only; no composited/physical-input claim."""
+    import math
+    phases = ('minimize-quit', 'minimize-quit-again')
+    bindings = ('window_number', 'document', 'engine_pid', 'launch_incarnation')
+    first = stopped[phases[0]]
+    assert all(first[key] for key in bindings), stopped
+    assert first['window_number'] == stopped['workspace_window_number'], stopped
+    assert first['engine_pid'] == stopped['owned_engine_pid'], stopped
+    duplicate = stopped['native_duplicate_invocation']['before']
+    assert all(first[key] == duplicate[key] for key in ('document', 'engine_pid', 'launch_incarnation')), stopped
+    ordered = []
+    restored = []
+    for command in phases:
+        before, after = stopped[command], stopped['restored-' + command]
+        assert all(before[key] == after[key] == first[key] for key in bindings), stopped
+        assert before['miniaturized'] is True and before['termination_pending'] is False, stopped
+        assert before['sheet_window'] == 0 and before['confirmation_id'] == '', stopped
+        assert after['miniaturized'] is False and after['visible'] is True and after['front'] is True, stopped
+        assert after['sheet_window'] > 0 and after['confirmation_id'] and after['termination_pending'] is True, stopped
+        for observation in (before, after):
+            assert observation['owners_intact'] is True and observation['stop_started'] is False, stopped
+        ordered.extend([before['observed_uptime'], after['observed_uptime']])
+        restored.append(after)
+    cancel = stopped['cancel_after_minimized_quit']
+    assert all(cancel[key] == first[key] for key in bindings), stopped
+    assert cancel['owners_intact'] is True and cancel['stop_started'] is False, stopped
+    assert cancel['termination_pending'] is False and cancel['sheet_window'] == 0 and cancel['confirmation_id'] == '', stopped
+    assert cancel['miniaturized'] is False, stopped
+    ordered.insert(2, cancel['observed_uptime'])
+    assert all(type(t) in (int, float) and math.isfinite(t) and t > 0 for t in ordered), stopped
+    assert all(left < right for left, right in zip(ordered, ordered[1:])), stopped
+    assert restored[0]['confirmation_id'] == stopped['native_duplicate_invocation']['before']['confirmation_id'], stopped
+    assert restored[0]['confirmation_id'] != restored[1]['confirmation_id'], stopped
+
+
 def verify_native_quit_completion(stopped):
     assert stopped['application_class'] == 'NACApplication', stopped
     assert stopped['quit_confirmation_decisions'] == stopped['quit_sheet_presentations'] == 2, stopped
@@ -154,6 +202,8 @@ def run_contract(bundle, destination, observer):
                         assert result.get('termination_requested'), result
                         os_requests.append(result)
 
+                    minimize_before_quit(journey, 'minimize-quit', ready_pid)
+                    fixture.assert_work_running()
                     if scenario == 'terminal':
                         os_quit() # First Quit originates from the public OS application API.
                     else:
@@ -176,6 +226,8 @@ def run_contract(bundle, destination, observer):
                     assert cancelled['cancel_retained_owners']
                     capture('cancelled')
                     fixture.assert_work_running()
+                    minimize_before_quit(journey, 'minimize-quit-again', ready_pid)
+                    fixture.assert_work_running()
                     journey.command_file('quit-again')
                     journey.stage('reconfirming')
                     started = time.monotonic()
@@ -186,6 +238,7 @@ def run_contract(bundle, destination, observer):
                     wait_for('App exited after Stop and Quit', lambda: not journey.observe()['apps'], timeout=6)
                     stopped = journey.read() # Includes the final settled-termination snapshot.
                     verify_native_quit_completion(stopped)
+                    verify_minimized_quit(stopped)
                 assert engine_settled(moved, ready_pid)
                 after = fixture.verify_store(store)
                 if scenario == 'renderer-hidden':
