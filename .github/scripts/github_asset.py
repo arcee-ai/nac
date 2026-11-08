@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fetch a public GitHub release asset; optional job token is API-hop-only."""
 import argparse
+import http.client
 import os
 from pathlib import Path
 import re
@@ -51,7 +52,7 @@ def download_asset(url, output, limit):
                 response = opener.open(request, timeout=60)
             except urllib.error.HTTPError as error:
                 response = error
-            except (OSError, ValueError):
+            except (OSError, ValueError, http.client.HTTPException):
                 raise AssetError("asset network request failed") from None
             with response:
                 facts(response, "api" if hop == 0 else "asset")
@@ -77,7 +78,7 @@ def download_asset(url, output, limit):
                         destination.write(chunk)
                 return
         raise AssetError("too many asset redirects")
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:
         if created:
             output.unlink(missing_ok=True)
         if isinstance(error, AssetError):
@@ -97,7 +98,7 @@ def main():
     args = parser.parse_args()
     try:
         download_asset(args.url, args.output, args.max_bytes)
-    except (AssetError, OSError):
+    except (AssetError, OSError, http.client.HTTPException):
         # A transport exception can contain a signed URL or injected server text.
         print("GitHub asset download failed; see allowlisted HTTP facts above", file=sys.stderr)
         return 1

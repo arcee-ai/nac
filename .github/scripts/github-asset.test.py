@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """API-hop credential custody and bounded, sanitized binary transport controls."""
 import contextlib
+import http.client
 import io
 import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import urllib.error
 
 import github_asset as asset
@@ -151,6 +152,107 @@ class Controls(unittest.TestCase):
                 with self.assertRaises(asset.AssetError):
                     asset.download_asset(url, Path("unused"), 100)
                 build.assert_not_called()
+
+    def stdlib_transfer(self, wires, entry="library"):
+        # Only the socket connection is replaced. Real urllib/HTTPConnection and
+        # HTTPResponse parsing create the protocol errors and validate the path.
+        class WireSocket:
+            def __init__(self, wire):
+                self.wire, self.sent = wire, []
+            def sendall(self, data):
+                self.sent.append(bytes(data))
+            def makefile(self, *args, **kwargs):
+                return io.BytesIO(self.wire)
+            def close(self):
+                pass
+        sockets = []
+        def connect(connection):
+            self.assertTrue(wires, "unexpected connection")
+            connection.sock = WireSocket(wires.pop(0))
+            sockets.append(connection.sock)
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {"GITHUB_TOKEN": CANARY}), patch.object(
+                asset.urllib.request, "getproxies", return_value={}), patch.object(
+                http.client.HTTPSConnection, "connect", connect):
+            output = Path(d) / "download"
+            diagnostic = io.StringIO()
+            error = result = None
+            with contextlib.redirect_stderr(diagnostic):
+                try:
+                    if entry == "cli":
+                        with patch("sys.argv", ["github_asset.py", "--url", API, "--output", str(output),
+                                                "--max-bytes", "2097152"]):
+                            result = asset.main()
+                    else:
+                        asset.download_asset(API, output, 2097152)
+                except Exception as failure:
+                    error = failure
+            data = output.read_bytes() if output.exists() else None
+            sent = [b"".join(sock.sent) for sock in sockets]
+            return result, error, data, diagnostic.getvalue(), sent
+
+    def test_real_stdlib_protocol_errors_are_sanitized_in_library_and_main(self):
+        cases = {
+            "status": f"{CANARY}\r\n\r\n".encode(),
+            "redirect": (f"HTTP/1.1 302 Found\r\nLocation: {SIGNED} bad\r\n"
+                         "Content-Length: 0\r\n\r\n").encode(),
+            # First read writes a full chunk; the next real chunk read is short.
+            "read": (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n100000\r\n"
+                     + b"x" * 1048576 + b"\r\n20\r\n" + CANARY.encode()),
+        }
+        for name, wire in cases.items():
+            for entry in ["library", "cli"]:
+                with self.subTest(case=name, entry=entry):
+                    result, error, data, diagnostic, sent = self.stdlib_transfer([wire], entry)
+                    if entry == "library":
+                        self.assertIsInstance(error, asset.AssetError)
+                        self.assertTrue(error.__suppress_context__)
+                        self.assert_safe_output(str(error))
+                    else:
+                        self.assertIsNone(error)
+                        self.assertEqual(result, 1)
+                    self.assertIsNone(data, "owned partial output must be cleaned")
+                    self.assertEqual(len(sent), 1)
+                    self.assert_safe_output(diagnostic)
+
+    def test_real_stdlib_redirect_success_keeps_auth_on_api_only(self):
+        wires = [(f"HTTP/1.1 302 Found\r\nLocation: {SIGNED}\r\nContent-Length: 0\r\n\r\n").encode(),
+                 b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\narchive"]
+        result, error, data, diagnostic, sent = self.stdlib_transfer(wires)
+        self.assertIsNone(error)
+        self.assertEqual(data, b"archive")
+        self.assertEqual(len(sent), 2)
+        self.assertIn(("Authorization: Bearer " + CANARY).encode(), sent[0])
+        self.assertNotIn(b"Authorization:", sent[1])
+        self.assertNotIn(CANARY.encode(), sent[1])
+        self.assert_safe_output(diagnostic)
+
+    def test_main_defense_handles_real_protocol_exception_classes(self):
+        for error in [http.client.BadStatusLine(CANARY), http.client.InvalidURL(SIGNED),
+                      http.client.IncompleteRead(CANARY.encode(), 1)]:
+            with self.subTest(error=type(error).__name__), patch("sys.argv", [
+                    "github_asset.py", "--url", API, "--output", "unused", "--max-bytes", "100"]), patch.object(
+                    asset, "download_asset", side_effect=error):
+                diagnostic = io.StringIO()
+                with contextlib.redirect_stderr(diagnostic):
+                    self.assertEqual(asset.main(), 1)
+                self.assert_safe_output(diagnostic.getvalue())
+
+    def test_interruption_and_exit_are_not_sanitized_and_still_clean_partial_output(self):
+        for exception in [KeyboardInterrupt, SystemExit]:
+            for phase in ["open", "read"]:
+                with self.subTest(exception=exception.__name__, phase=phase), tempfile.TemporaryDirectory() as d:
+                    output = Path(d) / "download"
+                    response = Response()
+                    response.read = Mock(
+                        side_effect=[b"partial", exception()])
+                    with patch.object(asset.urllib.request, "build_opener") as build:
+                        if phase == "open":
+                            build.return_value.open.side_effect = exception()
+                        else:
+                            build.return_value.open.return_value = response
+                        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(exception):
+                            asset.download_asset(API, output, 100)
+                    self.assertFalse(output.exists())
 
     def test_cli_failure_cannot_print_exception_or_token(self):
         with patch.dict(os.environ, {"GITHUB_TOKEN": CANARY}), patch("sys.argv", [
