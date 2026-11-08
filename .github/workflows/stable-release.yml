@@ -170,6 +170,8 @@ jobs:
         run: python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
       - name: Check portable path adapter contracts without native execution
         run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v
+      - name: Check instance capture evidence contracts without native execution
+        run: python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
       - name: Check workflows and scripts, then prove enforcement
         env:
           GITHUB_TOKEN: ${{ github.token }}
