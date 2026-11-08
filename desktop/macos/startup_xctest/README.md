@@ -270,6 +270,19 @@ of parent hittability while its Go to Folder sub-sheet is present. The opt-in
 must be supplied in a required source-bound Mac test lane to claim enforcement;
 an ordinary skipped proof is not coverage. Preserve the existing title proof.
 
+A failed public AX folder-surface guard retains at most one
+`nac342-ax-refusal-v1-configuredLocal` JSON attachment before the unchanged
+XCTUnwrap refusal. Its 8 KiB bound contains only the first observed refusal,
+terminal guard, numeric error/count/frame facts and exact P/Q/H/configuration,
+PID/launch/window binding. A rejected candidate may precede the terminal guard;
+the first observation is not a claim of the exclusive cause. It performs no
+extra AX reads after refusal, tree/text dump, trust prompt or action. Acceptance
+stays false. Source-only stub controls exercise the actual extracted AX methods;
+SDK/runtime behavior remains separate. H must explicitly admit and export this
+optional failed-test attachment before mandatory success/cleanup evidence checks;
+current older collectors do not retain it. Source production alone is not export
+or runtime validation.
+
 Root354 owns H's new exact Q commit/four source hashes, complete operations
 list, generated runner/config source hashes and collector/test/consumer handoff.
 H's `FUTURE_MESSAGE` and R's `GUIDANCE` verify the private engine wire and retain

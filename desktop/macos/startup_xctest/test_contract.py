@@ -909,5 +909,174 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: resul
         self.assertEqual(self.run_rows([dict(mode='selection', label=x) for x in labels]),
                          [True, False, False, False, False, False])
 
+@unittest.skipUnless(os.environ.get('NAC342_SWIFT_PANEL_PROOF') == '1',
+                     'Compile-verbatim AX refusal controls not requested')
+class AXRefusalTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix='nac342-ax-refusal-')
+        cls.addClassCleanup(cls.temporary.cleanup)
+        root = Path(cls.temporary.name)
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        def block(start, end):
+            value = source.split(start, 1)[1].split(end, 1)[0]
+            return value[value.index('\n') + 1:]
+        policy = block('// BEGIN NATIVE FOLDER POLICY', '// END NATIVE FOLDER POLICY')
+        diagnostic = block('// BEGIN AX REFUSAL', '// END AX REFUSAL')
+        methods = source[source.index('    private struct AXIdentity:'):source.index('    // Public, read-only AX probe')]
+        # All public AX names below are inert local stubs, never framework calls.
+        stubs = r"""
+typealias AXUIElement = CFString
+typealias AXValue = CFArray
+enum AXError: Int32 { case success = 0, failure = -25204 }
+enum AXValueType: Int { case cgPoint = 1, cgSize = 2, illegal = 0 }
+let kAXWindowsAttribute = "AXWindows", kAXChildrenAttribute = "AXChildren"
+let kAXRoleAttribute = "AXRole", kAXPositionAttribute = "AXPosition", kAXSizeAttribute = "AXSize"
+var attributes = [String: [String: AnyObject]]()
+var mode = "", calls = [String]()
+func token(_ name: String) -> CFString { name as CFString }
+func value(_ kind: Int, _ x: Double, _ y: Double) -> CFArray { [kind, x, y] as CFArray }
+func AXUIElementGetTypeID() -> CFTypeID { CFStringGetTypeID() }
+func AXValueGetTypeID() -> CFTypeID { CFArrayGetTypeID() }
+func AXUIElementCreateApplication(_ pid: pid_t) -> AXUIElement { token("app") }
+func AXUIElementSetMessagingTimeout(_ element: AXUIElement, _ seconds: Float) -> AXError {
+    calls.append("timeout:" + (element as String))
+    return mode == "timeout" ? .failure : .success
+}
+func AXUIElementCopyAttributeValue(_ element: AXUIElement, _ name: CFString,
+                                    _ result: UnsafeMutablePointer<CFTypeRef?>) -> AXError {
+    let key = name as String
+    calls.append((element as String) + ":" + key)
+    if mode == "api_error" && key == "AXWindows" { return .failure }
+    result.pointee = attributes[element as String]?[key]
+    return .success
+}
+func AXUIElementGetPid(_ element: AXUIElement, _ result: UnsafeMutablePointer<pid_t>) -> AXError {
+    calls.append("pid:" + (element as String)); result.pointee = mode == "pid" ? 124 : 123
+    return .success
+}
+func AXValueGetType(_ value: AXValue) -> AXValueType {
+    AXValueType(rawValue: ((value as NSArray)[0] as! NSNumber).intValue)!
+}
+func AXValueGetValue(_ value: AXValue, _ type: AXValueType, _ pointer: UnsafeMutableRawPointer) -> Bool {
+    if mode == "decode" { return false }
+    let a = value as NSArray
+    let x = (a[1] as! NSNumber).doubleValue, y = (a[2] as! NSNumber).doubleValue
+    if type == .cgPoint { pointer.assumingMemoryBound(to: CGPoint.self).pointee = CGPoint(x: x, y: y) }
+    else { pointer.assumingMemoryBound(to: CGSize.self).pointee = CGSize(width: x, height: y) }
+    return true
+}
+func prepare(_ selected: String) {
+    mode = selected; calls = []
+    attributes = ["app": ["AXWindows": [token("root")] as NSArray],
+                  "root": ["AXRole": "AXWindow" as NSString, "AXPosition": value(1, 10, 20),
+                           "AXSize": value(2, 100, 30), "AXChildren": [] as NSArray]]
+    switch mode {
+    case "missing": attributes["app"]?.removeValue(forKey: "AXWindows")
+    case "type": attributes["app"]?["AXWindows"] = 1 as NSNumber
+    case "member": attributes["app"]?["AXWindows"] = [1] as NSArray
+    case "count": attributes["app"]?["AXWindows"] = Array(repeating: token("root"), count: 129) as NSArray
+    case "frame": attributes["root"]?["AXPosition"] = value(1, 11, 20)
+    case "encoding": attributes["root"]?["AXPosition"] = value(2, 10, 20)
+    case "value_type": attributes["root"]?["AXPosition"] = 1 as NSNumber
+    case "ambiguous":
+        attributes["root2"] = attributes["root"]
+        attributes["app"]?["AXWindows"] = [token("root"), token("root2")] as NSArray
+    case "hierarchy":
+        attributes["sheet"] = ["AXRole": "AXSheet" as NSString]
+        attributes["root"]?["AXChildren"] = [token("sheet")] as NSArray
+    case "foreign":
+        attributes["other"] = ["AXRole": "AXButton" as NSString]
+        attributes["app"]?["AXWindows"] = [token("root"), token("other")] as NSArray
+    case "panel_valid", "goTo_valid", "nested_unexpected", "nested_missing":
+        attributes["root"]?["AXChildren"] = [token("sheet")] as NSArray
+        attributes["sheet"] = ["AXRole": "AXSheet" as NSString, "AXChildren": [] as NSArray]
+        if mode == "goTo_valid" || mode == "nested_unexpected" {
+            attributes["sheet"]?["AXChildren"] = [token("goTo")] as NSArray
+            attributes["goTo"] = ["AXRole": "AXSheet" as NSString]
+        }
+    default: break
+    }
+}
+"""
+        driver = r"""
+    func run() -> [String: Any] {
+        var binding = StartupNativeFolderPolicy.Binding<AXIdentity>()
+        let surface: StartupNativeFolderPolicy.Surface = ["goTo_valid", "nested_missing"].contains(mode) ? .goTo
+            : ["panel_valid", "nested_unexpected"].contains(mode) ? .panel : .form
+        if surface != .form {
+            _ = binding.accept(.form, root: AXIdentity(element: token("root")), panel: nil, goTo: nil)
+            if surface == .goTo {
+                _ = binding.accept(.panel, root: AXIdentity(element: token("root")),
+                                   panel: AXIdentity(element: token("sheet")), goTo: nil)
+            }
+        }
+        let result = axSurface(surface, pid: 123, frame: CGRect(x: 10, y: 20, width: 100, height: 30), binding: &binding)
+        let before = calls.count
+        let first = axRefusal.record(binding: ["app_pid": 123, "window_number": 9])
+        axRefusal.note("later_cause_must_not_overwrite")
+        let after = axRefusal.record(binding: ["app_pid": 123, "window_number": 9])
+        let bounded = axRefusal.record(binding: ["oversized": String(repeating: "X", count: 8193)]) == nil
+        return ["accepted": result != nil, "record": first as Any? ?? NSNull(),
+                "after": after as Any? ?? NSNull(), "bounded": bounded,
+                "post_refusal_api_reads": calls.count - before, "calls": calls]
+    }
+}
+let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
+let rows = modes.map { selected -> [String: Any] in prepare(selected); return Probe().run() }
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows))
+"""
+        swift = root / 'main.swift'
+        swift.write_text('import Foundation\nimport CoreFoundation\nimport CoreGraphics\nimport Darwin\n'
+                         + stubs + policy + diagnostic + '\nprivate final class Probe {\n' + methods + driver)
+        cls.binary = root / 'proof'
+        result = subprocess.run(['swiftc', '-swift-version', '5', str(swift), '-o', str(cls.binary)],
+                                capture_output=True, text=True, timeout=90)
+        if result.returncode:
+            raise AssertionError(result.stderr)
+
+    def run_modes(self, modes):
+        result = subprocess.run([str(self.binary)], input=json.dumps(modes), capture_output=True,
+                                text=True, timeout=10, check=True)
+        return json.loads(result.stdout)
+
+    def test_distinct_first_failure_facts_preserve_nil_and_never_poll_after_refusal(self):
+        modes = ['timeout', 'api_error', 'missing', 'type', 'member', 'count', 'frame',
+                 'encoding', 'value_type', 'decode', 'ambiguous', 'hierarchy', 'pid', 'foreign']
+        stages = ['application_timeout', 'attribute_error', 'attribute_missing', 'elements_type',
+                  'elements_member_type', 'elements_count', 'root_frame_mismatch', 'frame_encoding',
+                  'frame_value_type', 'frame_position_decode', 'root_matches', 'root_sheet_count',
+                  'pid_mismatch', 'root_role_or_type']
+        for mode, stage, row in zip(modes, stages, self.run_modes(modes)):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'])
+                self.assertFalse(row['record']['acceptance'])
+                self.assertEqual(row['record']['first_observed_refusal']['stage'], stage)
+                self.assertEqual(row['record'], row['after'])
+                self.assertEqual(row['post_refusal_api_reads'], 0)
+                self.assertTrue(row['bounded'])
+                self.assertLessEqual(len(json.dumps(row['record'])), 8192)
+                self.assertTrue(row['record']['terminal_refusal']['stage'])
+        rows = self.run_modes(['api_error', 'ambiguous', 'frame', 'foreign'])
+        self.assertEqual(rows[0]['record']['first_observed_refusal']['api_code'], -25204)
+        self.assertEqual(rows[1]['record']['terminal_refusal']['count'], 2)
+        self.assertEqual(rows[2]['record']['first_observed_refusal']['frame'], [11, 20, 100, 30])
+        self.assertEqual(rows[3]['record']['terminal_refusal']['stage'], 'foreign_window')
+
+    def test_panel_and_goTo_hierarchy_acceptance_and_nested_refusals_stay_distinct(self):
+        rows = self.run_modes(['panel_valid', 'goTo_valid', 'nested_unexpected', 'nested_missing'])
+        self.assertEqual([row['accepted'] for row in rows], [True, True, False, False])
+        self.assertEqual([row['record'] for row in rows[:2]], [None, None])
+        for row, count in zip(rows[2:], [1, 0]):
+            self.assertEqual(row['record']['terminal_refusal'], {'stage': 'nested_sheet_count', 'count': count})
+            self.assertEqual(row['post_refusal_api_reads'], 0)
+
+    def test_success_stays_accepted_without_failure_record(self):
+        row = self.run_modes(['valid'])[0]
+        self.assertTrue(row['accepted'])
+        self.assertIsNone(row['record'])
+        self.assertEqual(row['post_refusal_api_reads'], 0)
+
+
 if __name__ == '__main__':
     unittest.main()
