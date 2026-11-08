@@ -78,6 +78,68 @@ enum StartupAXFailureDiagnostic {
 }
 // END AX FAILURE DIAGNOSTICS
 
+// BEGIN PASSIVE FAILURE CONTEXT (existing values only; never authority)
+private enum StartupAXFailureContext {
+    static let causes: Set<String> = ["ax_predicate_refused", "sample_deadline", "target_retirement"]
+    static let readerTerminals: Set<String> = ["application_timeout", "windows_unavailable", "root_matches",
+        "root_children", "root_sheet_count", "panel_children", "nested_sheet_count", "owned_pid",
+        "foreign_window", "incarnation_binding", "focus_unavailable"]
+
+    static func first(_ stored: inout [String: String]?, cause: String, sequence: UInt64,
+                      generation: UInt64, failure: Data? = nil) {
+        guard stored == nil, causes.contains(cause) else { return }
+        var value = ["cause": cause, "sequence": String(sequence), "generation_before": String(generation)]
+        if cause == "ax_predicate_refused", let failure, failure.count <= 8192,
+           let body = (try? JSONSerialization.jsonObject(with: failure)) as? [String: Any],
+           let terminal = body["terminal_refusal"] as? [String: Any],
+           let stage = terminal["stage"] as? String, readerTerminals.contains(stage) {
+            value["reader_terminal"] = stage
+        }
+        stored = value
+    }
+
+    private static func identity(_ node: [String: Any]) -> StartupAXProcess? {
+        let keys = ["pid", "parent", "uid", "start_seconds", "start_microseconds", "executable"]
+        guard let data = try? JSONSerialization.data(withJSONObject: node.filter { keys.contains($0.key) }) else { return nil }
+        return try? JSONDecoder().decode(StartupAXProcess.self, from: data)
+    }
+
+    static func closing(_ snapshot: [String: Any], target: StartupAXProcess, window: Int,
+                        latched: String?, helperUID: Int32) -> [String: Any]? {
+        guard let nodes = snapshot["nodes"] as? [[String: Any]], nodes.count <= 128,
+              latched == nil || latched == "retiring" || latched == "retired" else { return nil }
+        let apps = nodes.filter { $0["kind"] as? String == "app" }
+        let app = apps.count == 1 ? apps[0] : nil
+        let windows = app?["windows"] as? [Int]
+        let retired = snapshot["retired"] as? [[String: Any]]
+        guard (windows?.count ?? 0) <= 128, (retired?.count ?? 0) <= 128 else { return nil }
+        let matches = (retired ?? []).filter { row in
+            row["proof"] as? String == "kill_zero_ESRCH"
+                && (row["identity"] as? [String: Any]).flatMap(identity) == target
+        }.count
+        // Stored structural fields/helper UID, not another getuid/kernel probe.
+        return ["complete": snapshot["complete"] as? Bool == true,
+            "target_fields_valid": target.pid > 0 && target.parent > 0 && target.uid >= 0
+                && target.start_seconds > 0 && (0..<1_000_000).contains(target.start_microseconds),
+            "target_uid_matches_helper": target.uid == helperUID,
+            "app_count": apps.count, "process_equal": app.flatMap(identity) == target,
+            "windows_typed": windows != nil, "window_count": windows?.count ?? 0,
+            "original_present": windows?.contains(window) == true, "exact_original_singleton": windows == [window],
+            "latched": latched ?? "none", "retired_inventory_typed": retired != nil, "retirement_matches": matches]
+    }
+
+    static func attach(_ record: [String: Any], first: [String: String]?, closing: [String: Any]?) -> [String: Any] {
+        guard record["stage"] as? String == "closing_lifetime", record["pre_refusal_paired"] == nil else { return record }
+        var candidate = record
+        if let first { candidate["first_counter_transition"] = first }
+        if let closing { candidate["closing_lifetime_context"] = closing }
+        guard let bytes = try? JSONSerialization.data(withJSONObject: candidate, options: [.sortedKeys]),
+              bytes.count < 2048 else { return record }
+        return candidate // Optional overflow/malformed context leaves the original record intact.
+    }
+}
+// END PASSIVE FAILURE CONTEXT
+
 // BEGIN PRE-REFUSAL PAIRED DIAGNOSTIC (never input/ready authority)
 enum StartupAXPreRefusalDiagnostic {
     static func eligible(complete: Bool, exactProcess: Bool, originalRoot: Bool,
@@ -119,6 +181,8 @@ enum StartupAXWitnessMode {
         var diagnosticBinding: [String: String] = [:]
         var sequence: UInt64 = 0, refusals: UInt64 = 0
         var pairedDiagnostic: [String: Any]?
+        var firstCounter: [String: String]?
+        var closingContext: [String: Any]?
         do {
             let bytes = try StartupAXPreflight.file(configPath, limit: 32768)
             let config = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
@@ -166,6 +230,10 @@ enum StartupAXWitnessMode {
                     status: status, case_deadline_ns: caseDeadline, observation: observed, refusal_stage: stage, refusal: failure)
             }
             func terminal(_ snapshot: [String: Any], began: UInt64) throws -> Bool {
+                if diagnosticStage == .closing_lifetime {
+                    closingContext = StartupAXFailureContext.closing(snapshot, target: target, window: window,
+                        latched: retired, helperUID: me.uid)
+                }
                 let state = try StartupAXLifetime.outcome(snapshot, target: target, window: window, latched: &retired)
                 guard state != "ready" else { return false }
                 diagnosticStage = .closing_integrity
@@ -174,7 +242,9 @@ enum StartupAXWitnessMode {
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
                 let ended = DispatchTime.now().uptimeNanoseconds
                 try StartupObserver.need(ended >= began && ended < deadline)
-                sequence += 1; refusals += 1
+                sequence += 1
+                StartupAXFailureContext.first(&firstCounter, cause: "target_retirement", sequence: sequence, generation: refusals)
+                refusals += 1
                 diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(state, began: began, ended: ended,
                     stage: "target_" + state), to: declaration.path)
@@ -268,7 +338,12 @@ enum StartupAXWitnessMode {
                     observed = try reader.observe(pid: target.pid, frame: frame)
                     if let observed { retainedRoot = observed.root_id }
                 }
-                catch { refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
+                catch {
+                    failure = reader.failureData
+                    StartupAXFailureContext.first(&firstCounter, cause: "ax_predicate_refused", sequence: sequence,
+                        generation: refusals, failure: failure)
+                    refusals += 1; stage = "ax_predicate_refused"
+                }
                 diagnosticStage = .closing_snapshot
                 let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
                 diagnosticStage = .closing_lifetime
@@ -284,6 +359,7 @@ enum StartupAXWitnessMode {
                 let ended = DispatchTime.now().uptimeNanoseconds
                 try StartupObserver.need(ended >= began && ended < deadline)
                 if ended - began > 1_000_000_000 {
+                    StartupAXFailureContext.first(&firstCounter, cause: "sample_deadline", sequence: sequence, generation: refusals)
                     refusals += 1; observed = nil; stage = "sample_deadline"
                 }
                 diagnosticStage = .receipt_publication
@@ -300,6 +376,7 @@ enum StartupAXWitnessMode {
                 observed: DispatchTime.now().uptimeNanoseconds, sequence: sequence, refusals: refusals,
                 binding: diagnosticBinding)
             if let pairedDiagnostic { record["pre_refusal_paired"] = pairedDiagnostic }
+            record = StartupAXFailureContext.attach(record, first: firstCounter, closing: closingContext)
             StartupAXFailureDiagnostic.emit(record, write: { try FileHandle.standardError.write(contentsOf: $0) })
             exit(1)
         }

@@ -20,6 +20,12 @@ DIAGNOSTIC_STAGES = {'configuration', 'admission', 'initial_snapshot', 'trust', 
     'closing_integrity', 'receipt_publication', 'parent_lost'}
 DIAGNOSTIC_CODES = {'ownership_invalid', 'ownership_arguments_unavailable', 'process_probe_unavailable',
                     'decoding_failure', 'foundation_failure', 'other'}
+_COUNTER_CAUSES = {'ax_predicate_refused', 'sample_deadline', 'target_retirement'}
+_READER_TERMINALS = {'application_timeout', 'windows_unavailable', 'root_matches', 'root_children',
+    'root_sheet_count', 'panel_children', 'nested_sheet_count', 'owned_pid', 'foreign_window',
+    'incarnation_binding', 'focus_unavailable'}
+_CLOSING_BOOLS = {'complete', 'target_fields_valid', 'target_uid_matches_helper', 'process_equal',
+    'windows_typed', 'original_present', 'exact_original_singleton', 'retired_inventory_typed'}
 
 
 def require(value, reason):
@@ -29,6 +35,41 @@ def require(value, reason):
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _failure_context(row):
+    """Closed passive operands only; no observation or acceptance authority."""
+    fields = {'first_counter_transition', 'closing_lifetime_context'} & set(row)
+    if not fields:
+        return
+    require(row['stage'] == 'closing_lifetime' and 'pre_refusal_paired' not in row,
+            'AX passive context scope')
+    if 'first_counter_transition' in row:
+        first = row['first_counter_transition']
+        require(type(first) is dict and {'cause', 'sequence', 'generation_before'} <= set(first)
+            <= {'cause', 'sequence', 'generation_before', 'reader_terminal'}
+            and first['cause'] in _COUNTER_CAUSES and first['generation_before'] == '0'
+            and type(first['sequence']) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', first['sequence'])
+            and int(first['sequence']) <= int(row['sequence']) < 2**64
+            and int(row['refusal_generation']) > 0, 'AX first counter transition')
+        if 'reader_terminal' in first:
+            require(first['cause'] == 'ax_predicate_refused' and first['reader_terminal'] in _READER_TERMINALS,
+                    'AX reader terminal cause')
+    if 'closing_lifetime_context' in row:
+        context = row['closing_lifetime_context']
+        require(type(context) is dict
+            and set(context) == _CLOSING_BOOLS | {'app_count', 'window_count', 'latched', 'retirement_matches'}
+            and all(type(context[k]) is bool for k in _CLOSING_BOOLS)
+            and all(type(context[k]) is int and 0 <= context[k] <= 128
+                    for k in ('app_count', 'window_count', 'retirement_matches'))
+            and context['latched'] in ('none', 'retiring', 'retired'), 'AX closing lifetime operands')
+        require((context['app_count'] == 1 or not (context['process_equal'] or context['windows_typed']))
+            and (context['windows_typed'] or (context['window_count'] == 0
+                 and not context['original_present'] and not context['exact_original_singleton']))
+            and (not context['original_present'] or context['window_count'] > 0)
+            and (not context['exact_original_singleton'] or (context['original_present'] and context['window_count'] == 1))
+            and (context['retired_inventory_typed'] or context['retirement_matches'] == 0),
+            'AX closing operand consistency')
 
 
 def paired_diagnostic(row):
@@ -239,7 +280,8 @@ class AXCompanion:
             row = json.loads(data, object_pairs_hook=unique)
             required = {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
                 'observed_uptime_ns', 'sequence', 'refusal_generation', 'binding'}
-            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired'}
+            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired',
+                    'first_counter_transition', 'closing_lifetime_context'}
                 and row['schema'] == 'nac342-ax-failure-diagnostic-v1' and row['acceptance'] is False
                 and row['stage'] in DIAGNOSTIC_STAGES and row['code'] in DIAGNOSTIC_CODES
                 and row['clock_basis'] == 'DispatchTime.uptimeNanoseconds', 'AX diagnostic fields')
@@ -252,6 +294,7 @@ class AXCompanion:
             require(type(row['binding']) is dict and row['binding'] == expected, 'AX diagnostic source binding')
             if 'pre_refusal_paired' in row:
                 paired_diagnostic(row['pre_refusal_paired'])
+            _failure_context(row)
             return row
         except BaseException:
             return None  # No new acceptance, stop, cleanup or failure precedence.
