@@ -15,6 +15,9 @@ import time
 STOP = []
 BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
 SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
+REFUSAL_SCOPE = 'P12-Qba-Hebdb-configured-refusal-diagnostic01'
+REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-configured-refusal-consumer01'
+REFUSAL_H = 'ebdbd340bdc1220318446180c0a0df579489392c'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
@@ -40,11 +43,12 @@ def write(path, value):
     path.write_bytes(data)
 
 
-def admit(value, controller_sha, *, now=None):
+def admit(value, controller_sha, *, now=None, configured_refusal=False):
     """Validate a declaration; this function never issues execution authority."""
     require(set(value) == {'scope', 'controller_sha', 'allocation_id', 'attempt', 'retries',
                           'manifest_sha256', 'clock', 'producer'}, 'exact admission fields')
-    require(value['scope'] == SCOPE and value['controller_sha'] == controller_sha
+    require(type(configured_refusal) is bool, 'closed diagnostic role')
+    require(value['scope'] == (REFUSAL_SCOPE if configured_refusal else SCOPE) and value['controller_sha'] == controller_sha
             and re.fullmatch('[0-9a-f]{40}', controller_sha), 'frozen controller binding')
     require(type(value['attempt']) is int and value['attempt'] == 1
             and type(value['retries']) is int and value['retries'] == 0, 'one attempt, no retries')
@@ -127,6 +131,69 @@ def selected_episode(startup, protocol, clock, using, *, evidence, profiles, app
         raise
 
 
+def selected_refusal(startup, clock, using, *, evidence, profiles, app, manifest, product, tests,
+                     selection, observer, image_reader, run, command, native_report, progress,
+                     read, validate_pair):
+    """Exactly one maintained case; its original refusal is always fatal."""
+    folder = evidence / 'startup-configuredLocal'
+    try:
+        require(tuple(startup.CASES) == CASES, 'unchanged maintained case contract')
+        clock.require_phase('case-configuredLocal', 615)
+        progress(requested='configuredLocal')
+        with using(clock.cleanup):
+            startup.run_case(folder=folder, profiles=profiles, scenario='configuredLocal', app=app,
+                manifest=manifest, product=product, tests=tests, harness_sha=REFUSAL_H,
+                selection=selection, observer=observer, image_reader=image_reader,
+                run=run, command=command, native_report=native_report)
+        require(False, 'diagnostic first refusal unavailable; no startup acceptance')
+    except BaseException as primary:
+        clock.fail('configured diagnostic refusal/failure remains fatal')
+        clock.cleaning = True
+        try:
+            with using(clock.cleanup):
+                case_bytes = read(folder / 'case.json', 65536)
+                proof = json.loads(case_bytes)
+                require(proof.get('scenario') == 'configuredLocal' and proof.get('H') == REFUSAL_H
+                    and proof.get('P') == PRODUCER_PRODUCT and proof.get('Q') == PRODUCER_QUERY
+                    and proof.get('passed') is False and proof.get('public_test_requested') is True
+                    and proof.get('input_completion_unknown') is True
+                    and proof.get('rendered_UI_reload_observed') is False, 'actual failed configured case only')
+                owner = proof.get('owner_observation', {})
+                require(owner.get('failure') == 'app_windows' and owner.get('ui_failure') == 'app_windows'
+                    and owner.get('process_failure') is None and owner.get('positive_process_settlement') is True
+                    and owner.get('metadata_helper_settled') is True and owner.get('positive_settlement') is False
+                    and proof.get('cleanup', {}).get('owned_processes_settled') is True
+                    and proof['cleanup'].get('complete_observation') is True
+                    and proof.get('ax_companion_custody', {}).get('owned_processes_settled') is True
+                    and proof.get('profile_removed') is True
+                    and proof.get('persistent_authorization_policy_unchanged') is True
+                    and all(key in proof for key in ('integrity', 'provider', 'actual_result'))
+                    and all(proof.get('errors', {}).get(k) is None for k in ('cleanup', 'integrity', 'provider', 'policy')),
+                    'positive existing app/engine/helper/profile failure cleanup')
+                diagnostic = proof.get('ax_companion_diagnostic') or {}
+                require(diagnostic.get('acceptance') is False and diagnostic.get('stage') == 'lifetime'
+                    and diagnostic.get('code') == 'ownership_invalid' and diagnostic.get('refusal_generation') == '0'
+                    and all(diagnostic.get('binding', {}).get(k) == v for k, v in
+                        [('harness_sha', REFUSAL_H), ('source_sha', PRODUCER_PRODUCT), ('test_source_sha', PRODUCER_QUERY)]),
+                    'first original CG refusal source binding')
+                paired = validate_pair(diagnostic['pre_refusal_paired'])
+                require(paired['original_window_number'] == owner.get('original_window_number'), 'original pinned root diagnostic')
+                progress(diagnostic=dict(status='BOUNDED_REFUSAL_AND_CLEANUP', acceptance=False,
+                    independent_R_executed=False, input_completion='UNKNOWN', paired=paired,
+                    case_receipt='startup-configuredLocal/case.json', case_sha256=hashlib.sha256(case_bytes).hexdigest()))
+        except BaseException as evidence_error:
+            try:
+                progress(diagnostic=dict(status='INCOMPLETE', acceptance=False, independent_R_executed=False))
+            except BaseException:
+                pass
+            raise primary from evidence_error
+        raise
+
+
+PRODUCER_PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
+PRODUCER_QUERY = 'ba266ba1b3bea331768d91fc8a0b2ee66b484d01'
+
+
 def make_clock(epochs, Bound):
     _, work, cleanup, hard = epochs
     class Clock:
@@ -163,20 +230,23 @@ def make_clock(epochs, Bound):
     return Clock()
 
 
-def main():
+def main(*, configured_refusal=False):
     require(len(sys.argv) == 1, 'no arbitrary commands or scenarios')
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'actual arm64 macOS host')
     require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
-            and os.environ.get('GITHUB_REF') == BRANCH
+            and os.environ.get('GITHUB_REF') == (REFUSAL_BRANCH if configured_refusal else BRANCH)
             and os.environ.get('GITHUB_RUN_ATTEMPT') == '1'
             and os.environ.get('GITHUB_REPOSITORY') == 'arcee-ai/nac', 'one explicit experimental dispatch')
     controller = Path(__file__).resolve().parents[3]
-    pair_path = Path(__file__).with_name('pair.json')
+    pair_path = Path(__file__).with_name('configured-refusal-pair.json' if configured_refusal else 'pair.json')
     pair = json.loads(pair_path.read_text())
-    require(pair['scope'] == SCOPE, 'fixed source scope')
+    scope = REFUSAL_SCOPE if configured_refusal else SCOPE
+    require(pair['scope'] == scope, 'fixed source scope')
+    if configured_refusal:
+        require(pair['H'] == REFUSAL_H and pair['P'] == PRODUCER_PRODUCT and pair['Q'] == PRODUCER_QUERY, 'closed diagnostic sources')
     admission = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
-    start, work, cleanup, hard = admit(admission, os.environ['GITHUB_SHA'])
-    roots = {key: Path(os.environ[key + '_ROOT']) for key in ('H', 'P', 'Q', 'R')}
+    start, work, cleanup, hard = admit(admission, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal)
+    roots = {key: Path(os.environ[key + '_ROOT']) for key in (('H', 'P', 'Q') if configured_refusal else ('H', 'P', 'Q', 'R'))}
     package, output = Path(os.environ['PACKAGE_ROOT']), Path(os.environ['OUTPUT_ROOT'])
     paths = [controller, *roots.values(), package, output]
     require(all(p.is_absolute() and p.resolve() == p for p in paths), 'canonical explicit roots')
@@ -190,18 +260,22 @@ def main():
     evidence.mkdir(mode=0o700)
     exported = output / 'evidence'
     exported.mkdir(mode=0o700)
-    report = dict(status='FAIL', scope=SCOPE, pair=pair, pair_sha256=digest(pair_path),
+    report_name = 'configured-refusal.json' if configured_refusal else 'four-startup.json'
+    report = dict(status='FAIL', scope=scope, pair=pair, pair_sha256=digest(pair_path),
         wrapper_sha256=digest(__file__), admission=admission, controller_sha=os.environ['GITHUB_SHA'],
         runtime_attempts=0, cases_requested=[], retries=0, full_four_case_run=False, protocol_executed=False, cases=[],
         prefix_binary_acceptance=False, final_integrated_native_acceptance=False,
         historical_four_Q_failures_preserved=True, prior_SDK_actual_allocation_consumed=True,
         lifecycle531_spent=1, allocation_consumed=True, phases=[])
-    write(evidence / 'four-startup.json', report)
-    write(exported / 'four-startup.json', report)  # Initial FAIL survives an import/preflight failure.
+    if configured_refusal:
+        report.update(acceptance=False, diagnostic_only=True, independent_R_omitted='diagnostic role; no fresh R acceptance')
+    write(evidence / report_name, report)
+    write(exported / report_name, report)  # Initial FAIL survives an import/preflight failure.
     sys.path.insert(0, str(roots['H'] / 'desktop/macos'))
     import ci
     import ci_startup as startup
-    import ci_startup_protocol as protocol
+    if not configured_refusal:
+        import ci_startup_protocol as protocol
     from ci_paths_budget import Bound, active, using
     from ci_qualifications import require_checkout
     from ci_support import COMPLETE_LOG_LIMIT, export_evidence, qualify_toolchain, redact_values, require_console
@@ -217,7 +291,7 @@ def main():
 
     def save():
         with using(clock.retention):
-            write(evidence / 'four-startup.json', report)
+            write(evidence / report_name, report)
 
     def bound():
         current = active()
@@ -272,6 +346,8 @@ def main():
         write(derived.parent / 'runtime-build.json', receipt)
 
     def run(argv, log, cap, cwd=roots['H'], *, env=None, abort=None, complete_output_limit=None):
+        if configured_refusal:
+            require(complete_output_limit is None and argv[0] != 'cargo', 'no independent R graph in diagnostic role')
         if complete_output_limit is not None:
             require(complete_output_limit == COMPLETE_LOG_LIMIT
                     and argv == ['cargo', 'test', '--locked', '-p', 'nac-server', '--test',
@@ -310,8 +386,9 @@ def main():
                 require_checkout(root, pair[key])
             require(startup.PRODUCT == pair['P'] and startup.TEST_SOURCE == pair['Q']
                     and startup.TEST_FILES['StartupJourneys.swift'] == pair['q_swift_sha256']
-                    and startup.PROTOCOL_SOURCE == pair['R'] == protocol.REVISION, 'actual H/P/Q/R pins')
-            protocol.sources(roots['R'])
+                    and (configured_refusal or startup.PROTOCOL_SOURCE == pair['R'] == protocol.REVISION), 'actual H/P/Q/R pins')
+            if not configured_refusal:
+                protocol.sources(roots['R'])
             expected = json.loads((roots['H'] / 'desktop/macos/ci-toolchain.json').read_text())
             actual = dict(developer_directory=os.environ.get('DEVELOPER_DIR'),
                 xcode=command(['xcodebuild', '-version']), sdk=command(['xcrun', '--sdk', 'macosx', '--show-sdk-version']),
@@ -361,6 +438,14 @@ def main():
             report.update(updates)
             report['runtime_attempts'] = len(report['cases_requested'])
             save()
+        if configured_refusal:
+            from ci_xctest_attachments import bounded_file
+            from ci_startup_ax import paired_diagnostic
+            selected_refusal(startup, clock, using, evidence=evidence, profiles=profiles, app=app,
+                manifest=manifest, product=roots['P'], tests=roots['Q'], selection=selection,
+                observer=observer, image_reader=image_reader, run=run, command=command,
+                native_report=native_report, progress=progress, read=bounded_file, validate_pair=paired_diagnostic)
+        require(not configured_refusal, 'diagnostic cannot enter full R episode')
         process, cases = selected_episode(startup, protocol, clock, using, evidence=evidence, profiles=profiles,
             app=app, manifest=manifest, product=roots['P'], tests=roots['Q'], protocol_root=roots['R'],
             harness_sha=pair['H'], package_admission={'provenance': report['package_before']},
@@ -387,15 +472,38 @@ def main():
         report.update(error_type=type(error).__name__, error='selected experiment failed; retain stage evidence')
         raise
     finally:
-        report.update(ended_epoch=time.time(), clock_failures=clock.failed, stop_signals=STOP)
+        primary = sys.exc_info()[1]
         try:
-            save()
-        finally:
-            with using(clock.retention):
-                export_evidence(evidence, exported, [*redact_values(),
-                    *((str(root), '<' + key + '-checkout>') for key, root in roots.items()),
-                    (str(package), '<retained-package>'), (str(output), '<owned-output>')],
-                    include_hashes=True, strict_json=True, essential_first=True)
+            if configured_refusal:
+                try:
+                    with using(clock.cleanup):
+                        if 'package_before' in report:
+                            report['console_after'] = console('after')
+                            report['package_after'] = startup.package_contract(contract, 'inspect_normal_package',
+                                [str(manifest), str(app), str(roots['P'])], dict(product_sha=pair['P']),
+                                tests=roots['Q'], directory=evidence, name='package-after', run=run)
+                            require(report['package_before'] == report['package_after'], 'package admission changed')
+                        for key, root in roots.items():
+                            require_checkout(root, pair[key])
+                        require_checkout(controller, admission['controller_sha'])
+                except BaseException as final_error:
+                    report['diagnostic_finalization_error'] = type(final_error).__name__
+                    clock.fail('diagnostic finalization incomplete')
+                    if primary is None:
+                        raise
+            report.update(ended_epoch=time.time(), clock_failures=clock.failed, stop_signals=STOP)
+            try:
+                save()
+            finally:
+                with using(clock.retention):
+                    export_evidence(evidence, exported, [*redact_values(),
+                        *((str(root), '<' + key + '-checkout>') for key, root in roots.items()),
+                        (str(package), '<retained-package>'), (str(output), '<owned-output>')],
+                        include_hashes=True, strict_json=True, essential_first=True)
+        except BaseException as export_error:
+            if configured_refusal and primary is not None:
+                raise primary from export_error
+            raise
 
 
 if __name__ == '__main__':

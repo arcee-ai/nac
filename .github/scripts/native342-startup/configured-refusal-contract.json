@@ -1,0 +1,155 @@
+{
+  "state": "SOURCE_ONLY_UNADMITTED",
+  "scope": "P12-Qba-Hebdb-configured-refusal-diagnostic01",
+  "acceptance": false,
+  "runtime_authorized": false,
+  "cases": [
+    "configuredLocal"
+  ],
+  "H": "ebdbd340bdc1220318446180c0a0df579489392c",
+  "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
+  "independent_R_required": false,
+  "independent_R_executed": false,
+  "fresh_R_acceptance": false,
+  "full_four_case_run": false,
+  "original_full_consumer": "ec8076b99105737e7a0a0e86d61d84705a155eab unchanged default role",
+  "original_normal_artifact": {
+    "run_id": 42455455480,
+    "artifact_id": 13607980704,
+    "manifest_sha256": "b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e",
+    "role": "normal only; lifecycle role is never launched"
+  },
+  "compiler_roles": [
+    {
+      "role": "complete H2+canonicalQ2",
+      "invocations": 1,
+      "cap_seconds": 90
+    },
+    {
+      "role": "CIEvidence",
+      "invocations": 1,
+      "cap_seconds": 90
+    },
+    {
+      "role": "CIGUI",
+      "invocations": 1,
+      "cap_seconds": 90
+    },
+    {
+      "role": "Foundation command environment resolver",
+      "invocations": 1,
+      "cap_seconds": 45
+    },
+    {
+      "role": "full generated Q SDK build-for-testing",
+      "invocations": 1,
+      "cap_seconds": 240,
+      "outputs": [
+        "runner",
+        "test bundle"
+      ],
+      "compiler_work": "retain actual compiler graph log and binary identities, not one compiler"
+    },
+    {
+      "role": "independent R graph",
+      "invocations": 0
+    }
+  ],
+  "future_roles": {
+    "source_checkouts": [
+      "controller",
+      "H",
+      "P",
+      "Q"
+    ],
+    "locked_setup_invocations": 4,
+    "each_setup_cap_seconds": 600,
+    "rust_bootstrap_minutes": 3,
+    "node_bootstrap_minutes": 2,
+    "each_checkout_minutes": 2,
+    "producer_metadata_seconds": 60,
+    "download_minutes": 2,
+    "original_archive_extract_seconds": 90,
+    "XCTest_invocations": 1,
+    "XCTest_cap_seconds": 300,
+    "configured_cases": 1,
+    "provider": "one controlled owned loopback provider; existing deadlines",
+    "engine_actors": "existing settings-preparation helper and app-owned engine; any successful-case persisted read remains owned but diagnostic still cannot pass",
+    "read_only_console": "same compiled CIGUI and ioreg before/after",
+    "package_signature_provenance": "unchanged maintained Q/P before/input/after inspections",
+    "cleanup": "existing app/engine/descendant, AX ci.run helper, metadata helper, provider and profile owners; unknown retained",
+    "evidence": "existing bounded strict redacted hash export; no private fields",
+    "inherited_subordinate_caps_seconds": {
+      "toolchain_console_SDK_metadata_each_command": 30,
+      "package_contract_each": 60,
+      "profile_git_init": 15,
+      "configuration_preflight": 13,
+      "Foundation_resolver_run": 5,
+      "controlled_provider_ready": 5,
+      "controlled_provider_stop": 5,
+      "provider_record_harvest": 2,
+      "provider_fallback_wait_each": 3,
+      "provider_reader_join_each": 3,
+      "settings_engine_ready": 25,
+      "settings_engine_stop": 25,
+      "settings_engine_kill_wait": 3,
+      "settings_engine_reader_join": 3,
+      "metadata_observer_ready": 5,
+      "metadata_observer_stop_wait_each": 3,
+      "metadata_observer_reader_join": 3,
+      "AX_companion_original_case_cap": 300,
+      "AX_companion_parent_ready": 5,
+      "AX_companion_parent_stop_join": 20,
+      "live_API_request_each": 5,
+      "live_API_stop_join": 55,
+      "process_settle_initial_empty": 2,
+      "process_settle_TERM_empty": 5,
+      "process_settle_KILL_empty": 5,
+      "process_settle_final_empty": 2,
+      "ci_run_TERM_grace": 5,
+      "ci_run_KILL_wait": 5,
+      "ci_run_drain_join": 5
+    },
+    "evidence_caps_bytes": {
+      "each_JSON_or_log": 262144,
+      "each_PNG": 2097152,
+      "total_export": 12582912,
+      "case_receipt_read": 65536,
+      "paired_failure_line": 2048,
+      "diagnostic_controller_JSON": 262144
+    },
+    "no_new_supervisor": "Same maintained H owners; subcaps remain within original active work/cleanup/retention where inherited. No changed process or signal authority."
+  },
+  "clock": {
+    "fields": [
+      "STARTED",
+      "WORK_DEADLINE",
+      "CLEANUP_DEADLINE",
+      "HARD_DEADLINE"
+    ],
+    "authority": "Separate Root literal actual admission only; no epochs here",
+    "queue_inclusive": true,
+    "max_total_seconds": 3600,
+    "max_work_seconds": 2880,
+    "min_cleanup_seconds": 600,
+    "min_retention_seconds": 120,
+    "renewal": false,
+    "case_remaining_seconds": 615,
+    "each_expensive_helper_reserve_seconds": 15,
+    "worst_case_completion_guaranteed": false
+  },
+  "outcome": "Every UI refusal remains fatal/FAIL even if bounded diagnostic and cleanup are complete; acceptance always false; missing paired data stays incomplete",
+  "configured_invariants": {
+    "console": 27,
+    "fresh_AX_proofs": 26,
+    "public_inputs": 11,
+    "before_after_dispatch_records": 22,
+    "failed_input_completion": "UNKNOWN",
+    "retained_CFEqual_identity": true,
+    "zero_next_input_on_refusal": true,
+    "readonly_receipt": true,
+    "private_field_text_exported": false,
+    "positive_app_engine_companion_cleanup_required": true
+  }
+}

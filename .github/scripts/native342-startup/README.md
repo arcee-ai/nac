@@ -154,3 +154,29 @@ replacement compile inside the same original clock. No runtime or historical
 repair counter is reset, and no real helper/companion was executed. New runtime
 source scope and branch reject the consumed073 admission; Root must separately
 bind any later exact controller SHA and original epochs.
+
+## Closed configured-refusal diagnostic (source only)
+
+`configured-refusal.py` and `configured-refusal-launch.py` are fixed entry points
+for `native342-configured-refusal.yml`, only on
+`codex/experimental-native-p12-configured-refusal-consumer01`. They use the same
+maintained launcher, normal-role artifact admission, generated SDK runner,
+configuredLocal case, process/fixture owners, original clock and strict exporter.
+No caller can select another case. The new pair deliberately pins H `ebdbd340`,
+unchanged Qba and original normal P12 artifact13607980704. The full four-case/R
+workflow, pair, qualification contract and serial episode remain intact.
+
+This role checks out and sets up controller/H/P/Q only. It omits independent R
+entirely and claims no fresh R acceptance. One maintained configuredLocal case
+runs; its first CG refusal, strict paired diagnostic and positive existing
+app/engine/helper/profile cleanup are retained. Missing paired facts, prior
+refusal, wrong source/root or unknown cleanup remain incomplete. Every refusal
+stays fatal and the job stays FAIL even if diagnostics/cleanup are complete;
+acceptance is always false. No root/window/CFEqual/focus/freshness/input/cleanup
+predicate is relaxed or reset. It adds no post-refusal AX polling or process owner.
+
+`configured-refusal-contract.json` declares every future checkout/setup/compiler,
+SDK/XCTest/provider/engine/console/package/evidence role and original caps. No
+actual epochs or runtime grant are supplied. Root must separately publish/admit
+an exact controller SHA and queue-inclusive <=60/48/10/2 clock. A successful
+source review is not a diagnostic runtime, native acceptance or full startup pass.

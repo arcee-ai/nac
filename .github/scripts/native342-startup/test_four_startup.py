@@ -308,7 +308,7 @@ class SourceControls(unittest.TestCase):
                 observed.append('export');controller.write(exported/'four-startup.json',report)
             def checkout(*args):
                 if ordinary_failure:raise ordinary
-            namespace=dict(clock=self.clock,using=using,report=report,console=lambda _: {},startup=startup,
+            namespace=dict(configured_refusal=False, sys=__import__('sys'), clock=self.clock,using=using,report=report,console=lambda _: {},startup=startup,
                 contract=object(),manifest=root/'manifest',app=root/'app',roots={k:root/k for k in ('H','P','Q','R')},pair=PAIR,
                 evidence=raw,profiles=profiles,run=Mock(),require=controller.require,require_checkout=checkout,
                 controller=root/'controller',admission={'controller_sha':'a'*40},STOP=controller.STOP,
@@ -351,7 +351,7 @@ class SourceControls(unittest.TestCase):
         observed, report = [], {'phases': []}
         ci = Mock(spec=['run'])
         ci.run.side_effect = lambda *a, **k: observed.append(budget.active().kind)
-        namespace = dict(clock=self.clock, active=budget.active, using=budget.using, ci=ci,
+        namespace = dict(configured_refusal=False, clock=self.clock, active=budget.active, using=budget.using, ci=ci,
             roots={'H': H}, report=report, save=Mock(), time=controller.time, Path=Path, STOP=controller.STOP,
             runtime_build_receipt=Mock())
         exec(compile(ast.Module(body=callbacks, type_ignores=[]), '<actual-owned-callbacks>', 'exec'), namespace)
@@ -374,7 +374,7 @@ class SourceControls(unittest.TestCase):
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
         callbacks = [n for n in main.body if isinstance(n, ast.FunctionDef) and n.name in ('bound', 'run')]
         report, ci = {'phases': []}, Mock(spec=['run'])
-        namespace = dict(clock=self.clock, active=budget.active, using=budget.using, ci=ci,
+        namespace = dict(configured_refusal=False, clock=self.clock, active=budget.active, using=budget.using, ci=ci,
             roots={'H': H}, report=report, save=Mock(), time=controller.time, Path=Path, STOP=controller.STOP,
             runtime_build_receipt=Mock(), COMPLETE_LOG_LIMIT=2*1024*1024, require=controller.require)
         exec(compile(ast.Module(body=callbacks, type_ignores=[]), '<actual-complete-R-callback>', 'exec'), namespace)

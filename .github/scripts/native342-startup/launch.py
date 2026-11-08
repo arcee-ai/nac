@@ -22,19 +22,20 @@ CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'checkout-Q': 2,
         'metadata': 2, 'download': 2, 'prepare': 2}
 
 
-def inputs():
+def inputs(*, configured_refusal=False):
     value = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
-    case.admit(value, os.environ['GITHUB_SHA'])
-    case.require(os.environ.get('GITHUB_REF') == case.BRANCH
+    case.admit(value, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal)
+    case.require(os.environ.get('GITHUB_REF') == (case.REFUSAL_BRANCH if configured_refusal else case.BRANCH)
         and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
         and os.environ.get('GITHUB_RUN_ATTEMPT') == '1'
         and os.environ.get('GITHUB_REPOSITORY') == REPOSITORY, 'exact private first manual job')
     return value
 
 
-def minutes(value, phase, *, now=None):
+def minutes(value, phase, *, now=None, configured_refusal=False):
     stamp = time.time() if now is None else now
-    case.admit(value, value['controller_sha'], now=stamp)
+    case.admit(value, value['controller_sha'], now=stamp, configured_refusal=configured_refusal)
+    case.require(not configured_refusal or phase != 'checkout-R', 'no R checkout in diagnostic role')
     if phase == 'episode':
         # Bound the episode plus its ORIGINAL cleanup; leave retention for upload.
         deadline, cap = value['clock']['CLEANUP_DEADLINE'], 58
@@ -128,7 +129,7 @@ def handoff_files(root, value, product):
     return manifest, archive
 
 
-def main():
+def main(*, configured_refusal=False):
     phase = sys.argv[1]
     gate = Path(os.environ['RUNNER_TEMP']).resolve() / 'native342-startup-gate'
     value = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
@@ -140,16 +141,16 @@ def main():
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('minutes=' + str(n) + '\n')
         return
-    value = inputs()
-    pair = json.loads(Path(__file__).with_name('pair.json').read_text())
+    value = inputs(configured_refusal=configured_refusal)
+    pair = json.loads(Path(__file__).with_name('configured-refusal-pair.json' if configured_refusal else 'pair.json').read_text())
     case.require(os.environ.get('ImageVersion') == pair['host_image'], 'exact image before bootstrap/build')
     if phase == '--gate':
         name = sys.argv[2]
-        n = minutes(value, name)
+        n = minutes(value, name, configured_refusal=configured_refusal)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('minutes=' + str(n) + '\n')
             if name == 'checkout-H':
-                for key in ('H', 'P', 'Q', 'R'):
+                for key in (('H', 'P', 'Q') if configured_refusal else ('H', 'P', 'Q', 'R')):
                     stream.write(key + '=' + pair[key] + '\n')
             if name == 'download':
                 for key in ('run_id', 'artifact_id'):
@@ -158,7 +159,7 @@ def main():
         return
     if phase == '--metadata-child':
         def read(suffix):
-            case.admit(value, os.environ['GITHUB_SHA'])
+            case.admit(value, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal)
             remaining = value['clock']['WORK_DEADLINE'] - time.time() - 15
             case.require(remaining > 0, 'original metadata work cutoff')
             request = urllib.request.Request('https://api.github.com/repos/' + REPOSITORY + suffix,
@@ -177,7 +178,7 @@ def main():
     sys.path.insert(0, str(Path(os.environ['H_ROOT']) / 'desktop/macos'))
     import ci
     from ci_paths_budget import Bound, using
-    clock = case.make_clock(case.admit(value, os.environ['GITHUB_SHA']), Bound)
+    clock = case.make_clock(case.admit(value, os.environ['GITHUB_SHA'], configured_refusal=configured_refusal), Bound)
     ci.RUN_DEADLINE = min(ci.RUN_DEADLINE, clock.work.deadline)
     def owned(name, argv, cap):
         log = gate / (name + '.log')
@@ -187,7 +188,7 @@ def main():
             case.require(proof['accepted'] and proof['reaped'] and proof['drain_settled']
                 and not proof['unknown'] and proof['teardown_error'] is None, 'positive launcher helper ownership')
     if phase == '--metadata':
-        owned('producer-metadata', [sys.executable, '-B', str(Path(__file__).resolve()), '--metadata-child'], 60)
+        owned('producer-metadata', [sys.executable, '-B', str(Path(__file__).with_name('configured-refusal-launch.py').resolve() if configured_refusal else Path(__file__).resolve()), '--metadata-child'], 60)
         return
     case.require(phase == '--prepare', 'fixed launcher operation')
     with using(clock.work):
