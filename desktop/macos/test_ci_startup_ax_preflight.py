@@ -25,7 +25,7 @@ class AXPreflightTests(unittest.TestCase):
         self.config.write_text('{"schema":"fixture-only"}')
         node = dict(pid=10, parent=1, uid=501, start_seconds=1234, start_microseconds=5,
                     executable='/owned/NACPreview', kind='app', windows=[58])
-        self.witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None,
+        self.witness = SimpleNamespace(condition=threading.Condition(), ready=True, failure=None, ui_terminal=False,
             app=node.copy(), latest=[node.copy()], configuration_sha256=sha(self.config.read_bytes()),
             config=json.loads(self.config.read_bytes()))
         self.run = Mock(side_effect=self.respond)
@@ -49,6 +49,12 @@ class AXPreflightTests(unittest.TestCase):
     def capture(self):
         return capture_ax_preflight(self.witness, self.helper, self.source, self.config, self.root,
             run=self.run, source_sha256=sha(b'inert source'), binary_sha256=sha(b'inert binary'))
+
+    def test_ui_failure_or_terminal_target_prevents_diagnostic_ready_path(self):
+        for failure, terminal in (('app_windows', False), (None, True)):
+            self.witness.failure, self.witness.ui_terminal = failure, terminal
+            with self.subTest(failure=failure, terminal=terminal), self.assertRaises(RuntimeError): self.capture()
+            self.run.assert_not_called()
 
     def test_bound_receipt_is_diagnostic_only(self):
         value = self.capture()

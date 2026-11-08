@@ -37,7 +37,7 @@ export function reverseNativeQualification(workflow) {
 
 export function reverseNativeApp(workflow) {
   if (workflow.jobs['startup-panel-policy']) {
-    assert.equal(digest(workflow.jobs['startup-panel-policy']), '3ed009ab6e7bcaea230cd1e35af8ab7646e3e553b9f3f3d080c487bf59447dd2', 'exact required immutable Mac policy job');
+    assert.equal(digest(workflow.jobs['startup-panel-policy']), '3702c2c02f38894c5f1023a79429d748853b6e61535dea9e228d6560ece1527f', 'exact required immutable Mac policy job');
     delete workflow.jobs['startup-panel-policy'];
   }
   if (!workflow.jobs.app) return;

@@ -73,7 +73,7 @@ class StartupOwnerTests(unittest.TestCase):
         app, engine = self.node('app', 10, 1), self.node('engine', 11, 10)
         self.ready()
         for nodes in ([{**engine, 'parent': 1}], [{**app, 'executable': '/foreign/NACPreview'}],
-                      [{**app, 'uid': 999}], [app, app], [{**app, 'windows': [17, 18]}],
+                      [{**app, 'uid': 999}], [app, app],
                       [{**app, 'pid': True}], [{**app, 'unexpected': 'FOREIGN-SECRET'}],
                       [{**app, 'environment': {'HOME': '/personal'}}]):
             with self.subTest(nodes=nodes), self.assertRaises(RuntimeError):
@@ -118,7 +118,7 @@ class StartupOwnerTests(unittest.TestCase):
         self.observe([self.node('app', 10, 1), self.node('engine', 11, 10)])
         self.observe([])
         self.assertTrue(self.owner.settle(100)['owned_processes_settled'])
-        self.owner.failure = 'owner_stream_unavailable'
+        self.owner.process_failure = 'owner_stream_unavailable'
         with self.assertRaises(RuntimeError):
             self.owner.settle(100)
 

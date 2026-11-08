@@ -49,7 +49,7 @@ class StartupClockTests(unittest.TestCase):
             run = Mock(side_effect=AssertionError('No preparation helper may launch after expiry'))
             with patch('ci_startup.Provider', return_value=provider), \
                     patch('ci_startup.prepare_configuration') as configuration, using(clock.cleanup):
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(BudgetExpired):
                     run_case(root / 'case', profiles, 'onboarding', root, root, root, root,
                              'a' * 40, {}, root, root, run, Mock(), Mock())
             run.assert_not_called()
