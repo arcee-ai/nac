@@ -57,6 +57,43 @@ class PairedDiagnosticSourceControls(unittest.TestCase):
         self.assertIn('ownedFrame(target.pid, window) == frame', self.branch)
         self.assertIn('ended - began <= 1_000_000_000', self.branch)
 
+    def test_every_optional_opening_fault_is_contained_before_original_refusal(self):
+        # Trace actual source block boundaries. This is not executed Swift:
+        # every opening throw must exit to the optional catch, then encounter
+        # the original CG refusal without reaching the canonical read.
+        code = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', lambda m: ' ' * len(m[0]), self.branch)
+        opening = re.search(r'\bdo\s*\{', code)
+        self.assertIsNotNone(opening, 'Optional opening rechecks have no containing catch')
+        start = code.index('{', opening.start())
+        def end_of_block(begin):
+            depth = 1
+            for index in range(begin + 1, len(code)):
+                depth += (code[index] == '{') - (code[index] == '}')
+                if depth == 0: return index
+            self.fail('Unclosed production block')
+        end = end_of_block(start)
+        catch = re.match(r'\s*catch\s*\{', code[end + 1:])
+        self.assertIsNotNone(catch, 'Opening checks must have an unfiltered catch')
+        catch_start = code.index('{', end + 1)
+        catch_end = end_of_block(catch_start)
+        self.assertNotIn('throw', code[catch_start:catch_end])
+        self.assertNotIn('reader.observe', code[catch_start:catch_end])
+        self.assertRegex(code[catch_end + 1:], r'^\s*throw OwnershipError.invalid')
+        read = code.index('try reader.observe(')
+        capture = code.index('StartupAXPreRefusalDiagnostic.capture(')
+        for fault in ('try decodedProcess(apps[0])', 'resources.intact()', 'process(getpid()) == me',
+                      'StartupAXPreflight.file(binary,', 'StartupAXPreflight.file(configPath,',
+                      'try ownedFrame(target.pid, window)', 'try StartupObserver.need(readAt'):
+            with self.subTest(opening_fault=fault):
+                at = code.index(fault)
+                self.assertLess(start, at)
+                self.assertLess(at, capture)
+                self.assertLess(capture, read)
+                self.assertLess(read, end)
+        self.assertNotIn('continue', code[start:catch_end])
+        self.assertNotIn('return', code[start:catch_end])
+        self.assertNotIn('publish(', code[start:catch_end])
+
     def test_publication_fault_cannot_replace_original_error_or_issue_ready(self):
         emit = self.source.split('static func emit(', 1)[1].split('// END AX FAILURE DIAGNOSTICS', 1)[0]
         self.assertIn('do { try write(data) } catch {', emit)

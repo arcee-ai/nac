@@ -205,42 +205,47 @@ enum StartupAXWitnessMode {
                 // exits; it cannot publish ready or enter another AX sample.
                 if apps.count == 1, target.pid != 0,
                    let cgWindows = apps[0]["windows"] as? [Int], cgWindows.count > 1 {
-                    let current = try decodedProcess(apps[0])
-                    let stamp = DispatchTime.now().uptimeNanoseconds
-                    let exact = current == target && target.valid
-                        && (apps[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
-                    let original = cgWindows.count <= 128 && cgWindows.allSatisfy { $0 > 0 }
-                        && Set(cgWindows).count == cgWindows.count && cgWindows.contains(window)
-                    if StartupAXPreRefusalDiagnostic.eligible(complete: snapshot["complete"] as? Bool == true,
-                        exactProcess: exact, originalRoot: original, retainedRoot: retainedRoot != nil,
-                        pristine: refusals == 0 && retired == nil && !pairedAttempted && reader.failureData == nil,
-                        withinSample: stamp >= began && stamp < deadline && stamp - began < 1_000_000_000) {
-                        // Recheck the same helper/config/source closure before
-                        // the first diagnostic AX call; no new process owner.
-                        try StartupObserver.need(resources.intact() && process(getpid()) == me
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
-                        let frame = try ownedFrame(target.pid, window)
-                        let readAt = DispatchTime.now().uptimeNanoseconds
-                        try StartupObserver.need(readAt >= began && readAt < deadline && readAt - began < 1_000_000_000)
-                        pairedAttempted = true
-                        pairedDiagnostic = StartupAXPreRefusalDiagnostic.capture(windows: cgWindows,
-                            original: window, retained: retainedRoot!, read: {
-                                try reader.observe(pid: target.pid, frame: frame)
-                            }, close: {
-                                let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
-                                let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
-                                try StartupObserver.need(closing["complete"] as? Bool == true && latest.count == 1
-                                    && decodedProcess(latest[0]) == target
-                                    && (latest[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
-                                    && (latest[0]["windows"] as? [Int])?.contains(window) == true
-                                    && resources.intact() && process(getpid()) == me
-                                    && ownedFrame(target.pid, window) == frame
-                                    && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                                    && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
-                                let ended = DispatchTime.now().uptimeNanoseconds
-                                try StartupObserver.need(ended >= began && ended < deadline && ended - began <= 1_000_000_000)
-                            })
+                    do {
+                        let current = try decodedProcess(apps[0])
+                        let stamp = DispatchTime.now().uptimeNanoseconds
+                        let exact = current == target && target.valid
+                            && (apps[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
+                        let original = cgWindows.count <= 128 && cgWindows.allSatisfy { $0 > 0 }
+                            && Set(cgWindows).count == cgWindows.count && cgWindows.contains(window)
+                        if StartupAXPreRefusalDiagnostic.eligible(complete: snapshot["complete"] as? Bool == true,
+                            exactProcess: exact, originalRoot: original, retainedRoot: retainedRoot != nil,
+                            pristine: refusals == 0 && retired == nil && !pairedAttempted && reader.failureData == nil,
+                            withinSample: stamp >= began && stamp < deadline && stamp - began < 1_000_000_000) {
+                            // Recheck the same helper/config/source closure before
+                            // the first diagnostic AX call; no new process owner.
+                            try StartupObserver.need(resources.intact() && process(getpid()) == me
+                                && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
+                                && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                            let frame = try ownedFrame(target.pid, window)
+                            let readAt = DispatchTime.now().uptimeNanoseconds
+                            try StartupObserver.need(readAt >= began && readAt < deadline && readAt - began < 1_000_000_000)
+                            pairedAttempted = true
+                            pairedDiagnostic = StartupAXPreRefusalDiagnostic.capture(windows: cgWindows,
+                                original: window, retained: retainedRoot!, read: {
+                                    try reader.observe(pid: target.pid, frame: frame)
+                                }, close: {
+                                    let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
+                                    let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
+                                    try StartupObserver.need(closing["complete"] as? Bool == true && latest.count == 1
+                                        && decodedProcess(latest[0]) == target
+                                        && (latest[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
+                                        && (latest[0]["windows"] as? [Int])?.contains(window) == true
+                                        && resources.intact() && process(getpid()) == me
+                                        && ownedFrame(target.pid, window) == frame
+                                        && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
+                                        && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                                    let ended = DispatchTime.now().uptimeNanoseconds
+                                    try StartupObserver.need(ended >= began && ended < deadline && ended - began <= 1_000_000_000)
+                                })
+                        }
+                    } catch {
+                        // Optional opening failures omit diagnostics; they must
+                        // not replace the original extra-CG-window refusal.
                     }
                     throw OwnershipError.invalid // Original extra-CG-window refusal, always fatal.
                 }
