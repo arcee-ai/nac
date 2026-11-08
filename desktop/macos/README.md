@@ -455,3 +455,55 @@ Work/collection ends C'-600, cleanup C'-120 and retention C'. Build1200s and
 sharedcases900s only shorten those fixed bounds. Clock discontinuity, expiry or
 unknown cleanup latches failure, retains relocated bundles and permits only
 independent bounded cleanup/retention; it never renews a case or grants input.
+
+## ALL-343 capture evidence contract (source only)
+
+`ci_instance_capture_contract.py` projects the already admitted T34
+(`34f8ed0d4f82d4df50553f8faa27765e61f03e57`) preparation receipt into canonical
+`nac343-public-resource-v1` bytes. The H caller supplies independently retained
+target/H source pins and manifest/preparation SHA-256 values. T remains the
+owner of full live artifact validation and exclusive preparation consumption.
+The resource contains the fixed 19-point roster, run/preparation identity and
+public dev/stable bundle spellings, identifiers and binary hashes. It contains
+no store, configuration, observer, request, release or control-file paths. Its
+SHA-256 is kept outside the resource, avoiding a self-referential digest.
+
+`ci_instance_capture_attachments.collect` accepts only an existing private,
+owned export directory, the resource, host-retained T record bytes and an
+independent selected-result origin. Its `nac343-selected-export-v1` index is an
+H-normalized contract, **not an implemented xcresulttool format adapter**. A
+future adapter must establish the actual result-bundle inventory hash, exact
+test identifier/URL, result and resource binding before constructing that index.
+Every index row names one flat metadata/PNG pair and its SHA-256 values. Public
+`nac343-public-capture-v1` metadata binds equal closed AX phases before/after,
+the public app URL spelling, declared geometry/scale and PNG bytes/hash. H joins
+each pair to its retained T configuration/request/private fence and diagnostic,
+and all eight complete case records to the T summary/run. Notification hints
+have no input or authority in this interface. No T path is reopened; successful
+T fixture deletion does not prevent collection from retained attestations.
+
+The collector reads without following links, pins directory/file generations,
+rejects aliases, wrong owners, special files and changed records, and enforces
+32 KiB records, 256 KiB aggregate text, 2 MiB individual PNGs and 12 MiB aggregate
+images (including supplied diagnostic bytes). It writes nothing. On failure,
+`CollectionError.partial` preserves the unambiguous validated prefix and its
+metadata/PNG bytes in memory; the caller owns any durable retention. Interrupts
+and unexpected errors retain their original type with `instance_capture_partial`
+attached. Close failures cannot replace a primary failure. Rejected payload
+bytes are excluded. Original export files remain untouched.
+
+`structurally_complete` establishes only this finite join. PNG signature/hash
+and declared geometry checks do not decode images or prove actual OS window
+geometry, visibility, OCR or paint. Complete semantic records are hashed and
+joined; the existing `ci_instances.require_cases` engine/assets/console/cleanup
+gate is still required. No actor, controller, generated XCTest target, SDK
+adapter or qualification entry invokes these modules. Full-Xcode/pinned OS,
+trusted desktop input, clock admission, actual 8-case/19-frame qualification
+and independent acceptance remain separate gates.
+
+These 38 portable synthetic controls also run in the Stable release
+`workflow-lint` job on each PR (no SDK, app, engine or network):
+
+```sh
+python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
+```
