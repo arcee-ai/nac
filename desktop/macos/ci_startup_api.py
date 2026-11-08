@@ -17,6 +17,7 @@ from ci_startup_fixture import PRODUCT, digest
 from ci_startup_owner import native_identity, signature
 
 ROOT = Path(__file__).resolve().parents[2]
+DIAGNOSTIC_INT_LIMIT = 8 * 1024 * 1024
 
 
 DIAGNOSTIC_GUARDS = frozenset('''
@@ -29,7 +30,7 @@ entry_document_bound entry_document_position entry_document_json entry_document_
 entry_document_shape entry_document_identity entry_document_scope entry_document_uuid
 entry_document_release live_app_api_evidence_missing owned_store_cardinality
 local_project_workspace local_session_model_and_project selected_store_session_metadata
-saved_dummy_model_configuration canonical_transcript unexpected_tool_or_message unexpected_tool_request
+saved_dummy_model_configuration transcript_schema canonical_transcript unexpected_tool_or_message unexpected_tool_request
 persisted_transcript_matches_snapshot unexpected_terminal event_schema canonical_completed_run
 '''.split())
 
@@ -38,7 +39,9 @@ def diagnostic_facts(facts):
     result = {}
     for key, value in (facts or {}).items():
         if key in ('expected_bytes', 'actual_bytes', 'asset_ordinal', 'http_status'):
-            if type(value) is int and 0 <= value <= 8 * 1024 * 1024:
+            # entry_assets reads one byte past its cap to detect overflow.
+            limit = DIAGNOSTIC_INT_LIMIT + 1 if key == 'actual_bytes' else DIAGNOSTIC_INT_LIMIT
+            if type(value) is int and 0 <= value <= limit:
                 result[key] = value
         elif key in ('expected_sha256', 'actual_sha256'):
             if type(value) is str and re.fullmatch('[0-9a-f]{64}', value):

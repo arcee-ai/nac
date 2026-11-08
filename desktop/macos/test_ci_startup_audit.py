@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from ci_startup_audit import (EntryAssets, LiveAudit, PROMPT, RESPONSE, _entry_document, entry_asset_source, entry_assets,
                               persisted_audit, session_facts, transcript)
-from ci_startup_api import FixtureFailure, ListenerPending
+from ci_startup_api import FixtureFailure, ListenerPending, failure_metadata
 from ci_startup_fixture import PRODUCT
 
 IDENTITY = {'product_version': '0.1.4', 'build_id': 'dev-' + PRODUCT,
@@ -51,6 +51,54 @@ PRODUCT_INDEX = b'''<!doctype html>
 
 
 class StartupAuditTests(unittest.TestCase):
+    def test_first_oversize_asset_keeps_sentinel_without_expanding_read_or_acceptance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            dist = source / 'crates/nac-server/assets/dist'
+            (dist / 'assets').mkdir(parents=True)
+            (dist / 'index.html').write_bytes(PRODUCT_INDEX)
+            parser = EntryAssets(); parser.feed(PRODUCT_INDEX.decode())
+            for path in parser.paths:
+                (dist / path.removeprefix('/assets/dist/')).write_bytes(b'inert asset')
+            sentinel = 8 * 1024 * 1024 + 1
+            body = b'private-canary' + b'x' * (sentinel - len(b'private-canary'))
+            opener = MagicMock()
+            response = opener.open.return_value.__enter__.return_value
+            response.read.return_value = body
+            response.status = 200
+            with patch('ci_startup_audit.urllib.request.build_opener', return_value=opener), \
+                    patch('ci_startup_audit._entry_document') as document, self.assertRaises(FixtureFailure) as caught:
+                entry_assets('http://127.0.0.1:4321', source, identity=IDENTITY)
+            response.read.assert_called_once_with(sentinel)
+            opener.open.assert_called_once()
+            document.assert_not_called()
+            metadata = failure_metadata(caught.exception)
+            self.assertEqual(metadata['guard_code'], 'served_entry_asset_bytes')
+            self.assertEqual(metadata['operands']['actual_bytes'], sentinel)
+            self.assertEqual(metadata['operands']['expected_bytes'], len(PRODUCT_INDEX))
+            self.assertEqual(metadata['operands']['asset_ordinal'], 0)
+            self.assertEqual(metadata['operands']['actual_sha256'], hashlib.sha256(body).hexdigest())
+            self.assertNotIn('private-canary', json.dumps(metadata))
+
+    def test_transcript_schema_failure_snapshot_remains_named_redacted_and_failed(self):
+        for messages in (None, True, {'body': 'private-canary'}, 'private-canary'):
+            with self.subTest(kind=type(messages).__name__):
+                audit = LiveAudit(SimpleNamespace(), {'scenario': 'configuredLocal'}, None)
+                audit.phase = 'configured_session'
+                def invalid_transcript(): transcript(messages)
+                audit.sample = invalid_transcript
+                audit.start(); audit.thread.join(timeout=2)
+                snapshot = audit.failure_snapshot()
+                self.assertFalse(audit.thread.is_alive())
+                self.assertTrue(snapshot['rejected'])
+                self.assertEqual(snapshot['phase'], 'configured_session')
+                self.assertEqual(snapshot['failure'], {'exception_type': 'FixtureFailure',
+                    'guard_code': 'transcript_schema', 'operands': {}})
+                self.assertFalse(snapshot['progress']['proof_observed'])
+                self.assertNotIn('private-canary', json.dumps(snapshot))
+                with self.assertRaises(RuntimeError): audit.stop()
+                self.assertEqual(audit.failure_snapshot(), snapshot)
+
     def test_actual_P_entry_document_is_not_the_raw_embedded_index(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary).resolve()
