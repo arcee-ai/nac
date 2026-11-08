@@ -44,3 +44,9 @@ onto nominated current dev, and admit separately bounded SDK/native validation
 before publication, acceptance or merge. No source control test establishes
 actual AX focus, public input delivery, painted screenshots, API/store behavior,
 process cleanup, or native acceptance for this new context.
+
+The companion explicitly requests an ownership receipt from the same ci.run
+owner even when no PathBudget is active (the ordinary startup lane). Its optional
+retain_ownership flag changes receipt retention only; default launches and
+existing bounded teardown remain unchanged. A missing receipt refuses cleanup
+qualification, and a receipt sink failure preserves an original helper error.

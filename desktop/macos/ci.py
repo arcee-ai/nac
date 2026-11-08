@@ -52,7 +52,7 @@ def native_report(args, log):
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None):
+def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, retain_ownership=False):
     """Retain every accepted handle through thread startup, waits and teardown."""
     print(f'Native CI phase: {log.name}', flush=True)
     process,thread=None,None
@@ -111,18 +111,20 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None):
             if process is not None and (thread is None or not thread.is_alive()):process.stdout.close()
             log.write_bytes(b''.join(chunks))
         except BaseException as error:teardown=teardown or error
-        if bound is not None:
-            owner=bound.owner
+        if bound is not None or retain_ownership:
+            owner=bound.owner if bound is not None else None
             unknown=(process is not None and not reaped) or (thread is not None and thread.is_alive())
-            if teardown is not None or unknown:owner.fail('helper finalization unknown')
+            if owner is not None and (teardown is not None or unknown):owner.fail('helper finalization unknown')
             try:
-                with using(owner.retention):
+                with using(owner.retention if owner is not None else None):
                     log.with_name(log.name+'.ownership.json').write_text(json.dumps(dict(
                         accepted=process is not None,pid=process.pid if process else None,
                         reaped=reaped,drain_settled=thread is None or not thread.is_alive(),unknown=unknown,
                         primary_error=type(primary).__name__ if primary else None,
                         teardown_error=type(teardown).__name__ if teardown else None))+'\n')
-            except BaseException:owner.fail('retention: helper ownership receipt unknown')
+            except BaseException:
+                if owner is not None:owner.fail('retention: helper ownership receipt unknown')
+                elif primary is None:raise  # Explicit custody cannot silently lose its receipt.
         if teardown is not None and (primary is None or bound is None):raise teardown
         if primary is None:budget_check()
         elif bound is not None:

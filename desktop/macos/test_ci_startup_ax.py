@@ -1,5 +1,6 @@
 """Inert companion/process-port controls; no subprocess, AX, app or signal."""
 import json
+import io
 import os
 from pathlib import Path
 import tempfile
@@ -27,6 +28,7 @@ class CompanionControls(unittest.TestCase):
             primary=ValueError('inert original helper failure')
             def owned(argv,log,cap,**kwargs):
                 events.append('owned-start')
+                self.assertIs(kwargs['retain_ownership'], True)
                 if fail: raise primary
                 row=dict(schema='nac342-ax-witness-v1',status='waiting',sequence='0',trusted=True,
                          nonce='wrong' if wrong_nonce else declaration['nonce'],configuration_sha256='d'*64,
@@ -115,6 +117,49 @@ class GuardProofControls(unittest.TestCase):
             if mode=='phase':row['rows'][7]['surface']='form'
             with self.subTest(mode=mode),self.assertRaises((RuntimeError,ValueError)):
                 require_guard_proof(row,config,'e'*64,witness)
+
+
+class ExistingOwnerReceiptControls(unittest.TestCase):
+    def exercise(self, *, retain=False, fail=False, receipt_failure=False):
+        from ci import run
+        from ci_paths_budget import active
+        self.assertIsNone(active())
+        class Child:
+            pid=57111
+            def __init__(self):self.stdout=io.BytesIO(b'inert; never a real child')
+            def wait(self,timeout=None):return 1 if fail else 0
+            def poll(self):return 1 if fail else 0
+        class Thread:
+            def __init__(self,*,target,**kwargs):self.target=target
+            def start(self):self.target()
+            def is_alive(self):return False
+        child=Child()
+        original=Path.write_text
+        def write(path,*args,**kwargs):
+            if receipt_failure and path.name.endswith('.ownership.json'):raise OSError('inert custody sink failure')
+            return original(path,*args,**kwargs)
+        with tempfile.TemporaryDirectory() as temporary, patch('ci.subprocess.Popen',return_value=child), \
+                patch('ci.threading.Thread',Thread),patch('ci.os.killpg') as signal,patch.object(Path,'write_text',write):
+            log=Path(temporary)/'owner.log'
+            if fail:
+                with self.assertRaisesRegex(RuntimeError,r'failed \(1\)'):run(['inert'],log,1,retain_ownership=retain)
+            elif receipt_failure:
+                with self.assertRaises(OSError):run(['inert'],log,1,retain_ownership=retain)
+            else:run(['inert'],log,1,retain_ownership=retain)
+            receipt=log.with_name(log.name+'.ownership.json')
+            if retain and not receipt_failure:
+                row=json.loads(receipt.read_text())
+                self.assertTrue(row['accepted'] and row['reaped'] and row['drain_settled'])
+                self.assertFalse(row['unknown']);self.assertIsNone(row['teardown_error'])
+            else:self.assertFalse(receipt.exists())
+            signal.assert_not_called();self.assertTrue(child.stdout.closed)
+
+    def test_explicit_receipt_works_without_PathBudget_and_default_is_unchanged(self):
+        self.exercise();self.exercise(retain=True)
+
+    def test_receipt_failure_refuses_success_and_preserves_original_helper_failure(self):
+        self.exercise(retain=True,receipt_failure=True)
+        self.exercise(retain=True,fail=True,receipt_failure=True)
 
 
 if __name__=='__main__':unittest.main()

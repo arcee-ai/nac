@@ -70,7 +70,7 @@ class AXCompanion:
                     require(remaining > 0, 'AX companion original deadline')
                     self.phase = dict(started_epoch=time.time(), cap_seconds=min(300, remaining))
                     self.run([str(self.helper), '--ax-witness', str(self.config_path), str(self.case_deadline_ns)], self.folder / 'ax-companion.log',
-                             min(300, remaining), env=runner_environment(), abort=lambda: bool(self.witness.failure))
+                             min(300, remaining), env=runner_environment(), abort=lambda: bool(self.witness.failure), retain_ownership=True)
             except BaseException as error:
                 self.error = error
             finally:
