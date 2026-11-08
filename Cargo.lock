@@ -1821,6 +1821,7 @@ dependencies = [
  "nac-contracts",
  "nac-core",
  "nac-managed",
+ "nac-process",
  "ring",
  "rmcp",
  "rusqlite",
