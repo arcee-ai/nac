@@ -68,12 +68,30 @@ def command(args, *, env=None, output=None, timeout=600):
     return result.stdout
 
 
-def download(url, limit=150 * 1024 * 1024, data=None):
-    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+def download(url, limit=150 * 1024 * 1024, data=None, *, accept=None):
+    headers = {"Content-Type": "application/json"}
+    if accept is not None:
+        headers["Accept"] = accept
+    request = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(request, timeout=120) as response:
         result = response.read(limit + 1)
     require(len(result) <= limit, "download exceeded size limit")
     return result
+
+
+def tool_download_url(name, pin, host):
+    ids = pin.get("release_asset_ids")
+    require(ids is None or isinstance(ids, dict) and set(ids) == {pin["version"]},
+            "stale scanner release asset mapping")
+    if ids is not None:
+        require(isinstance(ids[pin["version"]], dict) and all(
+            platform in pin and type(value) is int and value > 0
+            for platform, value in ids[pin["version"]].items()), "invalid scanner release asset ID")
+    asset_id = ids[pin["version"]].get(host) if ids is not None else None
+    if asset_id is not None:
+        return f"https://api.github.com/repos/anchore/{name}/releases/assets/{asset_id}"
+    return (f"https://github.com/anchore/{name}/releases/download/v{pin['version']}/"
+            f"{name}_{pin['version']}_{host}.tar.gz")
 
 
 def install_tools(cache, names=None):
@@ -88,10 +106,10 @@ def install_tools(cache, names=None):
     cache.mkdir(parents=True, exist_ok=True)
     for name, pin in pins.items():
         require(host in pin, f"unsupported scanner host: {host}")
+        url = tool_download_url(name, pin, host)
         archive = cache / f"{name}_{pin['version']}_{host}.tar.gz"
         if not archive.exists():
-            archive.write_bytes(download(f"https://github.com/anchore/{name}/releases/download/"
-                                         f"v{pin['version']}/{archive.name}"))
+            archive.write_bytes(download(url, accept="application/octet-stream"))
         require(sha256(archive) == pin[host], f"{name} archive checksum mismatch")
         with tarfile.open(fileobj=io.BytesIO(archive.read_bytes())) as bundle:
             member = bundle.getmember(name)

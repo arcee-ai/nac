@@ -88,12 +88,49 @@ class Controls(unittest.TestCase):
         self.assertEqual(tool.VERSION, "0.9.151")
         self.assertEqual(tool.SHA256, "1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4")
         self.assertEqual(tool.ARCHIVE_BYTES, 12161169)
-        self.assertIn("cargo-nextest-0.9.151-x86_64-unknown-linux-gnu.tar.gz", tool.URL)
+        self.assertEqual(tool.ASSET_IDS, {"0.9.151": 703600788})
+        self.assertEqual(tool.URL, "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703600788")
         with tempfile.TemporaryDirectory() as d:
             result = subprocess.run([sys.executable, tool.__file__, "--destination", str(Path(d) / "tool"),
                                      "--sha256", "a" * 64], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"unrecognized arguments", result.stderr)
+
+    def test_public_asset_request_verifies_bytes_before_extraction_without_credentials(self):
+        payload = b"pinned archive response"
+        import hashlib
+        def extract(archive, destination):
+            self.assertEqual(archive.read_bytes(), payload)
+            destination.write_bytes(b"not executed")
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                tool, "ARCHIVE_BYTES", len(payload)), mock.patch.object(
+                tool, "SHA256", hashlib.sha256(payload).hexdigest()), mock.patch.object(
+                tool.urllib.request, "urlopen", return_value=io.BytesIO(payload)) as read, mock.patch.object(
+                tool, "extract_binary", side_effect=extract), mock.patch.object(tool, "verify_version") as version:
+            binary = tool.install(Path(d) / "tool")
+            self.assertEqual(binary.read_bytes(), b"not executed")
+            request = read.call_args.args[0]
+            self.assertEqual(request.full_url, tool.URL)
+            self.assertEqual(dict(request.header_items()), {"Accept": "application/octet-stream"})
+            self.assertEqual(read.call_args.kwargs, {"timeout": 60})
+            version.assert_called_once()
+
+    def test_api_error_or_corrupt_success_never_tries_another_route(self):
+        from urllib.error import HTTPError
+        for response in [HTTPError(tool.URL, code, "failed", {}, None) for code in [403, 404, 429, 504]] + [b"bad"]:
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as d, mock.patch.object(
+                    tool.urllib.request, "urlopen") as read, mock.patch.object(tool, "extract_binary") as extract:
+                if isinstance(response, bytes):
+                    read.return_value = io.BytesIO(response)
+                else:
+                    read.side_effect = response
+                with self.assertRaises((OSError, ValueError)):
+                    tool.install(Path(d) / "tool")
+                self.assertEqual(read.call_count, 1)
+                extract.assert_not_called()
+                self.assertFalse((Path(d) / "tool").exists())
+                if isinstance(response, HTTPError):
+                    response.close()
 
     def test_download_failure_cleans_only_created_leaf(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(tool.urllib.request, "urlopen", side_effect=OSError("offline")):

@@ -12,8 +12,10 @@ import urllib.request
 
 VERSION = "0.9.151"
 COMMIT = "6b3f994577a98874a2e0ea5bef77fbbab3434044"
-URL = ("https://github.com/nextest-rs/nextest/releases/download/"
-       "cargo-nextest-0.9.151/cargo-nextest-0.9.151-x86_64-unknown-linux-gnu.tar.gz")
+# Public release-asset API avoids the failing browser download route. Keep the
+# asset ID version-bound; a new version needs an explicitly qualified mapping.
+ASSET_IDS = {"0.9.151": 703600788}
+URL = f"https://api.github.com/repos/nextest-rs/nextest/releases/assets/{ASSET_IDS[VERSION]}"
 SHA256 = "1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4"
 ARCHIVE_BYTES = 12161169
 MAX_BINARY_BYTES = 128 * 1024 * 1024
@@ -76,7 +78,8 @@ def install(destination, archive=None):
     try:
         download = destination / "download.tar.gz"
         if archive is None:
-            with urllib.request.urlopen(URL, timeout=60) as source, download.open("xb") as target:
+            request = urllib.request.Request(URL, headers={"Accept": "application/octet-stream"})
+            with urllib.request.urlopen(request, timeout=60) as source, download.open("xb") as target:
                 copy_bounded(source, target, ARCHIVE_BYTES)
         else:
             archive = Path(archive)

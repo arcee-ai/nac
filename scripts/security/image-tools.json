@@ -2,7 +2,12 @@
   "syft": {
     "version": "1.55.0",
     "linux_amd64": "bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d",
-    "darwin_arm64": "1217c258bd5eb91ef3189cf22a82e02f9cac07e4ce934350f428e93aff674625"
+    "darwin_arm64": "1217c258bd5eb91ef3189cf22a82e02f9cac07e4ce934350f428e93aff674625",
+    "release_asset_ids": {
+      "1.55.0": {
+        "linux_amd64": 657153873
+      }
+    }
   },
   "grype": {
     "version": "0.121.0",

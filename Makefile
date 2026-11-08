@@ -271,7 +271,7 @@ lint-workflows:
 
 ## Prove workflow/shell enforcement with real pinned tools and invalid fixtures
 test-workflow-lint:
-	node --test .github/scripts/workflow-lint.test.mjs
+	node --test .github/scripts/workflow-lint.test.mjs .github/scripts/workflow-lint-tools.test.mjs
 
 ## Lint frontend and production Rust targets
 lint:
