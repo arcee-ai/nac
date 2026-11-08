@@ -1,6 +1,6 @@
 {
   "scope": "P10-Q057-external-AX-preflight-source01",
-  "H": "4405b9f898edee04c1f468092db9d5ad96372fb1",
+  "H": "10164e74a445a53e65439c599d89d7a963eb2a17",
   "P": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
   "Q": "057adebe72355fb7e95dc98b821c0a3de17a1167",
   "product_parent": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
@@ -16,6 +16,6 @@
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
   "producer_source": "7239e61a0ebc0ee01b28f9d3cb9c1262132a8627",
   "producer_branch": "codex/experimental-native-q-host-package-post657-p10",
-  "H_nomination_ready": false,
-  "H_nomination_gate": "Original G1 latest-versus-retained app repair and final review pending; source only, no execution"
+  "H_nomination_ready": true,
+  "H_nomination_gate": "Root nominated H10164/tree f16959315d83c5b5f0c06be0c60c6ab1b7bd457e; original G1 report7fcbb770 source-closes AX-PREFLIGHT-F1. Controller affected verification, private source availability and separate Root runtime admission remain required; source only, no execution."
 }

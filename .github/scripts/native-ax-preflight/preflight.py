@@ -212,6 +212,7 @@ def main():
             require(report['diagnostic']['status'] == 'GO' and not clock.failed and not STOP, 'diagnostic NO_GO')
             report['status'] = 'GO'
     except BaseException as error:
+        report['status'] = 'NO_GO'
         report['error_type'] = type(error).__name__
         clock.fail('diagnostic failed/unknown')
         raise

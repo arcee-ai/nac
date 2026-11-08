@@ -21,13 +21,16 @@ class Admission(unittest.TestCase):
             manifest_sha256=p.MANIFEST, producer=copy.deepcopy(p.PRODUCER),
             clock=dict(STARTED=1000, WORK_DEADLINE=3880, CLEANUP_DEADLINE=4480, HARD_DEADLINE=4600))
 
-    def test_real_source_blocks_unnominated_H_before_bootstrap(self):
-        with self.assertRaisesRegex(RuntimeError, 'not nominated'):
+    def test_unnominated_H_still_blocks_before_bootstrap(self):
+        pair = json.loads((p.HERE/'pair.json').read_text())
+        pair['H_nomination_ready'] = False
+        with patch.object(Path, 'read_text', return_value=json.dumps(pair)), self.assertRaisesRegex(RuntimeError, 'not nominated'):
             p.admit(self.value(), 'a'*40, now=1001)
 
     def test_exact_p10_only_and_original_clock_even_after_nomination(self):
         pair = json.loads((p.HERE/'pair.json').read_text())
-        pair['H_nomination_ready'] = True
+        self.assertEqual(pair['H'], '10164e74a445a53e65439c599d89d7a963eb2a17')
+        self.assertIs(pair['H_nomination_ready'], True)
         with patch.object(Path, 'read_text', return_value=json.dumps(pair)):
             self.assertEqual(p.admit(self.value(), 'a'*40, now=1001), (1000,3880,4480,4600))
             changes = [dict(scope=p.legacy.SCOPE), dict(attempt=2), dict(retries=1),
