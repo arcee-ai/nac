@@ -56,6 +56,8 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
          desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift
          desktop/macos/NativeCommands.swift desktop/macos/NativeCommandState.swift
          desktop/macos/NativeCommandScript.swift desktop/macos/NativeCommandBridge.swift
+         desktop/macos/WorkspaceRecovery.swift desktop/macos/WorkspaceRetirement.swift
+         desktop/macos/WorkspaceReadiness.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
@@ -67,7 +69,7 @@ else
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift)
     flags+=(-D PREVIEW_SMOKE -framework IOKit)
 fi
 if [[ "$mode" == startup-* ]]; then
@@ -79,7 +81,7 @@ if [[ "$mode" == instance-* ]]; then
     flags+=(-D PREVIEW_SMOKE -D INSTANCE_SMOKE)
 fi
 if [[ "$mode" == lifecycle-* ]]; then
-    sources+=(desktop/macos/LifecycleSmoke.swift)
+    sources+=(desktop/macos/LifecycleSmoke.swift desktop/macos/RecoverySmoke.swift)
     flags+=(-D PREVIEW_SMOKE -D LIFECYCLE_SMOKE)
 fi
 receipt_inputs="$output/build-inputs-$mode.json"

@@ -2,6 +2,9 @@
 export type DesktopUIAction = "newSession" | "settings" | "projects";
 export interface DesktopCommandPort {
   connect(owner: (message: unknown) => boolean): () => void;
+  /** Internal document disposal/readiness facts; never a native operation. */
+  connectLifetime?(close: () => void): () => void;
+  reportConnectionLost?(): void;
 }
 export type DesktopUIOwners = Record<DesktopUIAction, () => boolean | void>;
 

@@ -6,15 +6,17 @@ import WebKit
 final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     private weak var webView: WKWebView?
     private let receipt: () -> EngineReceipt?
+    private let connectionLost: (() -> Void)?
     private var bridge: NativeCommandBridge?
     private var bound = false
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] { bridge?.smokeSnapshot ?? ["installed": false] }
     #endif
 
-    init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?) {
+    init(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil) {
         self.webView = webView
         self.receipt = receipt
+        self.connectionLost = connectionLost
         super.init()
         webView.uiDelegate = self
     }
@@ -23,7 +25,7 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     func bind() {
         guard !bound, let webView, receipt() != nil else { return }
         bound = true
-        bridge = NativeCommandBridge(webView: webView, receipt: receipt)
+        bridge = NativeCommandBridge(webView: webView, receipt: receipt, connectionLost: connectionLost)
     }
 
     func navigationStarted(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationStarted(in: view, navigation: navigation) }
@@ -31,7 +33,11 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
         bridge?.allows(action, in: view) ?? false
     }
-    func retire() { bridge?.retire(); bridge = nil }
+    func retire(completion: @escaping (Bool) -> Void = { _ in }) {
+        guard let current = bridge else { completion(false); return }
+        bridge = nil
+        current.retire(completion: completion)
+    }
 
     func installMenus(applicationName: String = "NAC") {
         let main = NSMenu()

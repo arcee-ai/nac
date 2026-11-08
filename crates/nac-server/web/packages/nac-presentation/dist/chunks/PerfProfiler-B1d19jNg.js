@@ -3469,50 +3469,58 @@ var Co = class extends le {
 	}
 }, wo = class {
 	limit;
+	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
 	closed = !1;
-	constructor(e = 128) {
-		this.limit = e;
+	constructor(e = 128, t = !1) {
+		this.limit = e, this.requireAcknowledgement = t;
 	}
-	acquire(e, t) {
-		let n = JSON.stringify([e, t]), r = this.entries.get(n);
-		!this.closed && !r && this.entries.size < this.limit && (r = {
-			failed: !1,
+	acquire(e, t, n = !1) {
+		let r = JSON.stringify([e, t]), i = !this.requireAcknowledgement || !n, a = i ? this.entries.get(r) : void 0;
+		if (i && !this.closed && !a && this.requireAcknowledgement && this.entries.size >= this.limit) {
+			for (let [e, t] of this.entries) if (!t.failed && !t.readers) {
+				this.entries.delete(e);
+				break;
+			}
+		}
+		i && !this.closed && !a && this.entries.size < this.limit && (a = {
+			failed: this.requireAcknowledgement,
 			readers: 0,
 			listeners: /* @__PURE__ */ new Set()
-		}, this.entries.set(n, r)), r && r.readers++;
-		let i = !1, a = /* @__PURE__ */ new Set(), o = () => !this.closed && !i && !!r && this.entries.get(n) === r, s = {
+		}, this.entries.set(r, a)), a && a.readers++;
+		let o = !1, s = /* @__PURE__ */ new Set(), c = () => !this.closed && !o && !!a && this.entries.get(r) === a, l = {
+			observationOnly: !i,
 			get available() {
-				return o();
+				return c();
 			},
 			get current() {
-				return o() && !!r?.failed;
+				return c() && !!a?.failed;
 			},
 			set current(e) {
-				if (!o() || !r || r.failed === e) return;
-				r.failed = e;
-				let t = Array.from(r.listeners);
+				if (!c() || !a || a.failed === e) return;
+				a.failed = e;
+				let t = Array.from(a.listeners);
 				for (let e of t) e();
 			},
 			subscribe(e) {
-				return o() && (a.add(e), r?.listeners.add(e)), () => {
-					a.delete(e), r?.listeners.delete(e);
+				return c() && (s.add(e), a?.listeners.add(e)), () => {
+					s.delete(e), a?.listeners.delete(e);
 				};
 			},
 			acknowledge() {
-				return o() ? (s.current = !1, !0) : !1;
+				return c() ? (l.current = !1, !0) : !1;
 			},
 			release: () => {
-				if (!i) {
-					if (r) {
-						for (let e of a) r.listeners.delete(e);
-						r.readers--, !r.failed && !r.readers && this.entries.delete(n);
+				if (!o) {
+					if (a) {
+						for (let e of s) a.listeners.delete(e);
+						a.readers--, this.requireAcknowledgement || a.failed || a.readers || this.entries.delete(r);
 					}
-					a.clear(), i = !0, r = void 0;
+					s.clear(), o = !0, a = void 0;
 				}
 			}
 		};
-		return s;
+		return l;
 	}
 	close() {
 		if (this.closed) return;
@@ -3541,7 +3549,7 @@ var Do = /* @__PURE__ */ new WeakMap(), Oo = 0, ko = class {
 	productNavigation;
 	stores;
 	queryClient;
-	terminalInputRecovery = new wo();
+	terminalInputRecovery;
 	controller = new AbortController();
 	disposers = /* @__PURE__ */ new Set();
 	listeners = /* @__PURE__ */ new Set();
@@ -3550,7 +3558,7 @@ var Do = /* @__PURE__ */ new WeakMap(), Oo = 0, ko = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new wo(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,

@@ -459,6 +459,34 @@ real system WK document/SSE lifetime. Hiding a retained document can keep a live
 observer through graceful shutdown. `stopLoading()` behavior is recorded per OS;
 it does not release ownership of the WebView. Neither helper nor any provider or
 lifecycle fixture is included in the ordinary app's compiler inputs or binary.
+
+## Workspace recovery (ALL-345)
+
+When the renderer or connection fails, NAC retires the old document and tries
+one automatic reload against the same verified engine. **Reload Workspace**
+explicitly retries reading canonical state. A replacement is refused while the
+old WebView is still retained; the timeout does not permit bypassing its release.
+Explicit reload is bounded to three total attempts per engine incarnation,
+including the automatic attempt. Wake revalidates the engine separately.
+Waiting for the old view to release does not consume those attempts; failed
+engine-readiness checks do. The same retirement object remains the release barrier.
+
+If the engine has exited, choose **Restart Engine…** and confirm the restart.
+NAC waits for owned cleanup before launching a new engine; restart is bounded
+to two attempts per app launch. Saved chat history remains available, but old
+live terminals and their process-local output cannot be restored. A pending
+Quit confirmation prevents recovery from installing another workspace; Cancel
+leaves explicit recovery available, while Stop retires it.
+The restart budget is consumed only after old-document release and current
+Quit/generation admission, including a failed attempt to restart the engine.
+
+Recovery never resends prompts, approvals, shell commands or terminal bytes.
+Review canonical history and uncertain outcomes before taking another action.
+Same-engine recovered terminals require explicit acknowledgement before input;
+initial startup and a new engine retain their existing behavior. Native renderer
+crash, sleep/wake, replacement and trusted-input acceptance require separately
+qualified actual AppKit/WKWebView evidence; headless controls and compilation do
+not establish those behaviors.
 ## Fixed hosted lifecycle qualification (ALL-344)
 
 `all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier

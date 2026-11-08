@@ -21,6 +21,7 @@ interface TerminalPorts {
     previousFailure: {
         current: boolean;
         readonly available?: boolean;
+        readonly observationOnly?: boolean;
         subscribe?: (listener: () => void) => () => void;
     };
     controls: (value: TerminalControls | null) => void;
