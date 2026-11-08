@@ -151,10 +151,14 @@ test('no rendered text fragments cannot qualify a matching code span', () => {
 const journeys = fs.readFileSync(process.env.NAC_WORKSPACE_JOURNEYS_SOURCE ||
   new URL('WorkspaceJourneys.swift', import.meta.url), 'utf8');
 const rowExpression = journeys.match(/let fileRow = """\n([\s\S]*?)\n            """/);
+const gitBlock = journeys.slice(journeys.indexOf('        await check("git") {'), journeys.indexOf('        await check("approvals") {'));
+const gitRowExpression = gitBlock.match(/let gitRow = """\n([\s\S]*?)\n            """/);
+const gitDiffExpression = gitBlock.match(/let gitDiff = """\n([\s\S]*?)\n            """/);
 const oldRowAction = journeys.match(/self\.js\("(const e=\[\.\.\.document\.querySelectorAll\('button'\)\][^\n]+?)"\)/);
-function rowFixture({route = '#/session/owned-session/files', extra = '', row = ''} = {}) {
+function rowFixture({route = '#/session/owned-session/files', extra = '', row = '', git = false} = {}) {
+  const mode = git ? 'Diff of changed files' : 'All files';
   const dom = new JSDOM('<style>*{opacity:1;visibility:visible}</style><div id=list>' +
-    '<button aria-label="All files" aria-pressed="true">All files</button><div id=rows>' + row +
+    '<button aria-label="' + mode + '" aria-pressed="true">' + mode + '</button><div id=rows>' + row +
     '</div><div role=separator aria-label="Resize list panel"></div></div>' + extra,
     {url:'http://127.0.0.1:351/' + route, runScripts:'outside-only'});
   const {window} = dom;
@@ -166,14 +170,14 @@ function rowFixture({route = '#/session/owned-session/files', extra = '', row = 
   window.document.addEventListener('click', event => {
     if (event.target.matches('button[title="workspace.ts"]')) clicks++;
   });
-  const lookup = rowExpression?.[1].replace('\\(self.quote(self.sessionID))', JSON.stringify('owned-session'));
+  const lookup = (git ? gitRowExpression : rowExpression)?.[1].replace('\\(self.quote(self.sessionID))', JSON.stringify('owned-session'));
   const source = fragment => {
     if (!rowExpression) return oldRowAction[1];
-    const expression = journeys.match(fragment)[1];
-    return expression.replace('\\(fileRow)', lookup);
+    const expression = (git ? gitBlock : journeys).match(fragment)[1];
+    return expression.replace(git ? '\\(gitRow)' : '\\(fileRow)', lookup);
   };
   return {window, dom,
-    ready:() => window.Function(source(/self\.waitJS\("owned Files workspace\.ts row", "([^\n]+)"\)/))(),
+    ready:() => window.Function(source(git ? /self\.waitJS\("owned Git workspace\.ts row", "([^\n]+)"\)/ : /self\.waitJS\("owned Files workspace\.ts row", "([^\n]+)"\)/))(),
     act:() => window.Function(source(/self\.js\("(const rows=\(\(\) => \{ [^\n]+)"\)/))(),
     count:() => clicks, mount:html => window.document.querySelector('#rows').innerHTML = html,
     close:() => window.close()};
@@ -235,5 +239,95 @@ test('actual Files action rechecks readiness without click retry', () => {
       assert.equal(f.ready(),true); change(f);
       assert.throws(() => f.act()); assert.equal(f.count(),0);
     } finally { f.close(); }
+  }
+});
+
+
+const hunk = '<div><span>@@</span><span class="code">-0,0 +1,1</span></div>';
+function gitFixture(html = header + '<div class="overflow-auto">' + hunk + code + '</div>', hash = '#/session/session/files', chat = '') {
+  const f = fixture(html,hash,chat);
+  f.window.document.querySelector('#panel').insertAdjacentHTML('beforeend',
+    '<div id=list><button aria-label="Diff of changed files" aria-pressed="true"></button>' + row +
+    '<div role=separator aria-label="Resize list panel"></div></div>');
+  Object.defineProperty(f.window.document.body,'innerText',{get() { return this.textContent; }});
+  const actual = gitDiffExpression?.[1].replace('\\(self.quote(self.sessionID))', JSON.stringify('session')) ||
+    gitBlock.match(/self\.waitJS\("rendered Git diff", "([^\n]+)"\)/)[1];
+  return {...f, git:() => f.window.Function(actual)(),
+    qualifies:(api=state) => f.window.Function(actual)() && f.probe(api).ready && f.window.Function(actual)()};
+}
+test('actual Git evidence rejects chat hunk while legitimate plain Files capture remains ready', () => {
+  const f = gitFixture(pane, '#/session/session/files', '<p>@@ unrelated transcript</p>');
+  try { assert.equal(f.probe().ready,true); assert.equal(f.git(),false); assert.equal(f.qualifies(),false); }
+  finally { f.close(); }
+});
+test('actual Git row admission is read-only and rechecked in explicit Diff mode', () => {
+  const f = rowFixture({git:true});
+  try {
+    for (let n=0;n<4;n++) { assert.equal(f.ready(),false); assert.equal(f.count(),0); }
+    f.mount(ownedRow); assert.equal(f.ready(),true); assert.equal(f.count(),0);
+    f.act(); assert.equal(f.count(),1); assert.equal(f.ready(),true); assert.equal(f.count(),1);
+    f.window.document.querySelector('[aria-label="Diff of changed files"]').setAttribute('aria-pressed','false');
+    assert.equal(f.ready(),false); assert.throws(() => f.act()); assert.equal(f.count(),1);
+  } finally { f.close(); }
+  for (const data of [
+    {}, {extra:ownedRow}, {row:ownedRow+ownedRow},
+    {row:'<button title="folder/workspace.ts">workspace.ts</button>'},
+    {row:ownedRow.replace('<button','<button disabled')},
+    {row:'<div inert>'+ownedRow+'</div>'}, {row:ownedRow.replace('<button','<button hidden')},
+    {row:ownedRow.replace('<button','<button data-zero')},
+    {row:ownedRow,route:'#/session/foreign/files'},
+    {row:ownedRow,extra:'<div><button aria-label="Diff of changed files" aria-pressed="true"></button>'+ownedRow+
+      '<div role=separator aria-label="Resize list panel"></div></div>'},
+  ]) {
+    const g = rowFixture({...data,git:true});
+    try { assert.equal(g.ready(),false); assert.throws(() => g.act()); assert.equal(g.count(),0); }
+    finally { g.close(); }
+  }
+  const stale = rowFixture({git:true,row:ownedRow});
+  try { assert.equal(stale.ready(),true); stale.mount(''); assert.throws(() => stale.act()); assert.equal(stale.count(),0); }
+  finally { stale.close(); }
+});
+test('actual Git hunk and exact file source must share one selected visible owned pane', () => {
+  const good = gitFixture();
+  try { assert.equal(good.git(),true); assert.equal(good.qualifies(),true); }
+  finally { good.close(); }
+  const allFilesDiff = gitFixture();
+  try {
+    allFilesDiff.window.document.querySelector('#list [aria-label]').setAttribute('aria-label','All files');
+    assert.equal(allFilesDiff.probe().ready,true); // An untracked file can show DiffPane in All files.
+    assert.equal(allFilesDiff.git(),false); // Git independently admits its explicit changed-files mode.
+  } finally { allFilesDiff.close(); }
+  for (const html of [
+    pane, pane.replace('workspaceFileFixture','wrongFixture'),
+    header+'<div class="overflow-auto">'+hunk+'</div>',
+    header+'<div class="overflow-auto">'+code+'</div><section>'+hunk+'</section>',
+    header.replace('title="workspace.ts"','title="foreign.ts"')+'<div class="overflow-auto">'+hunk+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span hidden>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span inert>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span data-covered>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span data-top="-30">')+code+'</div>',
+    header+'<div class="overflow-auto" data-clip-width="20">'+hunk+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('-0,0 +1,1','not a hunk')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk+code+'</div>'+header+'<div class="overflow-auto">'+hunk+code+'</div>',
+  ]) {
+    const f=gitFixture(html,'#/session/session/files','<p>@@ elsewhere '+expected.content+'</p>');
+    try { assert.equal(f.qualifies(),false); }
+    finally { f.close(); }
+  }
+  for (const change of [
+    f => f.window.location.hash='#/session/foreign/files',
+    f => f.window.document.querySelector('#list [title]').setAttribute('aria-pressed','false'),
+    f => f.window.document.querySelector('#list [title]').setAttribute('title','foreign.ts'),
+    f => f.window.document.querySelector('#list [aria-label]').setAttribute('aria-pressed','false'),
+    f => f.window.document.querySelector('#list').insertAdjacentHTML('beforeend',row),
+    f => f.window.document.querySelector('#detail').insertAdjacentHTML('beforeend','<div class="nac-toast" style="pointer-events:none">Covered</div>'),
+  ]) {
+    const f=gitFixture();
+    try { assert.equal(f.qualifies(),true); change(f); assert.equal(f.qualifies(),false); }
+    finally { f.close(); }
+  }
+  for (const api of [null,{...state,path:'foreign.ts'},{...state,content:'stale'},{...state,binary:true},{...state,too_large:true}]) {
+    const f=gitFixture();
+    try { assert.equal(f.qualifies(api),false); } finally { f.close(); }
   }
 });

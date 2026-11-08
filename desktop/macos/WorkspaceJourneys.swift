@@ -169,7 +169,90 @@ extension WorkspaceSmoke {
         await check("git") {
             try await self.require("Git branch unavailable", "return [...document.querySelectorAll('button')].some(b => (b.getAttribute('aria-label') || b.textContent).includes('Branch: main'));")
             try await self.require("Git changed-file receipt missing", "const r=await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/workspace/diff?path=workspace.ts&stage=all&context=3'); if(!r.ok)return false; return JSON.stringify(await r.json()).includes('workspaceFileFixture');")
-            try await self.waitJS("rendered Git diff", "return document.body.innerText.includes('@@') && document.body.innerText.includes('export const workspaceFileFixture = 351;');")
+            try await self.navigate("files")
+            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Show panel\"]');")) as? Bool == true { try await self.button("Show panel") }
+            try await self.button("Diff of changed files")
+            let gitRow = """
+            if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
+            const lists = [...document.querySelectorAll('[role="separator"][aria-label="Resize list panel"]')]
+              .map(e => e.parentElement).filter(e => e &&
+                e.querySelector('button[aria-label="Diff of changed files"][aria-pressed="true"]'));
+            if (lists.length !== 1) return [];
+            return [...lists[0].querySelectorAll('button[title="workspace.ts"]')].filter(e => {
+              const rect = e.getBoundingClientRect();
+              if (e.disabled || e.closest('[inert]') || !e.getClientRects().length ||
+                  rect.width <= 0 || rect.height <= 0) return false;
+              for (let node = e; node; node = node.parentElement) {
+                const style = getComputedStyle(node);
+                if (node.hidden || style.display === 'none' || style.visibility !== 'visible' ||
+                    Number(style.opacity) === 0) return false;
+              }
+              return true;
+            });
+            """
+            try await self.waitJS("owned Git workspace.ts row", "const rows=(() => { \(gitRow) })(); return rows.length === 1;")
+            _ = try await self.js("const rows=(() => { \(gitRow) })(); if(rows.length !== 1)throw Error('Missing or ambiguous owned fixture source file'); rows[0].click(); return true;")
+            let gitDiff = """
+            if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return false;
+            const panes = [...document.querySelectorAll('span[title="workspace.ts"]')].filter(title => {
+              if (title.closest('button,[inert],[role=dialog]')) return false;
+              const header = title.parentElement, scroller = header?.nextElementSibling;
+              if (!header?.classList.contains('header-sm') || !scroller?.classList.contains('overflow-auto')) return false;
+              const panel = scroller.parentElement?.parentElement;
+              if (panel?.querySelectorAll('button[title="workspace.ts"][aria-pressed="true"]').length !== 1 ||
+                  !panel.querySelector('button[aria-label="Diff of changed files"][aria-pressed="true"]')) return false;
+              const visible = e => {
+                const range = document.createRange(); range.selectNodeContents(e);
+                const rects = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+                if (!rects.length || typeof document.elementFromPoint !== 'function') return false;
+                for (const rect of rects) {
+                  let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+                  for (let node = e; node; node = node.parentElement) {
+                    const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
+                    if (node.hidden || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' ||
+                        style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+                    if (node !== e && /^(auto|scroll|hidden|clip)$/.test(style.overflowX || style.overflow)) {
+                      left = Math.max(left, bounds.left + node.clientLeft);
+                      right = Math.min(right, bounds.left + node.clientLeft + node.clientWidth);
+                    }
+                    if (node !== e && /^(auto|scroll|hidden|clip)$/.test(style.overflowY || style.overflow)) {
+                      top = Math.max(top, bounds.top + node.clientTop);
+                      bottom = Math.min(bottom, bounds.top + node.clientTop + node.clientHeight);
+                    }
+                  }
+                  if (rect.left < left || rect.top < top || rect.right > right || rect.bottom > bottom) return false;
+                  const dx = Math.min(0.5, rect.width / 4), dy = Math.min(0.5, rect.height / 4);
+                  if (![[rect.left + dx, rect.top + dy], [rect.right - dx, rect.top + dy],
+                      [rect.left + dx, rect.bottom - dy], [rect.right - dx, rect.bottom - dy],
+                      [(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2]]
+                      .every(([x,y]) => e.contains(document.elementFromPoint(x,y)))) return false;
+                  if ([...document.querySelectorAll('.nac-toast')].some(toast => {
+                    for (let node = toast; node; node = node.parentElement) {
+                      const style = getComputedStyle(node);
+                      if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+                    }
+                    const b = toast.getBoundingClientRect();
+                    return b.width > 0 && b.height > 0 && b.left < rect.right && b.right > rect.left &&
+                      b.top < rect.bottom && b.bottom > rect.top;
+                  })) return false;
+                }
+                return true;
+              };
+              const rows = [...scroller.querySelectorAll('div')];
+              return rows.some(row => row.children.length === 2 && row.firstElementChild.matches('span') &&
+                  row.firstElementChild.textContent.trim() === '@@' && visible(row.firstElementChild) &&
+                  row.lastElementChild.matches('span.code') &&
+                  /^-[0-9]+,[0-9]+ [+][0-9]+,[0-9]+(?: .*)?$/.test(row.lastElementChild.textContent.trim())) &&
+                rows.some(row => row.children.length === 2 && row.lastElementChild.matches('span.code') &&
+                  row.lastElementChild.textContent === 'export const workspaceFileFixture = 351;');
+            });
+            return panes.length === 1;
+            """
+            try await self.waitJS("owned rendered Git diff", gitDiff)
+            let gitReadiness = try await self.captureReadiness(.file(id: self.sessionID, path: "workspace.ts",
+                content: "export const workspaceFileFixture = 351;\n"))
+            guard gitReadiness["ready"] as? Bool == true else { throw PreviewError.message("Owned Git diff file readiness failed") }
+            try await self.require("Owned Git diff changed during file readback", gitDiff)
             return "Actual Git branch, authoritative file diff and rendered hunk; no terminal input claim"
         }
         await check("approvals") {
