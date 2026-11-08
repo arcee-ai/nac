@@ -13,7 +13,7 @@ final class NativeJourneys: XCTestCase {
         let evidence: String
         let native_sha256: String
     }
-    private let marker = "NAC354_TRUSTED_OK"
+    private let marker = "NAC354_TRUSTED_XY"
 
     private func require(_ valid: @autoclosure () -> Bool, _ message: String) throws {
         guard valid() else { throw NSError(domain: "NACUI", code: 1,

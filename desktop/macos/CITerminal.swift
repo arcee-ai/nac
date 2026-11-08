@@ -8,7 +8,7 @@ import WebKit
 /// No production bridge, permission prompt, clipboard, or JS trust override.
 @MainActor
 enum CITerminal {
-    static let marker = "NAC354_TRUSTED_OK"
+    static let marker = "NAC354_TRUSTED_XY"
     // The command echo cannot satisfy the rendered-output marker assertion.
     static let command = "printf '" + marker.utf8.map { String(format: "\\%03o", Int($0)) }.joined()
         + "' > ci-native-input.txt; cat ci-native-input.txt"
