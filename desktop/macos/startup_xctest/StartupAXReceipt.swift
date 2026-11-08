@@ -185,6 +185,7 @@ final class StartupAXClient {
     let now: () -> UInt64
     let pause: () -> Void
     let load: () throws -> Data
+    private(set) var rejectionContext: [String: Any]?
     private var portLost = false
     private var helper: StartupAXProcess?
     private var target: StartupAXProcess?
@@ -216,7 +217,7 @@ final class StartupAXClient {
         lastTime = value
         return value
     }
-    private func read() throws -> StartupAXReceipt {
+    private func read(phase: String) throws -> StartupAXReceipt {
         let hex: (String) -> Bool = { $0.utf8.count == 64 && $0.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }
         try StartupAXFiles.need(hex(declaration.nonce) && hex(declaration.helper_sha256) && hex(configurationSHA)
             && Set(declaration.support_sha256.keys) == ["StartupAXGuard.swift", "StartupAXReceipt.swift"]
@@ -262,6 +263,27 @@ final class StartupAXClient {
         if receipt.status != "ready" {
             failureData = receipt.refusal
             refusalStage = receipt.refusal_stage ?? "external_witness_refused"
+            if rejectionContext == nil {
+                let stages: Set<String> = ["ax_predicate_refused", "sample_deadline", "target_retiring", "target_retired"]
+                let terminals: Set<String> = ["application_timeout", "windows_unavailable", "root_matches",
+                    "root_children", "root_sheet_count", "panel_children", "nested_sheet_count", "owned_pid",
+                    "foreign_window", "incarnation_binding", "focus_unavailable"]
+                var terminal = "absent"
+                if let data = receipt.refusal, data.count <= 8192,
+                   let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                   let fact = body["terminal_refusal"] as? [String: Any], let value = fact["stage"] as? String {
+                    terminal = terminals.contains(value) ? value : "other"
+                }
+                rejectionContext = ["schema": "nac342-ax-client-rejection-v1", "acceptance": false,
+                    "gate": "receipt_status_not_ready", "client_phase": phase,
+                    "receipt_status": ["refused", "retiring", "retired"].contains(receipt.status) ? receipt.status : "other",
+                    "refusal_stage": receipt.refusal_stage.map { stages.contains($0) ? $0 : "other" } ?? "absent",
+                    "reader_terminal": terminal, "sequence": String(incoming), "refusal_generation": String(refusal),
+                    "began_ns": String(began), "ended_ns": String(ended), "case_deadline_ns": String(cutoff),
+                    "failure_payload_present": receipt.refusal != nil, "observation_present": receipt.observation != nil,
+                    "configuration_sha256": configurationSHA, "helper_sha256": declaration.helper_sha256,
+                    "app_pid": Int(pid), "app_launch_epoch": launch, "window_number": window]
+            }
             throw StartupAXReceiptError.refused
         }
         guard let observation = receipt.observation,
@@ -275,7 +297,7 @@ final class StartupAXClient {
         let deadline = min(try StartupAXFiles.number(declaration.deadline_ns), try time() + 30_000_000_000)
         while true {
             do {
-                let baseline = try read()
+                let baseline = try read(phase: "begin")
                 let entered = try time()
                 if entered >= deadline { throw StartupAXReceiptError.expired }
                 return Ticket(sequence: try StartupAXFiles.number(baseline.sequence),
@@ -291,7 +313,7 @@ final class StartupAXClient {
                  field: (CGRect, String)? = nil) throws -> StartupAXSurface {
         while true {
             if try time() >= ticket.deadline { throw StartupAXReceiptError.expired }
-            let receipt = try read()
+            let receipt = try read(phase: "consume")
             let stamp = try time()
             let sequence = try StartupAXFiles.number(receipt.sequence)
             let refusal = try StartupAXFiles.number(receipt.refusal_generation)

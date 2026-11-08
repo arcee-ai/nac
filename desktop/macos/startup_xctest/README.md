@@ -457,3 +457,7 @@ No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by
 these commands. Current-head readiness and ordinary four-state qualification
 remain outstanding until root/354 completes the actual integration and evidence.
+
+## Passive client rejection diagnostic
+
+A first-only optional `nac342-ax-client-rejection-v1-configuredLocal` attachment projects only the receipt already decoded at the existing non-ready status rejection. It preserves the same original error, ready/identity/counter/deadline predicates, loads, queries and inputs. Its closed enums, canonical counter strings and existing source/config/helper/target binding omit raw receipt data, field values and arbitrary attributes; serialized record <=2048 bytes. The existing reader-refusal attachment remains independent, including when its failureData is nil. No new record qualifies ordinary observation, paired/pristine-gen0 evidence or native acceptance. This optional diagnostic does not create runtime admission or startup acceptance.

@@ -185,8 +185,53 @@ func identityProof() -> [String: Any] {
     let replacement = binding.accept(.panel,root:.init(element:root),panel:.init(element:NSObject()),goTo:nil)
     return ["accepted":a && b && c,"retained":retained != nil,"replacement_rejected": !replacement]
 }
+
+func rejectionRun(_ mode: String) -> [String: Any] {
+    var stamp: UInt64 = 3_000_000_000, loads=0, clocks=0, pauses=0, inputs=0
+    let helper=StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+    let target=StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+    let declaration=StartupAXDeclaration(path:"/inert/receipt",nonce:String(repeating:"a",count:64),helper_path:helper.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
+    let initial=mode.hasPrefix("reject_initial"), later=mode.hasPrefix("reject_later")
+    let client=StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
+        now:{clocks += 1;stamp += 1_000_000;return stamp},pause:{pauses += 1;stamp += 31_000_000_000},load:{
+            loads += 1
+            let rejecting = mode != "reject_ready" && (initial || later && loads>=3 || !initial && !later && loads>=2)
+            if loads>1 {stamp=max(stamp,loads>=3 ? 3_400_000_000 : 3_200_000_000)}
+            var status=rejecting ? "refused" : "ready"
+            if rejecting && mode.contains("retiring") {status="retiring"}
+            if rejecting && mode.contains("retired") {status="retired"}
+            if rejecting && mode.contains("unknown") {status="PRIVATE_STATUS"}
+            var stage:String?=rejecting ? "sample_deadline" : nil
+            if rejecting && mode.contains("private") {stage="PRIVATE_STAGE"}
+            var refusal:Data?=nil
+            if rejecting && mode.contains("payload") {
+                refusal=try JSONSerialization.data(withJSONObject:["terminal_refusal":["stage":mode.contains("private") ? "PRIVATE_TERMINAL" : "owned_pid"],"PRIVATE_RAW":"PRIVATE_FIELD_VALUE"])
+            }
+            var row=try JSONSerialization.jsonObject(with:JSONEncoder().encode(StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(loads),refusal_generation:"0",began_ns:loads==1 ? "1000000000" : loads>=3 ? "3300000000" : "3100000000",ended_ns:loads==1 ? "1100000000" : loads>=3 ? "3350000000" : "3150000000",status:status,case_deadline_ns:"50000000000",observation:StartupAXSurface(surface:"form",root_id:"00000000-0000-0000-0000-000000000001",panel_id:nil,go_to_id:nil,root_frame:[10,20,100,30],focus:nil),refusal_stage:stage,refusal:refusal))) as! [String:Any]
+            if rejecting && mode.contains("invalid") {row["trusted"]=false}
+            if rejecting && mode.contains("expired") {row["case_deadline_ns"]="1"}
+            return try JSONSerialization.data(withJSONObject:row,options:[.sortedKeys])
+        })
+    var name="none", frozen=true
+    do {
+        for _ in 0..<(later ? 2 : 1) {
+            let ticket=try client.begin()
+            _=try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30));inputs += 1
+        }
+    } catch {
+        name=String(describing:error)
+        if mode.contains("frozen") {
+            let first=try! JSONSerialization.data(withJSONObject:client.rejectionContext ?? [:],options:[.sortedKeys])
+            do {_=try client.begin()} catch {}
+            frozen=first == (try! JSONSerialization.data(withJSONObject:client.rejectionContext ?? [:],options:[.sortedKeys]))
+        }
+    }
+    return ["error":name,"inputs":inputs,"loads":loads,"clocks":clocks,"pauses":pauses,
+            "context":client.rejectionContext ?? [:],"failure_data":client.failureData != nil,"frozen":frozen]
+}
+
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : $0.hasPrefix("focus_") ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("reject_") ? rejectionRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : $0.hasPrefix("focus_") ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -209,6 +254,40 @@ class ReceiptControls(unittest.TestCase):
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
                          env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_passive_rejection_preserves_ready_error_and_exact_fake_port_counts(self):
+        modes=['reject_ready','reject_initial_nil','reject_consume_nil','reject_later_nil',
+               'reject_initial_invalid','reject_initial_expired']
+        rows=self.rows(modes)
+        for mode,row,error,counts in zip(modes,rows,['none','refused','refused','refused','invalid','invalid'],
+                [(1,2,7),(0,1,2),(0,2,5),(1,3,9),(0,1,2),(0,1,2)]):
+            with self.subTest(mode=mode):
+                self.assertEqual(row['error'],error)
+                self.assertEqual((row['inputs'],row['loads'],row['clocks']),counts)
+                self.assertEqual(row['pauses'],0)
+        self.assertFalse(rows[0]['context'])
+        self.assertFalse(rows[4]['context'])
+        self.assertFalse(rows[5]['context'])
+        self.assertEqual(rows[1]['context']['client_phase'],'begin')
+        self.assertEqual(rows[2]['context']['client_phase'],'consume')
+        self.assertEqual(rows[3]['context']['client_phase'],'begin')
+        self.assertFalse(rows[1]['failure_data'])
+        self.assertFalse(rows[2]['failure_data'])
+
+    def test_first_rejection_is_frozen_closed_and_private_payload_is_never_exported(self):
+        modes=['reject_initial_retiring','reject_initial_retired','reject_initial_unknown_payload_private',
+               'reject_initial_payload','reject_initial_frozen']
+        rows=self.rows(modes)
+        self.assertEqual([r['context']['receipt_status'] for r in rows],['retiring','retired','other','refused','refused'])
+        self.assertEqual(rows[2]['context']['refusal_stage'],'other')
+        self.assertEqual(rows[2]['context']['reader_terminal'],'other')
+        self.assertEqual(rows[3]['context']['reader_terminal'],'owned_pid')
+        self.assertTrue(rows[4]['frozen'])
+        for row in rows:
+            self.assertEqual(row['error'],'refused')
+            self.assertEqual(row['inputs'],0)
+            self.assertNotIn('PRIVATE',json.dumps(row))
+            self.assertLessEqual(len(json.dumps(row['context']).encode()),2048)
 
     def test_fifo_without_writer_and_directory_are_refused_by_actual_file_port(self):
         self.assertEqual(self.rows(['file_fifo','file_directory'],timeout=1),[{'accepted':False}]*2)

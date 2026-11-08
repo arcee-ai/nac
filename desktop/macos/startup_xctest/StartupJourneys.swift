@@ -622,6 +622,8 @@ final class StartupJourneys: XCTestCase {
                 window: number, executable: paths.native.path)
         } else { axClient = nil }
         var axRefusalEmitted = false
+        var clientRejectionEmitted = false
+        var initialGuardPending = true
         func panel() throws -> XCUIElement {
             let sheets = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
             try require(sheets.count == 1, "Owned root has no unique attached folder panel")
@@ -671,6 +673,18 @@ final class StartupJourneys: XCTestCase {
                     "Frozen fixture configuration changed")
                 if let ticket { try validateFolderSurface(ticket) }
             } catch {
+                // Optional, first-only already-held receipt facts; never query or change the refusal.
+                if !clientRejectionEmitted, var record = axClient?.rejectionContext {
+                    clientRejectionEmitted = true
+                    record.merge(["scenario": fixture.scenario,
+                        "guard_site": initialGuardPending ? "initial_guard" : "later_guard",
+                        "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                        "harness_sha": fixture.harness_sha, "startup_source_sha256": fixture.startup_source_sha256]) { _, new in new }
+                    if JSONSerialization.isValidJSONObject(record),
+                       let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), data.count <= 2048 {
+                        try? attachment(record, name: "nac342-ax-client-rejection-v1-" + fixture.scenario)
+                    }
+                }
                 if !axRefusalEmitted, let data = axClient?.failureData,
                    var record = try? json(data) {
                     axRefusalEmitted = true
@@ -714,6 +728,7 @@ final class StartupJourneys: XCTestCase {
             try dispatch("click:" + label) { elements.firstMatch.click() }
         }
         try guardTarget()
+        initialGuardPending = false
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
             if fixture.scenario == "futureStore" {
                 // Match the complete nominated sentence sequence verbatim,

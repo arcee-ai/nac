@@ -78,3 +78,7 @@ load loss latches refusal for that client. Positive exact known-app retirement
 produces only a terminal non-ready receipt. It never restores AX/input authority
 or rebinds a target. H reconciles it only after complete original case proofs
 and positive exact app/engine metadata settlement; missing app alone is failure.
+
+## Passive client rejection diagnostic
+
+A first-only optional `nac342-ax-client-rejection-v1-configuredLocal` attachment projects only the receipt already decoded at the existing non-ready status rejection. It preserves the same original error, ready/identity/counter/deadline predicates, loads, queries and inputs. Its closed enums, canonical counter strings and existing source/config/helper/target binding omit raw receipt data, field values and arbitrary attributes; serialized record <=2048 bytes. The existing reader-refusal attachment remains independent, including when its failureData is nil. No new record qualifies ordinary observation, paired/pristine-gen0 evidence or native acceptance. This optional diagnostic does not create runtime admission or startup acceptance.
