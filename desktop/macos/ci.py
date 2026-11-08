@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and qualify the actual development app on a dedicated hosted Mac."""
 import argparse
+from ci_paths_budget import active, check as budget_check, time_limit, using
 from collections import deque
 import hashlib
 import importlib.util
@@ -29,66 +30,103 @@ RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/u
 
 
 def command(args, cwd=ROOT):
-    return subprocess.check_output(args, cwd=cwd, text=True, stderr=subprocess.STDOUT,
-                                   timeout=min(30, max(1, RUN_DEADLINE - time.monotonic()))).strip()
+    seconds=min(30,max(1,RUN_DEADLINE-time.monotonic()))
+    seconds=time_limit(seconds)
+    value=subprocess.check_output(args,cwd=cwd,text=True,stderr=subprocess.STDOUT,timeout=seconds).strip()
+    budget_check()
+    return value
 
 
 def native_report(args, log):
     # AppKit/Vision may log diagnostics to stderr. Keep those separate from
     # the helper's JSON so warnings cannot corrupt a successful observation.
     result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
-                            timeout=min(60, max(1, RUN_DEADLINE - time.monotonic())))
+                            timeout=time_limit(min(60, max(1, RUN_DEADLINE - time.monotonic()))))
+    budget_check()
     log.write_text(result.stderr[-65536:])
     if result.returncode:
         raise RuntimeError(f'Native evidence reader failed ({result.returncode}); see {log.name}')
     return json.loads(result.stdout)
 
 
-def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None):
-    """Drain output continuously, retaining at most 256 KiB, including failure."""
+def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, retain_ownership=False):
+    """Retain every accepted handle through thread startup, waits and teardown."""
     print(f'Native CI phase: {log.name}', flush=True)
-    if abort is not None and abort():
-        raise RuntimeError('Native fixture ownership unavailable before helper launch')
-    chunks = deque(maxlen=64)
-    process = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, start_new_session=True, env=env)
-    def drain():
-        while chunk := process.stdout.read(4096):
-            chunks.append(chunk)
-    thread = threading.Thread(target=drain, daemon=True)
-    thread.start()
+    process,thread=None,None
+    primary,teardown=None,None
+    reaped=False
+    bound=active()
+    chunks=deque(maxlen=64)
     try:
-        seconds = min(timeout, max(1, RUN_DEADLINE - time.monotonic()))
-        if abort is None:
-            code = process.wait(timeout=seconds)
-        else:
-            deadline = time.monotonic() + seconds
-            while True:
-                if abort():
-                    raise RuntimeError('Native fixture ownership unavailable during helper execution')
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(args, seconds)
-                try:
-                    code = process.wait(timeout=min(.1, remaining))
-                    break
-                except subprocess.TimeoutExpired:
-                    pass
-        if code:
-            raise RuntimeError(f'{args[0]} failed ({code}); see {log.name}')
-    finally:
-        # This group contains our build/driver helpers, never an unrelated app.
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
+        if abort is not None and abort():
+            raise RuntimeError('Native fixture ownership unavailable before helper launch')
+        seconds=time_limit(min(timeout,max(1,RUN_DEADLINE-time.monotonic())),15)
+        process=subprocess.Popen(args,cwd=cwd,stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT,start_new_session=True,env=env)
+        budget_check()
+        def drain():
+            while chunk:=process.stdout.read(4096):chunks.append(chunk)
+        thread=threading.Thread(target=drain,daemon=True)
+        budget_check()
+        thread.start()
+        seconds=min(seconds,time_limit(seconds,15))
+        deadline=time.monotonic()+seconds
+        while True:
+            budget_check()
+            if abort is not None and abort():
+                raise RuntimeError('Native fixture ownership unavailable during helper execution')
+            remaining=deadline-time.monotonic()
+            if remaining<=0:raise subprocess.TimeoutExpired(args,seconds)
             try:
-                process.wait(timeout=cleanup_grace)
+                code=process.wait(timeout=min(.1,remaining) if abort is not None or bound is not None else remaining)
+                reaped=True
+                break
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
-        thread.join(timeout=5)
-        if not thread.is_alive():
-            process.stdout.close()
-        log.write_bytes(b''.join(chunks))
+                if abort is None and bound is None:raise
+        budget_check()
+        if code:raise RuntimeError(f'{args[0]} failed ({code}); see {log.name}')
+    except BaseException as error:
+        primary=error
+        if bound is not None and isinstance(error,subprocess.TimeoutExpired):
+            bound.owner.fail(bound.kind+': helper timeout')
+        raise
+    finally:
+        # Budget checks are synchronous. No alarm crosses Popen acquisition.
+        # The existing helper-group authority is unchanged and always attempted.
+        try:
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid,signal.SIGTERM)
+                try:process.wait(timeout=cleanup_grace)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid,signal.SIGKILL)
+                    process.wait(timeout=5)
+                reaped=True
+            elif process is not None:reaped=True
+        except BaseException as error:teardown=error
+        try:
+            if thread is not None and thread.is_alive():thread.join(timeout=5)
+            if process is not None and (thread is None or not thread.is_alive()):process.stdout.close()
+            log.write_bytes(b''.join(chunks))
+        except BaseException as error:teardown=teardown or error
+        if bound is not None or retain_ownership:
+            owner=bound.owner if bound is not None else None
+            unknown=(process is not None and not reaped) or (thread is not None and thread.is_alive())
+            if owner is not None and (teardown is not None or unknown):owner.fail('helper finalization unknown')
+            try:
+                with using(owner.retention if owner is not None else None):
+                    log.with_name(log.name+'.ownership.json').write_text(json.dumps(dict(
+                        accepted=process is not None,pid=process.pid if process else None,
+                        reaped=reaped,drain_settled=thread is None or not thread.is_alive(),unknown=unknown,
+                        primary_error=type(primary).__name__ if primary else None,
+                        teardown_error=type(teardown).__name__ if teardown else None))+'\n')
+            except BaseException:
+                if owner is not None:owner.fail('retention: helper ownership receipt unknown')
+                elif primary is None:raise  # Explicit custody cannot silently lose its receipt.
+        if teardown is not None and (primary is None or bound is None):raise teardown
+        if primary is None:budget_check()
+        elif bound is not None:
+            try:budget_check()
+            except TimeoutError:pass  # Preserve primary failure; expiry remains latched.
 
 
 def _recorded_command(pid):
