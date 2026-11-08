@@ -13,6 +13,25 @@ from ci_startup_fixture import PRODUCT
 
 
 class StartupAPITests(unittest.TestCase):
+    def test_diagnostic_byte_sentinel_is_bounded_and_only_applies_to_actual_bytes(self):
+        limit = 8 * 1024 * 1024
+        for value in (0, limit, limit + 1):
+            metadata = failure_metadata(FixtureFailure('served_entry_asset_bytes', {'actual_bytes': value}))
+            self.assertEqual(metadata['operands'], {'actual_bytes': value})
+        for key in ('expected_bytes', 'asset_ordinal', 'http_status'):
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {key: limit}))['operands'],
+                             {key: limit})
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {key: limit + 1}))['operands'], {})
+        for value in (True, False, -1, limit + 2, 10**100, float(limit), str(limit)):
+            self.assertEqual(failure_metadata(FixtureFailure('served_entry_asset_bytes', {'actual_bytes': value}))['operands'], {})
+
+    def test_named_transcript_guard_keeps_closed_redacted_operands(self):
+        metadata = failure_metadata(FixtureFailure('transcript_schema', {'actual_bytes': 9,
+            'body': 'private-canary', 'path': '/private-canary', 'url': 'https://private-canary.invalid'}))
+        self.assertEqual(metadata, {'exception_type': 'FixtureFailure', 'guard_code': 'transcript_schema',
+                                    'operands': {'actual_bytes': 9}})
+        self.assertNotIn('private-canary', json.dumps(metadata))
+
     def test_failure_metadata_never_formats_unknown_exception_or_exports_arbitrary_operands(self):
         class PrivateError(Exception):
             def __str__(self):
