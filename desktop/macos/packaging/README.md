@@ -249,7 +249,8 @@ PREVIEW_SMOKE/LIFECYCLE_SMOKE. The canonical builder also compiles its existing
 InstanceObservation helper with AppKit. No second Rust engine is built.
 
 The maintained lifecycle runner checks the original unsigned build-receipt's
-engine/native/plist hashes against actual bytes. Therefore this role deliberately
+engine/native hashes against actual bytes; the typed fixture validator also
+checks the original plist hash. Therefore this role deliberately
 retains canonical compiler output: no outer packaging signature, plist rewrite,
 PackageIdentity insertion or original receipt rewrite. Compiler/linker signatures
 are not represented as verified packaging signatures. The normal app still uses
