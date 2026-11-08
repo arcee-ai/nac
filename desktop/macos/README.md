@@ -250,3 +250,36 @@ hashes. It rejects an engine from another source revision or source changes
 during compilation. This is unsigned compiler provenance for the packaging
 owner; signing requires a separate final artifact manifest. The local builder's
 development bundle identifier is not the distribution or track identity contract.
+
+
+### External AX environment preflight (source only)
+
+`CIStartupObserver --ax-preflight CONFIG REQUEST` is an explicit one-shot
+read-only diagnostic, separate from the unchanged `nac342-owner-v1` stream.
+`ci_startup_owner.capture_ax_preflight` captures its bounded closed receipt
+through the existing process/clock owner (10 seconds), retaining helper failure
+before propagating it. Neither entry point is wired into startup qualification.
+A caller must first obtain a separate finite admission and own a new disposable
+ordinary app through the existing preinstalled owner; cleaned prior episodes
+are never available for probing. The parent binds exact source/binary hashes,
+configuration, latest kernel lifetime and sole window; helper rechecks canonical
+resources/lifetime/window before and after the read. Signing status/flags and
+the static app-sandbox entitlement are context only, not a claim about effective
+sandbox policy. A missing signing observation is retained as unknown.
+
+The helper calls plain `AXIsProcessTrusted()` once, never prompts or grants.
+False means zero AX messaging. True permits one `AXWindows` read with the
+existing one-second messaging policy, bounded type/count/PID checks and unique
+root geometry from that same array. It never traverses children, reads user
+text, performs actions, changes focus/value or posts input. Only closed facts
+and binding digests enter its receipt; acceptance is always false. Success
+proves host API availability only, never persistent CFEqual identity, picker
+focus/value/ancestry, all27 guard freshness, or native four-case acceptance.
+
+A live preflight controller is UNAPPLIED: it needs an independently reviewed
+ordinary diagnostic launch owner, exact package/source/artifact prerequisites,
+Root literal clock, exact-host image gate before bootstrap, attempt1/no retry,
+always-retained failure evidence and existing positive cleanup. Reusing the
+four-case driver would request unauthorized XCTest/input; changing that driver
+or inventing a launch path is outside this source unit. Q057, all guards and
+inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.

@@ -339,3 +339,74 @@ class OwnerWitness:
                     self.process.wait(timeout=3)
             self.process.stdout.close()
             self.reader.join(timeout=3)
+
+
+def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
+                         source_sha256, binary_sha256):
+    """Explicit one-shot diagnostic only; caller owns admission/fixture/clock.
+
+    Never starts/selects an app, changes trust, or modifies the owner stream.
+    `run` is the existing bounded process/clock owner, including failed output.
+    Failure receipts are retained before propagating the original helper error.
+    """
+    helper, source, config_path, folder = map(Path, (helper, source, config_path, folder))
+    require(all(path.is_absolute() and path.resolve(strict=True) == path and not path.is_symlink()
+                for path in (helper, source, config_path, folder)) and folder.is_dir())
+    require(all(re.fullmatch('[0-9a-f]{64}', value or '') for value in (source_sha256, binary_sha256)))
+    source_bytes = bounded_file(source, 256 * 1024)
+    helper_bytes = bounded_file(helper, 16 * 1024 * 1024)
+    configuration = bounded_file(config_path, 32768)
+    require(data_digest(source_bytes) == source_sha256 and data_digest(helper_bytes) == binary_sha256
+            and data_digest(configuration) == witness.configuration_sha256
+            and json.loads(configuration) == witness.config)
+    with witness.condition:
+        require(witness.ready and not witness.failure and witness.app and len(witness.app['windows']) == 1)
+        apps = [node for node in witness.latest if node['kind'] == 'app']
+        require(len(apps) == 1 and signature(apps[0]) == signature(witness.app)
+                and apps[0]['windows'] == witness.app['windows'])
+        binding = {'configuration_sha256': witness.configuration_sha256,
+                   'identity': identity(apps[0]), 'window_number': apps[0]['windows'][0]}
+    request_bytes = (json.dumps(binding, sort_keys=True) + '\n').encode()
+    request, log, receipt = (folder / name for name in ('ax-preflight-request.json', 'ax-preflight.log', 'ax-preflight.json'))
+    require(not any(path.exists() or path.is_symlink() for path in (request, log, receipt)))
+    with request.open('xb') as stream:
+        stream.write(request_bytes)
+    request.chmod(0o400)
+    original_error = None
+    try:
+        run([str(helper), '--ax-preflight', str(config_path), str(request)], log, 10,
+            abort=lambda: bool(witness.failure))
+    except Exception as error:
+        original_error = error
+    value = json.loads(bounded_file(log, 8192))
+    mandatory = {'schema', 'acceptance', 'trusted', 'windows_read', 'ax_code', 'window_count',
+                 'root_matches', 'bound', 'identity_rechecked', 'signing_code', 'app_sandbox_entitlement',
+                 'configuration_sha256', 'request_sha256', 'binary_sha256'}
+    require(type(value) is dict and mandatory <= set(value) <= mandatory | {'signing_flags'}
+            and value['schema'] == 'nac342-ax-preflight-v1' and value['acceptance'] is False)
+    require(all(type(value[key]) is bool for key in
+                ('trusted', 'windows_read', 'bound', 'identity_rechecked'))
+            and all(type(value[key]) is int for key in ('ax_code', 'window_count', 'root_matches', 'signing_code'))
+            and (value['app_sandbox_entitlement'] is None or type(value['app_sandbox_entitlement']) is bool)
+            and ('signing_flags' not in value or type(value['signing_flags']) is int))
+    require(value['configuration_sha256'] == witness.configuration_sha256
+            and value['request_sha256'] == data_digest(request_bytes) and value['binary_sha256'] == binary_sha256
+            and 0 <= value['window_count'] <= 128 and 0 <= value['root_matches'] <= value['window_count'])
+    require((value['trusted'] or not value['windows_read'])
+            and (value['windows_read'] or value['window_count'] == value['root_matches'] == 0)
+            and (not value['bound'] or (value['trusted'] and value['windows_read']
+                 and value['identity_rechecked'] and value['root_matches'] == 1 and value['ax_code'] == 0)))
+    require(data_digest(bounded_file(helper, 16 * 1024 * 1024)) == binary_sha256
+            and bounded_file(source, 256 * 1024) == source_bytes
+            and bounded_file(config_path, 32768) == configuration)
+    with witness.condition:
+        require(not witness.failure and witness.app and identity(witness.app) == binding['identity']
+                and witness.app['windows'] == [binding['window_number']])
+    value = {**value, 'source_sha256': source_sha256,
+             'scope': 'host AX API availability only; no focus/value/CFEqual/freshness or native acceptance'}
+    with receipt.open('xb') as stream:
+        stream.write((json.dumps(value, sort_keys=True) + '\n').encode())
+    if original_error is not None:
+        raise original_error
+    require(value['bound'] and value['identity_rechecked'])
+    return value
