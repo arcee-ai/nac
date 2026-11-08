@@ -401,8 +401,12 @@ def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
                 and bounded_file(source, 256 * 1024) == source_bytes
                 and bounded_file(config_path, 32768) == configuration)
         with witness.condition:
-            require(not witness.failure and witness.app and identity(witness.app) == binding['identity']
+            require(witness.ready and not witness.failure and witness.app
+                    and identity(witness.app) == binding['identity']
                     and witness.app['windows'] == [binding['window_number']])
+            apps = [node for node in witness.latest if node['kind'] == 'app']
+            require(len(apps) == 1 and identity(apps[0]) == binding['identity']
+                    and apps[0]['windows'] == [binding['window_number']])
         value = {**value, 'source_sha256': source_sha256,
                  'scope': 'host AX API availability only; no focus/value/CFEqual/freshness or native acceptance'}
         with receipt.open('xb') as stream:
