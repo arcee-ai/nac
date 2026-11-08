@@ -116,6 +116,56 @@ struct Engine { let pid = 351 }
             executed = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
             self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
 
+    def test_actual_git_block_selects_diff_and_rechecks_owned_file(self):
+        owner = Path(__file__).parent
+        target = member((owner / 'WorkspaceSmoke.swift').read_text(), 'enum CaptureTarget {')
+        journeys = Path(os.environ.get('NAC_WORKSPACE_JOURNEYS_SOURCE', owner / 'WorkspaceJourneys.swift')).read_text()
+        block = journeys[journeys.index('        await check("git") {'):journeys.index('        await check("approvals") {')]
+        fixture = r'''import Foundation
+        enum PreviewError: Error { case message(String) }
+        @MainActor final class WorkspaceSmoke {
+            // TARGET
+            let sessionID = "owned-session"
+            var events: [String] = []
+            func quote(_ value: String) -> String { String(data: try! JSONSerialization.data(withJSONObject: [value]), encoding: .utf8)!.dropFirst().dropLast().description }
+            func check(_ name: String, _ action: () async throws -> String) async { _ = try! await action() }
+            func navigate(_ panel: String) async throws { events.append("navigate:" + panel) }
+            func button(_ title: String) async throws { events.append("button:" + title) }
+            func require(_ title: String, _ script: String) async throws { events.append(title) }
+            func waitJS(_ title: String, _ script: String) async throws { events.append(title) }
+            func js(_ script: String) async throws -> Any {
+                if script.contains("Show panel") { return false }
+                precondition(script.contains("rows[0].click()")); events.append("one-row-click"); return true
+            }
+            func captureReadiness(_ target: CaptureTarget) async throws -> [String: Any] {
+                guard case let .file(id,path,content) = target, id == sessionID, path == "workspace.ts",
+                    content == "export const workspaceFileFixture = 351;\n" else { fatalError("Wrong Git file binding") }
+                events.append("file-readiness"); return ["ready":true]
+            }
+            func run() async {
+                // GIT
+            }
+        }
+        @main enum GitControls {
+            @MainActor static func main() async {
+                let smoke = WorkspaceSmoke(); await smoke.run()
+                precondition(smoke.events == ["Git branch unavailable", "Git changed-file receipt missing",
+                    "navigate:files", "button:Diff of changed files", "owned Git workspace.ts row",
+                    "one-row-click", "owned rendered Git diff", "file-readiness",
+                    "Owned Git diff changed during file readback"])
+            }
+        }
+'''.replace('            // TARGET', target).replace('                // GIT', block)
+        with tempfile.TemporaryDirectory(prefix='nac-git-owned-pure-') as temporary:
+            root = Path(temporary)
+            swift, binary = root / 'GitBlock.swift', root / 'git-block'
+            swift.write_text(fixture)
+            compiled = subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-warnings-as-errors',
+                '-parse-as-library', str(swift), '-o', str(binary)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            executed = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+
     def test_exact_file_target_and_negative_controls(self):
         result = subprocess.run(['node', '--test', str(Path(__file__).with_suffix('.mjs'))],
                                 capture_output=True, text=True, timeout=15)
