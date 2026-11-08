@@ -1,0 +1,6 @@
+{
+  "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "original_P_journey_sha256": "8b7abeb982ff974f4630e19662c7ce9b44d02666975f0347d3e660f661dd74cf",
+  "transaction_owner_source": "f902a6b9bdcbf5b91f3f7e30b1c1b11c0622d1ec",
+  "changes": "Relative imports only in accepted transaction owners; Q adds optional public_capture callback at exactly two existing confirmation stages. No P source/artifact changes."
+}
