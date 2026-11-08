@@ -378,34 +378,39 @@ def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
             abort=lambda: bool(witness.failure))
     except Exception as error:
         original_error = error
-    value = json.loads(bounded_file(log, 8192))
-    mandatory = {'schema', 'acceptance', 'trusted', 'windows_read', 'ax_code', 'window_count',
-                 'root_matches', 'bound', 'identity_rechecked', 'signing_code', 'app_sandbox_entitlement',
-                 'configuration_sha256', 'request_sha256', 'binary_sha256'}
-    require(type(value) is dict and mandatory <= set(value) <= mandatory | {'signing_flags'}
-            and value['schema'] == 'nac342-ax-preflight-v1' and value['acceptance'] is False)
-    require(all(type(value[key]) is bool for key in
-                ('trusted', 'windows_read', 'bound', 'identity_rechecked'))
-            and all(type(value[key]) is int for key in ('ax_code', 'window_count', 'root_matches', 'signing_code'))
-            and (value['app_sandbox_entitlement'] is None or type(value['app_sandbox_entitlement']) is bool)
-            and ('signing_flags' not in value or type(value['signing_flags']) is int))
-    require(value['configuration_sha256'] == witness.configuration_sha256
-            and value['request_sha256'] == data_digest(request_bytes) and value['binary_sha256'] == binary_sha256
-            and 0 <= value['window_count'] <= 128 and 0 <= value['root_matches'] <= value['window_count'])
-    require((value['trusted'] or not value['windows_read'])
-            and (value['windows_read'] or value['window_count'] == value['root_matches'] == 0)
-            and (not value['bound'] or (value['trusted'] and value['windows_read']
-                 and value['identity_rechecked'] and value['root_matches'] == 1 and value['ax_code'] == 0)))
-    require(data_digest(bounded_file(helper, 16 * 1024 * 1024)) == binary_sha256
-            and bounded_file(source, 256 * 1024) == source_bytes
-            and bounded_file(config_path, 32768) == configuration)
-    with witness.condition:
-        require(not witness.failure and witness.app and identity(witness.app) == binding['identity']
-                and witness.app['windows'] == [binding['window_number']])
-    value = {**value, 'source_sha256': source_sha256,
-             'scope': 'host AX API availability only; no focus/value/CFEqual/freshness or native acceptance'}
-    with receipt.open('xb') as stream:
-        stream.write((json.dumps(value, sort_keys=True) + '\n').encode())
+    try:
+        value = json.loads(bounded_file(log, 8192))
+        mandatory = {'schema', 'acceptance', 'trusted', 'windows_read', 'ax_code', 'window_count',
+                     'root_matches', 'bound', 'identity_rechecked', 'signing_code', 'app_sandbox_entitlement',
+                     'configuration_sha256', 'request_sha256', 'binary_sha256'}
+        require(type(value) is dict and mandatory <= set(value) <= mandatory | {'signing_flags'}
+                and value['schema'] == 'nac342-ax-preflight-v1' and value['acceptance'] is False)
+        require(all(type(value[key]) is bool for key in
+                    ('trusted', 'windows_read', 'bound', 'identity_rechecked'))
+                and all(type(value[key]) is int for key in ('ax_code', 'window_count', 'root_matches', 'signing_code'))
+                and (value['app_sandbox_entitlement'] is None or type(value['app_sandbox_entitlement']) is bool)
+                and ('signing_flags' not in value or type(value['signing_flags']) is int))
+        require(value['configuration_sha256'] == witness.configuration_sha256
+                and value['request_sha256'] == data_digest(request_bytes) and value['binary_sha256'] == binary_sha256
+                and 0 <= value['window_count'] <= 128 and 0 <= value['root_matches'] <= value['window_count'])
+        require((value['trusted'] or not value['windows_read'])
+                and (value['windows_read'] or value['window_count'] == value['root_matches'] == 0)
+                and (not value['bound'] or (value['trusted'] and value['windows_read']
+                     and value['identity_rechecked'] and value['root_matches'] == 1 and value['ax_code'] == 0)))
+        require(data_digest(bounded_file(helper, 16 * 1024 * 1024)) == binary_sha256
+                and bounded_file(source, 256 * 1024) == source_bytes
+                and bounded_file(config_path, 32768) == configuration)
+        with witness.condition:
+            require(not witness.failure and witness.app and identity(witness.app) == binding['identity']
+                    and witness.app['windows'] == [binding['window_number']])
+        value = {**value, 'source_sha256': source_sha256,
+                 'scope': 'host AX API availability only; no focus/value/CFEqual/freshness or native acceptance'}
+        with receipt.open('xb') as stream:
+            stream.write((json.dumps(value, sort_keys=True) + '\n').encode())
+    except Exception as capture_error:
+        if original_error is not None:
+            raise original_error from capture_error
+        raise
     if original_error is not None:
         raise original_error
     require(value['bound'] and value['identity_rechecked'])

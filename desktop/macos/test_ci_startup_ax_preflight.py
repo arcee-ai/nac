@@ -64,6 +64,13 @@ class AXPreflightTests(unittest.TestCase):
         receipt = json.loads((self.root / 'ax-preflight.json').read_bytes())
         self.assertFalse(receipt['windows_read']); self.assertFalse(receipt['bound'])
 
+    def test_malformed_failed_receipt_preserves_original_helper_failure(self):
+        self.change = lambda v: v.update(tree='forbidden')
+        self.helper_failure = True
+        with self.assertRaisesRegex(RuntimeError, 'original helper failure'):
+            self.capture()
+        self.assertTrue((self.root / 'ax-preflight.log').exists())
+
     def test_rejects_untrusted_messaging(self):
         self.change = lambda v: v.update(trusted=False)
         with self.assertRaises(RuntimeError): self.capture()
