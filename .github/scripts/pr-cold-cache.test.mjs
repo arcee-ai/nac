@@ -1,4 +1,5 @@
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
+import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -40,7 +41,7 @@ const baseline = {
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
   "managed-quality": "b77ca20017fcce1fef054e779b42b852dac053dcf53648cbeb41940d5cdc14e0",
 };
-const read = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+const read = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "macos-native") reverseNativeApp(value); if (name === "stable-release") reverseNativeQualification(value); return value; };
 function graph() {
   const result = {};
   function visit(name) {

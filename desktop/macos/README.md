@@ -118,6 +118,18 @@ macOS 14 qualification, signing/notarization, consumer installation, background
 window lifecycle, native menus/bridge, or performance.
 Those have separate owners in the ALL-339 work map.
 
+## Ordinary startup supplier binding
+
+The startup fixture and controlled-environment resolver bind exact final product
+`ef2cce9141973f37bf35e33d113e35eaa7a91f19`, whose direct parent is the
+full Native source `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Its Native boundary
+is `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`, integrated on actual landed dev
+`42231f447fef5d9d63d82943ae35e8c0d6c424b6`. This is source nomination only;
+no package/engine/app/query/runtime acceptance is inherited from historical P9/P6c/Pff8.
+Legacy P9/P6c/Pff8/Pd443 substitutions fail admission. The default four cases and
+protocol supplier remain unchanged; failed episodes and spent allocations are
+not renewed.
+
 ## Private launch contract (ALL-341)
 
 The builder asks the exact bundled executable for `__desktop-identity` and saves
