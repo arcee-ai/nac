@@ -157,7 +157,7 @@ def run(args, log, timeout, cwd=ROOT, cleanup_grace=5, *, env=None, abort=None, 
             except BaseException:
                 if owner is not None:owner.fail('retention: helper ownership receipt unknown')
                 elif primary is None:raise  # Explicit custody cannot silently lose its receipt.
-        if teardown is not None and (primary is None or (bound is None and complete_output_limit is None)):raise teardown
+        if teardown is not None and (primary is None or (bound is None and complete_output_limit is None and not retain_ownership)):raise teardown
         if capture_failure is not None:raise capture_failure
         if primary is None:budget_check()
         elif bound is not None:

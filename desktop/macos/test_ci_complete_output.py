@@ -31,13 +31,19 @@ class CompleteOutputTests(unittest.TestCase):
         self.payload=b'PREFIX\n'+b'x'*(66*4096)+b'\nSHORT-END\n'
 
     def execute(self,payload=None,*,limit=1024*1024,code=0,wait_error=None,drain_error=None,
-                abort=None,write_error=False,legacy=False,thread_class=InlineThread):
+                abort=None,write_error=False,legacy=False,thread_class=InlineThread,retain_ownership=True,
+                signal_error=None,close_error=None):
         data=self.payload if payload is None else payload
         clock=[100.]
         class Stream(io.BytesIO):
             def read(self,size):
                 if drain_error: raise drain_error
                 return super().read(size)
+            def close(self):
+                if close_error and not getattr(self,'failed_close',False):
+                    self.failed_close=True
+                    raise close_error
+                super().close()
         class Child:
             pid=98765
             def __init__(self): self.stdout=Stream(data);self.done=False;self.waits=0
@@ -53,11 +59,14 @@ class CompleteOutputTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(patch('ci.subprocess.Popen',return_value=child))
             stack.enter_context(patch('ci.threading.Thread',thread_class))
-            stack.enter_context(patch('ci.os.killpg',side_effect=lambda *v:signals.append(v)))
+            def kill(*values):
+                signals.append(values)
+                if signal_error:raise signal_error
+            stack.enter_context(patch('ci.os.killpg',side_effect=kill))
             stack.enter_context(patch('ci.time.monotonic',side_effect=lambda:clock[0]))
             stack.enter_context(patch('ci.RUN_DEADLINE',1000.))
             if write_error: stack.enter_context(patch.object(Path,'write_bytes',side_effect=OSError('inert finalization')))
-            ci.run(['inert-never-executed'],self.log,2,retain_ownership=True,abort=abort,**options)
+            ci.run(['inert-never-executed'],self.log,2,retain_ownership=retain_ownership,abort=abort,**options)
         return child,signals
 
     def receipt(self): return json.loads(self.log.with_name(self.log.name+'.ownership.json').read_text())
@@ -98,6 +107,62 @@ class CompleteOutputTests(unittest.TestCase):
                 self.assertEqual(row['primary_error'],error.__name__)
                 self.assertEqual(row['teardown_error'],'OSError')
                 self.assertTrue(row['reaped'] and row['drain_settled'])
+
+    def test_owned_tail_primary_identity_survives_secondary_log_close_and_kill_failures(self):
+        for secondary in ('log','close','kill'):
+            with self.subTest(secondary=secondary):
+                primary=RuntimeError('original helper failure object')
+                options=dict(legacy=True,wait_error=primary)
+                if secondary=='log':options['write_error']=True
+                if secondary=='close':options['close_error']=OSError('PRIVATE-CLOSE')
+                if secondary=='kill':options['signal_error']=OSError('PRIVATE-KILL')
+                with self.assertRaises(RuntimeError) as caught:self.execute(**options)
+                self.assertIs(caught.exception,primary)
+                row=self.receipt()
+                self.assertEqual(row['primary_error'],'RuntimeError')
+                self.assertEqual(row['teardown_error'],'OSError')
+                self.assertEqual(row['unknown'],secondary=='kill')
+                self.assertNotIn('PRIVATE-',json.dumps(row))
+                self.assertNotIn('output_capture',row)
+
+    def test_ordinary_unowned_tail_keeps_existing_teardown_precedence(self):
+        primary=RuntimeError('original legacy helper error')
+        with self.assertRaises(OSError):
+            self.execute(legacy=True,retain_ownership=False,wait_error=primary,write_error=True)
+        self.assertFalse(self.log.with_name(self.log.name+'.ownership.json').exists())
+
+    def test_owned_success_cannot_hide_cleanup_failure(self):
+        with self.assertRaises(OSError):self.execute(legacy=True,write_error=True)
+        self.assertIsNone(self.receipt()['primary_error'])
+        self.assertEqual(self.receipt()['teardown_error'],'OSError')
+
+    def test_owned_abort_primary_object_survives_secondary_before_and_after_acquisition(self):
+        for after_launch in (False,True):
+            with self.subTest(after_launch=after_launch):
+                primary=RuntimeError('exact ownership abort object')
+                calls=[]
+                def abort():
+                    calls.append(True)
+                    if not after_launch or len(calls)>1:raise primary
+                    return False
+                with self.assertRaises(RuntimeError) as caught:
+                    self.execute(legacy=True,abort=abort,write_error=True)
+                self.assertIs(caught.exception,primary)
+                row=self.receipt()
+                self.assertEqual(row['accepted'],after_launch)
+                self.assertFalse(row['unknown'])
+
+    def test_existing_bound_keeps_primary_and_sticky_cleanup_failure(self):
+        from ci_paths_budget import using
+        from test_ci_startup_clock import Clock
+        clock=Clock(1000)
+        primary=RuntimeError('original bounded helper error')
+        with using(clock.cleanup):
+            with self.assertRaises(RuntimeError) as caught:
+                self.execute(legacy=True,wait_error=primary,write_error=True)
+        self.assertIs(caught.exception,primary)
+        self.assertIn('helper finalization unknown',clock.failed)
+        self.assertEqual(self.receipt()['teardown_error'],'OSError')
 
     def test_drain_error_and_thread_start_failure_never_claim_complete_capture(self):
         with self.assertRaisesRegex(RuntimeError,'complete output drain failed'):

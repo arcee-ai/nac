@@ -143,10 +143,18 @@ class Provider:
             self.base = endpoint(ready.get('base_url'))
             return self.base
         except BaseException:
+            failure = RuntimeError('Owned startup provider did not become ready')
             bound = active()
-            with using(bound.owner.cleanup if bound else None):
-                self.stop(require_complete=False)
-            raise RuntimeError('Owned startup provider did not become ready') from None
+            try:
+                with using(bound.owner.cleanup if bound else None):
+                    self.stop(require_complete=False)
+            except BaseException as cleanup_error:
+                if bound is not None:
+                    bound.owner.fail('startup provider cleanup failed')
+                # Keep the existing safe startup failure as primary. Never
+                # format private cleanup messages or turn unknown custody into success.
+                failure.add_note('Startup provider cleanup failed: ' + json.dumps(failure_metadata(cleanup_error)))
+            raise failure from None
 
     def stop(self, require_complete=True):
         if self.process is None:
