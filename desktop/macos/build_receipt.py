@@ -44,6 +44,7 @@ def main():
             'normal_startup': 'LOCAL_APP' in flags, 'smoke_instrumentation': 'PREVIEW_SMOKE' in flags,
             'instance_smoke_instrumentation': 'INSTANCE_SMOKE' in flags,
             'lifecycle_smoke_instrumentation': 'LIFECYCLE_SMOKE' in flags,
+            'attention_smoke_instrumentation': 'ATTENTION_SMOKE' in flags,
             'bundle_identifier': bundle['CFBundleIdentifier'], 'bundle_name': bundle['CFBundleName'],
             'source_head': source_head,
             'source_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True)),
@@ -83,7 +84,7 @@ def main():
                     raise SystemExit('Ordinary app compiler inputs contain smoke/test instrumentation.')
                 markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap',
                            'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence',
-                           'LifecycleSmoke', 'QuitWebViewFixture', '__quitLifecycleObserver',
+                           'AttentionSmoke', 'LifecycleSmoke', 'QuitWebViewFixture', '__quitLifecycleObserver',
                            'offline-dummy-local-only', 'OfflineProviderPolicy', 'OfflineNetworkFence',
                            'OfflineWebProbe', 'OfflineProviderSmoke', 'OfflineHTTPControlTarget']
                 binary = (app / 'Contents/MacOS/NACPreview').read_bytes()

@@ -9,6 +9,8 @@ enum NativeCommandScript {
     (() => {
       if (window !== window.top) return;
       let owner = null, lifetime = null, binding = null, retired = false, disconnected = false;
+      let targetOwner = null, targetProfile = null, targetFlight = null;
+      let visibilityOwner = null, visible = true;
       const same = b => binding && b && ['launch','view','document'].every(k => b[k] === binding[k]);
       const post = (kind, extra = {}) => {
         if (!binding || retired) return;
@@ -21,10 +23,52 @@ enum NativeCommandScript {
         // Native already retired and may have removed the receipt handler.
         const closing = lifetime;
         retired = true; owner = null; lifetime = null; binding = null;
+        targetOwner = null; targetFlight = null; visibilityOwner = null; targetProfile = null;
         if (!closing) return false;
         try { closing.callback(); return true; } catch { return false; }
       };
       const port = Object.freeze({
+        connectSessionTarget(callback) {
+          if (retired || targetOwner || typeof callback !== 'function') throw new Error('Target owner unavailable');
+          const connection = {callback}; targetOwner = connection;
+          if (binding && targetProfile) post('session_target_ready', {profile: targetProfile});
+          return () => {
+            if (targetOwner !== connection) return;
+            targetOwner = null; targetFlight = null;
+            if (binding && targetProfile) post('session_target_retired', {profile: targetProfile});
+          };
+        },
+        activateSessionTarget(expected, profile) {
+          if (retired || disconnected || !same(expected) || targetProfile || typeof profile !== 'string') return false;
+          targetProfile = profile;
+          if (targetOwner) post('session_target_ready', {profile});
+          return true;
+        },
+        dispatchSessionTarget(expected, request) {
+          if (retired || disconnected || !same(expected) || !targetOwner || request.profile !== targetProfile ||
+              !['launch','view','document'].every(k => request[k] === binding[k])) return false;
+          const flight = {owner: targetOwner, binding, profile: targetProfile}; targetFlight = flight;
+          Promise.resolve().then(() => targetFlight === flight ? flight.owner.callback(request) : 'stale').then(outcome => {
+            if (retired || disconnected || targetFlight !== flight || targetOwner !== flight.owner || binding !== flight.binding) return;
+            targetFlight = null;
+            post('session_target_settled', {profile: flight.profile, request: request.request,
+              outcome: ['opened','deferred','unavailable','stale'].includes(outcome) ? outcome : 'unavailable'});
+          }, () => {
+            if (retired || disconnected || targetFlight !== flight || targetOwner !== flight.owner || binding !== flight.binding) return;
+            targetFlight = null;
+            post('session_target_settled', {profile: flight.profile, request: request.request, outcome: 'unavailable'});
+          });
+          return true;
+        },
+        connectVisibility(callback) {
+          if (retired || visibilityOwner || typeof callback !== 'function') throw new Error('Visibility owner unavailable');
+          const connection = {callback}; visibilityOwner = connection; callback(visible);
+          return () => { if (visibilityOwner === connection) visibilityOwner = null; };
+        },
+        setVisibility(expected, next) {
+          if (retired || !same(expected) || typeof next !== 'boolean') return false;
+          visible = next; visibilityOwner?.callback(visible); return true;
+        },
         connect(callback) {
           if (retired || owner || typeof callback !== 'function') throw new Error('UI owner unavailable');
           // A stale cleanup must not remove a later use of the same callback.
@@ -46,6 +90,7 @@ enum NativeCommandScript {
         reportConnectionLost() {
           if (retired || disconnected || !binding || !owner) return;
           disconnected = true;
+          targetFlight = null;
           post('connection_lost');
         },
         activate(next) {

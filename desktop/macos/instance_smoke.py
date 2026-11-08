@@ -41,13 +41,27 @@ def verify_embedded_assets(base):
     return verified
 
 
-def wait_for(label, predicate, timeout=50):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+def remaining(deadline, limit):
+    """Optional absolute fixture deadline; callers retain their old defaults."""
+    if deadline is None:
+        return limit
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError('Fixture operation deadline exhausted')
+    return min(limit, left)
+
+
+def wait_for(label, predicate, timeout=50, *, deadline=None):
+    end = time.monotonic() + timeout
+    if deadline is not None:
+        end = min(end, deadline)
+    while time.monotonic() < end:
         value = predicate()
+        if deadline is not None:
+            remaining(end, timeout)  # A late truthy read is never acceptance.
         if value:
             return value
-        time.sleep(.05)
+        time.sleep(.05 if deadline is None else min(.05, max(0, end - time.monotonic())))
     raise TimeoutError(label)
 
 
@@ -77,8 +91,10 @@ class AppJourney:
         self.command += options if options is not None else ['--directory', str(root), '--store-path', str(store)]
         self.log = output.with_suffix('.log').open('w')
 
-    def observe(self):
-        return json.loads(subprocess.check_output([str(self.observer), 'state', str(self.bundle)], timeout=4))
+    def observe(self, *, deadline=None):
+        value = json.loads(subprocess.check_output([str(self.observer), 'state', str(self.bundle)], timeout=remaining(deadline, 4)))
+        remaining(deadline, 4)
+        return value
 
     def launch(self):
         # Ordinary Finder/LaunchServices opening: intentionally no -n or fixed
@@ -92,34 +108,45 @@ class AppJourney:
                 opened.terminate()
                 opened.wait(timeout=3)
 
-    def read(self):
+    def read(self, *, deadline=None):
+        remaining(deadline, 50)
         try:
             value = json.loads(self.output.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
         if value.get('stage') == 'failed':
             raise AssertionError(value)
+        remaining(deadline, 50)
         return value
 
-    def stage(self, stage):
-        record = wait_for('Actual app stage ' + stage, lambda: (value if (value := self.read()).get('stage') == stage else None))
-        self.guard_console('observed-stage-' + stage)
-        state = self.observe()
+    def stage(self, stage, timeout=50, *, deadline=None):
+        def sample():
+            value = self.read() if deadline is None else self.read(deadline=deadline)
+            return value if value.get('stage') == stage else None
+        record = wait_for('Actual app stage ' + stage, sample, timeout=timeout, deadline=deadline)
+        self.guard_console('observed-stage-' + stage, deadline=deadline)
+        state = self.observe() if deadline is None else self.observe(deadline=deadline)
         assert len(state['apps']) == 1, state
         self.identity = state['apps'][0]
         assert self.identity['pid'] == record['app_pid'] and record['workspace_window_count'] == 1, record
+        remaining(deadline, timeout)
         return record
 
     def command_file(self, name):
         self.guard_console('native-control-' + name)
         (self.control / name).touch(exist_ok=False)
 
-    def guard_console(self, boundary):
-        return require_console(self.observer, self.console_checks, boundary)
+    def guard_console(self, boundary, *, deadline=None):
+        remaining(deadline, 4)
+        value = require_console(self.observer, self.console_checks, boundary)
+        remaining(deadline, 4)
+        return value
 
-    def guard_focus(self):
-        self.guard_console('focus-check')
-        assert self.observe().get('frontmost') == self.identity, 'User focus changed; refusing another activation'
+    def guard_focus(self, *, deadline=None):
+        self.guard_console('focus-check', deadline=deadline)
+        state = self.observe() if deadline is None else self.observe(deadline=deadline)
+        assert state.get('frontmost') == self.identity, 'User focus changed; refusing another activation'
+        remaining(deadline, 4)
 
     def reopen(self):
         self.guard_focus()

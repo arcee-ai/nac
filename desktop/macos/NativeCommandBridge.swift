@@ -9,6 +9,10 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     private let receipt: () -> EngineReceipt?
     private let state: NativeCommandState
     private let connectionLost: (() -> Void)?
+    private let targetReady: (() -> Void)?
+    private let target = NativeSessionTarget()
+    private let profile: String?
+    private var visible = true
     private var storage: WorkspaceStorageBridge?
     private var installed = true
     private var navigation: WKNavigation?
@@ -24,12 +28,14 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     #endif
 
     init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil,
-          workspaceStorage: WorkspaceStorage? = nil) {
+          workspaceStorage: WorkspaceStorage? = nil, targetReady: (() -> Void)? = nil) {
         guard let current = receipt(), let state = NativeCommandState(receipt: current) else { return nil }
         self.webView = webView
         self.receipt = receipt
         self.state = state
         self.connectionLost = connectionLost
+        self.targetReady = targetReady
+        self.profile = workspaceStorage?.profile.digest
         super.init()
         let controller = webView.configuration.userContentController
         controller.add(self, contentWorld: .page, name: NativeCommandScript.handler)
@@ -72,6 +78,7 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         guard candidate === webView else { return }
         self.navigation = navigation
         state.endDocument()
+        target.end()
         storage?.endDocument()
     }
 
@@ -79,6 +86,12 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         guard installed, candidate === webView, let navigation, navigation === self.navigation, state.allows(candidate.url),
               let binding = state.beginDocument(receipt: receipt()) else { return }
         call("return window.__nacDesktop?.activate(binding) === true", arguments: ["binding": object(binding)], binding: binding)
+        if let profile {
+            target.begin(binding, profile: profile)
+            call("return window.__nacDesktop?.activateSessionTarget(binding, profile) === true",
+                 arguments: ["binding": object(binding), "profile": profile], binding: binding)
+        }
+        setVisibility(visible)
         storage?.activate(binding, endpoint: state.origin.absoluteString)
     }
 
@@ -97,6 +110,7 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     func retire(completion: @escaping (Bool) -> Void = { _ in }) {
         guard installed else { completion(false); return }
         installed = false
+        target.end()
         navigation = nil
         storage?.retire()
         state.retire()
@@ -115,6 +129,29 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         }
         // This bridge must be installed before its view's first load. It does
         // not remove other owners' user scripts or reuse a retired WebView.
+    }
+
+    @discardableResult
+    func openSessionTarget(session: String, occurrence: String, completion: @escaping (NativeSessionTarget.Outcome) -> Void) -> Bool {
+        // This response follows explicit OS activation. Menu responder ownership
+        // stays unchanged; React separately protects IME/modal/local editors.
+        guard installed, state.matches(receipt()), target.ready else { return false }
+        if webView?.window?.attachedSheet != nil || NSApp.modalWindow != nil {
+            completion(.deferred); return true
+        }
+        guard NSApp.isActive, webView?.window?.isKeyWindow == true,
+              state.matches(receipt()), let binding = state.binding,
+              let request = target.issue(session: session, occurrence: occurrence, completion: completion) else { return false }
+        call("return window.__nacDesktop?.dispatchSessionTarget(binding, request) === true",
+             arguments: ["binding": object(binding), "request": object(request)], binding: binding)
+        return true
+    }
+
+    func setVisibility(_ next: Bool) {
+        visible = next
+        guard installed, state.matches(receipt()), let binding = state.binding else { return }
+        call("return window.__nacDesktop?.setVisibility(binding, visible) === true",
+             arguments: ["binding": object(binding), "visible": next], binding: binding)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -136,6 +173,11 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
             guard message.frameInfo.isMainFrame, state.matches(receipt()), state.allows(components.url),
                   let binding = state.binding else { return }
             _ = storage?.receive(body, expected: binding)
+            return
+        }
+        if message.frameInfo.isMainFrame, state.matches(receipt()), state.allows(components.url),
+           let binding = state.binding, target.receive(body, expected: binding) {
+            if target.ready { targetReady?() }
             return
         }
         let accepted = state.receive(body, origin: components.url, mainFrame: message.frameInfo.isMainFrame,
@@ -164,8 +206,8 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
             guard let self, self.installed, self.state.binding == binding,
                   self.state.matches(self.receipt()) else { return }
             // Late failures may retire only the document which issued them.
-            if case .failure = result { self.state.endDocument() }
-            else if case .success(let value) = result, (value as? Bool) != true { self.state.endDocument() }
+            if case .failure = result { self.state.endDocument(); self.target.end() }
+            else if case .success(let value) = result, (value as? Bool) != true { self.state.endDocument(); self.target.end() }
         }
     }
 

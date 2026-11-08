@@ -313,6 +313,15 @@ final class WorkspaceRecovery: NSObject, NSMenuItemValidation {
 
     private func cancelConfirmation() {
         restartRendererFailure = nil
+        #if ATTENTION_SMOKE
+        if app.quit.attentionFixtureCleanup {
+            // close() already fences recovery generation/tasks. Leave an
+            // attached recovery sheet in place; its answer cannot restart a
+            // closed owner, and dismissing it could change window focus.
+            busy = false
+            return
+        }
+        #endif
         guard let alert = restartConfirmation else { return }
         restartConfirmation = nil
         app.window.endSheet(alert.window, returnCode: .alertFirstButtonReturn)

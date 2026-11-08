@@ -54,6 +54,72 @@ function deferred() {
   });
   return { promise, resolve };
 }
+describe("explicit native notification navigation", () => {
+  const target = { session_id: "target", occurrence_id: "historical-completion" };
+  const targetContext = () => {
+    const value = context();
+    value.session!.session_id = "target";
+    return value;
+  };
+  it("reads the canonical target and opens the normal full chat, preserving the menu session guard", async () => {
+    const inspect = vi.fn(async () => targetContext()),
+      resolve = vi.fn();
+    const nav = new ProductNavigation(resolve, () => false, inspect);
+    const open = vi.fn(),
+      menu = vi.fn();
+    nav.connect({
+      currentSession: () => "source",
+      open: menu,
+      openNotificationSessionTarget: open,
+    });
+    const signal = new AbortController().signal;
+    expect(await nav.openNotificationSessionTarget(target, signal, () => true)).toBe("opened");
+    expect(inspect).toHaveBeenCalledWith("target", signal);
+    expect(open).toHaveBeenCalledExactlyOnceWith("target");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(menu).not.toHaveBeenCalled();
+    await expect(nav.open(request)).rejects.toThrow("another session");
+  });
+  it.each(["abort", "route", "replace", "close", "modal", "deleted"])(
+    "fences %s during canonical inspection without a deferred retry",
+    async (change) => {
+      let done!: (value: ProductContext) => void;
+      let source = "source",
+        allowed = true;
+      const nav = new ProductNavigation(
+        vi.fn(),
+        () => false,
+        () =>
+          new Promise((resolve) => {
+            done = resolve;
+          }),
+      );
+      const open = vi.fn();
+      const adapter = {
+        currentSession: () => source,
+        open: vi.fn(),
+        openNotificationSessionTarget: open,
+      };
+      nav.connect(adapter);
+      const abort = new AbortController();
+      const result = nav.openNotificationSessionTarget(target, abort.signal, () => allowed);
+      if (change === "abort") abort.abort();
+      if (change === "route") source = "elsewhere";
+      if (change === "replace") nav.connect({ ...adapter });
+      if (change === "close") nav.close();
+      if (change === "modal") allowed = false;
+      const current = targetContext();
+      if (change === "deleted") current.session = null;
+      done(current);
+      expect(await result).toBe(
+        change === "modal" ? "deferred" : change === "deleted" ? "unavailable" : "stale",
+      );
+      allowed = true;
+      await Promise.resolve();
+      expect(open).not.toHaveBeenCalled();
+    },
+  );
+});
 describe("explicit scoped product navigation", () => {
   it("returns truthful headless steps and never replays on browser attachment", async () => {
     const resolve = vi.fn().mockResolvedValue(resolution());
