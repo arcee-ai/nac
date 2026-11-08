@@ -14,8 +14,8 @@ import stat
 import sys
 import time
 
-BRANCH = 'refs/heads/codex/experimental-native-q-host-package-post657-p10'
-SCOPE = 'p10-hosted-normal-package-only'
+BRANCH = 'refs/heads/codex/experimental-native-q-host-package-mini505-p11'
+SCOPE = 'p11-hosted-normal-package-only'
 STOP = []
 CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'restore-cache': 2}
 

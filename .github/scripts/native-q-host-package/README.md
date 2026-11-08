@@ -1,4 +1,4 @@
-# NEVERMERGE: hosted post657 P10 package preparation only
+# NEVERMERGE: hosted mini505 P11 package preparation only
 
 This private experimental branch replaces its stable-release workflow with a
 single guarded manual build-only job. It is never a default-branch/release
@@ -8,20 +8,20 @@ ordinary artifact handoff; the old local producer and SDK allocations are spent.
 No dispatch, provisioning, signing, compilation or artifact upload ran during
 source preparation. No ONE-Q clock/source repair is imported here.
 
-This private controller branch starts at frozen producer bbc46c9d89ea2beef166392094f3989dbf3955f4;
-its predecessor branch/ref and P9 evidence stay frozen. The exact manual guard
-selects only `codex/experimental-native-q-host-package-post657-p10`.
-Original G1 affected verification must bind this new P10/Q pair before publication.
+This new private controller starts at frozen producer7239e61a0ebc0ee01b28f9d3cb9c1262132a8627;
+its predecessor branch/ref and genuine P10 evidence remain frozen. The manual
+guard selects only `codex/experimental-native-q-host-package-mini505-p11`.
+Root's independent coherent source verification/publication is still required.
 
-`pair.json` pins P10 `ef2cce9141973f37bf35e33d113e35eaa7a91f19`;
-its actual immediate P_parent and P_native_base are full Native
-`7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Product source_context is actual
-post657 dev `42231f447fef5d9d63d82943ae35e8c0d6c424b6`; this is product ancestry,
-not a claim that the controller was rebased. The normal39 roster/3support inputs
-are unchanged from P9; current653 source/generated assets and every Native/Q/test
-change come from7325. Packaging Python owners remain byte-identical to P9.
-Q993102af source hashes are exact inherited P10 inputs. Tool-only H9863 remains
-explicit and unchanged; it does not nominate or qualify 354's independent H9.
+`pair.json` pins P11 `4abb04a5f0e14f4c74c4f82a1e10dc377955b9d5`, whose immediate
+P_parent/P_native_base is full Native `21257259dfe34243aeb0cf8b3b966a6972cc4529`.
+Product source_context remains dev42231f447fef5d9d63d82943ae35e8c0d6c424b6.
+Normal39/3support roster is unchanged; only AppQuit.swift normal bytes change
+(two reviewed conditional deminiaturize calls). Assets/API/locks are unchanged.
+All current Native/test/Q057 inputs come from21257; packaging Python is identical
+to P10. Q057adebe exact inherited hashes select strict geometry/diagnostic source;
+its package contract remains1bc06c5d. Tool-only historical/measured H9863 stays
+explicit and unchanged; this does not nominate or execute 354's independent H.
 Only P's Rust/normal Swift are built. H provides the maintained Bound/ci.run
 process-group/ownership/drain/retention owner; its Rust/Auth/native cases are
 never built or called. Q's exact source, inherited unchanged by P, is imported
@@ -29,7 +29,7 @@ only for strict inspect_normal_package of actual manifest/relocated post-sign
 bytes. No app/XCTest/AX/console/provider/profile/R/futureStore operation exists.
 
 Before dispatch Root supplies `package_admission` with exactly scope
-`p10-hosted-normal-package-only`, controller_sha (the actual frozen new commit),
+`p11-hosted-normal-package-only`, controller_sha (the actual frozen new commit),
 a named allocation_id, attempt1, retries0 and clock fields STARTED,
 WORK_DEADLINE, CLEANUP_DEADLINE, HARD_DEADLINE as absolute finite epochs. Placeholders
 are not an admission. Original time starts before queue/checkout/bootstrap.
@@ -70,7 +70,7 @@ missing positive fresh release-dependency inventory stops before production.
 archive is unused: no ci-incremental helper, workspace-crate caching or old engine.
 The driver requires1530s remaining (1080engine+390downstream+60handoff) before
 marking its one producer attempt. Original40/30/8/2 and1080 caps stay unchanged.
-P10 has no release/config override: explicit CGU16/nonincremental0 match canonical
+P11 has no release/config override: explicit CGU16/nonincremental0 match canonical
 release defaults. The target is a job-owned sibling of all checkouts, outside
 handoff/output and never uploaded. Source identity and locked build stay exact.
 Job01 remains consumed/closed; this successor grants no actual cache/build retry.
@@ -80,11 +80,14 @@ the unedited producer manifest and its original ZIP, bounded receipts and gate
 facts, unique run/attempt artifact name,3-day retention, no overwrite. Root must
 consume job/ownership PASS, exact file hashes/size/source and artifact ID before
 any further admission. Artifact hashes are NEW host evidence, not required to
-equal local f591/bb45; source P10 and genuine invariants remain exact.
+equal local f591/bb45; source P11 and genuine invariants remain exact.
 Legacy ff8 temp/artifact paths retain the existing handoff contract. The NEW
-P10 admission scope and exact controller/product pins reject old P9 scopes/refs;
-Root must supply a distinct finite allocation. Producer01/02 and P9 producer03/
-onboarding04 keep their original limited outcomes and cannot qualify P10.
+P11 admission scope and exact controller/product pins reject old P9/P10 scopes/refs;
+Root must supply a distinct finite allocation. All old producer/actual/SDK/mac14/
+one-shot counters retain their original outcomes. Genuine P10 R4/onboarding and
+configured AX failure keep their old source/scope; none qualifies P11, actual
+minimized/G3/trusted-input behavior or distribution. No actual execution occurred
+in this source unit.
 Independent R2504 build/protocol evidence is required before actual future/all4;
 full qualify builds/executes R, the onboarding-only wrapper does not. This producer
 adds no R phase or consumer extension. R private-wire compatible-newer-NAC-app and
