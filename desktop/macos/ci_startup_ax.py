@@ -58,18 +58,21 @@ class AXCompanion:
         self.thread = None
         self.finished = threading.Event()
         self.stopping = False
-        self.error = None
+        self.error = self.ui_failure = None
         self.identity = None
         self.terminal = None
+        self.settlement = None
 
     @property
     def failure(self):
         if self.error is not None or (self.finished.is_set() and not self.stopping):
-            return 'ax_companion_unavailable'
+            self.ui_failure = 'ax_companion_unavailable'
+        if self.ui_failure:
+            return self.ui_failure
         return None
 
     def start(self):
-        require(self.thread is None and self.witness.ready and not self.witness.failure, 'AX metadata owner not ready')
+        require(self.thread is None and self.witness.ready and not self.witness.failure and not self.witness.ui_terminal, 'AX metadata owner not ready')
         self.case_deadline_ns = min(int(self.declaration['deadline_ns']), int((time.monotonic() + time_limit(300)) * 1e9))
         def owned():
             try:
@@ -83,6 +86,8 @@ class AXCompanion:
                 self.error = error
             finally:
                 self.phase['ended_epoch'] = time.time()
+                if not self.stopping:
+                    self.ui_failure = 'ax_companion_unavailable'
                 self.finished.set()
         self.thread = threading.Thread(target=owned, daemon=True)
         self.thread.start()
@@ -110,6 +115,15 @@ class AXCompanion:
         raise RuntimeError('AX companion readiness cutoff')
 
     def stop(self):
+        try:
+            return self._stop()
+        except BaseException as error:
+            self.ui_failure = self.ui_failure or 'ax_companion_unavailable'
+            if self.error is not None and error is not self.error:
+                raise self.error from error
+            raise
+
+    def _stop(self):
         if self.thread is None:
             return None
         self.stopping = True
@@ -122,12 +136,17 @@ class AXCompanion:
         os.replace(temporary, path)
         self.thread.join(timeout=time_limit(20))
         require(not self.thread.is_alive(), 'AX companion process owner not settled')
-        if self.error is not None:
-            raise self.error
         log = self.folder / 'ax-companion.log.ownership.json'
         owner = json.loads(bounded_file(log, 32768))
-        require(owner['accepted'] and owner['reaped'] and owner['drain_settled']
-            and not owner['unknown'] and owner['teardown_error'] is None, 'AX companion positive settlement')
+        require(all(owner[key] is True for key in ('accepted', 'reaped', 'drain_settled'))
+            and owner['unknown'] is False and owner['teardown_error'] is None
+            and type(owner['pid']) is int and owner['pid'] > 0
+            and (self.identity is None or owner['pid'] == self.identity['pid']), 'AX companion positive settlement')
+        self.settlement = dict(owned_processes_settled=True, helper=self.identity,
+            helper_sha256=self.declaration['helper_sha256'], phase=self.phase,
+            scope='Read-only AX companion only; not app/UI acceptance')
+        if self.error is not None:
+            raise self.error
         row = json.loads(bounded_file(Path(self.declaration['path']), 8192))
         if row.get('status') in ('retired', 'retiring'):
             require(row['schema'] == 'nac342-ax-witness-v1' and row['trusted'] is True
@@ -139,8 +158,7 @@ class AXCompanion:
                 and row.get('observation') is None and row.get('refusal') is None
                 and row['refusal_stage'] == 'target_' + row['status'], 'AX terminal receipt binding')
             self.terminal = {key: row[key] for key in ('target', 'app_launch_epoch', 'window_number', 'status')}
-        return dict(owned_processes_settled=True, helper=self.identity, helper_sha256=self.declaration['helper_sha256'], phase=self.phase,
-                    scope='Read-only AX companion only; not app/UI acceptance')
+        return self.settlement
 
     def failure_diagnostic(self):
         """Read only the bounded static failure log; absence never affects custody."""

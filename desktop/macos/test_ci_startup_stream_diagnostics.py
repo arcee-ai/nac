@@ -52,7 +52,7 @@ class StreamDiagnosticsTests(unittest.TestCase):
             nodes=[node('app',10,1),node('engine',11,10)], retired=[], enumerated_exits=[],
             observed_uptime_ns='99500000000')
 
-    def read(self, suffix=b'', *, healthy=False, stream_error=None):
+    def read(self, suffix=b'', *, healthy=False, stream_error=None, expect_failure=None):
         payload = b''.join((json.dumps(v)+'\n').encode() for v in (self.ready,self.record))+suffix
         owner = self.owner
         class Stream(io.BytesIO):
@@ -66,7 +66,8 @@ class StreamDiagnosticsTests(unittest.TestCase):
         with patch('ci_startup_owner.subprocess.Popen',return_value=child) as launch, \
                 patch('ci_startup_owner.threading.Thread',InlineThread), \
                 patch('ci_startup_owner.os.kill') as signal:
-            if healthy: self.owner.start('/inert/helper',self.path)
+            if expect_failure is None: expect_failure = not healthy
+            if not expect_failure: self.owner.start('/inert/helper',self.path)
             else:
                 with self.assertRaises(RuntimeError): self.owner.start('/inert/helper',self.path)
             launch.assert_called_once()
@@ -107,12 +108,17 @@ class StreamDiagnosticsTests(unittest.TestCase):
         diagnostic=self.assert_failure(b'','read','io_error',stream_error=OSError('SECRET-CANARY'))
         self.assertNotIn('SECRET-CANARY',json.dumps(diagnostic))
 
-    def test_two_window_failure_has_safe_shape_counts_without_new_authority(self):
+    def test_two_window_failure_has_safe_shape_counts_without_new_ui_authority(self):
         row=copy.deepcopy(self.record);row['observed_uptime_ns']='99700000000'
         row['nodes'][0]['windows']=[17,18]
-        diagnostic=self.assert_failure((json.dumps(row)+'\n').encode(),'record_validation','app_windows')
-        self.assertEqual(diagnostic['shape'],dict(app_count=1,window_count=2,original_window_present=True))
+        result=self.read((json.dumps(row)+'\n').encode(),healthy=True,expect_failure=True)
+        self.assertEqual(result['failure'],'app_windows')
+        self.assertIsNone(result['process_failure'])
+        self.assertEqual(result['stream_diagnostic']['shape'],dict(app_count=1,window_count=2,original_window_present=True))
         self.assertEqual(self.owner.app['windows'],[17])
+        self.assertEqual(self.owner.latest[0]['windows'],[17,18])
+        self.assertEqual(self.owner.last_accepted_uptime_ns,99700000000)
+        self.assertFalse(result['positive_process_settlement'])
 
     def test_malformed_record_cannot_supply_counts_or_leak_fields(self):
         row=dict(schema='nac342-owner-v1',nodes=[{'kind':'app','windows':['SECRET-CANARY']}])

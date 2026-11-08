@@ -41,5 +41,12 @@ authority; the production React UI and HTTP/SSE client remain shared.
   input remain the evidence obligations of their owning tickets. Scripted DOM
   interaction cannot prove those contracts.
 
+Startup qualification keeps process custody separate from UI eligibility. The
+single preinstalled metadata owner commits only complete, valid process records;
+a sticky UI rejection never authorizes input or a new window binding. Positive
+process history plus a fresh exact kernel identity may still support cleanup.
+Helper, app/engine, and profile settlement are separate proofs. Cleanup success
+cannot clear the original UI failure, infer completed input, or admit another case.
+
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.

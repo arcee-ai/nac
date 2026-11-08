@@ -88,11 +88,19 @@ class OwnerWitness:
         self.last_uptime_ns = 0
         self.last_accepted_uptime_ns = 0
         self.stream_diagnostic = None
-        self.failure = None
+        self.process_failure = self.ui_failure = None
+        self.ui_root = None
+        self.ui_terminal = False
         self.stopping = False
         self.process = self.reader = None
+        self.helper_settled = False
         self.condition = threading.Condition()
         self.signals = []
+
+    @property
+    def failure(self):
+        """Sticky UI rejection remains visible to every existing abort caller."""
+        return self.ui_failure or self.process_failure
 
     def observe(self, record):
         """Validate actual helper records; portable tests supply explicit fixtures."""
@@ -128,7 +136,7 @@ class OwnerWitness:
                             and re.fullmatch(r'(?:(?:bsd|path|existence|children)_(?:denied|unavailable)|identity_changed)',
                                              str(item['reason'])))
                 self.retained_diagnostics, self.unresolved = retained, unresolved
-                self.failure = 'ownership_observation_unavailable'
+                self.process_failure = self.process_failure or 'ownership_observation_unavailable'
                 self.condition.notify_all()
                 return  # Never erase latest/history or manufacture an empty observation.
             if record.get('event') == 'ready':
@@ -141,7 +149,7 @@ class OwnerWitness:
                 self.last_empty = self.last_observation = observed
                 self.condition.notify_all()
                 return
-            require(self.ready and not self.failure and set(record) == {'schema', 'complete', 'nodes', 'retired',
+            require(self.ready and not self.process_failure and set(record) == {'schema', 'complete', 'nodes', 'retired',
                     'enumerated_exits', 'observed_uptime_ns'} and record['complete'] is True)
             nodes = record.get('nodes')
             require(isinstance(nodes, list) and len(nodes) <= 128)
@@ -168,13 +176,14 @@ class OwnerWitness:
                 if node['kind'] == 'app':
                     require(node['executable'] == native and type(node.get('app_launch_epoch')) in (int, float)
                             and node['app_launch_epoch'] > 0)
-                    require(isinstance(node.get('windows'), list) and len(node['windows']) <= 1
-                            and all(type(n) is int and n > 0 for n in node['windows']),
+                    require(isinstance(node.get('windows'), list) and len(node['windows']) <= 128
+                            and all(type(n) is int and 0 < n < 2**64 for n in node['windows'])
+                            and len(set(node['windows'])) == len(node['windows']),
                             'app_windows')
                     if new_app:
                         require(signature(node) == signature(new_app)
                                 and node['app_launch_epoch'] == new_app['app_launch_epoch'])
-                    new_app = {**node, 'windows': node['windows'] or (new_app or {}).get('windows', [])}
+                    new_app = node
                 elif node['kind'] == 'engine':
                     require(node['executable'] == engine)
                 else:
@@ -232,6 +241,24 @@ class OwnerWitness:
                         and item['parent'] in set(self.history) | set(current) and item['proof'] == 'kill_zero_ESRCH'
                         and item['pid'] not in set(self.history) | set(current) | exit_pids)
                 exit_pids.add(item['pid'])
+            # Only a wholly valid process record can update either custody or
+            # UI state. CG cardinality is UI policy, never signal authority.
+            apps = [node for node in nodes if node['kind'] == 'app']
+            if apps:
+                windows = apps[0]['windows']
+                if self.ui_root is None and not self.ui_failure and not self.ui_terminal and len(windows) == 1:
+                    self.ui_root = windows[0]
+                if len(windows) > 1 or (self.ui_root is not None and windows and windows != [self.ui_root]):
+                    self.ui_failure = self.ui_failure or 'app_windows'
+                if self.ui_root is not None and not windows:
+                    self.ui_terminal = True
+                if self.ui_terminal and windows:
+                    self.ui_failure = self.ui_failure or 'app_window_reappeared'
+                # Historical binding for read-only attachment/retirement checks;
+                # never replace the original root with a later singleton.
+                new_app = {**new_app, 'windows': [self.ui_root] if self.ui_root is not None else []}
+            elif self.app is not None:
+                self.ui_terminal = True
             for node in nodes:
                 self.history[node['pid']] = node
             self.app, self.serving_observed, self.retired = new_app, serving_observed, retired
@@ -281,11 +308,11 @@ class OwnerWitness:
                 stage = 'record_validation'
                 self.observe(record)
                 if self.failure:
-                    self._retain_stream_diagnostic(stage, 'typed_failure', len(line), record)
+                    self._retain_stream_diagnostic(stage, 'typed_failure' if self.process_failure else 'app_windows', len(line), record)
         except BaseException as error:
             with self.condition:
                 if not self.stopping:
-                    self.failure = self.failure or 'owner_stream_unavailable'
+                    self.process_failure = self.process_failure or 'owner_stream_unavailable'
                     code = ('unexpected_eof' if stage == 'eof' else
                             'invalid_json' if stage == 'json' else
                             'io_error' if stage == 'read' and isinstance(error, OSError) else
@@ -339,7 +366,8 @@ class OwnerWitness:
 
     def attachment_binding(self):
         with self.condition:
-            require(self.ready and self.app and not self.failure and len(self.app['windows']) == 1)
+            require(self.ready and self.app and not self.failure and self.ui_root is not None)
+            # Historical export only: this binding does not grant live input.
             return {'preinstalled': True, 'owned_incarnation_verified': True,
                     'app_pid': self.app['pid'], 'app_launch_epoch': self.app['app_launch_epoch'],
                     'window_number': self.app['windows'][0], 'app_path': self.config['app_path'],
@@ -348,7 +376,7 @@ class OwnerWitness:
     def wait_empty(self, after, seconds=25):
         deadline = self.clock() + seconds
         with self.condition:
-            while self.clock() < deadline and not self.failure:
+            while self.clock() < deadline and not self.process_failure:
                 if (self.last_empty is not None and self.last_empty >= after and not self.latest
                         and set(self.retired) == set(self.history)):
                     return True
@@ -356,21 +384,23 @@ class OwnerWitness:
         return False
 
     def signal_owned(self, node, signum, *, inspect=native_identity, send=os.kill):
-        require(not self.failure and node['pid'] in self.history and node['pid'] not in self.retired
-                and signature(node) == signature(self.history[node['pid']]))
-        actual = inspect(node['pid'])
-        if actual is None:
-            return
-        require(signature(actual) == signature(node)
-                and (actual['parent'] == node['parent'] or actual['parent'] == 1))
-        try:
-            send(node['pid'], signum)
-        except ProcessLookupError:
-            return
-        self.signals.append({'pid': node['pid'], 'signal': int(signum), 'kernel_identity_rechecked': True})
+        with self.condition:
+            require(not self.process_failure and node['pid'] in self.history and node['pid'] not in self.retired
+                    and signature(node) == signature(self.history[node['pid']])
+                    and node['parent'] in (self.history[node['pid']]['parent'], 1))
+            actual = inspect(node['pid'])
+            if actual is None:
+                return
+            require(signature(actual) == signature(node)
+                    and (actual['parent'] == node['parent'] or actual['parent'] == 1))
+            try:
+                send(node['pid'], signum)
+            except ProcessLookupError:
+                return
+            self.signals.append({'pid': node['pid'], 'signal': int(signum), 'kernel_identity_rechecked': True})
 
     def settle(self, after):
-        require(self.ready and not self.failure)
+        require(self.ready and not self.process_failure)
         if not self.wait_empty(after, seconds=2):
             # Only identities positively witnessed before failure can receive a
             # fallback signal, with a fresh kernel signature recheck each time.
@@ -381,22 +411,27 @@ class OwnerWitness:
                     self.signal_owned(node, signum)
                 if self.wait_empty(self.clock(), seconds=5):
                     break
-        require(self.wait_empty(self.clock(), seconds=2) and self.ready and not self.failure
+        require(self.wait_empty(self.clock(), seconds=2) and self.ready and not self.process_failure
                 and not self.latest and set(self.retired) == set(self.history))
         if self.config['scenario'] in ('onboarding', 'configuredLocal'):
             require(self.serving_observed)
         require(self.app is not None)
         return {'root': self.config['fixture_root'], 'owned_processes_settled': True,
-                'preinstalled': True, 'app': self.app, 'observed_processes': list(self.history.values()),
+                'preinstalled': True, 'ui_failure': self.ui_failure, 'app': self.app, 'observed_processes': list(self.history.values()),
                 'complete_observation': True, 'retired_identities': list(self.retired.values()),
                 'fallback_signals': self.signals, 'scope': 'Actual OS ownership/settlement; not public UI or image acceptance'}
 
     def failure_receipt(self):
         with self.condition:
             return {'ready': self.ready, 'failure': self.failure, 'known_identities': [identity(node) for node in self.history.values()],
+                    'process_failure': self.process_failure, 'ui_failure': self.ui_failure,
+                    'original_window_number': self.ui_root, 'ui_terminal': self.ui_terminal,
                     'latest_pids': [node['pid'] for node in self.latest], 'retired': list(self.retired.values()),
                     'unresolved': self.unresolved, 'retained_diagnostics': self.retained_diagnostics,
                     'stream_diagnostic': self.stream_diagnostic,
+                    'metadata_helper_settled': self.helper_settled,
+                    'positive_process_settlement': bool(self.history) and not self.process_failure and not self.latest
+                        and set(self.retired) == set(self.history),
                     'positive_settlement': bool(self.history) and not self.failure and not self.latest
                         and set(self.retired) == set(self.history)}
 
@@ -412,6 +447,8 @@ class OwnerWitness:
                     self.process.wait(timeout=3)
             self.process.stdout.close()
             self.reader.join(timeout=3)
+            require(self.process.poll() is not None and not self.reader.is_alive())
+            self.helper_settled = True
 
 
 def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
@@ -433,7 +470,7 @@ def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
             and data_digest(configuration) == witness.configuration_sha256
             and json.loads(configuration) == witness.config)
     with witness.condition:
-        require(witness.ready and not witness.failure and witness.app and len(witness.app['windows']) == 1)
+        require(witness.ready and not witness.failure and not witness.ui_terminal and witness.app and len(witness.app['windows']) == 1)
         apps = [node for node in witness.latest if node['kind'] == 'app']
         require(len(apps) == 1 and signature(apps[0]) == signature(witness.app)
                 and apps[0]['windows'] == witness.app['windows'])
@@ -474,7 +511,7 @@ def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
                 and bounded_file(source, 256 * 1024) == source_bytes
                 and bounded_file(config_path, 32768) == configuration)
         with witness.condition:
-            require(witness.ready and not witness.failure and witness.app
+            require(witness.ready and not witness.failure and not witness.ui_terminal and witness.app
                     and identity(witness.app) == binding['identity']
                     and witness.app['windows'] == [binding['window_number']])
             apps = [node for node in witness.latest if node['kind'] == 'app']
