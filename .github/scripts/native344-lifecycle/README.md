@@ -3,7 +3,9 @@
 This private source candidate consumes the original separate P12 lifecycle role
 from successful producer run42455455480/artifact13607980704. It does not rebuild,
 re-sign or relabel the normal app. It starts at consumer ec8076b99105737e7a0a0e86d61d84705a155eab;
-H299, P4b7 and the original six-file lifecycle ZIP/manifest remain immutable.
+The bounded F1/F2 correction appends preserved19df41a8b132ed54b45737e2d57bc671746b4286
+as its direct parent; the controller checks that parent with the same two-commit
+checkout. H299, P4b7 and the original six-file lifecycle ZIP/manifest remain immutable.
 `qualification-contract.json` and `source-roster.json` declare the exact roles,
 original future clock requirements and source hashes. No actual epochs or
 execution grant are supplied by this source. Root must separately review, admit
@@ -77,3 +79,10 @@ inline admission Python with synthetic clocks and existing locked YAML tooling.
 The callback fixtures mock transports and image readers; their synthetic receipts
 are never runtime or image acceptance. Historical/default and derivative handle
 controls additionally run against the immutable H299 test sources.
+
+The F1/F2 correction preserves the first exception object and traceback when
+publication/ledger recording also fails, retaining the secondary as an explicit
+cause and bounded note. The original555-second allowance is repeated after
+reservation guards/digests, after durable writes, and immediately before the
+existing supervisor acquires its handle. No epoch or promised cap is renewed or
+shortened; a refused recorded reservation cannot dispatch, retry or advance.

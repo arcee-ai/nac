@@ -20,7 +20,7 @@ common = launch.case
 require, digest = common.require, common.digest
 P = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
 H = '29931101ff7ad50bfc80bf048681ab05de028ec6'
-BASE = 'ec8076b99105737e7a0a0e86d61d84705a155eab'
+BASE = '19df41a8b132ed54b45737e2d57bc671746b4286'
 BRANCH = 'refs/heads/codex/experimental-native-p12-lifecycle-consumer-source01'
 SCOPE = 'P12-maintained-three-case-lifecycle-transactions-source01'
 ROLE = 'canonical-lifecycle-fixture-v1'
@@ -102,6 +102,9 @@ def serial(ledger, clock, using, *, reserve, driver, validate, cleanup, publish,
         primary = None
         driver_completed = False
         try:
+            # Reservation guards and durable writes may consume the earlier
+            # allowance. Refuse here without entering the driver or a later case.
+            clock.require_phase('lifecycle-dispatch-' + name, 555)
             with using(clock.work):
                 outcome['driver'] = driver(name)
                 driver_completed = True
@@ -119,13 +122,19 @@ def serial(ledger, clock, using, *, reserve, driver, validate, cleanup, publish,
                         'passing case retained a private fixture')
             except BaseException as error:
                 outcome.update(status='unknown', cleanup_error=str(error)[:4096])
-                primary = primary or error
+                if primary is None:
+                    primary = error
         try:
             publish(name, outcome)
             ledger.finish(name, outcome['status'], {'external_result_sha256': outcome['external_result_sha256']},
                           before_save=finish_guard)
-        except BaseException:
+        except BaseException as secondary:
             clock.fail('result/export/ledger incomplete')
+            if primary is not None:
+                if hasattr(primary, 'add_note'):
+                    primary.add_note('Result publication/ledger also failed: ' +
+                                     type(secondary).__name__ + ': ' + str(secondary)[:4096])
+                raise primary from secondary
             raise
         if primary is not None:
             clock.fail('lifecycle failed or unknown')

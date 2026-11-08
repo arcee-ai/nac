@@ -122,14 +122,21 @@ def episode():
                 c.verify_package(p, package, c.MANIFEST)
                 c.require(c.digest(helper) == helper_hash, 'image reader changed')
                 observed = console()
-                ledger.reserve(name, control / name, observed, dict(source_sha=c.P,
-                    harness_sha=value['controller_sha'], builds_sha256=c.digest(control / 'builds.json'),
-                    observer_sha256=c.digest(observer), command=c.driver_command(p, name, app, control / name, observer)))
+                execution = dict(source_sha=c.P, harness_sha=value['controller_sha'],
+                    builds_sha256=c.digest(control / 'builds.json'), observer_sha256=c.digest(observer),
+                    command=c.driver_command(p, name, app, control / name, observer))
+                clock.require_phase('lifecycle-reservation-' + name, 555)
+                ledger.reserve(name, control / name, observed, execution)
 
         def driver(name):
+            def acquire(*args, **kwargs):
+                # Existing supervisor owns the returned handle. Check only
+                # BEFORE acquisition; never throw between Popen and its owner.
+                clock.require_phase('lifecycle-acquire-' + name, 555)
+                return supervisor.subprocess.Popen(*args, **kwargs)
             environment['NAC_LIFECYCLE_SCENARIOS'] = name
             return supervisor.run_case(c.driver_command(p, name, app, control / name, observer),
-                control / name / 'runner.log', environment, owner=owner, binding=contract.Binding.P12)
+                control / name / 'runner.log', environment, owner=owner, binding=contract.Binding.P12, spawn=acquire)
 
         def native_report(argv, log):
             clock.require_phase('image-readability', 25)

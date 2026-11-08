@@ -19,8 +19,11 @@ import ci_qualifications
 
 
 class EpisodeCallbacks(unittest.TestCase):
-    def exercise(self, fail=None, unknown=False):
+    def exercise(self, fail=None, unknown=False, *, real_clock=False, elapsed_guard=0,
+                 ledger_cost=0, acquisition_cost=0, guard_remaining=600):
         events = []
+        time = type('SyntheticTime', (), {'now': 1001.0})()
+        verifications = 0
         original = Path(os.environ['LIFECYCLE_ORIGINAL_OUTER'])
         # Read only the genuine package body, without extracting/running it.
         _, _, body = c.handoff(original, admission())
@@ -35,6 +38,8 @@ class EpisodeCallbacks(unittest.TestCase):
                 file = root / label; file.write_text('{}'); envvars[label] = str(file)
 
             def run(argv, log, cap, **kwargs):
+                if real_clock and 'console' in argv and verifications >= 2:
+                    time.now += 10
                 events.append(('helper', tuple(argv)))
                 if argv[0] == '/usr/bin/ditto':
                     package = Path(argv[-1]); (package / body['bundle']['name']).mkdir()
@@ -53,7 +58,11 @@ class EpisodeCallbacks(unittest.TestCase):
                 raise AssertionError('Unexpected helper ' + repr(argv))
 
             def driver(argv, log, environment, **kwargs):
-                name = environment['NAC_LIFECYCLE_SCENARIOS']; events.append(('driver', name))
+                name = environment['NAC_LIFECYCLE_SCENARIOS']
+                if real_clock: time.now += acquisition_cost
+                kwargs['spawn'](['INERT-NEVER-EXECUTED'], env=environment)
+                events.append(('driver', name))
+                if real_clock: time.now += 240
                 destination = log.parent
                 fixture_receipt(destination, name)
                 owner.retain(destination, name)
@@ -76,26 +85,53 @@ class EpisodeCallbacks(unittest.TestCase):
             # its immutable H blob is read from the recorded roster fixture.
             helper_source = H_STATIC / 'desktop/macos/CILifecycleImages.swift'
             self.assertTrue(helper_source.is_file())
+            original_reserve = contract.Ledger.reserve
+            def reserve(ledger, *args, **kwargs):
+                result = original_reserve(ledger, *args, **kwargs)
+                if real_clock: time.now += ledger_cost
+                return result
+            def verify(*args, **kwargs):
+                nonlocal verifications
+                verifications += 1
+                if real_clock and verifications >= 2:
+                    if verifications == 2: time.now = 3880 - guard_remaining
+                    time.now += elapsed_guard
+                return {'inert': True}
             with ExitStack() as stack:
                 stack.enter_context(mock.patch.dict(os.environ, envvars))
                 stack.enter_context(mock.patch.object(c, 'admit', return_value=(1000, 3880, 4480, 4600)))
-                stack.enter_context(mock.patch.object(c.common, 'make_clock', return_value=clock()))
+                if real_clock:
+                    from ci_paths_budget import Bound
+                    stack.enter_context(mock.patch.object(c.common.time, 'time', side_effect=lambda: time.now))
+                    stack.enter_context(mock.patch.object(c.common.time, 'monotonic', side_effect=lambda: time.now))
+                    actual_clock = c.common.make_clock((1000, 3880, 4480, 4600), Bound)
+                else:
+                    actual_clock = clock()
+                stack.enter_context(mock.patch.object(c.common, 'make_clock', return_value=actual_clock))
+                stack.enter_context(mock.patch.object(contract.Ledger, 'reserve', new=reserve))
+                stack.enter_context(mock.patch.object(supervisor.subprocess, 'Popen',
+                    side_effect=lambda *args, **kwargs: events.append(
+                        ('acquired', kwargs['env']['NAC_LIFECYCLE_SCENARIOS']))))
                 stack.enter_context(mock.patch.object(ci_qualifications, 'require_checkout'))
                 stack.enter_context(mock.patch.object(ci, 'run', side_effect=run))
                 stack.enter_context(mock.patch.object(ci, 'command', side_effect=command))
                 stack.enter_context(mock.patch.object(c.launch, 'artifact_identity', return_value={'inert': True}))
-                stack.enter_context(mock.patch.object(c, 'verify_package', return_value={'inert': True}))
+                stack.enter_context(mock.patch.object(c, 'verify_package', side_effect=verify))
                 stack.enter_context(mock.patch.object(supervisor, 'run_case', side_effect=driver))
                 stack.enter_context(mock.patch.object(supervisor, 'audit_cleanup', side_effect=cleanup))
                 stack.enter_context(mock.patch.object(supervisor, 'image_report', side_effect=lambda argv, log, **kw:
                     dict(role=argv[1], readable=True, composited_paint_acceptance=False, trusted_input_acceptance=False)))
                 # Existing finalizer's crash owner is retained but reads no host files here.
                 stack.enter_context(mock.patch('ci_lifecycle_finalization.collect_crashes', return_value=[]))
-                if fail or unknown:
+                if fail or unknown or (real_clock and guard_remaining == 600):
                     with self.assertRaises(RuntimeError): episode.episode()
                 else: episode.episode()
             report = json.loads((output / 'evidence/ci-report.json').read_bytes())
             ledger = json.loads((output / 'raw/lifecycle/ledger.json').read_bytes())
+            if real_clock:
+                self.assertLess(time.now, actual_clock.work.deadline)
+                self.assertEqual((actual_clock.work.deadline, actual_clock.cleanup.deadline,
+                                  actual_clock.retention.deadline), (3880, 4480, 4600))
             return events, report, ledger
 
     def test_real_composition_reservation_validation_and_export_callbacks(self):
@@ -116,6 +152,23 @@ class EpisodeCallbacks(unittest.TestCase):
                 self.assertEqual(report['result'], 'failed')
                 self.assertNotEqual(ledger['phase'], 'complete')
                 self.assertEqual(ledger['cases']['terminal'], dict(state='not_dispatched', dispatches=0))
+
+    def test_exact_clock_actual_guard_ledger_and_acquisition_callbacks_refuse_without_input(self):
+        for args, dispatches in (({'elapsed_guard': 400}, 0), ({'ledger_cost': 100}, 1),
+                                 ({'acquisition_cost': 100}, 1)):
+            with self.subTest(args=args):
+                events, report, ledger = self.exercise(real_clock=True, **args)
+                self.assertFalse(any(event[0] in ('driver', 'acquired') for event in events))
+                self.assertEqual(ledger['cases']['run']['dispatches'], dispatches)
+                self.assertEqual(ledger['cases']['approval'], dict(state='not_dispatched', dispatches=0))
+                self.assertEqual(report['result'], 'failed')
+
+    def test_quick_actual_callbacks_keep_three_original_caps_with_exact_clock(self):
+        events, report, ledger = self.exercise(real_clock=True, guard_remaining=2000)
+        self.assertEqual([event[1] for event in events if event[0] == 'driver'], list(c.CASES))
+        self.assertEqual(sum(event[0] == 'acquired' for event in events), 3)
+        self.assertEqual(report['result'], 'passed')
+        self.assertEqual(ledger['phase'], 'complete')
 
 
 def clock():

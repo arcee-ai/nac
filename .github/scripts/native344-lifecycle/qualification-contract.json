@@ -1,7 +1,7 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
   "scope": "P12-maintained-three-case-lifecycle-transactions-source01",
-  "base": "ec8076b99105737e7a0a0e86d61d84705a155eab",
+  "base": "19df41a8b132ed54b45737e2d57bc671746b4286",
   "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "workflow": "stable-release.yml",
@@ -64,7 +64,13 @@
     "direct_owned_handle_force_reap_seconds": 5,
     "image_read_seconds_each": 10,
     "image_count_each": 5,
-    "cleanup": "Existing exact-incarnation product finally; positive H residual audit, no arbitrary JSON PID signal"
+    "cleanup": "Existing exact-incarnation product finally; positive H residual audit, no arbitrary JSON PID signal",
+    "allowance_checks": [
+      "before guards",
+      "after all reservation guards and execution binding digests",
+      "after durable reservation returns",
+      "immediately before existing supervisor Popen acquisition"
+    ]
   },
   "clock": {
     "authority": "Separate Root literal allocation only; NO epochs or execution authority in this source",
@@ -97,5 +103,6 @@
   "full_G3_acceptance": false,
   "composited_paint_acceptance": false,
   "trusted_or_physical_input_acceptance": false,
-  "minimum_OS_signing_vendor_distribution_acceptance": false
+  "minimum_OS_signing_vendor_distribution_acceptance": false,
+  "original_source_base": "ec8076b99105737e7a0a0e86d61d84705a155eab"
 }
