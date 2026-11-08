@@ -8,7 +8,7 @@ import threading
 import time
 
 from ci_paths_budget import active, check, time_limit, using
-from ci_startup_owner import native_identity
+from ci_startup_owner import native_identity, signature
 from ci_xctest import runner_environment
 from ci_xctest_attachments import bounded_file
 
@@ -53,6 +53,7 @@ class AXCompanion:
         self.stopping = False
         self.error = None
         self.identity = None
+        self.terminal = None
 
     @property
     def failure(self):
@@ -120,8 +121,40 @@ class AXCompanion:
         owner = json.loads(bounded_file(log, 32768))
         require(owner['accepted'] and owner['reaped'] and owner['drain_settled']
             and not owner['unknown'] and owner['teardown_error'] is None, 'AX companion positive settlement')
+        row = json.loads(bounded_file(Path(self.declaration['path']), 8192))
+        if row.get('status') in ('retired', 'retiring'):
+            require(row['schema'] == 'nac342-ax-witness-v1' and row['trusted'] is True
+                and row['nonce'] == self.declaration['nonce'] and row['helper'] == self.identity
+                and row['configuration_sha256'] == digest(self.config_path)
+                and row['helper_sha256'] == self.declaration['helper_sha256']
+                and row['support_sha256'] == self.declaration['support_sha256']
+                and row['case_deadline_ns'] == str(self.case_deadline_ns)
+                and row.get('observation') is None and row.get('refusal') is None
+                and row['refusal_stage'] == 'target_' + row['status'], 'AX terminal receipt binding')
+            self.terminal = {key: row[key] for key in ('target', 'app_launch_epoch', 'window_number', 'status')}
         return dict(owned_processes_settled=True, helper=self.identity, helper_sha256=self.declaration['helper_sha256'], phase=self.phase,
                     scope='Read-only AX companion only; not app/UI acceptance')
+
+
+    def reconcile_retirement(self, settled, collection):
+        if self.terminal is None:
+            return {'terminal_observed': False}
+        require(collection is not None and collection.get('complete') is True
+            and settled.get('owned_processes_settled') is True and settled.get('complete_observation') is True,
+            'AX retirement requires complete case and metadata settlement')
+        app, target = settled['app'], self.terminal['target']
+        require(signature(app) == signature(target) and app['windows'] == [self.terminal['window_number']]
+            and app['app_launch_epoch'] == self.terminal['app_launch_epoch'], 'AX retired target differs')
+        history = settled['observed_processes']
+        retired = settled['retired_identities']
+        require(history and signature(target) in {signature(node) for node in history}
+            and len(retired) == len(history)
+            and all(item['proof'] == 'kill_zero_ESRCH' for item in retired)
+            and {signature(item['identity']) for item in retired} == {signature(node) for node in history}
+            and any(node.get('kind') == 'engine' and node.get('serving') is True for node in history),
+            'AX retirement requires exact app and engine settlement')
+        return {'terminal_observed': self.terminal['status'] == 'retired', 'retiring_observed': self.terminal['status'] == 'retiring',
+                'case_complete': True, 'metadata_settlement_verified': True}
 
 
 def guard_phases():

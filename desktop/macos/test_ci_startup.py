@@ -45,6 +45,7 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
             companion = MagicMock(failure=None)
             companion.stop.return_value = {'owned_processes_settled': True}
+            companion.reconcile_retirement.return_value = {'terminal_observed': False}
             if configured:
                 def stop_companion():
                     calls.append('ax-stopped')

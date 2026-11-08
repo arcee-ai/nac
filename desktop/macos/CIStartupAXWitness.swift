@@ -4,6 +4,36 @@ import AppKit
 import ApplicationServices
 import Darwin
 
+// BEGIN AX LIFETIME
+// Positive known-identity retirement is terminal, never new ready authority.
+enum StartupAXLifetime {
+    static func outcome(_ snapshot: [String: Any], target: StartupAXProcess, window: Int, latched: inout String?) throws -> String {
+        try StartupObserver.need(snapshot["complete"] as? Bool == true && target.valid)
+        let apps = (snapshot["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
+        try StartupObserver.need(apps.count <= 1)
+        if let app = apps.first {
+            let keys = ["pid", "parent", "uid", "start_seconds", "start_microseconds", "executable"]
+            let current = try JSONDecoder().decode(StartupAXProcess.self,
+                from: JSONSerialization.data(withJSONObject: app.filter { keys.contains($0.key) }))
+            try StartupObserver.need(current == target && latched != "retired")
+            guard let windows = app["windows"] as? [Int] else { throw OwnershipError.invalid }
+            if windows.isEmpty { latched = "retiring"; return "retiring" }
+            try StartupObserver.need(latched == nil && windows == [window])
+            return "ready"
+        }
+        let retired = snapshot["retired"] as? [[String: Any]] ?? []
+        let matches = try retired.filter { row in
+            guard row["proof"] as? String == "kill_zero_ESRCH", let identity = row["identity"] as? [String: Any] else { return false }
+            return try JSONDecoder().decode(StartupAXProcess.self,
+                from: JSONSerialization.data(withJSONObject: identity)) == target
+        }
+        try StartupObserver.need(matches.count == 1)
+        latched = "retired"
+        return "retired"
+    }
+}
+// END AX LIFETIME
+
 @MainActor
 enum StartupAXWitnessMode {
     static func main(_ configPath: String, _ caseDeadline: String) {
@@ -33,6 +63,7 @@ enum StartupAXWitnessMode {
                 start_microseconds: 0, executable: "")
             var target = empty, launch = 0.0, window = 0
             var sequence: UInt64 = 0, refusals: UInt64 = 0
+            var retired: String?
             let reader = StartupAXReader()
             func receipt(_ status: String, began: UInt64, ended: UInt64,
                          observed: StartupAXSurface? = nil, stage: String? = nil, failure: Data? = nil) -> StartupAXReceipt {
@@ -42,6 +73,20 @@ enum StartupAXWitnessMode {
                     app_launch_epoch: launch, window_number: window, sequence: String(sequence),
                     refusal_generation: String(refusals), began_ns: String(began), ended_ns: String(ended),
                     status: status, case_deadline_ns: caseDeadline, observation: observed, refusal_stage: stage, refusal: failure)
+            }
+            func terminal(_ snapshot: [String: Any], began: UInt64) throws -> Bool {
+                let state = try StartupAXLifetime.outcome(snapshot, target: target, window: window, latched: &retired)
+                guard state != "ready" else { return false }
+                try StartupObserver.need(resources.intact() && process(getpid()) == me
+                    && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
+                    && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                let ended = DispatchTime.now().uptimeNanoseconds
+                try StartupObserver.need(ended >= began && ended < deadline)
+                sequence += 1; refusals += 1
+                try StartupAXFiles.publish(receipt(state, began: began, ended: ended,
+                    stage: "target_" + state), to: declaration.path)
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                return true // Keep bounded custody alive until parent stop, no more AX/ready.
             }
             let start = DispatchTime.now().uptimeNanoseconds
             try StartupAXFiles.publish(receipt("waiting", began: start, ended: start), to: declaration.path)
@@ -57,6 +102,7 @@ enum StartupAXWitnessMode {
                 if target.pid == 0 && (apps.isEmpty || apps[0]["windows"] as? [Int] == []) {
                     RunLoop.current.run(until: Date().addingTimeInterval(0.05)); continue
                 }
+                if target.pid != 0 { if try terminal(snapshot, began: began) { continue } }
                 try StartupObserver.need(apps.count == 1)
                 let app = apps[0], current = try decodedProcess(app)
                 let windows = app["windows"] as? [Int] ?? []
@@ -71,6 +117,7 @@ enum StartupAXWitnessMode {
                 do { observed = try reader.observe(pid: target.pid, frame: frame) }
                 catch { refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
                 let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
+                if try terminal(closing, began: began) { continue }
                 let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
                 try StartupObserver.need(latest.count == 1 && decodedProcess(latest[0]) == target
                     && latest[0]["windows"] as? [Int] == [window]

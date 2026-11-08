@@ -14,7 +14,7 @@ from ci_startup_ax import AXCompanion, guard_phases, require_guard_proof
 
 
 class CompanionControls(unittest.TestCase):
-    def exercise(self, *, wrong_nonce=False, unknown=False, fail=False, metadata_loss=False):
+    def exercise(self, *, wrong_nonce=False, unknown=False, fail=False, metadata_loss=False, retire=False):
         events=[]
         with tempfile.TemporaryDirectory(prefix='nac-ax-parent-inert-') as temporary:
             root=Path(temporary).resolve(); private=root/'ax';private.mkdir(mode=0o700)
@@ -25,6 +25,7 @@ class CompanionControls(unittest.TestCase):
                              support_sha256={'inert':'c'*64},owner_pid=os.getpid(),deadline_ns=str(int((time.monotonic()+60)*1e9)))
             witness=SimpleNamespace(ready=True,failure=None)
             begun=threading.Event()
+            retire_now=threading.Event();retired_published=threading.Event()
             primary=ValueError('inert original helper failure')
             def owned(argv,log,cap,**kwargs):
                 events.append('owned-start')
@@ -38,6 +39,14 @@ class CompanionControls(unittest.TestCase):
                 begun.set()
                 until=time.monotonic()+2
                 while not Path(declaration['path']+'.stop').exists() and time.monotonic()<until:
+                    if retire_now.is_set() and not retired_published.is_set():
+                        terminal=dict(row,status='retired',refusal_stage='target_retired',observation=None,
+                            target=dict(pid=400,parent=1,uid=os.getuid(),start_seconds=3,start_microseconds=4,executable='/inert/app'),
+                            app_launch_epoch=10,window_number=7)
+                        next_receipt=Path(declaration['path']+'.next')
+                        next_receipt.write_text(json.dumps(terminal));next_receipt.chmod(0o400)
+                        os.replace(next_receipt,Path(declaration['path']))
+                        events.append('retired-terminal');retired_published.set()
                     if kwargs['abort'](): raise RuntimeError('inert metadata loss')
                     time.sleep(.005)
                 log.write_text('inert')
@@ -50,6 +59,9 @@ class CompanionControls(unittest.TestCase):
                 if wrong_nonce or fail:
                     with self.assertRaises(RuntimeError):owner.start()
                 else:owner.start()
+                if retire:
+                    retire_now.set();self.assertTrue(retired_published.wait(.5))
+                    self.assertIsNone(owner.failure);self.assertFalse(owner.finished.is_set())
                 if metadata_loss:
                     witness.failure='inert stream failure'
                     self.assertTrue(begun.wait(.2))
@@ -60,8 +72,14 @@ class CompanionControls(unittest.TestCase):
                     if fail:self.assertIs(raised.exception,primary)
                 else:
                     proof=owner.stop();self.assertTrue(proof['owned_processes_settled'])
+                    if retire:
+                        _,settled,collection=RetirementCompositionControls().fixture()
+                        self.assertTrue(owner.reconcile_retirement(settled,collection)['metadata_settlement_verified'])
                 self.assertFalse(owner.thread.is_alive())
             return events
+
+    def test_normal_retirement_before_parent_stop_keeps_owned_companion_alive_until_stop(self):
+        self.assertEqual(self.exercise(retire=True),['owned-start','retired-terminal','owned-reaped'])
 
     def test_positive_owned_completion_and_no_target_signal(self):
         self.assertEqual(self.exercise(),['owned-start','owned-reaped'])
@@ -77,6 +95,37 @@ class CompanionControls(unittest.TestCase):
 
     def test_metadata_failure_aborts_companion_without_blocking_metadata_port(self):
         self.exercise(metadata_loss=True)
+
+
+class RetirementCompositionControls(unittest.TestCase):
+    def fixture(self):
+        target=dict(pid=400,parent=1,uid=os.getuid(),start_seconds=3,start_microseconds=4,executable='/inert/app')
+        app=dict(target,kind='app',windows=[7],app_launch_epoch=10)
+        engine=dict(pid=401,parent=400,uid=os.getuid(),start_seconds=3,start_microseconds=5,executable='/inert/engine',kind='engine',serving=True)
+        owner=AXCompanion.__new__(AXCompanion)
+        owner.terminal=dict(target=target,app_launch_epoch=10,window_number=7,status='retired')
+        settled=dict(owned_processes_settled=True,complete_observation=True,app=app,observed_processes=[app,engine],
+                     retired_identities=[dict(identity=n,proof='kill_zero_ESRCH') for n in [app,engine]])
+        return owner,settled,dict(complete=True)
+
+    def test_normal_final_retirement_requires_completed_case_and_exact_app_engine_settlement(self):
+        owner,settled,collection=self.fixture()
+        self.assertTrue(owner.reconcile_retirement(settled,collection)['metadata_settlement_verified'])
+        owner.terminal['status']='retiring'
+        proof=owner.reconcile_retirement(settled,collection)
+        self.assertTrue(proof['retiring_observed']);self.assertFalse(proof['terminal_observed'])
+
+    def test_premature_unknown_missing_engine_or_replaced_retirement_never_qualifies(self):
+        for mode in ['premature','unknown','engine','replacement','window','launch','proof']:
+            owner,settled,collection=self.fixture()
+            if mode=='premature':collection['complete']=False
+            if mode=='unknown':settled['complete_observation']=False
+            if mode=='engine':settled['observed_processes'].pop()
+            if mode=='replacement':owner.terminal['target']={**owner.terminal['target'],'start_seconds':9}
+            if mode=='window':owner.terminal['window_number']=8
+            if mode=='launch':owner.terminal['app_launch_epoch']=11
+            if mode=='proof':settled['retired_identities'][0]['proof']='unknown'
+            with self.subTest(mode=mode),self.assertRaises(RuntimeError):owner.reconcile_retirement(settled,collection)
 
 
 class GuardProofControls(unittest.TestCase):

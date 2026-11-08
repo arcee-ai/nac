@@ -218,6 +218,11 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                 try:
                     settled = witness.settle(time.monotonic())
                     proof['cleanup'] = cleanup_receipt(settled)
+                    if companion:
+                        try:
+                            proof['ax_retirement'] = companion.reconcile_retirement(settled, collection)
+                        except BaseException as error:
+                            errors['ax_owner'] = errors['ax_owner'] or error
                     safe_to_remove = errors['ax_owner'] is None
                 except BaseException as error:
                     errors['cleanup'] = error

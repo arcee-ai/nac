@@ -50,3 +50,12 @@ owner even when no PathBudget is active (the ordinary startup lane). Its optiona
 retain_ownership flag changes receipt retention only; default launches and
 existing bounded teardown remain unchanged. A missing receipt refuses cleanup
 qualification, and a receipt sink failure preserves an original helper error.
+
+F1 repair: after the bound app loses its sole window, the companion latches a
+non-ready retiring state; a positively proved known-app ESRCH becomes retired.
+Neither state permits AX/ready samples or input, and reappearance/replacement
+fails. Parent custody remains live and bounded until stop. Final qualification
+requires the original completed case proof plus independent exact app/engine
+retirement from OwnerWitness; empty apps alone is never positive settlement.
+F2/F3 canonical Q controls cover nonblocking special-file acquisition and sticky
+loss of an admitted port while preserving legitimate initial publication wait.
