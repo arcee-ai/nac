@@ -181,8 +181,8 @@ def retain_ax_refusal(selected, entries, index, config, configuration_sha256, wi
                   'elements_member_type', 'frame_value_type', 'frame_encoding', 'frame_position_decode', 'frame_size_decode',
                   'application_timeout', 'windows_unavailable', 'root_role_or_type', 'root_frame_mismatch', 'root_matches',
                   'child_role_type', 'root_children', 'root_sheet_count', 'panel_children', 'nested_sheet_count',
-                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding'}
-        attributes = {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize'}
+                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding', 'focus_unavailable'}
+        attributes = {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize', 'AXFocusedUIElement', 'AXFocused', 'AXValue', 'AXParent'}
         for key in ('first_observed_refusal', 'terminal_refusal'):
             fact = row[key]
             allowed = {'stage', 'count'} if key == 'terminal_refusal' else {'stage', 'attribute', 'api_code', 'count', 'frame', 'expected_frame'}
@@ -408,7 +408,8 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             scenario = config['scenario']
             fixed = {f'nac342-ordinary-{scenario}': 'png', f'nac342-failure-{scenario}': 'failure',
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup',
-                     QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal'}
+                     QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal',
+                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
             selected = select_inventory(export, entries, fixed, pattern, index)
@@ -459,6 +460,16 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             require(test['result'] == 'Passed', 'actual_test_result')
             require(index['query_diagnostic']['retention'] == 'missing', 'unexpected_failure_diagnostic')
             require(index['ax_refusal']['retention'] == 'missing', 'unexpected_ax_refusal')
+            if scenario == 'configuredLocal':
+                from ci_startup_ax import require_guard_proof
+                require('ax_guards' in values, 'ax_guards_missing')
+                name, data, row = values['ax_guards']
+                require(len(data) <= 16384, 'ax_guards_size')
+                require_guard_proof(row, config, configuration_sha256, witness)
+                (output / (name + '.json')).write_bytes(data)
+                index['ax_guards'] = {'file': name + '.json', 'sha256': digest(data), 'count': len(row['rows'])}
+            else:
+                require('ax_guards' not in values, 'foreign_ax_guards')
             index.update(complete=True, image=image, observation=observation, input_completion_unknown=False)
         return index
     except BaseException as error:

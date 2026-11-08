@@ -35,8 +35,11 @@ class StartupConsoleTests(unittest.TestCase):
         self.assertEqual(dispatch.count('try guardTarget()'), 2)
         for anchor in ('try guardTarget()\n        if ["invalidConfig", "futureStore"]',
                        'try guardTarget()\n        let screenshot',
-                       'try guardTarget()\n        let expectedPrivateFailure'):
+                       'try guardTarget()\n        if let axClient'):
             self.assertEqual(main.count(anchor), 1)
+        proof = main.split('try guardTarget()\n        if let axClient', 1)[1].split('let expectedPrivateFailure', 1)[0]
+        self.assertNotIn('try guardTarget()', proof)
+        self.assertIn('axClient.evidence.count == 26', proof)
         callback = main.split('}, window: { window.frame }, verify: {', 1)[1].split('})', 1)[0]
         self.assertEqual(callback.count('(try? guardTarget())'), 1)
         self.assertIn('Data(contentsOf: URL(fileURLWithPath: path))) == bytes', callback)

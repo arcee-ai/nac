@@ -17,6 +17,7 @@ from ci_startup_audit import LiveAudit, persisted_audit
 from ci_startup_fixture import (CASES, PRODUCT, TEST_SOURCE, TEST_FILES, digest, immutable_snapshot,
                                prepare_configuration, prepare_profile, remove_profile, require_integrity, test_contract)
 from ci_startup_owner import OwnerWitness
+from ci_startup_ax import AXCompanion, declaration as ax_declaration
 from ci_startup_protocol import REVISION as PROTOCOL_SOURCE, build as build_protocol, sources as protocol_sources, verify as verify_protocol
 from ci_xctest import (authorization_policy, observe_prerequisites, require_generated_runner, result_receipt,
                        runner_environment)
@@ -86,9 +87,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
              selection, observer, image_reader, run, command, native_report):
     folder.mkdir()
     errors = {key: None for key in ('preparation', 'build', 'admission', 'test', 'api', 'collector',
-                                   'result', 'image', 'policy', 'cleanup', 'integrity', 'provider')}
+                                   'result', 'image', 'policy', 'cleanup', 'integrity', 'provider', 'ax_owner')}
     provider = Provider(folder / 'provider.log')
-    profile = config = witness = audit = collection = policy = None
+    profile = config = witness = audit = collection = policy = companion = None
     attempted, safe_to_remove = False, False
     proof = {}
     caller_abort = {'observed': False, 'origin': None}
@@ -100,7 +101,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
             base = provider.start()
             profile = prepare_profile(profiles, scenario, base + '/models-dev', run=run, directory=folder)
             write(folder / 'fixture-location.json', {'root': str(profile['root']), 'scenario': scenario})
-            config, config_path, admission = prepare_configuration(profile, app, manifest, product, tests, harness_sha, run=run, directory=folder)
+            options = {'ax_witness': ax_declaration(profile, observer, tests)} if scenario == 'configuredLocal' else {}
+            config, config_path, admission = prepare_configuration(profile, app, manifest, product, tests, harness_sha,
+                run=run, directory=folder, **options)
             configuration_sha256 = digest(config_path)
             write(folder / 'configuration.json', config)
             write(folder / 'package-admission.json', admission)
@@ -133,6 +136,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
             tool.prepare()  # Actual selected SDK tool/schema admission, before input.
             witness = OwnerWitness(config, configuration_sha256)
             witness.start(observer, config_path)
+            if scenario == 'configuredLocal':
+                companion = AXCompanion(witness, config, config_path, observer, folder)
+                companion.start()
             if scenario in ('onboarding', 'configuredLocal'):
                 audit = LiveAudit(witness, {**config, 'provider_base': base}, product, model_config)
                 audit.start()
@@ -143,6 +149,8 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
             def abort():
                 reason = witness.failure
                 origin = 'witness'
+                if not reason and companion:
+                    reason, origin = companion.failure, 'ax_companion'
                 if not reason:
                     reason = audit and audit.failure
                     origin = 'audit'
@@ -159,6 +167,12 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
         errors[stage] = error
     finally:
         with using(bound.owner.cleanup if bound else None):
+            if companion:
+                try:
+                    proof['ax_companion'] = companion.stop()
+                except BaseException as error:
+                    errors['ax_owner'] = error
+                    safe_to_remove = False
             if audit:
                 # Preserve the rejection before stop() can replace it with a
                 # generic missing-proof exception. Never retain exception text.
@@ -204,7 +218,12 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                 try:
                     settled = witness.settle(time.monotonic())
                     proof['cleanup'] = cleanup_receipt(settled)
-                    safe_to_remove = True
+                    if companion:
+                        try:
+                            proof['ax_retirement'] = companion.reconcile_retirement(settled, collection)
+                        except BaseException as error:
+                            errors['ax_owner'] = errors['ax_owner'] or error
+                    safe_to_remove = errors['ax_owner'] is None
                 except BaseException as error:
                     errors['cleanup'] = error
                 finally:
@@ -271,6 +290,13 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
     return proof
 
 
+def observer_sources(harness, tests):
+    """Complete helper inputs; callers must not compile the main file alone."""
+    test_contract(tests)
+    return [str(harness / 'desktop/macos' / name) for name in ('CIStartupObserver.swift', 'CIStartupAXWitness.swift')] + [
+        str(tests / 'desktop/macos/startup_xctest' / name) for name in ('StartupAXGuard.swift', 'StartupAXReceipt.swift')]
+
+
 def qualify(raw, product, tests, protocol, harness_sha, run, command, native_report):
     require_checkout(product, PRODUCT)
     test_contract(tests)
@@ -296,7 +322,9 @@ def qualify(raw, product, tests, protocol, harness_sha, run, command, native_rep
     selection = materialize_project(ROOT, harness_sha, startup_root=tests, startup_sha=TEST_SOURCE,
         startup_source_sha256=TEST_FILES['StartupJourneys.swift'], output=raw / 'startup-project')
     observer, image_reader = raw / 'startup-owner-observer', raw / 'startup-image-reader'
-    run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', 'desktop/macos/CIStartupObserver.swift', '-o', str(observer)],
+    helper_sources = observer_sources(ROOT, tests)
+    helper_inventory = {path: digest(path) for path in helper_sources}
+    run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *helper_sources, '-o', str(observer)],
         raw / 'startup-owner-build.log', 90)
     run(['xcrun', 'swiftc', '-swift-version', '5', 'desktop/macos/CIEvidence.swift', '-o', str(image_reader)],
         raw / 'startup-image-build.log', 90)
@@ -317,5 +345,7 @@ def qualify(raw, product, tests, protocol, harness_sha, run, command, native_rep
             require_checkout(root, sha)
     return {'startup': {'P': PRODUCT, 'Q': TEST_SOURCE, 'R': PROTOCOL_SOURCE, 'H': harness_sha,
                         'process_protocol': process_proof, 'cases': cases, 'full_four_case_run': len(cases) == 4,
-                        'observer_sha256': digest(observer), 'rendered_UI_reload_observed': False,
+                        'observer_sha256': digest(observer), 'observer_sources_sha256': helper_inventory,
+                        'observer_compiler_flags': ['-swift-version', '5', '-parse-as-library'],
+                        'rendered_UI_reload_observed': False,
                         'scope': 'Four ordinary LOCAL_APP startup cases only; full ALL-354 acceptance remains separate'}}
