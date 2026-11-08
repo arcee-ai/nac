@@ -9,6 +9,36 @@ import { managedCallerJobs, imageJobs, managedJobs, qualityJobs, qualityReceipt,
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
 const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
+// Exact reviewed nomination; file digests checked against immutable Q and R sources.
+const reviewedStartupSupplier = {
+  "source_sha": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
+  "test_source_sha": "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81",
+  "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "profile": "macos26",
+  "suite": "startup",
+  "scenario_count": 4,
+  "scenarios": [
+    "onboarding",
+    "configuredLocal",
+    "invalidConfig",
+    "futureStore"
+  ],
+  "test_files": {
+    "README.md": "1a5c8590992df95d73d35b94e3adba27e779f4e09fdba9e5d8a72f8562bc332b",
+    "StartupJourneys.swift": "60473fa8af3306146d546982f775e4856b6bffb0a8516728e211bfd26fbdc28e",
+    "contract.py": "86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048",
+    "test_contract.py": "650a67bebd47864ac3f24fe8997c0aff0ba2933656d112ea2597fbf6b7bce7ed"
+  },
+  "protocol_files": {
+    "Cargo.lock": "8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa",
+    "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",
+    "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
+  }
+};
+function assertStartupSupplier(catalog) {
+  assert.deepEqual(catalog["all-342-startup-macos26"], reviewedStartupSupplier);
+}
+
 const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };
 
@@ -53,10 +83,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   assert.equal(catalog["all-351-macos14"].profile, "macos14");
   assert.equal(catalog["all-352-macos26"].source_sha, "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1");
   assert.equal(catalog["all-352-macos26"].phase_count, 6);
-  assert.equal(catalog["all-342-startup-macos26"].source_sha, "ef2cce9141973f37bf35e33d113e35eaa7a91f19");
-  assert.equal(catalog["all-342-startup-macos26"].test_source_sha, "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81");
-  assert.equal(catalog["all-342-startup-macos26"].protocol_source_sha, "7325c48b3c9ec7036e255a6bd92f31c1a98c1607");
-  assert.deepEqual(catalog["all-342-startup-macos26"].scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
+  assertStartupSupplier(catalog);
 });
 
 const quality = () => ({
@@ -250,4 +277,25 @@ test("unprivileged image verification overlaps fault compilation but final manag
   const stable = workflow("stable-release");
   assert.ok(stable.jobs["required-pr-checks"].needs.includes("managed"));
   assert.ok(stable.jobs.publish.needs.includes("required-pr-checks"));
+});
+
+
+test("immutable startup nomination rejects supplier, source-file and policy drift", () => {
+  const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
+  assertStartupSupplier(catalog);
+  for (const mutate of [
+    s => { s.source_sha = "0".repeat(40); },
+    s => { s.test_source_sha = "0".repeat(40); },
+    s => { s.protocol_source_sha = "0".repeat(40); },
+    s => { s.test_files["StartupJourneys.swift"] = "0".repeat(64); },
+    s => { delete s.test_files["contract.py"]; },
+    s => { s.protocol_files["Cargo.lock"] = "0".repeat(64); },
+    s => { s.profile = "macos14"; },
+    s => { s.scenario_count--; },
+    s => { s.scenarios.reverse(); },
+    s => { s.acceptance = true; },
+  ]) {
+    const value = structuredClone(catalog); mutate(value["all-342-startup-macos26"]);
+    assert.throws(() => assertStartupSupplier(value));
+  }
 });
