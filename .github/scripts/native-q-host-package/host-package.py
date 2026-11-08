@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEVERMERGE: one separately admitted hosted normal package, never app/UI execution."""
+"""NEVERMERGE: one engine, signed normal and separate canonical lifecycle fixture; no UI execution."""
 import hashlib
 import importlib.util
 import json
@@ -14,8 +14,8 @@ import stat
 import sys
 import time
 
-BRANCH = 'refs/heads/codex/experimental-native-q-host-package-mini505-p11'
-SCOPE = 'p11-hosted-normal-package-only'
+BRANCH = 'refs/heads/codex/experimental-native-p12-lifecycle-package-20261108'
+SCOPE = 'p12-hosted-normal-and-lifecycle-package-only'
 STOP = []
 CAPS = {'rust': 3, 'node': 2, 'checkout-H': 2, 'checkout-P': 2, 'restore-cache': 2}
 
@@ -40,9 +40,9 @@ def admit(value, env, *, now=None):
     start, work, cleanup, hard = [clock[k] for k in keys]
     stamp = time.time() if now is None else now
     need(all(math.isfinite(x) for x in (start, work, cleanup, hard, stamp))
-         and start <= stamp < work < cleanup < hard and hard-start <= 2400
-         and work-start <= 1800 and cleanup-work >= 480 and hard-cleanup >= 120,
-         'original <=40m total/<=30m work/>=8m cleanup/>=2m retention')
+         and start <= stamp < work < cleanup < hard and hard-start <= 3000
+         and work-start <= 2400 and cleanup-work >= 480 and hard-cleanup >= 120,
+         'original <=50m total/<=40m work/>=8m cleanup/>=2m retention')
     return start, work, cleanup, hard
 
 
@@ -73,8 +73,8 @@ def cache_ready(target, before, admission, remaining, hit):
          and before.get('allocation_id') == admission['allocation_id']
          and before.get('original_clock') == admission['clock'], 'fresh source/allocation-bound cache restore required')
     need(hit in ('true', 'false'), 'cache action result unknown')
-    need(type(remaining) in (int, float) and math.isfinite(remaining) and remaining >= 1530,
-         'original work needs1080 engine+390 downstream+60 handoff; no cold/short retry')
+    need(type(remaining) in (int, float) and math.isfinite(remaining) and remaining >= 1860,
+         'original work needs1080 engine+720 downstream+60 handoff; no cold/short retry')
     deps = target/'aarch64-apple-darwin/release/deps'
     need(target.is_absolute() and deps.resolve() == deps and deps.is_dir(), 'restored release deps absent/aliased')
     engine = deps.parent/'nac-web'
@@ -89,7 +89,7 @@ def cache_ready(target, before, admission, remaining, hit):
             need(count <= 4096, 'bounded dependency inventory')
     need(count > 0, 'true cache miss: no restored release dependencies; stop before producer')
     return dict(exact_hit=hit == 'true', restored_release_rlibs=count, bytes=size,
-                remaining_work_seconds=remaining, downstream_reserve_seconds=450,
+                remaining_work_seconds=remaining, downstream_reserve_seconds=780,
                 workspace_incremental_used=False, cache_saved=False)
 
 
@@ -99,7 +99,9 @@ def plan(product, output):
     return [('prepare-engine', 1080, [sys.executable, '-B', owner, 'prepare-engine', '--track', 'dev', '--output', str(engine)]),
             ('normal', 180, [sys.executable, '-B', owner, 'normal', '--engine-receipt', str(engine/'engine-build.json'), '--output', str(normal)]),
             ('verify', 60, [sys.executable, '-B', owner, 'verify', str(normal/'manifest.json'), '--signatures']),
-            ('relocate-check', 90, [sys.executable, '-B', owner, 'relocate-check', '--manifest', str(normal/'manifest.json'), '--output', str(relocated)])]
+            ('relocate-check', 90, [sys.executable, '-B', owner, 'relocate-check', '--manifest', str(normal/'manifest.json'), '--output', str(relocated)]),
+            ('lifecycle-build', 240, [sys.executable, '-B', owner, 'lifecycle-build', '--engine-receipt', str(engine/'engine-build.json'), '--output', str(output/'lifecycle')]),
+            ('verify-lifecycle', 60, [sys.executable, '-B', owner, 'verify-lifecycle', str(output/'lifecycle/manifest.json')])]
 
 
 class PackageClock:
@@ -142,6 +144,10 @@ def inspect_only(pair, product, output):
     source = product/'desktop/macos/startup_xctest/contract.py'
     need(digest(source) == pair['q_contract_sha256'] and
          digest(product/'desktop/macos/startup_xctest/StartupJourneys.swift') == pair['q_swift_sha256'], 'exact current Q source')
+    need(set(pair['fixture_sources']) == {'desktop/macos/LifecycleSmoke.swift',
+         'desktop/macos/lifecycle_smoke.py', 'desktop/macos/test_lifecycle_composition.py'}
+         and all(digest(product/name) == sha for name, sha in pair['fixture_sources'].items()),
+         'exact current maintained lifecycle journey postimages')
     spec = importlib.util.spec_from_file_location('Q_package_only', source)
     contract = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(contract)
@@ -149,6 +155,13 @@ def inspect_only(pair, product, output):
         str(output/'relocation/Relocated App With Spaces/NAC.app'), str(product), product_sha=pair['P'])
     write(output/'raw/Q-package-admission.json', dict(scope='normal_package_admission_only',
         Q=pair['Q'], proof=proof, actual_UI=False, H_pins_or_runtime_qualified=False))
+    sys.path.insert(0, str(product/'desktop/macos/packaging'))
+    from lifecycle_package import verify_role_pair
+    before = json.loads((output/'raw/normal-before-lifecycle.json').read_text())
+    engine = json.loads((output/'engine/engine-build.json').read_text())
+    fixture = verify_role_pair(output/'normal', output/'lifecycle', engine, product, before)
+    write(output/'raw/lifecycle-package-admission.json', dict(scope='canonical_lifecycle_fixture_integrity_only',
+        proof=fixture, actual_UI=False, G3_accepted=False, runtime_qualified=False))
 
 
 def main():
@@ -179,8 +192,12 @@ def main():
     from ci_qualifications import require_checkout
     from ci_support import qualify_toolchain, export_evidence, redact_values
     from ci_xctest import runner_environment
-    budget = PackageClock(epochs, Bound, ci.RUN_DEADLINE)
-    ci.RUN_DEADLINE = min(ci.RUN_DEADLINE, budget.work.deadline)
+    # This distinct controller's reviewed Root clock owns this build-only route.
+    # H's full-suite default30m is not renewed; every command gets the SAME absolute
+    # original work deadline once. No fixture case or H qualification is executed.
+    original_work_mono = time.monotonic() + epochs[1] - time.time()
+    budget = PackageClock(epochs, Bound, original_work_mono)
+    ci.RUN_DEADLINE = budget.work.deadline
 
     def save():
         with using(budget.retention):
@@ -193,7 +210,7 @@ def main():
         report.setdefault('capacity', []).append(dict(epoch=time.time(), memory=memory, cpus=cpus, free=free))
         capacity(memory, free, cpus)
         size = sum(x.stat().st_size for x in output.rglob('*') if x.is_file())
-        need(size <= 512*1024**2, 'private outputs exceed512MiB; retain and stop')
+        need(size <= 768*1024**2, 'two-role private outputs exceed768MiB; retain and stop')
         need(os.environ.get('ImageVersion') == pair['host_image'], 'actual image drift')
 
     base = runner_environment()
@@ -215,7 +232,8 @@ def main():
                 ci.run(argv, log, cap, cwd=root, env=base, abort=lambda: bool(STOP))
                 ownership = json.loads(log.with_name(log.name+'.ownership.json').read_text())
                 need(ownership['accepted'] and ownership['reaped'] and ownership['drain_settled']
-                     and not ownership['unknown'] and ownership['teardown_error'] is None, 'positive helper custody required')
+                     and not ownership['unknown'] and ownership['primary_error'] is None
+                     and ownership['teardown_error'] is None, 'positive helper custody required')
                 observe_capacity()
             phase['status'] = 'PASS'
         finally:
@@ -248,8 +266,13 @@ def main():
         report['producer_attempts'] = 1
         save()
         for label, cap, argv in plan(product, output):
+            if label == 'lifecycle-build':
+                with using(budget.work):
+                    sys.path.insert(0, str(product/'desktop/macos/packaging'))
+                    from lifecycle_package import normal_snapshot
+                    write(raw/'normal-before-lifecycle.json', normal_snapshot(output/'normal'))
             run(label, argv, product, cap)
-        run('Q-inspection', [sys.executable, '-B', str(Path(__file__).resolve()), '--inspect'], product, 60)
+        run('Q-and-role-inspection', [sys.executable, '-B', str(Path(__file__).resolve()), '--inspect'], product, 90)
         with using(budget.work):
             manifest = output/'normal/manifest.json'
             data = json.loads(manifest.read_text())
@@ -261,6 +284,16 @@ def main():
                 shutil.copyfile(f, handoff/f.name)
                 need(digest(f) == digest(handoff/f.name), 'unedited artifact handoff')
             report['handoff'] = {f.name:dict(sha256=digest(f), bytes=f.stat().st_size) for f in (manifest, archive)}
+            fixture = output/'lifecycle'
+            typed = json.loads((fixture/'manifest.json').read_text())
+            need(typed['role'] == 'canonical-lifecycle-fixture-v1', 'separate typed fixture')
+            fixture_handoff = handoff/'lifecycle'
+            fixture_handoff.mkdir(mode=0o700)
+            for name in ('manifest.json', 'NAC-lifecycle-fixture-arm64.zip'):
+                source = fixture/name
+                shutil.copyfile(source, fixture_handoff/name)
+                need(digest(source) == digest(fixture_handoff/name), 'unedited lifecycle handoff')
+                report['handoff']['lifecycle/'+name] = dict(sha256=digest(source), bytes=source.stat().st_size)
             observe_capacity()
             for root, sha in [(controller, admission['controller_sha']), (tools, pair['H_tools']), (product, pair['P'])]:
                 require_checkout(root, sha)

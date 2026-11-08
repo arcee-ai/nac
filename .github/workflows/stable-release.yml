@@ -1,5 +1,5 @@
-name: PRIVATE NEVERMERGE hosted mini505 P11 package
-run-name: PRIVATE NEVERMERGE hosted P11 package only
+name: PRIVATE NEVERMERGE hosted P12 normal and lifecycle fixtures
+run-name: PRIVATE NEVERMERGE hosted P12 package roles only
 
 on:
   workflow_dispatch:
@@ -14,9 +14,9 @@ permissions:
 
 jobs:
   package:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-q-host-package-mini505-p11' && github.run_attempt == 1
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native-p12-lifecycle-package-20261108' && github.run_attempt == 1
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       PYTHONDONTWRITEBYTECODE: "1"
@@ -36,7 +36,7 @@ jobs:
               assert report['actual_image'] == report['expected_image'], 'unexpected/unknown hosted image; no checkout/bootstrap'
               a = json.loads(os.environ['ROOT_PACKAGE_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','clock'}
-              assert a['scope'] == 'p11-hosted-normal-package-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['scope'] == 'p12-hosted-normal-and-lifecycle-package-only' and a['controller_sha'] == os.environ['GITHUB_SHA']
               assert re.fullmatch('[0-9a-f]{40}', a['controller_sha'])
               assert re.fullmatch('[A-Za-z0-9_-]{1,100}', a['allocation_id'])
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
@@ -44,7 +44,7 @@ jobs:
               assert set(c) == set(keys) and all(type(c[k]) in (int,float) for k in keys)
               start, work, cleanup, hard = [c[k] for k in keys]; now = time.time()
               assert all(math.isfinite(x) for x in (start,work,cleanup,hard,now))
-              assert start <= now < work < cleanup < hard and hard-start <= 2400 and work-start <= 1800
+              assert start <= now < work < cleanup < hard and hard-start <= 3000 and work-start <= 2400
               assert cleanup-work >= 480 and hard-cleanup >= 120
               minutes = min(3, math.floor((work-now-60)/60)); assert minutes >= 1
               with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('minutes='+str(minutes)+'\n')
@@ -70,7 +70,7 @@ jobs:
           spec=importlib.util.spec_from_file_location('route',f); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
           m.admit(json.loads(os.environ['ROOT_PACKAGE_ADMISSION']),os.environ)
           p=json.loads(f.with_name('pair.json').read_text())
-          assert p['P']=='4abb04a5f0e14f4c74c4f82a1e10dc377955b9d5'
+          assert p['P']=='1cd48f95fbd239a43ef091c43b92649207fc86f5'
           assert p['H_tools']=='9863b7714c32ed77bd66867973de6d5b02a753f8'
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('P='+p['P']+'\nH='+p['H_tools']+'\n')
@@ -128,7 +128,7 @@ jobs:
           workspaces: source-P -> ../target
           cache-directories: ${{ github.workspace }}/.nac-ci-incremental-cache/aarch64-apple-darwin
           save-if: "false"
-      - name: One normal package and strict current Q package admission only
+      - name: One canonical engine, signed normal and separate lifecycle compiler-output fixture
         env:
           PACKAGE_CACHE_HIT: ${{ steps.package-cache.outputs.cache-hit }}
           H_ROOT: ${{ github.workspace }}/source-H
@@ -147,7 +147,7 @@ jobs:
               a=json.loads(os.environ['ROOT_PACKAGE_ADMISSION']); c=a['clock']
               start,work,cleanup,hard=[c[k] for k in ('STARTED','WORK_DEADLINE','CLEANUP_DEADLINE','HARD_DEADLINE')]
               assert all(type(x) in (int,float) and math.isfinite(x) for x in (start,work,cleanup,hard))
-              assert start<work<cleanup<hard and hard-start<=2400 and work-start<=1800
+              assert start<work<cleanup<hard and hard-start<=3000 and work-start<=2400
               assert cleanup-work>=480 and hard-cleanup>=120
               minutes=max(0,min(2,math.floor((hard-time.time()-15)/60)))
           except (ValueError,KeyError,TypeError,AssertionError): pass

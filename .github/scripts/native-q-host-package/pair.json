@@ -1,6 +1,6 @@
 {
-  "scope": "p11-hosted-normal-package-only",
-  "P": "4abb04a5f0e14f4c74c4f82a1e10dc377955b9d5",
+  "scope": "p12-hosted-normal-and-lifecycle-package-only",
+  "P": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
   "H_tools": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "Q": "057adebe72355fb7e95dc98b821c0a3de17a1167",
   "q_contract_sha256": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
@@ -8,7 +8,18 @@
   "host_image": "20261102.0473.1",
   "rust_version": "1.98.0",
   "node_version": "v24.22.1",
-  "P_parent": "21257259dfe34243aeb0cf8b3b966a6972cc4529",
-  "P_native_base": "21257259dfe34243aeb0cf8b3b966a6972cc4529",
-  "source_context": "42231f447fef5d9d63d82943ae35e8c0d6c424b6"
+  "P_parent": "d84e8c227a297efab400ecb695212a305090ecbd",
+  "P_native_base": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
+  "source_context": "04c22a7fa1e06a72219f59f37e811813cf64cd98",
+  "integration_join": "64df258aeb54093cdc5c410aede25f8c4d2e6aea",
+  "P11_predecessor": "4abb04a5f0e14f4c74c4f82a1e10dc377955b9d5",
+  "producer_predecessor": "23851282c473fb1f413a72b85265ea030d2fccca",
+  "fixture_role": "canonical-lifecycle-fixture-v1",
+  "fixture_signature_role": "original canonical compiler output; no packaging signing or signature qualification",
+  "R_provenance_only": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "fixture_sources": {
+    "desktop/macos/LifecycleSmoke.swift": "9652347f2547c92faee656665c6c6b956dff640c16d65c179aa5159187d874ec",
+    "desktop/macos/lifecycle_smoke.py": "8b7abeb982ff974f4630e19662c7ce9b44d02666975f0347d3e660f661dd74cf",
+    "desktop/macos/test_lifecycle_composition.py": "f432917c6962ec88e6da08830563090b4976712d417082f2e562ae8ce2c24af0"
+  }
 }
