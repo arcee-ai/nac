@@ -28,7 +28,7 @@
   "all-342-startup-macos26": {
     "source_sha": "ef2cce9141973f37bf35e33d113e35eaa7a91f19",
     "test_source_sha": "ddb2cb82ba9f17e662a96ccfe7b2f08442470d81",
-    "protocol_source_sha": "25046f450110d1b795d529d046d2c1deee880877",
+    "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
     "profile": "macos26",
     "suite": "startup",
     "scenario_count": 4,
@@ -45,8 +45,8 @@
       "test_contract.py": "650a67bebd47864ac3f24fe8997c0aff0ba2933656d112ea2597fbf6b7bce7ed"
     },
     "protocol_files": {
-      "Cargo.lock": "641d909e84b0c2b1dfef821fe07e02fe5f405d7d098ede8c2a7f63ed4b977286",
-      "crates/nac-server/Cargo.toml": "d87d6ea026fe5040e7ea32a8888a8cba7329242e2832132caa280a7236b2e7b0",
+      "Cargo.lock": "8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa",
+      "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",
       "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
     }
   }

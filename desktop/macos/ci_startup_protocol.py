@@ -11,10 +11,12 @@ from ci_qualifications import require_checkout
 from ci_startup_fixture import FUTURE_MESSAGE, PRODUCT, canonical, digest
 from ci_xctest_attachments import bounded_file
 
-REVISION = '25046f450110d1b795d529d046d2c1deee880877'
-FILES = {'Cargo.lock': '641d909e84b0c2b1dfef821fe07e02fe5f405d7d098ede8c2a7f63ed4b977286',
-         'crates/nac-server/Cargo.toml': 'd87d6ea026fe5040e7ea32a8888a8cba7329242e2832132caa280a7236b2e7b0',
+REVISION = '7325c48b3c9ec7036e255a6bd92f31c1a98c1607'
+FILES = {'Cargo.lock': '8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa',
+         'crates/nac-server/Cargo.toml': 'b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3',
          'crates/nac-server/tests/desktop_schema_contract.rs': '0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e'}
+SCHEMA_PATH = 'crates/nac-core/src/store/schema.rs'
+SCHEMA_SHA256 = 'f737575607380e154ac5b8be7f9116af73bb56e3874a886050f6175a94ba6407'
 TESTS = ('future_main_store_is_selected_then_rejected_with_guidance',
          'future_wal_store_is_selected_then_rejected_without_pager_changes',
          'owned_future_store_retains_store_owned_priority', 'unrelated_invalid_store_retains_generic_failure')
@@ -36,9 +38,62 @@ def sources(root):
     return root
 
 
-def build(root, output, run):
-    """Called only inside the job's Rust lane; copy before releasing ownership."""
+def admit_protocol_schema(r_source, p_source, manifest_bytes, *, r_sha256, p_sha256,
+                          manifest_sha256, product_sha):
+    """Pure source/manifest equality admission; no SQLite, compiler or engine."""
+    versions = []
+    for source, expected in ((r_source, r_sha256), (p_source, p_sha256)):
+        require(isinstance(source, bytes) and hashlib.sha256(source).hexdigest() == expected,
+                'schema_source_hash')
+        definitions = re.findall(rb'\bconst\s+STORE_SCHEMA_VERSION\b', source)
+        values = re.findall(rb'^const STORE_SCHEMA_VERSION: i64 = ([0-9]+);$', source, re.MULTILINE)
+        require(len(definitions) == len(values) == 1, 'unique_literal_schema_version')
+        require(len(values[0]) <= 10, 'safe_schema_successor')
+        version = int(values[0])
+        require(0 <= version < 2147483647, 'safe_schema_successor')
+        versions.append(version)
+    require(isinstance(manifest_bytes, bytes)
+            and hashlib.sha256(manifest_bytes).hexdigest() == manifest_sha256, 'bound_manifest_hash')
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'duplicate_manifest_field')
+            result[key] = value
+        return result
+    try:
+        body = json.loads(manifest_bytes, object_pairs_hook=unique)
+        source = body['identity']['source']
+        recorded = source['store_schema']
+        require(source['revision'] == product_sha and type(recorded) is int,
+                'manifest_source_schema')
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError('External startup protocol verifier rejected: manifest_source_schema') from None
+    require(versions[0] == versions[1] == recorded, 'R_P_manifest_schema_equality')
+    return dict(R_supported_schema=versions[0], P_supported_schema=versions[1],
+                manifest_store_schema=recorded, fixture_main_schema=versions[0],
+                fixture_future_schema=versions[0] + 1, R_schema_source_sha256=r_sha256,
+                P_schema_source_sha256=p_sha256, manifest_sha256=manifest_sha256)
+
+
+def schema_alignment(root, product, manifest, package_admission):
     root = sources(root)
+    product, manifest = canonical(product), canonical(manifest)
+    require_checkout(product, PRODUCT)
+    provenance = package_admission['provenance']
+    require(provenance['source_sha'] == PRODUCT
+            and provenance['engine_identity']['source_revision'] == PRODUCT, 'schema_package_source')
+    result = admit_protocol_schema(
+        bounded_file(canonical(root / SCHEMA_PATH), 256 * 1024),
+        bounded_file(canonical(product / SCHEMA_PATH), 256 * 1024),
+        bounded_file(manifest, 256 * 1024), r_sha256=SCHEMA_SHA256, p_sha256=SCHEMA_SHA256,
+        manifest_sha256=provenance['manifest_sha256'], product_sha=PRODUCT)
+    return dict(R=REVISION, P=PRODUCT, **result)
+
+
+def build(root, output, run, *, product, manifest, package_admission):
+    """Called only inside the job's Rust lane; copy before releasing ownership."""
+    alignment = schema_alignment(root, product, manifest, package_admission)
+    root = canonical(root)
     output.mkdir(mode=0o700)
     log = output / 'protocol-build.log'
     env = {**os.environ, 'NAC_SOURCE_REVISION': REVISION, 'NAC_BUILD_TRACK': 'dev', 'NAC_BUILD_ID': 'dev-' + REVISION}
@@ -62,8 +117,9 @@ def build(root, output, run):
     require(digest(private) == digest(executable), 'private_runner_copy')
     run([str(private), 'adapter_', '--nocapture'], output / 'protocol-adapter-controls.log', 90,
         cwd=root, env={'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(output), 'TMPDIR': str(output), 'LANG': 'en_US.UTF-8'})
-    sources(root)
-    receipt = {'R': REVISION, 'P': PRODUCT, 'R_files': FILES, 'test_executable_sha256': digest(private),
+    require(schema_alignment(root, product, manifest, package_admission) == alignment,
+            'schema_alignment_changed_during_build')
+    receipt = {'R': REVISION, 'P': PRODUCT, 'R_files': FILES, 'schema_alignment': alignment, 'test_executable_sha256': digest(private),
                'actual_Cargo_artifact_path': str(executable), 'private_executable': str(private),
                'build_log_sha256': digest(log), 'scope': 'R verifier source/build only; no product or UI acceptance'}
     (output / 'protocol-runner.json').write_text(json.dumps(receipt, indent=2) + '\n')
@@ -134,6 +190,21 @@ def verify(private, runner, app, manifest, package_admission, output, run):
     require(runner.get('R') == REVISION and runner.get('P') == PRODUCT and runner.get('R_files') == FILES
             and str(private) == runner.get('private_executable')
             and digest(private) == runner['test_executable_sha256'], 'frozen_R_runner')
+    manifest_source = json.loads(bounded_file(manifest, 256 * 1024))['identity']['source']
+    alignment = runner.get('schema_alignment', {})
+    require(alignment.get('R') == REVISION and alignment.get('P') == PRODUCT
+            and alignment.get('manifest_sha256') == digest(manifest)
+            and manifest_source.get('revision') == PRODUCT
+            and type(manifest_source.get('store_schema')) is int
+            and alignment.get('manifest_store_schema') == manifest_source['store_schema']
+            and alignment.get('R_schema_source_sha256') == SCHEMA_SHA256
+            and alignment.get('P_schema_source_sha256') == SCHEMA_SHA256
+            and type(alignment.get('R_supported_schema')) is int
+            and alignment['R_supported_schema'] == alignment.get('P_supported_schema')
+                == alignment.get('manifest_store_schema') == alignment.get('fixture_main_schema')
+            and 0 <= alignment['R_supported_schema'] < 2147483647
+            and alignment.get('fixture_future_schema') == alignment['R_supported_schema'] + 1,
+            'required_schema_alignment_receipt')
     identity = package_admission['provenance']['engine_identity']
     post = package_admission['provenance']['post_sign_receipt']
     require(identity['source_revision'] == PRODUCT and digest(engine) == post['engine_sha256']
@@ -160,7 +231,7 @@ def verify(private, runner, app, manifest, package_admission, output, run):
     require(digest(engine) == post['engine_sha256'] and digest(manifest) == package_admission['provenance']['manifest_sha256'],
             'package_changed_after_verification')
     receipt = {'R': REVISION, 'P': PRODUCT, 'manifest_sha256': digest(manifest), 'engine_sha256': digest(engine),
-               'runner_sha256': runner['test_executable_sha256'], 'observations': observations,
+               'runner_sha256': runner['test_executable_sha256'], 'schema_alignment': alignment, 'observations': observations,
                'native_UI_qualified': False, 'scope': 'Four standalone private process cases only; native matrix still exactly four UI cases'}
     (output / 'protocol-proof.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return receipt
