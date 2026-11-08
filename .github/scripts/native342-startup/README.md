@@ -159,10 +159,10 @@ bind any later exact controller SHA and original epochs.
 
 `configured-refusal.py` and `configured-refusal-launch.py` are fixed entry points
 for the already registered `stable-release.yml` (workflow353798970), only on
-`codex/experimental-native-p12-context-consumer01`. They use the same
+`codex/experimental-native-p12-lifetime-context-consumer01`. They use the same
 maintained launcher, normal-role artifact admission, generated SDK runner,
 configuredLocal case, process/fixture owners, original clock and strict exporter.
-No caller can select another case. The new pair deliberately pins reviewed H `148f51f88`,
+No caller can select another case. The new pair deliberately pins reviewed H `54c0b7db6`,
 unchanged Qba and original normal P12 artifact13607980704. The original full four-case/R
 workflow remains at immutable published ec807/ref; its pair, qualification
 contract and serial episode/default R requirements remain intact. This
@@ -191,7 +191,7 @@ and cancellation raised by the save is never converted to an ordinary helper
 error; a pending helper cancellation remains primary through ordinary save faults.
 
 This source-only passive-context nomination uses the new closed scope
-`P12-Qba-H148-configured-context-diagnostic01`. Inherited Hbc retention preserves the already-owned
+`P12-Qba-H54-configured-lifetime-context-diagnostic01`. Inherited Hbc retention preserves the already-owned
 read-only diagnostic under the original work/case cutoff, with original-work
 prelaunch admission and at most five seconds inside the existing20-second stop.
 Parent input/UI/collector failure remains sticky; CFEqual, own-refusal/no-ready,
@@ -201,13 +201,15 @@ H-ebdbd actual01 remains frozen FAIL/incomplete; this nomination neither retags
 that actual nor grants another one. Root must separately review and admit an exact
 new consumer head; no actual epochs, dispatch or availability grant is supplied.
 
-This final source-only nomination adds reviewed H148 passive first-counter and
-same-closing-snapshot context, with five pinned H/Q supplier hashes checked
+This final source-only nomination adds reviewed H54 passive first-counter context at lifetime or
+closing_lifetime, with same-closing-snapshot context only at closing_lifetime, with five pinned H/Q supplier hashes checked
 inside the original work bound before compiler/actor admission. Its internal
 optional context remains acceptance=false and cannot satisfy the unchanged
 first-CG lifetime/generation0 pair gate. Unknown context remains incomplete;
 no observation call, input, root/CFEqual reset, clock or operator role is added.
 The earlier138/Hbc actual02 remains immutable FAIL/pairedINCOMPLETE/inputUNKNOWN.
-The H148 local complete-helper compile is only CLT preflight; pinned hosted
+The reviewed H54 one complete-helper compile is only CLT preflight; pinned hosted
 Xcode/SDK/native evidence remains separately required. This source creates no
 actual nonce, epochs, dispatch, publication or runtime admission.
+
+The extra nomination pins H54 as the exact child of H148. The first-counter facts reuse the existing frozen transition; no new read, native call, counter increment, input or acceptance is added. Closing operands remain closing_lifetime only, so an earlier closing snapshot is never relabeled as a later opening failure. Missing first-counter facts remain missing; prior gen2 is not two proven AX failures. The current local CLT compile consumed one reviewed H2/Q2 command with zero launches; its packet is compiler evidence only. Original H/consumer4/4 and all old actual/repair counts stay preserved; this is one expressly approved extra consumer source nomination, not a runtime grant.

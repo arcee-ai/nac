@@ -30,13 +30,13 @@ class RefusalControls(unittest.TestCase):
         self.assertEqual(PAIR['H'], controller.REFUSAL_H)
         self.assertNotIn('R', PAIR)
 
-    def test_H148_nomination_rejects_old_scope_branch_and_H(self):
-        self.assertEqual(controller.REFUSAL_H, '148f51f887a823bbc517e34aa607615393aa2875')
+    def test_H54_nomination_rejects_old_scope_branch_and_H(self):
+        self.assertEqual(controller.REFUSAL_H, '54c0b7db66c19c9b676e46933bfc89944c3b6f2a')
         contract=json.loads((full.HERE/'configured-refusal-contract.json').read_bytes())
         self.assertEqual(contract['H'],PAIR['H']);self.assertEqual(contract['scope'],controller.REFUSAL_SCOPE)
         self.assertEqual(contract['dispatch']['experimental_branch'],controller.REFUSAL_BRANCH.removeprefix('refs/heads/'))
         value=self.admission();value['scope']=controller.REFUSAL_SCOPE
-        for old_scope in ('P12-Qba-Hebdb-configured-refusal-diagnostic01',controller.SCOPE):
+        for old_scope in ('P12-Qba-H148-configured-context-diagnostic01','P12-Qba-Hebdb-configured-refusal-diagnostic01',controller.SCOPE):
             with self.assertRaises(RuntimeError):
                 controller.admit({**value,'scope':old_scope},'a'*40,now=1001,configured_refusal=True)
         env=dict(ROOT_STARTUP_ADMISSION=json.dumps(value),GITHUB_SHA='a'*40,
@@ -49,7 +49,7 @@ class RefusalControls(unittest.TestCase):
         gate=next(n for n in main.body if isinstance(n,ast.If) and isinstance(n.test,ast.Name)
                   and n.test.id=='configured_refusal')
         code=compile(ast.Module(body=[gate],type_ignores=[]),'<actual-H-pin-gate>','exec')
-        for field,bad in (('H','ebdbd340bdc1220318446180c0a0df579489392c'),('H','0'*40),('P','0'*40),('Q','0'*40)):
+        for field,bad in (('H','148f51f887a823bbc517e34aa607615393aa2875'),('H','ebdbd340bdc1220318446180c0a0df579489392c'),('H','0'*40),('P','0'*40),('Q','0'*40)):
             ns=dict(controller.__dict__,configured_refusal=True,pair={**PAIR,field:bad})
             with self.assertRaises(RuntimeError):exec(code,ns)
         exec(code,dict(controller.__dict__,configured_refusal=True,pair=PAIR))
@@ -248,7 +248,7 @@ class RefusalControls(unittest.TestCase):
         self.assertFalse((full.repository/'.github/workflows/native342-configured-refusal.yml').exists())
         source=(full.repository/contract['dispatch']['workflow_path']).read_text()
         self.assertIn('  configured_refusal:',source)
-        self.assertIn('experimental-native-p12-context-consumer01',source)
+        self.assertIn('experimental-native-p12-lifetime-context-consumer01',source)
         self.assertIn('workflow_dispatch:',source)
         self.assertNotIn('  push:',source)
 

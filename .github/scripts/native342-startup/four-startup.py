@@ -15,14 +15,14 @@ import time
 STOP = []
 BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
 SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
-REFUSAL_SCOPE = 'P12-Qba-H148-configured-context-diagnostic01'
-REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-context-consumer01'
-REFUSAL_H = '148f51f887a823bbc517e34aa607615393aa2875'
+REFUSAL_SCOPE = 'P12-Qba-H54-configured-lifetime-context-diagnostic01'
+REFUSAL_BRANCH = 'refs/heads/codex/experimental-native-p12-lifetime-context-consumer01'
+REFUSAL_H = '54c0b7db66c19c9b676e46933bfc89944c3b6f2a'
 REFUSAL_SUPPLIERS = {
     "H": {
         "desktop/macos/CIStartupObserver.swift": "1a8141134d45838aa150cb903b5483bd22b2e3b7c163505812108af37b151b95",
-        "desktop/macos/CIStartupAXWitness.swift": "9c9aa03b8a02e752a947d0b39760314ffb51408981d70362dde14fb5daf6fd00",
-        "desktop/macos/ci_startup_ax.py": "9497a839c4043cfae92a683dce0dd07e8c352dbb8028b5eb2150aef896b45e53"
+        "desktop/macos/CIStartupAXWitness.swift": "78bb7e28f6262efe309ac0d70508dc988b52187e4ee0bf9a251d43e38bb5f695",
+        "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a"
     },
     "Q": {
         "desktop/macos/startup_xctest/StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",

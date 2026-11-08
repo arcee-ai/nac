@@ -1,6 +1,6 @@
 {
-  "scope": "P12-Qba-H148-configured-context-diagnostic01",
-  "H": "148f51f887a823bbc517e34aa607615393aa2875",
+  "scope": "P12-Qba-H54-configured-lifetime-context-diagnostic01",
+  "H": "54c0b7db66c19c9b676e46933bfc89944c3b6f2a",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
   "product_parent": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
@@ -9,7 +9,7 @@
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "q_swift_sha256": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
   "host_image": "20261102.0473.1",
-  "H_preparation_parent": "bc596148c88e00a4e8e25c1ff09ec34d568913bc",
+  "H_preparation_parent": "148f51f887a823bbc517e34aa607615393aa2875",
   "native_boundary": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
   "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",
@@ -18,8 +18,8 @@
   "supplier_sha256": {
     "H": {
       "desktop/macos/CIStartupObserver.swift": "1a8141134d45838aa150cb903b5483bd22b2e3b7c163505812108af37b151b95",
-      "desktop/macos/CIStartupAXWitness.swift": "9c9aa03b8a02e752a947d0b39760314ffb51408981d70362dde14fb5daf6fd00",
-      "desktop/macos/ci_startup_ax.py": "9497a839c4043cfae92a683dce0dd07e8c352dbb8028b5eb2150aef896b45e53"
+      "desktop/macos/CIStartupAXWitness.swift": "78bb7e28f6262efe309ac0d70508dc988b52187e4ee0bf9a251d43e38bb5f695",
+      "desktop/macos/ci_startup_ax.py": "40994057d3156b1faf83eb08bb30661e052d6d4aeb3e10ffef3ccf8a4d29a55a"
     },
     "Q": {
       "desktop/macos/startup_xctest/StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
