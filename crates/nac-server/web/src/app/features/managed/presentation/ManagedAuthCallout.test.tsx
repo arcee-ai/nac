@@ -7,13 +7,14 @@ import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedA
 import type { DeviceLoginState } from "@/app/features/managed/controller/useDeviceLogin";
 
 const fakes = vi.hoisted(() => ({
+  provider: "codex" as "codex" | "arcee",
   signedIn: true,
   state: { status: "idle" } as DeviceLoginState,
   calls: [] as string[],
 }));
 
 vi.mock("@/app/features/managed/controller/useManagedSignIn", () => ({
-  useManagedSignIn: () => ({ provider: "codex", signedIn: fakes.signedIn }),
+  useManagedSignIn: () => ({ provider: fakes.provider, signedIn: fakes.signedIn }),
 }));
 vi.mock("@/app/features/managed/controller/useDeviceLogin", () => ({
   useDeviceLogin: () => ({
@@ -22,7 +23,7 @@ vi.mock("@/app/features/managed/controller/useDeviceLogin", () => ({
       fakes.calls.push(`start:${provider}`);
       return Promise.resolve();
     },
-    cancel: vi.fn(),
+    cancel: () => fakes.calls.push("cancel"),
   }),
 }));
 vi.mock("@/app/services/queries", () => ({
@@ -38,6 +39,7 @@ vi.mock("@/app/services/queries", () => ({
 }));
 
 beforeEach(() => {
+  fakes.provider = "codex";
   fakes.signedIn = true;
   fakes.state = { status: "idle" };
   fakes.calls = [];
@@ -69,21 +71,32 @@ it("signs in directly when no credential is on file", async () => {
   await waitFor(() => expect(fakes.calls).toEqual(["start:codex"]));
 });
 
-it("shows the device code, the verification page and cancel while the sign-in waits", () => {
-  const open = vi.spyOn(window, "open").mockReturnValue(null);
-  fakes.state = {
-    status: "waiting",
-    prompt: { user_code: "ABCD-1234", verification_uri: "https://auth.openai.com/codex/device" },
-  } as DeviceLoginState;
-  render(<ManagedAuthCallout backend="chatgpt-codex-responses" rejected />);
+it.each([
+  { provider: "codex" as const, backend: "chatgpt-codex-responses" as const, label: "ChatGPT" },
+  { provider: "arcee" as const, backend: "arcee-auth" as const, label: "Arcee" },
+])(
+  "keeps the same $provider attempt behind a real retry link and cancel",
+  ({ provider, backend, label }) => {
+    fakes.provider = provider;
+    const verification = "https://accounts.example.test/device?code=local-fixture";
+    fakes.state = {
+      status: "waiting",
+      prompt: { user_code: "ABCD-1234", verification_uri: verification },
+    } as DeviceLoginState;
+    render(<ManagedAuthCallout backend={backend} rejected />);
 
-  expect(screen.getByText("ABCD-1234")).toBeTruthy();
-  expect(screen.getByText("Cancel")).toBeTruthy();
-  fireEvent.click(screen.getByText("Open ChatGPT"));
-  expect(open).toHaveBeenCalledWith(
-    "https://auth.openai.com/codex/device",
-    "_blank",
-    "noopener,noreferrer",
-  );
-  open.mockRestore();
-});
+    expect(screen.getByText("ABCD-1234")).toBeTruthy();
+    expect(screen.getByText("Cancel")).toBeTruthy();
+    const link = screen.getByRole("link", { name: `Open ${label}` });
+    expect(link.getAttribute("href")).toBe(verification);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")?.split(" ")).toEqual(
+      expect.arrayContaining(["noopener", "noreferrer"]),
+    );
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    expect(fakes.calls).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(fakes.calls).toEqual(["cancel"]);
+  },
+);

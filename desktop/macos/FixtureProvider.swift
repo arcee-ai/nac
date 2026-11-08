@@ -19,6 +19,8 @@ final class FixtureProvider {
         heldResponses.removeAll()
         completions.forEach { $0() }
     }
+    // Main-queue fixture observation only; never retains a proxy destination.
+    private(set) var rejectedConnectCount = 0
     #endif
     private var startContinuation: CheckedContinuation<Void, Error>?
     var baseURL: URL!
@@ -104,6 +106,9 @@ final class FixtureProvider {
         guard route == "POST /responses HTTP/1.1",
               let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               request["model"] as? String == "gpt-5.6-sol" else {
+            #if PREVIEW_SMOKE
+            if route.hasPrefix("CONNECT ") { rejectedConnectCount = min(32, rejectedConnectCount + 1) }
+            #endif
             send(connection, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", final: true)
             return
         }

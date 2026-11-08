@@ -17,8 +17,7 @@ final class PreviewSmoke {
         let args = CommandLine.arguments
         destination = URL(fileURLWithPath: args[args.firstIndex(of: "--smoke-output")! + 1])
         scenario = args[args.firstIndex(of: "--smoke-scenario")! + 1]
-        // Attribute decoy requests to this fixture on a shared interactive host.
-        app.webView.customUserAgent = "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+        if let view = app.webView { configure(view) }
         let observer = #"""
         window.__previewEvidence = {errors: [], partial: false, deltas: []};
         addEventListener('error', e => __previewEvidence.errors.push(String(e.message)));
@@ -40,13 +39,25 @@ final class PreviewSmoke {
             source: observer, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
 
+    /// Each recovery view keeps the fixture classification before its first load.
+    func configure(_ view: WKWebView) {
+        if scenario == "external-navigation-recording" { ExternalNavigationSmoke.installObserver(in: view) }
+        view.customUserAgent = scenario == "external-auth"
+            ? "NACExternalAuthWK/ALL348 AppleWebKit/605.1.15"
+            : "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+    }
+
     func start() {
         evidence["app_pid"] = getpid()
         evidence["scenario"] = scenario
         write()
         Task {
             do {
-                if ["commands", "commands-input"].contains(scenario) {
+                if scenario == "external-navigation-recording" {
+                    evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if scenario == "external-auth" {
+                    evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if ["commands", "commands-input"].contains(scenario) {
                     evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
                         trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
                 } else if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {

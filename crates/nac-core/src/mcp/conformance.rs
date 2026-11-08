@@ -59,7 +59,7 @@ pub async fn run_mcp_conformance_client(server_url: String) -> Result<()> {
 async fn run_scenario(service: &McpService, scenario: &str) -> Result<()> {
     let tools = service.list_all_tools().await?;
     match scenario {
-        "request-metadata" | "json-schema-ref-no-deref" => Ok(()),
+        "request-metadata" | "json-schema-ref-no-deref" | "initialize" => Ok(()),
         "http-custom-headers" => call_context_tools(service).await,
         "http-invalid-tool-headers" => {
             call_tool(
@@ -82,7 +82,6 @@ async fn run_scenario(service: &McpService, scenario: &str) -> Result<()> {
         }
         "http-standard-headers" => call_tool(service, "test_headers", serde_json::json!({})).await,
         "sse-retry" => call_tool(service, "test_reconnection", serde_json::json!({})).await,
-        "initialize" => Ok(()),
         "tools_call" | "tools-call" => {
             call_tool(service, "add_numbers", serde_json::json!({"a": 2, "b": 3})).await
         }

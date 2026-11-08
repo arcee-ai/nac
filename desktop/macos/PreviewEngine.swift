@@ -20,8 +20,29 @@ final class PreviewEngine {
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
         var environment = profile.environment
         environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+        #if PREVIEW_SMOKE
+        environment = Self.recordingEnvironment(environment, provider: provider.baseURL, arguments: CommandLine.arguments)
+        #endif
         try launch(executable: executable, configuration: EngineLaunchConfiguration(
             cwd: profile.workspace, store: profile.store, environment: environment))
+    }
+    #endif
+
+    #if PREVIEW_SMOKE && !LOCAL_APP
+    static func recordingEnvironment(_ original: [String: String], provider: URL,
+                                     arguments: [String]) -> [String: String] {
+        var environment = original
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "external-navigation-recording" {
+            // Only this disposable child uses the already rejecting fixture as
+            // a proxy. It never forwards CONNECT or changes the host environment.
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"] {
+                environment[name] = provider.absoluteString
+            }
+            environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        }
+        return environment
     }
     #endif
 

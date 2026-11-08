@@ -61,7 +61,7 @@ function verifyGranularity(value) {
   const sort = v => Array.isArray(v) ? v.map(sort) : v && typeof v === "object"
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)])) : v;
   assert.equal(createHash("sha256").update(JSON.stringify(sort(before))).digest("hex"),
-    "b8a26e07fa465e608b59b3d29bcec2b9a9b317c8171c4c700ce68789b329dc1d",
+    "8e48b71c0b261aa0f4ddb0aa96500311d777e9a643d7eaa6650ab0123dac9983",
     "exact canonical workflow at3769e2aa11d2c36de75305355f167c921b2b81e8, including S12/provenance/S17");
 }
 

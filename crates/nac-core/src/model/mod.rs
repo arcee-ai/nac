@@ -484,6 +484,19 @@ pub async fn begin_managed_arcee_repair(
     })
 }
 
+/// Exercises the ordinary local device-login owner against an explicit test
+/// service. The credential retains the canonical issuer and legacy client;
+/// production `begin_login` has no endpoint override.
+#[cfg(feature = "test-support")]
+pub async fn begin_local_arcee_login_with_auth_service_for_test(
+    auth_service_base_url: &str,
+) -> Result<PendingDeviceLogin> {
+    let login = arcee::begin_local_arcee_device_login_for_test(auth_service_base_url).await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
+}
+
 /// Test-support entry point for exercising the real managed repair lifecycle
 /// against a loopback authorization service while retaining the configured
 /// issuer as the credential's security identity.

@@ -29,9 +29,9 @@ function project(value,required=requiredJobs) {
   const old=structuredClone(value);reverseAssetTokens(old);
   reverseAdmission(old);reverseParallelApt(old,aptProducerSteps);reverseElapsedEvidence(old);
   const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
-  // Full pre-admission APT graph plus this layer's required startup-custody control.
+  // Full pre-admission APT graph plus the required startup-custody and native-auth fixture controls.
   assert.equal(createHash('sha256').update(JSON.stringify(sort(old))).digest('hex'),
-    'e2f13f6f6f2c2413a5892dc9b6afe135feb83c83d9f37ff2d1357acb6c3c0c0b');
+    '9faf04f1f32d65e2249fbf855c8158e2b24faa652b34d9b370cd6f73542ac167');
 }
 
 test('strict split-only projection recovers the complete pre-admission APT graph',()=>project(actual));

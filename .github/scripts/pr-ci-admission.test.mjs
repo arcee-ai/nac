@@ -12,8 +12,8 @@ import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
 reverseNativeQualification(stable);
-// Full pre-admission graph plus this layer's required startup-custody control.
-const parentHash="e2f13f6f6f2c2413a5892dc9b6afe135feb83c83d9f37ff2d1357acb6c3c0c0b";
+// Full pre-admission graph plus the required startup-custody and native-auth fixture controls.
+const parentHash="9faf04f1f32d65e2249fbf855c8158e2b24faa652b34d9b370cd6f73542ac167";
 const sealedPins={
   ".github/scripts/ci-admission.py": "afa1c74728cdf5646de034a553c32bc5af6552ecc6fdf0bacab67eca31aef04a",
   ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
