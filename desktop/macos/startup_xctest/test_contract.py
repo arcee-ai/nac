@@ -766,6 +766,14 @@ func scalar(_ value: Any) -> Double {
     return value as? String == "nan" ? .nan : .infinity
 }
 func rectangle(_ raw: Any) -> CGRect {
+    if let sentinel = raw as? String {
+        switch sentinel {
+        case "CGRect.infinite": return .infinite
+        case "CGRect.null": return .null
+        case "CGRect.zero": return .zero
+        default: preconditionFailure("Unknown rectangle sentinel")
+        }
+    }
     let a = raw as! [Any]
     return CGRect(x: scalar(a[0]), y: scalar(a[1]), width: scalar(a[2]), height: scalar(a[3]))
 }
@@ -776,10 +784,13 @@ let results: [Any] = rows.map { row in
         return StartupNativeFolderPolicy.surface(.init(rawValue: row["surface"] as! String)!,
             windows: row["windows"] as! Int, rootSheets: row["root"] as! Int,
             nestedSheets: row["nested"] as! Int, allSheets: row["all"] as! Int)
+    case "attached":
+        return StartupNativeFolderPolicy.attached(exists: row["exists"] as! Bool,
+            frame: rectangle(row["frame"]!), owner: rectangle(row["owner"]!))
     case "usable":
         return StartupNativeFolderPolicy.usable(exists: row["exists"] as! Bool,
             enabled: row["enabled"] as! Bool, hittable: row["hittable"] as! Bool,
-            frame: rectangle(row["frame"]!), owner: CGRect(x: 0, y: 0, width: 500, height: 500))
+            frame: rectangle(row["frame"]!), owner: rectangle(row["owner"] ?? [0, 0, 500, 500]))
     case "binding":
         var binding = StartupNativeFolderPolicy.Binding<String>()
         return (row["steps"] as! [[String: Any]]).map { step in
@@ -833,6 +844,26 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: resul
         rows += [{**valid, 'frame': frame} for frame in ([10, 20, 0, 30], [10, 20, -1, 30],
                  [10, 20, 100, -1], [1000, 1000, 10, 10], ['nan', 20, 10, 10])]
         self.assertEqual(self.run_rows(rows), [True] + [False] * (len(rows) - 1))
+
+    def test_coregraphics_sentinels_rejected_for_control_and_panel_attachment(self):
+        # Construct the native sentinel in Swift: finite components alone miss it.
+        for mode in ('usable', 'attached'):
+            valid = dict(mode=mode, exists=True, enabled=True, hittable=True,
+                         frame=[10, 20, 100, 30], owner=[0, 0, 500, 500])
+            rows = [valid, {**valid, 'frame': [499, 499, 1, 1]}]
+            for key in ('frame', 'owner'):
+                for frame in ('CGRect.infinite', 'CGRect.null', 'CGRect.zero',
+                              [10, 20, 0, 30], [10, 20, -1, 30], [10, 20, 100, -1],
+                              ['nan', 20, 100, 30], [10, 'infinity', 100, 30]):
+                    rows.append({**valid, key: frame})
+            rows += [{**valid, 'exists': False}, {**valid, 'frame': [500, 500, 1, 1]}]
+            with self.subTest(mode=mode):
+                self.assertEqual(self.run_rows(rows), [True, True] + [False] * (len(rows) - 2))
+        # An attached panel may be obscured by its Go to Folder sub-sheet.
+        hidden_parent = dict(exists=True, enabled=False, hittable=False,
+                             frame=[10, 20, 100, 30], owner=[0, 0, 500, 500])
+        self.assertEqual(self.run_rows([{**hidden_parent, 'mode': mode}
+                                       for mode in ('attached', 'usable')]), [True, False])
 
     def sequence(self):
         return [dict(surface='form', root='root'),

@@ -163,13 +163,20 @@ private enum StartupNativeFolderPolicy {
         }
     }
 
-    static func usable(exists: Bool, enabled: Bool, hittable: Bool,
-                       frame: CGRect, owner: CGRect) -> Bool {
+    // Attachment stays valid while a Go to Folder sub-sheet obscures its parent.
+    // Interaction state is checked separately by usable, not by this geometry guard.
+    static func attached(exists: Bool, frame: CGRect, owner: CGRect) -> Bool {
         let numbers = [frame.minX, frame.minY, frame.width, frame.height,
                        owner.minX, owner.minY, owner.width, owner.height]
-        return exists && enabled && hittable && numbers.allSatisfy { $0.isFinite }
+        return exists && numbers.allSatisfy { $0.isFinite }
+            && !frame.isInfinite && !owner.isInfinite
             && frame.size.width > 0 && frame.size.height > 0 && owner.size.width > 0 && owner.size.height > 0
             && frame.intersects(owner)
+    }
+
+    static func usable(exists: Bool, enabled: Bool, hittable: Bool,
+                       frame: CGRect, owner: CGRect) -> Bool {
+        enabled && hittable && attached(exists: exists, frame: frame, owner: owner)
     }
 
     static func focused(pid: Int32, expectedPID: Int32, role: String, focused: Bool,
@@ -796,7 +803,8 @@ final class StartupJourneys: XCTestCase {
                 "Foreign, ambiguous or stale native folder surface")
             if folderSurface != .form {
                 let sheet = try panel()
-                try require(sheet.exists && !sheet.frame.isEmpty && sheet.frame.intersects(rootWindow.frame),
+                try require(StartupNativeFolderPolicy.attached(exists: sheet.exists,
+                    frame: sheet.frame, owner: rootWindow.frame),
                     "Folder panel is not attached to the owned root")
                 if folderSurface == .panel {
                     try require(StartupNativeFolderPolicy.usable(exists: sheet.exists, enabled: sheet.isEnabled,

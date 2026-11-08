@@ -263,7 +263,10 @@ remain required; parser and inert projection controls cannot qualify them.
 
 `NAC342_SWIFT_PANEL_PROOF=1` runs the compile-verbatim surface, stable identity,
 focused-target and exact form-value policy controls. These use synthetic
-Foundation/CoreGraphics projections and never invoke AX or XCTest. The opt-in
+Foundation/CoreGraphics projections and never invoke AX or XCTest. The
+controls also construct native `CGRect.infinite`/null/zero sentinels and reject
+invalid control, owner and attached-panel geometry. Attachment remains independent
+of parent hittability while its Go to Folder sub-sheet is present. The opt-in
 must be supplied in a required source-bound Mac test lane to claim enforcement;
 an ordinary skipped proof is not coverage. Preserve the existing title proof.
 
