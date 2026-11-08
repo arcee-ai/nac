@@ -9,8 +9,8 @@ import time
 from .protocol import P, CASES, closed, digest, require
 
 BASE='ebdbd340bdc1220318446180c0a0df579489392c'
-SOURCE_PARENT='484876634043ace52ec0bca4a6d0126c69414178'
-BRANCH='refs/heads/codex/private-native-lifecycle-capture-source01'
+SOURCE_PARENT='259d3614273b45d685a8e26c37be293ce2139ff8'
+BRANCH='refs/heads/codex/experimental-native-p12-lifecycle-capture-consumer01'
 SCOPE='P12-six-composited-lifecycle-confirmations-source01'
 MANIFEST='1ddcf153b7dabeb82b3e662b8770ab57ea734566343e16496c4932c72391cf78'
 PRODUCER=dict(run_id=42455455480,artifact_id=13607980704,

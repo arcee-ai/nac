@@ -113,3 +113,12 @@ exactly the nominated successful method with that URI. Any other namespace,
 method or schema stops the episode; do not accept alternatives or retry an
 unknown result. Preserve the generated runner/target/scheme and complete tree
 hash/origin evidence for Root's explicit qualification decision.
+
+The separately nominated caller branch is
+`codex/experimental-native-p12-lifecycle-capture-consumer01`, one clean child of
+reviewed `259d3614273b45d685a8e26c37be293ce2139ff8`. Its admission names the ACTUAL
+consumer HEAD/GITHUB_SHA and preserves original H_base ebdbd. The original259
+source branch/ref stays frozen. Only admission branch/parent constants change;
+the reviewed capture implementation is otherwise byte-identical. The private
+caller uses the already registered stable-release.yml manual workflow; see
+.github/scripts/native344-capture/README.md for fixed roles and remaining gates.
