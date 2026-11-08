@@ -42,6 +42,8 @@ async fn future_schema_cause_survives_owned_construction() {
     assert!(!String::from_utf8_lossy(&bytes).contains("private-diagnostic-canary"));
     assert!(bytes.len() <= LIMIT);
     assert_eq!(std::fs::read(&store).unwrap(), before);
+    let busy = error.context(nac_core::sessions::StoreProcessLeaseError::Busy);
+    assert_eq!(startup_failure_code(&busy), "store_owned");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -60,6 +62,44 @@ fn future_schema_diagnostics_are_not_a_typed_cause() {
             startup_failure_code(&anyhow::anyhow!(diagnostic)),
             "engine_unavailable"
         );
+    }
+}
+
+#[test]
+fn store_ownership_failure_is_typed_and_diagnostics_are_constant() {
+    use nac_core::sessions::StoreProcessLeaseError;
+
+    for (error, expected) in [
+        (
+            anyhow::Error::new(StoreProcessLeaseError::Busy).context("private-diagnostic-canary"),
+            "store_owned",
+        ),
+        (
+            anyhow::anyhow!(StoreProcessLeaseError::Busy.to_string()),
+            "engine_unavailable",
+        ),
+        (
+            anyhow::Error::new(StoreProcessLeaseError::Store(anyhow::anyhow!(
+                "private-diagnostic-canary"
+            ))),
+            "engine_unavailable",
+        ),
+    ] {
+        let (parent, launch) = channel();
+        parent
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        launch.failed(&error);
+        let bytes = read_record(&mut BufReader::new(parent)).unwrap();
+        let receipt: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(receipt["kind"], "failed");
+        assert_eq!(receipt["version"], VERSION);
+        assert_eq!(receipt["incarnation"], launch.incarnation);
+        assert_eq!(receipt["stage"], "startup");
+        assert_eq!(receipt["code"], expected);
+        assert!(!String::from_utf8_lossy(&bytes).contains("private-diagnostic-canary"));
+        assert!(receipt.get("endpoint").is_none());
+        assert!(bytes.len() <= LIMIT);
     }
 }
 
