@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import threading
 import time
 
@@ -13,6 +14,12 @@ from ci_xctest import runner_environment
 from ci_xctest_attachments import bounded_file
 
 SUPPORT = ('StartupAXGuard.swift', 'StartupAXReceipt.swift')
+DIAGNOSTIC_STAGES = {'configuration', 'admission', 'initial_snapshot', 'trust', 'helper_identity',
+    'waiting_publication', 'deadline', 'configuration_integrity', 'snapshot', 'lifetime',
+    'app_window', 'owned_frame', 'ax_observation', 'closing_snapshot', 'closing_lifetime',
+    'closing_integrity', 'receipt_publication', 'parent_lost'}
+DIAGNOSTIC_CODES = {'ownership_invalid', 'ownership_arguments_unavailable', 'process_probe_unavailable',
+                    'decoding_failure', 'foundation_failure', 'other'}
 
 
 def require(value, reason):
@@ -134,6 +141,34 @@ class AXCompanion:
             self.terminal = {key: row[key] for key in ('target', 'app_launch_epoch', 'window_number', 'status')}
         return dict(owned_processes_settled=True, helper=self.identity, helper_sha256=self.declaration['helper_sha256'], phase=self.phase,
                     scope='Read-only AX companion only; not app/UI acceptance')
+
+    def failure_diagnostic(self):
+        """Read only the bounded static failure log; absence never affects custody."""
+        try:
+            data = bounded_file(self.folder / 'ax-companion.log', 2048)
+            require(data.endswith(b'\n') and data.count(b'\n') == 1, 'AX diagnostic framing')
+            def unique(pairs):
+                row = {}
+                for key, value in pairs:
+                    require(key not in row, 'AX diagnostic duplicate field')
+                    row[key] = value
+                return row
+            row = json.loads(data, object_pairs_hook=unique)
+            require(type(row) is dict and set(row) == {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
+                'observed_uptime_ns', 'sequence', 'refusal_generation', 'binding'}
+                and row['schema'] == 'nac342-ax-failure-diagnostic-v1' and row['acceptance'] is False
+                and row['stage'] in DIAGNOSTIC_STAGES and row['code'] in DIAGNOSTIC_CODES
+                and row['clock_basis'] == 'DispatchTime.uptimeNanoseconds', 'AX diagnostic fields')
+            for key in ('observed_uptime_ns', 'sequence', 'refusal_generation'):
+                value = row[key]
+                require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', value)
+                        and int(value) < 2**64, 'AX diagnostic counter')
+            expected = {key: self.config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha')}
+            expected.update(configuration_sha256=digest(self.config_path), helper_sha256=self.declaration['helper_sha256'])
+            require(type(row['binding']) is dict and row['binding'] == expected, 'AX diagnostic source binding')
+            return row
+        except BaseException:
+            return None  # No new acceptance, stop, cleanup or failure precedence.
 
 
     def reconcile_retirement(self, settled, collection):

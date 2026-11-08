@@ -15,9 +15,11 @@ from ci_xctest_attachments import bounded_file
 from ci_xctest_attachments import digest as data_digest
 
 
-def require(condition):
+def require(condition, code='invalid_record'):
     if not condition:
-        raise RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
+        error = RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
+        error.owner_guard = code  # Static tags only; never exception text or rejected input.
+        raise error
 
 
 def signature(node):
@@ -84,6 +86,8 @@ class OwnerWitness:
         self.serving_observed = False
         self.last_observation = self.last_empty = None
         self.last_uptime_ns = 0
+        self.last_accepted_uptime_ns = 0
+        self.stream_diagnostic = None
         self.failure = None
         self.stopping = False
         self.process = self.reader = None
@@ -133,6 +137,7 @@ class OwnerWitness:
                         and record.get('enumerated_exits') == []
                         and record.get('configuration_sha256') == self.configuration_sha256)
                 self.ready = True
+                self.last_accepted_uptime_ns = int(stamp)
                 self.last_empty = self.last_observation = observed
                 self.condition.notify_all()
                 return
@@ -162,8 +167,10 @@ class OwnerWitness:
                             and node['parent'] in (self.history[node['pid']]['parent'], 1))
                 if node['kind'] == 'app':
                     require(node['executable'] == native and type(node.get('app_launch_epoch')) in (int, float)
-                            and node['app_launch_epoch'] > 0 and isinstance(node.get('windows'), list)
-                            and len(node['windows']) <= 1 and all(type(n) is int and n > 0 for n in node['windows']))
+                            and node['app_launch_epoch'] > 0)
+                    require(isinstance(node.get('windows'), list) and len(node['windows']) <= 1
+                            and all(type(n) is int and n > 0 for n in node['windows']),
+                            'app_windows')
                     if new_app:
                         require(signature(node) == signature(new_app)
                                 and node['app_launch_epoch'] == new_app['app_launch_epoch'])
@@ -230,6 +237,7 @@ class OwnerWitness:
             self.app, self.serving_observed, self.retired = new_app, serving_observed, retired
             self.latest = nodes
             self.last_observation = observed
+            self.last_accepted_uptime_ns = int(stamp)
             if not nodes:
                 self.last_empty = self.last_observation
             self.condition.notify_all()
@@ -244,18 +252,7 @@ class OwnerWitness:
             require(not file.is_symlink() and file.resolve() == file and digest(file) == self.config[expected])
         self.process = subprocess.Popen([str(helper), str(config_path)], stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, start_new_session=True)
-        def read():
-            try:
-                while line := self.process.stdout.readline(65537):
-                    require(len(line) <= 65536 and line.endswith(b'\n'))
-                    self.observe(json.loads(line))
-                require(self.stopping)  # Unexpected EOF never proves application settlement.
-            except BaseException:
-                with self.condition:
-                    if not self.stopping:
-                        self.failure = self.failure or 'owner_stream_unavailable'
-                    self.condition.notify_all()
-        self.reader = threading.Thread(target=read, daemon=True)
+        self.reader = threading.Thread(target=lambda: self._read_stream(self.process.stdout), daemon=True)
         self.reader.start()
         deadline = self.clock() + 5
         with self.condition:
@@ -264,6 +261,81 @@ class OwnerWitness:
         if not self.ready or self.failure:
             self.stop()
             require(False)
+
+    def _read_stream(self, stream):
+        """The existing reader owns framing; diagnostics never grant ownership."""
+        stage, line, record = 'read', b'', None
+        try:
+            while True:
+                stage, line, record = 'read', b'', None
+                line = stream.readline(65537)
+                if not line:
+                    stage = 'eof'
+                    require(self.stopping)  # EOF never proves application settlement.
+                    break
+                stage = 'framing'
+                require(len(line) <= 65536, 'oversize')
+                require(line.endswith(b'\n'), 'missing_newline')
+                stage = 'json'
+                record = json.loads(line)
+                stage = 'record_validation'
+                self.observe(record)
+                if self.failure:
+                    self._retain_stream_diagnostic(stage, 'typed_failure', len(line), record)
+        except BaseException as error:
+            with self.condition:
+                if not self.stopping:
+                    self.failure = self.failure or 'owner_stream_unavailable'
+                    code = ('unexpected_eof' if stage == 'eof' else
+                            'invalid_json' if stage == 'json' else
+                            'io_error' if stage == 'read' and isinstance(error, OSError) else
+                            getattr(error, 'owner_guard', 'other'))
+                    self._retain_stream_diagnostic(stage, code, len(line), record)
+                self.condition.notify_all()
+
+    def _retain_stream_diagnostic(self, stage, code, byte_count, record):
+        # Failure-side best effort. No rejected bytes, paths, environments,
+        # exception strings or AX values cross this boundary.
+        try:
+            with self.condition:
+                if self.stream_diagnostic is not None:
+                    return
+                stages = {'read', 'framing', 'json', 'record_validation', 'eof'}
+                codes = {'unexpected_eof', 'invalid_json', 'io_error', 'oversize',
+                         'missing_newline', 'app_windows', 'invalid_record', 'typed_failure'}
+                shape = None
+                if (type(record) is dict and set(record) == {'schema', 'complete', 'nodes', 'retired',
+                        'enumerated_exits', 'observed_uptime_ns'} and record['schema'] == 'nac342-owner-v1'
+                        and record['complete'] is True and type(record['nodes']) is list
+                        and len(record['nodes']) <= 128):
+                    common = {'pid', 'parent', 'uid', 'start_seconds', 'start_microseconds', 'executable',
+                              'kind', 'environment', 'environment_role', 'arguments_sha256', 'serving', 'configuration_helper'}
+                    nodes = record['nodes']
+                    if all(type(n) is dict and n.get('kind') in ('app', 'engine', 'descendant')
+                           and set(n) == common | ({'windows', 'app_launch_epoch'} if n['kind'] == 'app' else set())
+                           for n in nodes):
+                        apps = [n for n in nodes if n['kind'] == 'app']
+                        if len(apps) == 1:
+                            windows = apps[0]['windows']
+                            if (type(windows) is list and len(windows) <= 128
+                                    and all(type(n) is int and 0 < n < 2**64 for n in windows)):
+                                original = (self.app or {}).get('windows', [])
+                                shape = dict(app_count=1, window_count=len(windows),
+                                    original_window_present=bool(original) and original[0] in windows)
+                        elif not apps:
+                            shape = dict(app_count=0, window_count=0, original_window_present=False)
+                        else:
+                            shape = dict(app_count=len(apps))
+                observed = int(self.clock() * 1e9)
+                if not 0 <= observed < 2**64:
+                    return
+                self.stream_diagnostic = dict(schema='nac342-owner-stream-diagnostic-v1', acceptance=False,
+                    stage=stage if stage in stages else 'read', code=code if code in codes else 'other',
+                    clock_basis='time.monotonic', observed_uptime_ns=str(observed),
+                    last_accepted_uptime_ns=str(self.last_accepted_uptime_ns),
+                    byte_count=min(byte_count, 65537), shape=shape)
+        except BaseException:
+            pass  # Missing diagnostics cannot change the original failure/custody.
 
     def attachment_binding(self):
         with self.condition:
@@ -324,6 +396,7 @@ class OwnerWitness:
             return {'ready': self.ready, 'failure': self.failure, 'known_identities': [identity(node) for node in self.history.values()],
                     'latest_pids': [node['pid'] for node in self.latest], 'retired': list(self.retired.values()),
                     'unresolved': self.unresolved, 'retained_diagnostics': self.retained_diagnostics,
+                    'stream_diagnostic': self.stream_diagnostic,
                     'positive_settlement': bool(self.history) and not self.failure and not self.latest
                         and set(self.retired) == set(self.history)}
 

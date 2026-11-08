@@ -173,6 +173,13 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                 except BaseException as error:
                     errors['ax_owner'] = error
                     safe_to_remove = False
+                finally:
+                    # Diagnostic loss must not replace the original failure or
+                    # change the process owner's cleanup decision.
+                    try:
+                        proof['ax_companion_diagnostic'] = companion.failure_diagnostic()
+                    except BaseException:
+                        pass
             if audit:
                 # Preserve the rejection before stop() can replace it with a
                 # generic missing-proof exception. Never retain exception text.

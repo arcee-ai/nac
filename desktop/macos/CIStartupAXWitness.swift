@@ -34,15 +34,59 @@ enum StartupAXLifetime {
 }
 // END AX LIFETIME
 
+// BEGIN AX FAILURE DIAGNOSTICS (pure Foundation values; never ready authority)
+enum StartupAXDiagnosticStage: String, CaseIterable {
+    case configuration, admission, initial_snapshot, trust, helper_identity
+    case waiting_publication, deadline, configuration_integrity, snapshot, lifetime
+    case app_window, owned_frame, ax_observation, closing_snapshot, closing_lifetime
+    case closing_integrity, receipt_publication, parent_lost
+}
+
+enum StartupAXFailureDiagnostic {
+    static func record(stage: StartupAXDiagnosticStage, error: Error, observed: UInt64,
+                       sequence: UInt64, refusals: UInt64, binding: [String: String]) -> [String: Any] {
+        let code: String
+        switch error {
+        case OwnershipError.invalid: code = "ownership_invalid"
+        case OwnershipError.argumentsUnavailable: code = "ownership_arguments_unavailable"
+        case is StartupProbeFailure: code = "process_probe_unavailable"
+        case is DecodingError: code = "decoding_failure"
+        case is CocoaError: code = "foundation_failure"
+        default: code = "other"
+        }
+        var safe: [String: String] = [:]
+        for (key, length) in [("source_sha", 40), ("test_source_sha", 40), ("harness_sha", 40),
+                              ("configuration_sha256", 64), ("helper_sha256", 64)] {
+            if let value = binding[key], value.utf8.count == length,
+               value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) {
+                safe[key] = value
+            }
+        }
+        return ["schema": "nac342-ax-failure-diagnostic-v1", "acceptance": false,
+                "stage": stage.rawValue, "code": code, "clock_basis": "DispatchTime.uptimeNanoseconds",
+                "observed_uptime_ns": String(observed), "sequence": String(sequence),
+                "refusal_generation": String(refusals), "binding": safe]
+    }
+}
+// END AX FAILURE DIAGNOSTICS
+
 @MainActor
 enum StartupAXWitnessMode {
     static func main(_ configPath: String, _ caseDeadline: String) {
+        var diagnosticStage = StartupAXDiagnosticStage.configuration
+        var diagnosticBinding: [String: String] = [:]
+        var sequence: UInt64 = 0, refusals: UInt64 = 0
         do {
             let bytes = try StartupAXPreflight.file(configPath, limit: 32768)
             let config = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
             let declaration = try JSONDecoder().decode(StartupAXDeclaration.self,
                 from: JSONSerialization.data(withJSONObject: config["ax_witness"] as Any))
             let digest = StartupAXPreflight.hash(bytes)
+            diagnosticBinding = ["configuration_sha256": digest, "helper_sha256": declaration.helper_sha256]
+            for key in ["source_sha", "test_source_sha", "harness_sha"] {
+                diagnosticBinding[key] = config[key] as? String
+            }
+            diagnosticStage = .admission
             let binary = CommandLine.arguments[0]
             try StartupObserver.need(StartupURLResources.physical(binary) == binary
                 && binary == declaration.helper_path && getppid() == declaration.owner_pid
@@ -54,15 +98,17 @@ enum StartupAXWitnessMode {
                 && deadline > admittedAt && deadline - admittedAt <= 300_000_000_000)
             let resources = try StartupURLResources(root: config["fixture_root"] as! String, app: config["app_path"] as! String)
             var known: [Int32: StartupProcessIdentity] = [:]
+            diagnosticStage = .initial_snapshot
             let initial = try StartupObserver.snapshot(config, resources: resources, known: &known)
             try StartupObserver.need((initial["nodes"] as! [[String: Any]]).isEmpty)
+            diagnosticStage = .trust
             let trusted = AXIsProcessTrusted() // Once, plain API. Never prompt or options.
             try StartupObserver.need(trusted)
+            diagnosticStage = .helper_identity
             let me = try process(getpid())
             let empty = StartupAXProcess(pid: 0, parent: 0, uid: Int32(getuid()), start_seconds: 0,
                 start_microseconds: 0, executable: "")
             var target = empty, launch = 0.0, window = 0
-            var sequence: UInt64 = 0, refusals: UInt64 = 0
             var retired: String?
             let reader = StartupAXReader()
             func receipt(_ status: String, began: UInt64, ended: UInt64,
@@ -77,32 +123,40 @@ enum StartupAXWitnessMode {
             func terminal(_ snapshot: [String: Any], began: UInt64) throws -> Bool {
                 let state = try StartupAXLifetime.outcome(snapshot, target: target, window: window, latched: &retired)
                 guard state != "ready" else { return false }
+                diagnosticStage = .closing_integrity
                 try StartupObserver.need(resources.intact() && process(getpid()) == me
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
                 let ended = DispatchTime.now().uptimeNanoseconds
                 try StartupObserver.need(ended >= began && ended < deadline)
                 sequence += 1; refusals += 1
+                diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(state, began: began, ended: ended,
                     stage: "target_" + state), to: declaration.path)
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
                 return true // Keep bounded custody alive until parent stop, no more AX/ready.
             }
             let start = DispatchTime.now().uptimeNanoseconds
+            diagnosticStage = .waiting_publication
             try StartupAXFiles.publish(receipt("waiting", began: start, ended: start), to: declaration.path)
             while getppid() == declaration.owner_pid {
                 if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
                 let began = DispatchTime.now().uptimeNanoseconds
+                diagnosticStage = .deadline
                 try StartupObserver.need(began < deadline)
+                diagnosticStage = .configuration_integrity
                 try StartupObserver.need(resources.intact() && process(getpid()) == me
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                diagnosticStage = .snapshot
                 let snapshot = try StartupObserver.snapshot(config, resources: resources, known: &known)
                 let apps = (snapshot["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
                 try StartupObserver.need(apps.count <= 1)
                 if target.pid == 0 && (apps.isEmpty || apps[0]["windows"] as? [Int] == []) {
                     RunLoop.current.run(until: Date().addingTimeInterval(0.05)); continue
                 }
+                diagnosticStage = .lifetime
                 if target.pid != 0 { if try terminal(snapshot, began: began) { continue } }
+                diagnosticStage = .app_window
                 try StartupObserver.need(apps.count == 1)
                 let app = apps[0], current = try decodedProcess(app)
                 let windows = app["windows"] as? [Int] ?? []
@@ -112,12 +166,17 @@ enum StartupAXWitnessMode {
                     launch = (app["app_launch_epoch"] as! NSNumber).doubleValue
                 }
                 try StartupObserver.need(current == target && windows == [window])
+                diagnosticStage = .owned_frame
                 let frame = try ownedFrame(target.pid, window)
                 var observed: StartupAXSurface?, stage: String?, failure: Data?
+                diagnosticStage = .ax_observation
                 do { observed = try reader.observe(pid: target.pid, frame: frame) }
                 catch { refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
+                diagnosticStage = .closing_snapshot
                 let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
+                diagnosticStage = .closing_lifetime
                 if try terminal(closing, began: began) { continue }
+                diagnosticStage = .closing_integrity
                 let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
                 try StartupObserver.need(latest.count == 1 && decodedProcess(latest[0]) == target
                     && latest[0]["windows"] as? [Int] == [window]
@@ -130,15 +189,24 @@ enum StartupAXWitnessMode {
                 if ended - began > 1_000_000_000 {
                     refusals += 1; observed = nil; stage = "sample_deadline"
                 }
+                diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(observed == nil ? "refused" : "ready", began: began,
                     ended: ended, observed: observed, stage: stage, failure: failure), to: declaration.path)
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
+            diagnosticStage = .parent_lost
             throw OwnershipError.invalid
         } catch {
             // Unexpected ownership/deadline/stream failure exits nonzero. The
             // parent invalidates/aborts the test and retains original ownership.
-            fputs("AX companion failed; no acceptance\n", stderr)
+            let record = StartupAXFailureDiagnostic.record(stage: diagnosticStage, error: error,
+                observed: DispatchTime.now().uptimeNanoseconds, sequence: sequence, refusals: refusals,
+                binding: diagnosticBinding)
+            if let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), data.count < 2048 {
+                FileHandle.standardError.write(data + Data([10]))
+            } else {
+                fputs("AX companion failed; no acceptance\n", stderr)
+            }
             exit(1)
         }
     }

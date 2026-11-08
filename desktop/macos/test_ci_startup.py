@@ -24,7 +24,8 @@ class StartupSupervisorTests(unittest.TestCase):
             self.assertEqual(runner_environment(), {'DEVELOPER_DIR': '/Selected/Xcode'})
 
     def exercise(self, *, sdk_failure=False, cleanup_failure=False, test_failure=False, integrity_failure=False,
-                 diagnostic_error=None, witness_rejection=False, configured=False, ax_failure=False):
+                 diagnostic_error=None, witness_rejection=False, configured=False, ax_failure=False,
+                 companion_diagnostic_error=False):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary).resolve()
             scenario = 'configuredLocal' if configured else 'onboarding'
@@ -44,6 +45,9 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.settle.return_value = {'root': str(fixture), 'owned_processes_settled': True, 'observed_processes': []}
             witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
             companion = MagicMock(failure=None)
+            companion.failure_diagnostic.return_value = None
+            if companion_diagnostic_error:
+                companion.failure_diagnostic.side_effect = RuntimeError('private diagnostic canary')
             companion.stop.return_value = {'owned_processes_settled': True}
             companion.reconcile_retirement.return_value = {'terminal_observed': False}
             if configured:
@@ -191,6 +195,10 @@ class StartupSupervisorTests(unittest.TestCase):
 
     def test_settled_ax_companion_allows_existing_profile_cleanup(self):
         self.exercise(configured=True)
+
+    def test_companion_diagnostic_loss_never_changes_success_or_unknown_custody(self):
+        self.exercise(configured=True, companion_diagnostic_error=True)
+        self.exercise(configured=True, ax_failure=True, companion_diagnostic_error=True)
 
     def test_sdk_failure_never_starts_observer_or_requests_input(self):
         self.exercise(sdk_failure=True)
