@@ -97,9 +97,23 @@ vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
 }));
 
 vi.mock("@/app/components/modals/PathPickerModal", () => ({
-  PathPickerModal: ({ open, onSelect }: { open: boolean; onSelect: (path: string) => void }) =>
+  PathPickerModal: ({
+    open,
+    initialPath,
+    onSelect,
+  }: {
+    open: boolean;
+    initialPath: string;
+    onSelect: (path: string) => void;
+  }) =>
     open ? (
-      <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+      <>
+        <output data-testid="picker-initial-path">{initialPath}</output>
+        <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+        <button onClick={() => onSelect("/workspace/Project 日本語 ")}>
+          Choose literal folder
+        </button>
+      </>
     ) : null,
 }));
 
@@ -347,6 +361,31 @@ it("launches once through the connected SSH project without restating location o
     expect(request).not.toHaveProperty("sandbox");
     expect(request).not.toHaveProperty("cwd");
     expect(request).not.toHaveProperty("ssh_host");
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("reopens and submits the exact selected local folder with trailing whitespace", async () => {
+  const { client, view } = renderModal(false);
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(screen.getByText("/workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose literal folder" }));
+    fireEvent.click(screen.getByText("/workspace/Project 日本語", { exact: false }));
+    expect(screen.getByTestId("picker-initial-path").textContent).toBe(
+      "/workspace/Project 日本語 ",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Choose literal folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createProject).mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/workspace/Project 日本語 ",
+    });
   } finally {
     view.unmount();
     client.clear();

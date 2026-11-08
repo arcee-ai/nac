@@ -1,6 +1,7 @@
 export declare const NAC_API_SURFACE: {
     readonly "GET /sessions/{session_id}/integrations": "private:standalone session integration status";
     readonly "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh";
+    readonly "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath";
     readonly "GET /product-context": "api.getProductContext";
     readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
     readonly "POST /sessions/{session_id}/task-followup-delegations": "private:human task follow-up delegation issuance";
