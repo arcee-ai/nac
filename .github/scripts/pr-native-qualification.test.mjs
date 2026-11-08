@@ -214,6 +214,6 @@ test("startup catalog binds the delivered product and four-file query supplier",
     "contract.py": "1bc06c5df4229475f02a77cf0e7d1cb9ef723da9d3ecf86e8ca4f9029ee01d86",
     "test_contract.py": "d111ad946ea80b69d1a1c21a73a6818b46380829719a00054013105716aa776e",
   });
-  assert.equal(startup.protocol_source_sha, "25046f450110d1b795d529d046d2c1deee880877");
+  assert.equal(startup.protocol_source_sha, "7325c48b3c9ec7036e255a6bd92f31c1a98c1607");
   assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
 });
