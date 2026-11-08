@@ -11,6 +11,53 @@ import unittest
 from unittest.mock import patch
 
 from ci_startup_ax import AXCompanion, guard_phases, require_guard_proof
+from ci_xctest_attachments import bounded_file
+
+
+def publish_fixture_receipt(path, row):
+    """Match the Swift producer: private complete file, read-only, then rename."""
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
+    pending = Path(temporary)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(json.dumps(row).encode())
+            os.fchmod(stream.fileno(), 0o400)
+        os.replace(pending, path)
+    finally:
+        pending.unlink(missing_ok=True)
+
+
+class ReceiptPublicationControls(unittest.TestCase):
+    def test_initial_and_replacement_publication_expose_only_complete_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'receipt.json'
+            original_replace = os.replace
+            previous = None
+            for row in [{'sequence': '0'}, {'sequence': '1'}]:
+                def before_rename(pending, destination):
+                    self.assertEqual(destination, target)
+                    self.assertEqual(pending.stat().st_mode & 0o777, 0o400)
+                    self.assertEqual(json.loads(bounded_file(pending, 8192)), row)
+                    if previous is None:
+                        with self.assertRaises(FileNotFoundError): bounded_file(target, 8192)
+                    else:
+                        self.assertEqual(json.loads(bounded_file(target, 8192)), previous)
+                    original_replace(pending, destination)
+                with patch('os.replace', side_effect=before_rename) as replace:
+                    publish_fixture_receipt(target, row)
+                replace.assert_called_once()
+                self.assertEqual(json.loads(bounded_file(target, 8192)), row)
+                self.assertEqual(list(target.parent.iterdir()), [target])
+                previous = row
+
+    def test_failed_publication_preserves_previous_receipt_and_removes_private_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'receipt.json'
+            publish_fixture_receipt(target, {'sequence': '0'})
+            with patch('os.replace', side_effect=OSError('inert publication failure')):
+                with self.assertRaises(OSError): publish_fixture_receipt(target, {'sequence': '1'})
+            self.assertEqual(json.loads(bounded_file(target, 8192)), {'sequence': '0'})
+            self.assertEqual(list(target.parent.iterdir()), [target])
 
 
 class CompanionControls(unittest.TestCase):
@@ -35,7 +82,7 @@ class CompanionControls(unittest.TestCase):
                          nonce='wrong' if wrong_nonce else declaration['nonce'],configuration_sha256='d'*64,
                          helper_sha256=declaration['helper_sha256'],support_sha256=declaration['support_sha256'],
                          case_deadline_ns=argv[-1],helper=identity)
-                Path(declaration['path']).write_text(json.dumps(row));Path(declaration['path']).chmod(0o400)
+                publish_fixture_receipt(Path(declaration['path']), row)
                 begun.set()
                 until=time.monotonic()+2
                 while not Path(declaration['path']+'.stop').exists() and time.monotonic()<until:
@@ -43,9 +90,7 @@ class CompanionControls(unittest.TestCase):
                         terminal=dict(row,status='retired',refusal_stage='target_retired',observation=None,
                             target=dict(pid=400,parent=1,uid=os.getuid(),start_seconds=3,start_microseconds=4,executable='/inert/app'),
                             app_launch_epoch=10,window_number=7)
-                        next_receipt=Path(declaration['path']+'.next')
-                        next_receipt.write_text(json.dumps(terminal));next_receipt.chmod(0o400)
-                        os.replace(next_receipt,Path(declaration['path']))
+                        publish_fixture_receipt(Path(declaration['path']), terminal)
                         events.append('retired-terminal');retired_published.set()
                     if kwargs['abort'](): raise RuntimeError('inert metadata loss')
                     time.sleep(.005)

@@ -52,7 +52,7 @@ test('ordinary-CI projection removes only the exact reviewed three-step contract
   }
 });
 
-test('required Mac workflow compiles only the nominated nine geometry and AX controls', () => {
+test('required Mac workflow runs the exact nominated geometry and AX lifetime controls', () => {
   const mac = require('yaml').parse(readFileSync('.github/workflows/macos-native.yml', 'utf8'));
   assert.ok(requiredJobs.includes('macos-native'));
   assert.ok(workflow.jobs['required-pr-checks'].needs.includes('macos-native'));
@@ -62,8 +62,25 @@ test('required Mac workflow compiles only the nominated nine geometry and AX con
   assert.equal(job['continue-on-error'], undefined);
   assert.equal(job.steps[0].with.ref, '${{ inputs.source-sha }}');
   assert.equal(job.steps[2].with.ref, '${{ steps.policy-source.outputs.revision }}');
-  assert.equal(job.steps[3].env.NAC342_SWIFT_PANEL_PROOF, '1');
-  assert.equal(job.steps[3].run, 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel');
+  const controls = job.steps[3];
+  const expectedEnv = { NAC342_SWIFT_PANEL_PROOF: '1', NAC342_AX_WITNESS_PROOF: '1' };
+  const expectedRun = 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel\n'
+    + 'NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/.startup-panel-q" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py\n';
+  const verify = step => {
+    assert.deepEqual(step.env, expectedEnv);
+    assert.equal(step.run, expectedRun);
+  };
+  verify(controls);
+  for (const mutate of [
+    s => { delete s.env.NAC342_AX_WITNESS_PROOF; },
+    s => { s.env.NAC342_SWIFT_PANEL_PROOF = '0'; },
+    s => { s.run = s.run.split('\n')[0]; },
+    s => { s.run = s.run.replace('$GITHUB_WORKSPACE/.startup-panel-q', '/foreign'); },
+    s => { s.run = s.run.replace('test_ci_startup_ax_lifetime.py', 'other.py'); },
+  ]) {
+    const changed = structuredClone(controls); mutate(changed);
+    assert.throws(() => verify(changed));
+  }
   for (const step of job.steps) {
     assert.equal(step.if, undefined);
     assert.equal(step['continue-on-error'], undefined);

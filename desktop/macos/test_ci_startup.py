@@ -39,6 +39,7 @@ class StartupSupervisorTests(unittest.TestCase):
             profile = {'root': fixture}
             calls = []
             primary = RuntimeError('synthetic test failure')
+            owned_errors = []
             witness = MagicMock(failure=None, ui_terminal=False)
             def start_witness(*args):
                 calls.append('preinstalled')
@@ -105,9 +106,13 @@ class StartupSupervisorTests(unittest.TestCase):
                         return options['abort']()
                     # This actual child only writes its PID and waits. The CI
                     # runner owns its process group; no NAC, Xcode or UI runs.
-                    owned_run([sys.executable, '-B', '-c',
-                        'import os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)',
-                        str(child_pid)], folder / 'controlled-child.log', 3, abort=abort)
+                    try:
+                        owned_run([sys.executable, '-B', '-c',
+                            'import os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)',
+                            str(child_pid)], folder / 'controlled-child.log', 3, abort=abort, retain_ownership=True)
+                    except BaseException as error:
+                        owned_errors.append(error)
+                        raise
                 if witness_rejection or ui_failure:
                     witness.failure = 'app_windows' if ui_failure else 'ownership_observation_unavailable'
                     self.assertEqual(options['abort'](), witness.failure)
@@ -146,7 +151,12 @@ class StartupSupervisorTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as caught:
                     run_case(folder, profiles, scenario, root, root, root, root, 'a' * 40, {}, root, root,
                              run, MagicMock(), MagicMock(return_value={'scope': 'synthetic OCR'}))
-                if test_failure or settled_ax_failure: self.assertIs(caught.exception, primary)
+                if diagnostic_error is not None:
+                    self.assertEqual(len(owned_errors), 1)
+                    self.assertIs(caught.exception, owned_errors[0])
+                    self.assertEqual(str(caught.exception), 'Native fixture ownership unavailable during helper execution')
+                elif test_failure or settled_ax_failure:
+                    self.assertIs(caught.exception, primary)
                 if export_failure:
                     self.assertIsInstance(caught.exception.__cause__, OSError)
                     witness.settle.assert_called_once(); witness.stop.assert_called_once()
@@ -205,6 +215,12 @@ class StartupSupervisorTests(unittest.TestCase):
                 else:
                     self.assertEqual(metadata['failure']['exception_type'], 'unknown')
                 self.assertFalse(audit.thread.is_alive())
+                ownership = json.loads((folder / 'controlled-child.log.ownership.json').read_text())
+                self.assertTrue(ownership['accepted'])
+                self.assertTrue(ownership['reaped'])
+                self.assertTrue(ownership['drain_settled'])
+                self.assertFalse(ownership['unknown'])
+                self.assertIsNone(ownership['teardown_error'])
                 with self.assertRaises(ProcessLookupError):
                     os.kill(int(child_pid.read_text()), 0)  # Observation only; never signal an adopted PID.
             if ui_failure or settled_ax_failure:
