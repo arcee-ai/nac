@@ -15,7 +15,7 @@ from ci_startup_process import capture, package_contract
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
+PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
 TEST_SOURCE = 'ba266ba1b3bea331768d91fc8a0b2ee66b484d01'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
