@@ -300,7 +300,7 @@ def main():
             need(not budget.failed and not STOP, 'latched failure cannot pass')
             report['status'] = 'PASS'
     except BaseException as error:
-        report.update(error_type=type(error).__name__, error=str(error)[-2048:])
+        report.update(status='FAIL', error_type=type(error).__name__, error=str(error)[-2048:])
         raise
     finally:
         report.update(ended_epoch=time.time(), clock_failures=budget.failed, stop_signals=STOP)
