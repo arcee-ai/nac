@@ -1,6 +1,6 @@
 """Shared public XCTest launcher; never provisions host permissions."""
 import hashlib
-from ci_paths_budget import active, using, check as budget_check, timeout_options, checked_items
+from ci_paths_budget import BudgetExpired, active, using, check as budget_check, timeout_options, checked_items
 import json
 import os
 from contextlib import contextmanager
@@ -28,21 +28,44 @@ def runner_environment():
 @contextmanager
 def relocation_directory(raw):
     """Never remove an input-launched bundle before ownership cleanup settles."""
+    budget_check()
     path = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-')).resolve()
     lease = {'path': path, 'safe_to_remove': True}
+    published = False
+    primary = None
+    def journal(retained):
+        budget_check()
+        (raw / 'xctest-relocation.json').write_text(json.dumps({
+            'path':str(path),'bundle_retained_for_unresolved_cleanup':retained},indent=2)+'\n')
+        budget_check()
     try:
+        # Caller work must never receive an unjournaled root. This uses only
+        # the allowance already admitted by the caller, including its cap.
+        with using(active()):
+            journal(True)
+        published = True
         yield lease
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         bound=active()
         if bound is not None and bound.owner.failed:lease['safe_to_remove']=False
-        with using(bound.owner.retention if bound else None):
-            try:
-                if lease['safe_to_remove']:
-                    budget_check()
-                    shutil.rmtree(path)
-            finally:
-                (raw / 'xctest-relocation.json').write_text(json.dumps({
-                    'path':str(path),'bundle_retained_for_unresolved_cleanup':not lease['safe_to_remove']},indent=2)+'\n')
+        try:
+            with using(bound.owner.retention if bound else None):
+                removed = False
+                try:
+                    if lease['safe_to_remove']:
+                        budget_check()
+                        shutil.rmtree(path)
+                        removed = True
+                finally:
+                    if published:
+                        journal(not removed)
+        except BudgetExpired:
+            if primary is None:
+                raise
+            primary.add_note('Relocation finalization: BudgetExpired under original retention/parent cutoff; cleanup remains unqualified')
 
 
 def observe_process_status(pid, *, strict=False):
