@@ -120,6 +120,21 @@ func fileRun(_ mode: String) -> [String: Any] {
         guard let resolved = realpath(directory.path, nil) else { throw StartupAXReceiptError.invalid }
         directory = URL(fileURLWithPath:String(cString:resolved)); free(resolved)
         let file = directory.appendingPathComponent("receipt.json").path
+        if mode == "file_publish" {
+            let process = StartupAXProcess(pid:1,parent:2,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert")
+            func receipt(_ sequence: String) -> StartupAXReceipt {
+                StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:String(repeating:"a",count:64),configuration_sha256:String(repeating:"b",count:64),helper_sha256:String(repeating:"c",count:64),support_sha256:[:],trusted:true,helper:process,target:process,app_launch_epoch:1,window_number:1,sequence:sequence,refusal_generation:"0",began_ns:"1",ended_ns:"2",status:"ready",case_deadline_ns:"100",observation:nil,refusal_stage:nil,refusal:nil)
+            }
+            try StartupAXFiles.publish(receipt("1"),to:file)
+            let before = try StartupAXFiles.read(file)
+            let old = FileHandle(fileDescriptor:open(file,O_RDONLY|O_NOFOLLOW|O_CLOEXEC),closeOnDealloc:true)
+            try StartupAXFiles.publish(receipt("2"),to:file)
+            let after = try StartupAXFiles.read(file)
+            let stable = old.readDataToEndOfFile()
+            let decoded = try StartupAXFiles.decode(after)
+            let files = try FileManager.default.contentsOfDirectory(atPath:directory.path)
+            return ["accepted":stable == before && before != after && decoded.sequence == "2" && files == ["receipt.json"]]
+        }
         let data = Data(mode == "file_oversize" ? String(repeating:" ",count:8193).utf8 : "{}".utf8)
         let target = directory.appendingPathComponent("target.json").path
         FileManager.default.createFile(atPath:mode == "file_symlink" ? target : file,contents:data,attributes:[.posixPermissions:0o400])
@@ -185,8 +200,8 @@ class ReceiptControls(unittest.TestCase):
         self.assertEqual([r['accepted'] for r in self.rows(modes)],[True]+[False]*6)
 
     def test_real_read_port_refuses_symlink_hardlink_oversize_and_foreign_parent(self):
-        modes=['file_positive','file_symlink','file_hardlink','file_oversize','file_foreign_parent']
-        self.assertEqual([r['accepted'] for r in self.rows(modes)],[True]+[False]*4)
+        modes=['file_positive','file_publish','file_symlink','file_hardlink','file_oversize','file_foreign_parent']
+        self.assertEqual([r['accepted'] for r in self.rows(modes)],[True]*2+[False]*4)
 
     def test_real_cfequal_wrapper_retains_cancelled_handle_and_rejects_same_shaped_replacement(self):
         self.assertEqual(self.rows(['identity'])[0],dict(accepted=True,retained=True,replacement_rejected=True))
