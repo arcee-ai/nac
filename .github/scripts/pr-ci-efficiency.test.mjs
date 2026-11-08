@@ -51,7 +51,7 @@ test("exact native supplier qualification is explicit, bounded and separate from
   const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
   const input = stable.on.workflow_dispatch.inputs.native_qualification;
   assert.equal(input.default, "none");
-  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26"]);
+  assert.deepEqual(input.options, ["none", "all-341-macos26", "all-343-macos26", "all-351-macos14", "all-352-macos26", "all-342-startup-macos26", "all-344-lifecycle-macos26"]);
   const caller = stable.jobs["native-qualification"];
   assert.match(caller.if, /github.event_name == 'workflow_dispatch'/);
   assert.match(caller.if, /startsWith\(github.ref, 'refs\/heads\/codex\/'\)/);
@@ -89,6 +89,32 @@ test("exact native supplier qualification is explicit, bounded and separate from
   assert.equal(catalog["all-352-macos26"].source_sha, "a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1");
   assert.equal(catalog["all-352-macos26"].phase_count, 6);
   assertStartupSupplier(catalog);
+  assert.deepEqual(catalog["all-344-lifecycle-macos26"], {
+    source_sha: "7d8322f1d8cad25cc1aa79dc5a7a025a6719065b", source_tree: "89a58b792f4b181a6d64af5dfcb5bc4d6bb24053",
+    profile: "macos26", suite: "lifecycle", scenario_count: 3, scenarios: ["run", "approval", "terminal"],
+    allocation_id: "nac344-ordering-7e-one", retry_budget: 0,
+  });
+});
+
+test("lifecycle custody stays in the named native adapter without rerouting ordinary CI", () => {
+  const stable = YAML.parse(readFileSync(".github/workflows/stable-release.yml", "utf8"));
+  const native = stable.jobs["native-qualification"];
+  assert.match(native.if, /inputs.native_qualification == 'all-344-lifecycle-macos26'/);
+  assert.equal(stable.on.workflow_dispatch.inputs.lifecycle_custody.type, "string");
+  assert.equal(stable.on.workflow_dispatch.inputs.lifecycle_custody.default, "");
+  assert.equal(native.with["lifecycle-custody"], "${{ inputs.lifecycle_custody || '' }}");
+  for (const [name, job] of Object.entries(stable.jobs)) {
+    if (name !== "native-qualification") {
+      assert.equal(JSON.stringify(job).includes("all-344-lifecycle-macos26"), false, name);
+      assert.equal(JSON.stringify(job).includes("inputs.lifecycle_custody"), false, name);
+    }
+  }
+  assert.equal(stable.jobs["macos-native"].if, "${{ !cancelled() && needs.prepare.result == 'success' && (needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}");
+  const exact = workflow("macos-qualification");
+  assert.equal(exact.on.workflow_call.inputs["lifecycle-custody"].default, "");
+  const driver = exact.jobs.native.steps.find(step => step.name === "Qualify the exact supplier without copying or changing its sources");
+  assert.equal(driver.env.NAC_LIFECYCLE_CUSTODY, "${{ inputs.lifecycle-custody }}");
+  assert.deepEqual(exact.permissions, { contents: "read" });
 });
 
 const quality = () => ({

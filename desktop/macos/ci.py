@@ -24,6 +24,9 @@ from ci_xctest import run_terminal
 from ci_instances import audit_cleanup as audit_instances, qualify as qualify_instances, retain_receipt as retain_instances
 from ci_terminal import qualify as qualify_terminal
 from ci_startup import qualify as qualify_startup
+from ci_lifecycle import qualify as qualify_lifecycle, image_report as lifecycle_image_report
+from ci_lifecycle_contract import require_capsule as require_lifecycle_capsule
+from ci_lifecycle_finalization import finalize as finalize_lifecycle, gui_guard as lifecycle_gui_guard
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
@@ -276,6 +279,7 @@ def main():
     instances = False
     terminal = False
     startup = False
+    lifecycle = False
     def interrupt(signum, _frame):
         raise RuntimeError(f'CI interrupted by signal {signum}')
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -289,6 +293,7 @@ def main():
             instances = target['suite'] == 'instances'
             terminal = target['suite'] == 'terminal'
             startup = target['suite'] == 'startup'
+            lifecycle = target['suite'] == 'lifecycle'
             if not args.source_root or args.source_root.is_symlink():
                 raise RuntimeError('Qualification requires an explicit non-symlink source root')
             source_root = args.source_root.resolve()
@@ -296,6 +301,10 @@ def main():
                 raise RuntimeError('Supplier source must be a separate checkout, not part of the harness')
             report['qualification'] = args.qualification
             report['target_contract'] = target
+            if lifecycle:
+                if not args.source_root.is_absolute() or args.source_root.resolve() != args.source_root:
+                    raise RuntimeError('Lifecycle requires a canonical absolute supplier checkout')
+                require_lifecycle_capsule(os.environ.get('NAC_LIFECYCLE_CUSTODY', ''), args.expected_sha, os.environ)
         elif args.source_root:
             raise RuntimeError('Separate source root requires an approved qualification key')
         external_roots = []
@@ -358,7 +367,7 @@ def main():
             os.environ.pop(key, None)
         os.environ.update(NAC_SOURCE_REVISION=report['source_sha'], NAC_BUILD_TRACK='dev',
                           NAC_BUILD_ID='dev-' + report['source_sha'])
-        if target and not instances and not startup:
+        if target and not instances and not startup and not lifecycle:
             # Reuse the exact source owner's failure cleanup, including its
             # native fixture helpers. No code is copied into that checkout.
             sys.path.insert(0, str(source_root / 'desktop/macos'))
@@ -369,7 +378,10 @@ def main():
                 target_module = loaded
             finally:
                 sys.path.pop(0)
-        if startup:
+        if lifecycle:
+            report.update(qualify_lifecycle(raw, source_root, target, args.expected_sha,
+                                           run, command, lifecycle_image_report, RUN_DEADLINE, report=report))
+        elif startup:
             report.update(qualify_startup(raw, source_root, args.test_source_root, args.protocol_source_root,
                                          args.expected_sha, run, command, native_report))
         elif instances:
@@ -441,6 +453,8 @@ def main():
                 report['terminal_image'] = native_report([str(helper), '--terminal', str(raw / 'evidence/trusted-terminal.png')],
                                                           raw / 'terminal-image-reader.log')
         report['quartz_end'] = native_report([str(gui_helper)], raw / 'gui-reader-end.log')
+        if lifecycle:
+            lifecycle_gui_guard(report['quartz_end'], [(str(source_root), '<target-checkout>'), *redact_values()])
         console_end = subprocess.check_output(['/usr/sbin/ioreg', '-a', '-n', 'Root', '-d', '1'], timeout=15)
         report['console_end'] = require_console(console_end, os.getuid(), report['quartz_end'])
         require_checkout(source_root, report['source_sha'])
@@ -461,6 +475,10 @@ def main():
             if startup:
                 report['cleanup'] = {'owner': 'startup preinstalled OS witness; per-case receipts',
                                      'generic_JSON_PID_cleanup_used': False}
+            elif lifecycle:
+                report['cleanup'] = {'owner': 'immutable ALL-344 driver finally and external per-case residual audit',
+                                     'generic_JSON_PID_cleanup_used': False,
+                                     'receipt_glob': 'lifecycle/*/external-result.json'}
             else:
                 report['cleanup'] = settle_apps(raw, cleanup=target_module.cleanup_failed_case if target_module else None,
                                                 extra_alive=getattr(target_module, 'alive', None), workspace=workspace or terminal)
@@ -470,18 +488,21 @@ def main():
             raise
         finally:
             crashes = Path.home() / 'Library/Logs/DiagnosticReports'
-            count = 0
-            for crash in sorted(crashes.glob('NACPreview*')):
-                if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
-                    with crash.open('rb') as stream:
-                        (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
-                    count += 1
-            report['crash_reports'] = count
-            report['elapsed_seconds'] = round(time.time() - started, 3)
-            (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
-            # Bundle resources and binaries are not uploaded. Export only bounded
-            # evidence, logs and our report, with exact-value redaction.
-            export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
+            if lifecycle:
+                report['elapsed_seconds'] = round(time.time() - started, 3)
+                finalize_lifecycle(raw, output, report, [(str(source_root), '<target-checkout>'), *redact_values()],
+                                   crashes=crashes, started=started)
+            else:
+                count = 0
+                for crash in sorted(crashes.glob('NACPreview*')):
+                    if crash.is_file() and not crash.is_symlink() and crash.stat().st_mtime >= started and count < 3:
+                        with crash.open('rb') as stream:
+                            (raw / f'crash-{count}{crash.suffix}').write_bytes(stream.read(65536))
+                        count += 1
+                report['crash_reports'] = count
+                report['elapsed_seconds'] = round(time.time() - started, 3)
+                (raw / 'ci-report.json').write_text(json.dumps(report, indent=2) + '\n')
+                export_evidence(raw, output, [(str(source_root), '<target-checkout>'), *redact_values()], include_hashes=startup)
 
 
 if __name__ == '__main__':
