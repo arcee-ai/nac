@@ -1,5 +1,5 @@
 name: PRIVATE NEVERMERGE post657 four startup with R
-run-name: PRIVATE NEVERMERGE exact P10 Q9931 H1c9 R four startup
+run-name: PRIVATE NEVERMERGE exact P10 Q9931 schema-aligned R four startup
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   four_startup:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-four-startup-post657-p10' && github.run_attempt == 1
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/experimental-native342-four-startup-r7325-source01' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -39,7 +39,7 @@ jobs:
           try:
               a = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
               assert set(a) == {'scope','controller_sha','allocation_id','attempt','retries','manifest_sha256','clock','producer'}
-              assert a['scope'] == 'P10-Q9931-H1c9-R2504-four-startup' and a['controller_sha'] == os.environ['GITHUB_SHA']
+              assert a['scope'] == 'P10-Q9931-R7325-schema50-four-startup' and a['controller_sha'] == os.environ['GITHUB_SHA']
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0
               c = a['clock']; keys = ('STARTED','WORK_DEADLINE','CLEANUP_DEADLINE','HARD_DEADLINE')
               assert set(c) == set(keys) and all(type(c[k]) in (int,float) for k in keys)

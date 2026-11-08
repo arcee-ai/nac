@@ -39,6 +39,7 @@ class LauncherControls(unittest.TestCase):
         with patch.dict(launch.os.environ, env), patch.object(launch.time, 'time', return_value=1001):
             self.assertEqual(launch.inputs(), value)
             for changed in (dict(GITHUB_REF='refs/heads/codex/experimental-native342-onboarding-post648-p9'),
+                            dict(GITHUB_REF='refs/heads/codex/experimental-native342-four-startup-post657-p10'),
                             dict(GITHUB_RUN_ATTEMPT='2'), dict(GITHUB_EVENT_NAME='push')):
                 with patch.dict(launch.os.environ, changed), self.assertRaises(RuntimeError):
                     launch.inputs()

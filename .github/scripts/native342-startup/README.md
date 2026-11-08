@@ -1,17 +1,19 @@
 # NEVERMERGE: exact post-657 four startup cases plus independent R
 
-This private successor starts at immutable consumer6c052d2. It adapts that
-consumer's exact-artifact handoff and maintained H callbacks. The old onboarding
-branch, evidence and allocation remain unchanged. Only this new branch's manual
+This private successor starts at frozen consumerfd221, retaining consumer6c052d2's
+exact-artifact handoff and maintained H callbacks. Both spent branches, their
+evidence and original allocations remain unchanged. Only this new branch's manual
 workflow is reachable; source publication and any actual episode require Root.
 No source declaration, test success or JSON example grants execution authority.
 
-`pair.json` binds P10ef2c, Q9931, H1c9 and independent R2504. P10's sole parent
+`pair.json` binds P10ef2c, Q9931, current H successor and independent R7325. P10's sole parent
 and full Native boundary are7325, on current dev422. Historical SDK controller,
 measured H, original preparation origin and landed-auth provenance are retained
 as historical fields. They provide no current binary/configuration/SDK credit.
-The reviewed producer source is7239 on its exact post657-P10 branch; actual
-producer run, artifact ID/name and manifest hash are still UNKNOWN and Root-bound.
+The reviewed producer source is7239 on its exact post657-P10 branch. Root verified
+producer04 run42426305195 and artifact13594999645, original manifest57fef13a,
+without granting this new scope an actual allocation. A new admission must bind
+the exact genuine artifact and full manifest hash; no implicit reuse grant exists.
 An old P9 receipt, producer source, onboarding scope or branch is rejected.
 
 ## Existing ownership and validation
@@ -93,7 +95,7 @@ allocates nothing and zero IDs/epochs/placeholders are rejected:
 
 ```json
 {
-  "scope": "P10-Q9931-H1c9-R2504-four-startup",
+  "scope": "P10-Q9931-R7325-schema50-four-startup",
   "controller_sha": "<reviewed new consumer SHA>",
   "allocation_id": "<Root NEW finite episode>",
   "attempt": 1,
@@ -143,6 +145,32 @@ Historical onboarding04/producer03 and SDK PASS remain old Q04c/H1b9/P9 evidence
 Clock F1 count1 remains7PASS/1 canonical fixture ERROR; count2/4 source fix remains
 historical. This new extension creates no count3, retry reset or runtime credit.
 Four prior failed Q cases, lifecycle531 spent1, private345 STOP and all one-shots
-remain unchanged. The old ALL354 goal remains BLOCKED/unfinished. Publication,
-actual producer success, current full SDK, R runtime, four UI cases, minOS and
-full Native acceptance remain unproven until separately admitted and observed.
+remain unchanged. The old ALL354 goal remains BLOCKED/unfinished. New-source publication, current full Q SDK, aligned R7325 runtime, four UI
+cases, minOS and full Native acceptance remain pending separate Root decisions
+and observed evidence; producer04 package success remains package-only.
+
+## Source correction01: stale R schema nomination
+
+Actual episode01 on frozen fd221/R2504 is CONSUMED_FAIL before any full-Q SDK
+or UI request. Root's read-only source diagnosis established R supported40 and
+fixture41 against P10 supported50. That pair did not qualify a future store;
+no production future-store bug is established by its two failed R tests. The
+two retained profiles and missing after-byte/cleanup evidence remain failures.
+
+This new scope/branch changes R to retained Native7325 with the SAME complete
+reviewed Rust test bytes0eb70, supported50 and true future51 (WAL main50). H's
+protocol owner now mandates exact clean R/P, pinned schema-source hashes and
+original normal-manifest/admission SHA binding, with literal
+R_supported == P_supported == manifest.store_schema BEFORE any Cargo/executor.
+Missing/malformed/duplicate/hash/overflow/version mismatch, including R51/P50,
+refuses before creating build output. The build receipt records versions and
+source/manifest hashes; runtime verification requires the aligned receipt.
+No Rust test edit, target-schema environment override, production API, generic
+failure acceptance, bytes/mtime/lease/profile or typed-record weakening occurs.
+
+All existing caps, original clock and four-case fail-first behavior remain.
+Old fd221 is spent/frozen. This SOURCE correction01/4 grants no repeat of its
+allocation; a new source review, publication and finite actual admission remain
+Root-owned. Genuine P10 producer04/artifact13594999645/manifest57fef remains the
+same package; no rebuild or retag is introduced. Current full Q SDK and all four
+native UI cases remain unrun, and no automatic continuation follows.

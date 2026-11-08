@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native342-four-startup-post657-p10'
-SCOPE = 'P10-Q9931-H1c9-R2504-four-startup'
+BRANCH = 'refs/heads/codex/experimental-native342-four-startup-r7325-source01'
+SCOPE = 'P10-Q9931-R7325-schema50-four-startup'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '7239e61a0ebc0ee01b28f9d3cb9c1262132a8627'
 PRODUCER_BRANCH = 'codex/experimental-native-q-host-package-post657-p10'
@@ -78,7 +78,8 @@ def selected_episode(startup, protocol, clock, using, *, evidence, profiles, app
     try:
         clock.require_phase('required-R-build-and-four-records', 1155)
         with using(clock.work):
-            private, runner = protocol.build(protocol_root, evidence / 'startup-protocol-runner', run)
+            private, runner = protocol.build(protocol_root, evidence / 'startup-protocol-runner', run,
+                product=product, manifest=manifest, package_admission=package_admission)
             process = protocol.verify(private, runner, app, manifest, package_admission,
                                       evidence / 'startup-protocol', run)
         # verify owns all typed records, engine identity/digest, integrity and

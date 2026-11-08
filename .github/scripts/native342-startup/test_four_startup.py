@@ -50,7 +50,8 @@ class SourceControls(unittest.TestCase):
     def test_original_queue_inclusive_clock_and_new_scope_never_reuse_old_admission(self):
         value = self.admission()
         self.assertEqual(controller.admit(value, 'a' * 40, now=3700), (1000, 3880, 4480, 4600))
-        for changed in (dict(scope='Q04c-on-final-post648-P-onboarding-only'), dict(attempt=2), dict(retries=1),
+        for changed in (dict(scope='Q04c-on-final-post648-P-onboarding-only'),
+                        dict(scope='P10-Q9931-H1c9-R2504-four-startup'), dict(attempt=2), dict(retries=1),
                         dict(controller_sha='c' * 40), dict(extra=True), dict(manifest_sha256=''),
                         dict(producer={**value['producer'], 'controller_sha': 'c' * 40}),
                         dict(producer={**value['producer'], 'branch': 'codex/old-P9'})):
@@ -71,8 +72,10 @@ class SourceControls(unittest.TestCase):
         startup.CASES, startup.PROTOCOL_SOURCE, startup.PRODUCT = controller.CASES, PAIR['R'], PAIR['P']
         protocol = Mock(spec=['build', 'verify', 'SCENARIOS'])
         protocol.SCENARIOS = ('future-main', 'future-wal', 'busy-future', 'invalid-db')
-        def build(root, output, run):
+        def build(root, output, run, *, product, manifest, package_admission):
             events.append('R-build')
+            self.assertEqual((product, manifest, package_admission),
+                ('exact-P10-checkout', 'actual-manifest', {'provenance': 'actual'}))
             self.assertIs(budget.active(), self.clock.work)
             return 'private-R', {'actual': 'inert receipt'}
         def verify(private, receipt, app, manifest, admission, output, run):
