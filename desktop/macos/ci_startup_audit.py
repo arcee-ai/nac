@@ -211,6 +211,7 @@ class LiveAudit:
         require(len(nodes) <= 1, 'ambiguous_serving_engine')
         if not nodes:
             return
+        require(not self.witness.ui_terminal and self.witness.ui_root is not None, 'api_witness_unavailable')
         node = nodes[0]
         require(app and node['parent'] == app['pid'], 'app_owned_serving_parent')
         if self.process:

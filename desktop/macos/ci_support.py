@@ -4,9 +4,11 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import stat
 
 MAX_FILE = 256 * 1024
 MAX_TOTAL = 12 * 1024 * 1024
+COMPLETE_LOG_LIMIT = 2 * 1024 * 1024  # Opt-in R compiler graph only; total stays 12 MiB.
 
 
 def console_state(data, uid):
@@ -82,10 +84,37 @@ def export_evidence(raw, output, replacements, *, include_hashes=False):
             continue
         size = source.stat().st_size
         limit = 2 * 1024 * 1024 if source.suffix == '.png' else MAX_FILE
+        capture = None
+        if str(source.relative_to(raw)) == 'startup-protocol-runner/protocol-build.log':
+            owner = source.with_name(source.name + '.ownership.json')
+            descriptor = os.open(owner, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 8192:
+                    raise RuntimeError('Complete R compiler log ownership receipt unavailable')
+                encoded = stream.read(8193)
+            if len(encoded) > 8192:
+                raise RuntimeError('Complete R compiler log ownership receipt exceeds bound')
+            ownership = json.loads(encoded)
+            capture = ownership.get('output_capture', {})
+            if (capture.get('mode') != 'complete' or type(capture.get('limit_bytes')) is not int
+                    or not 0 < capture['limit_bytes'] <= COMPLETE_LOG_LIMIT
+                    or type(capture.get('complete')) is not bool or type(capture.get('overflow')) is not bool
+                    or type(capture.get('bytes_seen')) is not int or type(capture.get('bytes_retained')) is not int
+                    or not 0 <= capture['bytes_retained'] == size <= capture['limit_bytes']
+                    or capture['bytes_seen'] < size
+                    or capture['overflow'] != (capture['bytes_seen'] > capture['limit_bytes'])
+                    or (capture['complete'] and (capture['overflow'] or capture['bytes_seen'] != size
+                        or any(ownership.get(k) is not True for k in ('accepted', 'reaped', 'drain_settled'))
+                        or ownership.get('unknown') is not False or ownership.get('teardown_error') is not None))):
+                raise RuntimeError('Complete R compiler log capture receipt invalid')
+            limit = capture['limit_bytes']
         if source.suffix == '.png' and size > limit:
             raise RuntimeError(f'Image exceeds evidence limit: {source.name}')
         with source.open('rb') as stream:
             data = stream.read(limit)
+            if capture is not None and hashlib.sha256(data).hexdigest() != capture.get('sha256'):
+                raise RuntimeError('Complete R compiler log digest changed')
             if include_hashes:
                 stream.seek(0)
                 source_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -102,6 +131,8 @@ def export_evidence(raw, output, replacements, *, include_hashes=False):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         entry = {'file': str(source.relative_to(raw)), 'bytes': len(data), 'truncated': size > limit}
+        if capture is not None:
+            entry.update(capture_complete=capture['complete'], truncated=not capture['complete'])
         if include_hashes:
             entry.update(raw_source_sha256=source_sha256, raw_source_bytes=size,
                          exported_sha256=hashlib.sha256(data).hexdigest())

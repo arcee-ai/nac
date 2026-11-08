@@ -135,6 +135,16 @@ jobs:
           node-version: 24.22.1
       - name: Install locked workflow-parser dependencies
         run: npm --prefix .github/scripts ci --ignore-scripts
+      - name: Resolve immutable startup console supplier
+        id: startup-console-source
+        run: python3 -B desktop/macos/ci_startup_console_check.py --resolve >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.startup-console-source.outputs.revision }}
+          path: .startup-console-q
+          persist-credentials: false
+      - name: Require startup console producer and collector controls with zero skips
+        run: python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q
       - name: Check workflows and scripts, then prove enforcement
         env:
           GITHUB_TOKEN: ${{ github.token }}

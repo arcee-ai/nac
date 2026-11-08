@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -14,6 +15,8 @@ import urllib.parse
 import urllib.request
 
 from ci_startup_fixture import PRODUCT, digest
+from ci_paths_budget import active, using, check as budget_check, time_limit
+from ci_startup_process import capture
 from ci_startup_owner import native_identity, signature
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -104,54 +107,69 @@ class Provider:
         self.journal = None
         self.log = log
         self.diagnostics = deque(maxlen=16)
+        self.reader = self.error_reader = None
+        self.settled = False
 
     def start(self):
         require(self.process is None, 'provider_stale_process')
-        self.process = subprocess.Popen(['node', str(ROOT / 'desktop/macos/ci_startup_provider.mjs')],
-            cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env={'PATH': os.environ['PATH'], 'LANG': 'en_US.UTF-8'}, start_new_session=True)
-        def read():
-            try:
-                for line in iter(lambda: self.process.stdout.readline(65537), ''):
-                    require(len(line.encode()) <= 65536 and line.endswith('\n'), 'provider_record_bound')
-                    self.lines.put_nowait(json.loads(line))
-            except BaseException:
-                pass
-            finally:
-                try:
-                    self.lines.put_nowait({'event': 'unavailable'})
-                except queue.Full:
-                    pass
-        self.reader = threading.Thread(target=read, daemon=True)
-        self.reader.start()
-        def errors():
-            while text := self.process.stderr.read(4096):
-                self.diagnostics.append(text)
-        self.error_reader = threading.Thread(target=errors, daemon=True)
-        self.error_reader.start()
         try:
-            ready = self.lines.get(timeout=5)
+            budget_check()
+            self.process = subprocess.Popen(['node', str(ROOT / 'desktop/macos/ci_startup_provider.mjs')],
+                cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env={'PATH': os.environ['PATH'], 'LANG': 'en_US.UTF-8'}, start_new_session=True)
+            def read():
+                try:
+                    for line in iter(lambda: self.process.stdout.readline(65537), ''):
+                        require(len(line.encode()) <= 65536 and line.endswith('\n'), 'provider_record_bound')
+                        self.lines.put_nowait(json.loads(line))
+                except BaseException:
+                    pass
+                finally:
+                    try:
+                        self.lines.put_nowait({'event': 'unavailable'})
+                    except queue.Full:
+                        pass
+            self.reader = threading.Thread(target=read, daemon=True)
+            self.reader.start()
+            def errors():
+                while text := self.process.stderr.read(4096):
+                    self.diagnostics.append(text)
+            self.error_reader = threading.Thread(target=errors, daemon=True)
+            self.error_reader.start()
+            ready = self.lines.get(timeout=time_limit(5))
+            budget_check()
             require(ready.get('event') == 'ready' and ready.get('shared_source_sha256') ==
                     digest(ROOT / 'crates/nac-server/web/e2e/scripted-provider.ts'), 'provider_source_readiness')
             self.base = endpoint(ready.get('base_url'))
             return self.base
         except BaseException:
-            self.stop(require_complete=False)
-            raise RuntimeError('Owned startup provider did not become ready') from None
+            failure = RuntimeError('Owned startup provider did not become ready')
+            bound = active()
+            try:
+                with using(bound.owner.cleanup if bound else None):
+                    self.stop(require_complete=False)
+            except BaseException as cleanup_error:
+                if bound is not None:
+                    bound.owner.fail('startup provider cleanup failed')
+                # Keep the existing safe startup failure as primary. Never
+                # format private cleanup messages or turn unknown custody into success.
+                failure.add_note('Startup provider cleanup failed: ' + json.dumps(failure_metadata(cleanup_error)))
+            raise failure from None
 
     def stop(self, require_complete=True):
         if self.process is None:
             return None
         if self.journal is not None:
+            require(self.settled, 'provider_settlement_unknown')
             require(not require_complete or self.journal.get('valid') is True, 'provider_script_completion')
             return self.journal
         try:
             if self.process.poll() is None:
                 self.process.stdin.write('finish\n')
                 self.process.stdin.flush()
-            self.process.wait(timeout=5)
+            self.process.wait(timeout=time_limit(5))
             while True:
-                record = self.lines.get(timeout=2)
+                record = self.lines.get(timeout=time_limit(2))
                 if record.get('event') == 'finished':
                     self.journal = record
                     break
@@ -161,24 +179,37 @@ class Provider:
             return self.journal
         finally:
             if self.process.poll() is None:
-                self.process.terminate()
+                os.killpg(self.process.pid, signal.SIGTERM)
                 try:
                     self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
+                    os.killpg(self.process.pid, signal.SIGKILL)
                     self.process.wait(timeout=3)
             self.process.stdin.close()
             self.process.stdout.close()
-            self.reader.join(timeout=3)
-            self.error_reader.join(timeout=3)
+            if self.reader is not None:
+                self.reader.join(timeout=3)
+            if self.error_reader is not None:
+                self.error_reader.join(timeout=3)
+            self.settled = self.process.poll() is not None and not any(
+                reader is not None and reader.is_alive() for reader in (self.reader, self.error_reader))
+            if not self.settled and active() is not None:
+                active().owner.fail('startup provider finalization unknown')
+            require(self.settled, 'provider_settlement_unknown')
             self.process.stderr.close()
             if self.log is not None:
                 self.log.write_text(''.join(self.diagnostics))
 
 
-def configuration_selection(profile, engine):
-    result = subprocess.run([str(engine), '__desktop-configuration', '--directory', str(profile['home'])],
-        cwd=profile['home'], env=profile['environment'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=13)
+def configuration_selection(profile, engine, *, run=None, directory=None):
+    if run is not None:
+        stdout, stderr = capture([str(engine), '__desktop-configuration', '--directory', str(profile['home'])],
+            directory, 'configuration-preflight', 13, run, cwd=profile['home'], env=profile['environment'], limit=16 * 1024)
+        result = subprocess.CompletedProcess([], 0, stdout, stderr)
+    else:
+        result = subprocess.run([str(engine), '__desktop-configuration', '--directory', str(profile['home'])],
+            cwd=profile['home'], env=profile['environment'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=time_limit(13))
+        budget_check()
     require(result.returncode == 0 and len(result.stdout) <= 16 * 1024, 'configuration_preflight')
     row = json.loads(result.stdout)
     require(isinstance(row, dict) and type(row.get('version')) is int, 'configuration_schema')

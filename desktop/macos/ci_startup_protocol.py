@@ -10,6 +10,7 @@ import uuid
 from ci_qualifications import require_checkout
 from ci_startup_fixture import FUTURE_MESSAGE, PRODUCT, canonical, digest
 from ci_xctest_attachments import bounded_file
+from ci_support import COMPLETE_LOG_LIMIT
 
 REVISION = '7325c48b3c9ec7036e255a6bd92f31c1a98c1607'
 FILES = {'Cargo.lock': '8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa',
@@ -98,7 +99,8 @@ def build(root, output, run, *, product, manifest, package_admission):
     log = output / 'protocol-build.log'
     env = {**os.environ, 'NAC_SOURCE_REVISION': REVISION, 'NAC_BUILD_TRACK': 'dev', 'NAC_BUILD_ID': 'dev-' + REVISION}
     run(['cargo', 'test', '--locked', '-p', 'nac-server', '--test', 'desktop_schema_contract',
-         '--no-run', '--message-format=json'], log, 900, cwd=root, env=env)
+         '--no-run', '--message-format=json'], log, 900, cwd=root, env=env,
+        complete_output_limit=COMPLETE_LOG_LIMIT)
     artifacts = []
     for line in log.read_text().splitlines():
         try:

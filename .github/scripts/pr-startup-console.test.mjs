@@ -1,0 +1,92 @@
+import { reverseStartupConsole } from './native-qualification-wiring.mjs';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import test from 'node:test';
+import { requiredJobs, managedCallerJobs, requireComplete } from './pr-checks.mjs';
+const require = createRequire(import.meta.url);
+const workflow = require('yaml').parse(readFileSync('.github/workflows/stable-release.yml', 'utf8'));
+
+test('required workflow-lint runs nominated checkout and no-skip console controls', () => {
+  assert.ok(requiredJobs.includes('workflow-lint'));
+  assert.ok(workflow.jobs['required-pr-checks'].needs.includes('workflow-lint'));
+  const steps = workflow.jobs['workflow-lint'].steps;
+  const resolve = steps.findIndex(s => s.id === 'startup-console-source');
+  const checkout = steps[resolve + 1], run = steps[resolve + 2];
+  assert.ok(resolve > 0);
+  assert.equal(steps[resolve].run, 'python3 -B desktop/macos/ci_startup_console_check.py --resolve >> "$GITHUB_OUTPUT"');
+  assert.equal(checkout.uses, 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
+  assert.deepEqual(checkout.with, { ref: '${{ steps.startup-console-source.outputs.revision }}', path: '.startup-console-q', 'persist-credentials': false });
+  assert.equal(run.run, 'python3 -B -m unittest discover -s desktop/macos -p "test_ci_startup_console_check.py" -v && python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-console-q');
+  for (const step of steps.slice(resolve, resolve + 3)) {
+    assert.equal(step.if, undefined);
+    assert.equal(step['continue-on-error'], undefined);
+  }
+});
+
+test('failed or skipped workflow-lint blocks actual required aggregation', () => {
+  const needs = Object.fromEntries(requiredJobs.map(job => [job, { result: 'success' }]));
+  for (const job of managedCallerJobs) needs[job] = { result: 'skipped' };
+  const sha = 'a'.repeat(40);
+  needs.prepare.outputs = { sha, run: 'true' };
+  requireComplete(needs, 'false', sha);
+  for (const result of ['failure', 'skipped', 'cancelled']) {
+    assert.throws(() => requireComplete({ ...needs, 'workflow-lint': { result } }, 'false', sha), /workflow-lint/);
+  }
+});
+
+test('ordinary-CI projection removes only the exact reviewed three-step contract', () => {
+  const original = structuredClone(workflow), projected = structuredClone(workflow);
+  const index = original.jobs['workflow-lint'].steps.findIndex(s => s.id === 'startup-console-source');
+  original.jobs['workflow-lint'].steps.splice(index, 3);
+  reverseStartupConsole(projected);
+  assert.deepEqual(projected, original);
+  for (const mutate of [
+    w => { w.jobs['workflow-lint'].steps[index + 1].with.ref = 'foreign'; },
+    w => { w.jobs['workflow-lint'].steps[index + 2]['continue-on-error'] = true; },
+    w => { w.jobs['workflow-lint'].steps[index + 2].if = 'false'; },
+    w => { w.jobs['workflow-lint'].steps.splice(index, 1); },
+  ]) {
+    const changed = structuredClone(workflow); mutate(changed);
+    assert.throws(() => reverseStartupConsole(changed));
+  }
+});
+
+test('required Mac workflow runs the exact nominated geometry and AX lifetime controls', () => {
+  const mac = require('yaml').parse(readFileSync('.github/workflows/macos-native.yml', 'utf8'));
+  assert.ok(requiredJobs.includes('macos-native'));
+  assert.ok(workflow.jobs['required-pr-checks'].needs.includes('macos-native'));
+  const job = mac.jobs['startup-panel-policy'];
+  assert.equal(job['runs-on'], 'macos-26');
+  assert.equal(job.if, undefined);
+  assert.equal(job['continue-on-error'], undefined);
+  assert.equal(job.steps[0].with.ref, '${{ inputs.source-sha }}');
+  assert.equal(job.steps[2].with.ref, '${{ steps.policy-source.outputs.revision }}');
+  const controls = job.steps[3];
+  const expectedEnv = { NAC342_SWIFT_PANEL_PROOF: '1', NAC342_AX_WITNESS_PROOF: '1' };
+  const expectedRun = 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel\n'
+    + 'NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/.startup-panel-q" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py\n';
+  const verify = step => {
+    assert.deepEqual(step.env, expectedEnv);
+    assert.equal(step.run, expectedRun);
+  };
+  verify(controls);
+  for (const mutate of [
+    s => { delete s.env.NAC342_AX_WITNESS_PROOF; },
+    s => { s.env.NAC342_SWIFT_PANEL_PROOF = '0'; },
+    s => { s.run = s.run.split('\n')[0]; },
+    s => { s.run = s.run.replace('$GITHUB_WORKSPACE/.startup-panel-q', '/foreign'); },
+    s => { s.run = s.run.replace('test_ci_startup_ax_lifetime.py', 'other.py'); },
+  ]) {
+    const changed = structuredClone(controls); mutate(changed);
+    assert.throws(() => verify(changed));
+  }
+  for (const step of job.steps) {
+    assert.equal(step.if, undefined);
+    assert.equal(step['continue-on-error'], undefined);
+    if (step.uses) {
+      assert.equal(step.uses, 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
+      assert.equal(step.with['persist-credentials'], false);
+    }
+  }
+});

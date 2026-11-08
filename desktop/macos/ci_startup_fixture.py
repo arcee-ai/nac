@@ -10,19 +10,26 @@ import subprocess
 import tempfile
 
 from ci_qualifications import require_checkout
+from ci_paths_budget import check as budget_check, time_limit
+from ci_startup_process import capture, package_contract
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = 'ef2cce9141973f37bf35e33d113e35eaa7a91f19'
-TEST_SOURCE = 'ddb2cb82ba9f17e662a96ccfe7b2f08442470d81'
+PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
+TEST_SOURCE = 'ba266ba1b3bea331768d91fc8a0b2ee66b484d01'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': '1a5c8590992df95d73d35b94e3adba27e779f4e09fdba9e5d8a72f8562bc332b',
-    'StartupJourneys.swift': '60473fa8af3306146d546982f775e4856b6bffb0a8516728e211bfd26fbdc28e',
-    'contract.py': '86d5182b77f64301b6c14f97642fff3ebcb1f656502b406606c68e42e0b94048',
-    'test_contract.py': '650a67bebd47864ac3f24fe8997c0aff0ba2933656d112ea2597fbf6b7bce7ed',
+    'README.md': '39c0b3aec37188e18eb141ef5537711e6f60b1fd384920d47d248cfd19758ed9',
+    'StartupJourneys.swift': '7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8',
+    'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
+    'test_contract.py': '493457530363e6992941960a6de2911c65da463db7452deb17f3af24443f916d',
+    'StartupAXGuard.swift': '3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18',
+    'StartupAXReceipt.swift': 'a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217',
+    'AX-WITNESS-CONTRACT.md': '1041bcef5739ebc1fe146673f7460ab82448d13dbb763af93c78f9cbf53c3bf6',
+    'test_ax_witness.py': '26e3fb9b290a03642e43eb07965564d2beb8013cc28d3294a6e07c946289cdc3',
+    'AGENTS.md': '074ff7d390c45a739b80048cf155274607ba3db5da74183cd5e4f673286a20fe',
 }
 FUTURE_MESSAGE = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
                   'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.')
@@ -47,7 +54,7 @@ def test_contract(root):
     for name, expected in TEST_FILES.items():
         file = canonical(directory / name)
         if not file.is_file() or hashlib.sha256(bounded_file(file, 256 * 1024)).hexdigest() != expected:
-            raise RuntimeError('Nominated four-file startup source differs')
+            raise RuntimeError('Nominated startup source inventory differs')
     spec = importlib.util.spec_from_file_location('nac342_nominated_startup_contract', directory / 'contract.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -57,9 +64,9 @@ def test_contract(root):
 def operations(config):
     if config['scenario'] != 'configuredLocal':
         return []
-    return ['click:Get Started', 'click:' + config['home'], 'click:folder-input',
-            'key:command-a-folder-input', 'type:owned-workspace', 'key:return-folder-input',
-            'click:Select', 'click:Create Project', 'click:Message',
+    return ['click:Get Started', 'click:Choose Working Folder: ' + config['home'], 'key:command-shift-g-native-folder',
+            'key:command-a-native-go-to-folder', 'type:owned-workspace', 'key:return-native-go-to-folder',
+            'click:native-folder-Select', 'click:Create Project', 'click:Message',
             'type:FINDER_CONFIGURED_LOCAL_startup-home', 'click:Send']
 
 
@@ -71,7 +78,8 @@ def environment(root, catalog_url):
             'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none', 'MODELS_DEV_URL': catalog_url}
 
 
-def prepare_profile(parent, scenario, catalog_url):
+def prepare_profile(parent, scenario, catalog_url, *, run=None, directory=None):
+    budget_check()
     if scenario not in CASES:
         raise RuntimeError('Unknown ordinary startup case')
     parent = canonical(parent)
@@ -80,7 +88,11 @@ def prepare_profile(parent, scenario, catalog_url):
     home, nac, workspace = Path(env['HOME']), Path(env['NAC_HOME']), root / 'workspace with spaces'
     nac.mkdir(parents=True, mode=0o700)
     workspace.mkdir(mode=0o700)
-    subprocess.run(['/usr/bin/git', 'init', '-q', str(workspace)], env=env, check=True, timeout=15)
+    if run is not None:
+        capture(['/usr/bin/git', 'init', '-q', str(workspace)], directory, 'profile-git', 15, run, cwd=root, env=env)
+    else:
+        subprocess.run(['/usr/bin/git', 'init', '-q', str(workspace)], env=env, check=True, timeout=time_limit(15))
+        budget_check()
     config, store = nac / 'config.toml', nac / 'dev.db'
     if scenario == 'invalidConfig':
         config.write_text('[broken\n')
@@ -130,7 +142,7 @@ def require_integrity(profile, before):
     return {'protected_before': before, 'protected_after': after, 'no_alternate_database': True}
 
 
-def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha):
+def prepare_configuration(profile, app, manifest, product_root, test_root, harness_sha, *, run=None, directory=None, ax_witness=None):
     """Host-side only; public XCTest reads the resulting frozen file and bundle."""
     product_root = canonical(product_root)
     require_checkout(product_root, PRODUCT)
@@ -142,8 +154,10 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
     relocated = root / 'Moved app folder with spaces/NAC.app'
     relocated.parent.mkdir()
     shutil.copytree(app, relocated, symlinks=True)
-    proof = contract.inspect_normal_package(str(manifest), str(relocated), str(product_root), product_sha=PRODUCT)
-    child_environment, environment_resolution = resolve_environment(product_root, profile)
+    proof = package_contract(contract, 'inspect_normal_package', [str(manifest), str(relocated), str(product_root)],
+        dict(product_sha=PRODUCT), tests=test_root, directory=directory, name='package-relocated', run=run)
+    child_environment, environment_resolution = (resolve_environment(product_root, profile, run=run, directory=directory)
+        if run is not None else resolve_environment(product_root, profile))
     environment_resolution.update(test_source_sha=TEST_SOURCE,
         startup_source_sha256=TEST_FILES['StartupJourneys.swift'],
         app_launch_arguments=['--directory', str(profile['home'])],
@@ -159,8 +173,11 @@ def prepare_configuration(profile, app, manifest, product_root, test_root, harne
         config[key] = proof[key]
     for key in ('native_sha256', 'engine_sha256', 'info_plist_sha256'):
         config[key] = proof['post_sign_receipt'][key]
-    admission = contract.validate_normal_package(config, str(manifest), str(product_root),
-        product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha)
+    if ax_witness is not None:
+        config['ax_witness'] = ax_witness
+    admission = package_contract(contract, 'validate_normal_package', [config, str(manifest), str(product_root)],
+        dict(product_sha=PRODUCT, test_sha=TEST_SOURCE, harness_sha=harness_sha),
+        tests=test_root, directory=directory, name='package-configuration', run=run)
     encoded = (json.dumps(config, indent=2) + '\n').encode()
     if len(encoded) > 32 * 1024:
         raise RuntimeError('Startup configuration exceeds its immutable bound')

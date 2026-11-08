@@ -15,9 +15,11 @@ from ci_xctest_attachments import bounded_file
 from ci_xctest_attachments import digest as data_digest
 
 
-def require(condition):
+def require(condition, code='invalid_record'):
     if not condition:
-        raise RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
+        error = RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
+        error.owner_guard = code  # Static tags only; never exception text or rejected input.
+        raise error
 
 
 def signature(node):
@@ -84,11 +86,21 @@ class OwnerWitness:
         self.serving_observed = False
         self.last_observation = self.last_empty = None
         self.last_uptime_ns = 0
-        self.failure = None
+        self.last_accepted_uptime_ns = 0
+        self.stream_diagnostic = None
+        self.process_failure = self.ui_failure = None
+        self.ui_root = None
+        self.ui_terminal = False
         self.stopping = False
         self.process = self.reader = None
+        self.helper_settled = False
         self.condition = threading.Condition()
         self.signals = []
+
+    @property
+    def failure(self):
+        """Sticky UI rejection remains visible to every existing abort caller."""
+        return self.ui_failure or self.process_failure
 
     def observe(self, record):
         """Validate actual helper records; portable tests supply explicit fixtures."""
@@ -124,7 +136,7 @@ class OwnerWitness:
                             and re.fullmatch(r'(?:(?:bsd|path|existence|children)_(?:denied|unavailable)|identity_changed)',
                                              str(item['reason'])))
                 self.retained_diagnostics, self.unresolved = retained, unresolved
-                self.failure = 'ownership_observation_unavailable'
+                self.process_failure = self.process_failure or 'ownership_observation_unavailable'
                 self.condition.notify_all()
                 return  # Never erase latest/history or manufacture an empty observation.
             if record.get('event') == 'ready':
@@ -133,10 +145,11 @@ class OwnerWitness:
                         and record.get('enumerated_exits') == []
                         and record.get('configuration_sha256') == self.configuration_sha256)
                 self.ready = True
+                self.last_accepted_uptime_ns = int(stamp)
                 self.last_empty = self.last_observation = observed
                 self.condition.notify_all()
                 return
-            require(self.ready and not self.failure and set(record) == {'schema', 'complete', 'nodes', 'retired',
+            require(self.ready and not self.process_failure and set(record) == {'schema', 'complete', 'nodes', 'retired',
                     'enumerated_exits', 'observed_uptime_ns'} and record['complete'] is True)
             nodes = record.get('nodes')
             require(isinstance(nodes, list) and len(nodes) <= 128)
@@ -162,12 +175,15 @@ class OwnerWitness:
                             and node['parent'] in (self.history[node['pid']]['parent'], 1))
                 if node['kind'] == 'app':
                     require(node['executable'] == native and type(node.get('app_launch_epoch')) in (int, float)
-                            and node['app_launch_epoch'] > 0 and isinstance(node.get('windows'), list)
-                            and len(node['windows']) <= 1 and all(type(n) is int and n > 0 for n in node['windows']))
+                            and node['app_launch_epoch'] > 0)
+                    require(isinstance(node.get('windows'), list) and len(node['windows']) <= 128
+                            and all(type(n) is int and 0 < n < 2**64 for n in node['windows'])
+                            and len(set(node['windows'])) == len(node['windows']),
+                            'app_windows')
                     if new_app:
                         require(signature(node) == signature(new_app)
                                 and node['app_launch_epoch'] == new_app['app_launch_epoch'])
-                    new_app = {**node, 'windows': node['windows'] or (new_app or {}).get('windows', [])}
+                    new_app = node
                 elif node['kind'] == 'engine':
                     require(node['executable'] == engine)
                 else:
@@ -225,11 +241,30 @@ class OwnerWitness:
                         and item['parent'] in set(self.history) | set(current) and item['proof'] == 'kill_zero_ESRCH'
                         and item['pid'] not in set(self.history) | set(current) | exit_pids)
                 exit_pids.add(item['pid'])
+            # Only a wholly valid process record can update either custody or
+            # UI state. CG cardinality is UI policy, never signal authority.
+            apps = [node for node in nodes if node['kind'] == 'app']
+            if apps:
+                windows = apps[0]['windows']
+                if self.ui_root is None and not self.ui_failure and not self.ui_terminal and len(windows) == 1:
+                    self.ui_root = windows[0]
+                if len(windows) > 1 or (self.ui_root is not None and windows and windows != [self.ui_root]):
+                    self.ui_failure = self.ui_failure or 'app_windows'
+                if self.ui_root is not None and not windows:
+                    self.ui_terminal = True
+                if self.ui_terminal and windows:
+                    self.ui_failure = self.ui_failure or 'app_window_reappeared'
+                # Historical binding for read-only attachment/retirement checks;
+                # never replace the original root with a later singleton.
+                new_app = {**new_app, 'windows': [self.ui_root] if self.ui_root is not None else []}
+            elif self.app is not None:
+                self.ui_terminal = True
             for node in nodes:
                 self.history[node['pid']] = node
             self.app, self.serving_observed, self.retired = new_app, serving_observed, retired
             self.latest = nodes
             self.last_observation = observed
+            self.last_accepted_uptime_ns = int(stamp)
             if not nodes:
                 self.last_empty = self.last_observation
             self.condition.notify_all()
@@ -244,18 +279,7 @@ class OwnerWitness:
             require(not file.is_symlink() and file.resolve() == file and digest(file) == self.config[expected])
         self.process = subprocess.Popen([str(helper), str(config_path)], stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, start_new_session=True)
-        def read():
-            try:
-                while line := self.process.stdout.readline(65537):
-                    require(len(line) <= 65536 and line.endswith(b'\n'))
-                    self.observe(json.loads(line))
-                require(self.stopping)  # Unexpected EOF never proves application settlement.
-            except BaseException:
-                with self.condition:
-                    if not self.stopping:
-                        self.failure = self.failure or 'owner_stream_unavailable'
-                    self.condition.notify_all()
-        self.reader = threading.Thread(target=read, daemon=True)
+        self.reader = threading.Thread(target=lambda: self._read_stream(self.process.stdout), daemon=True)
         self.reader.start()
         deadline = self.clock() + 5
         with self.condition:
@@ -265,9 +289,85 @@ class OwnerWitness:
             self.stop()
             require(False)
 
+    def _read_stream(self, stream):
+        """The existing reader owns framing; diagnostics never grant ownership."""
+        stage, line, record = 'read', b'', None
+        try:
+            while True:
+                stage, line, record = 'read', b'', None
+                line = stream.readline(65537)
+                if not line:
+                    stage = 'eof'
+                    require(self.stopping)  # EOF never proves application settlement.
+                    break
+                stage = 'framing'
+                require(len(line) <= 65536, 'oversize')
+                require(line.endswith(b'\n'), 'missing_newline')
+                stage = 'json'
+                record = json.loads(line)
+                stage = 'record_validation'
+                self.observe(record)
+                if self.failure:
+                    self._retain_stream_diagnostic(stage, 'typed_failure' if self.process_failure else 'app_windows', len(line), record)
+        except BaseException as error:
+            with self.condition:
+                if not self.stopping:
+                    self.process_failure = self.process_failure or 'owner_stream_unavailable'
+                    code = ('unexpected_eof' if stage == 'eof' else
+                            'invalid_json' if stage == 'json' else
+                            'io_error' if stage == 'read' and isinstance(error, OSError) else
+                            getattr(error, 'owner_guard', 'other'))
+                    self._retain_stream_diagnostic(stage, code, len(line), record)
+                self.condition.notify_all()
+
+    def _retain_stream_diagnostic(self, stage, code, byte_count, record):
+        # Failure-side best effort. No rejected bytes, paths, environments,
+        # exception strings or AX values cross this boundary.
+        try:
+            with self.condition:
+                if self.stream_diagnostic is not None:
+                    return
+                stages = {'read', 'framing', 'json', 'record_validation', 'eof'}
+                codes = {'unexpected_eof', 'invalid_json', 'io_error', 'oversize',
+                         'missing_newline', 'app_windows', 'invalid_record', 'typed_failure'}
+                shape = None
+                if (type(record) is dict and set(record) == {'schema', 'complete', 'nodes', 'retired',
+                        'enumerated_exits', 'observed_uptime_ns'} and record['schema'] == 'nac342-owner-v1'
+                        and record['complete'] is True and type(record['nodes']) is list
+                        and len(record['nodes']) <= 128):
+                    common = {'pid', 'parent', 'uid', 'start_seconds', 'start_microseconds', 'executable',
+                              'kind', 'environment', 'environment_role', 'arguments_sha256', 'serving', 'configuration_helper'}
+                    nodes = record['nodes']
+                    if all(type(n) is dict and n.get('kind') in ('app', 'engine', 'descendant')
+                           and set(n) == common | ({'windows', 'app_launch_epoch'} if n['kind'] == 'app' else set())
+                           for n in nodes):
+                        apps = [n for n in nodes if n['kind'] == 'app']
+                        if len(apps) == 1:
+                            windows = apps[0]['windows']
+                            if (type(windows) is list and len(windows) <= 128
+                                    and all(type(n) is int and 0 < n < 2**64 for n in windows)):
+                                original = (self.app or {}).get('windows', [])
+                                shape = dict(app_count=1, window_count=len(windows),
+                                    original_window_present=bool(original) and original[0] in windows)
+                        elif not apps:
+                            shape = dict(app_count=0, window_count=0, original_window_present=False)
+                        else:
+                            shape = dict(app_count=len(apps))
+                observed = int(self.clock() * 1e9)
+                if not 0 <= observed < 2**64:
+                    return
+                self.stream_diagnostic = dict(schema='nac342-owner-stream-diagnostic-v1', acceptance=False,
+                    stage=stage if stage in stages else 'read', code=code if code in codes else 'other',
+                    clock_basis='time.monotonic', observed_uptime_ns=str(observed),
+                    last_accepted_uptime_ns=str(self.last_accepted_uptime_ns),
+                    byte_count=min(byte_count, 65537), shape=shape)
+        except BaseException:
+            pass  # Missing diagnostics cannot change the original failure/custody.
+
     def attachment_binding(self):
         with self.condition:
-            require(self.ready and self.app and not self.failure and len(self.app['windows']) == 1)
+            require(self.ready and self.app and not self.failure and self.ui_root is not None)
+            # Historical export only: this binding does not grant live input.
             return {'preinstalled': True, 'owned_incarnation_verified': True,
                     'app_pid': self.app['pid'], 'app_launch_epoch': self.app['app_launch_epoch'],
                     'window_number': self.app['windows'][0], 'app_path': self.config['app_path'],
@@ -276,7 +376,7 @@ class OwnerWitness:
     def wait_empty(self, after, seconds=25):
         deadline = self.clock() + seconds
         with self.condition:
-            while self.clock() < deadline and not self.failure:
+            while self.clock() < deadline and not self.process_failure:
                 if (self.last_empty is not None and self.last_empty >= after and not self.latest
                         and set(self.retired) == set(self.history)):
                     return True
@@ -284,21 +384,23 @@ class OwnerWitness:
         return False
 
     def signal_owned(self, node, signum, *, inspect=native_identity, send=os.kill):
-        require(not self.failure and node['pid'] in self.history and node['pid'] not in self.retired
-                and signature(node) == signature(self.history[node['pid']]))
-        actual = inspect(node['pid'])
-        if actual is None:
-            return
-        require(signature(actual) == signature(node)
-                and (actual['parent'] == node['parent'] or actual['parent'] == 1))
-        try:
-            send(node['pid'], signum)
-        except ProcessLookupError:
-            return
-        self.signals.append({'pid': node['pid'], 'signal': int(signum), 'kernel_identity_rechecked': True})
+        with self.condition:
+            require(not self.process_failure and node['pid'] in self.history and node['pid'] not in self.retired
+                    and signature(node) == signature(self.history[node['pid']])
+                    and node['parent'] in (self.history[node['pid']]['parent'], 1))
+            actual = inspect(node['pid'])
+            if actual is None:
+                return
+            require(signature(actual) == signature(node)
+                    and (actual['parent'] == node['parent'] or actual['parent'] == 1))
+            try:
+                send(node['pid'], signum)
+            except ProcessLookupError:
+                return
+            self.signals.append({'pid': node['pid'], 'signal': int(signum), 'kernel_identity_rechecked': True})
 
     def settle(self, after):
-        require(self.ready and not self.failure)
+        require(self.ready and not self.process_failure)
         if not self.wait_empty(after, seconds=2):
             # Only identities positively witnessed before failure can receive a
             # fallback signal, with a fresh kernel signature recheck each time.
@@ -309,21 +411,27 @@ class OwnerWitness:
                     self.signal_owned(node, signum)
                 if self.wait_empty(self.clock(), seconds=5):
                     break
-        require(self.wait_empty(self.clock(), seconds=2) and self.ready and not self.failure
+        require(self.wait_empty(self.clock(), seconds=2) and self.ready and not self.process_failure
                 and not self.latest and set(self.retired) == set(self.history))
         if self.config['scenario'] in ('onboarding', 'configuredLocal'):
             require(self.serving_observed)
         require(self.app is not None)
         return {'root': self.config['fixture_root'], 'owned_processes_settled': True,
-                'preinstalled': True, 'app': self.app, 'observed_processes': list(self.history.values()),
+                'preinstalled': True, 'ui_failure': self.ui_failure, 'app': self.app, 'observed_processes': list(self.history.values()),
                 'complete_observation': True, 'retired_identities': list(self.retired.values()),
                 'fallback_signals': self.signals, 'scope': 'Actual OS ownership/settlement; not public UI or image acceptance'}
 
     def failure_receipt(self):
         with self.condition:
             return {'ready': self.ready, 'failure': self.failure, 'known_identities': [identity(node) for node in self.history.values()],
+                    'process_failure': self.process_failure, 'ui_failure': self.ui_failure,
+                    'original_window_number': self.ui_root, 'ui_terminal': self.ui_terminal,
                     'latest_pids': [node['pid'] for node in self.latest], 'retired': list(self.retired.values()),
                     'unresolved': self.unresolved, 'retained_diagnostics': self.retained_diagnostics,
+                    'stream_diagnostic': self.stream_diagnostic,
+                    'metadata_helper_settled': self.helper_settled,
+                    'positive_process_settlement': bool(self.history) and not self.process_failure and not self.latest
+                        and set(self.retired) == set(self.history),
                     'positive_settlement': bool(self.history) and not self.failure and not self.latest
                         and set(self.retired) == set(self.history)}
 
@@ -339,3 +447,85 @@ class OwnerWitness:
                     self.process.wait(timeout=3)
             self.process.stdout.close()
             self.reader.join(timeout=3)
+            require(self.process.poll() is not None and not self.reader.is_alive())
+            self.helper_settled = True
+
+
+def capture_ax_preflight(witness, helper, source, config_path, folder, *, run,
+                         source_sha256, binary_sha256):
+    """Explicit one-shot diagnostic only; caller owns admission/fixture/clock.
+
+    Never starts/selects an app, changes trust, or modifies the owner stream.
+    `run` is the existing bounded process/clock owner, including failed output.
+    Failure receipts are retained before propagating the original helper error.
+    """
+    helper, source, config_path, folder = map(Path, (helper, source, config_path, folder))
+    require(all(path.is_absolute() and path.resolve(strict=True) == path and not path.is_symlink()
+                for path in (helper, source, config_path, folder)) and folder.is_dir())
+    require(all(re.fullmatch('[0-9a-f]{64}', value or '') for value in (source_sha256, binary_sha256)))
+    source_bytes = bounded_file(source, 256 * 1024)
+    helper_bytes = bounded_file(helper, 16 * 1024 * 1024)
+    configuration = bounded_file(config_path, 32768)
+    require(data_digest(source_bytes) == source_sha256 and data_digest(helper_bytes) == binary_sha256
+            and data_digest(configuration) == witness.configuration_sha256
+            and json.loads(configuration) == witness.config)
+    with witness.condition:
+        require(witness.ready and not witness.failure and not witness.ui_terminal and witness.app and len(witness.app['windows']) == 1)
+        apps = [node for node in witness.latest if node['kind'] == 'app']
+        require(len(apps) == 1 and signature(apps[0]) == signature(witness.app)
+                and apps[0]['windows'] == witness.app['windows'])
+        binding = {'configuration_sha256': witness.configuration_sha256,
+                   'identity': identity(apps[0]), 'window_number': apps[0]['windows'][0]}
+    request_bytes = (json.dumps(binding, sort_keys=True) + '\n').encode()
+    request, log, receipt = (folder / name for name in ('ax-preflight-request.json', 'ax-preflight.log', 'ax-preflight.json'))
+    require(not any(path.exists() or path.is_symlink() for path in (request, log, receipt)))
+    with request.open('xb') as stream:
+        stream.write(request_bytes)
+    request.chmod(0o400)
+    original_error = None
+    try:
+        run([str(helper), '--ax-preflight', str(config_path), str(request)], log, 10,
+            abort=lambda: bool(witness.failure))
+    except Exception as error:
+        original_error = error
+    try:
+        value = json.loads(bounded_file(log, 8192))
+        mandatory = {'schema', 'acceptance', 'trusted', 'windows_read', 'ax_code', 'window_count',
+                     'root_matches', 'bound', 'identity_rechecked', 'signing_code', 'app_sandbox_entitlement',
+                     'configuration_sha256', 'request_sha256', 'binary_sha256'}
+        require(type(value) is dict and mandatory <= set(value) <= mandatory | {'signing_flags'}
+                and value['schema'] == 'nac342-ax-preflight-v1' and value['acceptance'] is False)
+        require(all(type(value[key]) is bool for key in
+                    ('trusted', 'windows_read', 'bound', 'identity_rechecked'))
+                and all(type(value[key]) is int for key in ('ax_code', 'window_count', 'root_matches', 'signing_code'))
+                and (value['app_sandbox_entitlement'] is None or type(value['app_sandbox_entitlement']) is bool)
+                and ('signing_flags' not in value or type(value['signing_flags']) is int))
+        require(value['configuration_sha256'] == witness.configuration_sha256
+                and value['request_sha256'] == data_digest(request_bytes) and value['binary_sha256'] == binary_sha256
+                and 0 <= value['window_count'] <= 128 and 0 <= value['root_matches'] <= value['window_count'])
+        require((value['trusted'] or not value['windows_read'])
+                and (value['windows_read'] or value['window_count'] == value['root_matches'] == 0)
+                and (not value['bound'] or (value['trusted'] and value['windows_read']
+                     and value['identity_rechecked'] and value['root_matches'] == 1 and value['ax_code'] == 0)))
+        require(data_digest(bounded_file(helper, 16 * 1024 * 1024)) == binary_sha256
+                and bounded_file(source, 256 * 1024) == source_bytes
+                and bounded_file(config_path, 32768) == configuration)
+        with witness.condition:
+            require(witness.ready and not witness.failure and not witness.ui_terminal and witness.app
+                    and identity(witness.app) == binding['identity']
+                    and witness.app['windows'] == [binding['window_number']])
+            apps = [node for node in witness.latest if node['kind'] == 'app']
+            require(len(apps) == 1 and identity(apps[0]) == binding['identity']
+                    and apps[0]['windows'] == [binding['window_number']])
+        value = {**value, 'source_sha256': source_sha256,
+                 'scope': 'host AX API availability only; no focus/value/CFEqual/freshness or native acceptance'}
+        with receipt.open('xb') as stream:
+            stream.write((json.dumps(value, sort_keys=True) + '\n').encode())
+    except Exception as capture_error:
+        if original_error is not None:
+            raise original_error from capture_error
+        raise
+    if original_error is not None:
+        raise original_error
+    require(value['bound'] and value['identity_rechecked'])
+    return value

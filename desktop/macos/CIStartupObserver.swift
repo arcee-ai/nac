@@ -1,4 +1,6 @@
 // External, read-only ownership witness. Never linked into the product/test app.
+import ApplicationServices
+import Security
 import AppKit
 import CryptoKit
 import Darwin
@@ -181,6 +183,127 @@ struct StartupURLResources {
     }
 }
 // END STARTUP FOUNDATION URL RESOURCES
+
+
+// Isolated one-shot diagnostic. No owner-stream records, input, or trust prompt.
+enum StartupAXPreflight {
+    static func hash(_ bytes: Data) -> String {
+        SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func file(_ path: String, limit: Int) throws -> Data {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { throw OwnershipError.invalid }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              info.st_size <= limit else { throw OwnershipError.invalid }
+        let data = try handle.read(upToCount: limit + 1) ?? Data()
+        guard data.count <= limit else { throw OwnershipError.invalid }
+        return data
+    }
+
+    @MainActor
+    static func main(_ configPath: String, _ requestPath: String) {
+        var out: [String: Any] = ["schema": "nac342-ax-preflight-v1", "acceptance": false,
+            "trusted": false, "windows_read": false, "ax_code": 0, "window_count": 0,
+            "root_matches": 0, "bound": false, "identity_rechecked": false,
+            "signing_code": -1, "app_sandbox_entitlement": NSNull()]
+        do {
+            let data = try file(configPath, limit: 32768), request = try file(requestPath, limit: 8192)
+            let config = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let binding = try JSONSerialization.jsonObject(with: request) as! [String: Any]
+            try StartupObserver.need(Set(binding.keys) == ["configuration_sha256", "identity", "window_number"]
+                && binding["configuration_sha256"] as? String == hash(data)
+                && config["schema"] as? String == "nac342-startup-xctest-v1"
+                && config["bundle_id"] as? String == "ai.arcee.nac.dev")
+            out["configuration_sha256"] = hash(data); out["request_sha256"] = hash(request)
+            out["binary_sha256"] = hash(try file(CommandLine.arguments[0], limit: 16 * 1024 * 1024))
+            var code: SecCode?, staticCode: SecStaticCode?, information: CFDictionary?
+            let selfCode = SecCodeCopySelf([], &code)
+            let staticStatus = code.map { SecCodeCopyStaticCode($0, [], &staticCode) }
+            let signing = staticCode.map { SecCodeCopySigningInformation($0, SecCSFlags(rawValue: kSecCSSigningInformation), &information) }
+            out["signing_code"] = signing ?? staticStatus ?? selfCode
+            if let details = information as? [String: Any] {
+                let entitlements = details[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+                out["app_sandbox_entitlement"] = entitlements["com.apple.security.app-sandbox"] as? Bool ?? false
+                out["signing_flags"] = (details[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
+            }
+            let resources = try StartupURLResources(root: config["fixture_root"] as! String, app: config["app_path"] as! String)
+            var known: [Int32: StartupProcessIdentity] = [:]
+            func owned() throws -> [String: Any] {
+                let snapshot = try StartupObserver.snapshot(config, resources: resources, known: &known)
+                let apps = (snapshot["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
+                try StartupObserver.need(apps.count == 1)
+                let app = apps[0], expected = binding["identity"] as! [String: Any]
+                let keys = ["pid", "parent", "uid", "start_seconds", "start_microseconds", "executable"]
+                try StartupObserver.need(Set(expected.keys) == Set(keys)
+                    && NSDictionary(dictionary: app.filter { keys.contains($0.key) }).isEqual(NSDictionary(dictionary: expected))
+                    && app["windows"] as? [Int] == [binding["window_number"] as! Int])
+                return app
+            }
+            let app = try owned(), pid = Int32(app["pid"] as! Int)
+            defer {
+                if (try? owned()) != nil { out["identity_rechecked"] = true }
+                else { out["bound"] = false }
+            }
+            let trusted = AXIsProcessTrusted() // Once, plain API, never options/prompt.
+            out["trusted"] = trusted
+            if trusted {
+                let element = AXUIElementCreateApplication(pid)
+                func read(_ element: AXUIElement, _ name: String) throws -> CFTypeRef {
+                    let timeout = AXUIElementSetMessagingTimeout(element, 1)
+                    out["ax_code"] = timeout.rawValue
+                    try StartupObserver.need(timeout == .success)
+                    var value: CFTypeRef?
+                    if name == kAXWindowsAttribute { out["windows_read"] = true }
+                    let status = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                    out["ax_code"] = status.rawValue
+                    try StartupObserver.need(status == .success && value != nil)
+                    return value!
+                }
+                let raw = try read(element, kAXWindowsAttribute)
+                try StartupObserver.need(CFGetTypeID(raw) == CFArrayGetTypeID())
+                let windows = raw as! [AnyObject]
+                out["window_count"] = windows.count
+                try StartupObserver.need(windows.count <= 128 && windows.allSatisfy { CFGetTypeID($0) == AXUIElementGetTypeID() })
+                let cg = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                let matching = cg.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                    && ($0[kCGWindowNumber as String] as? Int) == binding["window_number"] as? Int
+                    && ($0[kCGWindowLayer as String] as? Int) == 0 }
+                try StartupObserver.need(matching.count == 1)
+                let frame = CGRect(dictionaryRepresentation: matching[0][kCGWindowBounds as String] as! CFDictionary)
+                var roots = 0
+                for value in windows {
+                    let window = value as! AXUIElement
+                    var owner: pid_t = 0
+                    let timeout = AXUIElementSetMessagingTimeout(window, 1); out["ax_code"] = timeout.rawValue
+                    try StartupObserver.need(timeout == .success)
+                    let status = AXUIElementGetPid(window, &owner); out["ax_code"] = status.rawValue
+                    try StartupObserver.need(status == .success && owner == pid)
+                    let role = try read(window, kAXRoleAttribute)
+                    let position = try read(window, kAXPositionAttribute), size = try read(window, kAXSizeAttribute)
+                    try StartupObserver.need(CFGetTypeID(role) == CFStringGetTypeID()
+                        && CFGetTypeID(position) == AXValueGetTypeID() && CFGetTypeID(size) == AXValueGetTypeID())
+                    let p = position as! AXValue, s = size as! AXValue
+                    var point = CGPoint.zero, dimensions = CGSize.zero
+                    try StartupObserver.need(AXValueGetType(p) == .cgPoint && AXValueGetType(s) == .cgSize
+                        && AXValueGetValue(p, .cgPoint, &point) && AXValueGetValue(s, .cgSize, &dimensions))
+                    if role as? String == "AXWindow" && CGRect(origin: point, size: dimensions) == frame { roots += 1 }
+                }
+                out["root_matches"] = roots
+                try StartupObserver.need(roots == 1)
+                out["bound"] = true
+            }
+        } catch {
+            out["bound"] = false // Closed facts only; no OS/path/tree/text exception dump.
+        }
+        if let bytes = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) {
+            FileHandle.standardOutput.write(bytes + Data([10]))
+        }
+        exit(out["bound"] as? Bool == true && out["identity_rechecked"] as? Bool == true ? 0 : 1)
+    }
+}
 
 @main
 enum StartupObserver {
@@ -387,6 +510,12 @@ enum StartupObserver {
 
     @MainActor
     static func main() {
+        if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--ax-witness" {
+            StartupAXWitnessMode.main(CommandLine.arguments[2], CommandLine.arguments[3]); return
+        }
+        if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--ax-preflight" {
+            StartupAXPreflight.main(CommandLine.arguments[2], CommandLine.arguments[3])
+        }
         var known: [Int32: StartupProcessIdentity] = [:]
         do {
             try need(CommandLine.arguments.count == 2)
