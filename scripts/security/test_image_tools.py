@@ -26,13 +26,68 @@ class ToolTransportTests(unittest.TestCase):
         self.assertEqual(scan.tool_download_url("syft", syft, "darwin_arm64"),
                          "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_darwin_arm64.tar.gz")
         self.assertEqual(scan.tool_download_url("grype", pins["grype"], "linux_amd64"),
-                         "https://github.com/anchore/grype/releases/download/v0.121.0/grype_0.121.0_linux_amd64.tar.gz")
+                         "https://api.github.com/repos/anchore/grype/releases/assets/657365424")
         with self.assertRaisesRegex(ValueError, "stale"):
             scan.tool_download_url("syft", dict(syft, version="999.0.0"), "linux_amd64")
         for bad in [None, True, 0, -1, "657153873", 1.5]:
             pin = dict(syft, release_asset_ids={"1.55.0": {"linux_amd64": bad}})
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "asset ID"):
                 scan.tool_download_url("syft", pin, "linux_amd64")
+
+    def test_grype_mapping_preserves_original_pin_and_darwin_route(self):
+        pin = json.loads(scan.PINS.read_text())["grype"]
+        self.assertEqual(pin["version"], "0.121.0")
+        self.assertEqual(pin["linux_amd64"], "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519")
+        self.assertEqual(pin["release_asset_ids"], {"0.121.0": {"linux_amd64": 657365424}})
+        self.assertEqual(scan.tool_download_url("grype", pin, "linux_amd64"),
+                         "https://api.github.com/repos/anchore/grype/releases/assets/657365424")
+        self.assertEqual(scan.tool_download_url("grype", pin, "darwin_arm64"),
+                         "https://github.com/anchore/grype/releases/download/v0.121.0/grype_0.121.0_darwin_arm64.tar.gz")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            scan.tool_download_url("grype", dict(pin, version="999.0.0"), "linux_amd64")
+        for bad in [None, True, 0, -1, "657365424", 1.5]:
+            invalid = dict(pin, release_asset_ids={"0.121.0": {"linux_amd64": bad}})
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "asset ID"):
+                scan.tool_download_url("grype", invalid, "linux_amd64")
+
+    def test_grype_route_and_cache_hash_gate_before_extraction(self):
+        class VerifiedArchiveBoundary(Exception):
+            pass
+        payload = b"inert Grype transport fixture; never extracted"
+        for mode in ["valid", "cached-valid", "failed", "corrupt", "cached-corrupt"]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                pinfile = root / "pins.json"
+                pins = copy.deepcopy(json.loads(scan.PINS.read_text()))
+                pins["grype"]["linux_amd64"] = hashlib.sha256(payload).hexdigest()
+                pinfile.write_text(json.dumps(pins))
+                cache = root / "cache"
+                cache.mkdir()
+                archive = cache / "grype_0.121.0_linux_amd64.tar.gz"
+                if mode.startswith("cached"):
+                    archive.write_bytes(payload if mode == "cached-valid" else b"corrupt")
+                def api(args, **kwargs):
+                    self.assertEqual(args[1], scan.ROOT / ".github/scripts/github_asset.py")
+                    self.assertEqual(args[args.index("--url") + 1],
+                                     "https://api.github.com/repos/anchore/grype/releases/assets/657365424")
+                    self.assertEqual(args[args.index("--max-bytes") + 1], str(150 * 1024 * 1024))
+                    self.assertEqual(kwargs, {"check": True})
+                    if mode == "failed":
+                        raise subprocess.CalledProcessError(1, args)
+                    Path(args[args.index("--output") + 1]).write_bytes(b"corrupt" if mode == "corrupt" else payload)
+                with patch.object(scan, "PINS", pinfile), patch.object(scan.platform, "system", return_value="Linux"), patch.object(
+                        scan.platform, "machine", return_value="x86_64"), patch.object(
+                        scan.subprocess, "run", side_effect=api) as fetch, patch.object(
+                        scan, "download", side_effect=TimeoutError("The read operation timed out")) as legacy, patch.object(
+                        scan.tarfile, "open", side_effect=VerifiedArchiveBoundary) as extraction:
+                    expected = (VerifiedArchiveBoundary if mode in ["valid", "cached-valid"] else
+                                subprocess.CalledProcessError if mode == "failed" else ValueError)
+                    with self.assertRaises(expected):
+                        scan.install_tools(cache, names={"grype"})
+                    self.assertEqual(fetch.call_count, 0 if mode.startswith("cached") else 1)
+                    legacy.assert_not_called()
+                    self.assertEqual(extraction.call_count, 1 if mode in ["valid", "cached-valid"] else 0)
+                    self.assertFalse((cache / "grype").exists())
 
     def test_binary_request_has_no_authorization_and_retains_bound(self):
         with patch.object(scan.urllib.request, "urlopen", return_value=io.BytesIO(b"ok")) as read:

@@ -12,6 +12,11 @@
   "grype": {
     "version": "0.121.0",
     "linux_amd64": "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519",
-    "darwin_arm64": "7be39d3a0428c664ce0183e4aba31ed9accffce9eda7e7f6fa84e9c512285f27"
+    "darwin_arm64": "7be39d3a0428c664ce0183e4aba31ed9accffce9eda7e7f6fa84e9c512285f27",
+    "release_asset_ids": {
+      "0.121.0": {
+        "linux_amd64": 657365424
+      }
+    }
   }
 }
