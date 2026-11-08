@@ -41,7 +41,7 @@ class Caller(unittest.TestCase):
             self.assertEqual(c.context(value(),now=1001),value())
             for key,bad in [('GITHUB_SHA','b'*40),('GITHUB_REF','refs/heads/codex/private-native-lifecycle-capture-source01'),('GITHUB_WORKFLOW_REF','unregistered.yml'),('GITHUB_JOB','other'),('ImageVersion','wrong')]:
                 with patch.dict(os.environ,{key:bad}),self.assertRaises(RuntimeError):c.context(value(),now=1001)
-        self.assertEqual(a.SOURCE_PARENT,'2af8c5bc3efcb6789ba164859699cc0b58d5200a');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
+        self.assertEqual(a.SOURCE_PARENT,'10f0894bf4b4d3d1fc8fe260cbd671dcddfd560e');self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
     def test_all_caps_original_clock_and_cleanup_retention(self):
         with patch.dict(os.environ,env(),clear=True):
             for phase in (*c.CAPS,'episode'):

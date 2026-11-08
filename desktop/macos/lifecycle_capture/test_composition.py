@@ -33,7 +33,7 @@ class Composition(Fixture):
         with self.assertRaises(RuntimeError):a.admit(value,dict(env,GITHUB_REF='refs/heads/dev'),now=1001)
         with self.assertRaises(RuntimeError):a.admit(value,env,now=4000)
     def test_exact_consumer_parent_preserves_original_h_base(self):
-        self.assertEqual(a.SOURCE_PARENT,'2af8c5bc3efcb6789ba164859699cc0b58d5200a')
+        self.assertEqual(a.SOURCE_PARENT,'10f0894bf4b4d3d1fc8fe260cbd671dcddfd560e')
         self.assertEqual(a.BASE,'ebdbd340bdc1220318446180c0a0df579489392c')
         value,env=self.admission();value['H_base']=a.SOURCE_PARENT
         with self.assertRaises(RuntimeError):a.admit(value,env,now=1001)
@@ -130,6 +130,33 @@ class SourceClosure(unittest.TestCase):
         self_outer=self;current=Strip().visit(current)
         self.assertEqual(hooks,["public_capture(journey, scenario, 'confirming')","public_capture(journey, scenario, 'reconfirming')"])
         self.assertEqual(ast.dump(current,include_attributes=False),ast.dump(original,include_attributes=False))
+    def test_sdk_notification_binding_is_in_selected_immutable_sources(self):
+        harness=Path(__file__).resolve().parents[3]
+        journey=Path('desktop/macos/lifecycle_capture/LifecycleCaptureJourneys.swift')
+        support=Path('desktop/macos/lifecycle_capture/CapturePort.swift')
+        source=(harness/journey).read_bytes()
+        self.assertEqual(source.count(b'import notify\n'),1)
+        self.assertEqual(p.digest(source.replace(b'import notify\n',b'')),
+                         '189ffcc4af4add7d49ae6528c270f8a9cdc6b9b1e3c7bb6845f2079e6bedda03')
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t).resolve();shadow=root/'harness'
+            for name in (journey,support,materialize.PROJECT/'project.pbxproj',materialize.PROJECT/materialize.SCHEME,materialize.NATIVE):
+                target=shadow/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes((harness/name).read_bytes())
+            selection=materialize.materialize(shadow,root/'project')
+            self.assertEqual(set(selection['sources']),{str(shadow/journey),str(shadow/support)})
+            self.assertEqual(selection['sources'][str(shadow/journey)],p.digest(source))
+            config=Path('/private/session.json')
+            target=dict(IsUITestBundle=True,BlueprintName=materialize.TARGET,
+                        EnvironmentVariables={'NAC_UI_FIXTURE':str(config)},TestBundlePath='/private/NACLifecycleCaptureUITests.xctest')
+            self.assertIs(materialize.runner({'targets':[target]},config,selection),target)
+            for name in (journey,support):
+                path=shadow/name;original=path.read_bytes()
+                path.write_bytes(original.replace(b'import notify\n',b'') if name==journey else original+b'\n// changed fixture input\n')
+                with self.assertRaisesRegex(RuntimeError,'compiler source changed'):
+                    materialize.runner({'targets':[target]},config,selection)
+                path.write_bytes(original)
+            self.assertIs(materialize.runner({'targets':[target]},config,selection),target)
+
     def test_runner_has_no_raw_ax_or_input_and_no_provisional_png_channel(self):
         source=Path(__file__).with_name('LifecycleCaptureJourneys.swift').read_text()
         for token in ('ApplicationServices','AXUIElementCopy','AXUIElementPerformAction','.click(','.typeText(','.tap(','.press('):self.assertNotIn(token,source)

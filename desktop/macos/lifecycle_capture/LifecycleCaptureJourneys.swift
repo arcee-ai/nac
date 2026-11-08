@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Darwin
+import notify
 import XCTest
 import XCUIAutomation
 

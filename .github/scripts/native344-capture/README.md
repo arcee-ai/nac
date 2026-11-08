@@ -7,13 +7,15 @@ producer0210 remain immutable Git objects/refs. Default dev, public PRs/stacks,
 C/H8 and the original capture-source259 branch are untouched. No unregistered
 workflow, synthetic GITHUB_SHA, extra bootstrap workflow or source rebuild is used.
 
-The first Swift compiler repair is one clean child of preserved caller
-2af8c5bc3efcb6789ba164859699cc0b58d5200a; reviewed259 remains its original source
+The SDK notification import repair is one clean child of preserved caller
+10f0894bf4b4d3d1fc8fe260cbd671dcddfd560e; reviewed259 remains its original source
 on codex/experimental-native-p12-lifecycle-capture-consumer01. Actual consumer
 HEAD is `${{ github.sha }}`; Root's literal controller_sha must match that same
-GITHUB_SHA. Original H_baseebdbd and exact P4b7 remain. Only branch/parent admission
-nomination and matching README/test literals change in the23-file role; all
-controller/Swift/Q/owner/collector/policy/input/PNG/join implementation stays exact.
+GITHUB_SHA. Original H_baseebdbd and exact P4b7 remain. The only new executable-source change is the approved notify module import
+in the owning SDK test file; its complete call bodies and all other production
+code remain exact10f. Strict parent nomination and matching docs/tests accompany
+that import. Original controller/Q/owner/collector/policy/input/PNG/join behavior
+and the previously reviewed Swift witness checks stay unchanged.
 
 The initial inline validator is the reviewed admission function with only its
 unchanged fixed Q digest substituted because checkout has not happened yet.
@@ -109,3 +111,14 @@ geometry/ownership/input/clock policy is relaxed. Candidate capture3/4, caller4/
 last nomination, firstSwiftrepair1/4; phase1/4, CALLER-F1first1/4, CAPfirst1/4,
 actualordinal1/cases0 remain. The unpublished repair child uses its own local
 branch; future publication must explicitly nominate it on the fixed consumer ref.
+
+The SDK notification import repair nominates exact parent
+`10f0894bf4b4d3d1fc8fe260cbd671dcddfd560e`. It adds only `import notify`
+to LifecycleCaptureJourneys.swift so the existing C API is visible in its
+owning file/target. Notification name/nonce/ordinal/withCString/zero-status
+check and every executable body remain byte-identical to10f; no new framework,
+library, notification, input, actor or predicate is added. Capture source4/4,
+Swift compiler repair2/4 and approved extra caller fifth nomination are recorded
+without resetting the prior4/4 limit. Actualordinal2 remains closed SDK failure
+with cases0/0/0. A further hosted attempt was approved but requires original SAME
+affected clearance and a separate fresh Root admission/clock; none runs here.
