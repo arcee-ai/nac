@@ -339,6 +339,14 @@ impl StoreConnection {
         self.connection_mut().transaction()
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn busy_handler(
+        &mut self,
+        callback: Option<fn(i32) -> bool>,
+    ) -> rusqlite::Result<()> {
+        self.connection_mut().busy_handler(callback)
+    }
+
     pub(crate) fn transaction_with_behavior(
         &mut self,
         behavior: rusqlite::TransactionBehavior,
