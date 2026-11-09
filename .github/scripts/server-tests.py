@@ -27,6 +27,7 @@ CONTROL_LISTENER_FILTER = ("package(=nac-server) & test(/^managed_control::tests
 OAUTH_LOOPBACK_TESTS = (
     "loopback_retry_reuses_only_its_own_live_callback_listener",
     "loopback_replacement_rejects_the_old_accepted_callback",
+    "loopback_failed_export_preserves_404_rejection_and_callback_ownership",
 )
 OAUTH_LOOPBACK_FILTER = ("package(=nac-server) & test(/^tests::mcp_oauth::loopback::("
                          + "|".join(OAUTH_LOOPBACK_TESTS) + ")$/)")

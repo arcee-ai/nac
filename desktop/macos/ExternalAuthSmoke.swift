@@ -97,12 +97,21 @@ final class ExternalAuthSmoke {
         }
         var witness = ExternalAuthCallbackWitness(source: identity.source_revision, build: identity.build_id,
             schema: schema, pid: Int(app.engine.pid))
+        var capture: ExternalAuthCallbackCapture?
+        guard let detach = app.engine.observeExternalAuthDiagnostics(incarnation: receipt.incarnation,
+                makeConsumer: { atBoundary in
+                    let next = ExternalAuthCallbackCapture(witness: witness, atRecordBoundary: atBoundary)
+                    capture = next
+                    return { next.receive($0) }
+                }), let capture else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+        defer { detach() }
+
         var results: [String: Any] = ["physical_input_qualified": false, "device_server_owner_qualified": false]
         for mode in ["success", "denied", "wrong-state", "hold"] {
             try await configure(mode, credential: credential)
             try await openPanel()
             guard let binding = currentDocument else { throw PreviewError.message("Auth document unavailable") }
-            try witness.ingest(app.engine.log)
+            witness = try capture.snapshot()
             let baseline = witness.owners
             try await clickButton("Authenticate")
             try await wait("production authorization link") {
@@ -113,7 +122,7 @@ final class ExternalAuthSmoke {
                 guard self.currentDocument == binding, self.app.engine.pid == enginePID,
                       self.app.engine.receipt?.incarnation == receipt.incarnation,
                       self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
-                try witness.ingest(self.app.engine.log)
+                witness = try capture.snapshot()
                 owner = try witness.newOwner(after: baseline)
                 return owner != nil
             }
@@ -137,7 +146,7 @@ final class ExternalAuthSmoke {
                         guard self.currentDocument == binding, self.app.engine.pid == enginePID,
                               self.app.engine.receipt?.incarnation == receipt.incarnation,
                               self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
-                        try witness.ingest(self.app.engine.log)
+                        witness = try capture.snapshot()
                         return try witness.rejection(owner: owner, baseline: baseline)
                     }
                     guard try await self.tokenCounts() == tokenBaseline else { throw ExternalAuthCallbackWitness.Refusal.invalid }
@@ -148,7 +157,7 @@ final class ExternalAuthSmoke {
                        guard self.currentDocument == binding, self.app.engine.pid == enginePID,
                              self.app.engine.receipt?.incarnation == receipt.incarnation,
                              self.app.engine.receipt?.identity == identity else { throw ExternalAuthCallbackWitness.Refusal.invalid }
-                       try witness.ingest(self.app.engine.log)
+                       witness = try capture.snapshot()
                        guard try witness.rejection(owner: owner, baseline: baseline) else { throw ExternalAuthCallbackWitness.Refusal.invalid }
                        cancelIssued = DispatchTime.now().uptimeNanoseconds
                        try await self.clickButton("Cancel authorization")
@@ -332,6 +341,7 @@ struct ExternalAuthCallbackWitness {
     private var rejected: Set<UInt64> = []
     private var seen: [String: String] = [:]
     private var processBound = false
+    private(set) var liveAccounting: [String: Any]?
 
     init(source: String, build: String, schema: Int, pid: Int) {
         self.source = source
@@ -363,7 +373,7 @@ struct ExternalAuthCallbackWitness {
         }
     }
 
-    mutating func ingest(_ log: String) throws {
+    mutating func ingest(_ log: String, replayAllowed: Bool = true) throws {
         // The final fragment may still be in flight. It can never qualify a row.
         let complete = log.split(separator: "\n", omittingEmptySubsequences: false).dropLast()
         var occurrences: Set<String> = []
@@ -389,13 +399,13 @@ struct ExternalAuthCallbackWitness {
                 let key = "\(owner):\(name)"
                 guard occurrences.insert(key).inserted else { throw Refusal.invalid }
                 if let previous = seen[key] {
-                    guard previous == line else { throw Refusal.invalid }
+                    guard replayAllowed && previous == line else { throw Refusal.invalid }
                     continue
                 }
                 if name.hasSuffix(".listening") {
-                    guard row["outcome"] as? String == "started", owners.insert(owner).inserted else { throw Refusal.invalid }
+                    guard owners.count < 4, seen.count < 8, row["outcome"] as? String == "started", owners.insert(owner).inserted else { throw Refusal.invalid }
                 } else {
-                    guard row["outcome"] as? String == "error", owners.contains(owner), rejected.insert(owner).inserted else { throw Refusal.invalid }
+                    guard seen.count < 8, row["outcome"] as? String == "error", owners.contains(owner), rejected.insert(owner).inserted else { throw Refusal.invalid }
                 }
                 seen[key] = line
             } else {
@@ -408,6 +418,7 @@ struct ExternalAuthCallbackWitness {
                       try integer(row["receipt_failures"]) == 0 else { throw Refusal.invalid }
                 recorder = id
                 processBound = true
+                liveAccounting = row
             }
         }
     }
@@ -440,6 +451,52 @@ struct ExternalAuthCallbackWitness {
         try await waiting()
         try await cancel()
         try await settled()
+    }
+}
+// The existing MainActor pipe reader calls this before trimming its ordinary log.
+// Retain only the validated four-flow witness (at most eight positive rows), one
+// matching live accounting row, and one bounded partial byte record. No new queue.
+final class ExternalAuthCallbackCapture {
+    private var witness: ExternalAuthCallbackWitness
+    private var partial = Data()
+    private var refused = false
+    private var discardingInitialFragment: Bool
+    private let maximumLineBytes = 65_536
+
+    init(witness: ExternalAuthCallbackWitness, atRecordBoundary: Bool) {
+        self.witness = witness
+        discardingInitialFragment = !atRecordBoundary
+    }
+
+    func receive(_ data: Data) {
+        guard !refused else { return }
+        for byte in data {
+            // Only a known pre-subscription fragment is skipped. The first full
+            // record after its real LF is processed, even in this same chunk.
+            if discardingInitialFragment {
+                if byte == 10 { discardingInitialFragment = false }
+                continue
+            }
+            if byte == 10 {
+                guard let line = String(data: partial, encoding: .utf8) else { refuse(); return }
+                partial.removeAll(keepingCapacity: true)
+                do { try witness.ingest(line + "\n", replayAllowed: false) }
+                catch { refuse(); return }
+            } else {
+                guard partial.count < maximumLineBytes else { refuse(); return }
+                partial.append(byte)
+            }
+        }
+    }
+
+    private func refuse() {
+        refused = true
+        partial.removeAll(keepingCapacity: false)
+    }
+
+    func snapshot() throws -> ExternalAuthCallbackWitness {
+        guard !refused else { throw ExternalAuthCallbackWitness.Refusal.invalid }
+        return witness
     }
 }
 // END EXTERNAL AUTH CALLBACK WITNESS

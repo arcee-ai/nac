@@ -29,6 +29,18 @@ final class PreviewEngine {
     #endif
 
     #if PREVIEW_SMOKE && !LOCAL_APP
+    // Exactly this ready run's diagnostic reader, never a process lookup or new pipe.
+    func observeExternalAuthDiagnostics(incarnation: String, makeConsumer: (Bool) -> ((Data) -> Void)) -> (() -> Void)? {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let run, run.receipt?.incarnation == incarnation, run.authDiagnosticConsumer == nil else { return nil }
+        let token = UUID()
+        run.authDiagnosticConsumer = (token, makeConsumer(run.authDiagnosticAtRecordBoundary))
+        return { [weak run] in
+            dispatchPrecondition(condition: .onQueue(.main))
+            if run?.authDiagnosticConsumer?.0 == token { run?.authDiagnosticConsumer = nil }
+        }
+    }
+
     static func recordingEnvironment(_ original: [String: String], provider: URL,
                                      arguments: [String]) -> [String: String] {
         var environment = original
@@ -132,6 +144,14 @@ private final class EngineRun {
     let protocolState: EngineProtocol
     var receipt: EngineReceipt? { pid > 0 && !stopping && !failed ? protocolState.ready : nil }
     private(set) var log = ""
+    #if PREVIEW_SMOKE && !LOCAL_APP
+    // BEGIN EXTERNAL AUTH DIAGNOSTIC ALIGNMENT
+    // Replacement decoding cannot invent ASCII LF; inspect only the consumed
+    // stream's final boundary on this same MainActor, never seed raw bytes here.
+    var authDiagnosticAtRecordBoundary: Bool { log.isEmpty || log.hasSuffix("\n") }
+    // END EXTERNAL AUTH DIAGNOSTIC ALIGNMENT
+    var authDiagnosticConsumer: (UUID, (Data) -> Void)?
+    #endif
     private var output: DispatchSourceRead?
     private var channel: DispatchSourceRead?
     private var exitSource: DispatchSourceProcess?
@@ -302,11 +322,16 @@ private final class EngineRun {
                 catch let failure as EngineFailure { fail(failure); return }
                 catch { fail(error.localizedDescription); return }
             } else {
+                // BEGIN EXTERNAL AUTH DIAGNOSTIC READ SINK
+                #if PREVIEW_SMOKE && !LOCAL_APP
+                authDiagnosticConsumer?.1(data)
+                #endif
                 log += String(decoding: data, as: UTF8.self)
                 if log.utf8.count > 65536 {
                     // Leave room for replacement scalars at a split UTF-8 boundary.
                     log = String(decoding: log.utf8.suffix(65528), as: UTF8.self)
                 }
+                // END EXTERNAL AUTH DIAGNOSTIC READ SINK
             }
         }
         if let endpoint, !failed, !stopping { onReady?(endpoint) }
