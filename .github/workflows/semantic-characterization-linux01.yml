@@ -1,0 +1,62 @@
+name: Private original-continuation mechanism control 01
+on:
+  push:
+    branches: [codex/semantic-characterization-linux01-20261109]
+permissions:
+  contents: read
+jobs:
+  one-characterization:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+      NO_COLOR: "1"
+    steps:
+      - name: Start invocation-owned evidence and forty-minute work budget
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          echo "CONTROL_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          mkdir -m 700 "$RUNNER_TEMP/semantic-control-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf '{"harness":"%s","run_id":"%s","attempt":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > "$RUNNER_TEMP/semantic-control-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/invocation.json"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ab860841921c7daede3ad84e9bc6e74172395b56
+          path: source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Build, select one case, retain original expected-failure evidence
+        timeout-minutes: 41
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 harness/.github/scripts/semantic-characterization-linux01.py
+          "$GITHUB_WORKSPACE/source"
+          "$RUNNER_TEMP/semantic-control-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Retain controlled logs, receipts, JUnit and unexpected owned fixtures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: semantic-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/semantic-control-${{ github.run_id }}-${{ github.run_attempt }}/
+            !${{ runner.temp }}/semantic-control-${{ github.run_id }}-${{ github.run_attempt }}/runtime/tool/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
