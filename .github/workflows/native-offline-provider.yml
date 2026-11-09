@@ -1,0 +1,67 @@
+name: Native offline local provider acceptance
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - .github/workflows/native-offline-provider.yml
+      - desktop/macos/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - Makefile
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: native-offline-provider-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  native-offline:
+    # Temporary one-case proposal. Root admits one exact published candidate
+    # before applying this file; remove/disable after that episode's decision.
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' && github.event.pull_request.number == 636 && github.run_attempt == '1' }}
+    name: Hosted macOS26 offline local provider
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+      CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha }}
+      CANDIDATE_BASE: ${{ github.event.pull_request.base.sha }}
+      CANDIDATE_PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: native-offline-provider-opt1
+          save-if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Set up the locked candidate
+        run: make setup
+      - name: Bind the actual hosted job and run one scoped offline local-provider journey
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B desktop/macos/ci_native_offline.py "$GITHUB_WORKSPACE" "$RUNNER_TEMP/native-offline-provider"
+      - name: Retain source, host, binary receipts and actual journey evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-offline-provider-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-offline-provider/evidence
+          if-no-files-found: error
+          retention-days: 7
