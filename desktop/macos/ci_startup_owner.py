@@ -15,6 +15,30 @@ from ci_xctest_attachments import bounded_file
 from ci_xctest_attachments import digest as data_digest
 
 
+_PRODUCER_FAILURE_STAGES = frozenset((
+    'unspecified', 'configuration', 'initial_empty', 'ready_emit',
+    'resources_candidates', 'include_probe', 'include_admission', 'process_list',
+    'pending_limit', 'children', 'arguments', 'arguments_absence',
+    'environment', 'detail_probe', 'arguments_hash', 'app_binding',
+    'app_launch', 'current_app', 'ancestry', 'known_coverage',
+    'known_limit', 'snapshot_record', 'snapshot_emit',
+))
+_PRODUCER_FAILURE_KINDS = frozenset((
+    'process_probe', 'ownership_invalid', 'arguments_unavailable', 'other',
+))
+
+
+def _producer_failure(record):
+    """Closed passive projection; malformed annotations never replace original failure."""
+    value = record.get('producer_failure')
+    if (type(value) is dict and set(value) == {'stage', 'kind'}
+            and type(value['stage']) is str and value['stage'] in _PRODUCER_FAILURE_STAGES
+            and type(value['kind']) is str and value['kind'] in _PRODUCER_FAILURE_KINDS
+            and ((value['kind'] == 'process_probe') == bool(record.get('unresolved')))):
+        return {'stage': value['stage'], 'kind': value['kind']}
+    return None
+
+
 def require(condition, code='invalid_record'):
     if not condition:
         error = RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
@@ -112,8 +136,10 @@ class OwnerWitness:
             observed = int(stamp) / 1e9
             self.last_uptime_ns = int(stamp)
             if record.get('event') == 'failed':
-                require(set(record) == {'schema', 'event', 'complete', 'reason', 'retained_identities',
-                                        'unresolved', 'observed_uptime_ns'}
+                require({'schema', 'event', 'complete', 'reason', 'retained_identities',
+                         'unresolved', 'observed_uptime_ns'} <= set(record)
+                        <= {'schema', 'event', 'complete', 'reason', 'retained_identities',
+                            'unresolved', 'observed_uptime_ns', 'producer_failure'}
                         and record['complete'] is False and record['reason'] == 'ownership_observation_unavailable')
                 retained, unresolved = record['retained_identities'], record['unresolved']
                 require(isinstance(retained, list) and len(retained) <= 128
@@ -361,6 +387,10 @@ class OwnerWitness:
                     clock_basis='time.monotonic', observed_uptime_ns=str(observed),
                     last_accepted_uptime_ns=str(self.last_accepted_uptime_ns),
                     byte_count=min(byte_count, 65537), shape=shape)
+                if code == 'typed_failure' and type(record) is dict and record.get('event') == 'failed':
+                    projection = _producer_failure(record)
+                    if projection is not None:
+                        self.stream_diagnostic['producer_failure'] = projection
         except BaseException:
             pass  # Missing diagnostics cannot change the original failure/custody.
 

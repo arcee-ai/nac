@@ -6,6 +6,7 @@ The resulting production-schema records enter the actual Python owner/caller.
 """
 from contextlib import ExitStack
 import hashlib
+import io
 import json
 import select
 import threading
@@ -20,7 +21,7 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from ci_startup import run_case
-from ci_startup_owner import OwnerWitness
+from ci_startup_owner import OwnerWitness, _PRODUCER_FAILURE_KINDS, _PRODUCER_FAILURE_STAGES
 
 ARGUMENT_KERNEL = r'''
 // All process/AppKit entry points used by snapshot are deterministic fixture
@@ -154,8 +155,9 @@ func runArgumentControl() throws {
     try StartupObserver.emit(StartupObserver.readyRecord(CommandLine.arguments[2]))
     try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
     argumentPhase = 1
+    var failureStage: StartupObserver.FailureStage = .unspecified
     do {
-        try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
+        try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known, note: { failureStage = $0 }))
         argumentReachedBarrier = true
         for _ in 0..<2 {
             // The consumer requests each fresh settlement observation first.
@@ -167,7 +169,7 @@ func runArgumentControl() throws {
             try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known))
         }
     } catch {
-        try StartupObserver.emit(StartupObserver.failureRecord(error, known: known))
+        try StartupObserver.emit(StartupObserver.failureRecord(error, known: known, stage: failureStage))
     }
     let audit: [String: Any] = ["actual_arguments_reads": argumentReads,
         "independent_absence_checks": argumentAbsenceChecks, "nonzero_signals": argumentSignals,
@@ -227,7 +229,23 @@ for pid: Int32 in [10, 11] { known[pid] = try injected(pid, previous: nil, scope
 try StartupObserver.emit(StartupObserver.readyRecord(configurationSHA))
 try StartupObserver.emit(StartupObserver.record(nodes: known.values.map(node), retired: [], enumeratedExits: []))
 do {
-    if scenario == "genuine_exit" {
+    if scenario == "generic_invalid" { throw OwnershipError.invalid }
+    if scenario == "generic_arguments" { throw OwnershipError.argumentsUnavailable }
+    if scenario == "generic_other" { throw NSError(domain: "PRIVATE-CANARY", code: 1, userInfo: ["path": "/PRIVATE-CANARY"]) }
+    if scenario.hasPrefix("failure_stages-") {
+        let errors: [String: Error] = [
+            "process_probe": StartupProbeFailure(pid: 11, scope: "known", reason: "path_denied"),
+            "ownership_invalid": OwnershipError.invalid,
+            "arguments_unavailable": OwnershipError.argumentsUnavailable,
+            "other": NSError(domain: "PRIVATE-CANARY", code: 1, userInfo: ["path": "/PRIVATE-CANARY"])
+        ]
+        guard let error = errors[String(scenario.dropFirst("failure_stages-".count))] else {
+            throw OwnershipError.invalid
+        }
+        for stage in StartupObserver.FailureStage.allCases {
+            try StartupObserver.emit(StartupObserver.failureRecord(error, known: known, stage: stage))
+        }
+    } else if scenario == "genuine_exit" {
         for pid in known.keys {
             guard try injected(pid, previous: known[pid], scope: "known", mode: "gone") == nil else { throw OwnershipError.invalid }
         }
@@ -409,6 +427,17 @@ class ProductionObserverControls(unittest.TestCase):
                 for frame in frames:
                     owner.observe(frame)
                 self.assertEqual(frames[-1]['event'], 'failed')
+                if scenario in ('known-denied', 'known-access-denied', 'known-malformed'):
+                    expected = ('arguments', 'ownership_invalid')
+                elif scenario == 'known-environment':
+                    expected = ('environment', 'ownership_invalid')
+                elif scenario == 'known-reused-after-arguments':
+                    expected = ('detail_probe', 'process_probe')
+                elif scenario == 'known-unknown':
+                    expected = ('arguments_absence', 'process_probe')
+                else:
+                    expected = ('arguments_absence', 'arguments_unavailable')
+                self.assertEqual(frames[-1]['producer_failure'], dict(zip(('stage', 'kind'), expected)))
                 self.assertFalse(audit['reached_settlement_barrier'])
                 self.assertFalse(owner.failure_receipt()['positive_settlement'])
                 self.assertEqual(set(owner.history), {10, 11, 12})
@@ -430,6 +459,56 @@ class ProductionObserverControls(unittest.TestCase):
         for record in frames:
             owner.observe(record)
         return owner
+
+    def test_production_enum_and_all_failure_kinds_match_consumer_without_authority(self):
+        self.assertEqual(len(_PRODUCER_FAILURE_STAGES), 23)
+        self.assertEqual(len(_PRODUCER_FAILURE_KINDS), 4)
+        for kind in sorted(_PRODUCER_FAILURE_KINDS):
+            with self.subTest(kind=kind):
+                frames = self.frames('failure_stages-' + kind)
+                failures = frames[2:]
+                # The actual production CaseIterable enum supplies this roster.
+                self.assertEqual(len(failures), len(_PRODUCER_FAILURE_STAGES))
+                self.assertEqual({f['producer_failure']['stage'] for f in failures},
+                                 _PRODUCER_FAILURE_STAGES)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(frames))
+                for frame in failures:
+                    annotation = frame['producer_failure']
+                    self.assertEqual(annotation['kind'], kind)
+                    owner = OwnerWitness(self.config(), 'b' * 64, uid=501)
+                    payload = b''.join((json.dumps(f) + '\n').encode() for f in frames[:2] + [frame])
+                    with patch('ci_startup_owner.ctypes.CDLL') as inspect, \
+                            patch('ci_startup_owner.os.kill') as send:
+                        owner._read_stream(io.BytesIO(payload))
+                        self.assertEqual(owner.stream_diagnostic['producer_failure'], annotation)
+                        self.assertEqual(owner.failure, 'ownership_observation_unavailable')
+                        self.assertEqual(owner.unresolved, frame['unresolved'])
+                        self.assertEqual(len(frame['retained_identities']), 2)
+                        self.assertEqual(set(owner.history), {10, 11})
+                        self.assertEqual({n['pid'] for n in owner.latest}, {10, 11})
+                        self.assertEqual(owner.last_accepted_uptime_ns,
+                                         int(frames[1]['observed_uptime_ns']))
+                        self.assertFalse(owner.failure_receipt()['positive_process_settlement'])
+                        self.assertFalse(owner.failure_receipt()['positive_settlement'])
+                        self.assertFalse(owner.retired)
+                        self.assertFalse(owner.signals)
+                        with self.assertRaises(RuntimeError): owner.settle(0)
+                        with self.assertRaises(RuntimeError): owner.attachment_binding()
+                        with self.assertRaises(RuntimeError): owner.signal_owned(owner.history[11], 15)
+                        inspect.assert_not_called()
+                        send.assert_not_called()
+
+    def test_generic_failure_kinds_are_static_and_do_not_export_exception_data(self):
+        for scenario, kind in [('generic_invalid', 'ownership_invalid'),
+                ('generic_arguments', 'arguments_unavailable'), ('generic_other', 'other')]:
+            with self.subTest(scenario=scenario):
+                frames = self.frames(scenario)
+                self.assertEqual(frames[-1]['producer_failure'], dict(stage='unspecified', kind=kind))
+                self.assertEqual(frames[-1]['unresolved'], [])
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(frames))
+                owner = self.owner(frames)
+                self.assertEqual(owner.failure, 'ownership_observation_unavailable')
+                self.assertFalse(owner.failure_receipt()['positive_settlement'])
 
     def test_app_exit_and_surviving_engine_unknown_path_never_emit_settled_empty(self):
         frames = self.frames('app_exit_engine_unavailable')

@@ -136,6 +136,105 @@ class StreamDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result['latest_pids'],[10,11])
         self.assertFalse(result['positive_settlement'])
 
+    def test_static_producer_failure_is_retained_without_new_authority(self):
+        row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+            reason='ownership_observation_unavailable', retained_identities=[], unresolved=[],
+            observed_uptime_ns='99700000000',
+            producer_failure=dict(stage='environment', kind='ownership_invalid'))
+        result = self.read((json.dumps(row)+'\n').encode())
+        self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+        self.assertEqual(result['stream_diagnostic']['producer_failure'], row['producer_failure'])
+        self.assertEqual(result['latest_pids'], [10, 11])
+        self.assertFalse(result['positive_process_settlement'])
+        with self.assertRaises(RuntimeError): self.owner.signal_owned(self.owner.latest[0], 15)
+        self.assertEqual(self.owner.signals, [])
+
+    def test_malformed_optional_projection_does_not_replace_original_failure(self):
+        for value in [None, [], 'SECRET-CANARY', dict(stage=['SECRET-CANARY'], kind='other'),
+                dict(stage='environment', kind='SECRET-CANARY'),
+                dict(stage='environment', kind='other', raw='SECRET-CANARY'),
+                dict(stage='include_probe', kind='process_probe')]:
+            with self.subTest(value=value):
+                self.setUp()
+                row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+                    reason='ownership_observation_unavailable', retained_identities=[], unresolved=[],
+                    observed_uptime_ns='99700000000', producer_failure=value)
+                result = self.read((json.dumps(row)+'\n').encode())
+                self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+                self.assertNotIn('producer_failure', result['stream_diagnostic'])
+                self.assertNotIn('SECRET-CANARY', json.dumps(result))
+                self.assertFalse(result['positive_settlement'])
+
+    def test_probe_details_are_preserved_alongside_static_stage(self):
+        row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+            reason='ownership_observation_unavailable', retained_identities=[],
+            unresolved=[dict(pid=11, scope='known', reason='path_denied')],
+            observed_uptime_ns='99700000000',
+            producer_failure=dict(stage='include_probe', kind='process_probe'))
+        result = self.read((json.dumps(row)+'\n').encode())
+        self.assertEqual(result['unresolved'], row['unresolved'])
+        self.assertEqual(result['stream_diagnostic']['producer_failure'], row['producer_failure'])
+        self.assertFalse(result['positive_settlement'])
+
+    def test_optional_projection_rejects_unknown_stage_types_and_probe_mismatch(self):
+        annotations = [
+            dict(stage='PRIVATE-CANARY', kind='other'),
+            dict(stage=1, kind='other'), dict(stage='environment', kind=False),
+            dict(stage='environment'), dict(kind='other'),
+            dict(stage='include_probe', kind='other'),
+        ]
+        for annotation in annotations:
+            with self.subTest(annotation=annotation):
+                self.setUp()
+                row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+                    reason='ownership_observation_unavailable', retained_identities=[],
+                    unresolved=[dict(pid=11, scope='known', reason='path_denied')],
+                    observed_uptime_ns='99700000000', producer_failure=annotation)
+                result = self.read((json.dumps(row) + '\n').encode())
+                self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+                self.assertEqual(result['unresolved'], row['unresolved'])
+                self.assertNotIn('producer_failure', result['stream_diagnostic'])
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(result))
+                self.assertFalse(result['positive_process_settlement'])
+                self.assertEqual(self.owner.last_accepted_uptime_ns, 99500000000)
+                self.assertEqual(self.owner.last_observation, 99.5)
+                self.assertFalse(self.owner.retired)
+                self.assertFalse(self.owner.signals)
+
+    def test_first_producer_annotation_is_retained_without_new_freshness_or_authority(self):
+        first = dict(schema='nac342-owner-v1', event='failed', complete=False,
+            reason='ownership_observation_unavailable', retained_identities=[], unresolved=[],
+            observed_uptime_ns='99700000000',
+            producer_failure=dict(stage='environment', kind='ownership_invalid'))
+        later = dict(first, observed_uptime_ns='99800000000',
+                     producer_failure=dict(stage='snapshot_emit', kind='other'))
+        result = self.read(b''.join((json.dumps(row) + '\n').encode() for row in (first, later)))
+        self.assertEqual(result['stream_diagnostic']['producer_failure'], first['producer_failure'])
+        self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+        self.assertEqual(result['latest_pids'], [10, 11])
+        self.assertEqual(self.owner.last_accepted_uptime_ns, 99500000000)
+        self.assertEqual(self.owner.last_observation, 99.5)
+        self.assertFalse(result['positive_settlement'])
+        self.assertFalse(result['positive_process_settlement'])
+        with patch('ci_startup_owner.ctypes.CDLL') as inspect, \
+                patch('ci_startup_owner.os.kill') as send:
+            with self.assertRaises(RuntimeError): self.owner.settle(0)
+            with self.assertRaises(RuntimeError): self.owner.attachment_binding()
+            with self.assertRaises(RuntimeError): self.owner.signal_owned(self.owner.latest[0], 15)
+            inspect.assert_not_called()
+            send.assert_not_called()
+        self.assertEqual(self.owner.signals, [])
+
+    def test_unknown_outer_field_cannot_relax_failed_record_validation(self):
+        row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+            reason='ownership_observation_unavailable', retained_identities=[], unresolved=[],
+            observed_uptime_ns='99700000000', private='PRIVATE-CANARY',
+            producer_failure=dict(stage='environment', kind='ownership_invalid'))
+        diagnostic = self.assert_failure((json.dumps(row) + '\n').encode(),
+                                         'record_validation', 'invalid_record')
+        self.assertNotIn('producer_failure', diagnostic)
+        self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+
     def test_healthy_stream_and_expected_stop_gain_no_failure_or_settlement(self):
         result=self.read(healthy=True)
         self.assertIsNone(result['failure'])
