@@ -1,6 +1,6 @@
 {
-  "scope": "P12-integration-Q3c7-R7325-four-startup-source01",
-  "H": "7a101a3a44605614c0952a466ed26be5f911a91f",
+  "scope": "P12-integration-Q3c7-currentD-R7325-four-startup-source02",
+  "H": "529b9d772da4d2e0afd9ae176e65f23355f446a6",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "3c7acb4b609cea491a144947966d5dcd0872e4f3",
   "product_parent": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
@@ -9,7 +9,7 @@
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "q_swift_sha256": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
   "host_image": "20261102.0473.1",
-  "H_preparation_parent": "29931101ff7ad50bfc80bf048681ab05de028ec6",
+  "H_preparation_parent": "ca9e162fef20e7119d35b9ec8b9866a6d65cfb94",
   "native_boundary": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
   "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",

@@ -1,7 +1,7 @@
 # PRIVATE NEVERMERGE: P12 integration product, Q3c7/H pins, four cases plus R
 
 This private source-binding candidate uses reviewed Q3c7 with the complete ten-file
-startup supplier roster and a pin-only child of the existing H299 normal harness.
+startup supplier roster and a pin-only child of exact current dev ca9e162fef20e7119d35b9ec8b9866a6d65cfb94.
 All original acceptance, input, cleanup and timing guards are unchanged. The new
 scope/branch identify a prospective allocation; runtime remains unadmitted.
 P12 is the compatible normal INTEGRATION TEST PRODUCT containing the native picker,
@@ -19,14 +19,17 @@ No execution, publication, actual allocation or goal is issued here.
 
 `pair.json` binds normal integration P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
 reviewed private Q `3c7acb4b609cea491a144947966d5dcd0872e4f3`, pin-only H
-`7a101a3a44605614c0952a466ed26be5f911a91f`, and unchanged independent R
+`529b9d772da4d2e0afd9ae176e65f23355f446a6`, and unchanged independent R
 `7325c48b3c9ec7036e255a6bd92f31c1a98c1607` (schema50/future51).
 Q has the exact ten reviewed799 source blobs/modes and remains above frozen
 UNMERGED L `1e873aa5200571940fe27dedb9c80b8f19966ebf`; it is a test supplier.
 P12 parent/native-boundary/source-context and historical SDK/preparation fields
-remain provenance for their original roles. H's actual preparation parent is H299.
+remain provenance for their original roles. H's actual preparation parent is current Dca9; every other H path equals that delivered tree.
 The Q source roster is sealed by H TEST_FILES; current controller/H/Q availability
 must be separately arranged before any Root-admitted SDK/runtime episode.
+The preserved H01/C01 review remains SOURCE_CLEAR_WITH_LIMITS for its old H299 base.
+This supplier selection correction consumes current delivered observer/owner/cleanup
+guards without editing them; it is not an extension of that old-base disposition.
 Historical source/inert evidence retains its original attribution. No old
 compiler/runtime allowance is reset and no current-host episode is granted here.
 
