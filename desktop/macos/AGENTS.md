@@ -54,3 +54,8 @@ Never retry AX after that diagnostic, infer CG-to-AX membership, or export field
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.
+
+The cohesive `test_ci_startup_observer.py` test module may exceed 800 lines
+because it keeps deterministic kernel/AppKit adapters, exact production snapshot
+compilation and custody/launch-race assertions in one auditable fixture owner.
+Each selected batch compiles that fixture once; the file remains below 2,000 lines.

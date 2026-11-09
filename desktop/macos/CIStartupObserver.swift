@@ -378,7 +378,7 @@ enum StartupObserver {
         try need(resources.intact() && candidates.count <= 1 && candidates.allSatisfy {
             resources.matches(bundle: $0.bundleURL, executable: $0.executableURL)
         })
-        let app = candidates.first
+        var app = candidates.first
         let nativePath = path + "/Contents/MacOS/NACPreview"
         let enginePath = path + "/Contents/Resources/nac-web"
         var nodes: [[String: Any]] = []
@@ -455,6 +455,23 @@ enum StartupObserver {
                 .map { String(format: "%02x", $0) }.joined()
             if actual == nativePath {
                 note(.app_binding)
+                if app == nil {
+                    // Launch may fall between independent app and kernel censuses.
+                    // Refresh an absent selection once, retaining existing bindings.
+                    let refreshed = NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                        .filter { !$0.isTerminated }
+                    try need(refreshed.count == 1 && refreshed.allSatisfy {
+                        $0.processIdentifier == pid
+                            && resources.matches(bundle: $0.bundleURL, executable: $0.executableURL)
+                    })
+                    guard let candidate = refreshed.first,
+                          try StartupProcessProbe.observe(pid, previous: after, scope: "app", uid: getuid()) != nil,
+                          !candidate.isTerminated,
+                          resources.matches(bundle: candidate.bundleURL, executable: candidate.executableURL) else {
+                        throw OwnershipError.invalid
+                    }
+                    app = candidate
+                }
                 try need(app?.processIdentifier == pid)
                 note(.app_launch)
                 node["app_launch_epoch"] = try app?.launchDate?.timeIntervalSince1970 ?? { throw OwnershipError.invalid }()
