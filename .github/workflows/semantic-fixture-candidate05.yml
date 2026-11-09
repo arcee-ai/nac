@@ -1,0 +1,67 @@
+name: Private fixture candidate fifth-trial verification
+on:
+  push:
+    branches: [codex/semantic-fixture-candidate-control05]
+permissions:
+  contents: read
+jobs:
+  candidate-once:
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+      NO_COLOR: "1"
+    steps:
+      - name: Start forty-minute work budget and owned evidence
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          echo "CONTROL_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          mkdir -m 700 "$RUNNER_TEMP/fixture-candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf '{"harness":"%s","run_id":"%s","attempt":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > "$RUNNER_TEMP/fixture-candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/invocation.json"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: cf0d83ac1a57e73ed7915ea211d2b39cfc2aad17
+          path: source-P
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: 1e873aa5200571940fe27dedb9c80b8f19966ebf
+          path: source-L
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: P exact GREEN, declared L core, unchanged full L server
+        timeout-minutes: 41
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 harness/.github/scripts/semantic-fixture-candidate05.py
+          "$GITHUB_WORKSPACE/source-P" "$GITHUB_WORKSPACE/source-L"
+          "$RUNNER_TEMP/fixture-candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Retain original results and controlled unexpected fixture roots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fixture-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/fixture-candidate-${{ github.run_id }}-${{ github.run_attempt }}/
+            !${{ runner.temp }}/fixture-candidate-${{ github.run_id }}-${{ github.run_attempt }}/tool/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
