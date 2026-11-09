@@ -320,10 +320,10 @@ async fn owner_selected_goal_retry_receipt_survives_idle_callbacks_and_handoff()
     assert_eq!(unchanged.status, crate::store::GoalStatus::Active);
 }
 
-// Expected named RED is mechanism evidence, never a Ready repair or attribution
-// of the historical CI writer. No shipping/test-support policy is changed.
+// Private GREEN proof of the fixture stop+wake ordering, never historical
+// writer attribution or full qualification. Original identity and task retained.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_settlement_caller_cannot_recreate_store_after_typed_drain() {
+async fn fenced_original_settlement_caller_cannot_recreate_store_after_typed_drain() {
     assert!(
         std::env::var_os("NAC_HUMAN_CRASH_STORE").is_none(),
         "Characterization refuses an externally selected crash store"
@@ -429,123 +429,149 @@ async fn original_settlement_caller_cannot_recreate_store_after_typed_drain() {
     let released_model = provider.release();
     let entered = held.entered().await;
     let active_at_hold = parts.service.has_active_operation();
-    let stopped =
-        tokio::time::timeout(Duration::from_secs(5), parts.service.stop_run_admission()).await;
+    let mut stopped = None;
+    let mut returned = None;
+    let mut joined = None;
+    let mut fence_pending = false;
+    // One original five-second envelope: the stopped wake must wait behind
+    // the ORIGINAL accepted caller, which returns/joins while its owner lives.
+    let fenced = tokio::time::timeout(Duration::from_secs(5), async {
+        stopped = Some(parts.service.stop_run_admission().await);
+        let wake = parts.service.start_next_direct_inbox_item();
+        tokio::pin!(wake);
+        let first_poll = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::future::Future::poll(wake.as_mut(), cx))
+        })
+        .await;
+        fence_pending = first_poll.is_pending();
+        held.release();
+        returned = Some(held.returned().await);
+        joined = Some((&mut original).await);
+        match first_poll {
+            std::task::Poll::Ready(result) => result,
+            std::task::Poll::Pending => wake.await,
+        }
+    })
+    .await;
+    // A timeout never owns a replacement task or permission to drain/delete.
+    // Release the exact caller even when stop failed before reaching release.
+    held.release();
+    let pending_before_drain = !original.is_finished();
+    let provider_requests = provider.finish();
+    let stopped_ok = matches!(&stopped, Some(Ok(())));
+    let returned_normally = matches!(&returned, Some(Ok(true)));
+    let original_joined = matches!(&joined, Some(Ok(())));
+    let fence_none = matches!(&fenced, Ok(Ok(None)));
+    let model_requests = provider_requests.as_ref().ok().map(Vec::len);
+    if released_model.is_err()
+        || entered.is_err()
+        || active_at_hold
+        || !stopped_ok
+        || !returned_normally
+        || !original_joined
+        || !fence_pending
+        || !fence_none
+        || pending_before_drain
+        || model_requests != Some(1)
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "fenced-original-continuation-frontier-evidence {}",
+            serde_json::json!({
+                "session":"session", "run":run.run_id.as_str(), "root":root.to_string_lossy(),
+                "caller_entered":entered.is_ok(), "caller_returned_normally":returned_normally,
+                "original_task_joined":original_joined, "provider_joined":provider_requests.is_ok(),
+                "active_at_hold":active_at_hold, "stopped":stopped_ok,
+                "fence_pending_while_original_held":fence_pending, "fence_returned_none":fence_none,
+                "original_pending_before_drain":pending_before_drain, "model_requests":model_requests,
+                "typed_drain":"not attempted", "root_cleanup":"not attempted",
+            })
+        );
+        panic!(
+            "fenced original owner/frontier unavailable; retain owned root {}",
+            root.display()
+        );
+    }
+    // The original accepted caller and unique task are closed BEFORE drain.
     let drained = tokio::time::timeout(Duration::from_secs(5), owner.shutdown()).await;
     drop(owner);
     let pending_after_drain = !original.is_finished();
-    // Preserve the original DB under this exclusively owned UUID root. Removing
-    // only the selected pathname by rename models the old unlink frontier;
-    // there is no early root deletion and no fabricated SQLite journal.
     let preserved = root.join("preserved-original.db");
     let original_bytes = std::fs::read(&path);
-    let moved = if entered.is_ok()
-        && original_bytes.is_ok()
-        && matches!(&stopped, Ok(Ok(())))
-        && matches!(&drained, Ok(Ok(())))
-        && !active_at_hold
-        && pending_after_drain
+    let moved = if matches!(&drained, Ok(Ok(()))) && !pending_after_drain && original_bytes.is_ok()
     {
         std::fs::rename(&path, &preserved)
     } else {
         Err(std::io::Error::other(
-            "exact caller/drain frontier unavailable; original DB retained",
+            "fenced drain frontier unavailable; original DB retained",
         ))
     };
-    held.release();
-    let returned = held.returned().await;
-    // Borrow the ORIGINAL handle so timeout cannot silently detach it. A
-    // timeout is missing closure evidence, not a cancellation-based substitute.
-    let joined = tokio::time::timeout(Duration::from_secs(5), &mut original).await;
+    drop(held);
+    drop(parts);
     let recreated = path.try_exists();
     let original_preserved = preserved.try_exists();
     let preserved_bytes = std::fs::read(&preserved);
-    let provider_requests = provider.finish();
-    drop(held);
-    drop(parts);
-    if returned.is_err()
-        || !matches!(&joined, Ok(Ok(())))
-        || !matches!(&stopped, Ok(Ok(())))
-        || !matches!(&drained, Ok(Ok(())))
-        || provider_requests.is_err()
-    {
-        panic!(
-            "original owner closure unavailable; retain owned root {}",
-            root.display()
-        );
-    }
     let bytes_match = match (&original_bytes, &preserved_bytes) {
         (Ok(before), Ok(after)) => !before.is_empty() && before == after,
         _ => false,
     };
-    // Root adjudication: retain the evidence on an invalid causal frontier,
-    // even after the original owners have closed. Inspect only held results.
-    if released_model.is_err()
-        || entered.is_err()
+    // Root's stricter F1 policy: invalid observations retain this owned root.
+    if !matches!(&drained, Ok(Ok(())))
+        || pending_after_drain
         || moved.is_err()
-        || active_at_hold
-        || !pending_after_drain
         || !matches!(&original_preserved, Ok(true))
         || !bytes_match
-        || provider_requests.as_ref().ok().map(Vec::len) != Some(1)
-        || recreated.is_err()
+        || !matches!(&recreated, Ok(false))
     {
-        panic!(
-            "unexpected original continuation frontier; retain owned root {} \
-             (model_released={}, caller_entered={}, moved={}, active={}, pending={}, \
-             original_preserved={:?}, bytes_match={}, model_requests={:?}, recreated={:?})",
-            root.display(),
-            released_model.is_ok(),
-            entered.is_ok(),
-            moved.is_ok(),
-            active_at_hold,
-            pending_after_drain,
-            original_preserved.as_ref().ok(),
-            bytes_match,
-            provider_requests.as_ref().ok().map(Vec::len),
-            recreated.as_ref().ok(),
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "fenced-original-continuation-store-evidence {}",
+            serde_json::json!({
+                "session":"session", "run":run.run_id.as_str(), "root":root.to_string_lossy(),
+                "typed_drain_acknowledged":matches!(&drained, Ok(Ok(()))),
+                "original_pending_after_drain":pending_after_drain, "moved":moved.is_ok(),
+                "original_preserved":original_preserved.as_ref().ok(),
+                "old_db_bytes_preserved":bytes_match, "selected_path_recreated":recreated.as_ref().ok(),
+                "root_cleanup":"not attempted",
+            })
         );
-    }
-    if matches!(&recreated, Ok(false)) {
         panic!(
-            "ORIGINAL_CONTINUATION_MECHANISM_NOT_DEMONSTRATED; retain owned root {}",
+            "unexpected fenced store frontier; retain owned root {}",
             root.display()
         );
     }
-    // Only the valid expected frontier reaches ONE strict deletion. Preserve
-    // the semantic assertions and exact named RED after observed cleanup.
     std::fs::remove_dir_all(&root).unwrap();
     let root_absent = root.try_exists().map(|exists| !exists);
-    // Content-free receipts bind the intended RED to the ORIGINAL owners and
-    // physical cleanup; an unrelated failure is not the expected mechanism.
     use std::io::Write;
     let _ = writeln!(
         std::io::stderr().lock(),
-        "original-continuation-drain-evidence {}",
+        "fenced-original-continuation-drain-evidence {}",
         serde_json::json!({
             "session":"session", "run":run.run_id.as_str(), "root":root.to_string_lossy(),
-            "caller_entered":entered.is_ok(), "caller_returned":returned.is_ok(),
-            "caller_operation_succeeded":returned.as_ref().ok(),
-            "original_task_joined":matches!(&joined, Ok(Ok(()))),
-            "provider_joined":provider_requests.is_ok(),
-            "model_requests":provider_requests.as_ref().ok().map(Vec::len),
-            "active_at_hold":active_at_hold, "original_pending_after_drain":pending_after_drain,
+            "caller_entered":entered.is_ok(), "caller_returned":returned_normally,
+            "caller_operation_succeeded":returned.as_ref().and_then(|value| value.as_ref().ok()),
+            "original_task_joined":original_joined, "provider_joined":provider_requests.is_ok(),
+            "model_requests":model_requests, "active_at_hold":active_at_hold,
+            "fence_pending_while_original_held":fence_pending, "fence_returned_none":fence_none,
+            "original_pending_before_drain":pending_before_drain,
+            "original_pending_after_drain":pending_after_drain,
             "typed_drain_acknowledged":matches!(&drained, Ok(Ok(()))),
-            "old_db_bytes_preserved":bytes_match,
-            "selected_path_recreated":recreated.as_ref().ok(),
-            "owned_root_absent":root_absent.as_ref().ok(),
-            "historical_ci_writer":"unknown",
+            "old_db_bytes_preserved":bytes_match, "selected_path_recreated":recreated.as_ref().ok(),
+            "owned_root_absent":root_absent.as_ref().ok(), "historical_ci_writer":"unknown",
         })
     );
     released_model.unwrap();
     entered.unwrap();
     stopped.unwrap().unwrap();
+    assert!(returned.unwrap().unwrap());
+    joined.unwrap().unwrap();
+    assert!(fence_pending);
+    assert!(fenced.unwrap().unwrap().is_none());
     drained.unwrap().unwrap();
     moved.unwrap();
-    assert!(
-        !active_at_hold && pending_after_drain,
-        "original caller must outlive the idle slot/drain"
-    );
+    assert!(!active_at_hold && !pending_before_drain && !pending_after_drain);
     assert!(original_preserved.unwrap());
     assert!(root_absent.unwrap());
     assert!(
@@ -555,6 +581,6 @@ async fn original_settlement_caller_cannot_recreate_store_after_typed_drain() {
     assert_eq!(provider_requests.unwrap().len(), 1);
     assert!(
         !recreated.unwrap(),
-        "ORIGINAL_CONTINUATION_RECREATED_STORE_AFTER_DRAIN"
+        "FENCED_ORIGINAL_CONTINUATION_RECREATED_STORE_AFTER_DRAIN"
     );
 }
