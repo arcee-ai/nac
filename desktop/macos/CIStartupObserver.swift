@@ -367,12 +367,14 @@ enum StartupObserver {
     }
 
     static func snapshot(_ config: [String: Any], resources: StartupURLResources,
-                         known: inout [Int32: StartupProcessIdentity]) throws -> [String: Any] {
+                         known: inout [Int32: StartupProcessIdentity],
+                         note: (FailureStage) -> Void = { _ in }) throws -> [String: Any] {
         let path = config["app_path"] as! String
         let identifier = config["bundle_id"] as! String
         let launcherEnvironment = config["environment"] as! [String: String]
         let childEnvironment = config["child_environment"] as! [String: String]
         let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
+        note(.resources_candidates)
         try need(resources.intact() && candidates.count <= 1 && candidates.allSatisfy {
             resources.matches(bundle: $0.bundleURL, executable: $0.executableURL)
         })
@@ -385,11 +387,13 @@ enum StartupObserver {
         var pending: [Int32] = [], examined: Set<Int32> = []
         func include(_ pid: Int32, scope: String, parent: Int32? = nil) throws {
             guard examined.insert(pid).inserted else { return }
+            note(.include_probe)
             guard let identity = try StartupProcessProbe.observe(pid, previous: known[pid], scope: scope, uid: getuid()) else {
                 if let old = known[pid] { retired.append(old.retirement) }
                 else if let parent { enumeratedExits.append(["pid": Int(pid), "parent": Int(parent), "proof": "kill_zero_ESRCH"]) }
                 return
             }
+            note(.include_admission)
             try need(known[pid] != nil || identity.executable == nativePath || identity.executable == enginePath
                      || scope == "enumerated_child")
             identities[pid] = identity
@@ -399,6 +403,7 @@ enum StartupObserver {
         // omitted them. Unknown foreign paths grant no ownership or signals.
         for pid in known.keys.sorted() { try include(pid, scope: "known") }
         if let app { try include(app.processIdentifier, scope: "app") }
+        note(.process_list)
         for pid in try allPIDs() where !examined.contains(pid) {
             if let path = try? StartupProcessProbe.path(pid), path == nativePath || path == enginePath {
                 try include(pid, scope: "candidate")
@@ -406,9 +411,11 @@ enum StartupObserver {
         }
         var cursor = 0
         while cursor < pending.count {
+            note(.pending_limit)
             try need(pending.count <= 128)
             let parent = pending[cursor]
             cursor += 1
+            note(.children)
             for child in try children(parent) {
                 try include(child, scope: "enumerated_child", parent: parent)
             }
@@ -418,19 +425,23 @@ enum StartupObserver {
             let actual = identity.executable
             let details: ([String], [String: String])
             do {
+                note(.arguments)
                 details = try arguments(pid)
             } catch OwnershipError.argumentsUnavailable {
                 // Only independent positive absence can recover a failed
                 // lookup. Parsing/environment validation is never caught.
+                note(.arguments_absence)
                 guard try StartupProcessProbe.absent(pid) else { throw OwnershipError.argumentsUnavailable }
                 if let old = known[pid] { retired.append(old.retirement) }
                 else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
                 continue
             }
             let (argv, environment) = details
+            note(.environment)
             let environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
                 nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
                 launcher: launcherEnvironment, child: childEnvironment)
+            note(.detail_probe)
             guard let after = try StartupProcessProbe.observe(pid, previous: identity, scope: "detail", uid: getuid()) else {
                 if let old = known[pid] { retired.append(old.retirement) }
                 else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
@@ -439,10 +450,13 @@ enum StartupObserver {
             observed[pid] = after
             var node = after.record
             node.merge(environmentRecord) { _, new in new }
+            note(.arguments_hash)
             node["arguments_sha256"] = SHA256.hash(data: try JSONSerialization.data(withJSONObject: argv))
                 .map { String(format: "%02x", $0) }.joined()
             if actual == nativePath {
+                note(.app_binding)
                 try need(app?.processIdentifier == pid)
+                note(.app_launch)
                 node["app_launch_epoch"] = try app?.launchDate?.timeIntervalSince1970 ?? { throw OwnershipError.invalid }()
                 let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                     as? [[String: Any]] ?? []
@@ -456,6 +470,7 @@ enum StartupObserver {
         let current = Dictionary(uniqueKeysWithValues: nodes.map { ($0["pid"] as! Int, $0) })
         let retiredPIDs = Set(retired.map { Int32(($0["identity"] as! [String: Any])["pid"] as! Int) })
         if let app {
+            note(.current_app)
             try need(current[Int(app.processIdentifier)]?["kind"] as? String == "app"
                      || retiredPIDs.contains(app.processIdentifier))
         }
@@ -470,15 +485,40 @@ enum StartupObserver {
             }
             // Reparented survivors remain owned only through a prior positive
             // path/parent/start witness; a newly found orphan fails closed.
+            note(.ancestry)
             try need(owned || known[pid] != nil)
         }
+        note(.known_coverage)
         try need(Set(known.keys).isSubset(of: Set(observed.keys).union(retiredPIDs)))
+        note(.known_limit)
         try need(Set(known.keys).union(observed.keys).count <= 128)
         known.merge(observed) { _, new in new }
+        note(.snapshot_record)
         return try record(nodes: nodes, retired: retired, enumeratedExits: enumeratedExits)
     }
 
     // BEGIN STARTUP OBSERVER RECORDS (same producer/emitter in fixture controls)
+    // Static, failure-only annotations. No clock, query, authority or error replacement.
+    enum FailureStage: String, CaseIterable {
+        case unspecified, configuration, initial_empty, ready_emit
+        case resources_candidates, include_probe, include_admission, process_list
+        case pending_limit, children, arguments, arguments_absence
+        case environment, detail_probe, arguments_hash, app_binding
+        case app_launch, current_app, ancestry, known_coverage
+        case known_limit, snapshot_record, snapshot_emit
+    }
+
+    static func failureKind(_ error: Error) -> String {
+        if error is StartupProbeFailure { return "process_probe" }
+        if let value = error as? OwnershipError {
+            switch value {
+            case .invalid: return "ownership_invalid"
+            case .argumentsUnavailable: return "arguments_unavailable"
+            }
+        }
+        return "other" // Never stringify an error, domain, path, argv or environment.
+    }
+
     static func record(nodes: [[String: Any]], retired: [[String: Any]], enumeratedExits: [[String: Any]]) throws -> [String: Any] {
         try need(nodes.count + retired.count + enumeratedExits.count <= 128)
         return ["schema": "nac342-owner-v1", "complete": true,
@@ -491,10 +531,12 @@ enum StartupObserver {
          "enumerated_exits": [], "configuration_sha256": configurationSHA256]
     }
 
-    static func failureRecord(_ error: Error, known: [Int32: StartupProcessIdentity]) -> [String: Any] {
+    static func failureRecord(_ error: Error, known: [Int32: StartupProcessIdentity],
+                              stage: FailureStage = .unspecified) -> [String: Any] {
         let failure = error as? StartupProbeFailure
         return ["schema": "nac342-owner-v1", "event": "failed", "complete": false,
                 "reason": "ownership_observation_unavailable",
+                "producer_failure": ["stage": stage.rawValue, "kind": failureKind(error)],
                 "retained_identities": known.keys.sorted().compactMap { known[$0]?.fingerprint },
                 "unresolved": failure.map { [["pid": Int($0.pid), "scope": $0.scope, "reason": $0.reason]] } ?? []]
     }
@@ -517,6 +559,7 @@ enum StartupObserver {
             StartupAXPreflight.main(CommandLine.arguments[2], CommandLine.arguments[3])
         }
         var known: [Int32: StartupProcessIdentity] = [:]
+        var failureStage: FailureStage = .configuration
         do {
             try need(CommandLine.arguments.count == 2)
             let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
@@ -527,17 +570,21 @@ enum StartupObserver {
                 && config["fixture_root"] is String && config["environment"] is [String: String]
                 && config["child_environment"] is [String: String])
             let resources = try StartupURLResources(root: config["fixture_root"] as! String, app: config["app_path"] as! String)
-            let initial = try snapshot(config, resources: resources, known: &known)
+            let initial = try snapshot(config, resources: resources, known: &known, note: { failureStage = $0 })
+            failureStage = .initial_empty
             try need((initial["nodes"] as! [[String: Any]]).isEmpty)
+            failureStage = .ready_emit
             try emit(readyRecord(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()))
             let owner = getppid()
             while getppid() == owner {
-                try emit(snapshot(config, resources: resources, known: &known))
+                let value = try snapshot(config, resources: resources, known: &known, note: { failureStage = $0 })
+                failureStage = .snapshot_emit
+                try emit(value)
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
         } catch {
             // Never stringify OS errors or process/credential-bearing values.
-            try? emit(failureRecord(error, known: known))
+            try? emit(failureRecord(error, known: known, stage: failureStage))
             exit(1)
         }
     }
