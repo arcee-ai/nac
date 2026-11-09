@@ -46,6 +46,9 @@ and navigate to the interface in your browser (default: [http://127.0.0.1:3210](
 nac-web upgrade
 ```
 
+This command updates a standalone CLI installation. An engine bundled inside a
+Mac app refuses it: [replace the whole app and retain its data](docs/configuration/mac-app-updates.md).
+
 ### Model Provider Authentication
 
 Pick one before you start a session, or configure it later from the dashboard.
@@ -66,9 +69,15 @@ More details can be found in [Providers and logins](docs/configuration/credentia
 
 ### Uninstall
 
+For a standalone CLI installation:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall.sh | sh
 ```
+
+For the Mac app, quit it and remove the `.app` bundle. Removing the app does not
+delete your configuration, credentials, sessions, or profile data. Deliberately
+deleting that data is a separate action; see [Mac app updates and removal](docs/configuration/mac-app-updates.md).
 
 ## Documentation
 
