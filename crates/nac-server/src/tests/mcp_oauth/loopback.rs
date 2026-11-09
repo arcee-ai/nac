@@ -53,6 +53,7 @@ async fn loopback_case(replace_accepted: bool) {
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let issuer = format!("http://{}/", listener.local_addr().unwrap());
+    let endpoint = format!("{issuer}mcp");
     let token_server = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -78,7 +79,7 @@ async fn loopback_case(replace_accepted: bool) {
             "/mcp_library/servers",
             serde_json::json!({
                 "name":name, "enabled":true, "transport":"streamable_http",
-                "url":"https://mcp.slack.com/mcp", "headers":{}, "args":[], "env":{}
+                "url":&endpoint, "headers":{}, "args":[], "env":{}
             }),
         )
         .await;

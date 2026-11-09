@@ -168,8 +168,8 @@ pub fn append_thread_event_observing_busy(
     thread_name: &str,
     event_json: &str,
 ) -> Result<()> {
-    let connection = ThreadEventWriter::new(path)?.checkout()?;
-    let ThreadEventConnection::Local(local) = &connection else {
+    let mut connection = ThreadEventWriter::new(path)?.checkout()?;
+    let ThreadEventConnection::Local(local) = &mut connection else {
         anyhow::bail!("busy observation must execute on the persistence owner");
     };
     local.busy_handler(Some(observe_thread_event_busy))?;

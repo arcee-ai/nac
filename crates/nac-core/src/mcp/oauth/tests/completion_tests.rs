@@ -277,7 +277,8 @@ async fn concurrent_callback_claims_allow_one_token_request_and_no_late_save() {
             }
         }
     });
-    let endpoint = "https://mcp.example.test/mcp";
+    // The resource and token peer are both local; the safe SDK rejects public-to-loopback requests.
+    let endpoint = format!("{}/mcp", server.base_url);
     let mut config = configuration();
     config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
         authorization_endpoint: "https://auth.example.test/authorize".into(),
@@ -290,21 +291,23 @@ async fn concurrent_callback_claims_allow_one_token_request_and_no_late_save() {
         code_challenge_methods_supported: None,
         additional_fields: BTreeMap::new(),
     });
-    configure_mcp_oauth(Path::new("/workspace"), "slack", endpoint, config).unwrap();
+    configure_mcp_oauth(Path::new("/workspace"), "slack", &endpoint, config).unwrap();
     let path = oauth_store_path(Path::new("/workspace")).unwrap();
-    pending(&adapter(&path)).await;
+    let mut local_adapter = adapter(&path);
+    local_adapter.endpoint = normalize_endpoint(&endpoint).unwrap();
+    pending(&local_adapter).await;
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let mut tasks = Vec::new();
     for code in ["first-code", "second-code"] {
         let (mut manager, _, _, _) = manager_and_profile(
             Path::new("/workspace"),
             "slack",
-            endpoint,
+            &endpoint,
             CredentialSaveMode::Independent,
         )
         .await
         .unwrap();
-        let store = adapter(&path);
+        let store = local_adapter.clone();
         manager.set_credential_store(store.clone());
         manager.set_state_store(BothLoaded {
             inner: store,
@@ -326,7 +329,7 @@ async fn concurrent_callback_claims_allow_one_token_request_and_no_late_save() {
     let retired = fail_mcp_oauth_authorization(
         Path::new("/workspace"),
         "slack",
-        endpoint,
+        &endpoint,
         Some("https://auth.example.test/authorize?state=completion-state"),
     );
     release.store(true, Ordering::Release);
@@ -354,7 +357,7 @@ async fn concurrent_callback_claims_allow_one_token_request_and_no_late_save() {
         "retirement rejects even the winning late response"
     );
     assert_eq!(
-        mcp_oauth_status(Path::new("/workspace"), "slack", endpoint).unwrap(),
+        mcp_oauth_status(Path::new("/workspace"), "slack", &endpoint).unwrap(),
         McpOAuthStatus::NeedsAuthorization
     );
 }
@@ -670,5 +673,74 @@ async fn prepared_provenance_follows_each_profile_invalidation_owner() {
                 "{operation}"
             );
         }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn safe_oauth_constructor_denies_remote_to_loopback_before_token_request() {
+    let _lock = TEST_ENV_LOCK.lock().unwrap();
+    let (_home, _restore) = test_environment("address-policy");
+    for local_resource in [false, true] {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            r#"{"access_token":"local-token","token_type":"Bearer"}"#,
+        )]);
+        let endpoint = if local_resource {
+            format!("{}/mcp", server.base_url)
+        } else {
+            "https://mcp.example.test/mcp".into()
+        };
+        let mut config = configuration();
+        config.authorization_metadata = Some(McpOAuthAuthorizationMetadata {
+            authorization_endpoint: "https://auth.example.test/authorize".into(),
+            token_endpoint: format!("{}/token", server.base_url),
+            registration_endpoint: None,
+            issuer: None,
+            jwks_uri: None,
+            scopes_supported: None,
+            response_types_supported: None,
+            code_challenge_methods_supported: None,
+            additional_fields: BTreeMap::new(),
+        });
+        let cwd = Path::new("/workspace");
+        configure_mcp_oauth(cwd, "policy", &endpoint, config).unwrap();
+        let redirect = "http://localhost:1456/callback";
+        let session = begin_mcp_oauth_authorization(cwd, "policy", &endpoint, redirect, &[])
+            .await
+            .unwrap();
+        let state = authorization_state(session.authorization_url()).unwrap();
+        let result = complete_mcp_oauth_authorization(
+            cwd,
+            "policy",
+            &endpoint,
+            &format!("{redirect}?code=test-code&state={state}"),
+        )
+        .await;
+        let requests = server.stop_and_finish();
+        if local_resource {
+            result.unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].path, "/token");
+            assert_eq!(
+                mcp_oauth_status(cwd, "policy", &endpoint).unwrap(),
+                McpOAuthStatus::Connected
+            );
+        } else {
+            let error = format!("{:#}", result.unwrap_err());
+            // The SDK intentionally exposes the token stage without the internal HTTP error.
+            assert!(
+                error.contains("OAuth token exchange failed: Request failed"),
+                "{error}"
+            );
+            assert!(
+                requests.is_empty(),
+                "denied token destination must receive no request"
+            );
+            assert_ne!(
+                mcp_oauth_status(cwd, "policy", &endpoint).unwrap(),
+                McpOAuthStatus::Connected
+            );
+        }
+        clear_mcp_oauth(cwd, "policy").unwrap();
     }
 }
