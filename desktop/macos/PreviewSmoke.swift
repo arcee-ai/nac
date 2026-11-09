@@ -8,6 +8,7 @@ final class PreviewSmoke {
     private let destination: URL
     private let scenario: String
     private var evidence: [String: Any] = [:]
+    private(set) var offline: OfflineNetworkFence?
     private var passed = false
     private var cleanupError: String?
     private var pausedFirstLoad = false
@@ -53,7 +54,11 @@ final class PreviewSmoke {
         write()
         Task {
             do {
-                if scenario == "external-navigation-recording" {
+                if scenario == "offline-api-key" {
+                    try await wait("owned offline workspace", timeout: 60) { self.offline != nil && self.app.baseURL != nil }
+                    guard let offline else { throw PreviewError.message("Offline fence was not installed") }
+                    evidence["offline_provider"] = try await OfflineProviderSmoke(app: app, fence: offline).run()
+                } else if scenario == "external-navigation-recording" {
                     evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
                 } else if scenario == "external-auth" {
                     evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
@@ -157,10 +162,15 @@ final class PreviewSmoke {
                 }
                 passed = true
             } catch {
-                evidence["error"] = String(describing: error)
-                evidence["engine_log"] = app.engine.log
-                if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                if scenario == "offline-api-key" {
+                    evidence["error"] = "Offline qualification failed; no network/credential payload retained"
+                } else {
+                    evidence["error"] = String(describing: error)
+                    evidence["engine_log"] = app.engine.log
+                    if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                }
             }
+            offline?.close()
             evidence["engine_pid"] = app.engine.pid
             evidence["profile"] = app.profile?.root.path
             evidence["base_url"] = app.baseURL?.absoluteString
@@ -198,6 +208,13 @@ final class PreviewSmoke {
     }
 
     func beforeLaunch(_ profile: PreviewProfile) async throws {
+        if OfflineProviderPolicy.selected() {
+            guard offline == nil, app.baseURL == nil, app.engine.pid == 0, let view = app.webView else {
+                throw PreviewError.message("Offline fence admission is not pre-launch")
+            }
+            offline = try OfflineNetworkFence(provider: app.provider, view: view)
+            try await offline!.initialControls()
+        }
         if scenario.hasSuffix("initialization") {
             try await wait("startup store barrier") {
                 FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("startup-go").path)
@@ -506,7 +523,7 @@ final class PreviewSmoke {
     }
     func cleanupFailed(_ error: Error) { cleanupError = String(describing: error) }
     func didCleanUp() {
-        evidence["engine_log_after_shutdown"] = app.engine.log
+        if scenario != "offline-api-key" { evidence["engine_log_after_shutdown"] = app.engine.log }
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["identity_retired"] = app.engine.receipt == nil

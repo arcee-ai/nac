@@ -14,6 +14,9 @@ final class ExternalNavigation {
     private var recordingOnly: Bool {
         let args = CommandLine.arguments
         guard let index = args.firstIndex(of: "--smoke-scenario"), index + 1 < args.count else { return false }
+        #if !LOCAL_APP
+        if args.filter({ $0 == "--smoke-scenario" }).count == 1, args[index + 1] == "offline-api-key" { return true }
+        #endif
         return args[index + 1] == "external-navigation-recording"
     }
     var smokeSnapshot: [String: Any] {

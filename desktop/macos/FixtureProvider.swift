@@ -10,6 +10,7 @@ final class FixtureProvider {
     private var connections: [UUID: NWConnection] = [:]
     private(set) var responseCount = 0
     #if PREVIEW_SMOKE
+    var offline: OfflineProviderPolicy?
     var holdResponses = false
     private(set) var heldResponseCount = 0
     private var heldResponses: [() -> Void] = []
@@ -99,6 +100,32 @@ final class FixtureProvider {
 
     private func respond(_ connection: NWConnection, headers: String, body: Data) {
         let route = headers.components(separatedBy: "\r\n")[0]
+        #if PREVIEW_SMOKE
+        if let offline {
+            if OfflineProviderPolicy.isProxyRequest(route) {
+                offline.reject(route)
+                send(connection, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n", final: true)
+                return
+            }
+            let path = route.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+            if route.hasPrefix("GET "), let nonce = offline.directCanary(path) {
+                let json = encode(["nonce": nonce])
+                send(connection, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(json)", final: true)
+                return
+            }
+            if route == "GET /models HTTP/1.1" || route == "POST /responses HTTP/1.1" {
+                guard offline.authorize(headers, response: route.hasPrefix("POST ")) else {
+                    send(connection, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", final: true)
+                    return
+                }
+                if route.hasPrefix("GET ") {
+                    let json = encode(["object": "list", "data": [["id": "gpt-5.6-sol", "object": "model", "owned_by": "fixture"]]])
+                    send(connection, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nConnection: close\r\n\r\n\(json)", final: true)
+                    return
+                }
+            }
+        }
+        #endif
         if route.hasPrefix("GET /models-dev") {
             send(connection, "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", final: true)
             return

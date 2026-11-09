@@ -237,7 +237,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             let project: String
             if let fixtureProject { project = fixtureProject }
             else {
+                #if PREVIEW_SMOKE
+                project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider,
+                    seedModel: !OfflineProviderPolicy.selected(), session: smoke?.offline?.session)
+                #else
                 project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider)
+                #endif
                 guard !Task.isCancelled, !stopping, engine.receipt?.incarnation == incarnation else { return }
                 fixtureProject = project
             }

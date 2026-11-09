@@ -98,6 +98,8 @@ else
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
     sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift)
+    sources+=(desktop/macos/OfflineProviderPolicy.swift desktop/macos/OfflineNetworkFence.swift
+              desktop/macos/OfflineWebProbe.swift desktop/macos/OfflineProviderSmoke.swift)
     flags+=(-D PREVIEW_SMOKE -framework IOKit)
 fi
 if [[ "$mode" == startup-* ]]; then

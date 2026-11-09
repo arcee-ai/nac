@@ -46,6 +46,15 @@ final class PreviewEngine {
         var environment = original
         if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
            let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "offline-api-key" {
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                environment[name] = provider.absoluteString
+            }
+            environment["NO_PROXY"] = "127.0.0.1"
+            environment["no_proxy"] = "127.0.0.1"
+        }
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
            arguments[option + 1] == "external-navigation-recording" {
             // Only this disposable child uses the already rejecting fixture as
             // a proxy. It never forwards CONNECT or changes the host environment.

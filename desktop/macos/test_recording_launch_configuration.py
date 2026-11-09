@@ -72,6 +72,46 @@ final class InertRecovery { func engineExited(_ message: String) {} }
     static func require(_ condition: @autoclosure () -> Bool, _ message: String = "Inert complete-start control failed") {
         guard condition() else { fputs("FAIL: " + message + "\n", stderr); exit(1) }
     }
+    #if PREVIEW_SMOKE
+    static func offlinePolicyControls() {
+        func rejects(_ action: () throws -> Void) { do { try action(); require(false,"Expected refusal") } catch {} }
+        require(OfflineProviderPolicy.selected(["x","--smoke-scenario","offline-api-key"]))
+        for args in [[String](),["--smoke-scenario"],["--smoke-scenario","offline-api-key-extra"],
+                     ["--smoke-scenario","offline-api-key","--smoke-scenario","normal"]] { require(!OfflineProviderPolicy.selected(args)) }
+        do {
+            _ = try OfflineProviderPolicy.loopback(URL(string:"http://127.0.0.1:1234")!)
+            for raw in ["http://localhost:1234","https://127.0.0.1:1234","http://user@127.0.0.1:1234","http://127.0.0.1:1234/?key=x","http://127.0.0.1:1234/path"] {
+                rejects { _ = try OfflineProviderPolicy.loopback(URL(string:raw)!) }
+            }
+            let p=OfflineProviderPolicy(); let token=try p.canary()
+            require(p.directCanary("/offline-canary/unknown")==nil)
+            require(p.directCanary("/offline-canary/"+token)==token)
+            require(!p.authorize("GET /models HTTP/1.1",response:false))
+            require(!p.authorize("GET /models HTTP/1.1\r\nAuthorization: Bearer wrong",response:false))
+            require(!p.authorize("GET /models HTTP/1.1\r\nAuthorization: Bearer "+OfflineProviderPolicy.key+"\r\nAuthorization: Bearer "+OfflineProviderPolicy.key,response:false))
+            require(p.authorize("POST /responses HTTP/1.1\r\nAuthorization: Bearer "+OfflineProviderPolicy.key,response:true))
+            try p.begin("missing",authority:"localhost:1234")
+            p.reject("GET http://foreign.invalid:1234/ HTTP/1.1")
+            rejects { try p.finish("missing") }
+            try p.begin("http",authority:"localhost:1234")
+            p.reject("POST http://localhost:1234/responses HTTP/1.1");try p.finish("http")
+            rejects { try p.begin("http",authority:"localhost:1234") }
+            try p.begin("https",authority:"control.invalid:443")
+            p.reject("CONNECT control.invalid:443 HTTP/1.1");try p.finish("https")
+            try p.begin("fallback",authority:"localhost:1234")
+            p.reject("CONNECT localhost:1234 HTTP/1.1")
+            rejects { try p.finish("fallback",directToken:token) }
+            try p.begin("overflow",authority:"localhost:1234")
+            for _ in 0..<9 { p.reject("CONNECT localhost:1234 HTTP/1.1") }
+            rejects { try p.finish("overflow") }
+            rejects { try p.finish("absent") }
+            let bytes=try JSONSerialization.data(withJSONObject:p.snapshot)
+            let text=String(decoding:bytes,as:UTF8.self)
+            require(!text.contains(OfflineProviderPolicy.key) && !text.contains("foreign.invalid"))
+            require(p.receipts.count==2&&p.responseAccepted==1&&p.keyRejected==3)
+        } catch { require(false,"Offline inert policy control threw unexpectedly") }
+    }
+    #endif
     @MainActor static func main() async {
         let hostEnvironment=ProcessInfo.processInfo.environment
         let app=PreviewApp()
@@ -92,6 +132,14 @@ final class InertRecovery { func engineExited(_ message: String) {} }
             for key in ["HTTP_PROXY","HTTPS_PROXY","ALL_PROXY"] { expected[key]=app.provider.baseURL.absoluteString }
             expected["NO_PROXY"]="127.0.0.1,localhost,::1"
         }
+        #if PREVIEW_SMOKE
+        if arguments.filter({$0=="--smoke-scenario"}).count == 1,
+           let index=arguments.firstIndex(of:"--smoke-scenario"),index+1<arguments.count,
+           arguments[index+1]=="offline-api-key" {
+            for key in ["HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","http_proxy","https_proxy","all_proxy"] { expected[key]=app.provider.baseURL.absoluteString }
+            expected["NO_PROXY"]="127.0.0.1"; expected["no_proxy"]="127.0.0.1"
+        }
+        #endif
         require(saved.environment == expected, "Actual complete start bypassed its scenario fence")
         require(saved == app.engine.configurations[0])
         await app.exercise(saved)
@@ -104,6 +152,9 @@ final class InertRecovery { func engineExited(_ message: String) {} }
         await stopped.exercise()
         require(stopped.engine.configurations.isEmpty, "Stopped launch reached child admission")
         require(hostEnvironment == ProcessInfo.processInfo.environment, "Host environment changed")
+        #if PREVIEW_SMOKE
+        offlinePolicyControls()
+        #endif
         print("Complete actual start captured fresh/retry environments; no native, provider, profile or engine side effects")
     }
 }
@@ -135,6 +186,7 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
         cls.receipt = {
             'actual_owner_sha256': hashlib.sha256(app.encode()).hexdigest(),
             'actual_helper_file_sha256': hashlib.sha256(engine.encode()).hexdigest(),
+            'actual_offline_policy_sha256': hashlib.sha256((SOURCE_ROOT / 'OfflineProviderPolicy.swift').read_bytes()).hexdigest(),
             'harness_sha256': hashlib.sha256(harness.encode()).hexdigest(),
             'native_provider_profile_engine_operations': False,
             'commands': [],
@@ -142,7 +194,7 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
         for mode, defines in [('smoke', ['-D', 'PREVIEW_SMOKE']), ('ordinary', [])]:
             result = cls.command(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5',
                                   '-target', 'arm64-apple-macosx14.0', '-O', *defines,
-                                  str(source), '-o', str(cls.output / mode)], timeout=60)
+                                  str(source), str(SOURCE_ROOT / 'OfflineProviderPolicy.swift'), '-o', str(cls.output / mode)], timeout=60)
             if result.returncode:
                 raise RuntimeError('Inert source compilation failed; see retained command receipt')
 
@@ -154,13 +206,21 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
     @classmethod
     def command(cls, argv, timeout=5):
         before = time.monotonic()
-        result = subprocess.run(argv, text=True, capture_output=True, timeout=timeout)
-        cls.receipt['commands'].append({
-            'argv': argv, 'exit': result.returncode, 'seconds': time.monotonic() - before,
-            'stdout': result.stdout, 'stderr': result.stderr,
-        })
-        (cls.output / 'receipt.json').write_text(json.dumps(cls.receipt, indent=2) + '\n')
-        return result
+        row = {'argv': argv, 'timeout_seconds': timeout, 'state': 'attempted'}
+        cls.receipt['commands'].append(row)
+        def retain():
+            (cls.output / 'receipt.json').write_text(json.dumps(cls.receipt, indent=2) + '\n')
+        retain()
+        try:
+            result = subprocess.run(argv, text=True, capture_output=True, timeout=timeout)
+            row.update(exit=result.returncode, stdout=result.stdout, stderr=result.stderr, state='completed')
+            return result
+        except BaseException as error:
+            row.update(state='failed', error=type(error).__name__)
+            raise
+        finally:
+            row['seconds'] = time.monotonic() - before
+            retain()
 
     def check(self, mode, arguments):
         result = self.command([str(self.output / mode), *arguments])
@@ -173,6 +233,8 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
     def test_other_missing_near_match_and_duplicate_scenarios(self):
         for arguments in [
             [], ['--smoke-scenario'], ['--smoke-scenario', 'normal'],
+            ['--smoke-scenario', 'offline-api-key-extra'],
+            ['--smoke-scenario', 'offline-api-key', '--smoke-scenario', 'normal'],
             ['--smoke-scenario', 'stale-launch'], ['--smoke-scenario', 'external-auth'],
             ['--smoke-scenario', 'external-navigation-recording-extra'],
             ['--smoke-scenario', 'external-navigation-recording', '--smoke-scenario', 'normal'],
@@ -180,6 +242,10 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
         ]:
             with self.subTest(arguments=arguments):
                 self.check('smoke', arguments)
+
+    def test_offline_fresh_retry_stopped(self):
+        self.check('smoke', ['--smoke-scenario', 'offline-api-key'])
+        self.check('ordinary', ['--smoke-scenario', 'offline-api-key'])
 
     def test_ordinary_preview_ignores_recording_arguments(self):
         self.check('ordinary', ['--smoke-scenario', 'external-navigation-recording'])
