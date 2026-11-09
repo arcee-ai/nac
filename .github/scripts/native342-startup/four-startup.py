@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/experimental-native-p12-ax-diagnostics-source01'
-SCOPE = 'P12-Qba-R7325-AX-diagnostics-source01'
+BRANCH = 'refs/heads/codex/private520-Q3c7-C01'
+SCOPE = 'P12-integration-Q3c7-R7325-four-startup-source01'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'

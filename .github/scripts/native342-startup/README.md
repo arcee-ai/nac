@@ -1,11 +1,13 @@
-# PRIVATE NEVERMERGE: genuine P12, repaired Q/H, four startup cases plus R
+# PRIVATE NEVERMERGE: P12 integration product, Q3c7/H pins, four cases plus R
 
-This source-only successor of consumer073 uses diagnostic H299, frozen first as
-an exact child of Hf7. It retains safe failure detail from the existing metadata
-reader and finite companion, plus bounded complete R compiler output through the
-existing accepted handle/drainer. All original ownership, window/CFEqual, input,
-privacy, receipt, clock and acceptance predicates remain strict. P12/Qba/R and the
-original normal artifact are unchanged.
+This private source-binding candidate uses reviewed Q3c7 with the complete ten-file
+startup supplier roster and a pin-only child of the existing H299 normal harness.
+All original acceptance, input, cleanup and timing guards are unchanged. The new
+scope/branch identify a prospective allocation; runtime remains unadmitted.
+P12 is the compatible normal INTEGRATION TEST PRODUCT containing the native picker,
+not a build or acceptance claim for current dev, frozen unmerged L, or a later M.
+This does not establish ALL-342 Done or global Native completion. No mailbox or
+actual05 client-rejection channel is selected.
 
 Prior run42461321245 remains FAIL: configured-local input completion UNKNOWN,
 process/profile settlement unproven and fixture retained; later cases UNRUN.
@@ -15,13 +17,18 @@ qualify the changed candidate. Old actual03 AXWindows-25211, all historical
 attempts, first reporting repair and exhausted/STOP pools retain attribution.
 No execution, publication, actual allocation or goal is issued here.
 
-`pair.json` binds genuine normal P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
-repaired Q `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`, nominated H
-`29931101ff7ad50bfc80bf048681ab05de028ec6`, and independent R
-`7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. P12's direct parent is1cd48f9,
-Native boundary8685729 and source context04c22a7. Historical SDK controller/H and
-old preparation/authentication fields are provenance only. P12's genuine supplier
-success does not inherit P10's SDK/onboarding or qualify this repaired Q/H pair.
+`pair.json` binds normal integration P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
+reviewed private Q `3c7acb4b609cea491a144947966d5dcd0872e4f3`, pin-only H
+`7a101a3a44605614c0952a466ed26be5f911a91f`, and unchanged independent R
+`7325c48b3c9ec7036e255a6bd92f31c1a98c1607` (schema50/future51).
+Q has the exact ten reviewed799 source blobs/modes and remains above frozen
+UNMERGED L `1e873aa5200571940fe27dedb9c80b8f19966ebf`; it is a test supplier.
+P12 parent/native-boundary/source-context and historical SDK/preparation fields
+remain provenance for their original roles. H's actual preparation parent is H299.
+The Q source roster is sealed by H TEST_FILES; current controller/H/Q availability
+must be separately arranged before any Root-admitted SDK/runtime episode.
+Historical source/inert evidence retains its original attribution. No old
+compiler/runtime allowance is reset and no current-host episode is granted here.
 
 ## Closed normal artifact admission
 

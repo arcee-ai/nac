@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-Qba-R7325-AX-diagnostics-source01",
+  "scope": "P12-integration-Q3c7-R7325-four-startup-source01",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "29931101ff7ad50bfc80bf048681ab05de028ec6",
+  "H": "7a101a3a44605614c0952a466ed26be5f911a91f",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
+  "Q": "3c7acb4b609cea491a144947966d5dcd0872e4f3",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
@@ -104,5 +104,8 @@
     "companion": "one bounded static typed failure JSON via existing stderr/case export",
     "acceptance": false,
     "missing_or_malformed": "never changes acceptance, failure precedence or cleanup authority"
-  }
+  },
+  "product_role": "compatible_P12_integration_test_product",
+  "current_dev_product_acceptance": false,
+  "global_native_completion": false
 }
