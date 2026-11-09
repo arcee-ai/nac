@@ -2,12 +2,13 @@ name: Mac package preparation
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     paths:
       - desktop/macos/**
       - .github/workflows/macos-package.yml
       - .github/scripts/**
       - crates/**
+      - scripts/build-identity.rs
       - Cargo.toml
       - Cargo.lock
       - rust-toolchain.toml
@@ -27,6 +28,8 @@ concurrency:
 jobs:
   normal:
     name: Ad-hoc normal app preparation (not distribution qualification)
+    # A base retarget changes the merge source; body/title edits do not.
+    if: ${{ github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null }}
     runs-on: macos-26
     timeout-minutes: 40
     defaults:

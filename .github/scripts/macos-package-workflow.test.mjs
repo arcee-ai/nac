@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
+import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml"); // Existing locked workflow-parser dependency.
@@ -13,6 +14,42 @@ const stable = YAML.parse(fs.readFileSync(".github/workflows/stable-release.yml"
 const job = workflow.jobs.normal;
 const runs = job.steps.filter(step => step.run);
 const packageSteps = runs.filter(step => /python3 -B desktop\/macos\/packaging\/package.py /.test(step.run));
+
+test("engine identity compiler support changes reach package preparation", () => {
+  const build = fs.readFileSync("crates/nac-server/build.rs", "utf8");
+  const imported = build.match(/^#\[path = "([^"]+)"\]\nmod build_identity;/m);
+  assert.ok(imported, "inspect the engine identity support owner if its import changes");
+  const support = path.posix.normalize(path.posix.join("crates/nac-server", imported[1]));
+  assert.equal(support, "scripts/build-identity.rs");
+  assert.ok(workflow.on.pull_request.paths.includes(support), `missing compiler input trigger: ${support}`);
+});
+
+test("base retarget rebuilds the merge candidate while metadata-only edits skip the Mac job", () => {
+  assert.deepEqual(workflow.on.pull_request.types,
+    ["opened", "synchronize", "reopened", "ready_for_review", "edited"]);
+  // This is a bounded truth table for this one literal guard, not an Actions
+  // expression interpreter. First require its exact supported operators/tokens.
+  assert.equal(job.if, "${{ github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null }}");
+  const base = { ref: { from: "old-base" }, sha: { from: "a".repeat(40) } };
+  const cases = [
+    ...["opened", "synchronize", "reopened", "ready_for_review"].map(action =>
+      ({ event: "pull_request", payload: { action }, expected: true })),
+    { event: "workflow_dispatch", payload: {}, expected: true },
+    { event: "pull_request", payload: { action: "edited", changes: { base } }, expected: true },
+    { event: "pull_request", payload: { action: "edited", changes: { base, body: { from: "old body" } } }, expected: true },
+    { event: "pull_request", payload: { action: "edited", changes: { body: { from: "old BugBot summary" } } }, expected: false },
+    { event: "pull_request", payload: { action: "edited", changes: { title: { from: "old title" } } }, expected: false },
+    { event: "pull_request", payload: { action: "edited", changes: { base: null } }, expected: false },
+    { event: "pull_request", payload: { action: "edited" }, expected: false },
+  ];
+  for (const { event, payload, expected } of cases) {
+    const expression = job.if.slice(3, -2)
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.event.action", JSON.stringify(payload.action ?? null))
+      .replaceAll("github.event.changes.base", JSON.stringify(payload.changes?.base ?? null));
+    assert.equal(runInNewContext(expression, {}, { timeout: 100 }), expected, JSON.stringify({ event, payload }));
+  }
+});
 
 test("preparation keeps PR/manual authority separate from stable publication", () => {
   assert.deepEqual(Object.keys(workflow.on).sort(), ["pull_request", "workflow_dispatch"]);
