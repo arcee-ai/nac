@@ -51,12 +51,15 @@ final class PreviewSmoke {
     func start() {
         evidence["app_pid"] = getpid()
         evidence["scenario"] = scenario
+        if scenario == "offline-api-key" { evidence["offline_phase"] = "await_workspace" }
         write()
         Task {
             do {
                 if scenario == "offline-api-key" {
                     try await wait("owned offline workspace", timeout: 60) { self.offline != nil && self.app.baseURL != nil }
                     guard let offline else { throw PreviewError.message("Offline fence was not installed") }
+                    evidence["offline_phase"] = "offline_journey"
+                    recordOfflineDiagnostic()
                     evidence["offline_provider"] = try await OfflineProviderSmoke(app: app, fence: offline).run()
                 } else if scenario == "external-navigation-recording" {
                     evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
@@ -163,6 +166,8 @@ final class PreviewSmoke {
                 passed = true
             } catch {
                 if scenario == "offline-api-key" {
+                    evidence["offline_failure_phase"] = evidence["offline_phase"]
+                    recordOfflineDiagnostic()
                     evidence["error"] = "Offline qualification failed; no network/credential payload retained"
                 } else {
                     evidence["error"] = String(describing: error)
@@ -212,8 +217,14 @@ final class PreviewSmoke {
             guard offline == nil, app.baseURL == nil, app.engine.pid == 0, let view = app.webView else {
                 throw PreviewError.message("Offline fence admission is not pre-launch")
             }
+            evidence["offline_phase"] = "fence_admission"
+            recordOfflineDiagnostic()
             offline = try OfflineNetworkFence(provider: app.provider, view: view)
+            evidence["offline_phase"] = "prelaunch_controls"
+            recordOfflineDiagnostic()
             try await offline!.initialControls()
+            evidence["offline_phase"] = "prelaunch_controls_passed"
+            recordOfflineDiagnostic()
         }
         if scenario.hasSuffix("initialization") {
             try await wait("startup store barrier") {
@@ -489,7 +500,27 @@ final class PreviewSmoke {
         throw PreviewError.message("Timed out waiting for \(label)")
     }
 
+    // Only closed fixture stage names, booleans and the existing redacted counts.
+    // A false observation never asserts that an engine was never launched.
+    private func recordOfflineDiagnostic() {
+        guard scenario == "offline-api-key" else { return }
+        let previous = evidence["offline_diagnostic"] as? [String: Any] ?? [:]
+        let next: [String: Any] = [
+            "phase": evidence["offline_phase"] as? String ?? "await_workspace",
+            "network_stage": offline?.diagnosticStage ?? "not_created",
+            "fence_created": offline != nil,
+            "startup_failure_observed": app.failure != nil,
+            "engine_pid_observed_positive": previous["engine_pid_observed_positive"] as? Bool == true || app.engine.pid > 0,
+            "ready_receipt_observed": previous["ready_receipt_observed"] as? Bool == true || app.engine.receipt != nil,
+            "network_observations": offline?.policy.snapshot ?? [:]]
+        if !NSDictionary(dictionary: previous).isEqual(to: next) {
+            evidence["offline_diagnostic"] = next
+            write()
+        }
+    }
+
     private func recordOwnership() {
+        recordOfflineDiagnostic()
         let root = app.profile?.root.path
         guard evidence["engine_pid"] as? Int32 != app.engine.pid || evidence["profile"] as? String != root else { return }
         evidence["engine_pid"] = app.engine.pid

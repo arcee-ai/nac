@@ -226,6 +226,9 @@ def main():
         run('offline-retirement-controls', [sys.executable, '-B',
             'desktop/macos/test_offline_retirement.py', '--artifacts',
             str(evidence / 'offline-retirement-controls')], environment=environment, limit=120)
+        run('offline-diagnostic-controls', [sys.executable, '-B',
+            'desktop/macos/test_offline_diagnostics.py', '--artifacts',
+            str(evidence / 'offline-diagnostic-controls')], environment=environment, limit=120)
         run('smoke-build', ['bash', 'desktop/macos/preview.sh', 'smoke-build'],
             environment=environment, limit=900)
         app = output / 'bundles/NAC Development Preview Smoke.app'

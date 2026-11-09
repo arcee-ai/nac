@@ -13,6 +13,7 @@ final class OfflineNetworkFence {
     private let provider: FixtureProvider
     private let httpTarget = OfflineHTTPControlTarget()
     private var completedPhases = Set<String>()
+    private(set) var diagnosticStage = "constructed"
 
     init(provider: FixtureProvider, view: WKWebView) throws {
         guard OfflineProviderPolicy.selected(), provider.offline == nil,
@@ -78,6 +79,7 @@ final class OfflineNetworkFence {
         let reference = OfflineWebProbe(store: .nonPersistent())
         defer { reference.close() }
         for kind in ["native", "wk-fetch", "wk-navigation"] {
+            diagnosticStage = "reference-" + kind
             let token = try policy.canary(), url = target(token: token, host: "localhost")
             if kind == "native" {
                 let (status, nonce) = try await native(url, using: baseline)
@@ -91,6 +93,7 @@ final class OfflineNetworkFence {
             guard policy.directCount(token) == 1 else { throw OfflineProviderPolicy.Refusal.missingObservation }
         }
         // The response fixture must reject missing and wrong keys, even locally.
+        diagnosticStage = "reference-key-rejections"
         let before = policy.keyRejected
         for key in ["", "wrong-dummy-key"] {
             var request = URLRequest(url: origin.appendingPathComponent("models"))
@@ -100,6 +103,7 @@ final class OfflineNetworkFence {
         }
         guard policy.keyRejected == before + 2 else { throw OfflineProviderPolicy.Refusal.missingObservation }
         try await controls("before")
+        diagnosticStage = "initial-controls-complete"
     }
 
     /// New owned authority for every HTTP operation, including clients that
@@ -144,6 +148,7 @@ final class OfflineNetworkFence {
         let probe = OfflineWebProbe(store: store)
         defer { probe.close() }
         for kind in ["native", "wk-fetch", "wk-navigation"] {
+            diagnosticStage = phase + "-" + kind + "-loopback"
             let positive = try policy.canary(), allowed = target(token: positive)
             if kind == "native" {
                 let (status, nonce) = try await native(allowed, using: session)
@@ -162,10 +167,12 @@ final class OfflineNetworkFence {
                 } else if kind == "wk-fetch" { _ = try await probe.fetch(url, base: origin) }
                 else { _ = try await probe.navigate(url) }
             }
+            diagnosticStage = phase + "-" + kind + "-http"
             try await httpControl(phase + "-" + kind + "-http", operation: attempt)
             let token = try policy.canary()
             let url = target(token: token, host: token + ".invalid", secure: true)
             let label = phase + "-" + kind + "-https"
+            diagnosticStage = phase + "-" + kind + "-https"
             try policy.begin(label, authority: authority(url), request: .httpsConnect)
             try await attempt(url)
             try policy.finish(label, directToken: token)
