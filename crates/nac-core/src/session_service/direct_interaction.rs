@@ -692,7 +692,21 @@ impl SessionService {
             .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
         let path = self.metadata.store_path.clone();
         let wake_session_id = session_id.to_owned();
+        #[cfg(test)]
+        let original_io = self.take_attention_continuation_io_for_test(settled_run.as_ref());
         let has_durable_work = crate::store::spawn_blocking_store_caller(move || {
+            // Only the exact registered test caller takes this branch. The
+            // normal/shipping expression below retains its original behavior.
+            #[cfg(test)]
+            if let Some(witness) = original_io {
+                return witness.call(|| {
+                    Ok::<_, anyhow::Error>(
+                        crate::store::next_pending_session_inbox_item(&path, &wake_session_id)?
+                            .is_some()
+                            || crate::store::load_session_goal(&path, &wake_session_id)?.is_some(),
+                    )
+                });
+            }
             Ok::<_, anyhow::Error>(
                 crate::store::next_pending_session_inbox_item(&path, &wake_session_id)?.is_some()
                     || crate::store::load_session_goal(&path, &wake_session_id)?.is_some(),

@@ -319,3 +319,208 @@ async fn owner_selected_goal_retry_receipt_survives_idle_callbacks_and_handoff()
     );
     assert_eq!(unchanged.status, crate::store::GoalStatus::Active);
 }
+
+// Expected named RED is mechanism evidence, never a Ready repair or attribution
+// of the historical CI writer. No shipping/test-support policy is changed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn original_settlement_caller_cannot_recreate_store_after_typed_drain() {
+    assert!(
+        std::env::var_os("NAC_HUMAN_CRASH_STORE").is_none(),
+        "Characterization refuses an externally selected crash store"
+    );
+    let root = std::env::temp_dir().join(format!(
+        "nac_original_settlement_tail_{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&root).expect("fresh owned characterization root");
+
+    // A setup panic must release the response gate and join the original
+    // provider worker too. Never delete this root from Drop: an unobserved
+    // caller/task closure retains it, rather than fabricating cleanup success.
+    struct HeldProvider {
+        server: Option<ScriptedServer>,
+        release: Option<std::sync::mpsc::Sender<()>>,
+    }
+    impl HeldProvider {
+        fn release(&mut self) -> std::result::Result<(), std::sync::mpsc::SendError<()>> {
+            self.release.take().map_or(Ok(()), |sender| sender.send(()))
+        }
+        fn finish(&mut self) -> std::thread::Result<Vec<crate::model::test_http::CapturedRequest>> {
+            let server = self.server.take().expect("original provider worker exists");
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.finish()))
+        }
+    }
+    impl Drop for HeldProvider {
+        fn drop(&mut self) {
+            let _ = self.release();
+            if let Some(server) = self.server.take() {
+                let joined = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    server.stop_and_finish()
+                }));
+                if let Err(error) = joined {
+                    if std::thread::panicking() {
+                        use std::io::Write;
+                        let _ = writeln!(
+                            std::io::stderr().lock(),
+                            "original provider cleanup also failed: {error:?}"
+                        );
+                    } else {
+                        std::panic::resume_unwind(error);
+                    }
+                }
+            }
+        }
+    }
+    let (release_model, wait_model) = std::sync::mpsc::channel();
+    let server = ScriptedServer::start_observed(
+        vec![ScriptedResponse::json(
+            "200 OK",
+            serde_json::json!({
+                "status":"completed", "output":[{"type":"message",
+                "content":[{"type":"output_text","text":"done"}]}]
+            })
+            .to_string(),
+        )],
+        move |_, _| {
+            wait_model.recv_timeout(Duration::from_secs(5)).unwrap();
+        },
+    );
+    let mut provider = HeldProvider {
+        server: Some(server),
+        release: Some(release_model),
+    };
+    let (parts, path) = crate::session_service::tests::test_direct_active_service_at(
+        "session",
+        ModelClient::new_for_test_server(provider.server.as_ref().unwrap().base_url.clone()),
+        root.join("store.db"),
+    );
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    parts
+        .service
+        .install_attention_observer(Arc::new(Observer::default()))
+        .unwrap();
+    let run = parts
+        .service
+        .try_submit_prompt("one original real run".into())
+        .unwrap();
+    let held = parts
+        .service
+        .hold_attention_continuation_io_for_test(&run.run_id);
+    // Transfer the ORIGINAL unique admission task, bound to the exact run.
+    // The control owns its join; no replacement wake/cancel can satisfy it.
+    let original = {
+        let mut operation = parts.service.active_operation.lock().unwrap();
+        match operation.as_mut() {
+            Some(ActiveSessionOperation::Run(active)) if active.snapshot.run_id == run.run_id => {
+                active.task.take()
+            }
+            _ => None,
+        }
+    };
+    let Some(mut original) = original else {
+        held.release();
+        let _ = provider.release();
+        let _ = provider.finish();
+        panic!(
+            "original run task unavailable; retain owned root {}",
+            root.display()
+        );
+    };
+    let released_model = provider.release();
+    let entered = held.entered().await;
+    let active_at_hold = parts.service.has_active_operation();
+    let stopped =
+        tokio::time::timeout(Duration::from_secs(5), parts.service.stop_run_admission()).await;
+    let drained = tokio::time::timeout(Duration::from_secs(5), owner.shutdown()).await;
+    drop(owner);
+    let pending_after_drain = !original.is_finished();
+    // Preserve the original DB under this exclusively owned UUID root. Removing
+    // only the selected pathname by rename models the old unlink frontier;
+    // there is no early root deletion and no fabricated SQLite journal.
+    let preserved = root.join("preserved-original.db");
+    let original_bytes = std::fs::read(&path);
+    let moved = if entered.is_ok()
+        && original_bytes.is_ok()
+        && matches!(&stopped, Ok(Ok(())))
+        && matches!(&drained, Ok(Ok(())))
+        && !active_at_hold
+        && pending_after_drain
+    {
+        std::fs::rename(&path, &preserved)
+    } else {
+        Err(std::io::Error::other(
+            "exact caller/drain frontier unavailable; original DB retained",
+        ))
+    };
+    held.release();
+    let returned = held.returned().await;
+    // Borrow the ORIGINAL handle so timeout cannot silently detach it. A
+    // timeout is missing closure evidence, not a cancellation-based substitute.
+    let joined = tokio::time::timeout(Duration::from_secs(5), &mut original).await;
+    let recreated = path.try_exists();
+    let original_preserved = preserved.try_exists();
+    let preserved_bytes = std::fs::read(&preserved);
+    let provider_requests = provider.finish();
+    drop(held);
+    drop(parts);
+    if returned.is_err()
+        || !matches!(&joined, Ok(Ok(())))
+        || !matches!(&stopped, Ok(Ok(())))
+        || !matches!(&drained, Ok(Ok(())))
+        || provider_requests.is_err()
+    {
+        panic!(
+            "original owner closure unavailable; retain owned root {}",
+            root.display()
+        );
+    }
+    // All fallible causal oracles follow release/return, original task and
+    // provider joins, and ONE strict deletion of this new owned root.
+    std::fs::remove_dir_all(&root).unwrap();
+    let root_absent = root.try_exists().map(|exists| !exists);
+    let bytes_match = match (&original_bytes, &preserved_bytes) {
+        (Ok(before), Ok(after)) => !before.is_empty() && before == after,
+        _ => false,
+    };
+    // Content-free receipts bind the intended RED to the ORIGINAL owners and
+    // physical cleanup; an unrelated failure is not the expected mechanism.
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "original-continuation-drain-evidence {}",
+        serde_json::json!({
+            "session":"session", "run":run.run_id.as_str(), "root":root.to_string_lossy(),
+            "caller_entered":entered.is_ok(), "caller_returned":returned.is_ok(),
+            "caller_operation_succeeded":returned.as_ref().ok(),
+            "original_task_joined":matches!(&joined, Ok(Ok(()))),
+            "provider_joined":provider_requests.is_ok(),
+            "model_requests":provider_requests.as_ref().ok().map(Vec::len),
+            "active_at_hold":active_at_hold, "original_pending_after_drain":pending_after_drain,
+            "typed_drain_acknowledged":matches!(&drained, Ok(Ok(()))),
+            "old_db_bytes_preserved":bytes_match,
+            "selected_path_recreated":recreated.as_ref().ok(),
+            "owned_root_absent":root_absent.as_ref().ok(),
+            "historical_ci_writer":"unknown",
+        })
+    );
+    released_model.unwrap();
+    entered.unwrap();
+    stopped.unwrap().unwrap();
+    drained.unwrap().unwrap();
+    moved.unwrap();
+    assert!(
+        !active_at_hold && pending_after_drain,
+        "original caller must outlive the idle slot/drain"
+    );
+    assert!(original_preserved.unwrap());
+    assert!(root_absent.unwrap());
+    assert!(
+        bytes_match,
+        "preserved original DB bytes must remain unchanged"
+    );
+    assert_eq!(provider_requests.unwrap().len(), 1);
+    assert!(
+        !recreated.unwrap(),
+        "ORIGINAL_CONTINUATION_RECREATED_STORE_AFTER_DRAIN"
+    );
+}
