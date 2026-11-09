@@ -474,14 +474,48 @@ async fn original_settlement_caller_cannot_recreate_store_after_typed_drain() {
             root.display()
         );
     }
-    // All fallible causal oracles follow release/return, original task and
-    // provider joins, and ONE strict deletion of this new owned root.
-    std::fs::remove_dir_all(&root).unwrap();
-    let root_absent = root.try_exists().map(|exists| !exists);
     let bytes_match = match (&original_bytes, &preserved_bytes) {
         (Ok(before), Ok(after)) => !before.is_empty() && before == after,
         _ => false,
     };
+    // Root adjudication: retain the evidence on an invalid causal frontier,
+    // even after the original owners have closed. Inspect only held results.
+    if released_model.is_err()
+        || entered.is_err()
+        || moved.is_err()
+        || active_at_hold
+        || !pending_after_drain
+        || !matches!(&original_preserved, Ok(true))
+        || !bytes_match
+        || provider_requests.as_ref().ok().map(Vec::len) != Some(1)
+        || recreated.is_err()
+    {
+        panic!(
+            "unexpected original continuation frontier; retain owned root {} \
+             (model_released={}, caller_entered={}, moved={}, active={}, pending={}, \
+             original_preserved={:?}, bytes_match={}, model_requests={:?}, recreated={:?})",
+            root.display(),
+            released_model.is_ok(),
+            entered.is_ok(),
+            moved.is_ok(),
+            active_at_hold,
+            pending_after_drain,
+            original_preserved.as_ref().ok(),
+            bytes_match,
+            provider_requests.as_ref().ok().map(Vec::len),
+            recreated.as_ref().ok(),
+        );
+    }
+    if matches!(&recreated, Ok(false)) {
+        panic!(
+            "ORIGINAL_CONTINUATION_MECHANISM_NOT_DEMONSTRATED; retain owned root {}",
+            root.display()
+        );
+    }
+    // Only the valid expected frontier reaches ONE strict deletion. Preserve
+    // the semantic assertions and exact named RED after observed cleanup.
+    std::fs::remove_dir_all(&root).unwrap();
+    let root_absent = root.try_exists().map(|exists| !exists);
     // Content-free receipts bind the intended RED to the ORIGINAL owners and
     // physical cleanup; an unrelated failure is not the expected mechanism.
     use std::io::Write;
