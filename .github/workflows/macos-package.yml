@@ -1,0 +1,101 @@
+name: Mac package preparation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - desktop/macos/**
+      - .github/workflows/macos-package.yml
+      - .github/scripts/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - Makefile
+      - LICENSE
+      - version.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This lane has no release, signing-account or notarization authority.
+concurrency:
+  group: mac-package-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  normal:
+    name: Ad-hoc normal app preparation (not distribution qualification)
+    runs-on: macos-26
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Bind exact Apple Silicon source
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: nac-ci-v1
+          key: mac-package-preparation
+          save-if: ${{ false }}
+      - name: Prepare locked dependencies in this fresh checkout
+        run: make setup
+      - name: Verify portable workflow, provenance and signature boundaries
+        run: |
+          node --test .github/scripts/macos-package-workflow.test.mjs
+          python3 -B -m unittest discover -s desktop/macos/packaging -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/package-controls.log"
+      # Stable build uploads only nac-web/LICENSE, without the exact-source
+      # engine-build.json required here. Do not infer a receipt or fetch latest.
+      - name: Compile once and retain private exact-source dev engine receipt
+        run: |
+          python3 -B desktop/macos/packaging/package.py prepare-engine --track dev \
+            --output "$RUNNER_TEMP/package-engine" 2>&1 | tee "$RUNNER_TEMP/package-engine.log"
+      # normal -> canonical preview.sh app-build; no preview/lifecycle/helper role.
+      - name: Consume normal native builder and strict current compiler receipt
+        run: |
+          python3 -B desktop/macos/packaging/package.py normal \
+            --engine-receipt "$RUNNER_TEMP/package-engine/engine-build.json" \
+            --output "$RUNNER_TEMP/package-normal" 2>&1 | tee "$RUNNER_TEMP/package-normal.log"
+      - name: Verify sealed ad-hoc bundle and download container
+        run: |
+          python3 -B desktop/macos/packaging/package.py verify \
+            "$RUNNER_TEMP/package-normal/manifest.json" --signatures 2>&1 | tee "$RUNNER_TEMP/package-verify.log"
+      - name: Verify archive extraction and relocation with spaces without app launch
+        run: |
+          python3 -B desktop/macos/packaging/package.py relocate-check \
+            --manifest "$RUNNER_TEMP/package-normal/manifest.json" \
+            --output "$RUNNER_TEMP/package-normal-relocation" 2>&1 | tee "$RUNNER_TEMP/package-relocation.log"
+      - name: Retain ad-hoc preparation container and evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-package-adhoc-preparation-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/package-engine/engine-build.json
+            ${{ runner.temp }}/package-normal/NAC-normal-app-preparation-arm64.zip
+            ${{ runner.temp }}/package-normal/manifest.json
+            ${{ runner.temp }}/package-normal-relocation/relocation.json
+            ${{ runner.temp }}/package-*.log
+          if-no-files-found: error
+          retention-days: 7

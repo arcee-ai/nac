@@ -53,6 +53,18 @@ acceptance requires explicit authorized inputs plus actual corresponding evidenc
 Ad-hoc signature/inventory checks establish only their named contracts. Preserve
 failed receipts. No fixture runtime or minimum-OS qualification is implied.
 
+The dedicated `.github/workflows/macos-package.yml` preparation lane is adapted
+from reviewed original #501 source1b23d906. It selects only one dev engine build
+and the canonical normal LOCAL_APP shell, then ad-hoc verification/relocation;
+it selects no preview/lifecycle/helper or actual-app runtime role. Fresh hosted
+checkouts run `make setup`. Stable release currently exports no package-compatible
+exact-source engine receipt, so this standalone lane builds its engine once.
+Keep pinned approved actions/read-only permissions, full-source manifest and
+ZIP/evidence retention, strict17 normal exclusions and false qualification facts.
+Do not change stable publication policy or treat a source-only workflow review
+as dispatch/producer/distribution authority. Owning inert workflow controls live
+in `.github/scripts/macos-package-workflow.test.mjs`.
+
 The Rust embedded assets input tree must exactly match Git-tracked paths;
 ignored files/symlinks/extra directories there cannot be reviewed-source input.
 Do not apply that guard to unrelated ignored caches, dependencies or local config.

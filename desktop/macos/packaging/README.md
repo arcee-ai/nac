@@ -166,13 +166,60 @@ into the app. Git, SSH, optional Podman and configured MCP commands remain genui
 project prerequisites, detected/explained by the startup owners and never
 silently installed by packaging.
 
-The current tree and P12 donor contain no `.github/workflows/macos-package.yml`.
-This fourteen-file carry installs no workflow or hosted controller. Coherent
-shipping CI/package routing remains a separate Root-owned integration gate;
-historical producer/controller runs are evidence only for their exact sources.
-A future joined stable lane should consume its existing macOS engine artifact,
-not add another engine/frontend build. Ordinary stable publication/tag policy
-is unchanged, and source integration grants no dispatch/publication authority.
+## Continuous ad-hoc preparation
+
+The fourteen-file source carry at `c60c808f7cb0629f3900e038592dcfd7b951f1c4`
+installed no workflow. The following CI contribution adapts the originally
+reviewed `.github/workflows/macos-package.yml` from package PR #501 source
+`1b23d9062d29c08700efd4f899484ebedf808c01`. It uses current approved pinned
+actions and read-only Contents permissions. It is a separate preparation lane;
+`stable-release.yml`, its checks, tags and publication policy remain unchanged.
+
+The workflow selects the exact `github.sha` checkout on relevant PR changes or
+an explicit manual invocation. PR source is the full GitHub merge candidate,
+not a head-only substitute. Engine/core/asset/native/version/lock and lane-control
+changes are included in its path selection. A fresh checkout runs `make setup`
+with locked dependencies before controls or compilation; setup installs build
+dependencies without rebuilding committed frontend/server/client outputs.
+The runner uses the existing macos-26 / Xcode 26.6 selection. Source-only local
+verification of this contribution does not authorize publishing it, dispatching
+it or running a producer. Root must admit exact-source actual qualification
+separately before a source publication can trigger the lane.
+
+Compiler and verification roles are explicit:
+
+| Phase | Selected owner and role |
+| --- | --- |
+| Engine | One `package.py prepare-engine --track dev` call: one locked release arm64 engine build, private copy and full-source/assets/schema/build receipt. |
+| Shell | One `package.py normal` call: the sole `preview.sh app-build` writer, closed39 LOCAL_APP sources, three support inputs and exact17 proof/binary exclusions. No preview, provider, lifecycle or helper compiler role is selected. |
+| Integrity | `verify --signatures`, then `relocate-check`: strict ad-hoc engine/app signatures, complete ZIP inventory and extracted bytes/modes in a new path with spaces. |
+
+The current stable macOS job uploads `nac-aarch64-apple-darwin.tar.gz` containing
+only `nac-web` and LICENSE. It exposes no `engine-build.json` with the package
+owner's full clean-source/tree/assets/schema/toolchain and deployment-target
+contract, and this independent workflow has no same-run receipt transfer port.
+Consequently this dedicated preparation job needs its one engine build. It
+does not fetch a latest/cross-run binary, synthesize missing provenance or build
+a second frontend. A future joined lane can reuse an engine when that exact-source
+receipt interface exists; it must not infer qualification from a cache hit.
+The existing Rust cache is read-only in this PR/manual lane.
+
+The approved upload-artifact action retains
+`mac-package-adhoc-preparation-<full source SHA>` for seven days: the normal ZIP,
+schema-1 manifest with embedded source and post-sign facts, private engine build
+receipt, relocation receipt and bounded command logs. The inner ZIP preserves
+the app's executable modes; the outer GHA evidence container is not an install
+claim. Failure logs and any completed receipts are retained through `always()`;
+explicit Bash pipefail keeps pipeline errors fatal. The private unsigned engine and extracted
+duplicate app are not additional download artifacts.
+
+No normal app/WKWebView is launched. Only the engine's bounded version/identity
+commands execute; no server, profile, provider, E2E or GUI/AX interaction is
+selected. Signing is ad-hoc only, with no keychain/certificate/account/notary
+inputs. All consumer/distribution/runtime qualification fields remain false.
+CI source and inert boundary controls are reviewable without credentials;
+current hosted producer success and all distribution gates remain unqualified.
+Historical producer/controller runs retain only their original source scope.
 
 ## Credentialed distribution gate
 
