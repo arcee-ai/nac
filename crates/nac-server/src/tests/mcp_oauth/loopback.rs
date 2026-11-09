@@ -6,12 +6,15 @@ struct CallbackExporter {
     paused: std::sync::Mutex<bool>,
     wake: std::sync::Condvar,
     entered: std::sync::atomic::AtomicBool,
+    fail: std::sync::atomic::AtomicBool,
 }
 impl nac_core::telemetry::TelemetryExporter for CallbackExporter {
     fn export(
         &self,
         event: &nac_core::telemetry::TelemetryEvent,
     ) -> Result<(), nac_core::telemetry::TelemetryExportError> {
+        // Attempts are retained before returning an exporter error. They are NOT
+        // successfully delivered observations or a zero-loss/native receipt.
         self.events.lock().unwrap().push(event.clone());
         let mut paused = self.paused.lock().unwrap();
         if *paused {
@@ -21,7 +24,11 @@ impl nac_core::telemetry::TelemetryExporter for CallbackExporter {
         while *paused {
             paused = self.wake.wait(paused).unwrap();
         }
-        Ok(())
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(nac_core::telemetry::TelemetryExportError)
+        } else {
+            Ok(())
+        }
     }
 }
 struct ReleaseCallbackExporter(std::sync::Arc<CallbackExporter>);
@@ -34,15 +41,20 @@ impl Drop for ReleaseCallbackExporter {
 
 #[tokio::test]
 async fn loopback_retry_reuses_only_its_own_live_callback_listener() {
-    loopback_case(false).await;
+    loopback_case(false, false).await;
 }
 
 #[tokio::test]
 async fn loopback_replacement_rejects_the_old_accepted_callback() {
-    loopback_case(true).await;
+    loopback_case(true, false).await;
 }
 
-async fn loopback_case(replace_accepted: bool) {
+#[tokio::test]
+async fn loopback_failed_export_preserves_404_rejection_and_callback_ownership() {
+    loopback_case(true, true).await;
+}
+
+async fn loopback_case(replace_accepted: bool, fail_export: bool) {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("mcp_oauth_loopback_retry");
     let _model_env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
@@ -125,19 +137,28 @@ async fn loopback_case(replace_accepted: bool) {
         assert_eq!(configured.status(), StatusCode::OK);
     }
     let exporter = std::sync::Arc::new(CallbackExporter::default());
+    exporter
+        .fail
+        .store(fail_export, std::sync::atomic::Ordering::SeqCst);
     let release_exporter = ReleaseCallbackExporter(exporter.clone());
     let recorder = nac_core::telemetry::TelemetryRecorder::bounded(
         exporter.clone(),
         nac_core::telemetry::RuntimeMetadata::sqlite("callback-test", "source-test", 1, None, None),
-        4,
+        // Preserve the original cases' capacity4. The new failed-export case
+        // keeps its prefix observable before deliberately overflowing below.
+        if fail_export { 32 } else { 4 },
     );
     let _telemetry = nac_core::telemetry::install_test_recorder(recorder.clone());
     let case_exporter = exporter.clone();
+    let case_recorder = recorder.clone();
     let body_app = app.clone();
     let result = tokio::spawn(async move {
         let app = body_app;
         let first = authenticate(app.clone(), serde_json::json!({})).await;
         let first_url = first["authorization_url"].as_str().unwrap().to_owned();
+        if fail_export {
+            listening_attempt(&case_exporter, 1).await;
+        }
         let failed = post_json(
             app.clone(),
             "/mcp_library/servers/slack/oauth/authenticate",
@@ -164,7 +185,51 @@ async fn loopback_case(replace_accepted: bool) {
         )
         .await;
         assert_eq!(other.status(), StatusCode::CONFLICT);
-        assert!(callback(&first_url).await.starts_with("HTTP/1.1 400"));
+        let current_owner = if fail_export {
+            let owner = listening_attempt(&case_exporter, 2).await;
+            settled_attempts(&case_recorder).await;
+            assert_eq!(case_recorder.stats().dropped, 0);
+            assert!(case_recorder.stats().failures > 0);
+            let before = response_json(
+                get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
+            )
+            .await;
+            let response = loopback_request("/not-an-oauth-callback?state=unrelated").await;
+            assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+            assert!(response.ends_with("This is not an active OAuth callback."));
+            settled_attempts(&case_recorder).await;
+            assert_eq!(case_recorder.stats().dropped, 0);
+            let attempts = case_exporter.events.lock().unwrap().clone();
+            assert_eq!(
+                attempts
+                    .iter()
+                    .filter(|event| event.name
+                        == nac_core::telemetry::TelemetryName::McpOAuthCallbackListening)
+                    .count(),
+                2
+            );
+            assert!(!attempts.iter().any(|event| event.name
+                == nac_core::telemetry::TelemetryName::McpOAuthCallbackStateRejected));
+            assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
+            let after = response_json(
+                get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
+            )
+            .await;
+            assert!(
+                after == before,
+                "unrelated path changed the current callback state"
+            );
+            Some(owner)
+        } else {
+            None
+        };
+        let rejected = callback(&first_url).await;
+        assert!(rejected.starts_with("HTTP/1.1 400"));
+        if fail_export {
+            assert!(rejected.ends_with(
+                "This OAuth callback is stale or invalid. Return to NAC and try again."
+            ));
+        }
         assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
         // A second invalid state stays on the same listener and cannot emit another rejection.
         assert!(callback(&first_url).await.starts_with("HTTP/1.1 400"));
@@ -190,6 +255,68 @@ async fn loopback_case(replace_accepted: bool) {
         })
         .await;
         assert!(observed.is_ok());
+        if let Some(owner) = current_owner {
+            settled_attempts(&case_recorder).await;
+            assert_eq!(case_recorder.stats().dropped, 0);
+            let attempts = case_exporter.events.lock().unwrap().clone();
+            let rejections = attempts
+                .iter()
+                .filter(|event| {
+                    event.name == nac_core::telemetry::TelemetryName::McpOAuthCallbackStateRejected
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(rejections.len(), 1);
+            assert_eq!(rejections[0].correlation.generation, Some(owner));
+            for event in attempts.iter().filter(|event| {
+                matches!(
+                    event.name,
+                    nac_core::telemetry::TelemetryName::McpOAuthCallbackListening
+                        | nac_core::telemetry::TelemetryName::McpOAuthCallbackStateRejected
+                )
+            }) {
+                assert!(event.route.is_none() && event.error.is_none());
+                let encoded = serde_json::to_string(event).unwrap();
+                assert!(
+                    !encoded.contains("route-client-secret-canary")
+                        && !encoded.contains("loopback-test-code")
+                        && !encoded.contains(&first_url)
+                        && !encoded.contains(&second_url)
+                );
+            }
+            // Matching state now completes on that SAME pending owner, despite
+            // every attempted observation returning an actual exporter error.
+            let url = second_url.clone();
+            let accepted = tokio::spawn(async move { callback(&url).await });
+            tokio::time::timeout(Duration::from_secs(5), entered.notified())
+                .await
+                .unwrap();
+            release.notify_one();
+            let response = tokio::time::timeout(Duration::from_secs(5), accepted)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+            assert!(response.ends_with("Authorization complete. You can close this window."));
+            assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
+            let connected = response_json(
+                get_response(app.clone(), "/mcp_library/servers/slack/oauth/status", None).await,
+            )
+            .await;
+            assert_eq!(connected["status"], "connected");
+            settled_attempts(&case_recorder).await;
+            assert_eq!(
+                case_exporter
+                    .events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| event.name
+                        == nac_core::telemetry::TelemetryName::McpOAuthCallbackStateRejected
+                        && event.correlation.generation == Some(owner))
+                    .count(),
+                1
+            );
+        }
         // Stall the actual exporter and overflow its queue. The remaining real callbacks,
         // replacement abort/join, token completion and logout must still finish below.
         *case_exporter.paused.lock().unwrap() = true;
@@ -315,7 +442,7 @@ async fn loopback_case(replace_accepted: bool) {
         assert_eq!(completed["status"], "connected");
         assert_eq!(
             requests.load(std::sync::atomic::Ordering::SeqCst),
-            if replace_accepted { 2 } else { 1 }
+            (if replace_accepted { 2 } else { 1 }) + usize::from(fail_export)
         );
         let rebound = tokio::net::TcpListener::bind("127.0.0.1:1456")
             .await
@@ -353,7 +480,72 @@ async fn loopback_case(replace_accepted: bool) {
         "stalled exporter did not exercise overflow"
     );
     drop(release_exporter);
+    settled_attempts(&recorder).await;
+    let stats = recorder.stats();
+    assert_eq!(stats.accepted, stats.exported + stats.failures);
+    assert_eq!(
+        exporter.events.lock().unwrap().len() as u64,
+        stats.exported + stats.failures
+    );
+    if fail_export {
+        assert!(
+            stats.failures > 0,
+            "error adapter was not actually exercised"
+        );
+        assert_eq!(
+            stats.exported, 0,
+            "failed attempts must not be credited as delivered"
+        );
+        assert_eq!(stats.accepted, stats.failures);
+    } else {
+        assert_eq!(stats.failures, 0);
+    }
+    drop(recorder);
+    // bounded() is observation-only: Drained acknowledges queue processing,
+    // not thread join, delivered observations, final receipts or Native acceptance.
+    assert_eq!(
+        nac_core::telemetry::finish_export(Duration::from_secs(2)),
+        nac_core::telemetry::ExportShutdown::Drained
+    );
     result.unwrap();
+}
+
+async fn listening_attempt(exporter: &CallbackExporter, count: usize) -> u64 {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let owners = exporter
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| {
+                    event.name == nac_core::telemetry::TelemetryName::McpOAuthCallbackListening
+                })
+                .filter_map(|event| event.correlation.generation)
+                .collect::<Vec<_>>();
+            if owners.len() == count {
+                return *owners.last().unwrap();
+            }
+            assert!(owners.len() < count);
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+async fn settled_attempts(recorder: &nac_core::telemetry::TelemetryRecorder) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let stats = recorder.stats();
+            if stats.accepted == stats.exported + stats.failures {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 async fn authenticate(app: axum::Router, body: serde_json::Value) -> serde_json::Value {
@@ -365,7 +557,6 @@ async fn authenticate(app: axum::Router, body: serde_json::Value) -> serde_json:
 }
 
 async fn callback(authorization_url: &str) -> String {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let url = url::Url::parse(authorization_url).unwrap();
     let state = url
         .query_pairs()
@@ -375,10 +566,21 @@ async fn callback(authorization_url: &str) -> String {
         .append_pair("code", "loopback-test-code")
         .append_pair("state", &state)
         .finish();
+    loopback_request(&format!("/mcp_library/oauth/callback?{query}")).await
+}
+
+async fn loopback_request(target: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut stream = tokio::net::TcpStream::connect("127.0.0.1:1456")
         .await
         .unwrap();
-    stream.write_all(format!("GET /mcp_library/oauth/callback?{query} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+    stream
+        .write_all(
+            format!("GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
     let mut response = String::new();
     tokio::time::timeout(Duration::from_secs(5), stream.read_to_string(&mut response))
         .await
