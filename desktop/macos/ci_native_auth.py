@@ -169,7 +169,10 @@ def main():
     require(output.parent == Path(os.environ['RUNNER_TEMP']).resolve() and not output.exists(), 'Fresh runner-owned output required')
     output.mkdir(mode=0o700)
     evidence = output / 'evidence'; evidence.mkdir(mode=0o700)
-    started = time.monotonic(); action_end = started + 1500; cleanup_end = started + 1620
+    # A cold hosted run spent 1213s in the two distinct Cargo builds and
+    # about 277s elsewhere before device auth. This is a construction/work
+    # allocation, not a journey SLA; individual command caps stay unchanged.
+    started = time.monotonic(); action_end = started + 2100; cleanup_end = started + 2220
     log = []; browser_identity = None; browser = observer = host_probe = None
     failure = None; browser_closed = False
 
@@ -215,8 +218,14 @@ def main():
                 return json.load(response)
         require(os.environ.get('CANDIDATE_PR', '').isdigit(), 'Missing public pull request identity')
         tree = subprocess.check_output(['git', 'rev-parse', source + '^{tree}'], text=True).strip()
-        candidate = public_candidate(source, parents, os.environ,
-            service('pulls/' + os.environ['CANDIDATE_PR']), tree=tree,
+        pull = service('pulls/' + os.environ['CANDIDATE_PR'])
+        # Observation only: this is not an admitted candidate or a guard waiver.
+        save('CANDIDATE-ADMISSION-INPUTS.json', dict(pre_admission_only=True,
+            source=source, parents=parents, tree=tree,
+            expected={key: os.environ.get(key) for key in
+                      ('CANDIDATE_PR', 'CANDIDATE_HEAD', 'CANDIDATE_BASE')},
+            public=candidate_pins(pull)))
+        candidate = public_candidate(source, parents, os.environ, pull, tree=tree,
             read_commit=lambda sha: service('git/commits/' + sha), read_service=service)
         save('CANDIDATE-PROOF.json', candidate)
         jobs = service('actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/jobs?per_page=100')

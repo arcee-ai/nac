@@ -177,5 +177,65 @@ class PreparedParentControls(unittest.TestCase):
             self.assertEqual(len(pulls), 2)
 
 
+    def test_pre_admission_snapshot_preserves_failed_pins_without_an_extra_read(self):
+        for scenario in ('valid', 'stale-base', 'missing-head', 'missing-public-merge', 'missing-event-base'):
+            with self.subTest(scenario=scenario):
+                self.fixture(); requests = []
+                self.pull['private_response'] = 'inert-response-secret'
+                if scenario == 'stale-base': self.environment['CANDIDATE_BASE'] = '0' * 40
+                if scenario == 'missing-head': self.pull['head'].pop('sha')
+                if scenario == 'missing-public-merge': self.pull.pop('merge_commit_sha')
+                if scenario == 'missing-event-base': self.environment.pop('CANDIDATE_BASE')
+                def request(request, timeout):
+                    endpoint = request.full_url.split('/repos/arcee-ai/nac/', 1)[1]
+                    requests.append(endpoint)
+                    if endpoint.startswith('actions/'):
+                        raise OSError('inert stop after admission')
+                    value = (self.objects[endpoint.removeprefix('git/commits/')]
+                             if endpoint.startswith('git/commits/') else self.responses[endpoint])
+                    return io.BytesIO(json.dumps(value).encode())
+                def local_git(arguments, **kwargs):
+                    if arguments == ['git', 'rev-parse', 'HEAD']: return self.source + '\n'
+                    if arguments == ['git', 'status', '--porcelain']: return ''
+                    if arguments == ['git', 'show', '-s', '--format=%P', self.source]: return ' '.join(self.parents)
+                    if arguments == ['git', 'rev-parse', self.source + '^{tree}']: return self.tree + '\n'
+                    self.fail('Unexpected child in inert admission control')
+                with tempfile.TemporaryDirectory(prefix='nac-auth-inert-') as temporary:
+                    output = Path(temporary) / 'fresh'
+                    environment = dict(self.environment, GITHUB_TOKEN='inert-controller-secret',
+                        ARCEE_API_KEY='inert-provider-secret', UNRELATED='inert-env-secret',
+                        GITHUB_RUN_ID='123', GITHUB_ACTIONS='true',
+                        RUNNER_ENVIRONMENT='github-hosted', RUNNER_TEMP=temporary)
+                    with patch.dict(os.environ, environment, clear=True), patch.object(sys, 'argv',
+                            ['ci_native_auth.py', str(Path.cwd()), str(output)]), \
+                            patch.object(auth, 'urlopen', side_effect=request), \
+                            patch.object(auth.subprocess, 'check_output', side_effect=local_git), \
+                            patch.object(auth.subprocess, 'Popen') as child, \
+                            patch.object(auth, 'record_console') as browser:
+                        self.assertEqual(auth.main(), 1)
+                        child.assert_not_called(); browser.assert_not_called()
+                    evidence = output / 'evidence'
+                    raw = (evidence / 'CANDIDATE-ADMISSION-INPUTS.json').read_text()
+                    snapshot = json.loads(raw)
+                    self.assertEqual(snapshot, dict(pre_admission_only=True, source=self.source,
+                        parents=self.parents, tree=self.tree, expected={key: self.environment.get(key)
+                            for key in ('CANDIDATE_PR', 'CANDIDATE_HEAD', 'CANDIDATE_BASE')},
+                        public=auth.candidate_pins(self.pull)))
+                    self.assertNotIn('secret', raw)
+                    terminal = json.loads((evidence / 'TERMINAL.json').read_text())
+                    self.assertEqual(terminal['commands'], [])
+                    self.assertIsNone(terminal['browser_identity'])
+                    if scenario == 'valid':
+                        self.assertTrue((evidence / 'CANDIDATE-PROOF.json').exists())
+                        self.assertEqual(terminal['failure']['message'], 'inert stop after admission')
+                        # Existing final pin recheck is the second GET; snapshot adds none.
+                        self.assertEqual(requests.count('pulls/633'), 2)
+                    else:
+                        self.assertFalse((evidence / 'CANDIDATE-PROOF.json').exists())
+                        self.assertEqual(terminal['failure']['message'],
+                                         'Checkout is not the current public candidate merge')
+                        self.assertEqual(requests, ['pulls/633'])
+
+
 if __name__ == '__main__':
     unittest.main()

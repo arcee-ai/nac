@@ -22,7 +22,8 @@ jobs:
   native-auth:
     name: Hosted macOS26 native authentication
     runs-on: macos-26
-    timeout-minutes: 35
+    # Covers the 2100s work + 120s cleanup allocation, setup and artifact upload.
+    timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: "4"
       CARGO_PROFILE_DEV_DEBUG: "0"

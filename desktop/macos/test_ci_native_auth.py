@@ -1,9 +1,13 @@
 """No app, browser, HTTP or real Actions metadata is used by these controls."""
+import ast
 import copy
+import inspect
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, Mock
 from ci_native_auth import clean_environment, hosted_job, isolate_subprocess_environment, public_candidate
@@ -123,6 +127,87 @@ class SyntheticMergeMetadataControls(unittest.TestCase):
         self.read.side_effect = OSError('inert service unavailable')
         with self.assertRaises(OSError):
             self.admit()
+
+
+class ConstructionAllocationControls(unittest.TestCase):
+    """Execute the actual clock/run bodies with fake time and a fake child only."""
+    def setUp(self):
+        import ci_native_auth as auth
+        self.auth = auth
+        self.main = ast.parse(inspect.getsource(auth.main)).body[0]
+        self.clock = Mock(); self.clock.monotonic.return_value = 100
+        self.scope = dict(vars(auth), time=self.clock)
+        assignments = [node for node in self.main.body if isinstance(node, ast.Assign)
+                       and isinstance(node.targets[0], ast.Name)
+                       and node.targets[0].id in ('started', 'action_end', 'cleanup_end')]
+        exec(compile(ast.Module(body=assignments, type_ignores=[]), '<actual-clock>', 'exec'), self.scope)
+
+    def run_body(self, directory, child, *, api_seconds=0):
+        def recheck(*args):
+            self.clock.monotonic.return_value += api_seconds
+            return {}
+        self.scope.update(evidence=Path(directory), candidate={}, service=Mock(),
+            recheck_candidate=Mock(side_effect=recheck), save=Mock(), log=[])
+        nested = next(node for node in self.main.body if isinstance(node, ast.FunctionDef) and node.name == 'run')
+        exec(compile(ast.Module(body=[nested], type_ignores=[]), '<actual-run>', 'exec'), self.scope)
+        return patch.object(self.auth.subprocess, 'Popen', return_value=child)
+
+    def test_finite_original_allocation_and_unchanged_role_caps(self):
+        self.assertEqual((self.scope['action_end'], self.scope['cleanup_end']), (2200, 2320))
+        self.assertEqual(self.scope['cleanup_end'] - self.scope['action_end'], 120)
+        run = next(n for n in self.main.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
+        self.assertEqual(ast.literal_eval(run.args.kw_defaults[-1]), 600)
+        calls = [n for n in ast.walk(self.main) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == 'run']
+        self.assertEqual({ast.unparse(n.args[0]):
+            ast.literal_eval(next(k.value for k in n.keywords if k.arg == 'limit')) for n in calls},
+            {"'device-owner-contract'": 180, "'compile-' + name": 60, 'mode': 900,
+             'driver': 600, "'native-bootstrap-contract'": 90})
+        workflow = Path(__file__).resolve().parents[2] / '.github/workflows/native-auth-browser.yml'
+        self.assertIn('timeout-minutes: 45', workflow.read_text())
+        self.assertLess(self.scope['cleanup_end'] - self.scope['started'], 45 * 60)
+
+    def test_api_time_consumes_remaining_work_and_never_renews_command_cap(self):
+        for now, limit, api_seconds, expected in [(1500, 60, 7, 53), (2180, 900, 5, 15)]:
+            with self.subTest(now=now), tempfile.TemporaryDirectory() as directory:
+                self.clock.monotonic.return_value = now
+                child = Mock(returncode=0); child.poll.return_value = 0; child.wait.return_value = 0
+                with self.run_body(directory, child, api_seconds=api_seconds):
+                    self.scope['run']('inert', ['never-launched'], limit=limit)
+                child.wait.assert_called_once_with(timeout=expected)
+                self.assertEqual(self.scope['cleanup_end'], 2320)
+
+    def test_expired_work_refuses_child_even_if_cleanup_time_remains(self):
+        for now, api_seconds in [(2200, 0), (2199, 2)]:
+            with self.subTest(now=now), tempfile.TemporaryDirectory() as directory:
+                self.clock.monotonic.return_value = now
+                child = Mock()
+                with self.run_body(directory, child, api_seconds=api_seconds) as process:
+                    with self.assertRaisesRegex(RuntimeError, 'Original native authentication deadline'):
+                        self.scope['run']('inert', ['never-launched'])
+                    process.assert_not_called()
+
+    def test_timeout_cleanup_uses_original_cutoff_including_browser_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.clock.monotonic.return_value = 2180
+            child = Mock(returncode=-2, pid=17); child.poll.return_value = None
+            def wait(*, timeout):
+                if child.wait.call_count == 1:
+                    self.clock.monotonic.return_value = 2315
+                    raise subprocess.TimeoutExpired('inert', timeout)
+                return 0
+            child.wait.side_effect = wait
+            with self.run_body(directory, child), patch.object(self.auth.os, 'killpg') as signal_group:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    self.scope['run']('inert', ['never-launched'], limit=900)
+                signal_group.assert_called_once_with(17, self.auth.signal.SIGINT)
+            self.assertEqual([call.kwargs['timeout'] for call in child.wait.call_args_list], [20, 5])
+            browser_end = next(n for n in ast.walk(self.main) if isinstance(n, ast.Assign)
+                and isinstance(n.targets[0], ast.Name) and n.targets[0].id == 'browser_end')
+            for now in (2310, 2330):
+                self.clock.monotonic.return_value = now
+                exec(compile(ast.Module(body=[browser_end], type_ignores=[]), '<actual-browser-cutoff>', 'exec'), self.scope)
+                self.assertEqual(self.scope['browser_end'], 2320)
 
 
 if __name__ == '__main__':
