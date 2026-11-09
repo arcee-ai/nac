@@ -97,13 +97,13 @@ final class FixtureProvider {
             let connectionsStopped = (offlineRetiredConnections ?? []).allSatisfy {
                 if case .cancelled = $0.state { return true }; return false
             }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { throw OfflineProviderPolicy.Refusal.missingObservation }
             if listenerStopped && connectionsStopped {
                 listener = nil
                 offlineRetiredConnections = nil
                 return
             }
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            guard remaining > 0 else { throw OfflineProviderPolicy.Refusal.missingObservation }
             try await Task.sleep(nanoseconds: UInt64(min(0.02, remaining) * 1_000_000_000))
         }
     }
