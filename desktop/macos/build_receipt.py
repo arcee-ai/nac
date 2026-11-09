@@ -73,7 +73,7 @@ def main():
         if receipt['normal_startup']:
             fixtures = {'PreviewProfile.swift', 'FixtureProvider.swift', 'FixtureBootstrap.swift',
                         'OfflineProviderPolicy.swift', 'OfflineNetworkFence.swift',
-                        'OfflineWebProbe.swift', 'OfflineProviderSmoke.swift'}
+                        'OfflineWebProbe.swift', 'OfflineProviderSmoke.swift', 'OfflineHTTPControlTarget.swift'}
             if fixtures.intersection(Path(path).name for path in receipt['native_source_files']):
                 raise SystemExit('LOCAL_APP compiler inputs contain disposable preview definitions.')
             receipt['preview_definitions_excluded'] = True
@@ -85,7 +85,7 @@ def main():
                            'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence',
                            'LifecycleSmoke', 'QuitWebViewFixture', '__quitLifecycleObserver',
                            'offline-dummy-local-only', 'OfflineProviderPolicy', 'OfflineNetworkFence',
-                           'OfflineWebProbe', 'OfflineProviderSmoke']
+                           'OfflineWebProbe', 'OfflineProviderSmoke', 'OfflineHTTPControlTarget']
                 binary = (app / 'Contents/MacOS/NACPreview').read_bytes()
                 if any(marker.encode() in binary for marker in markers):
                     raise SystemExit('Ordinary app binary contains disposable fixture markers.')

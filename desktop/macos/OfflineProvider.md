@@ -38,6 +38,23 @@ after reload prevent cache/error-only successes. The policy is never hot-swapped
 or retried without its fence. Any external opener attempt is recorded and
 refused before `NSWorkspace`, and fails qualification.
 
+Each HTTP negative has a fresh owned localhost authority: at most one extra
+instance of the existing FixtureProvider is live. A separate baseline session
+must reach that exact target first. No additional direct request may reach it
+during the fenced operation; it is retired before cancellation on success or
+failure. Its exact listener and captured connections must reach cancelled state
+under one original two-second retirement clock before a successor can open.
+A failed settlement retains the retired owner and refuses a successor or retry. The proxy collector consumes each authority permanently for the case
+and refuses port/authority reuse without retry, including after a failed control.
+This also distinguishes clients that tunnel HTTP using CONNECT, where the path
+is hidden. Absolute HTTP additionally requires its current method/path; HTTPS
+accepts only CONNECT to its fresh nonce authority. OLD traffic, same-authority
+reuse and non-CONNECT HTTPS cannot satisfy a new label. Strict external receipts
+require the request class and fresh-authority fact for every one of the16 rows.
+
+The setup journey enters Advanced presets and provider setup and explicitly
+selects Custom / Protocol / OpenAI Responses; production defaults remain intact.
+
 The positive journey uses the real configuration form, Create chat, streaming
 response and persistent transcript/configuration readback after reload. Every
 continuation checks the ready engine, current document/view/launch and store.

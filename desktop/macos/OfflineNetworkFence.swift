@@ -11,6 +11,7 @@ final class OfflineNetworkFence {
     let store: WKWebsiteDataStore
     let session: URLSession
     private let provider: FixtureProvider
+    private let httpTarget = OfflineHTTPControlTarget()
     private var completedPhases = Set<String>()
 
     init(provider: FixtureProvider, view: WKWebView) throws {
@@ -38,7 +39,7 @@ final class OfflineNetworkFence {
         provider.offline = policy
     }
 
-    func close() { session.invalidateAndCancel() }
+    func close() { httpTarget.close(); session.invalidateAndCancel() }
 
     func requireStore(_ view: WKWebView) throws {
         guard view.configuration.websiteDataStore === store, !store.isPersistent,
@@ -101,6 +102,43 @@ final class OfflineNetworkFence {
         try await controls("before")
     }
 
+    /// New owned authority for every HTTP operation, including clients that
+    /// tunnel HTTP via CONNECT and therefore hide its nonce/path from the proxy.
+    func httpControl(_ label: String, providerRequest: Bool = false,
+                     operation: (URL) async throws -> Void) async throws {
+        let owned = try await httpTarget.open()
+        defer { httpTarget.close() }
+        do {
+            guard let targetPolicy = httpTarget.policy else { throw OfflineProviderPolicy.Refusal.invalid }
+            let token = try targetPolicy.canary()
+            var parts = URLComponents(url: owned, resolvingAgainstBaseURL: false)!
+            parts.host = "localhost"
+            let endpoint = parts.url!
+            let canary = endpoint.appendingPathComponent("offline-canary/" + token)
+            let path = providerRequest ? "/responses" : canary.path
+            try policy.begin(label, authority: authority(endpoint),
+                             request: .http(method: providerRequest ? "POST" : "GET", path: path))
+            // Reach this exact owned target outside the fence first. This reference
+            // session is never used by the product or as a fallback for the control.
+            let config = URLSessionConfiguration.ephemeral
+            config.connectionProxyDictionary = [:]
+            config.timeoutIntervalForRequest = 5; config.timeoutIntervalForResource = 8
+            config.urlCache = nil
+            let baseline = URLSession(configuration: config)
+            defer { baseline.invalidateAndCancel() }
+            let (status, nonce) = try await native(canary, using: baseline)
+            guard status == 200, nonce == token else { throw OfflineProviderPolicy.Refusal.missingObservation }
+            try httpTarget.acceptBaseline(token)
+            try await operation(providerRequest ? endpoint : canary)
+            try await httpTarget.finish() // Zero additional direct requests and exact cancellation before a successor.
+            try policy.finish(label)
+        } catch {
+            httpTarget.close()
+            try? await httpTarget.settle() // No retry if its one original observation already failed.
+            throw error
+        }
+    }
+
     func controls(_ phase: String) async throws {
         guard ["before", "after"].contains(phase), completedPhases.insert(phase).inserted else { throw OfflineProviderPolicy.Refusal.invalid }
         let probe = OfflineWebProbe(store: store)
@@ -115,11 +153,7 @@ final class OfflineNetworkFence {
                 guard facts["status"] as? Int == 200, facts["nonce"] as? String == positive else { throw OfflineProviderPolicy.Refusal.missingObservation }
             } else { guard try await probe.navigate(allowed) == 200 else { throw OfflineProviderPolicy.Refusal.missingObservation } }
             guard policy.directCount(positive) == 1 else { throw OfflineProviderPolicy.Refusal.missingObservation }
-            for secure in [false, true] {
-                let token = try policy.canary()
-                let url = target(token: token, host: secure ? token + ".invalid" : "localhost", secure: secure)
-                let label = phase + "-" + kind + (secure ? "-https" : "-http")
-                try policy.begin(label, authority: authority(url))
+            func attempt(_ url: URL) async throws {
                 if kind == "native" {
                     do { _ = try await native(url, using: session) }
                     catch {
@@ -127,8 +161,14 @@ final class OfflineNetworkFence {
                     }
                 } else if kind == "wk-fetch" { _ = try await probe.fetch(url, base: origin) }
                 else { _ = try await probe.navigate(url) }
-                try policy.finish(label, directToken: token)
             }
+            try await httpControl(phase + "-" + kind + "-http", operation: attempt)
+            let token = try policy.canary()
+            let url = target(token: token, host: token + ".invalid", secure: true)
+            let label = phase + "-" + kind + "-https"
+            try policy.begin(label, authority: authority(url), request: .httpsConnect)
+            try await attempt(url)
+            try policy.finish(label, directToken: token)
         }
     }
 

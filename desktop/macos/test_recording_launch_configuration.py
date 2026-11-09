@@ -31,7 +31,25 @@ final class PreviewProfile {
 final class FixtureProvider {
     let baseURL=URL(string:"http://127.0.0.1:43123")!
     var starts=0
-    func start() async throws { starts += 1 }
+    #if PREVIEW_SMOKE
+    var offline: OfflineProviderPolicy?
+    static var failNext=false
+    static var stops=0
+    static var stoppedAfterRetirement=true
+    static var failSettlement=false
+    static var settlementDeadlines: [TimeInterval]=[]
+    func awaitOfflineControlStop(deadline: TimeInterval) async throws {
+        Self.settlementDeadlines.append(deadline)
+        if Self.failSettlement { throw EngineFailure() }
+    }
+    func stop() { Self.stops += 1; Self.stoppedAfterRetirement = Self.stoppedAfterRetirement && offline?.retired == true }
+    #endif
+    func start() async throws {
+        starts += 1
+        #if PREVIEW_SMOKE
+        if Self.failNext { Self.failNext=false; throw EngineFailure() }
+        #endif
+    }
 }
 final class PreviewSmoke {
     var profiles=0; var engines=0; var before=0
@@ -73,7 +91,7 @@ final class InertRecovery { func engineExited(_ message: String) {} }
         guard condition() else { fputs("FAIL: " + message + "\n", stderr); exit(1) }
     }
     #if PREVIEW_SMOKE
-    static func offlinePolicyControls() {
+    @MainActor static func offlinePolicyControls() async {
         func rejects(_ action: () throws -> Void) { do { try action(); require(false,"Expected refusal") } catch {} }
         require(OfflineProviderPolicy.selected(["x","--smoke-scenario","offline-api-key"]))
         for args in [[String](),["--smoke-scenario"],["--smoke-scenario","offline-api-key-extra"],
@@ -90,26 +108,83 @@ final class InertRecovery { func engineExited(_ message: String) {} }
             require(!p.authorize("GET /models HTTP/1.1\r\nAuthorization: Bearer wrong",response:false))
             require(!p.authorize("GET /models HTTP/1.1\r\nAuthorization: Bearer "+OfflineProviderPolicy.key+"\r\nAuthorization: Bearer "+OfflineProviderPolicy.key,response:false))
             require(p.authorize("POST /responses HTTP/1.1\r\nAuthorization: Bearer "+OfflineProviderPolicy.key,response:true))
-            try p.begin("missing",authority:"localhost:1234")
-            p.reject("GET http://foreign.invalid:1234/ HTTP/1.1")
-            rejects { try p.finish("missing") }
-            try p.begin("http",authority:"localhost:1234")
-            p.reject("POST http://localhost:1234/responses HTTP/1.1");try p.finish("http")
-            rejects { try p.begin("http",authority:"localhost:1234") }
-            try p.begin("https",authority:"control.invalid:443")
-            p.reject("CONNECT control.invalid:443 HTTP/1.1");try p.finish("https")
-            try p.begin("fallback",authority:"localhost:1234")
-            p.reject("CONNECT localhost:1234 HTTP/1.1")
+            try p.begin("old",authority:"localhost:11001",request:.http(method:"GET",path:"/offline-canary/OLD"))
+            p.reject("GET http://localhost:11001/offline-canary/OLD HTTP/1.1"); try p.finish("old")
+            // OLD traffic cannot satisfy NEW; a reused authority is refused even
+            // after failure, including when a CONNECT hides its path.
+            try p.begin("new",authority:"localhost:11002",request:.http(method:"GET",path:"/offline-canary/NEW"))
+            p.reject("GET http://localhost:11001/offline-canary/OLD HTTP/1.1")
+            rejects { try p.finish("new") }
+            rejects { try p.begin("same-authority",authority:"localhost:11001",request:.http(method:"GET",path:"/offline-canary/NEW")) }
+            rejects { try p.begin("failed-authority",authority:"localhost:11002",request:.http(method:"GET",path:"/offline-canary/NEW")) }
+            try p.begin("wrong-path",authority:"localhost:11003",request:.http(method:"GET",path:"/offline-canary/NEW"))
+            p.reject("GET http://localhost:11003/offline-canary/OLD HTTP/1.1")
+            rejects { try p.finish("wrong-path") }
+            try p.begin("wrong-method",authority:"localhost:11004",request:.http(method:"POST",path:"/responses"))
+            p.reject("GET http://localhost:11004/responses HTTP/1.1")
+            rejects { try p.finish("wrong-method") }
+            try p.begin("http-connect",authority:"localhost:11005",request:.http(method:"GET",path:"/offline-canary/NEW"))
+            p.reject("CONNECT localhost:11005 HTTP/1.1"); try p.finish("http-connect")
+            for (index,form) in ["GET https://nonconnect0.invalid/x HTTP/1.1","GET http://nonconnect1.invalid:443/x HTTP/1.1"].enumerated() {
+                let label="nonconnect"+String(index)
+                try p.begin(label,authority:label+".invalid:443",request:.httpsConnect)
+                p.reject(form); rejects { try p.finish(label) }
+            }
+            try p.begin("old-tls",authority:"current.invalid:443",request:.httpsConnect)
+            p.reject("CONNECT old.invalid:443 HTTP/1.1"); rejects { try p.finish("old-tls") }
+            try p.begin("https",authority:"latest.invalid:443",request:.httpsConnect)
+            p.reject("CONNECT latest.invalid:443 HTTP/1.1");try p.finish("https")
+            try p.begin("fallback",authority:"localhost:11006",request:.http(method:"GET",path:"/"))
+            p.reject("CONNECT localhost:11006 HTTP/1.1")
             rejects { try p.finish("fallback",directToken:token) }
-            try p.begin("overflow",authority:"localhost:1234")
-            for _ in 0..<9 { p.reject("CONNECT localhost:1234 HTTP/1.1") }
-            rejects { try p.finish("overflow") }
-            rejects { try p.finish("absent") }
-            let bytes=try JSONSerialization.data(withJSONObject:p.snapshot)
-            let text=String(decoding:bytes,as:UTF8.self)
-            require(!text.contains(OfflineProviderPolicy.key) && !text.contains("foreign.invalid"))
-            require(p.receipts.count==2&&p.responseAccepted==1&&p.keyRejected==3)
-        } catch { require(false,"Offline inert policy control threw unexpectedly") }
+            try p.begin("overflow",authority:"localhost:11007",request:.http(method:"GET",path:"/"))
+            for _ in 0..<9 { p.reject("CONNECT localhost:11007 HTTP/1.1") }
+            rejects { try p.finish("overflow") }; rejects { try p.finish("absent") }
+            let text=String(decoding:try JSONSerialization.data(withJSONObject:p.snapshot),as:UTF8.self)
+            require(!text.contains(OfflineProviderPolicy.key) && !text.contains("localhost") && !text.contains(".invalid"))
+            require(p.receipts.count==3 && p.responseAccepted==1 && p.keyRejected==3)
+            require(p.receipts[2]["request_class"] as? String == "https-connect")
+            p.retire(); rejects { _ = try p.canary() }
+
+            let target=OfflineHTTPControlTarget()
+            let stops=FixtureProvider.stops
+            FixtureProvider.failNext=true
+            do { _ = try await target.open(); require(false,"Start failure accepted") } catch {}
+            require(target.policy == nil && FixtureProvider.stops==stops+1)
+            _ = try await target.open()
+            let first=target.policy!
+            do { _ = try await target.open(); require(false,"Second target opened") } catch {}
+            require(target.policy === first, "Duplicate open lost owned target")
+            do { try await target.finish(); require(false,"Missing baseline accepted") } catch {}
+            require(target.policy == nil && first.retired)
+            _ = try await target.open()
+            let success=target.policy!, nonce=try success.canary()
+            success.noteDirectRequest(); require(success.directCanary("/offline-canary/"+nonce)==nonce)
+            try target.acceptBaseline(nonce); try await target.finish()
+            require(target.policy == nil && success.retired)
+            require(success.directCanary("/offline-canary/"+nonce)==nil, "Retired target served late callback")
+            _ = try await target.open()
+            let leaking=target.policy!, leak=try leaking.canary()
+            leaking.noteDirectRequest(); _ = leaking.directCanary("/offline-canary/"+leak)
+            try target.acceptBaseline(leak); leaking.noteDirectRequest()
+            do { try await target.finish(); require(false,"Direct leak accepted") } catch {}
+            require(target.policy == nil && leaking.retired, "Leak failure skipped target cleanup")
+            _ = try await target.open()
+            rejects { try target.acceptBaseline("unobserved") }
+            target.close(); target.close(); try await target.settle()
+            require(target.policy == nil && FixtureProvider.stops==stops+5 && FixtureProvider.stoppedAfterRetirement)
+            _ = try await target.open()
+            let uncertain=target.policy!
+            FixtureProvider.failSettlement=true
+            let attempts=FixtureProvider.settlementDeadlines.count
+            do { try await target.finish(); require(false,"Unsettled target accepted") } catch {}
+            require(target.policy === uncertain && uncertain.retired)
+            do { _ = try await target.open(); require(false,"Successor opened before settlement") } catch {}
+            do { try await target.settle(); require(false,"Settlement retried") } catch {}
+            require(FixtureProvider.settlementDeadlines.count==attempts+1 && FixtureProvider.stops==stops+6)
+            FixtureProvider.failSettlement=false
+            print("Offline OLD/NEW/same-authority/class refusal and exact target success/start/leak/baseline cleanup controls passed")
+        } catch { require(false,"Offline inert policy/target control threw unexpectedly") }
     }
     #endif
     @MainActor static func main() async {
@@ -153,7 +228,7 @@ final class InertRecovery { func engineExited(_ message: String) {} }
         require(stopped.engine.configurations.isEmpty, "Stopped launch reached child admission")
         require(hostEnvironment == ProcessInfo.processInfo.environment, "Host environment changed")
         #if PREVIEW_SMOKE
-        offlinePolicyControls()
+        await offlinePolicyControls()
         #endif
         print("Complete actual start captured fresh/retry environments; no native, provider, profile or engine side effects")
     }
@@ -186,6 +261,7 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
         cls.receipt = {
             'actual_owner_sha256': hashlib.sha256(app.encode()).hexdigest(),
             'actual_helper_file_sha256': hashlib.sha256(engine.encode()).hexdigest(),
+            'actual_target_owner_sha256': hashlib.sha256((SOURCE_ROOT / 'OfflineHTTPControlTarget.swift').read_bytes()).hexdigest(),
             'actual_offline_policy_sha256': hashlib.sha256((SOURCE_ROOT / 'OfflineProviderPolicy.swift').read_bytes()).hexdigest(),
             'harness_sha256': hashlib.sha256(harness.encode()).hexdigest(),
             'native_provider_profile_engine_operations': False,
@@ -194,7 +270,7 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
         for mode, defines in [('smoke', ['-D', 'PREVIEW_SMOKE']), ('ordinary', [])]:
             result = cls.command(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5',
                                   '-target', 'arm64-apple-macosx14.0', '-O', *defines,
-                                  str(source), str(SOURCE_ROOT / 'OfflineProviderPolicy.swift'), '-o', str(cls.output / mode)], timeout=60)
+                                  str(source), str(SOURCE_ROOT / 'OfflineProviderPolicy.swift'), str(SOURCE_ROOT / 'OfflineHTTPControlTarget.swift'), '-o', str(cls.output / mode)], timeout=60)
             if result.returncode:
                 raise RuntimeError('Inert source compilation failed; see retained command receipt')
 

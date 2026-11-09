@@ -78,14 +78,16 @@ final class OfflineProviderSmoke {
         return (await r.json()).configurations.length===0;
         """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
         // The project was seeded without a model/key. This is the actual form.
+        try await click("Advanced presets and provider setup")
         try await click("Browse Models")
         try await click("Create New")
         try await select("Model Provider", "Custom")
+        try await select("Protocol", "OpenAI Responses")
         try await input("Name", OfflineProviderPolicy.setupName)
         try await input("API Key", OfflineProviderPolicy.key)
         try await input("Model", "gpt-5.6-sol")
         try await input("Base URL", fence.origin.absoluteString)
-        // Custom defaults to the maintained Responses protocol; never guess it.
+        // Verify the explicit choice; the fresh Custom form defaults to Arcee.
         guard try await js(Self.visible + #"""
         const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')];
         return rows.some(e=>visible(e)&&document.getElementById(e.getAttribute('aria-labelledby'))?.textContent.trim().replace(/\*$/,'')==='Protocol'&&e.textContent.includes('Responses'));
@@ -107,14 +109,7 @@ final class OfflineProviderSmoke {
     }
 
     private func rustControls(_ phase: String, config: [String: Any]) async throws {
-        for secure in [false, true] {
-            let token = try fence.policy.canary()
-            var target = URLComponents()
-            target.scheme = secure ? "https" : "http"
-            target.host = secure ? token + ".invalid" : "localhost"
-            target.port = secure ? 443 : fence.origin.port
-            let label = phase + "-rust-provider" + (secure ? "-https" : "-http")
-            try fence.policy.begin(label, authority: target.host! + ":" + String(target.port!))
+        func attempt(_ endpoint: URL) async throws {
             let accepted = fence.policy.responseAccepted
             guard let control = try await js(#"""
             const post=async(path,body)=>{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error('control');return r.json()};
@@ -125,7 +120,7 @@ final class OfflineProviderSmoke {
             const id=created.metadata.session_id;
             const run=await post('/sessions/'+id+'/runs',{prompt:'OFFLINE_TRANSPORT_CONTROL'});
             return {session:id,run:run.run_id};
-            """#, ["config": config, "endpoint": target.url!.absoluteString]) as? [String: Any],
+            """#, ["config": config, "endpoint": endpoint.absoluteString]) as? [String: Any],
                   let sessionID = control["session"] as? String else { throw OfflineProviderPolicy.Refusal.invalid }
             try await wait {
                 try await self.js(#"""
@@ -133,9 +128,17 @@ final class OfflineProviderSmoke {
                 const s=await r.json();return s.active_run==null&&s.run_failure!=null;
                 """#, ["id": sessionID]) as? Bool == true
             }
-            try fence.policy.finish(label)
             guard fence.policy.responseAccepted == accepted else { throw OfflineProviderPolicy.Refusal.invalid }
         }
+        try await fence.httpControl(phase + "-rust-provider-http", providerRequest: true, operation: attempt)
+        let token = try fence.policy.canary()
+        let target = fence.target(token: token, host: token + ".invalid", secure: true)
+        let label = phase + "-rust-provider-https"
+        try fence.policy.begin(label, authority: target.host! + ":443", request: .httpsConnect)
+        var base = URLComponents(url: target, resolvingAgainstBaseURL: false)!
+        base.path = ""
+        try await attempt(base.url!)
+        try fence.policy.finish(label, directToken: token)
     }
 
     func run() async throws -> [String: Any] {

@@ -22,7 +22,7 @@ def receipt():
             'network': {'scope': 'declared-app-engine-HTTP(S)-only', 'whole_machine_offline': False,
                 'failover_allowed': False, 'literal_loopback_bypass': True,
                 'baseline_local_reachable': True, 'phases': ['after', 'before'],
-                'observations': {'controls': [{'control': k, 'proxy_rejections': 1, 'direct_success': False}
+                'observations': {'controls': [{'control': k, 'proxy_rejections': 1, 'request_class': 'https-connect' if k.endswith('-https') else 'http-absolute-or-connect', 'authority_fresh': True, 'direct_success': False}
                                              for k in sorted(offline.controls())],
                     'key_accepted': 1, 'key_rejected': 2, 'authenticated_responses': 1,
                     'unlabelled_proxy_rejections': 0}}}}
@@ -54,15 +54,15 @@ class OfflineReceiptTests(unittest.TestCase):
                 'controls', [v for v in r['offline_provider']['network']['observations']['controls'] if v['control'] != label]))
 
     def test_duplicate_or_foreign_control_and_fake_count(self):
-        for replacement in ({'control': 'not-a-control', 'proxy_rejections': 1, 'direct_success': False},
-                            {'control': sorted(offline.controls())[0], 'proxy_rejections': True, 'direct_success': False}):
+        for replacement in ({'control': 'not-a-control', 'proxy_rejections': 1, 'request_class': 'http-absolute-or-connect', 'authority_fresh': True, 'direct_success': False},
+                            {'control': sorted(offline.controls())[0], 'proxy_rejections': True, 'request_class': 'http-absolute-or-connect', 'authority_fresh': True, 'direct_success': False}):
             self.rejects(lambda r: r['offline_provider']['network']['observations']['controls'].__setitem__(0, replacement))
         self.rejects(lambda r: r['offline_provider']['network']['observations']['controls'].__setitem__(
             0, copy.deepcopy(r['offline_provider']['network']['observations']['controls'][1])))
 
     def test_no_observation_overflow_direct_fallback_or_payload(self):
         for key, value in [('proxy_rejections', 0), ('proxy_rejections', 9),
-                           ('direct_success', True), ('authorization', 'must-not-export')]:
+                           ('direct_success', True), ('request_class', 'absolute-https'), ('authority_fresh', False), ('authorization', 'must-not-export')]:
             self.rejects(lambda r: r['offline_provider']['network']['observations']['controls'][0].__setitem__(key, value))
         self.rejects(lambda r: r['offline_provider']['network']['observations'].__setitem__('headers', 'must-not-export'))
 
@@ -111,7 +111,7 @@ class NormalBuildExclusionTests(unittest.TestCase):
 
     def test_normal_app_and_auth_inputs_reject_every_offline_source(self):
         for name in ('OfflineProviderPolicy.swift', 'OfflineNetworkFence.swift',
-                     'OfflineWebProbe.swift', 'OfflineProviderSmoke.swift'):
+                     'OfflineWebProbe.swift', 'OfflineProviderSmoke.swift', 'OfflineHTTPControlTarget.swift'):
             for smoke in (False, True):
                 with self.subTest(name=name, smoke=smoke), self.assertRaises(SystemExit):
                     self.check(name, smoke)

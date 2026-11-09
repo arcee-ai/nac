@@ -57,10 +57,12 @@ def require_offline(record):
     need(isinstance(rows, list) and len(rows) == len(controls()))
     seen = set()
     for row in rows:
-        need(isinstance(row, dict) and set(row) == {'control', 'proxy_rejections', 'direct_success'})
+        need(isinstance(row, dict) and set(row) == {'control', 'proxy_rejections', 'request_class', 'authority_fresh', 'direct_success'})
         label = row.get('control')
         need(isinstance(label, str) and label in controls() and label not in seen)
         seen.add(label)
+        need(row.get('authority_fresh') is True)
+        need(row.get('request_class') == ('https-connect' if label.endswith('-https') else 'http-absolute-or-connect'))
         need(type(row.get('proxy_rejections')) is int and 1 <= row['proxy_rejections'] <= 8)
         need(row.get('direct_success') is False)
     need(seen == controls())
@@ -84,7 +86,7 @@ def require_build(app):
     assert receipt['smoke_instrumentation'] is True and receipt['normal_startup'] is False
     assert 'PREVIEW_SMOKE' in receipt['compiler_flags'] and 'NATIVE_AUTH_FIXTURE' not in receipt['compiler_flags']
     assert {'OfflineProviderPolicy.swift', 'OfflineNetworkFence.swift', 'OfflineWebProbe.swift',
-            'OfflineProviderSmoke.swift'} <= {Path(p).name for p in receipt['native_source_files']}
+            'OfflineProviderSmoke.swift', 'OfflineHTTPControlTarget.swift'} <= {Path(p).name for p in receipt['native_source_files']}
     assert digest(engine) == receipt['engine_sha256']
     assert digest(app / 'Contents/MacOS/NACPreview') == receipt['native_sha256']
     return build, receipt
