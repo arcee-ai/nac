@@ -109,23 +109,27 @@ func lossRun(_ mode: String) -> [String: Any] {
 }
 
 func focusRun(_ mode: String) -> [String: Any] {
-    var stamp: UInt64 = 3_000_000_000, call = 0, sequence = 1, last = Data()
+    var stamp: UInt64 = 3_000_000_000, call = 0, sequence = 1, last = Data(), pauses = 0
+    let staleFocus = mode.hasPrefix("stale_")
+    let scenario = staleFocus ? String(mode.dropFirst("stale_".count)) : mode
     let root = "00000000-0000-0000-0000-000000000001", panel = "00000000-0000-0000-0000-000000000002", goTo = "00000000-0000-0000-0000-000000000003"
     let declaration = StartupAXDeclaration(path:"/inert/receipt.json",nonce:String(repeating:"a",count:64),helper_path:"/inert/helper",helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
     let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:3,start_microseconds:4,executable:"/inert/app")
     let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:2,executable:"/inert/helper")
     let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
-        now:{stamp += 1_000_000;return stamp},pause:{stamp += 31_000_000_000},load:{
+        now:{stamp += 1_000_000;return stamp},pause:{pauses += 1;stamp += staleFocus ? 10_000_000 : 31_000_000_000},load:{
             call += 1
             if call == 3 || call == 5 { return last }
             if call > 1 { stamp += 100_000_000;sequence += 1 }
             let phase = call <= 2 ? "form" : call == 4 ? "panel" : "goTo"
-            let focus = phase == "goTo" ? StartupAXFocus(pid:mode == "focus_pid" ? 500 : 400,
-                role:mode == "focus_role" ? "AXSecureTextField" : "AXTextField",focused:mode != "focus_false",
-                attached:mode != "focus_ancestor",frame:mode == "focus_frame" ? [11,20,100,30] : [10,20,100,30],
-                value:mode == "focus_value" ? "/foreign" : "/owned workspace") : nil
+            let focus = phase == "goTo" ? StartupAXFocus(pid:scenario == "focus_pid" ? 500 : 400,
+                role:scenario == "focus_role" ? "AXSecureTextField" : "AXTextField",focused:scenario != "focus_false",
+                attached:scenario != "focus_ancestor",frame:scenario == "focus_frame" ? [11,20,100,30] : [10,20,100,30],
+                value:scenario == "focus_value" ? "/foreign" : "/owned workspace") : nil
             let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),refusal_generation:"0",began_ns:String(stamp-20_000_000),ended_ns:String(stamp-10_000_000),status:"ready",case_deadline_ns:"50000000000",observation:StartupAXSurface(surface:phase,root_id:root,panel_id:phase == "form" ? nil : panel,go_to_id:phase == "goTo" ? goTo : nil,root_frame:[10,20,100,30],focus:focus),refusal_stage:nil,refusal:nil)
-            last = try JSONEncoder().encode(receipt);return last
+            last = try JSONEncoder().encode(receipt)
+            if staleFocus && call == 6 { stamp += 1_100_000_000 }
+            return last
         })
     do {
         for phase in [StartupNativeFolderPolicy.Surface.form,.panel,.goTo] {
@@ -133,8 +137,95 @@ func focusRun(_ mode: String) -> [String: Any] {
             _ = try client.consume(ticket,surface:phase,rootFrame:CGRect(x:10,y:20,width:100,height:30),
                 field:phase == .goTo ? (CGRect(x:10,y:20,width:100,height:30),"/owned workspace") : nil)
         }
-        return ["accepted":true,"inputs":1]
-    } catch { return ["accepted":false,"inputs":0] }
+        return ["accepted":true,"inputs":1,"loads":call,"pauses":pauses,"proof":client.evidence.map { $0.sequence }]
+    } catch { return ["accepted":false,"inputs":0,"loads":call,"pauses":pauses,"proof":client.evidence.map { $0.sequence }] }
+}
+
+
+func publicationRun(_ name: String) -> [String: Any] {
+    let mode = String(name.dropFirst("publication_".count))
+    var stamp: UInt64 = 3_000_000_000, loads = 0, pauses = 0, inputs = 0, afterLoad = 0
+    var deadline: UInt64 = 0, stale = Data()
+    let root = "00000000-0000-0000-0000-000000000001"
+    let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+    let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+    let declaration = StartupAXDeclaration(path:"/inert/receipt",nonce:String(repeating:"a",count:64),
+        helper_path:helper.executable,helper_sha256:String(repeating:"b",count:64),
+        support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],
+        owner_pid:200,deadline_ns:"100000000000")
+    func record(_ sequence: Int, _ began: UInt64, _ ended: UInt64) throws -> [String: Any] {
+        let value = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,
+            configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,
+            support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,
+            app_launch_epoch:10,window_number:7,sequence:String(sequence),refusal_generation:"0",
+            began_ns:String(began),ended_ns:String(ended),status:"ready",case_deadline_ns:"50000000000",
+            observation:StartupAXSurface(surface:"form",root_id:root,panel_id:nil,go_to_id:nil,
+                root_frame:[10,20,100,30],focus:nil),refusal_stage:nil,refusal:nil)
+        return try JSONSerialization.jsonObject(with:JSONEncoder().encode(value)) as! [String:Any]
+    }
+    func encode(_ value: [String:Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])
+    }
+    let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,
+        launch:10,window:7,executable:target.executable,now:{
+            afterLoad += 1
+            stamp += mode == "final_age" && loads == 2 && afterLoad == 3 ? 200_000_000 : 1_000_000
+            return stamp
+        },pause:{pauses += 1;stamp += mode == "deadline" ? 1_000_000_000 : 10_000_000},load:{
+            loads += 1;afterLoad = 0
+            if mode == "initial_waiting" && loads == 1 {
+                var waiting = try record(0,0,0);waiting["status"] = "waiting"
+                return try encode(waiting)
+            }
+            let index = loads - (mode == "initial_waiting" ? 1 : 0)
+            if index == 1 { return try encode(record(1,1_000_000_000,1_100_000_000)) }
+            if index == 2 {
+                if mode == "malformed" { return Data("{".utf8) }
+                if mode == "oversize" { return Data(repeating:32,count:8193) }
+                if mode == "unchanged" { return try encode(record(1,1_000_000_000,1_100_000_000)) }
+                var candidate = try record(2,3_100_000_000,3_150_000_000)
+                stamp = max(stamp, mode == "final_age" ? 4_050_000_000 : 4_300_000_000)
+                switch mode {
+                case "preentry": candidate["began_ns"] = "2900000000";candidate["ended_ns"] = "2950000000"
+                case "initial_waiting":
+                    let began = stamp + 100_000_000
+                    candidate["began_ns"] = String(began);candidate["ended_ns"] = String(began+50_000_000)
+                    stamp = began + 60_000_000
+                case "duration": candidate["began_ns"] = "3050000000";candidate["ended_ns"] = "4200000000"
+                case "refused": candidate["status"] = "refused";candidate["refusal_stage"] = "inert_refused"
+                case "generation": candidate["refusal_generation"] = "1"
+                case "ownership": var t = candidate["target"] as! [String:Any];t["start_seconds"] = 8;candidate["target"] = t
+                case "surface":
+                    var o = candidate["observation"] as! [String:Any];o["surface"] = "panel"
+                    o["panel_id"] = "00000000-0000-0000-0000-000000000002";candidate["observation"] = o
+                case "frame": var o = candidate["observation"] as! [String:Any];o["root_frame"] = [11,20,100,30];candidate["observation"] = o
+                default: break
+                }
+                stale = try encode(candidate);return stale
+            }
+            if mode == "deadline" || (mode == "repeat_then_fresh" && index == 3) { return stale }
+            if mode == "lost_after_stale" { throw StartupAXReceiptError.missing }
+            if mode == "changed_after_stale" {
+                var changed = try JSONSerialization.jsonObject(with:stale) as! [String:Any]
+                changed["window_number"] = 8;return try encode(changed)
+            }
+            let began = stamp + 100_000_000
+            var fresh = try record(mode == "rollback_after_stale" ? 1 : 3,began,began+50_000_000)
+            stamp = began + 60_000_000
+            if mode == "generation_after_stale" { fresh["refusal_generation"] = "1" }
+            if mode == "deadline_after_stale" { fresh["case_deadline_ns"] = "60000000000" }
+            return try encode(fresh)
+        })
+    func result(_ accepted: Bool, _ error: String) -> [String:Any] {
+        ["accepted":accepted,"inputs":inputs,"loads":loads,"pauses":pauses,"error":error,
+         "deadline":String(deadline),"now":String(stamp),"proof":client.evidence.map { $0.sequence }]
+    }
+    do {
+        let ticket = try client.begin();deadline = ticket.deadline
+        _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+        inputs += 1
+        return result(true,"")
+    } catch { return result(false,String(describing:error)) }
 }
 
 func fileRun(_ mode: String) -> [String: Any] {
@@ -186,7 +277,7 @@ func identityProof() -> [String: Any] {
     return ["accepted":a && b && c,"retained":retained != nil,"replacement_rejected": !replacement]
 }
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : $0.hasPrefix("focus_") ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -209,6 +300,63 @@ class ReceiptControls(unittest.TestCase):
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
                          env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_stale_valid_waits_for_fresh_publication_using_only_fresh_evidence(self):
+        for mode, loads, pauses in [('stale_then_fresh', 3, 1), ('repeat_then_fresh', 4, 2)]:
+            with self.subTest(mode=mode):
+                row = self.rows(['publication_' + mode])[0]
+                self.assertTrue(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['pauses'], row['proof']),
+                                 (1, loads, pauses, ['3']))
+                self.assertEqual(row['deadline'], '33001000000')
+                self.assertLess(int(row['now']), int(row['deadline']))
+
+    def test_repeated_stale_positive_expires_at_original_ticket_without_input(self):
+        row = self.rows(['publication_deadline'])[0]
+        self.assertFalse(row['accepted'])
+        self.assertEqual((row['inputs'], row['proof'], row['error']), (0, [], 'expired'))
+        self.assertEqual(row['deadline'], '33001000000')
+        self.assertGreater(row['pauses'], 1)
+        self.assertGreaterEqual(int(row['now']), int(row['deadline']))
+
+    def test_stale_invalid_refusal_duration_geometry_or_ownership_is_terminal(self):
+        modes = ['surface', 'frame', 'duration', 'refused', 'generation', 'ownership', 'malformed', 'oversize']
+        for mode, row in zip(modes, self.rows(['publication_' + m for m in modes])):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['pauses'], row['proof']), (0, 2, 0, []))
+
+    def test_stale_then_generation_loss_rollback_changed_bytes_or_case_deadline_is_terminal(self):
+        modes = ['generation_after_stale', 'lost_after_stale', 'rollback_after_stale',
+                 'changed_after_stale', 'deadline_after_stale']
+        for mode, row in zip(modes, self.rows(['publication_' + m for m in modes])):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['pauses'], row['proof']), (0, 3, 1, []))
+
+    def test_initial_waiting_preentry_and_unchanged_publication_still_wait(self):
+        for mode in ['initial_waiting', 'preentry', 'unchanged']:
+            with self.subTest(mode=mode):
+                row = self.rows(['publication_' + mode])[0]
+                self.assertTrue(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['pauses']), (1, 3, 1))
+
+    def test_sample_crossing_one_second_at_final_consumption_is_not_accepted(self):
+        row = self.rows(['publication_final_age'])[0]
+        self.assertFalse(row['accepted'])
+        self.assertEqual((row['inputs'], row['loads'], row['pauses'], row['proof']), (0, 2, 0, []))
+
+    def test_stale_go_to_focus_is_validated_before_waiting_for_fresh(self):
+        modes = ['stale_focus_positive', 'stale_focus_pid', 'stale_focus_role', 'stale_focus_false',
+                 'stale_focus_ancestor', 'stale_focus_frame', 'stale_focus_value']
+        rows = self.rows(modes)
+        self.assertTrue(rows[0]['accepted'])
+        self.assertEqual((rows[0]['loads'], rows[0]['pauses'], rows[0]['proof']), (7, 1, ['2', '3', '5']))
+        for mode, row in zip(modes[1:], rows[1:]):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['pauses'], row['proof']),
+                                 (0, 6, 0, ['2', '3']))
 
     def test_fifo_without_writer_and_directory_are_refused_by_actual_file_port(self):
         self.assertEqual(self.rows(['file_fifo','file_directory'],timeout=1),[{'accepted':False}]*2)

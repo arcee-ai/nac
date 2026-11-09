@@ -301,7 +301,8 @@ final class StartupAXClient {
             if sequence <= ticket.sequence || began <= ticket.entered {
                 pause(); continue // Wait for a newly BEGUN sample, never a later positive after refusal.
             }
-            try StartupAXFiles.need(sequence > lastSequence && stamp - ended <= 1_000_000_000)
+            try StartupAXFiles.need(sequence > lastSequence)
+            let expiredPublication = stamp - ended > 1_000_000_000
             guard let observed = receipt.observation else { throw StartupAXReceiptError.invalid }
             try StartupAXFiles.need(observed.surface == surface.rawValue
                 && (try StartupAXFiles.frame(observed.root_frame)) == rootFrame
@@ -316,6 +317,9 @@ final class StartupAXClient {
                         focused: focus.focused, frame: try StartupAXFiles.frame(focus.frame),
                         expectedFrame: field.0, value: focus.value, expectedValue: field.1))
             } else { try StartupAXFiles.need(observed.focus == nil && field == nil) }
+            if expiredPublication {
+                pause(); continue // Only an otherwise fully validated positive may await publication.
+            }
             let consumed = try time()
             try StartupAXFiles.need(consumed < ticket.deadline && consumed >= ended && consumed - ended <= 1_000_000_000)
             lastSequence = sequence

@@ -63,6 +63,14 @@ AX receipt is consumed per configured guardTarget, not an invented 27th AX read.
 No read/input atomicity is claimed beyond the original before/after fences.
 Missing original deadline, sample freshness, field equality or ownership is NO_GO.
 
+A distinct post-entry ready publication that is already older than 1s when read
+may wait for another publication within the SAME original ticket, only after all
+other identity, generation, duration, surface, geometry, focus and value checks
+pass. Its stale contents are never consumed or appended as evidence. Refused,
+malformed, lost, wrong-predicate or overlong samples remain immediately terminal;
+no helper/query restart or new ticket is permitted. A sample fresh when read but
+older than 1s at final consumption still fails the original final freshness check.
+
 Source/inert controls are not actual AX, full SDK, or native acceptance. A new
 reviewed source nomination and separately bounded actual configured-local run
 must qualify this implementation with all original PNG/API/store/cleanup oracles.
