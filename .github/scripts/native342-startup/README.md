@@ -1,12 +1,13 @@
-# C18 private library-signature controller
+# C19 private runner-identifier controller
 
 Private source candidate, no build, signature, SDK, native, public push or CI
 execution authorized by this source alone. Root separately reviews and admits
 build-only verification, then the explicitly approved single fresh native
 qualification. Old Native17/18 allocations remain FAIL/SPENT and unusable.
 
-C18 consumes real frozen Source40 H
-`ef133a3250e6bb221f8e2effa2c6a5a711c32af5`, whose direct parent is Q
+C19 consumes real frozen Source42 H
+`2737d551459704a59f95c5fed3021e200ac88bf9`, whose direct parent is H
+`ef133a3250e6bb221f8e2effa2c6a5a711c32af5`. Immutable supplier Q remains
 `8397bafe8fb5f439b702ebf3e941eed802ce71aa`; Q's direct parent is public H
 `3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf`, and its tree is
 `0f4e7c9c867caf8f6505a6354e76876e8ac5e4ba`. The ten immutable supplier bytes
@@ -21,10 +22,10 @@ app/engine/global write grant, new transport or native guard relaxation applies.
 
 Admission now requires the exact closed `purpose`, bound to a separate scope:
 
-- `native`: `P12-integration-Qlibrary-role-R7325-four-startup-source18`.
-- `build-only`: `P12-integration-Qlibrary-role-R7325-signature-build-only-source18`.
+- `native`: `P12-integration-Qrunner-identity-R7325-four-startup-source19`.
+- `build-only`: `P12-integration-Qrunner-identity-R7325-signature-build-only-source19`.
 
-Both bind the exact C18 controller SHA, genuine P12 producer/normal manifest,
+Both bind the exact C19 controller SHA, genuine P12 producer/normal manifest,
 one attempt, zero retries, reviewed image and the original queue-inclusive
 48-minute work / 10-minute cleanup / 2-minute retention limits. Unknown, omitted
 or mismatched purpose refuses before work in the workflow and controller.
