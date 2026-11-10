@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import re
 import threading
 import time
@@ -224,6 +225,44 @@ class AXCompanion:
                 and row['refusal_stage'] == 'target_' + row['status'], 'AX terminal receipt binding')
             self.terminal = {key: row[key] for key in ('target', 'app_launch_epoch', 'window_number', 'status')}
         return self.settlement
+
+    def preflight_diagnostic(self):
+        """Untrusted first local throw, retained independently of interrupted xcresult."""
+        try:
+            path = Path(self.declaration['path'] + '.failure')
+            parent = path.parent
+            require(parent.resolve() == parent, 'Preflight diagnostic parent')
+            info = parent.stat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                    and stat.S_IMODE(info.st_mode) == 0o700, 'Preflight diagnostic directory')
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
+                        and stat.S_IMODE(info.st_mode) == 0o400 and 0 < info.st_size <= 2048,
+                        'Preflight diagnostic file')
+                data = stream.read(2049)
+                require(len(data) == info.st_size, 'Preflight diagnostic size')
+            def unique(pairs):
+                row = {}
+                for key, value in pairs:
+                    require(key not in row, 'Preflight diagnostic duplicate')
+                    row[key] = value
+                return row
+            row = json.loads(data, object_pairs_hook=unique)
+            require(type(row) is dict and set(row) == {'schema', 'acceptance', 'nonce', 'configuration_sha256',
+                    'step', 'operation_index', 'error_family'} and row['schema'] == 'nac342-first-preflight-failure-v1'
+                    and row['acceptance'] is False and row['nonce'] == self.declaration['nonce']
+                    and row['configuration_sha256'] == digest(self.config_path), 'Preflight diagnostic binding')
+            require(type(row['step']) is str and row['step'] in {'startup_checks', 'before_guard', 'before_record',
+                    'public_target', 'prepare_interaction', 'final_recheck', 'finish_interaction', 'input',
+                    'after_guard', 'after_record', 'terminal'} and type(row['operation_index']) is int
+                    and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                    and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
+                    'receipt_expired', 'decoding', 'foundation', 'other'}, 'Preflight diagnostic projection')
+            return row
+        except BaseException:
+            return None  # Never changes failure/abort/input/cleanup authority.
 
     def failure_diagnostic(self):
         """Read only the bounded static failure log; absence never affects custody."""

@@ -188,6 +188,13 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                             proof['ax_companion_diagnostic'] = companion.failure_diagnostic()
                         except BaseException:
                             pass
+                        try:
+                            first = companion.preflight_diagnostic()
+                            if first is not None:
+                                write(folder / 'first-preflight-failure.json', first)
+                                proof['first_preflight_failure_diagnostic'] = first
+                        except BaseException:
+                            pass  # Passive export cannot replace any original error.
                 if audit:
                     # Preserve the rejection before stop() can replace it with a
                     # generic missing-proof exception. Never retain exception text.

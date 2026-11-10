@@ -74,6 +74,54 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn('$0.count < 2048',source)
         self.assertIn('exit(1)',source)
 
+    def preflight(self, change=None, data=None):
+        directory = self.folder / 'owned-port'
+        directory.mkdir(mode=0o700, exist_ok=True)
+        path = directory / 'receipt.json.failure'
+        self.owner.declaration.update(path=str(directory / 'receipt.json'), nonce='a'*64)
+        row = dict(schema='nac342-first-preflight-failure-v1', acceptance=False, nonce='a'*64,
+                   configuration_sha256=hashlib.sha256(self.config_path.read_bytes()).hexdigest(),
+                   step='prepare_interaction', operation_index=1, error_family='receipt_invalid')
+        if change: row.update(change)
+        if path.exists(): path.chmod(0o600)
+        path.write_bytes(data if data is not None else json.dumps(row).encode())
+        path.chmod(0o400)
+        return row, path
+
+    def test_first_local_throw_survives_teardown_and_later_listener_absence_without_authority(self):
+        from ci_startup_api import FixtureFailure, failure_metadata, owned_listener
+        primary = RuntimeError('PRIVATE-CANARY')
+        self.owner.error = primary
+        row, path = self.preflight()
+        order = ['local_throw_retained', 'teardown']
+        expected = dict(pid=123, start_seconds=1, start_microseconds=2, uid=501, executable='/PRIVATE-CANARY')
+        with patch('ci_startup_api.native_identity', return_value=None) as query, \
+                patch('ci_startup_api.subprocess.run') as command:
+            with self.assertRaises(FixtureFailure) as caught: owned_listener(123, expected)
+            query.assert_called_once_with(123); command.assert_not_called()
+        order.append('api_absent')
+        self.assertEqual(self.owner.preflight_diagnostic(), row)
+        self.assertIs(self.owner.error, primary)
+        self.assertEqual(failure_metadata(caught.exception)['operands']['actual_absent'], True)
+        self.assertEqual(order, ['local_throw_retained', 'teardown', 'api_absent'])
+        self.assertIs(row['acceptance'], False)
+        self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
+        self.assertEqual(self.owner.failure, 'ax_companion_unavailable')
+
+    def test_malformed_private_unbound_or_duplicate_first_failure_is_dropped(self):
+        for change in [dict(acceptance=True), dict(step='PRIVATE-CANARY'), dict(operation_index=True),
+                       dict(operation_index=12), dict(error_family='PRIVATE-CANARY'), dict(nonce='b'*64),
+                       dict(configuration_sha256='f'*64), dict(raw='PRIVATE-CANARY')]:
+            with self.subTest(change=change):
+                self.preflight(change)
+                self.assertIsNone(self.owner.preflight_diagnostic())
+        for data in [b'{', b'[]', b'\xff', b'{"schema":1,"schema":2}', b'x'*2049]:
+            self.preflight(data=data)
+            self.assertIsNone(self.owner.preflight_diagnostic())
+        _, path = self.preflight()
+        path.chmod(0o600)
+        self.assertIsNone(self.owner.preflight_diagnostic())
+
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Swift Foundation controls unavailable')
 class ProductionFailureClassifierTests(unittest.TestCase):

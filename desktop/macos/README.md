@@ -138,8 +138,8 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `2e622aeb335cd4248e6cf397c3fc02ba19d063a1`; its journey
-SHA256 is `e68d9439b208fc97a630f8850fee9b10f4a04c33889050a678f4ac056bc1ea52`.
+ten-file supplier `0802cfc65b54c86fdc5966bf8dd3dead07daa2c9`; its journey
+SHA256 is `74b630f3490b851a6de6627a01e84332b17564a5f5d2061741c5c3262985ca84`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
 historical startup/SDK results keep their original source and consumed counters.
@@ -153,6 +153,14 @@ publication is authorized by this nomination. Configured-local pointer input now
 AX preflight, preserving all original postconditions and positive cleanup.
 Raw CG extras no longer veto that contract. The accepted last-instant race is
 not atomic or independently observed delivered-event equality.
+
+The configured journey also retains a first closed local failure before its
+existing teardown, using the same owned witness publisher at the fixed `.failure`
+suffix. H copies only a strict nonce/configuration-bound passive projection into
+case evidence before profile cleanup. Missing or malformed evidence changes no
+error precedence, input, process, freshness or settlement authority. Listener
+generation refusals retain only already-held absence/signature-mismatch bits;
+no extra kernel sample or raw identity is introduced.
 
 ## Private launch contract (ALL-341)
 
