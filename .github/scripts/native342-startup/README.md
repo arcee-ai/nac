@@ -1,25 +1,31 @@
 # PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
-C10 is a mechanical qualification caller derived from exact frozen C09
-`eb26bdda226d0c09af9e67b60e8125f2950a2ae4`. It binds public source nominee
-H `00d93898da122019b09eec5675095d571e7932b0` (tree
-`38de9842269ead70e93325375f99eb256913870a`) and
-Q `f9b0ca23e9a1f5a370bac846479b1aa30fcb63ba` under the new
-`P12-integration-Qfirst-failure-attachment-R7325-four-startup-source10` scope on
-`codex/private520-first-failure-attachment-C10`. Nominee public availability and
-original SDK receipt verification remain separate Root admission checks. No
-push, dispatch or runtime is authorized by this source.
+C11 is a mechanical qualification caller derived from exact frozen C10
+`e40467c38ef8e2f3732f6c41aee080f94306b0c1`. It binds PRIVATE prepared nominee
+H `56102f90ccfa61222b7532c1ad48878977a99cfd` (tree
+`5eebf27a45c34ef8847f5fdd1a1921bf1c9d9164`) and
+Q `4052b2383be17ba3d683dd9d9c2bb5efdf8615fd` under the new
+`P12-integration-Qgranular-first-failure-R7325-four-startup-source11` scope on
+`codex/private520-granular-first-failure-C11`. Original G1 review, public source
+availability and a fresh full SDK receipt remain separate Root admission checks.
+No push, dispatch or runtime is authorized by this source.
 
 H's actual parent is Q above. Q has actual parent
-`df534ae721dc0f31613a7f021f135b97d99c283b` and tree
-`55bfa17bf3811cd3ba1b728adf7785a6fb4d13c0`; df534 has parent public H617
-`6179380b40628aa7807518a83c18a61a5fca4111`.
-Source16 adds only diagnostic delivery: the same closed first-failure record
-is best-effort attached through existing XCTest before the same original throw
-and outer teardown, while file publication remains additional passive evidence.
-The bounded H collector may retain that exact bound attachment on an incomplete
-failed case without clearing any collection failure or granting acceptance.
-The exact Actual12 predicate remains unproven; this is no functional repair.
+`d56c0ad27bd27d44a14384b02358ab959b1fe069` and tree
+`4dc908964c44424b04d3d305ad0900f72fc82221`. Main prepared this pair on dev15cb
+`15cb2bd955ee9525cd6760bf0e881453e5e2d1eb`, including landed669 exactly once.
+Source19 retains the seven-field first-failure record and all legacy steps,
+adding closed checkpoints at original request, publication, consume and read
+operations. Both strict readers admit the closed values. The existing latch,
+original errors, XCTest attachment, guards and their evaluation order remain.
+The fixture-only followup uses Darwin realpath on its created directory; its
+original parent/open/rename failure assertions pass without production changes.
+Source/focused checks establish no SDK or native acceptance. Actual13 remains
+failed/spent at original C10/H00/Qf9: its attachment records
+prepare_interaction/receipt_invalid/op1, not the exact failed predicate. File
+channel absence proves no publication cause. R/onboarding passed; later two
+cases were UNRUN; input stays UNKNOWN and positive cleanup grants no acceptance.
+No historical episode, evidence, counts or clock is retagged by Source19.
 All public coordinate/request/AX/focus/freshness, input and positive cleanup
 contracts remain unchanged. No guard, selection or acceptance rule is relaxed.
 The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
@@ -48,7 +54,7 @@ App/engine/companion settlement and profile removal were positive. The last two
 cases were UNRUN. Actual11 and all earlier episodes retain their original
 failure, fixture, cleanup and spent-clock facts. Source16 and any later SDK
 result neither retag them nor supply runtime credit. No old episode, sealed
-packet or spent allocation can provide a clock or retry for C10. Root's active goal owns this finite
+packet or spent allocation can provide a clock or retry for C11. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -161,10 +167,10 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C10 preparation executes no SDK/helper actor.
-Root reports Source16 H00's hosted compile-only SDK gate and36 selected panel
-controls passed; its original artifact and prepared-merge binding require
-separate Root receipt verification. That result establishes neither full public CI nor native
+compile and Foundation control. C11 preparation executes no SDK/helper actor.
+Root reported Source16 H00's hosted compile-only SDK gate and36 selected panel
+controls passed for that earlier pair only. Source19 requires fresh SDK evidence;
+no previous receipt supplies it. That result establishes neither full public CI nor native
 UI acceptance. Fresh sandboxed receipt access, real focus/value/CFEqual/freshness/
 input/PNG/API/store/custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.
