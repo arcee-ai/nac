@@ -27,7 +27,7 @@
   },
   "all-342-startup-macos26": {
     "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-    "test_source_sha": "4052b2383be17ba3d683dd9d9c2bb5efdf8615fd",
+    "test_source_sha": "e86772e2380f865b4c324da304f4b3cd286f00fa",
     "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
     "profile": "macos26",
     "suite": "startup",
@@ -39,15 +39,15 @@
       "futureStore"
     ],
     "test_files": {
-      "README.md": "040ec5acdf1f4052426ee001b8d9643f9b6019c005a69667b46e73ced42513d1",
-      "StartupJourneys.swift": "04c72c122a7acf240ac864983409d90da09cc36b42ed953c077cfa4acedf55ac",
+      "README.md": "eac02603ae91fa9720f6d46b121821535b4ba465548ecc963b083cfe2005e89e",
+      "StartupJourneys.swift": "be9d20567caff0317303b6c4491786d6e77273b73c3545692d4e48c2fa27bcfe",
       "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
-      "test_contract.py": "94a287b12b1e164dbf4a5bf9d59db0a5437e31ea496ab63d0e8d9b592655b208",
-      "StartupAXGuard.swift": "19950ee10989c2759e2054248ece07a53bef98ad39d8f6771a66fec55e3b3b7e",
-      "StartupAXReceipt.swift": "21f6fbc44328c0666dd8368f4806117857a27129d527578133b5a0a88a5ea8de",
-      "AX-WITNESS-CONTRACT.md": "02a7051b832694514de52252f9b0e891df95edcd078f47f658e3abbe934e8bf0",
-      "test_ax_witness.py": "727350876d2a005cdc2d01f27dea7870bf3943242e419dee3250cb29886f38e4",
-      "AGENTS.md": "aaf23530161152bb063960f2b05420882b41e0bbc4b3d397c2d1675aeb590920",
+      "test_contract.py": "c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e",
+      "StartupAXGuard.swift": "923cfeb8cea1cf68dbb4b9af07dd9b7846ca0da0e233a4986d0c1ea1ae58127e",
+      "StartupAXReceipt.swift": "49e49e4ac6091e612b3049f4ca46a4552c00abacf6fa80642263ea9b98a268a2",
+      "AX-WITNESS-CONTRACT.md": "5541135c2f61f17c3ef093cb151af675a03d917f3f3ac2dcac9e3cc9b402099e",
+      "test_ax_witness.py": "21f22a5fc3da334c9b397e21a37d3e4209d05b2aaaa8f4df5d14700da58e0fbb",
+      "AGENTS.md": "a8478ae6ebb8aefae3e21eb6cca6e3aa79718da6da96bee5ec87f0859fada448",
       "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
     },
     "protocol_files": {

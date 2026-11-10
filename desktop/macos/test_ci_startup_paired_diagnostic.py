@@ -60,6 +60,20 @@ class InteractionSourceControls(unittest.TestCase):
         self.assertEqual(dispatch.count('try action('), 1)
         self.assertEqual(dispatch.count('client.prepareInteraction('), 1)
         self.assertEqual(dispatch.count('client.finishInteraction('), 1)
+        semantic_fences = ('try StartupAXFiles.need(namedTargetMatches(semanticName))',
+                           'kind: kind, label: semanticName,', 'namedTargetMatches(request.label)')
+        semantic_positions = []
+        for fence in semantic_fences:
+            self.assertEqual(dispatch.count(fence), 1)
+            semantic_positions.append(dispatch.index(fence))
+        self.assertEqual(semantic_positions, sorted(semantic_positions))
+        self.assertGreater(semantic_positions[0], dispatch.index(selection))
+        self.assertLess(semantic_positions[-1], dispatch.index('try client.finishInteraction(request)'))
+        for fence in ('semantic.query.count == 1', 'semantic.query.firstMatch.frame == anchor',
+                      'title: target.title, label: target.label',
+                      'placeholder: kind == "message" ? target.placeholderValue : nil'):
+            self.assertIn(fence, dispatch)
+
         self.assertIn('try client.finishInteraction(request)\n                coordinate = selected', dispatch)
 
         adapter = actor.split('static func selectCoordinate<Coordinate>(', 1)[1].split('struct Binding<Token:', 1)[0]
@@ -92,6 +106,11 @@ class InteractionSourceControls(unittest.TestCase):
         finish = 'try client.finishInteraction(request)'
         mutations = {
             'removed-adapter': (selection, 'let (selected, point) = (center, center.screenPoint)'),
+            'removed-initial-name': ('try StartupAXFiles.need(namedTargetMatches(semanticName))', 'try StartupAXFiles.need(true)'),
+            'label-only-request': ('kind: kind, label: semanticName,', 'kind: kind, label: target.label,'),
+            'removed-final-name': ('namedTargetMatches(request.label)', 'true'),
+            'identifier-only-name': ('title: target.title, label: target.label', 'title: target.identifier, label: target.label'),
+
             'bypassed-adapter': (selection, bypass),
             'wrong-readback-port': ('screenPoint: { $0.screenPoint }', 'screenPoint: { _ in center.screenPoint }'),
             'bypassed-public-offset': ('offset: { $0.withOffset($1) }', 'offset: { coordinate, _ in coordinate }'),
