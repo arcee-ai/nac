@@ -600,9 +600,13 @@ No app, engine, HOME, NAC_HOME, store, profile, parent/root or global write expa
 The designated project writer supplies source entitlements for the configured
 case only. App Sandbox stays enabled. The existing build owner first builds and
 independently inspects a normal same-source/configuration/toolchain baseline,
-then both actual signed candidate outputs. Each candidate must preserve its
-entire typed normal baseline, including AX/testmanager, plus only the exact child
-grant. Canonical source/project/selected and ordinary scheme/configuration,
+then both actual signed candidate outputs. The Runner process must preserve its
+entire actual typed XML baseline, including AX/testmanager, plus only the exact
+child grant. The hosted loadable MH_BUNDLE test library instead preserves its
+own actual verified entitlement absence. Both strict signatures and actual
+APPL/BNDL, generated-hosted and bounded all-slice Mach-O code roles remain checked;
+absence is explicitly tagged and distinct from an empty dictionary or missing
+evidence. No entitlements are fabricated or force-embedded into library code. Canonical source/project/selected and ordinary scheme/configuration,
 binary/Info/xctestrun/toolchain and directory identities remain checked. Missing
 propagation or any broader/dropped permission fails before input. No generated
 xcent edits, re-signing workaround, new transport or automatic request reissue.
@@ -615,3 +619,12 @@ Build-only verification must stop after generated_runner. Actual proof/stop
 nonwritability, alias/rename behavior, native AX/input predicates and positive
 process/profile/store settlement still require separately admitted evidence.
 The approval does not reset spent qualifications or waive any acceptance guard.
+
+BuildOnly01's normal signed Runner had valid XML while its strictly verified
+loadable test bundle had only the exact Executable display line, with no XML.
+The collector now records that observed library absence without requiring the
+library to carry process Sandbox/AX entitlements. The actual candidate remains
+unmeasured until a fresh admitted build: changed/present library payload,
+missing Runner XML, broader or nonpropagated process grants still fail closed.
+False-acceptance actual signature observations are retained before admission.
+No re-signing, generated-xcent edit or library-entitlements forcing is used.

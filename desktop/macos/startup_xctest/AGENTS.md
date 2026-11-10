@@ -55,8 +55,11 @@ proof parent, ancestor/root, global or nonconfigured write expansion is allowed.
 The designated project generator owns the source entitlement input. Never edit
 generated xcent or re-sign a Runner. The existing build owner must build and
 independently inspect an ordinary SAME-source/configuration/toolchain baseline
-and BOTH actual candidate signed outputs, preserving their entire baseline
-including AX/testmanager with only the exact child grant. Missing propagation,
+and BOTH actual candidate signatures. The Runner process must preserve its
+entire actual typed XML baseline, including AX/testmanager, plus only the exact
+child grant. The hosted MH_BUNDLE library preserves its own verified entitlement
+absence; it does not independently gain process entitlements. Tagged absence is
+not an empty dictionary or a waiver of strict signature verification. Missing propagation,
 identity or signature proof stops before any input. No retry, request reissue,
 predicate waiver or native acceptance follows from this exception. This text is
 limited authorization for this exception. All source/signature/custody/input

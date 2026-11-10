@@ -170,3 +170,15 @@ checks retain the original short-circuit order and invalid error, recording each
 closed condition, including each point component's finite then Float-roundtrip
 check and the nullable value's keyboard/kind/size conditions. No raw semantic
 name, length, coordinate, field text or additional protocol field is exported.
+
+## Signed code roles
+
+Verify both actual signatures under the same source/configuration/toolchain
+baseline. The Runner main executable retains its complete typed normal Sandbox,
+AX/testmanager and other entitlements plus only the approved request-child grant.
+The hosted MH_BUNDLE library retains its own verified entitlement absence;
+record that absence explicitly, never as an empty dictionary or unknown output.
+Strict verification, APPL/BNDL/generated-hosted roles, bounded all-slice Mach-O
+kind, canonical source/scheme/configuration/binary/Info and directory custody
+remain required. Unexpected library payload or missing/broader Runner grants
+refuse before input. Candidate output is measured, never inferred from xcent.
