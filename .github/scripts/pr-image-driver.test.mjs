@@ -1,3 +1,4 @@
+import { reverseImageApplicability } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -15,6 +16,7 @@ const digest = value => createHash('sha256').update(JSON.stringify(sort(value)))
 
 function verify(value) {
   const config = structuredClone(value); reverseAssetTokens(config);
+  reverseImageApplicability(config);
   const steps = config.jobs['build-smoke'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {
@@ -78,5 +80,18 @@ test('selection cannot bypass cold/cache trust, immutable image, security or qua
     v => { v.permissions.contents = 'write'; },
   ]) {
     const value = source(); change(value); assert.throws(() => verify(value));
+  }
+});
+
+const imageEvidenceMutations = [
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ' --collect-applicability --collect-applicability'); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
+];
+
+test('image evidence and reporting deltas cannot weaken the original driver contract', () => {
+  for (const mutate of imageEvidenceMutations) {
+    const value = source(); mutate(value.jobs['build-smoke'].steps);
+    assert.throws(() => verify(value));
   }
 });
