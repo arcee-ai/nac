@@ -915,7 +915,10 @@ final class StartupJourneys: XCTestCase {
             "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
         } catch {
-            failureEvidence.capture(error)
+            if let record = failureEvidence.capture(error) {
+                try? attachment(json(JSONEncoder().encode(record)),
+                    name: "nac342-first-preflight-failure-v1-" + fixture.scenario)
+            }
             throw error // Preserve the original failure before the outer teardown defer.
         }
     }

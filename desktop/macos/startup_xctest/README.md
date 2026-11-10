@@ -446,7 +446,14 @@ separate root runtime allocation. Neither is established by these local controls
 First-failure evidence uses a lexical `do/catch` inside the existing
 `@MainActor` test method, beneath its application teardown defer. The catch
 calls the passive nonthrowing recorder and rethrows the original error before
-teardown. Keeping the journey's nested guard and dispatch functions in this
+teardown. The first capture returns the same closed record even if private file
+publication fails. The lexical catch best-effort attaches that record as named
+XCTest JSON before the same original throw; an attachment error cannot replace
+it. The latch prevents retrying either channel. Success and unconfigured cases
+publish neither channel. H may retain this exact nonce/configuration-bound
+attachment on an incomplete failed case without accepting that case or changing
+its original collection error. File and attachment evidence establish no global
+failure precedence or input/cleanup authority. Keeping the journey's nested guard and dispatch functions in this
 lexical actor scope avoids a generic nonisolated callback boundary. Publication
 is best effort and first-only even if a failed file port later recovers.
 The inert receipt controls compile this actor scope and execute the exact

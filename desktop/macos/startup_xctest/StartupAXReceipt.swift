@@ -136,13 +136,15 @@ final class StartupFailureEvidence {
         if error is CocoaError { return "foundation" }
         return "other"
     }
-    func capture(_ error: Error) {
+    func capture(_ error: Error) -> StartupFirstFailure? {
         if !retained, let declaration {
             retained = true // First failure only, including publication failure.
             let record = StartupFirstFailure(nonce: declaration.nonce, configuration_sha256: configurationSHA,
                 step: step, operation_index: operationIndex, error_family: Self.family(error))
             try? StartupAXFiles.publish(record, to: declaration.path + ".failure")
+            return record // Independent attachment remains possible after file publication fails.
         }
+        return nil // No second publication or attachment attempt.
     }
 }
 

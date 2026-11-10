@@ -9,7 +9,7 @@ import unittest
 
 def journey_failure_catch():
     source = Path(__file__).with_name('StartupJourneys.swift').read_text()
-    return source.split('        } catch {\n            failureEvidence.capture(error)', 1)[1].split('\n    }\n}', 1)[0]
+    return '        } catch {' + source.rsplit('        } catch {', 1)[1].split('\n    }\n}', 1)[0]
 
 
 class FailureScopeTests(unittest.TestCase):
@@ -23,12 +23,14 @@ class FailureScopeTests(unittest.TestCase):
         self.assertNotIn('failureEvidence.run', body)
         self.assertNotIn('assumeIsolated', body)
         self.assertNotIn('Task {', body)
-        guards, caught = body.split('        } catch {\n            failureEvidence.capture(error)', 1)
+        guards, caught = body.rsplit('        } catch {', 1)
         self.assertIn('func guardTarget() throws {', guards)
         self.assertIn('func dispatch(', guards)
         self.assertEqual(guards.count('try guardWindow('), 2)
         self.assertIn('throw error', caught)
-        self.assertNotIn('try ', caught)
+        self.assertIn('try? attachment(json(JSONEncoder().encode(record))', caught)
+        self.assertLess(caught.index('try? attachment('), caught.index('throw error'))
+        self.assertNotIn('try attachment(', caught)
 
 
 DRIVER = r'''
@@ -431,12 +433,18 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
 }
 
 final class InertOriginalFailure: Error {}
+struct InertFailureFixture { let scenario = "configuredLocal" }
+func json(_ data: Data) throws -> [String: Any] {
+    try JSONSerialization.jsonObject(with: data) as! [String: Any]
+}
 
 // Compile-only actor scope control, never instantiated or invoked. The catch
 // is extracted from the real journey; XCUI SDK compilation is still separate.
 @MainActor final class InertJourneyActorScope {
     private func guardWindow() throws {}
+    private func attachment(_ record: [String: Any], name: String) throws {}
     func journey(_ failureEvidence: StartupFailureEvidence) throws {
+        let fixture = InertFailureFixture()
         defer {}
         do {
             func guardTarget() throws { try guardWindow() }
@@ -471,12 +479,19 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
         "decoding": DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "PRIVATE-CANARY")),
         "foundation": CocoaError(.fileReadUnknown), "other": NSError(domain: "PRIVATE-CANARY", code: 1),
         "identity": InertOriginalFailure()]
-    let selected = String(mode.dropFirst("first_".count)), error = errors[selected] ?? errors["other"]!
+    let selected = String(mode.dropFirst("first_".count)), error = errors[selected] ?? InertOriginalFailure()
     let path = declaration.path + ".failure"
-    if selected == "publish_failure" { try! FileManager.default.removeItem(at: directory) }
-    var beforeTeardown = false, events: [String] = []
+    if ["publish_failure", "both_failure"].contains(selected) { try! FileManager.default.removeItem(at: directory) }
+    var beforeTeardown = false, attachmentBeforeTeardown = false, events: [String] = []
+    var attached: [String: Any]?, attachmentAttempts = 0
+    let fixture = InertFailureFixture()
+    func attachment(_ record: [String: Any], name: String) throws {
+        attachmentAttempts += 1; events.append("attachment")
+        if ["attachment_failure", "both_failure"].contains(selected) { throw NSError(domain: "ATTACHMENT-PRIVATE", code: 7) }
+        attached = record
+    }
     func ui() throws {
-        defer { beforeTeardown = FileManager.default.fileExists(atPath: path); events.append("teardown") }
+        defer { beforeTeardown = FileManager.default.fileExists(atPath: path); attachmentBeforeTeardown = attached != nil; events.append("teardown") }
         let failureEvidence = recorder
         do {
             if selected != "success" { events.append("throw"); throw error }
@@ -484,22 +499,24 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
     }
     var preserved = false
     do { try ui() } catch let caught {
-        preserved = selected == "identity" ? (caught as? InertOriginalFailure) === (error as? InertOriginalFailure)
+        preserved = error is InertOriginalFailure ? (caught as? InertOriginalFailure) === (error as? InertOriginalFailure)
             : StartupFailureEvidence.family(caught) == StartupFailureEvidence.family(error)
     }
     events.append("api_absent") // Inert subsequent listener sample, no OS query.
     let first = try? Data(contentsOf: URL(fileURLWithPath: path))
-    if selected == "publish_failure" {
+    if ["publish_failure", "both_failure"].contains(selected) {
         // A recovered writable port must not retry the first failed publication.
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700])
     }
     recorder.step = .terminal
-    if selected != "success" { recorder.capture(StartupAXReceiptError.expired) }
+    let noRetry = selected == "success" || recorder.capture(StartupAXReceiptError.expired) == nil
     let unchanged = first == (try? Data(contentsOf: URL(fileURLWithPath: path)))
     let row = first.flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
     return ["record": row, "before_teardown": beforeTeardown, "original_preserved": preserved,
-            "unchanged": unchanged, "order": events, "publisher_parent": frontier]
+            "unchanged": unchanged, "order": events, "publisher_parent": frontier,
+            "attachment": attached ?? [:], "attachment_before_teardown": attachmentBeforeTeardown,
+            "attachment_attempts": attachmentAttempts, "no_retry": noRetry]
 }
 
 
@@ -566,7 +583,7 @@ class ReceiptControls(unittest.TestCase):
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name).resolve()
         driver = root / 'main.swift'
-        catch = '        } catch {\n            failureEvidence.capture(error)' + journey_failure_catch()
+        catch = journey_failure_catch()
         driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch))
         cls.binary = root / 'inert-client'
         sources = [Path(__file__).with_name(n) for n in ('StartupAXGuard.swift', 'StartupAXReceipt.swift')]
@@ -603,7 +620,10 @@ class ReceiptControls(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.assertTrue(row['original_preserved'])
                 self.assertTrue(row['unchanged'])
-                self.assertEqual(row['order'], ['throw', 'teardown', 'api_absent'])
+                self.assertEqual(row['order'], ['throw', 'attachment', 'teardown', 'api_absent'])
+                self.assertTrue(row['attachment_before_teardown'])
+                self.assertEqual(row['attachment_attempts'], 1)
+                self.assertTrue(row['no_retry'])
                 self.assertEqual(row['before_teardown'], mode != 'publish_failure')
                 if mode == 'publish_failure':
                     self.assertIsNone(row['record'])
@@ -612,9 +632,11 @@ class ReceiptControls(unittest.TestCase):
                         nonce='a'*64, configuration_sha256='b'*64, step='prepare_interaction', operation_index=1,
                         error_family='receipt_' + mode if mode in modes[:4] else mode))
                 self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
+                self.assertEqual(row['attachment']['error_family'], 'other' if mode == 'publish_failure' else ('receipt_' + mode if mode in modes[:4] else mode))
 
     def test_actual_journey_catch_preserves_error_identity_and_does_not_publish_success_or_unconfigured(self):
-        identity, success, unconfigured = self.rows(['first_identity', 'first_success', 'first_unconfigured'])
+        identity, success, unconfigured, attachment_failure, both_failure = self.rows(
+            ['first_identity', 'first_success', 'first_unconfigured', 'first_attachment_failure', 'first_both_failure'])
         self.assertTrue(identity['original_preserved'])
         self.assertTrue(identity['before_teardown'])
         self.assertEqual(identity['record']['error_family'], 'other')
@@ -624,6 +646,18 @@ class ReceiptControls(unittest.TestCase):
         self.assertTrue(unconfigured['original_preserved'])
         self.assertFalse(unconfigured['before_teardown'])
         self.assertIsNone(unconfigured['record'])
+        for row in (success, unconfigured):
+            self.assertEqual(row['attachment_attempts'], 0)
+        for row in (attachment_failure, both_failure):
+            self.assertTrue(row['original_preserved'])
+            self.assertEqual(row['attachment_attempts'], 1)
+            self.assertEqual(row['attachment'], {})
+            self.assertTrue(row['no_retry'])
+            self.assertTrue(row['unchanged'])
+            self.assertEqual(row['order'], ['throw', 'attachment', 'teardown', 'api_absent'])
+            self.assertNotIn('ATTACHMENT-PRIVATE', json.dumps(row))
+        self.assertTrue(attachment_failure['before_teardown'])
+        self.assertFalse(both_failure['before_teardown'])
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',
