@@ -1,4 +1,4 @@
-import { reverseImageApplicability } from './image-security-wiring.mjs';
+import { reverseImageApplicability, reverseStrictImageSummary } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -17,6 +17,7 @@ const digest = value => createHash('sha256').update(JSON.stringify(sort(value)))
 function verify(value) {
   const config = structuredClone(value); reverseAssetTokens(config);
   reverseImageApplicability(config);
+  reverseStrictImageSummary(config);
   const steps = config.jobs['build-smoke'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {
@@ -89,8 +90,16 @@ const imageEvidenceMutations = [
   steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
 ];
 
+const strictImageMutations = [
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('### Strict exact-image security result', '### Image findings are advisory; enforcement is deferred'); },
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('Blocking findings and incomplete scans fail this job.', 'Findings are advisory.'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('|| scan_status=$?', '|| true'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scanner-exit "$scan_status"', '--scanner-exit 0'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scan-output image-security-evidence/security', '--scan-output stale-evidence'); },
+];
+
 test('image evidence and reporting deltas cannot weaken the original driver contract', () => {
-  for (const mutate of imageEvidenceMutations) {
+  for (const mutate of [...imageEvidenceMutations, ...strictImageMutations]) {
     const value = source(); mutate(value.jobs['build-smoke'].steps);
     assert.throws(() => verify(value));
   }
