@@ -374,10 +374,10 @@ def private_request_selection(selection, configuration, configuration_sha256, *,
 
 
 def require_private_port_signatures(actual, baseline, port):
-    """Pure proposed gate over independently retained decoded signatures.
+    """Role-aware gate over independently retained actual signed observations.
 
-    No codesign command is invoked. Future integration must supply separately
-    verified baseline/actual Runner AND testbundle dictionaries, with binary,
+    No codesign command is invoked. Callers supply separately verified actual
+    baseline/candidate Runner and loadable-library observations, with binary,
     toolchain, project/configuration and private-directory identity custody.
     """
     def strings(value):
@@ -398,32 +398,44 @@ def require_private_port_signatures(actual, baseline, port):
     if (type(actual) is not dict or type(baseline) is not dict
             or set(actual) != {'runner', 'testbundle'} or set(baseline) != set(actual)):
         raise RuntimeError('Both actual signed executable entitlements are required')
-    for name in ('runner', 'testbundle'):
-        original, candidate = baseline[name], actual[name]
-        if not decoded(original) or not decoded(candidate):
-            raise RuntimeError('Unsupported decoded entitlement container/element type')
-        clauses = original.get('com.apple.security.temporary-exception.sbpl')
-        allowed = {'(allow hid-control)', '(allow signal)'}
-        if (not strings(clauses) or len(clauses) != 2
-                or set(clauses) != allowed
-                or original.get('com.apple.security.app-sandbox') is not True
-                or any(key.endswith('read-write') for key in original)
-                or original.get('com.apple.security.inherit') is True
-                or 'com.apple.axserver' not in original.get(
-                    'com.apple.security.temporary-exception.mach-lookup.local-name', [])
-                or 'com.apple.testmanagerd' not in original.get(
-                    'com.apple.security.temporary-exception.mach-lookup.global-name', [])):
-            raise RuntimeError('Independently verified closed normal sandbox/AX/testmanager baseline required')
-        expected = dict(original, **{PRIVATE_PORT_WRITE: [str(port) + '/']})
-        # plist booleans and integers compare equal in Python: require exact
-        # decoded types through a recursive comparison as well as values.
-        def exact(left, right):
-            if type(left) is not type(right):
-                return False
-            if type(left) is dict:
-                return left.keys() == right.keys() and all(exact(left[key], right[key]) for key in left)
-            if type(left) is list:
-                return len(left) == len(right) and all(exact(a, b) for a, b in zip(left, right))
-            return left == right
-        if not exact(candidate, expected):
-            raise RuntimeError('Signed ' + name + ' must preserve entire typed baseline plus exact directory grant')
+    keys = {'presence', 'entitlements', 'mach_o_type'}
+    for rows in (actual, baseline):
+        for name, kind in (('runner', 2), ('testbundle', 8)):
+            row = rows[name]
+            if (type(row) is not dict or set(row) != keys
+                    or type(row['presence']) is not str
+                    or type(row['mach_o_type']) is not int or row['mach_o_type'] != kind):
+                raise RuntimeError('Missing actual verified code-role observation')
+        library = rows['testbundle']
+        if library['presence'] != 'absent' or library['entitlements'] is not None:
+            raise RuntimeError('Loadable XCTest library must preserve verified entitlement absence')
+        if rows['runner']['presence'] != 'present':
+            raise RuntimeError('Runner requires actual signed entitlement XML')
+    original, candidate = baseline['runner']['entitlements'], actual['runner']['entitlements']
+    if not decoded(original) or not decoded(candidate):
+        raise RuntimeError('Unsupported decoded entitlement container/element type')
+    clauses = original.get('com.apple.security.temporary-exception.sbpl')
+    allowed = {'(allow hid-control)', '(allow signal)'}
+    if (not strings(clauses) or len(clauses) != 2
+            or set(clauses) != allowed
+            or original.get('com.apple.security.app-sandbox') is not True
+            or any(key.endswith('read-write') for key in original)
+            or original.get('com.apple.security.inherit') is True
+            or 'com.apple.axserver' not in original.get(
+                'com.apple.security.temporary-exception.mach-lookup.local-name', [])
+            or 'com.apple.testmanagerd' not in original.get(
+                'com.apple.security.temporary-exception.mach-lookup.global-name', [])):
+        raise RuntimeError('Independently verified closed normal sandbox/AX/testmanager baseline required')
+    expected = dict(original, **{PRIVATE_PORT_WRITE: [str(port) + '/']})
+    # plist booleans and integers compare equal in Python: require exact
+    # decoded types through a recursive comparison as well as values.
+    def exact(left, right):
+        if type(left) is not type(right):
+            return False
+        if type(left) is dict:
+            return left.keys() == right.keys() and all(exact(left[key], right[key]) for key in left)
+        if type(left) is list:
+            return len(left) == len(right) and all(exact(a, b) for a, b in zip(left, right))
+        return left == right
+    if not exact(candidate, expected):
+        raise RuntimeError('Signed Runner must preserve entire typed baseline plus exact directory grant')

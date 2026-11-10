@@ -12,7 +12,7 @@ const workflow = name => { const value = YAML.parse(readFileSync(`.github/workfl
 // Exact reviewed nomination; file digests checked against immutable Q and R sources.
 const reviewedStartupSupplier = {
   "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "test_source_sha": "90c997550099d233d753fcbc9d3c090350e70016",
+  "test_source_sha": "8397bafe8fb5f439b702ebf3e941eed802ce71aa",
   "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
   "profile": "macos26",
   "suite": "startup",
@@ -24,15 +24,15 @@ const reviewedStartupSupplier = {
     "futureStore"
   ],
   "test_files": {
-    "README.md": "afe4bac146f17e1d06d6e29d71e7bd532b69b0edc7c153b6b593afd3fcfb8155",
+    "README.md": "78555438488b65c400415e924d5e95854b4569d455263f3edb948362dbe276d0",
     "StartupJourneys.swift": "e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68",
     "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
     "test_contract.py": "c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e",
     "StartupAXGuard.swift": "266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d",
     "StartupAXReceipt.swift": "00a8be55d2fab69a7f0e58f2b747067c5ed3ee31e0c43d8c4d02753307a1a681",
-    "AX-WITNESS-CONTRACT.md": "663c4607186b0b52059e4d9ac692fa171e0e9f9b433a06f3d3bdaa1c4316fd0e",
+    "AX-WITNESS-CONTRACT.md": "22e3f67028d273d74b2ee792b372674cdd58ae3145f472d47a979f3f1d588aeb",
     "test_ax_witness.py": "512c033b7f6a8c5f38fac6a03f0c48a4576c0482d4b8d864d04ab81883c08750",
-    "AGENTS.md": "c302ff2a6017b2cd669ebf6395bb64e3233fbd6e15a54bf77dadea2b97eb2034",
+    "AGENTS.md": "8d9df6ef5e38f1f826be1681b127c9851caead040f1a8774ef9db12135da1431",
     "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
   },
 

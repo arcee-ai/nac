@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import struct
 import shutil
 import sys
 import tempfile
@@ -175,19 +176,25 @@ class PortProposalTests(unittest.TestCase):
             'com.apple.security.temporary-exception.mach-lookup.local-name': ['com.apple.axserver'],
             'com.apple.security.temporary-exception.mach-lookup.global-name': ['com.apple.testmanagerd'],
             'com.apple.security.temporary-exception.sbpl': ['(allow hid-control)', '(allow signal)']}
-        baseline = {name: copy.deepcopy(base) for name in ('runner','testbundle')}
-        actual = {name: dict(row, **{m.PRIVATE_PORT_WRITE: [str(self.port)+'/']}) for name,row in baseline.items()}
+        baseline = {'runner': dict(presence='present', entitlements=copy.deepcopy(base), mach_o_type=2),
+                    'testbundle': dict(presence='absent', entitlements=None, mach_o_type=8)}
+        actual = copy.deepcopy(baseline)
+        actual['runner']['entitlements'][m.PRIVATE_PORT_WRITE] = [str(self.port)+'/']
         m.require_private_port_signatures(actual, baseline, self.port)
-        for name in ('runner','testbundle'):
-            for key in tuple(base) + (m.PRIVATE_PORT_WRITE,):
-                bad = copy.deepcopy(actual)
-                del bad[name][key]
-                with self.subTest(name=name,key=key), self.assertRaises(RuntimeError):
-                    m.require_private_port_signatures(bad, baseline, self.port)
-            for path in (self.proof, self.root, self.parent, Path('/'), Path(str(self.port)+'-extra')):
-                bad = copy.deepcopy(actual)
-                bad[name][m.PRIVATE_PORT_WRITE] = [str(path)+'/']
-                with self.assertRaises(RuntimeError): m.require_private_port_signatures(bad, baseline, self.port)
+        for key in tuple(base) + (m.PRIVATE_PORT_WRITE,):
+            bad = copy.deepcopy(actual)
+            del bad['runner']['entitlements'][key]
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                m.require_private_port_signatures(bad, baseline, self.port)
+        for path in (self.proof, self.root, self.parent, Path('/'), Path(str(self.port)+'-extra')):
+            bad = copy.deepcopy(actual)
+            bad['runner']['entitlements'][m.PRIVATE_PORT_WRITE] = [str(path)+'/']
+            with self.assertRaises(RuntimeError): m.require_private_port_signatures(bad, baseline, self.port)
+        for library in ({}, None, dict(presence='present',entitlements={},mach_o_type=8),
+                        dict(presence='absent',entitlements=None,mach_o_type=2)):
+            bad=copy.deepcopy(actual);bad['testbundle']=library
+            with self.subTest(library=library),self.assertRaises(RuntimeError):
+                m.require_private_port_signatures(bad,baseline,self.port)
         with self.assertRaises(RuntimeError):
             m.require_private_port_signatures({'runner': actual['runner']}, baseline, self.port)
 
@@ -225,8 +232,21 @@ class PairTests(unittest.TestCase):
             return 'INERT toolchain '+str(args)
         product = Path(args[-1])
         if args[1] == '--verify':
-            if self.mode == 'invalid-signature': raise RuntimeError('inert verification failure')
+            if self.mode == 'invalid-signature' or (self.mode == 'plugin-invalid-signature' and product.name.endswith('.xctest')):
+                raise RuntimeError('inert verification failure')
             return ''
+        candidate = 'normal-signature-baseline' not in str(product)
+        if self.mode == 'display-failure' or (self.mode == 'plugin-display-failure' and product.name.endswith('.xctest')):
+            raise RuntimeError('inert display failure')
+        if self.mode == 'runner-absent' and product.name.endswith('.app'):
+            return 'Executable='+str(product/'Contents/MacOS/NACStartupUITests-Runner')
+        if product.name.endswith('.xctest'):
+            if self.mode in ('library-payload-added','bundle-not-propagated') and candidate: return plistlib.dumps({'changed':True}).decode()
+            if self.mode == 'library-empty-xml' and candidate: return plistlib.dumps({}).decode()
+            if self.mode == 'library-baseline-present' and not candidate: return plistlib.dumps({}).decode()
+            if self.mode == 'library-no-evidence': return ''
+            if self.mode == 'library-wrong-executable': return 'Executable=/inert/wrong'
+            return 'Executable='+str(product/'Contents/MacOS/NACStartupUITests')+'\n'
         values = copy.deepcopy(self.base)
         if self.mode == 'baseline-sbpl-string': values['com.apple.security.temporary-exception.sbpl']='(allow file-write*)'
         if self.mode == 'baseline-tab-default': values['com.apple.security.temporary-exception.sbpl']=['(allow\tdefault)']
@@ -246,8 +266,6 @@ class PairTests(unittest.TestCase):
             if self.mode == 'drop-AX': del values['com.apple.security.temporary-exception.mach-lookup.local-name']
             if self.mode == 'drop-testmanager': values['com.apple.security.temporary-exception.mach-lookup.global-name'] = []
             if self.mode == 'extra-permission': values['com.apple.security.network.server'] = True
-            if self.mode == 'bundle-not-propagated' and product.name.endswith('.xctest'):
-                del values[m.PRIVATE_PORT_WRITE]
         elif self.mode == 'baseline-unavailable':
             return ''
         return plistlib.dumps(values).decode()
@@ -259,10 +277,15 @@ class PairTests(unittest.TestCase):
         bundle = host/'Contents/PlugIns/NACStartupUITests.xctest'
         for product,name in ((host,'NACStartupUITests-Runner'),(bundle,'NACStartupUITests')):
             (product/'Contents/MacOS').mkdir(parents=True)
-            (product/'Contents/MacOS'/name).write_bytes(b'INERT-NONEXECUTABLE-'+name.encode())
-            (product/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(CFBundleExecutable=name)))
+            kind = 2 if product == host else 8
+            if self.mode == 'library-main-executable' and product == bundle: kind=2
+            binary=struct.pack('<IIIIIIII',0xFEEDFACF,0x0100000c,0,kind,0,0,0,0)+b'INERT-NOT-RUN'
+            (product/'Contents/MacOS'/name).write_bytes(binary)
+            package = 'APPL' if product == host else 'BNDL'
+            if self.mode == 'library-wrong-package' and product == bundle: package='APPL'
+            (product/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(CFBundleExecutable=name,CFBundlePackageType=package)))
         runner = products/'actual.xctestrun'
-        target = dict(TestHostPath='__TESTROOT__/Debug/NACStartupUITests-Runner.app',
+        target = dict(IsUITestBundle=True,IsXCTRunnerHostedTestBundle=self.mode!='not-hosted',TestHostPath='__TESTROOT__/Debug/NACStartupUITests-Runner.app',
             TestBundlePath='__TESTHOST__/Contents/PlugIns/NACStartupUITests.xctest')
         runner.write_bytes(plistlib.dumps(dict(inert=target)))
         receipt = dict(generated_target=target,xctestrun_sha256=m.digest(runner.read_bytes()),selection=selection['receipt'])
@@ -292,6 +315,8 @@ class PairTests(unittest.TestCase):
         gate=receipt['private_request_signature_gate']
         self.assertTrue(gate['both_actual_signatures_verified'])
         self.assertFalse(gate['acceptance'])
+        self.assertEqual(gate['candidate']['testbundle']['entitlements_presence'],'absent')
+        self.assertIsNone(gate['candidate']['testbundle']['entitlements'])
         self.assertEqual(set(gate['baseline']),{'runner','testbundle'})
         self.assertEqual(set(gate['candidate']),{'runner','testbundle'})
         self.assertEqual(sum(a[1]=='--verify' for a in self.commands if a[0]=='/usr/bin/codesign'),4)
@@ -303,9 +328,13 @@ class PairTests(unittest.TestCase):
     def test_pair_each_adverse_signature_case_fails_without_returning_runner(self):
         # Isolate each case in a fresh owned fixture; no app/input operation exists.
         for mode in ('missing-grant','parent-grant','prefix-grant','sandbox-off','drop-AX','drop-testmanager',
-                     'extra-permission','bundle-not-propagated','baseline-unavailable','invalid-signature','source-change',
+                     'extra-permission','library-payload-added','bundle-not-propagated','library-empty-xml','library-baseline-present',
+                     'library-no-evidence','library-wrong-executable','runner-absent','display-failure',
+                     'baseline-unavailable','invalid-signature','source-change',
                      'baseline-write','baseline-filewrite','baseline-sandbox-off','baseline-sbpl-string',
-                     'baseline-tab-default','baseline-sbpl-element','baseline-mach-string','candidate-bool-int'):
+                     'baseline-tab-default','baseline-sbpl-element','baseline-mach-string','candidate-bool-int',
+                     'library-main-executable','library-wrong-package','not-hosted',
+                     'plugin-invalid-signature','plugin-display-failure'):
             fixture=PairTests('test_pair_real_wiring_builds_normal_baseline_first_and_gates_both_outputs')
             fixture.setUp()
             try:
@@ -313,6 +342,18 @@ class PairTests(unittest.TestCase):
                 with self.subTest(mode=mode),self.assertRaises(RuntimeError):fixture.pair()
                 self.assertFalse((fixture.folder/'private-request-signatures.json').exists())
             finally:fixture.doCleanups()
+
+    def test_pair_rejected_permissions_retain_actual_false_observations(self):
+        self.mode='missing-grant'
+        with self.assertRaises(RuntimeError):self.pair()
+        data=json.loads((self.folder/'private-request-signature-observations.json').read_text())
+        self.assertIs(data['acceptance'],False)
+        self.assertEqual(data['admission'],'NOT_ESTABLISHED')
+        self.assertIsNone(data['baseline']['testbundle']['entitlements'])
+        self.assertIsNone(data['candidate']['testbundle']['entitlements'])
+        self.assertEqual(data['candidate']['testbundle']['entitlements_presence'],'absent')
+        self.assertNotIn(m.PRIVATE_PORT_WRITE,data['candidate']['runner']['entitlements'])
+        self.assertFalse((self.folder/'private-request-signatures.json').exists())
 
     def test_pair_changed_active_or_ordinary_scheme_cannot_return_runner(self):
         for mode in ('baseline-scheme-change','candidate-scheme-change','candidate-ordinary-scheme-change',
@@ -403,6 +444,71 @@ class PairTests(unittest.TestCase):
         text=plistlib.dumps(self.base).decode()
         self.assertEqual(s.decoded_entitlements('Executable=/inert/exe\n'+text,exe),self.base)
 
+
+
+
+
+# Actual BuildOnly01 normal Runner payload; only its Executable path is replaced
+# by an inert test path. Duplicated arrays are intentionally retained exactly.
+NORMAL_RUNNER_XML = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.application-identifier</key><string>ai.arcee.nac.ci.startup-ui-tests.xctrunner</string><key>com.apple.security.app-sandbox</key><true/><key>com.apple.security.get-task-allow</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.temporary-exception.files.absolute-path.read-only</key><array><string>/</string><string>/</string></array><key>com.apple.security.temporary-exception.mach-lookup.global-name</key><array><string>com.apple.testmanagerd</string><string>com.apple.dt.testmanagerd.runner</string><string>com.apple.coresymbolicationd</string><string>com.apple.coredevice.version</string><string>com.apple.coredevice.service</string><string>com.apple.remoted</string><string>com.apple.testmanagerd</string><string>com.apple.dt.testmanagerd.runner</string><string>com.apple.coresymbolicationd</string></array><key>com.apple.security.temporary-exception.mach-lookup.local-name</key><array><string>com.apple.axserver</string></array><key>com.apple.security.temporary-exception.sbpl</key><array><string>(allow hid-control)</string><string>(allow signal)</string></array></dict></plist>\n'
+
+
+class SignatureFormatTests(unittest.TestCase):
+    def test_actual_normal_payload_is_typed_and_duplicate_arrays_survive(self):
+        row=s.decoded_entitlements('Executable=/inert/runner\n'+NORMAL_RUNNER_XML,Path('/inert/runner'))
+        self.assertIs(row['com.apple.security.app-sandbox'],True)
+        self.assertEqual(row['com.apple.security.temporary-exception.files.absolute-path.read-only'],['/','/'])
+        self.assertEqual(len(row['com.apple.security.temporary-exception.mach-lookup.global-name']),9)
+        normal=dict(runner=dict(presence='present',entitlements=row,mach_o_type=2),
+                    testbundle=dict(presence='absent',entitlements=None,mach_o_type=8))
+        actual=copy.deepcopy(normal)
+        actual['runner']['entitlements'][m.PRIVATE_PORT_WRITE]=['/inert/requests/']
+        m.require_private_port_signatures(actual,normal,Path('/inert/requests'))
+        actual['runner']['entitlements']['com.apple.security.temporary-exception.files.absolute-path.read-only']=['/']
+        with self.assertRaises(RuntimeError):m.require_private_port_signatures(actual,normal,Path('/inert/requests'))
+
+    def test_actual_header_only_library_result_is_not_empty_xml_or_unknown(self):
+        exe=Path('/inert/NACStartupUITests')
+        for text in ('Executable='+str(exe),'Executable='+str(exe)+'\n'):
+            self.assertIsNone(s.decoded_entitlements(text,exe,allow_absent=True))
+            with self.assertRaises(RuntimeError):s.decoded_entitlements(text,exe)
+        self.assertEqual(s.decoded_entitlements(plistlib.dumps({}).decode(),exe,allow_absent=True),{})
+        for text in ('','Executable=/wrong','Executable='+str(exe)+'\nwarning','Executable='+str(exe)+'\n<?xml bad'):
+            with self.subTest(text=text),self.assertRaises(Exception):s.decoded_entitlements(text,exe,allow_absent=True)
+
+    def test_thin_headers_preserve_actual_role_kind_and_reject_truncation(self):
+        for endian,magic,size in (('<',0xfeedfacf,32),('>',0xfeedfacf,32),('<',0xfeedface,28),('>',0xfeedface,28)):
+            for kind in (2,8):
+                data=struct.pack(endian+'IIIIIII',magic,0x0100000c,0,kind,0,0,0)+bytes(size-28)
+                self.assertEqual(s.macho_type(data),kind)
+                with self.assertRaises(RuntimeError):s.macho_type(data[:-1])
+        for data in (b'',b'not Mach-O',bytes(32)):
+            with self.assertRaises(RuntimeError):s.macho_type(data)
+
+    def test_universal_all_slices_kinds_ranges_alignment_and_bounds(self):
+        thin=lambda kind:struct.pack('<IIIIIIII',0xfeedfacf,0x0100000c,0,kind,0,0,0,0)
+        def fat(kinds=(8,8),wide=False,offsets=None,alignment=0):
+            stride=32 if wide else 20;count=len(kinds);end=8+count*stride
+            starts=offsets or [end+32*i for i in range(count)]
+            header=struct.pack('>II',0xcafebabf if wide else 0xcafebabe,count)
+            for i,start in enumerate(starts):
+                header+=struct.pack('>IIQQII' if wide else '>IIIII',0x0100000c+i,0,start,32,alignment,0) if wide else struct.pack('>IIIII',0x0100000c+i,0,start,32,alignment)
+            return header+b''.join(thin(kind) for kind in kinds)
+        for wide in (False,True):self.assertEqual(s.macho_type(fat(wide=wide)),8)
+        for data in (fat((2,8)),fat()[:-1],fat(offsets=[48,48]),fat(offsets=[0,80]),fat(alignment=31),struct.pack('>II',0xcafebabe,9)):
+            with self.subTest(case=data[:8]),self.assertRaises(RuntimeError):s.macho_type(data)
+
+    def test_bare_none_or_synthetic_empty_library_cannot_supply_evidence(self):
+        runner=s.decoded_entitlements(NORMAL_RUNNER_XML,Path('/inert/runner'))
+        baseline=dict(runner=dict(presence='present',entitlements=runner,mach_o_type=2),
+                      testbundle=dict(presence='absent',entitlements=None,mach_o_type=8))
+        actual=copy.deepcopy(baseline)
+        actual['runner']['entitlements'][m.PRIVATE_PORT_WRITE]=['/inert/requests/']
+        for library in (None,{},dict(presence='absent',entitlements={},mach_o_type=8),
+                        dict(presence='present',entitlements=None,mach_o_type=8)):
+            bad=copy.deepcopy(actual);bad['testbundle']=library
+            with self.subTest(library=library),self.assertRaises(RuntimeError):
+                m.require_private_port_signatures(bad,baseline,Path('/inert/requests'))
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

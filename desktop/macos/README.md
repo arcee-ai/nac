@@ -144,7 +144,7 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `90c997550099d233d753fcbc9d3c090350e70016`; its journey
+ten-file supplier `8397bafe8fb5f439b702ebf3e941eed802ce71aa`; its journey
 SHA256 is `e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
