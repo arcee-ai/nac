@@ -184,7 +184,7 @@ enum StartupAXWitnessMode {
                 let frame = try ownedFrame(target.pid, window)
                 var observed: StartupAXSurface?, stage: String?, failure: Data?
                 var request: StartupAXInteractionRequest?
-                do { request = try StartupAXInteractionRequest.read(declaration.path + ".request") }
+                do { request = try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) }
                 catch StartupAXReceiptError.missing { request = nil }
                 if let pending = request, try StartupAXFiles.number(pending.entered_ns) >= began { request = nil }
                 if let request {
@@ -235,7 +235,7 @@ enum StartupAXWitnessMode {
                     while true {
                         if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
                         let pending: StartupAXInteractionRequest
-                        do { pending = try StartupAXInteractionRequest.read(declaration.path + ".request") }
+                        do { pending = try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) }
                         catch StartupAXReceiptError.missing { break }
                         try StartupObserver.need(pending == request && getppid() == declaration.owner_pid
                             && DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(request.deadline_ns)

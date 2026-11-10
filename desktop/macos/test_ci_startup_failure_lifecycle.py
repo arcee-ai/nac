@@ -89,7 +89,7 @@ class FailureLifecycleTests(unittest.TestCase):
                 try: ci.run(args, log, cap, **kwargs)
                 except BaseException as error:
                     primary.append(error); raise
-            def generated(*_):
+            def generated(*_, **options):
                 path = root / 'inert.xctestrun'; path.write_bytes(b'inert')
                 return path, {'xctestrun_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
             def collect(*args):
@@ -120,11 +120,13 @@ class FailureLifecycleTests(unittest.TestCase):
                 'result_receipt': Mock(return_value={}), 'collect': collect,
                 'require_integrity': Mock(return_value={}), 'remove_profile': remove,
                 'persisted_audit': Mock()}
+            # Signature admission has its own real-call-path inert tests.
+            stack.enter_context(patch('ci_startup_signatures.recheck_private_build'))
             for name, value in replacements.items(): stack.enter_context(patch('ci_startup.' + name, value))
             original_generated = generated
-            def generated_result(*args):
+            def generated_result(*args, **options):
                 (folder / 'ordinary-startup.xcresult').mkdir()
-                return original_generated(*args)
+                return original_generated(*args, **options)
             stack.enter_context(patch('ci_startup.generated_runner', side_effect=generated_result))
             with self.assertRaises(RuntimeError) as caught:
                 run_case(folder, profiles, 'configuredLocal', root, root, root, root, 'a' * 40, {}, root, root,

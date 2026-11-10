@@ -68,6 +68,7 @@ def declaration(profile, helper, tests):
     folder = profile['root'] / 'ax-witness'
     require(not folder.exists() and helper.is_absolute() and helper.resolve() == helper, 'AX declaration paths')
     folder.mkdir(mode=0o700)
+    (folder / 'requests').mkdir(mode=0o700)  # Runner request-only writer namespace.
     time_limit(300, 15)
     from ci import RUN_DEADLINE
     bound = active()

@@ -268,3 +268,162 @@ def materialize_paths(harness_root, harness_sha, product_root, product_sha, outp
         generated_project_sha256=digest(generated), selected_scheme_sha256=digest(selected))
     (output / 'project-selection.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return dict(project=str(project), scheme=target, receipt=receipt)
+
+
+# Approved 2026-11-10: bounded request-only child, with actual signature gates.
+# ci_startup wires baseline+candidate builds and both actual signature gates.
+PRIVATE_PORT_WRITE = 'com.apple.security.temporary-exception.files.absolute-path.read-write'
+
+
+def private_request_selection(selection, configuration, configuration_sha256, *,
+                           owned_profile, profiles_root, declaration, output):
+    """Materialize one configured-case project; never modify the input project.
+
+    owned_profile/profiles_root/declaration must come from H's existing fixture
+    owner, independently of the serialized configuration. No runtime admission
+    or test execution is performed here. Nonconfigured selections are unchanged.
+    """
+    import os
+    import plistlib
+    import stat
+
+    def require(ok, reason):
+        if not ok:
+            raise RuntimeError('Private XCTest port: ' + reason)
+
+    require(type(configuration) is bytes and digest(configuration) == configuration_sha256,
+            'configuration bytes differ')
+    config = json.loads(configuration)
+    if config.get('scenario') != 'configuredLocal':
+        require('ax_witness' not in config, 'nonconfigured declaration denied')
+        return selection
+    require(config.get('schema') == 'nac342-startup-xctest-v1', 'configuration schema')
+    require(owned_profile['scenario'] == 'configuredLocal', 'owned case differs')
+    require(config.get('ax_witness') == declaration and type(declaration) is dict
+            and set(declaration) == {'path', 'nonce', 'helper_path', 'helper_sha256',
+                                     'support_sha256', 'owner_pid', 'deadline_ns'}
+            and type(declaration['nonce']) is str
+            and re.fullmatch('[0-9a-f]{64}', declaration['nonce']) is not None
+            and declaration['owner_pid'] == os.getpid(), 'owner/nonce declaration differs')
+    parent, root = Path(profiles_root), Path(owned_profile['root'])
+    require(parent.is_absolute() and parent.resolve(strict=True) == parent and parent.is_dir(), 'profiles parent')
+    require(root.parent == parent and root.resolve(strict=True) == root
+            and re.fullmatch('nac342-xctest-configuredLocal-[a-z0-9_]{8}', root.name) is not None,
+            'exact fixture parent/name')
+    proof = root / 'ax-witness'
+    require(declaration['path'] == str(proof / 'receipt.json'), 'exact receipt path')
+    port = proof / 'requests'
+    fingerprints = {}
+    for path in (root, proof, port):
+        info = path.lstat()
+        require(path.resolve(strict=True) == path and stat.S_ISDIR(info.st_mode)
+                and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
+                'canonical owned 0700 directory')
+        fingerprints[str(path)] = (info.st_dev, info.st_ino, info.st_uid, info.st_mode)
+    require(not any(port.iterdir()), 'fresh request-only directory must be empty')
+    require(selection['scheme'] == TARGETS[2] and selection['receipt']['generated'] is True
+            and selection['receipt']['expected_target'] == TARGETS[2], 'startup selection')
+    original = Path(selection['project'])
+    require(original.resolve(strict=True) == original and original.is_dir(), 'project path')
+    base = bounded_file(original / 'project.pbxproj', 256 * 1024)
+    require(digest(base) == selection['receipt']['generated_project_sha256'], 'project digest')
+    output = Path(output)
+    require(output.is_absolute() and output.resolve() == output and not output.exists()
+            and output.parent.is_dir() and not output.is_relative_to(parent)
+            and not output.is_relative_to(original), 'new private output outside profiles/project')
+    # Only public source entitlement input; never generated xcent or signatures.
+    entitlements = output / 'StartupPrivatePort.entitlements'
+    values = {'com.apple.security.app-sandbox': True, PRIVATE_PORT_WRITE: [str(port) + '/']}
+    marker = '    B10000000000000000000013 = {'
+    before, after = base.decode().split(marker)
+    require('CODE_SIGN_ENTITLEMENTS' not in after and 'ENABLE_APP_SANDBOX' not in after,
+            'unexpected existing selected-target entitlement settings')
+    after = replace_once(after, 'NAC_UI_FIXTURE = "";',
+        'NAC_UI_FIXTURE = "";\n        ENABLE_APP_SANDBOX = YES;'
+        + '\n        CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;'
+        + '\n        CODE_SIGN_ENTITLEMENTS = ' + quote(entitlements) + ';')
+    generated = (before + marker + after).encode()
+    schemes = {}
+    for name, key in ((SCHEME.name, 'ordinary_scheme_sha256'),
+                      (TARGETS[2] + '.xcscheme', 'selected_scheme_sha256')):
+        path = original / SCHEME.parent / name
+        require(path.resolve(strict=True) == path, 'canonical scheme input')
+        value = bounded_file(path, 64 * 1024)
+        require(digest(value) == selection['receipt'].get(key), 'selected/ordinary scheme digest differs')
+        schemes[name] = value
+    for name, expected in fingerprints.items():
+        info = Path(name).lstat()
+        require(Path(name).resolve(strict=True) == Path(name)
+                and (info.st_dev, info.st_ino, info.st_uid, info.st_mode) == expected,
+                'directory identity changed during generation')
+    output.mkdir(mode=0o700)
+    project = output / PROJECT.name
+    (project / SCHEME.parent).mkdir(parents=True)
+    entitlements.write_bytes(plistlib.dumps(values, sort_keys=True))
+    (project / 'project.pbxproj').write_bytes(generated)
+    for name, value in schemes.items():
+        (project / SCHEME.parent / name).write_bytes(value)
+    receipt = dict(selection['receipt'], generated_project_sha256=digest(generated),
+                   private_request_proposal=dict(nonce=declaration['nonce'],
+                   configuration_sha256=configuration_sha256, directory=str(port),
+                   identities=fingerprints, source_entitlements_sha256=digest(entitlements.read_bytes()),
+                   actual_runner_entitlements_verified=False,
+                   actual_testbundle_entitlements_verified=False, acceptance=False))
+    (output / 'project-selection.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    return dict(project=str(project), scheme=selection['scheme'], receipt=receipt)
+
+
+def require_private_port_signatures(actual, baseline, port):
+    """Pure proposed gate over independently retained decoded signatures.
+
+    No codesign command is invoked. Future integration must supply separately
+    verified baseline/actual Runner AND testbundle dictionaries, with binary,
+    toolchain, project/configuration and private-directory identity custody.
+    """
+    def strings(value):
+        return type(value) is list and all(type(item) is str for item in value)
+
+    def decoded(value):
+        if type(value) is not dict or any(type(key) is not str for key in value):
+            return False
+        for key, item in value.items():
+            if key in ('com.apple.security.app-sandbox', 'com.apple.security.inherit'):
+                if type(item) is not bool:
+                    return False
+            elif key.startswith('com.apple.security.temporary-exception.'):
+                if not strings(item):
+                    return False
+        return True
+
+    if (type(actual) is not dict or type(baseline) is not dict
+            or set(actual) != {'runner', 'testbundle'} or set(baseline) != set(actual)):
+        raise RuntimeError('Both actual signed executable entitlements are required')
+    for name in ('runner', 'testbundle'):
+        original, candidate = baseline[name], actual[name]
+        if not decoded(original) or not decoded(candidate):
+            raise RuntimeError('Unsupported decoded entitlement container/element type')
+        clauses = original.get('com.apple.security.temporary-exception.sbpl')
+        allowed = {'(allow hid-control)', '(allow signal)'}
+        if (not strings(clauses) or len(clauses) != 2
+                or set(clauses) != allowed
+                or original.get('com.apple.security.app-sandbox') is not True
+                or any(key.endswith('read-write') for key in original)
+                or original.get('com.apple.security.inherit') is True
+                or 'com.apple.axserver' not in original.get(
+                    'com.apple.security.temporary-exception.mach-lookup.local-name', [])
+                or 'com.apple.testmanagerd' not in original.get(
+                    'com.apple.security.temporary-exception.mach-lookup.global-name', [])):
+            raise RuntimeError('Independently verified closed normal sandbox/AX/testmanager baseline required')
+        expected = dict(original, **{PRIVATE_PORT_WRITE: [str(port) + '/']})
+        # plist booleans and integers compare equal in Python: require exact
+        # decoded types through a recursive comparison as well as values.
+        def exact(left, right):
+            if type(left) is not type(right):
+                return False
+            if type(left) is dict:
+                return left.keys() == right.keys() and all(exact(left[key], right[key]) for key in left)
+            if type(left) is list:
+                return len(left) == len(right) and all(exact(a, b) for a, b in zip(left, right))
+            return left == right
+        if not exact(candidate, expected):
+            raise RuntimeError('Signed ' + name + ' must preserve entire typed baseline plus exact directory grant')

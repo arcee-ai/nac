@@ -33,7 +33,19 @@ def write(path, value):
     path.write_bytes(data)
 
 
-def generated_runner(folder, config_path, configuration_sha256, config, selection, run):
+def generated_runner(folder, config_path, configuration_sha256, config, selection, run, *,
+                     private_request=None, command=None):
+    if config.get('scenario') == 'configuredLocal':
+        from ci_startup_signatures import private_build_pair
+        runner, receipt = private_build_pair(folder, config_path, configuration_sha256, config, selection,
+                                            run, command, private_request, _build_runner)
+        write(folder / 'runner.json', receipt)
+        return runner, receipt
+    require('ax_witness' not in config, 'nonconfigured_private_request_declaration')
+    return _build_runner(folder, config_path, configuration_sha256, config, selection, run)
+
+
+def _build_runner(folder, config_path, configuration_sha256, config, selection, run):
     derived = folder / 'derived'
     args = ['xcodebuild', 'build-for-testing', '-project', selection['project'], '-scheme', selection['scheme'],
             '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
@@ -124,7 +136,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
             stage = 'build'
             # The full selected SDK target and actual generated runner must exist
             # before starting the owner observer or requesting any public UI input.
-            runner, runner_receipt = generated_runner(folder, config_path, configuration_sha256, config, selection, run)
+            private_request = dict(profile=profile, profiles_root=profiles, declaration=options['ax_witness']) if scenario == 'configuredLocal' else None
+            runner, runner_receipt = generated_runner(folder, config_path, configuration_sha256, config, selection, run,
+                private_request=private_request, command=command)
             stage = 'admission'
             status = observe_prerequisites(command)
             require(authorization_policy(status) == policy, 'persistent_policy_changed_during_build')
@@ -146,6 +160,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
             require(digest(config_path) == configuration_sha256
                     and digest(runner) == runner_receipt['xctestrun_sha256'], 'runner_configuration_changed_before_input')
             require(not witness.failure and not witness.ui_terminal and not (companion and companion.failure), 'startup_ui_target_unavailable')
+            if private_request is not None:
+                from ci_startup_signatures import recheck_private_build
+                recheck_private_build(runner_receipt, private_request)
             stage = 'test'
             attempted = True
             def abort():

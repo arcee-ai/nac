@@ -90,7 +90,7 @@ class StartupSupervisorTests(unittest.TestCase):
             provider = MagicMock()
             provider.start.return_value = 'http://127.0.0.1:4321'
             provider.stop.return_value = {'scope': 'synthetic provider'}
-            def generated(*args):
+            def generated(*args, **options):
                 calls.append('full-sdk-build')
                 if sdk_failure:
                     raise RuntimeError('SDK unavailable')
@@ -141,6 +141,8 @@ class StartupSupervisorTests(unittest.TestCase):
                 'collect': collect, 'require_integrity': MagicMock(return_value={}), 'remove_profile': MagicMock()}
             if integrity_failure:
                 replacements['require_integrity'].side_effect = RuntimeError('protected bytes changed')
+            # Signature admission has its own real-call-path inert tests.
+            stack.enter_context(patch('ci_startup_signatures.recheck_private_build'))
             for name, replacement in replacements.items():
                 stack.enter_context(patch('ci_startup.' + name, replacement))
             if export_failure:
