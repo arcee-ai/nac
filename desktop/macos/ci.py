@@ -353,7 +353,7 @@ def main():
             require_checkout(root, sha)
         if command(['git', 'status', '--porcelain']):
             raise RuntimeError('Locked setup modified the candidate source')
-        run(['python3', '-B', '-m', 'unittest', 'discover', '-s', 'desktop/macos', '-p', 'test_*.py'],
+        run(['python3', '-B', '-m', 'unittest', 'discover', '-v', '-s', 'desktop/macos', '-p', 'test_*.py'],
             raw / 'fixture-controls.log', 60)
         envelope = target['envelope'] if target else 'ci-toolchain.json'
         expected = json.loads((ROOT / 'desktop/macos' / envelope).read_text())
