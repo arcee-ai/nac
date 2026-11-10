@@ -22,16 +22,16 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_ax_pin_and_complete_inventory_reject_tamper_before_contract_import(self):
         import ci_startup_fixture as fixture
-        self.assertEqual(TEST_SOURCE, 'a5113788dd04b870bbb9a260e5773fda5b1b1d52')
+        self.assertEqual(TEST_SOURCE, 'ea7ea9a7d1546bf4f79649f4340ceafac4aa0f1b')
         self.assertEqual(fixture.TEST_FILES, {
-            'README.md': 'cceb74e21ec113881acd5f7cf2e93b6d935a07998cca8ce278c874131976b9bd',
-            'StartupJourneys.swift': '57902cda27adbd1c7bd215238ffe6a1091d9f24dcd8b237a21d2a1b9d3919945',
+            'README.md': 'bf519f8b9af97200e048fc2652d4f5ca06fc57de325af58a73bc52d429895328',
+            'StartupJourneys.swift': 'e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68',
             'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
             'test_contract.py': 'c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e',
-            'StartupAXGuard.swift': '923cfeb8cea1cf68dbb4b9af07dd9b7846ca0da0e233a4986d0c1ea1ae58127e',
+            'StartupAXGuard.swift': '266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d',
             'StartupAXReceipt.swift': 'aa2eb973e3508128d4be7d8a7664e9538c48c5a576cf81332d481e7fc7ba94d1',
             'AX-WITNESS-CONTRACT.md': 'e3475c6015b239c843c491fd7df74a086d5a308592d73776c3d61508c081e7aa',
-            'test_ax_witness.py': 'ca948f3c3659ee216eba467668841ab9ed5232450d78fbecc9ba06bda75dbe08',
+            'test_ax_witness.py': 'ceb44126ab5e5f59da39bdce37df7e7cc72d4b4b954e46a2786c8c43c668ace8',
             'AGENTS.md': 'c98d6333268d3d5039b5f316fd8297ebbadf92b148384442bea1a44b4c5e76c5',
             'test_title_assertion.py': 'e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef',
         })
