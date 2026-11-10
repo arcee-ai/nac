@@ -149,7 +149,9 @@ class InteractionSourceControls(unittest.TestCase):
         emit = source.split('static func emit(', 1)[1].split('// END AX FAILURE DIAGNOSTICS', 1)[0]
         self.assertIn('do { try write(data) } catch {', emit)
         self.assertIn('$0.count < 2048', emit)
-        outer = source.split('let record = StartupAXFailureDiagnostic.record(', 1)[1]
+        outer = source.split('// Unexpected ownership/deadline/stream failure', 1)[1]
+        self.assertIn('var record = StartupAXFailureDiagnostic.record(', outer)
+        self.assertLess(outer.index('fatalDiagnosticEmitted = true'), outer.index('StartupAXFailureDiagnostic.emit'))
         self.assertLess(outer.index('StartupAXFailureDiagnostic.emit'), outer.index('exit(1)'))
         for private in ('request.value', 'request.label', 'localizedDescription'):
             self.assertNotIn(private, outer.split('exit(1)', 1)[0])

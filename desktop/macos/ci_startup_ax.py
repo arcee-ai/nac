@@ -20,7 +20,7 @@ DIAGNOSTIC_STAGES = {'configuration', 'admission', 'initial_snapshot', 'trust', 
     'app_window', 'owned_frame', 'ax_observation', 'closing_snapshot', 'closing_lifetime',
     'closing_integrity', 'receipt_publication', 'parent_lost'}
 DIAGNOSTIC_CODES = {'ownership_invalid', 'ownership_arguments_unavailable', 'process_probe_unavailable',
-                    'decoding_failure', 'foundation_failure', 'other'}
+                    'decoding_failure', 'foundation_failure', 'other', 'sample_refused'}
 
 
 def require(value, reason):
@@ -77,6 +77,39 @@ def declaration(profile, helper, tests):
     return dict(path=str(folder / 'receipt.json'), nonce=secrets.token_hex(32), helper_path=str(helper),
         helper_sha256=digest(helper), support_sha256={name: digest(tests / 'desktop/macos/startup_xctest' / name) for name in SUPPORT},
         owner_pid=os.getpid(), deadline_ns=str(int(deadline * 1_000_000_000)))
+
+
+def sample_diagnostic(row):
+    """Closed passive first-publication context, never a consumed proof or input ticket."""
+    required = {'capture', 'began_ns', 'ended_ns', 'sequence', 'refusal_generation', 'refusal_stage', 'request_present'}
+    require(type(row) is dict and required <= set(row) <= required | {'request', 'first_api_failure'}
+            and row['capture'] == 'first_published_refusal_not_client_consumption'
+            and row['refusal_stage'] in ('ax_predicate_refused', 'sample_deadline')
+            and type(row['request_present']) is bool, 'AX sample fields')
+    def number(value):
+        require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', value)
+                and int(value) < 2**64, 'AX sample counter')
+        return int(value)
+    for key in ('began_ns', 'ended_ns', 'sequence', 'refusal_generation'):
+        number(row[key])
+    require(number(row['began_ns']) <= number(row['ended_ns']) and number(row['sequence']) > 0
+            and number(row['refusal_generation']) > 0, 'AX sample order')
+    require(('request' in row) == row['request_present'], 'AX sample request presence')
+    if 'request' in row:
+        request = row['request']
+        require(type(request) is dict and set(request) == {'id', 'entered_ns', 'deadline_ns', 'baseline_sequence', 'refusal_generation'}
+                and type(request['id']) is str and re.fullmatch(r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}', request['id']), 'AX sample request')
+        for key in ('entered_ns', 'deadline_ns', 'baseline_sequence', 'refusal_generation'):
+            number(request[key])
+        require(number(request['entered_ns']) < number(row['began_ns']) < number(request['deadline_ns'])
+                and number(request['baseline_sequence']) <= number(row['sequence'])
+                and number(request['refusal_generation']) <= number(row['refusal_generation']), 'AX sample request order')
+    if 'first_api_failure' in row:
+        fact = row['first_api_failure']
+        require(type(fact) is dict and set(fact) == {'attribute', 'api_code'}
+                and type(fact['attribute']) is str and fact['attribute'] in {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize', 'AXFocusedUIElement', 'AXFocused', 'AXValue', 'AXParent'}
+                and type(fact['api_code']) is int and -(2**31) <= fact['api_code'] < 2**31, 'AX sample API failure')
+    return row
 
 
 class AXCompanion:
@@ -309,7 +342,7 @@ class AXCompanion:
             row = json.loads(data, object_pairs_hook=unique)
             required = {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
                 'observed_uptime_ns', 'sequence', 'refusal_generation', 'binding'}
-            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired'}
+            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired', 'first_refused_sample'}
                 and row['schema'] == 'nac342-ax-failure-diagnostic-v1' and row['acceptance'] is False
                 and row['stage'] in DIAGNOSTIC_STAGES and row['code'] in DIAGNOSTIC_CODES
                 and row['clock_basis'] == 'DispatchTime.uptimeNanoseconds', 'AX diagnostic fields')
@@ -322,6 +355,15 @@ class AXCompanion:
             require(type(row['binding']) is dict and row['binding'] == expected, 'AX diagnostic source binding')
             if 'pre_refusal_paired' in row:
                 paired_diagnostic(row['pre_refusal_paired'])
+            if 'first_refused_sample' in row:
+                sample_diagnostic(row['first_refused_sample'])
+                require(int(row['first_refused_sample']['ended_ns']) <= int(row['observed_uptime_ns'])
+                        and all(int(row['first_refused_sample'][key]) <= int(row[key])
+                                for key in ('sequence', 'refusal_generation')), 'AX sample observation order')
+            if row['code'] == 'sample_refused':
+                require('first_refused_sample' in row and row['stage'] == 'ax_observation'
+                        and all(row[key] == row['first_refused_sample'][key]
+                                for key in ('sequence', 'refusal_generation')), 'AX sample-only record')
             return row
         except BaseException:
             return None  # No new acceptance, stop, cleanup or failure precedence.

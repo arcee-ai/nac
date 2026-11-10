@@ -12,6 +12,10 @@ enum OwnershipError: Error { case invalid, argumentsUnavailable }
 struct StartupProbeFailure: Error {
     let pid: Int32
     let scope, reason: String
+    let bsdRead: [String: Int32]?
+    init(pid: Int32, scope: String, reason: String, bsdRead: [String: Int32]? = nil) {
+        self.pid = pid; self.scope = scope; self.reason = reason; self.bsdRead = bsdRead
+    }
 }
 
 struct StartupProcessIdentity {
@@ -50,7 +54,12 @@ enum StartupProcessProbe {
         let expected = Int32(MemoryLayout<proc_bsdinfo>.size)
         errno = 0
         let count = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &value, expected)
-        try checked(count == expected, pid: pid, stage: "bsd", error: errno)
+        let savedErrno = errno // Immediately after the existing syscall, before any helper call.
+        do { try checked(count == expected, pid: pid, stage: "bsd", error: savedErrno) }
+        catch let failure as StartupProbeFailure {
+            throw StartupProbeFailure(pid: failure.pid, scope: failure.scope, reason: failure.reason,
+                bsdRead: ["returned_count": count, "expected_count": expected, "errno": savedErrno])
+        }
         return value
     }
 
@@ -91,7 +100,7 @@ enum StartupProcessProbe {
             // A denied/missing path alone never retires an identity. Only an
             // independent positive PID absence can resolve a failed probe.
             if error.reason != "identity_changed", try isAbsent(pid) { return nil }
-            throw StartupProbeFailure(pid: pid, scope: scope, reason: error.reason)
+            throw StartupProbeFailure(pid: pid, scope: scope, reason: error.reason, bsdRead: error.bsdRead)
         }
     }
 }
@@ -625,6 +634,7 @@ enum StartupObserver {
                               stage: FailureStage = .unspecified) -> [String: Any] {
         let failure = error as? StartupProbeFailure
         var annotation: [String: Any] = ["stage": stage.rawValue, "kind": failureKind(error)]
+        if let detail = failure?.bsdRead { annotation["bsd_read"] = detail }
         if stage == .environment, let rejection = error as? StartupEnvironmentRejection {
             annotation["environment_rejection"] = rejection.detail
         }

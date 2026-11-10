@@ -176,6 +176,67 @@ class StreamDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result['stream_diagnostic']['producer_failure'], row['producer_failure'])
         self.assertFalse(result['positive_settlement'])
 
+    def bsd_failure(self):
+        return dict(schema='nac342-owner-v1', event='failed', complete=False,
+            reason='ownership_observation_unavailable', retained_identities=[],
+            unresolved=[dict(pid=11, scope='known', reason='bsd_unavailable')], observed_uptime_ns='99700000000',
+            producer_failure=dict(stage='include_probe', kind='process_probe',
+                bsd_read=dict(returned_count=0, expected_count=136, errno=5)))
+
+    def test_bsd_operands_are_passive_and_timestamp_is_later_producer_record_time(self):
+        row = self.bsd_failure()
+        legacy = copy.deepcopy(row); legacy['producer_failure'].pop('bsd_read')
+        baseline = self.read((json.dumps(legacy)+'\n').encode())
+        baseline_state = (copy.deepcopy(self.owner.history), copy.deepcopy(self.owner.latest),
+                          self.owner.last_accepted_uptime_ns, self.owner.last_observation)
+        self.owner = OwnerWitness(self.config, self.digest, uid=501, clock=lambda: 100.)
+        result = self.read((json.dumps(row)+'\n').encode())
+        detail = result['stream_diagnostic']['producer_failure']['bsd_read']
+        self.assertEqual(detail, dict(row['producer_failure']['bsd_read'], failure_record_uptime_ns='99700000000'))
+        self.assertNotIn('syscall', json.dumps(detail))
+        self.assertEqual({k:v for k,v in result.items() if k != 'stream_diagnostic'},
+                         {k:v for k,v in baseline.items() if k != 'stream_diagnostic'})
+        self.assertEqual((self.owner.history, self.owner.latest, self.owner.last_accepted_uptime_ns,
+                          self.owner.last_observation), baseline_state)
+        with patch('ci_startup_owner.ctypes.CDLL') as query, patch('ci_startup_owner.os.kill') as signal:
+            with self.assertRaises(RuntimeError): self.owner.signal_owned(self.owner.latest[0], 15)
+            with self.assertRaises(RuntimeError): self.owner.attachment_binding()
+            with self.assertRaises(RuntimeError): self.owner.settle(0)
+            query.assert_not_called(); signal.assert_not_called()
+
+    def test_bsd_optional_projection_is_closed_and_malformed_detail_never_replaces_failure(self):
+        from ci_startup_owner import _producer_failure
+        bad = [None, {}, [], dict(returned_count=0, expected_count=136, errno=5, path='PRIVATE'),
+               dict(returned_count=136, expected_count=136, errno=5)]
+        original = self.bsd_failure()['producer_failure']['bsd_read']
+        for key in original:
+            for value in (True, '0', 2**31, -(2**31)-1, None):
+                bad.append(dict(original, **{key:value}))
+        bad += [dict(original, expected_count=0), dict(original, expected_count=65537)]
+        for detail in bad:
+            with self.subTest(detail=detail):
+                self.owner = OwnerWitness(self.config, self.digest, uid=501, clock=lambda: 100.)
+                row = self.bsd_failure(); row['producer_failure']['bsd_read'] = detail
+                self.assertIsNone(_producer_failure(row))
+                result = self.read((json.dumps(row)+'\n').encode())
+                self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+                self.assertEqual(result['unresolved'], row['unresolved'])
+                self.assertNotIn('producer_failure', result['stream_diagnostic'])
+                self.assertNotIn('PRIVATE', json.dumps(result))
+                self.assertFalse(result['positive_process_settlement'])
+                self.assertFalse(result['positive_settlement'])
+                self.assertFalse(self.owner.signals)
+        for stamp in (True, 1, '01', '-1', str(2**64)):
+            row = self.bsd_failure(); row['observed_uptime_ns'] = stamp
+            self.assertIsNone(_producer_failure(row))
+        for reason in ('bsd_denied', 'bsd_unavailable'):
+            row = self.bsd_failure(); row['unresolved'][0]['reason'] = reason
+            row['producer_failure']['bsd_read'] = dict(returned_count=2**31-1, expected_count=65536, errno=-(2**31))
+            self.assertIsNotNone(_producer_failure(row))
+        for change in (dict(unresolved=[]), dict(unresolved=[dict(pid=11, scope='known', reason='path_denied')]),
+                       dict(producer_failure=dict(stage='include_probe', kind='other', bsd_read=original))):
+            self.assertIsNone(_producer_failure(dict(self.bsd_failure(), **change)))
+
     def test_optional_projection_rejects_unknown_stage_types_and_probe_mismatch(self):
         annotations = [
             dict(stage='PRIVATE-CANARY', kind='other'),

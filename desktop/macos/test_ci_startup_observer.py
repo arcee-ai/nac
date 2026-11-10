@@ -5,6 +5,8 @@ signal, product engine, app, browser or XCTest is executed by these controls.
 The resulting production-schema records enter the actual Python owner/caller.
 """
 from contextlib import ExitStack
+import ctypes
+import errno
 import hashlib
 import io
 import json
@@ -21,12 +23,14 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from ci_startup import run_case
-from ci_startup_owner import OwnerWitness, _PRODUCER_FAILURE_KINDS, _PRODUCER_FAILURE_STAGES
+from ci_startup_owner import BSDInfo, OwnerWitness, _PRODUCER_FAILURE_KINDS, _PRODUCER_FAILURE_STAGES
 
 ARGUMENT_KERNEL = r'''
 // All process/AppKit entry points used by snapshot are deterministic fixture
 // adapters. No live PID, window service, sysctl or signal is reached.
 var argumentRoot = ""
+var passiveBSDMode = ""
+var passiveBSDTrace: [String] = []
 var argumentScenario = ""
 var argumentPhase = 0
 var candidateExecPhase = 0
@@ -72,6 +76,13 @@ func fixturePIDs() -> [Int32] {
 }
 func proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ argument: UInt64,
                   _ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    if !passiveBSDMode.isEmpty {
+        passiveBSDTrace.append("bsd")
+        if passiveBSDMode != "live" {
+            errno = passiveBSDMode == "denied" ? EACCES : passiveBSDMode == "zeroErrno" ? 0 : EIO
+            return passiveBSDMode == "short" ? size - 1 : passiveBSDMode == "negative" ? -1 : 0
+        }
+    }
     if argumentPhase == 2 || (pid == 12 && argumentHelperGone) { errno = ESRCH; return 0 }
     if candidateExecControl && candidateExecPhase > 0 {
         if pid == 12 { candidateDetailReads += 1 }
@@ -375,6 +386,31 @@ func injected(_ pid: Int32, previous: StartupProcessIdentity?, scope: String, mo
             return mode == "gone"
         })
 }
+if CommandLine.arguments[1].hasPrefix("bsd-passive-") {
+    passiveBSDMode = String(CommandLine.arguments[1].dropFirst("bsd-passive-".count))
+    let old = try injected(11, previous: nil, scope: "candidate", mode: "live")!
+    var result: [String: Any] = [:]
+    do {
+        let observed = try StartupProcessProbe.observe(11, previous: old, scope: "known", uid: 501,
+            readPath: { pid in passiveBSDTrace.append("path"); return executable(pid) },
+            isAbsent: { _ in
+                passiveBSDTrace.append("absent"); errno = ERANGE
+                if passiveBSDMode == "precedence" {
+                    throw StartupProbeFailure(pid: 11, scope: "existence", reason: "existence_unavailable")
+                }
+                return passiveBSDMode == "gone"
+            })
+        result["outcome"] = observed == nil ? "absent" : "live"
+    } catch {
+        result["outcome"] = "failed"
+        result["failure"] = StartupObserver.failureRecord(error, known: [11: old], stage: .include_probe)
+    }
+    result["trace"] = passiveBSDTrace
+    result["errno_after"] = errno
+    result["expected"] = MemoryLayout<proc_bsdinfo>.size
+    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
+    exit(0)
+}
 let scenario = CommandLine.arguments[1], configurationSHA = CommandLine.arguments[2]
 var known: [Int32: StartupProcessIdentity] = [:]
 for pid: Int32 in [10, 11] { known[pid] = try injected(pid, previous: nil, scope: "candidate", mode: "live")! }
@@ -423,6 +459,33 @@ do {
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Swift Foundation probe controls unavailable')
 class ProductionObserverControls(unittest.TestCase):
+    def test_original_bsd_operands_survive_later_absence_errno_and_keep_exact_query_trace(self):
+        for mode in ('denied', 'unavailable', 'zeroErrno', 'short', 'negative', 'live', 'gone', 'precedence'):
+            with self.subTest(mode=mode):
+                run = subprocess.run([str(self.executable), 'bsd-passive-' + mode], capture_output=True, timeout=5)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                row = json.loads(run.stdout)
+                self.assertEqual(row['trace'], ['bsd', 'path', 'bsd', 'path'] if mode == 'live' else ['bsd', 'absent'])
+                if mode in ('live', 'gone'):
+                    self.assertEqual(row['outcome'], 'absent' if mode == 'gone' else 'live')
+                    self.assertNotIn('failure', row)
+                    continue
+                failure = row['failure']
+                self.assertFalse(failure['complete'])
+                self.assertEqual(len(failure['retained_identities']), 1)
+                self.assertEqual(len(failure['unresolved']), 1)
+                annotation = failure['producer_failure']
+                if mode == 'precedence':
+                    self.assertEqual(failure['unresolved'][0]['reason'], 'existence_unavailable')
+                    self.assertNotIn('bsd_read', annotation)
+                    continue
+                self.assertEqual(row['errno_after'], errno.ERANGE)
+                detail = annotation['bsd_read']
+                self.assertEqual(detail, dict(returned_count=row['expected']-1 if mode == 'short' else -1 if mode == 'negative' else 0,
+                    expected_count=row['expected'], errno=errno.EACCES if mode == 'denied' else 0 if mode == 'zeroErrno' else errno.EIO))
+                self.assertEqual(failure['unresolved'][0], dict(pid=11, scope='known', reason='bsd_denied' if mode == 'denied' else 'bsd_unavailable'))
+                self.assertNotIn('observed_uptime_ns', failure)  # emit(), not the syscall, owns that later timestamp.
+
     @classmethod
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix='nac354-observer-source-controls-')
@@ -551,6 +614,8 @@ class ProductionObserverControls(unittest.TestCase):
                 if mode == 'bad-environment':
                     expected['environment_rejection'] = dict(executable_class='native', previously_known=False,
                                                               predicate='prohibited', category='token')
+                if mode == 'refresh-denied':
+                    expected['bsd_read'] = dict(returned_count=0, expected_count=ctypes.sizeof(BSDInfo), errno=errno.EACCES)
                 self.assertEqual(frames[-1]['producer_failure'], expected)
                 self.assertEqual(frames[-1]['retained_identities'], [])
                 self.assertEqual(audit['known_pids'], [])

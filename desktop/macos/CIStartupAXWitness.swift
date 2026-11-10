@@ -70,6 +70,25 @@ enum StartupAXFailureDiagnostic {
                 "refusal_generation": String(refusals), "binding": safe]
     }
 
+    // Only values already held for one refused publication; no reader/API call.
+    static func sample(began: UInt64, ended: UInt64, sequence: UInt64, refusals: UInt64,
+                       stage: String, request: [String: String]?, failure: Data?) -> [String: Any] {
+        var value: [String: Any] = ["capture": "first_published_refusal_not_client_consumption",
+            "began_ns": String(began), "ended_ns": String(ended), "sequence": String(sequence),
+            "refusal_generation": String(refusals), "refusal_stage": stage, "request_present": request != nil]
+        if let request {
+            value["request"] = request
+        }
+        if let failure, let body = try? JSONSerialization.jsonObject(with: failure) as? [String: Any],
+           let fact = body["first_observed_refusal"] as? [String: Any],
+           let attribute = fact["attribute"] as? String,
+           ["AXWindows", "AXChildren", "AXRole", "AXPosition", "AXSize", "AXFocusedUIElement", "AXFocused", "AXValue", "AXParent"].contains(attribute),
+           let code = fact["api_code"] as? Int, code >= Int(Int32.min), code <= Int(Int32.max) {
+            value["first_api_failure"] = ["attribute": attribute, "api_code": code]
+        }
+        return value
+    }
+
     static func emit(_ record: [String: Any], write: (Data) throws -> Void) {
         // Publication is best effort and cannot replace the original refusal.
         let data = (try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]))
@@ -88,6 +107,20 @@ enum StartupAXWitnessMode {
         var diagnosticStage = StartupAXDiagnosticStage.configuration
         var diagnosticBinding: [String: String] = [:]
         var sequence: UInt64 = 0, refusals: UInt64 = 0
+        var firstRefusedSample: [String: Any]?
+        var fatalDiagnosticEmitted = false
+        defer {
+            if !fatalDiagnosticEmitted, let sample = firstRefusedSample {
+                // Existing stderr only, one final bounded record; clean exit stays clean.
+                var record = StartupAXFailureDiagnostic.record(stage: .ax_observation,
+                    error: StartupAXReceiptError.refused, observed: UInt64(sample["ended_ns"] as! String)!,
+                    sequence: UInt64(sample["sequence"] as! String)!,
+                    refusals: UInt64(sample["refusal_generation"] as! String)!, binding: diagnosticBinding)
+                record["code"] = "sample_refused"
+                record["first_refused_sample"] = sample
+                StartupAXFailureDiagnostic.emit(record, write: { try FileHandle.standardError.write(contentsOf: $0) })
+            }
+        }
         do {
             let bytes = try StartupAXPreflight.file(configPath, limit: 32768)
             let config = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
@@ -228,6 +261,14 @@ enum StartupAXWitnessMode {
                 diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(observed == nil ? "refused" : "ready", began: began,
                     ended: ended, observed: observed, stage: stage, failure: failure), to: declaration.path)
+                if firstRefusedSample == nil, observed == nil, let stage,
+                   ["ax_predicate_refused", "sample_deadline"].contains(stage) {
+                    firstRefusedSample = StartupAXFailureDiagnostic.sample(began: began, ended: ended,
+                        sequence: sequence, refusals: refusals, stage: stage,
+                        request: request.map { ["id": $0.id, "entered_ns": $0.entered_ns,
+                            "deadline_ns": $0.deadline_ns, "baseline_sequence": $0.baseline_sequence,
+                            "refusal_generation": $0.refusal_generation] }, failure: failure)
+                }
                 if let request {
                     // Keep the proof publication stable until final consumption.
                     // Metadata custody remains in its independent original owner.
@@ -253,9 +294,11 @@ enum StartupAXWitnessMode {
         } catch {
             // Unexpected ownership/deadline/stream failure exits nonzero. The
             // parent invalidates/aborts the test and retains original ownership.
-            let record = StartupAXFailureDiagnostic.record(stage: diagnosticStage, error: error,
+            var record = StartupAXFailureDiagnostic.record(stage: diagnosticStage, error: error,
                 observed: DispatchTime.now().uptimeNanoseconds, sequence: sequence, refusals: refusals,
                 binding: diagnosticBinding)
+            if let firstRefusedSample { record["first_refused_sample"] = firstRefusedSample }
+            fatalDiagnosticEmitted = true
             StartupAXFailureDiagnostic.emit(record, write: { try FileHandle.standardError.write(contentsOf: $0) })
             exit(1)
         }

@@ -68,7 +68,7 @@ def _environment_rejection(value):
 def _producer_failure(record):
     """Closed passive projection; malformed annotations never replace original failure."""
     value = record.get('producer_failure')
-    if (type(value) is dict and {'stage', 'kind'} <= set(value) <= {'stage', 'kind', 'environment_rejection'}
+    if (type(value) is dict and {'stage', 'kind'} <= set(value) <= {'stage', 'kind', 'environment_rejection', 'bsd_read'}
             and type(value['stage']) is str and value['stage'] in _PRODUCER_FAILURE_STAGES
             and type(value['kind']) is str and value['kind'] in _PRODUCER_FAILURE_KINDS
             and ((value['kind'] == 'process_probe') == bool(record.get('unresolved')))):
@@ -78,6 +78,19 @@ def _producer_failure(record):
             if value['stage'] != 'environment' or value['kind'] != 'ownership_invalid' or detail is None:
                 return None
             projection['environment_rejection'] = detail
+        if 'bsd_read' in value:
+            detail = value['bsd_read']
+            stamp = record.get('observed_uptime_ns')
+            unresolved = record.get('unresolved')
+            if not (value['kind'] == 'process_probe' and type(detail) is dict
+                    and set(detail) == {'returned_count', 'expected_count', 'errno'}
+                    and all(type(detail[key]) is int and -(2**31) <= detail[key] < 2**31 for key in detail)
+                    and 0 < detail['expected_count'] <= 65536 and detail['returned_count'] != detail['expected_count']
+                    and type(stamp) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', stamp) and int(stamp) < 2**64
+                    and type(unresolved) is list and len(unresolved) == 1 and type(unresolved[0]) is dict
+                    and unresolved[0].get('reason') in ('bsd_denied', 'bsd_unavailable')):
+                return None
+            projection['bsd_read'] = dict(detail, failure_record_uptime_ns=stamp)
         return projection
     return None
 
