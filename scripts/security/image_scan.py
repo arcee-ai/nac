@@ -2,12 +2,14 @@
 """Gate/rescan a loaded immutable managed image. Never builds or publishes images."""
 import argparse
 import datetime as dt
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import platform
 import re
+import stat
 import subprocess
 import sys
 import tarfile
@@ -262,12 +264,33 @@ def load_bundle(bundle, output):
             "unsupported evidence bundle; reinventory exact image for Rust coverage")
     expected = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
     if manifest["schema_version"] == 3:
-        subject = json.loads((bundle / "identity.json").read_text())
+        with os.fdopen(os.open(bundle / "identity.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+            metadata = os.fstat(source.fileno())
+            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 4 * 1024 * 1024,
+                    "nonregular/oversized retained identity")
+            raw_subject = source.read(4 * 1024 * 1024 + 1)
+        require(len(raw_subject) == metadata.st_size and
+                hashlib.sha256(raw_subject).hexdigest() == manifest.get("files", {}).get("identity.json"),
+                "retained evidence hash mismatch: identity.json")
+        subject = json.loads(raw_subject)
         expected |= applicability_bundle.files(subject)
     require(set(manifest.get("files", {})) == expected, "incomplete bundle")
     for name, digest in manifest["files"].items():
-        require(sha256(bundle / name) == digest, f"retained evidence hash mismatch: {name}")
-        (output / name).write_bytes((bundle / name).read_bytes())
+        # V3 includes a complete image tar: never allocate its full size, follow
+        # a source symlink, or accept bytes different from those actually copied.
+        with os.fdopen(os.open(bundle / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+            metadata = os.fstat(source.fileno())
+            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 32 * 1024 ** 3,
+                    f"nonregular/oversized retained evidence: {name}")
+            checksum, count = hashlib.sha256(), 0
+            with (output / name).open("xb") as destination:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    count += len(chunk)
+                    require(count <= metadata.st_size, f"retained evidence grew while copying: {name}")
+                    checksum.update(chunk)
+                    destination.write(chunk)
+            require(count == metadata.st_size and checksum.hexdigest() == digest,
+                    f"retained evidence hash mismatch: {name}")
     identity = json.loads((output / "identity.json").read_text())
     require(identity["image"] == manifest["image"], "retained identity mismatch")
     return identity
