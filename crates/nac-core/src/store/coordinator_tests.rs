@@ -269,3 +269,84 @@ async fn executor_panic_fails_closed_drains_pending_callers_and_preserves_uncert
     drop(owner);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+struct CountedCorrelation(Arc<AtomicUsize>);
+impl PersistenceCommand for CountedCorrelation {
+    type Output = ();
+    fn correlation(&self) -> Correlation {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Correlation::session(Some("session"))
+    }
+    fn execute(self, _: &Path) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn command_correlation_is_derived_once_and_only_while_recording() {
+    use crate::telemetry::{InMemoryExporter, RuntimeMetadata, TelemetryRecorder};
+    let _serial = crate::telemetry::test_recorder_lock();
+    for recording in [false, true] {
+        let exporter = Arc::new(InMemoryExporter::default());
+        let recorder = if recording {
+            TelemetryRecorder::bounded(
+                exporter.clone(),
+                RuntimeMetadata::sqlite("test", "test", crate::store::schema_version(), None, None),
+                crate::telemetry::MAX_EXPORT_QUEUE_CAPACITY,
+            )
+        } else {
+            TelemetryRecorder::disabled()
+        };
+        let _installed = crate::telemetry::install_test_recorder(recorder.clone());
+        let owner = StoreCoordinator::start(path(), None, 1).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        owner
+            .submit(CountedCorrelation(Arc::clone(&calls)))
+            .unwrap()
+            .acknowledge()
+            .await
+            .unwrap();
+        owner.shutdown().await.unwrap();
+
+        // Admission derives the correlation once, and only while recording;
+        // execution, queue observations and the acknowledgement reuse it.
+        assert_eq!(calls.load(Ordering::SeqCst), usize::from(recording));
+        if !recording {
+            continue;
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while recorder.stats().exported < recorder.stats().accepted {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "telemetry exporter did not drain"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let expected = Correlation::session(Some("session"));
+        let mut queue = exporter
+            .events()
+            .into_iter()
+            .filter_map(|event| match event.operation {
+                Some(
+                    operation @ (StoreOperation::QueueAdmission
+                    | StoreOperation::QueueWait
+                    | StoreOperation::QueueExecution
+                    | StoreOperation::QueueAck),
+                ) => Some((operation, event.correlation == expected)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        // Admission is observed on the submitting thread after the command is
+        // queued, so the executor can report its wait first. Every queue
+        // observation must carry the correlation; their order is not asserted.
+        let mut want = vec![
+            (StoreOperation::QueueAdmission, true),
+            (StoreOperation::QueueWait, true),
+            (StoreOperation::QueueExecution, true),
+            (StoreOperation::QueueAck, true),
+        ];
+        queue.sort_by_key(|(operation, _)| format!("{operation:?}"));
+        want.sort_by_key(|(operation, _)| format!("{operation:?}"));
+        assert_eq!(queue, want);
+    }
+}

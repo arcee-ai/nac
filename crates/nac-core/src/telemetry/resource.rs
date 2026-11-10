@@ -1,6 +1,9 @@
-use super::{global_record, Correlation, Observation, TelemetryKind, TelemetryName};
+use super::{enabled, global_record, Correlation, Observation, TelemetryKind, TelemetryName};
 
 pub fn emit_resource_sample(correlation: Correlation, pid: Option<u32>) {
+    if !enabled() {
+        return;
+    }
     let target_pid = pid.unwrap_or_else(std::process::id);
     let (cpu_time_us, resident_memory_bytes) = process_resource_sample(target_pid);
     global_record(Observation {

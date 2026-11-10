@@ -83,6 +83,9 @@ struct Counters {
 
 impl Counters {
     fn emit(&self, correlation: Correlation) {
+        if !telemetry::enabled() {
+            return;
+        }
         telemetry::emit_persistence_counts(
             self.queued.load(Ordering::SeqCst),
             self.executing.load(Ordering::SeqCst),
@@ -129,28 +132,35 @@ trait QueuedCommand: Send {
     fn run(self: Box<Self>, path: &Path, counters: &Counters);
 }
 
+/// The command's correlation is derived once at admission, and only while
+/// telemetry records; every later observation of the command reuses it.
 struct Submission<C: PersistenceCommand> {
     command: C,
     reply: oneshot::Sender<Result<C::Output>>,
     admitted: Instant,
+    correlation: Correlation,
 }
 
 impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
     fn correlation(&self) -> Correlation {
-        self.command.correlation()
+        self.correlation.clone()
     }
     fn fail_unexecuted(self: Box<Self>, counters: &Counters) {
-        let correlation = self.command.correlation();
+        let Submission {
+            reply,
+            admitted,
+            correlation,
+            ..
+        } = *self;
         counters.cancelled.fetch_add(1, Ordering::SeqCst);
         emit(
             StoreOperation::QueueCancellation,
             correlation.clone(),
-            self.admitted,
+            admitted,
             TelemetryOutcome::Dropped,
         );
         let ack = Instant::now();
-        let outcome = if self
-            .reply
+        let outcome = if reply
             .send(Err(PersistenceAdmissionError::ExecutorStopped.into()))
             .is_ok()
         {
@@ -166,8 +176,8 @@ impl<C: PersistenceCommand> QueuedCommand for Submission<C> {
             command,
             reply,
             admitted,
+            correlation,
         } = *self;
-        let correlation = command.correlation();
         emit(
             StoreOperation::QueueWait,
             correlation.clone(),
@@ -330,7 +340,11 @@ impl StoreCoordinator {
         command: C,
     ) -> Result<PendingPersistence<C::Output>> {
         let admitted = Instant::now();
-        let correlation = command.correlation();
+        let correlation = if telemetry::enabled() {
+            command.correlation()
+        } else {
+            Correlation::default()
+        };
         let (reply, response) = oneshot::channel();
         let guard = self
             .sender
@@ -345,6 +359,7 @@ impl StoreCoordinator {
                         command,
                         reply,
                         admitted,
+                        correlation: correlation.clone(),
                     }));
                     Ok(PendingPersistence { response })
                 }
