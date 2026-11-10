@@ -117,3 +117,11 @@ the existing nonce/configuration binding. It is written before the journey's
 teardown defer, best effort, once per journey; publication failure preserves the
 original error. It contains no label, value, path or process identity and grants
 no input, freshness, process ownership, settlement or acceptance authority.
+
+Coordinate selection keeps the public center when it is exactly Float-representable
+and strictly inside the anchor. Otherwise it chooses a finite representable
+interior point, constructs a public offset coordinate, and requires its actual
+screenPoint to equal that selected point before publication. The same coordinate
+is retained through the existing final recheck and dispatch. Degenerate geometry,
+no representable interior point, and readback mismatch refuse before publication;
+request validation, global hit testing and all original freshness fences remain.

@@ -714,8 +714,9 @@ final class StartupJourneys: XCTestCase {
                 let anchor = target.frame, root = rootWindow.frame
                 try require(target.exists && target.isEnabled && target.isHittable,
                     "Interaction target lost public eligibility")
-                let selected = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                let point = selected.screenPoint
+                let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,
+                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })
                 let value = keyboard && ["field", "message"].contains(kind) ? try XCTUnwrap(target.value as? String) : nil
                 let field: (CGRect, String)?
                 if folderSurface == .goTo {

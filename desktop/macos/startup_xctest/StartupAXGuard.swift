@@ -77,6 +77,39 @@ enum StartupNativeFolderPolicy {
 
 // BEGIN INTERACTION POLICY (same algorithm, inert value ports in controls)
 enum StartupInteractionPolicy {
+    static func point(anchor: CGRect, preferred: CGPoint) -> CGPoint? {
+        guard [anchor.minX, anchor.minY, anchor.maxX, anchor.maxY, anchor.width, anchor.height,
+               preferred.x, preferred.y].allSatisfy({ $0.isFinite }),
+              anchor.width > 0, anchor.height > 0, anchor.contains(preferred) else { return nil }
+        func axis(_ lower: CGFloat, _ upper: CGFloat, _ preferred: CGFloat) -> CGFloat? {
+            let lo = Float(lower), hi = Float(upper)
+            // Strict interior: rounding onto either boundary is not a target.
+            let first = Double(lo) <= Double(lower) ? lo.nextUp : lo
+            let last = Double(hi) >= Double(upper) ? hi.nextDown : hi
+            guard first.isFinite, last.isFinite, first <= last else { return nil }
+            let rounded = Float(preferred)
+            let value = rounded.isFinite ? min(max(rounded, first), last) : (preferred > 0 ? last : first)
+            let result = CGFloat(value)
+            return lower < result && result < upper ? result : nil
+        }
+        guard let x = axis(anchor.minX, anchor.maxX, preferred.x),
+              let y = axis(anchor.minY, anchor.maxY, preferred.y) else { return nil }
+        return CGPoint(x: x, y: y)
+    }
+
+    static func selectCoordinate<Coordinate>(anchor: CGRect, center: Coordinate,
+        screenPoint: (Coordinate) -> CGPoint, offset: (Coordinate, CGVector) -> Coordinate) throws -> (Coordinate, CGPoint) {
+        let original = screenPoint(center)
+        guard let selectedPoint = point(anchor: anchor, preferred: original) else { throw StartupAXReceiptError.invalid }
+        let selected = selectedPoint == original ? center
+            : offset(center, CGVector(dx: selectedPoint.x - original.x, dy: selectedPoint.y - original.y))
+        let actual = screenPoint(selected)
+        try StartupAXFiles.need(actual == selectedPoint && anchor.contains(actual)
+            && actual.x > anchor.minX && actual.y > anchor.minY
+            && [actual.x, actual.y].allSatisfy { $0.isFinite && Double(Float($0)) == Double($0) })
+        return (selected, actual) // Retain and dispatch this same checked public coordinate.
+    }
+
     struct Binding<Token: Equatable> {
         private var id: String?
         private var target: Token?

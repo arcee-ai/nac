@@ -448,8 +448,49 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
             "unchanged": unchanged, "order": events, "publisher_parent": frontier]
 }
 
+
+func floatSelectionRun(_ name: String) -> [String: Any] {
+    let mode = String(name.dropFirst("float_".count)), ulp = Double(Float(120).nextUp) - 120
+    var anchor = CGRect(x:100,y:20,width:40,height:30), preferred = CGPoint(x:120,y:35)
+    switch mode {
+    case "fractional", "readback": anchor.origin.x += 1.0/1048576; preferred.x = anchor.midX
+    case "lower": anchor = CGRect(x:120,y:20,width:2*ulp,height:30); preferred.x = 120+ulp/4
+    case "upper": anchor = CGRect(x:120,y:20,width:2*ulp,height:30); preferred.x = 120+2*ulp-ulp/4
+    case "tie_even": preferred.x = 120+ulp/2
+    case "tie_next": preferred.x = 120+ulp+ulp/2
+    case "tiny": anchor = CGRect(x:120+ulp/4,y:20,width:ulp/4,height:30); preferred.x = anchor.midX
+    case "boundary_only": anchor = CGRect(x:0,y:20,width:1e-100,height:30); preferred.x = anchor.midX
+    case "empty": anchor.size.width = 0
+    case "negative": anchor.size.width = -40
+    case "infinite": anchor.origin.x = .infinity
+    case "nan": anchor.size.height = .nan
+    default: break
+    }
+    struct Coordinate { let point: CGPoint; let id: Int }
+    var offsets = 0, publications = 0, inputs = 0
+    do {
+        let (coordinate, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor,
+            center: Coordinate(point: preferred,id:1), screenPoint: { $0.point }, offset: { original, delta in
+                offsets += 1
+                return Coordinate(point: mode == "readback" ? original.point :
+                    CGPoint(x:original.point.x+delta.dx,y:original.point.y+delta.dy),id:2)
+            })
+        let request = StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:String(repeating:"a",count:64),
+            configuration_sha256:String(repeating:"b",count:64),id:UUID().uuidString,root_id:UUID().uuidString,
+            entered_ns:"1",deadline_ns:"100",baseline_sequence:"1",refusal_generation:"0",surface:"form",kind:"button",
+            label:"Intended",keyboard:false,point:[point.x,point.y],anchor_frame:[anchor.minX,anchor.minY,anchor.width,anchor.height],
+            root_frame:[0,0,1024,674],value:nil)
+        try request.validate(); publications += 1
+        try StartupAXFiles.need(coordinate.point == point && StartupInteractionPolicy.unchanged(point:coordinate.point,
+            expected:point,anchor:anchor,expectedAnchor:anchor,root:anchor,expectedRoot:anchor))
+        inputs += 1 // Same retained coordinate, inert input only.
+        return ["accepted":true,"point_x":point.x,"coordinate_x":coordinate.point.x,"coordinate_id":coordinate.id,
+                "offsets":offsets,"publications":publications,"inputs":inputs]
+    } catch { return ["accepted":false,"publications":publications,"inputs":inputs] }
+}
+
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -472,6 +513,22 @@ class ReceiptControls(unittest.TestCase):
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
                          env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_float_selection_constructs_and_reads_back_the_same_representable_public_coordinate(self):
+        modes = ['integer', 'fractional', 'lower', 'upper', 'tie_even', 'tie_next',
+                 'tiny', 'boundary_only', 'empty', 'negative', 'infinite', 'nan', 'readback']
+        rows = self.rows(['float_' + mode for mode in modes])
+        for mode, row in zip(modes[:6], rows[:6]):
+            with self.subTest(mode=mode):
+                self.assertTrue(row['accepted'])
+                self.assertEqual(row['point_x'], row['coordinate_x'])
+                self.assertEqual((row['publications'],row['inputs']),(1,1))
+        self.assertEqual((rows[0]['point_x'],rows[0]['coordinate_id'],rows[0]['offsets']),(120,1,0))
+        self.assertEqual((rows[1]['point_x'],rows[1]['coordinate_id'],rows[1]['offsets']),(120,2,1))
+        import struct
+        ulp = struct.unpack('f',struct.pack('I',struct.unpack('I',struct.pack('f',120))[0]+1))[0]-120
+        self.assertEqual([rows[i]['point_x'] for i in (2,3,4,5)],[120+ulp,120+ulp,120,120+2*ulp])
+        self.assertEqual(rows[6:],[dict(accepted=False,publications=0,inputs=0)]*7)
 
     def test_first_real_journey_failure_is_closed_and_published_before_teardown_without_replacing_error(self):
         modes = ['missing', 'invalid', 'refused', 'expired', 'decoding', 'foundation', 'other', 'publish_failure']
