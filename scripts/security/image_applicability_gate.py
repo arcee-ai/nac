@@ -13,10 +13,19 @@ from image_inventory import require, sha256, write_json
 
 MAX_ARTIFACT = 16 * 1024 * 1024
 MAX_EVIDENCE = 256 * 1024 * 1024
+MAX_POLICY = 1024 * 1024
 
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def policy_bytes(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        require(stat.S_ISREG(os.fstat(source.fileno()).st_mode), "image policy must be a regular file")
+        raw = source.read(MAX_POLICY + 1)
+    require(len(raw) <= MAX_POLICY, "image policy exceeds byte budget")
+    return raw
 
 
 def raw_policy_rows(result):
@@ -101,10 +110,16 @@ def evaluate(findings, *, trusted_path, candidate_path, observations, scan_ident
     """Missing trusted capability admits nothing; candidate rules cannot bootstrap."""
     now = now or dt.datetime.now(dt.timezone.utc)
     applicability.scan_subject(scan_identity)
-    candidate = Path(candidate_path).read_bytes()
+    candidate_path, trusted_path = Path(candidate_path), Path(trusted_path)
+    if not (candidate_path.exists() or candidate_path.is_symlink() or
+            trusted_path.exists() or trusted_path.is_symlink()):
+        return {"schema_version": 1, "status": "inactive", "reason": "capability-not-configured",
+                "policy_sha256": None, "candidate_policy_sha256": None,
+                "raw_findings": copy.deepcopy(findings), "dispositions": [],
+                "unresolved_indexes": list(range(len(findings)))}
+    candidate = policy_bytes(candidate_path)
     candidate_policy = applicability.policy(candidate, now)
-    trusted_path = Path(trusted_path)
-    if not trusted_path.exists():
+    if not (trusted_path.exists() or trusted_path.is_symlink()):
         require(not candidate_policy["rules"],
                 "candidate applicability rules have no trusted policy; separate human landing required")
         return {"schema_version": 1, "status": "inactive", "reason": "trusted-policy-unavailable",
@@ -112,13 +127,13 @@ def evaluate(findings, *, trusted_path, candidate_path, observations, scan_ident
                 "raw_findings": copy.deepcopy(findings), "dispositions": [],
                 "unresolved_indexes": list(range(len(findings)))}
     require(trusted_path.is_file() and not trusted_path.is_symlink(), "invalid trusted image policy file")
-    trusted = trusted_path.read_bytes()
+    trusted = policy_bytes(trusted_path)
     require(trusted == candidate, "candidate changes image applicability policy; land reviewed policy separately")
     admitted = applicability.policy(trusted, now)
     directory = evidence_directory or trusted_path.parent / "image-applicability-evidence"
     evidence = reviewed_evidence(admitted, directory)
     result = applicability.verify_applicability(findings, trusted_policy=trusted,
-        candidate_policy=candidate, evidence=evidence, observations=observations,
+        candidate_policy=candidate, evidence=evidence, observations=observations if admitted["rules"] else [],
         scan_identity=scan_identity, now=now)
     return {**result, "status": "verified"}
 
@@ -157,7 +172,7 @@ def validated_decision(directory, findings, source_result, identity):
     receipt = json.loads((directory / "applicability-result.json").read_bytes())
     require(receipt.get("status") in {"inactive", "verified"}, "unknown applicability state")
     if receipt["status"] == "inactive":
-        require(receipt.get("reason") == "trusted-policy-unavailable" and
+        require(receipt.get("reason") in {"trusted-policy-unavailable", "capability-not-configured"} and
                 receipt.get("policy_sha256") is None and not receipt.get("dispositions"),
                 "inactive applicability cannot admit findings")
     else:

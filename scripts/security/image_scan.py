@@ -21,6 +21,8 @@ from image_upstreams import upstream_findings, upstream_targets, wolfi_upstream_
 from image_rust import (RUST_PROBE, RUST_FILES, source_rust_pins,
                         collect_distribution, rust_inventory)
 from image_rust_advisories import query_rust
+import image_applicability_gate as applicability_gate
+import image_applicability_bundle as applicability_bundle
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -246,16 +248,23 @@ def evaluate(findings, trusted_policy, candidate_policy, output, *, publication_
 def bundle_manifest(output, identity):
     # All evidence is bound to one image. Daily rescans verify these retained bytes.
     files = ["sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *sorted(RUST_FILES)]
-    write_json(output / "bundle.json", {"schema_version": 2, "image": identity,
+    extended = (output / "applicability-context.json").is_file()
+    if extended:
+        subject = json.loads((output / "identity.json").read_text())
+        files += sorted(applicability_bundle.files(subject))
+    write_json(output / "bundle.json", {"schema_version": 3 if extended else 2, "image": identity,
                "files": {name: sha256(output / name) for name in files}})
 
 
 def load_bundle(bundle, output):
     manifest = json.loads((bundle / "bundle.json").read_text())
-    require(manifest.get("schema_version") == 2,
+    require(manifest.get("schema_version") in {2, 3},
             "unsupported evidence bundle; reinventory exact image for Rust coverage")
-    require(set(manifest.get("files", {})) ==
-            {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}, "incomplete bundle")
+    expected = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
+    if manifest["schema_version"] == 3:
+        subject = json.loads((bundle / "identity.json").read_text())
+        expected |= applicability_bundle.files(subject)
+    require(set(manifest.get("files", {})) == expected, "incomplete bundle")
     for name, digest in manifest["files"].items():
         require(sha256(bundle / name) == digest, f"retained evidence hash mismatch: {name}")
         (output / name).write_bytes((bundle / name).read_bytes())
@@ -324,6 +333,10 @@ def run(args):
             coverage["owned_runtime_packages"] = package_integrity(
                 raw_runtime.get("owned_packages"), identity.get("runtime_package_pins"), sbom["artifacts"])
         write_json(output / "coverage.json", coverage)
+        if not args.bundle and getattr(args, "collect_applicability", False):
+            applicability_bundle.capture(identity, output, command, download)
+        observations = (applicability_bundle.validate(output, identity)
+                        if (output / "applicability-context.json").is_file() else [])
         bundle_manifest(output, args.image)
         if inventory_only:
             write_json(output / "result.json", {"status": "inventoried", "image": args.image,
@@ -339,11 +352,27 @@ def run(args):
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output,
                           publication_policy=getattr(args, "publication_policy", None),
                           source_revision=args.source_revision)
+        receipt = applicability_gate.evaluate(findings,
+            trusted_path=getattr(args, "trusted_applicability_policy", None) or
+                         args.trusted_policy.with_name("image-applicability.json"),
+            candidate_path=getattr(args, "candidate_applicability_policy", None) or
+                           args.candidate_policy.with_name("image-applicability.json"),
+            observations=observations,
+            scan_identity={"image": args.image, "source_revision": args.source_revision,
+                           "platform": "linux/amd64"})
+        decision = applicability_gate.retain_decision(output, result, receipt, identity)
         write_report(output / "report.md", result, args.image)
-        write_json(output / "result.json", {"status": "blocked" if result["blocking"] else "passed",
+        effective = len(decision["blocking_indexes"])
+        with (output / "report.md").open("a") as report_file:
+            report_file.write(f"\nApplicability: {receipt['status']}; reviewed dispositions: "
+                              f"{len(receipt['dispositions'])}; unresolved blocking records: {effective}.\n"
+                              "Raw findings and source-policy classifications remain unchanged; "
+                              "see applicability-result.json and decision.json.\n")
+        write_json(output / "result.json", {"status": "blocked" if effective else "passed",
                    "image": args.image, "scanned_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                   "blocking": len(result["blocking"]), "findings": len(findings)})
-        return 1 if result["blocking"] else 0
+                   "blocking": effective, "findings": len(findings),
+                   "applicability": receipt["status"], "decision_sha256": sha256(output / "decision.json")})
+        return 1 if effective else 0
     except Exception as error:
         write_json(output / "result.json", {"status": "error", "image": args.image, "error": str(error)})
         print(f"image security failed closed: {error}", file=sys.stderr)
@@ -359,6 +388,10 @@ def main():
     parser.add_argument("--candidate-policy", required=True, type=Path)
     parser.add_argument("--publication-policy", type=Path,
                         help="eligible publication's canonical reviewed-dev policy receipt")
+    parser.add_argument("--trusted-applicability-policy", type=Path)
+    parser.add_argument("--candidate-applicability-policy", type=Path)
+    parser.add_argument("--collect-applicability", action="store_true",
+                        help="retain complete exact-image passive filesystem/source evidence")
     parser.add_argument("--inventory-only", action="store_true",
                         help="produce validated inputs only; never a security verdict")
     parser.add_argument("--bundle", type=Path, help="rescan retained SBOM/probes without rebuilding")

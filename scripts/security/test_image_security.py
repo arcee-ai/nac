@@ -594,12 +594,17 @@ class DriverTests(unittest.TestCase):
         # A rescan must not read current checkout pins or require the old source
         # commit to exist in today's shallow checkout.
         upgraded = dict(PINS, GH_VERSION="3.0.0", GIT_LFS_VERSION="4.0.0", GIT_LFS_REVISION="b" * 40)
+        def evaluated(findings, trusted, candidate, output, **kwargs):
+            result = {"blocking": [], "excepted": [], "reporting": []}
+            inv.write_json(output / "findings.json", findings)
+            inv.write_json(output / "policy-result.json", result)
+            return result
         with patch.object(inv, "managed_go_pins", return_value=upgraded), patch.object(
                 scan, "managed_go_pins", side_effect=AssertionError("current checkout read")), patch.object(
                 scan, "install_tools", return_value=({}, {})), patch.object(scan, "scan_sbom", return_value={}), patch.object(
                 scan, "grype_findings", return_value=[]), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
                 scan, "query_rust", return_value=[]), patch.object(
-                scan, "evaluate", return_value={"blocking": [], "excepted": [], "reporting": []}):
+                scan, "evaluate", side_effect=evaluated):
             self.assertEqual(scan.run(args), 0)
         retained = json.loads((args.output / "identity.json").read_text())
         self.assertEqual(retained["go_application_pins"], PINS)

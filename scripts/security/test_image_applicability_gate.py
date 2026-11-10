@@ -64,6 +64,23 @@ class GateTests(unittest.TestCase):
             with self.subTest(raw=raw[:20]), self.assertRaises(ValueError):
                 self.evaluate()
 
+    def test_legacy_absent_capability_retains_original_verdict(self):
+        self.candidate.unlink()
+        receipt = self.evaluate()
+        self.assertEqual(receipt["reason"], "capability-not-configured")
+        self.assertEqual(self.retain(receipt)["blocking_indexes"], [0])
+        self.trusted.write_bytes(self.empty)
+        with self.assertRaises(OSError):
+            self.evaluate()
+
+    def test_policy_symlinks_and_nonregular_inputs_are_rejected(self):
+        self.candidate.unlink()
+        target = self.root / "other-policy.json"
+        target.write_bytes(self.empty)
+        self.candidate.symlink_to(target)
+        with self.assertRaises(OSError):
+            self.evaluate()
+
     def test_trusted_empty_policy_is_verified_and_preserves_unknown_findings(self):
         self.trusted.write_bytes(self.empty)
         self.f["findings"][0]["severity"] = "Unknown"

@@ -125,20 +125,55 @@ pass: inventory, full scan, database/feed freshness, unchanged-image rescan,
 source policy, strict reporter, and publisher checks still apply. Empty rules
 produce no dispositions and leave every raw index unresolved.
 
-This mechanical module does not yet wire CI, retained rescans, or the private
-publisher. Those integration changes and exact-image/native qualification must
-be reviewed and validated at their final combined source revision. Production
-rule proposals remain a separate policy PR after accepted ALL-501/ALL-502
-evidence; unsupported findings remain blockers.
+`image_scan.py` joins this contract through `image_applicability_gate.py`.
+It retains `findings.json` and the shared `policy-result.json` unchanged, then
+writes separate `applicability-result.json` and `decision.json` receipts. The
+decision binds both input files and the applicability receipt by SHA-256 and
+records each remaining blocking raw index. The reporter verifies the complete
+index partition, source row multiset, exact subject and receipt hashes before
+accepting the scanner's effective count. Source exceptions, severity,
+database/feed freshness and scanner error behavior stay effective.
+
+The native CI image-inventory step and source-owned prepublication adapter
+request `--collect-applicability`. This creates an unstarted, network-disabled,
+read-only container from the exact scanned image ID; exports its underlying
+filesystem directly to a retained tar; inspects that same image and container;
+and removes only that owned container and its anonymous volumes. Source archives
+and patches use exact source-lock URLs and hashes. No image is started for this
+collection, and no volume-content or runtime-absence claim is made. See
+`docker/managed/packages/APPLICABILITY_EVIDENCE.md`.
+
+Schema-v3 inventory bundles retain the full tar, inspection/context receipts,
+three passive profiles and original source/patch bytes alongside every existing
+schema-v2 Rust/runtime/SBOM input. Extra names are deterministic flat names
+derived from validated exact pins. Missing, unexpected or altered inputs fail.
+An unchanged-bundle rescan reconstructs the complete passive profile from the
+retained tar and source bytes using its original collection timestamp; it never
+relabels old evidence as freshly observed. Schema-v2 inventory remains readable
+and supplies no applicability observations.
+
+The collector establishes curl/Kerberos observations only. The integrator maps
+exactly the documented APK and synthetic upstream coordinates to their actual
+installed APK, separately binding package and upstream versions. No libssh2
+observation or production disposition is manufactured. Unsupported rules or
+missing qualified inputs fail closed. Actual native image qualification, the
+separately reviewed private-publisher scanner pin and beta/recovery acceptance
+remain incomplete. Production rules require a separate human-reviewed policy
+PR after accepted ALL-501/ALL-502 evidence.
 
 The standalone mechanics can be reviewed before the trusted checkout contains
 the new empty policy file. Calling the verifier still requires real trusted
 bytes; a missing file must not be replaced with candidate bytes or a fabricated
-empty policy. Until the capability is explicitly integrated and its trusted
-policy is available, the existing scanner continues its original raw verdict
-without applicability admissions. An integrator that supports an explicitly
-inactive capability must record that state and grant zero dispositions; it must
-not describe inactive or missing trust as successful applicability verification.
+empty policy. If neither checkout configures the optional capability, the
+integration records `inactive/capability-not-configured`. If only the candidate
+contains the new empty policy, it records `inactive/trusted-policy-unavailable`.
+Both states retain the original raw blocking verdict and grant zero dispositions;
+neither is successful applicability verification. Candidate rules cannot
+bootstrap missing trust. Missing candidate policy when trust exists, malformed
+policy, candidate/trusted differences or invalid active-rule evidence fail the
+scan. Empty trusted policy needs no observations and admits no records, so old
+passive collection timestamps do not prevent a fresh raw vulnerability scan.
+With active rules, original observation and evidence freshness stay mandatory.
 
 ## Focused verification
 
