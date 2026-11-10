@@ -87,6 +87,7 @@ struct Capture {
     signal_pid: Option<libc::pid_t>,
     census_iteration: Option<u32>,
     buffers: [String; 3],
+    signal_outcome: Option<std::ops::Range<usize>>,
     dropped: [u32; 3],
     sequence: u32,
     inspector: Option<Inspector>,
@@ -122,6 +123,7 @@ impl Scope {
                 signal_pid: None,
                 census_iteration,
                 buffers: Default::default(),
+                signal_outcome: None,
                 dropped: [0; 3],
                 sequence: 0,
                 inspector,
@@ -156,6 +158,7 @@ impl Scope {
             // this iteration's signal rows/drops rotate; teardown has its own
             // inspection and operation-result budgets. Nothing rotates on unwind.
             capture.buffers[0].clear();
+            capture.signal_outcome = None;
             capture.dropped[0] = 0;
             capture.sequence = 0;
             capture.phase = Phase::Setup;
@@ -278,7 +281,42 @@ pub(super) fn record(
             values[1],
             values[2]
         );
-        if capture.buffers[bucket].len() + line.len() <= [5120, 1024, 1536][bucket] {
+        if bucket == 0 {
+            // Roll complete signal rows, but retain the latest primary outcome
+            // across the inherited observational probe. It may itself overflow
+            // after an atomic denial; that must not replace primary attribution.
+            let primary = stage == Stage::NativeSend
+                || (stage == Stage::Inspect && result != 1)
+                || (stage == Stage::Validate && result == 2)
+                || (stage == Stage::Resolve && result == 3);
+            if primary {
+                capture.signal_outcome = None;
+            }
+            let buffer = &mut capture.buffers[0];
+            while buffer.len() + line.len() > 5120 {
+                let start = capture
+                    .signal_outcome
+                    .as_ref()
+                    .filter(|range| range.start == 0)
+                    .map_or(0, |range| range.end);
+                let Some(end) = buffer[start..].find('\n').map(|end| start + end + 1) else {
+                    capture.dropped[0] = capture.dropped[0].saturating_add(1);
+                    return;
+                };
+                buffer.drain(start..end);
+                if let Some(range) = capture.signal_outcome.as_mut() {
+                    if end <= range.start {
+                        range.start -= end - start;
+                        range.end -= end - start;
+                    }
+                }
+                capture.dropped[0] = capture.dropped[0].saturating_add(1);
+            }
+            if primary {
+                capture.signal_outcome = Some(buffer.len()..buffer.len() + line.len());
+            }
+            buffer.push_str(&line);
+        } else if capture.buffers[bucket].len() + line.len() <= [5120, 1024, 1536][bucket] {
             capture.buffers[bucket].push_str(&line);
         } else {
             capture.dropped[bucket] = capture.dropped[bucket].saturating_add(1);

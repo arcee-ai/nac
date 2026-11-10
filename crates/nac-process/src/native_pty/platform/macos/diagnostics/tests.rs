@@ -14,6 +14,8 @@ struct Fake {
     sends: Vec<i32>,
     sent_versions: Vec<i32>,
     torn: bool,
+    torn_attempts: i32,
+    metadata_noise: bool,
     gone: bool,
 }
 thread_local! {
@@ -42,7 +44,7 @@ impl inspection::Probe for Probe {
             return Ok(None);
         }
         let offset = FAKE.with(|f| {
-            if f.borrow().torn {
+            if f.borrow().torn || self.unique_calls.get() / 2 < f.borrow().torn_attempts {
                 self.unique_calls.get()
             } else {
                 0
@@ -57,6 +59,16 @@ impl inspection::Probe for Probe {
     }
     fn short(&self, pid: libc::pid_t) -> io::Result<Option<inspection::Short>> {
         call("short")?;
+        if FAKE.with(|f| f.borrow().metadata_noise) {
+            record(
+                Stage::MetadataCredentials,
+                pid,
+                1,
+                None,
+                [u32::MAX as i128; 3],
+            );
+            record(Stage::MetadataStatus, pid, 1, None, [u32::MAX as i128; 3]);
+        }
         Ok(Some(inspection::Short {
             pid,
             ppid: 50,
@@ -214,6 +226,94 @@ fn existing_version_retry_order_and_three_attempt_bound_are_unchanged() {
         let text = scope.take().unwrap();
         assert_eq!(text.matches("stage=native-send").count(), results.len());
         assert_eq!(text.matches("stage=validate").count(), results.len());
+    }
+}
+
+#[test]
+fn nested_retries_and_post_error_saturation_keep_terminal_failure_attribution() {
+    use super::super::signal_diagnostics::FailureObservation;
+    use std::time::Duration;
+
+    for inspection_failure in [false, true] {
+        let mut capture = scope();
+        FAKE.with(|f| {
+            let mut f = f.borrow_mut();
+            f.torn_attempts = 2; // Two torn bookends before each stable acquisition.
+            f.metadata_noise = true; // Native short-record scalar observations.
+            f.sends = vec![libc::ESRCH, libc::ESRCH, libc::EPERM];
+            // Two complete 18-read acquisitions and sends, then the final read.
+            f.fail_at = inspection_failure.then_some(2 * 19 + 18);
+        });
+        let error = signal().unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+        let acquisition = ["unique", "short", "sid", "short", "sid", "unique"].repeat(3);
+        let mut expected = acquisition.clone();
+        expected.push("send");
+        expected = expected.repeat(2);
+        expected.extend(acquisition);
+        if !inspection_failure {
+            expected.push("send");
+        }
+        assert_eq!(calls(), expected);
+        assert!(CAPTURE.with(|slot| slot.borrow().as_ref().unwrap().dropped[0] > 0));
+
+        // Exercise the inherited observational probe with injected metadata,
+        // never Native. Stress retention even if it follows the terminal result.
+        CAPTURE.with(|slot| slot.borrow_mut().as_mut().unwrap().signal_pid = Some(200));
+        let mut observation = FailureObservation::default();
+        observation.observe(200, 7, libc::EPERM, Duration::ZERO, || {
+            for _ in 0..64 {
+                record(
+                    Stage::MetadataCredentials,
+                    200,
+                    1,
+                    None,
+                    [u32::MAX as i128; 3],
+                );
+            }
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "PRIVATE-CREDENTIAL",
+            ))
+        });
+        phase(Phase::Teardown);
+        for _ in 0..64 {
+            record(Stage::UniqueFirst, 200, 1, None, [u64::MAX as i128; 3]);
+        }
+        result::<()>(
+            Stage::ChildWait,
+            50,
+            &Err(io::Error::from_raw_os_error(libc::EIO)),
+            [0; 3],
+        );
+        let text = capture.take().unwrap();
+        let terminal = if inspection_failure {
+            "inspect"
+        } else {
+            "native-send"
+        };
+        assert!(
+            text.contains(&format!("stage={terminal} pid=200 result=3 errno=1 kind=1")),
+            "terminal failure lost: {text}"
+        );
+        assert!(text.contains("stage=post-identity pid=200 result=3 errno=none kind=1"));
+        assert!(text.contains("stage=child-wait pid=50 result=3 errno=5"));
+        assert!(!text.contains("PRIVATE"));
+        assert!(text.len() < 8192);
+        let sequences: Vec<u32> = text
+            .lines()
+            .skip(1)
+            .map(|line| {
+                line.split_whitespace()
+                    .next()
+                    .unwrap()
+                    .strip_prefix("seq=")
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }
 
