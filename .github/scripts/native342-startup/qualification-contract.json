@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qmainactor-SDK-R7325-four-startup-source09",
+  "scope": "P12-integration-Qfirst-failure-attachment-R7325-four-startup-source10",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "6179380b40628aa7807518a83c18a61a5fca4111",
+  "H": "00d93898da122019b09eec5675095d571e7932b0",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "b5cb0a0afb2b1f90c703b980d210ac58546cddec",
+  "Q": "f9b0ca23e9a1f5a370bac846479b1aa30fcb63ba",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
