@@ -2,6 +2,9 @@
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -70,6 +73,81 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
             self.assertNotIn(forbidden,mapper)
         self.assertIn('$0.count < 2048',source)
         self.assertIn('exit(1)',source)
+
+
+@unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Swift Foundation controls unavailable')
+class ProductionFailureClassifierTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory(prefix='nac-failure-classifier-inert-')
+        cls.addClassCleanup(cls.temp.cleanup)
+        folder = Path(cls.temp.name).resolve()
+        observer = Path(__file__).with_name('CIStartupObserver.swift').read_text()
+        companion = Path(__file__).with_name('CIStartupAXWitness.swift').read_text()
+        def section(source, name):
+            begin, end = '// BEGIN ' + name, '// END ' + name
+            assert source.count(begin) == source.count(end) == 1
+            return source.split(begin, 1)[1].split('\n', 1)[1].split(end, 1)[0]
+        # Compile the real validator and both real classifiers. No AppKit/kernel
+        # adapters or copied predicate/mapping stand-ins enter this fixture.
+        ownership = observer.split('enum OwnershipError:', 1)[1].split('\n', 1)[0]
+        probe = observer.split('struct StartupProbeFailure:', 1)[1].split('struct StartupProcessIdentity', 1)[0]
+        metadata = observer.split('    static func failureKind(', 1)[1].split('    static func record(', 1)[0]
+        source = ('import Foundation\nenum OwnershipError:' + ownership + '\nstruct StartupProbeFailure:' + probe
+                  + section(observer, 'STARTUP ENVIRONMENT CHECKS')
+                  + '\nenum StartupObserver { static func failureKind(' + metadata + '\n}\n'
+                  + section(companion, 'AX FAILURE DIAGNOSTICS') + r'''
+let requests = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [[String: Any]]
+var results: [[String: Any]] = []
+for request in requests {
+    do {
+        _ = try StartupEnvironmentCheck.record(executable: request["executable"] as! String,
+            nativePath: request["native"] as! String, enginePath: request["engine"] as! String,
+            argv: request["argv"] as! [String], environment: request["observed"] as! [String: String],
+            launcher: request["launcher"] as! [String: String], child: request["child"] as! [String: String])
+        fatalError("Validator unexpectedly accepted rejection fixture")
+    } catch {
+        guard let rejection = error as? StartupEnvironmentRejection else { throw error }
+        results.append(["predicate": rejection.detail["predicate"]!, "metadata": StartupObserver.failureKind(error),
+            "companion": StartupAXFailureDiagnostic.record(stage: .initial_snapshot, error: error,
+                observed: 100, sequence: 0, refusals: 0, binding: [:])])
+    }
+}
+FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: results, options: [.sortedKeys]))
+''')
+        file = folder / 'main.swift'
+        file.write_text(source)
+        cls.executable = folder / 'FailureClassifierControls'
+        result = subprocess.run(['swiftc', '-swift-version', '5', str(file), '-o', str(cls.executable)],
+                                capture_output=True, timeout=45)
+        if result.returncode: raise AssertionError(result.stderr[-8192:].decode())
+
+    def test_real_validator_rejection_families_keep_both_production_error_codes(self):
+        requests = []
+        native, engine = '/PRIVATE-CANARY/native', '/PRIVATE-CANARY/engine'
+        for predicate in ('contract', 'prohibited', 'native_argv', 'engine_argv', 'controlled_value'):
+            executable = engine if predicate == 'engine_argv' else native
+            request = dict(native=native, engine=engine, executable=executable, argv=[executable],
+                           launcher={'HOME': '/PRIVATE-CANARY/home'}, child={'HOME': '/PRIVATE-CANARY/home'},
+                           observed={'HOME': '/PRIVATE-CANARY/home'})
+            if predicate == 'contract': request['child'] = {}
+            elif predicate == 'prohibited': request['observed']['PRIVATE-CANARY_TOKEN'] = 'PRIVATE-CANARY'
+            elif predicate == 'native_argv': request['argv'] = ['PRIVATE-CANARY']
+            elif predicate == 'engine_argv': request['argv'] += ['__desktop-configuration', '--bind']
+            else: request['observed']['HOME'] = 'PRIVATE-CANARY'
+            requests.append(request)
+        result = subprocess.run([str(self.executable)], input=json.dumps(requests).encode(),
+                                capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr[-4096:])
+        self.assertNotIn(b'PRIVATE-CANARY', result.stdout)
+        rows = json.loads(result.stdout)
+        self.assertEqual([row['predicate'] for row in rows],
+                         ['contract', 'prohibited', 'native_argv', 'engine_argv', 'controlled_value'])
+        for row in rows:
+            self.assertEqual(row['metadata'], 'ownership_invalid')
+            self.assertEqual(row['companion'], dict(schema='nac342-ax-failure-diagnostic-v1', acceptance=False,
+                stage='initial_snapshot', code='ownership_invalid', clock_basis='DispatchTime.uptimeNanoseconds',
+                observed_uptime_ns='100', sequence='0', refusal_generation='0', binding={}))
 
 
 if __name__=='__main__': unittest.main()

@@ -49,6 +49,7 @@ enum StartupAXFailureDiagnostic {
         let code: String
         switch error {
         case OwnershipError.invalid: code = "ownership_invalid"
+        case is StartupEnvironmentRejection: code = "ownership_invalid"
         case OwnershipError.argumentsUnavailable: code = "ownership_arguments_unavailable"
         case is StartupProbeFailure: code = "process_probe_unavailable"
         case is DecodingError: code = "decoding_failure"
