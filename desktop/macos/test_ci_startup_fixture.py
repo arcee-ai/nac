@@ -22,9 +22,9 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_ax_pin_and_complete_inventory_reject_tamper_before_contract_import(self):
         import ci_startup_fixture as fixture
-        self.assertEqual(TEST_SOURCE, 'e86772e2380f865b4c324da304f4b3cd286f00fa')
+        self.assertEqual(TEST_SOURCE, '80b771ef59663e12df6822fb986aa8186fc244b3')
         self.assertEqual(fixture.TEST_FILES, {
-            'README.md': 'eac02603ae91fa9720f6d46b121821535b4ba465548ecc963b083cfe2005e89e',
+            'README.md': '6136f47e6c5ff17d4eacb890e8a112468c5da91e2523c479625c153644ce06bb',
             'StartupJourneys.swift': 'be9d20567caff0317303b6c4491786d6e77273b73c3545692d4e48c2fa27bcfe',
             'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
             'test_contract.py': 'c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e',
