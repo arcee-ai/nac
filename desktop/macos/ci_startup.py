@@ -326,8 +326,9 @@ def run_case(folder, profiles, scenario, app, manifest, product, tests, harness_
                         'positive_process_settlement': 'cleanup' in proof,
                         'retention_reasons': [name for name, error in errors.items() if error is not None]})
                 # Build products and XCTest's raw result never enter the bounded export.
-                if (folder / 'derived').exists():
-                    shutil.rmtree(folder / 'derived')
+                for derived in (folder / 'derived', folder / 'normal-signature-baseline/derived'):
+                    if derived.exists():
+                        shutil.rmtree(derived)
         except BaseException as final_error:
             original = primary_error or next((error for error in errors.values() if error is not None), None)
             if original is not None:

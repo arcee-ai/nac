@@ -13,13 +13,14 @@ from unittest.mock import Mock, patch
 
 import ci
 from ci_startup import run_case
+from ci_support import MAX_FILE, export_evidence
 from ci_startup_api import FixtureFailure, owned_listener
 from ci_startup_audit import LiveAudit
 import test_ci_startup_owner as owner_fixtures
 
 
 class FailureLifecycleTests(unittest.TestCase):
-    def exercise(self, mode):
+    def exercise(self, mode, *, with_baseline=False, cleanup_error=False):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary).resolve()
             profiles = root / 'profiles'; profiles.mkdir()
@@ -59,7 +60,12 @@ class FailureLifecycleTests(unittest.TestCase):
             companion.failure_diagnostic.return_value = None
             companion.reconcile_retirement.return_value = {}
             if mode == 'unknown_cleanup':
-                companion.stop.side_effect = lambda: setattr(owner, 'process_failure', 'owner_stream_unavailable')
+                def unknown_owner():
+                    owner.process_failure = 'ownership_observation_unavailable' if with_baseline else 'owner_stream_unavailable'
+                    if with_baseline:
+                        owner.stream_diagnostic = {'producer_failure': {
+                            'stage': 'resources_candidates', 'kind': 'ownership_invalid'}}
+                companion.stop.side_effect = unknown_owner
             child_state = {'returncode': None}
             class Child:
                 pid = 57001
@@ -124,9 +130,34 @@ class FailureLifecycleTests(unittest.TestCase):
             stack.enter_context(patch('ci_startup_signatures.recheck_private_build'))
             for name, value in replacements.items(): stack.enter_context(patch('ci_startup.' + name, value))
             original_generated = generated
+            retained = {}
             def generated_result(*args, **options):
                 (folder / 'ordinary-startup.xcresult').mkdir()
+                if with_baseline:
+                    for relative in ('derived', 'normal-signature-baseline/derived'):
+                        products = folder / relative / 'Build/Intermediates.noindex/XCBuildData/inert.xcbuilddata'
+                        products.mkdir(parents=True)
+                        (products / 'manifest.json').write_text(json.dumps({'inert': 'x' * MAX_FILE}))
+                    retained.update({
+                        'runner.json': json.dumps({'private_request_signature_gate': {
+                            'acceptance': False, 'scope': 'inert embedded gate fixture'}}),
+                        'normal-signature-baseline/runner.json': '{"scope":"inert normal runner"}',
+                        'normal-signature-baseline/build.log': 'inert normal build log',
+                        'normal-signature-baseline/other-derived/keep.log': 'unrelated build directory',
+                        'private-request-signatures.json': '{"acceptance":false,"scope":"inert gate"}',
+                        'signature-command-15.log': 'inert signature observation INERT-SECRET'})
+                    for relative, value in retained.items():
+                        target = folder / relative; target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text(value)
                 return original_generated(*args, **options)
+            if cleanup_error:
+                import shutil
+                removing = shutil.rmtree
+                def remove_build(path, *args, **kwargs):
+                    if Path(path) == folder / 'normal-signature-baseline/derived':
+                        raise OSError('inert baseline derived cleanup failed')
+                    return removing(path, *args, **kwargs)
+                stack.enter_context(patch('ci_startup.shutil.rmtree', side_effect=remove_build))
             stack.enter_context(patch('ci_startup.generated_runner', side_effect=generated_result))
             with self.assertRaises(RuntimeError) as caught:
                 run_case(folder, profiles, 'configuredLocal', root, root, root, root, 'a' * 40, {}, root, root,
@@ -156,6 +187,46 @@ class FailureLifecycleTests(unittest.TestCase):
                 self.assertNotIn('cleanup', case)
             else: remove.assert_called_once()
             self.assertFalse(audit.thread.is_alive())
+            if with_baseline:
+                if mode == 'unknown_cleanup':
+                    self.assertEqual(case['owner_observation']['process_failure'], 'ownership_observation_unavailable')
+                    self.assertEqual(case['owner_observation']['stream_diagnostic']['producer_failure'],
+                                     {'stage': 'resources_candidates', 'kind': 'ownership_invalid'})
+                    self.assertFalse(case['owner_observation']['positive_process_settlement'])
+                    self.assertTrue(fixture.exists())
+                for relative, value in retained.items():
+                    self.assertEqual((folder / relative).read_text(), value)
+                if cleanup_error:
+                    self.assertIsInstance(caught.exception.__cause__, OSError)
+                    self.assertEqual(str(caught.exception.__cause__), 'inert baseline derived cleanup failed')
+                    self.assertTrue((folder / 'normal-signature-baseline/derived').exists())
+                    return
+                output = root / 'exported'
+                # The real strict exporter previously stopped on the leaked
+                # baseline build manifest, hiding otherwise bounded evidence.
+                export_evidence(folder, output, [('INERT-SECRET', '<redacted>')],
+                                strict_json=True, essential_first=True, include_hashes=True)
+                self.assertEqual(json.loads((output / 'case.json').read_text()), case)
+                self.assertFalse((folder / 'derived').exists())
+                self.assertFalse((folder / 'normal-signature-baseline/derived').exists())
+                for relative, value in retained.items():
+                    self.assertEqual((output / relative).read_text(), value.replace('INERT-SECRET', '<redacted>'))
+                self.assertTrue((output / 'test.log').is_file())
+                diagnostic = output / 'attachments/nac342-first-preflight-failure-v1-configuredLocal.json'
+                # Unknown ownership already prevents collection in this fixture;
+                # retaining other evidence must not fabricate that attachment.
+                self.assertEqual(diagnostic.is_file(), mode != 'unknown_cleanup')
+                if mode == 'unknown_cleanup':
+                    retained_fixture = json.loads((output / 'retained-fixture.json').read_text())
+                    self.assertFalse(retained_fixture['positive_process_settlement'])
+                    self.assertIn('cleanup', retained_fixture['retention_reasons'])
+
+    def test_baseline_build_products_cannot_block_failed_case_evidence_export(self):
+        for mode in ('handoff', 'unknown_cleanup'):
+            with self.subTest(mode=mode): self.exercise(mode, with_baseline=True)
+
+    def test_baseline_build_cleanup_error_preserves_original_failed_test(self):
+        self.exercise('unknown_cleanup', with_baseline=True, cleanup_error=True)
 
     def test_prior_test_termination_can_abort_the_wrapper_before_result_commit(self):
         self.exercise('prior_termination')
