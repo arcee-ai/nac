@@ -261,6 +261,72 @@ class ApplicabilityBundleTests(unittest.TestCase):
             self.capture()
         self.assertEqual(self.docker.calls, [])
 
+    def test_complete_v3_bundle_rescan_and_report_preserve_raw_rows_and_match_only_reviewed_fixture(self):
+        import image_scan as scan
+        import image_ci_report as reporter
+        import image_applicability_gate as gate
+        from image_inventory import write_json, sha256
+        from image_rust import RUST_FILES
+        from test_image_applicability import fixture, encode
+
+        self.capture()
+        # Full bundle boundaries use real synthetic export/profile collection;
+        # opaque base scanner inputs are retained, not claimed as a native scan.
+        for name, value in {"identity.json": self.identity, "runtime.json": {"synthetic": True},
+                            "sbom.syft.json": {"synthetic": True}, "coverage.json": {"synthetic": True},
+                            **{name: {"synthetic": True} for name in RUST_FILES}}.items():
+            write_json(self.output / name, value)
+        scan.bundle_manifest(self.output, IMAGE)
+        manifest = json.loads((self.output / "bundle.json").read_text())
+        self.assertEqual(manifest["schema_version"], 3)
+        retained = self.root / "rescan"
+        retained.mkdir()
+        self.assertEqual(scan.load_bundle(self.output, retained), self.identity)
+        scan.bundle_manifest(retained, IMAGE)
+        observations = bundle.validate(retained, self.identity)
+        actual_binding = observations[0]["binding"]
+        f = fixture()
+        f["record"]["binding"] = actual_binding
+        f["record"]["collected_at"] = "2026-11-10T12:00:00Z"
+        rule = f["rules"][0]
+        rule["binding"] = actual_binding
+        rule["finding"].update(package=actual_binding["package"], version=actual_binding["package_version"])
+        rule["review"].update(reviewed_at="2026-11-10T12:01:00Z", expires_at="2026-11-11T12:01:00Z")
+        record = encode(f["record"])
+        rule["evidence_sha256"] = hashlib.sha256(record).hexdigest()
+        policy = encode({"schema_version": 1, "rules": [rule]})
+        trusted, candidate = self.root / "trusted-policy.json", self.root / "candidate-policy.json"
+        trusted.write_bytes(policy)
+        candidate.write_bytes(policy)
+        proofs = self.root / "proofs"
+        proofs.mkdir()
+        for digest, raw in {**f["evidence"], rule["evidence_sha256"]: record}.items():
+            (proofs / digest).write_bytes(raw)
+        finding = {**f["findings"][0], "package": actual_binding["package"], "version": actual_binding["package_version"]}
+        findings = [finding, {**finding, "advisory": "CVE-UNREVIEWED-SYNTHETIC"}]
+        raw_bytes = (json.dumps(findings, separators=(",", ":")) + "\n").encode()
+        (retained / "findings.json").write_bytes(raw_bytes)
+        source = {"blocking": findings, "excepted": [], "reporting": []}
+        write_json(retained / "policy-result.json", source)
+        receipt = gate.evaluate(findings, trusted_path=trusted, candidate_path=candidate,
+            evidence_directory=proofs, observations=observations,
+            scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"},
+            now=NOW + dt.timedelta(minutes=2))
+        decision = gate.retain_decision(retained, source, receipt, self.identity)
+        self.assertEqual(decision["blocking_indexes"], [1])
+        write_json(retained / "result.json", {"status": "blocked", "image": IMAGE,
+            "blocking": 1, "findings": 2, "applicability": "verified",
+            "decision_sha256": sha256(retained / "decision.json")})
+        (retained / "report.md").write_text("Synthetic review-bound disposition; not production evidence.\n")
+        self.assertEqual(reporter.report(retained, 1)["blocking"], 1)
+        self.assertEqual((retained / "findings.json").read_bytes(), raw_bytes)
+        self.assertEqual(json.loads((retained / "policy-result.json").read_bytes()), source)
+        (self.output / bundle.ARCHIVE).write_bytes(b"tampered")
+        corrupt = self.root / "corrupt-rescan"
+        corrupt.mkdir()
+        with self.assertRaisesRegex(ValueError, "retained evidence hash mismatch"):
+            scan.load_bundle(self.output, corrupt)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,7 +24,7 @@ def gate(args):
     if getattr(args, "publication_policy", None) is not None:
         extra = ["--publication-policy", str(args.publication_policy)]
     result = subprocess.run(["python3", str(ROOT / "scripts/security/image_scan.py"),
-                             "--image", args.image, "--source-revision", args.source_revision,
+                             "--image", args.image, "--source-revision", args.source_revision, "--collect-applicability",
                              "--trusted-policy", str(args.trusted_policy),
                              "--candidate-policy", str(args.candidate_policy), "--output", str(args.output), *extra])
     require(result.returncode == 0, "publication blocked by failed/incomplete image security")
