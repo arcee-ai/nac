@@ -349,7 +349,11 @@ func requestRun(_ name: String) -> [String: Any] {
     } catch { return ["accepted":false] }
 }
 func interactionRun(_ name: String) -> [String: Any] {
-    let mode = String(name.dropFirst("interaction_".count))
+    let raw = String(name.dropFirst("interaction_".count)), diagnosing = raw.hasPrefix("diag_")
+    let mode = diagnosing ? String(raw.dropFirst(5)) : raw
+    let diagnostic = StartupFailureEvidence(nil, configurationSHA: String(repeating:"d", count:64))
+    diagnostic.operationIndex = 1
+    let original = InertOriginalFailure()
     var stamp: UInt64 = 3_000_000_000, loads = 0, inputs = 0, clears = 0, published: StartupAXInteractionRequest?
     var last = Data(), finalEnd: UInt64 = 0
     let root = "00000000-0000-0000-0000-000000000001"
@@ -370,7 +374,7 @@ func interactionRun(_ name: String) -> [String: Any] {
             let began: UInt64 = loads == 1 ? 1_000_000_000 : loads == 2 ? 3_100_000_000 : UInt64(published!.entered_ns)! + 10_000_000
             let ended = began + 10_000_000
             stamp = max(stamp,ended+1_000_000); finalEnd = ended
-            var observed = StartupAXSurface(surface:"form",root_id:root,panel_id:nil,go_to_id:nil,root_frame:[10,20,100,30],focus:nil)
+            var observed = StartupAXSurface(surface:"form",root_id:root,panel_id:nil,go_to_id:nil,root_frame:loads == 3 && mode == "consume_frame" ? [11,20,100,30] : [10,20,100,30],focus:nil)
             if let request = published, mode != "no_proof" {
                 observed.interaction = StartupAXInteraction(request_id:mode == "wrong_request" ? UUID().uuidString : request.id,
                     target_id:mode == "target_token" ? "invalid" : UUID().uuidString,
@@ -380,26 +384,36 @@ func interactionRun(_ name: String) -> [String: Any] {
                     focus_checked:mode == "focus_flag" ? !request.keyboard : request.keyboard)
             }
             let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,
-                configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,
+                configuration_sha256:String(repeating:"d",count:64),helper_sha256:loads == 3 && mode == "read_binding" ? String(repeating:"f",count:64) : declaration.helper_sha256,
                 support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,
                 window_number:7,sequence:String(loads),refusal_generation:loads == 3 && mode == "generation" ? "1" : "0",
                 began_ns:String(began),ended_ns:String(ended),status:loads == 3 && mode == "refused" ? "refused" : "ready",
                 case_deadline_ns:"50000000000",observation:observed,refusal_stage:nil,refusal:nil)
             last = try JSONEncoder().encode(receipt)
+            if loads == 3 && mode == "decode" { return Data("{".utf8) }
             return last
         })
     do {
         let ticket = try client.begin()
-        _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30))
-        let request = try client.prepareInteraction(ticket,point:CGPoint(x:20,y:25),anchor:CGRect(x:10,y:20,width:100,height:30),
-            kind:"button",label:"Intended",keyboard:false,value:nil,rootFrame:CGRect(x:10,y:20,width:100,height:30),publish:{published=$0})
+        if mode != "state" { _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30)) }
+        if mode == "rollback" { stamp = 0 }
+        let usedTicket = mode == "ticket" ? StartupAXClient.Ticket(sequence:ticket.sequence,refusal:1,entered:ticket.entered,deadline:ticket.deadline) : mode == "deadline" ? StartupAXClient.Ticket(sequence:ticket.sequence,refusal:ticket.refusal,entered:ticket.entered,deadline:stamp) : ticket
+        let publisher: ((StartupAXInteractionRequest) throws -> Void)? = mode == "parent" ? nil : { request in
+            if mode == "publish_error" { throw original }
+            published = request
+        }
+        let request = try client.prepareInteraction(usedTicket,point:CGPoint(x:mode == "containment" ? 500 : 20,y:25),anchor:mode == "anchor" ? .zero : CGRect(x:10,y:20,width:100,height:30),
+            kind:mode == "shape" ? "foreign" : "button",label:"Intended",keyboard:false,value:nil,rootFrame:mode == "root" ? .zero : CGRect(x:10,y:20,width:100,height:30),publish:publisher,diagnostic:diagnosing ? diagnostic : nil)
         try client.finishInteraction(request,clear:{if mode == "clear_loss" { throw StartupAXReceiptError.invalid };clears += 1})
         inputs += 1
         return ["accepted":true,"inputs":inputs,"loads":loads,"clears":clears,"proofs":client.interactions.count,
                 "deadline":request.deadline_ns,"finalized":client.interactions[0].finalized_ns]
     } catch {
+        let retainedStep = diagnostic.step.rawValue, family = StartupFailureEvidence.family(error)
+        let sameError = (error as AnyObject) === original
         var denied = false
         do { _ = try client.begin() } catch { denied = true }
+        if diagnosing { return ["accepted":false,"inputs":inputs,"next_denied":denied,"step":retainedStep,"family":family,"original_preserved":sameError] }
         return ["accepted":false,"inputs":inputs,"clears":clears,"next_denied":denied]
     }
 }
@@ -454,6 +468,23 @@ func json(_ data: Data) throws -> [String: Any] {
     }
 }
 
+
+func publisherCheckpointRun(_ mode: String) -> [String: Any] {
+    let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!).resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+    let diagnostic = StartupFailureEvidence(nil, configurationSHA: "")
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path: String
+        if mode == "open" { path = directory.appendingPathComponent(String(repeating:"x",count:300)).path }
+        else if mode == "rename" {
+            path = directory.appendingPathComponent("destination").path
+            try FileManager.default.createDirectory(atPath:path,withIntermediateDirectories:false)
+        } else { path = directory.appendingPathComponent("missing/record").path }
+        try StartupAXFiles.publish(["closed":true],to:path,diagnostic:diagnostic)
+        return ["accepted":true]
+    } catch { return ["accepted":false,"step":diagnostic.step.rawValue,"family":StartupFailureEvidence.family(error)] }
+}
 func firstFailureRun(_ mode: String) -> [String: Any] {
     var directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
         .appendingPathComponent(UUID().uuidString)
@@ -570,7 +601,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -590,6 +621,11 @@ class ReceiptControls(unittest.TestCase):
         result = subprocess.run(['/usr/bin/xcrun', 'swiftc', '-swift-version', '5', *map(str,sources), str(driver), '-o', str(cls.binary)],
                        capture_output=True, text=True, timeout=60)
         if result.returncode: raise AssertionError(result.stderr)
+        if os.environ.get('NAC342_INERT_BINARY_RECORD'):
+            import hashlib
+            data = cls.binary.read_bytes()
+            Path(os.environ['NAC342_INERT_BINARY_RECORD']).write_text(json.dumps(dict(
+                bytes=len(data), sha256=hashlib.sha256(data).hexdigest(), compiler_timeout=60)))
 
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
@@ -662,6 +698,36 @@ class ReceiptControls(unittest.TestCase):
             self.assertNotIn('ATTACHMENT-PRIVATE', json.dumps(row))
         self.assertTrue(attachment_failure['before_teardown'])
         self.assertFalse(both_failure['before_teardown'])
+
+        checkpoints = {
+            'state': ('prepare_state', 'receipt_invalid'),
+            'rollback': ('clock_monotonic', 'receipt_invalid'),
+            'shape': ('request_shape', 'receipt_invalid'),
+            'anchor': ('request_anchor_frame', 'receipt_invalid'),
+            'root': ('request_root_frame', 'receipt_invalid'),
+            'containment': ('request_containment', 'receipt_invalid'),
+            'deadline': ('request_deadline', 'receipt_invalid'),
+            'ticket': ('prepare_ticket', 'receipt_invalid'),
+            'publish_error': ('prepare_publication', 'other'),
+            'parent': ('publish_parent', 'receipt_invalid'),
+            'decode': ('decode_keys', 'receipt_invalid'),
+            'read_binding': ('read_binding', 'receipt_invalid'),
+            'consume_frame': ('consume_surface_binding', 'receipt_invalid'),
+            'wrong_request': ('consume_proof_binding', 'receipt_invalid'),
+            'generation': ('consume_refusal', 'receipt_invalid'),
+            'refused': ('read_status', 'receipt_refused'),
+            'no_proof': ('consume_deadline', 'receipt_expired'),
+        }
+        rows = self.rows(['interaction_diag_' + mode for mode in checkpoints])
+        for mode, row in zip(checkpoints, rows):
+            with self.subTest(checkpoint=mode):
+                self.assertEqual((row['step'], row['family']), checkpoints[mode])
+                self.assertEqual((row['accepted'], row['inputs'], row['next_denied']), (False, 0, True))
+                self.assertEqual(row['original_preserved'], mode == 'publish_error')
+                self.assertNotIn('Intended', json.dumps(row))
+        self.assertEqual(self.rows(['publisher_checkpoint_' + mode for mode in ('parent', 'open', 'rename')]),
+                         [dict(accepted=False, step='publish_' + mode, family='receipt_invalid')
+                          for mode in ('parent', 'open', 'rename')])
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',

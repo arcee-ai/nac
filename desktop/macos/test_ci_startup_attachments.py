@@ -53,6 +53,20 @@ class StartupAttachmentTests(unittest.TestCase):
                     self.assertEqual(json.loads((raw / 'public' / retained.name).read_text()), record)
                 self.assertNotIn('PRIVATE-CANARY', json.dumps(index))
 
+        import re
+        source = Path(__file__).with_name('startup_xctest') / 'StartupAXReceipt.swift'
+        enumeration = source.read_text().split('enum StartupFailureStep:', 1)[1].split('\n}', 1)[0]
+        steps = re.findall(r'\b[a-z][a-z_]+\b', '\n'.join(
+            line.split('case ', 1)[1] for line in enumeration.splitlines() if 'case ' in line))
+        for step in steps:
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                expected = dict(record, step=step)
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(self.tool(raw, [(name, json.dumps(expected).encode())], result='Failed'),
+                            raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+                self.assertEqual(json.loads((raw / 'selected' / (name + '.json')).read_text()), expected)
+
     def test_first_failure_attachment_never_follows_a_destination_alias(self):
         config, configuration_sha, witness, _ = self.fixture('configuredLocal')
         config['ax_witness']['nonce'] = 'd' * 64

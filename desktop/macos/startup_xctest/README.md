@@ -492,3 +492,16 @@ No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by
 these commands. Current-head readiness and ordinary four-state qualification
 remain outstanding until root/354 completes the actual integration and evidence.
+
+The first-failure record keeps its seven-field schema and all legacy step values.
+Preparation additionally records closed checkpoints at the original request
+shape, anchor/root frame, containment, deadline, ticket, publication and consume
+guards. File publication marks parent, encoding/size, open, write, mode, close and
+rename before those original operations; receipt reading marks its existing
+file, decoding, identity, sequence, refusal, surface, focus and freshness guards.
+Only the optional passive recorder reference travels through these calls.
+There is no callback/actor hop or additional protocol. The first record is still
+latched before diagnostic publication, so a failed diagnostic write cannot
+replace its original step or error, and the independent XCTest attachment remains
+available. Inert failures distinguish checkpoints; they do not identify the
+Actual13 predicate or establish native input/acceptance.

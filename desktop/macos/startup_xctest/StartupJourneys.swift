@@ -725,7 +725,7 @@ final class StartupJourneys: XCTestCase {
                 } else { field = nil }
                 failureEvidence.step = .prepare_interaction
                 let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: target.label,
-                    keyboard: keyboard, value: value, rootFrame: root, field: field)
+                    keyboard: keyboard, value: value, rootFrame: root, field: field, diagnostic: failureEvidence)
                 // Same public coordinate and anchor after AX proof, immediately
                 // before final freshness consumption and dispatch. This fence is
                 // bounded, not atomic with the eventual delivered OS event.

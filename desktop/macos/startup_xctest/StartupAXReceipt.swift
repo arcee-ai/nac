@@ -37,19 +37,26 @@ struct StartupAXInteractionRequest: Codable, Equatable {
     let point, anchor_frame, root_frame: [Double]
     let value: String?
 
-    func validate() throws {
+    func validate(diagnostic: StartupFailureEvidence? = nil) throws {
+        diagnostic?.step = .request_shape
         try StartupAXFiles.need(schema == "nac342-ax-interaction-v1" && UUID(uuidString: id) != nil
             && UUID(uuidString: root_id) != nil && ["form", "panel", "goTo"].contains(surface)
             && ["button", "message", "panel", "field"].contains(kind) && label.utf8.count <= 1024
             && (!["button", "message"].contains(kind) || !label.isEmpty)
             && point.count == 2 && point.allSatisfy { $0.isFinite && Double(Float($0)) == $0 }
             && (value == nil || (keyboard && ["message", "field"].contains(kind) && value!.utf8.count <= 4096)))
-        let anchor = try StartupAXFiles.frame(anchor_frame), root = try StartupAXFiles.frame(root_frame)
+        diagnostic?.step = .request_anchor_frame
+        let anchor = try StartupAXFiles.frame(anchor_frame)
+        diagnostic?.step = .request_root_frame
+        let root = try StartupAXFiles.frame(root_frame)
+        diagnostic?.step = .request_containment
         try StartupAXFiles.need(anchor.contains(CGPoint(x: point[0], y: point[1])) && anchor.intersects(root)
             && (kind != "field" || (keyboard && surface == "goTo" && value != nil))
             && (kind != "message" || !keyboard || value != nil))
+        diagnostic?.step = .request_deadline
         let entered = try StartupAXFiles.number(entered_ns), deadline = try StartupAXFiles.number(deadline_ns)
         try StartupAXFiles.need(deadline > entered && deadline - entered <= 30_000_000_000)
+        diagnostic?.step = .request_counters
         _ = try StartupAXFiles.number(baseline_sequence); _ = try StartupAXFiles.number(refusal_generation)
     }
     static func read(_ path: String) throws -> Self {
@@ -100,9 +107,28 @@ enum StartupAXReceiptError: Error { case missing, invalid, refused, expired }
 
 // First throwing journey step, published before its existing teardown defer.
 // Passive evidence on the existing owned port; never receipt/input authority.
+// Optional references mark original operations before they can throw. No errors,
+// raw operands, or guard results are added to the closed seven-field record.
 enum StartupFailureStep: String, Codable, CaseIterable {
     case startup_checks, before_guard, before_record, public_target, prepare_interaction
     case final_recheck, finish_interaction, input, after_guard, after_record, terminal
+    case request_shape, request_anchor_frame, request_root_frame, request_containment
+    case request_deadline, request_counters, read_parent, read_open
+    case read_metadata, read_bytes, publish_parent, publish_encode
+    case publish_size, publish_open, publish_write, publish_mode
+    case publish_close, publish_rename, decode_size, decode_keys
+    case decode_json, decode_object, decode_fields, decode_process
+    case decode_observation, decode_interaction, decode_focus, decode_types
+    case clock_monotonic, read_declaration, read_port, read_load
+    case read_numbers, read_clock, read_window, read_case_deadline
+    case read_sample_order, read_sequence_bytes, read_binding, read_helper_identity
+    case read_waiting, read_target_binding, read_target_identity, read_sequence
+    case read_status, read_observation, read_folder_binding, prepare_state
+    case prepare_ticket, prepare_publication, consume_deadline, consume_numbers
+    case consume_refusal, consume_sample_numbers, consume_sample_window, consume_sequence
+    case consume_observation, consume_surface_binding, consume_focus_presence, consume_focus
+    case consume_no_focus, consume_proof_presence, consume_proof_binding, consume_freshness
+    case consume_pending, consume_target_identity, consume_evidence_limit, read_cutoff
 }
 
 struct StartupFirstFailure: Encodable {
@@ -167,32 +193,45 @@ enum StartupAXFiles {
             && info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
             && info.st_uid == getuid() && info.st_mode & 0o777 == 0o700)
     }
-    static func read(_ path: String) throws -> Data {
+    static func read(_ path: String, diagnostic: StartupFailureEvidence? = nil) throws -> Data {
+        diagnostic?.step = .read_parent
         try parent(path)
+        diagnostic?.step = .read_open
         let fd = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         if fd < 0 && errno == ENOENT { throw StartupAXReceiptError.missing }
         try need(fd >= 0)
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         var info = stat()
+        diagnostic?.step = .read_metadata
         try need(fstat(fd, &info) == 0 && info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
             && info.st_uid == getuid() && info.st_nlink == 1 && info.st_mode & 0o777 == 0o400
             && info.st_size > 0 && info.st_size <= limit)
+        diagnostic?.step = .read_bytes
         let data = handle.readData(ofLength: limit + 1)
         try need(data.count == Int(info.st_size) && data.count <= limit)
         return data
     }
-    static func publish<Value: Encodable>(_ receipt: Value, to path: String) throws {
+    static func publish<Value: Encodable>(_ receipt: Value, to path: String,
+                                          diagnostic: StartupFailureEvidence? = nil) throws {
+        diagnostic?.step = .publish_parent
         try parent(path)
+        diagnostic?.step = .publish_encode
         let data = try JSONEncoder().encode(receipt)
+        diagnostic?.step = .publish_size
         try need(data.count <= limit)
         let temporary = path + "." + UUID().uuidString
+        diagnostic?.step = .publish_open
         let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         try need(fd >= 0)
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         defer { _ = unlink(temporary) }
+        diagnostic?.step = .publish_write
         try handle.write(contentsOf: data)
+        diagnostic?.step = .publish_mode
         try need(fchmod(fd, 0o400) == 0)
+        diagnostic?.step = .publish_close
         try handle.close()
+        diagnostic?.step = .publish_rename
         try need(rename(temporary, path) == 0)
     }
     static func uniqueKeys(_ data: Data) throws {
@@ -227,31 +266,41 @@ enum StartupAXFiles {
         }
         try need(stack.isEmpty)
     }
-    static func decode(_ data: Data) throws -> StartupAXReceipt {
+    static func decode(_ data: Data, diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXReceipt {
+        diagnostic?.step = .decode_size
         try need(data.count <= limit)
+        diagnostic?.step = .decode_keys
         try uniqueKeys(data)
+        diagnostic?.step = .decode_json
         let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let required: Set<String> = ["schema", "nonce", "configuration_sha256", "helper_sha256", "support_sha256",
             "helper", "target", "trusted", "app_launch_epoch", "window_number", "sequence", "refusal_generation",
             "began_ns", "ended_ns", "status", "case_deadline_ns"]
         let optional: Set<String> = ["observation", "refusal_stage", "refusal"]
+        diagnostic?.step = .decode_object
         guard let body else { throw StartupAXReceiptError.invalid }
+        diagnostic?.step = .decode_fields
         try need(required.isSubset(of: Set(body.keys)) && Set(body.keys).isSubset(of: required.union(optional)))
         let processKeys: Set<String> = ["pid", "parent", "uid", "start_seconds", "start_microseconds", "executable"]
         for key in ["helper", "target"] {
+            diagnostic?.step = .decode_process
             try need((body[key] as? [String: Any]).map { Set($0.keys) == processKeys } == true)
         }
         if let observation = body["observation"] as? [String: Any] {
             let keys: Set<String> = ["surface", "root_id", "root_frame"]
+            diagnostic?.step = .decode_observation
             try need(keys.isSubset(of: Set(observation.keys))
                 && Set(observation.keys).isSubset(of: keys.union(["panel_id", "go_to_id", "focus", "interaction"])))
             if let interaction = observation["interaction"] as? [String: Any] {
+                diagnostic?.step = .decode_interaction
                 try need(Set(interaction.keys) == ["request_id", "target_id", "point", "anchor_frame", "keyboard", "focus_checked"])
             }
             if let focus = observation["focus"] as? [String: Any] {
+                diagnostic?.step = .decode_focus
                 try need(Set(focus.keys) == ["pid", "role", "focused", "attached", "frame", "value"])
             }
         }
+        diagnostic?.step = .decode_types
         return try JSONDecoder().decode(StartupAXReceipt.self, from: data)
     }
     static func number(_ text: String) throws -> UInt64 {
@@ -282,7 +331,7 @@ final class StartupAXClient {
     let executable: String
     let now: () -> UInt64
     let pause: () -> Void
-    let load: () throws -> Data
+    let load: (() throws -> Data)?
     private var portLost = false
     private var helper: StartupAXProcess?
     private var target: StartupAXProcess?
@@ -318,37 +367,50 @@ final class StartupAXClient {
         self.declaration = declaration; self.configurationSHA = configurationSHA
         self.pid = pid; self.launch = launch; self.window = window; self.executable = executable
         self.now = now; self.pause = pause
-        self.load = load ?? { try StartupAXFiles.read(declaration.path) }
+        self.load = load
     }
-    private func time() throws -> UInt64 {
+    private func time(diagnostic: StartupFailureEvidence? = nil) throws -> UInt64 {
+        diagnostic?.step = .clock_monotonic
         let value = now()
         try StartupAXFiles.need(value >= lastTime)
         lastTime = value
         return value
     }
-    private func read() throws -> StartupAXReceipt {
+    private func read(diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXReceipt {
         let hex: (String) -> Bool = { $0.utf8.count == 64 && $0.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }
+        diagnostic?.step = .read_declaration
         try StartupAXFiles.need(hex(declaration.nonce) && hex(declaration.helper_sha256) && hex(configurationSHA)
             && Set(declaration.support_sha256.keys) == ["StartupAXGuard.swift", "StartupAXReceipt.swift"]
             && declaration.support_sha256.values.allSatisfy(hex))
+        diagnostic?.step = .read_port
         try StartupAXFiles.need(!portLost)
+        diagnostic?.step = .read_load
         let data: Data
-        do { data = try load() }
+        do { data = try load?() ?? StartupAXFiles.read(declaration.path, diagnostic: diagnostic) }
         catch { if target != nil { portLost = true }; throw error }
-        let receipt = try StartupAXFiles.decode(data)
+        let receipt = try StartupAXFiles.decode(data, diagnostic: diagnostic)
+        diagnostic?.step = .read_numbers
         let incoming = try StartupAXFiles.number(receipt.sequence)
         let refusal = try StartupAXFiles.number(receipt.refusal_generation)
         let began = try StartupAXFiles.number(receipt.began_ns), ended = try StartupAXFiles.number(receipt.ended_ns)
-        let stamp = try time(), cutoff = try StartupAXFiles.number(receipt.case_deadline_ns)
+        diagnostic?.step = .read_clock
+        let stamp = try time(diagnostic: diagnostic)
+        diagnostic?.step = .read_cutoff
+        let cutoff = try StartupAXFiles.number(receipt.case_deadline_ns)
+        diagnostic?.step = .read_window
         try StartupAXFiles.need(refusal >= observedRefusal && began <= ended && ended <= stamp
             && cutoff <= StartupAXFiles.number(declaration.deadline_ns) && stamp < cutoff)
+        diagnostic?.step = .read_case_deadline
         if let caseDeadline { try StartupAXFiles.need(caseDeadline == cutoff) }
+        diagnostic?.step = .read_sample_order
         if let previous = observedSequence, incoming > previous { try StartupAXFiles.need(began >= observedEnd) }
         observedRefusal = refusal; observedEnd = ended; caseDeadline = cutoff
+        diagnostic?.step = .read_sequence_bytes
         if let previous = observedSequence {
             try StartupAXFiles.need(incoming >= previous && (incoming != previous || data == observedBytes))
         }
         observedSequence = incoming; observedBytes = data
+        diagnostic?.step = .read_binding
         try StartupAXFiles.need(receipt.schema == "nac342-ax-witness-v1"
             && receipt.nonce == declaration.nonce && declaration.nonce.count == 64
             && receipt.configuration_sha256 == configurationSHA
@@ -356,26 +418,34 @@ final class StartupAXClient {
             && receipt.support_sha256 == declaration.support_sha256
             && receipt.helper.valid && receipt.helper.parent == declaration.owner_pid
             && receipt.helper.executable == declaration.helper_path)
+        diagnostic?.step = .read_helper_identity
         if let helper { try StartupAXFiles.need(helper == receipt.helper) }
         helper = receipt.helper
         if receipt.status == "waiting" {
+            diagnostic?.step = .read_waiting
             try StartupAXFiles.need(lastSequence == 0 && receipt.sequence == "0" && receipt.trusted)
             throw StartupAXReceiptError.missing
         }
+        diagnostic?.step = .read_target_binding
         try StartupAXFiles.need(receipt.trusted && receipt.target.valid && receipt.target.pid == pid
             && receipt.target.executable == executable && receipt.app_launch_epoch == launch
             && launch.isFinite && launch > 0 && receipt.window_number == window && window > 0)
+        diagnostic?.step = .read_target_identity
         if let target { try StartupAXFiles.need(target == receipt.target) }
         helper = receipt.helper; target = receipt.target
+        diagnostic?.step = .read_sequence
         let sequence = try StartupAXFiles.number(receipt.sequence)
         try StartupAXFiles.need(sequence > 0 && sequence >= lastSequence)
+        diagnostic?.step = .read_status
         if receipt.status != "ready" {
             failureData = receipt.refusal
             refusalStage = receipt.refusal_stage ?? "external_witness_refused"
             throw StartupAXReceiptError.refused
         }
+        diagnostic?.step = .read_observation
         guard let observation = receipt.observation,
               let phase = StartupNativeFolderPolicy.Surface(rawValue: observation.surface) else { throw StartupAXReceiptError.invalid }
+        diagnostic?.step = .read_folder_binding
         try StartupAXFiles.need(receipt.refusal_stage == nil && receipt.refusal == nil
             && UUID(uuidString: observation.root_id) != nil
             && folderBinding.accept(phase, root: observation.root_id, panel: observation.panel_id, goTo: observation.go_to_id))
@@ -400,24 +470,28 @@ final class StartupAXClient {
     func prepareInteraction(_ ticket: Ticket, point: CGPoint, anchor: CGRect, kind: String, label: String,
                             keyboard: Bool, value: String?, rootFrame: CGRect,
                             field: (CGRect, String)? = nil,
-                            publish: ((StartupAXInteractionRequest) throws -> Void)? = nil) throws -> StartupAXInteractionRequest {
+                            publish: ((StartupAXInteractionRequest) throws -> Void)? = nil,
+                            diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXInteractionRequest {
         do {
+            diagnostic?.step = .prepare_state
             guard let observed = lastSurface, pendingInteraction == nil else { throw StartupAXReceiptError.invalid }
-            let entered = try time()
+            let entered = try time(diagnostic: diagnostic)
             let request = StartupAXInteractionRequest(schema: "nac342-ax-interaction-v1", nonce: declaration.nonce,
                 configuration_sha256: configurationSHA, id: UUID().uuidString, root_id: observed.root_id,
                 entered_ns: String(entered), deadline_ns: String(ticket.deadline), baseline_sequence: String(lastSequence),
                 refusal_generation: String(ticket.refusal), surface: observed.surface, kind: kind, label: label, keyboard: keyboard,
                 point: [point.x, point.y], anchor_frame: [anchor.minX, anchor.minY, anchor.width, anchor.height],
                 root_frame: [rootFrame.minX, rootFrame.minY, rootFrame.width, rootFrame.height], value: value)
-            try request.validate()
+            try request.validate(diagnostic: diagnostic)
+            diagnostic?.step = .prepare_ticket
             try StartupAXFiles.need(entered < ticket.deadline && observedRefusal == ticket.refusal)
             pendingInteraction = request
+            diagnostic?.step = .prepare_publication
             if let publish { try publish(request) }
-            else { try StartupAXFiles.publish(request, to: declaration.path + ".request") }
+            else { try StartupAXFiles.publish(request, to: declaration.path + ".request", diagnostic: diagnostic) }
             let fresh = Ticket(sequence: lastSequence, refusal: ticket.refusal, entered: entered, deadline: ticket.deadline)
             _ = try consume(fresh, surface: StartupNativeFolderPolicy.Surface(rawValue: observed.surface)!,
-                rootFrame: rootFrame, field: field, request: request)
+                rootFrame: rootFrame, field: field, request: request, diagnostic: diagnostic)
             return request
         } catch { portLost = true; throw error }
     }
@@ -444,22 +518,32 @@ final class StartupAXClient {
         } catch { portLost = true; throw error }
     }
     func consume(_ ticket: Ticket, surface: StartupNativeFolderPolicy.Surface, rootFrame: CGRect,
-                 field: (CGRect, String)? = nil, request: StartupAXInteractionRequest? = nil) throws -> StartupAXSurface {
+                 field: (CGRect, String)? = nil, request: StartupAXInteractionRequest? = nil,
+                 diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXSurface {
         while true {
-            if try time() >= ticket.deadline { throw StartupAXReceiptError.expired }
-            let receipt = try read()
-            let stamp = try time()
+            let checkedTime = try time(diagnostic: diagnostic)
+            diagnostic?.step = .consume_deadline
+            if checkedTime >= ticket.deadline { throw StartupAXReceiptError.expired }
+            let receipt = try read(diagnostic: diagnostic)
+            let stamp = try time(diagnostic: diagnostic)
+            diagnostic?.step = .consume_numbers
             let sequence = try StartupAXFiles.number(receipt.sequence)
             let refusal = try StartupAXFiles.number(receipt.refusal_generation)
+            diagnostic?.step = .consume_refusal
             try StartupAXFiles.need(refusal == ticket.refusal)
+            diagnostic?.step = .consume_sample_numbers
             let began = try StartupAXFiles.number(receipt.began_ns), ended = try StartupAXFiles.number(receipt.ended_ns)
+            diagnostic?.step = .consume_sample_window
             try StartupAXFiles.need(began <= ended && ended <= stamp && ended - began <= 1_000_000_000)
             if sequence <= ticket.sequence || began <= ticket.entered {
                 pause(); continue // Wait for a newly BEGUN sample, never a later positive after refusal.
             }
+            diagnostic?.step = .consume_sequence
             try StartupAXFiles.need(sequence > lastSequence)
             let expiredPublication = stamp - ended > 1_000_000_000
+            diagnostic?.step = .consume_observation
             guard let observed = receipt.observation else { throw StartupAXReceiptError.invalid }
+            diagnostic?.step = .consume_surface_binding
             try StartupAXFiles.need(observed.surface == surface.rawValue
                 && (try StartupAXFiles.frame(observed.root_frame)) == rootFrame
                 && UUID(uuidString: observed.root_id) != nil
@@ -467,15 +551,22 @@ final class StartupAXClient {
                 && (observed.go_to_id == nil || UUID(uuidString: observed.go_to_id!) != nil)
                 && folderBinding.accept(surface, root: observed.root_id, panel: observed.panel_id, goTo: observed.go_to_id))
             if surface == .goTo {
+                diagnostic?.step = .consume_focus_presence
                 guard let focus = observed.focus, let field else { throw StartupAXReceiptError.invalid }
+                diagnostic?.step = .consume_focus
                 try StartupAXFiles.need(focus.attached && focus.value.utf8.count <= 4096
                     && StartupNativeFolderPolicy.focused(pid: focus.pid, expectedPID: pid, role: focus.role,
                         focused: focus.focused, frame: try StartupAXFiles.frame(focus.frame),
                         expectedFrame: field.0, value: focus.value, expectedValue: field.1))
-            } else { try StartupAXFiles.need(observed.focus == nil && field == nil) }
+            } else {
+                diagnostic?.step = .consume_no_focus
+                try StartupAXFiles.need(observed.focus == nil && field == nil)
+            }
             if let request {
                 if observed.interaction == nil { pause(); continue }
+                diagnostic?.step = .consume_proof_presence
                 guard let proof = observed.interaction else { throw StartupAXReceiptError.invalid }
+                diagnostic?.step = .consume_proof_binding
                 try StartupAXFiles.need(proof.request_id == request.id && UUID(uuidString: proof.target_id) != nil
                     && proof.point == request.point && proof.anchor_frame == request.anchor_frame
                     && proof.keyboard == request.keyboard && proof.focus_checked == request.keyboard
@@ -484,14 +575,17 @@ final class StartupAXClient {
             if expiredPublication {
                 pause(); continue // Only an otherwise fully validated positive may await publication.
             }
-            let consumed = try time()
+            let consumed = try time(diagnostic: diagnostic)
+            diagnostic?.step = .consume_freshness
             try StartupAXFiles.need(consumed < ticket.deadline && consumed >= ended && consumed - ended <= 1_000_000_000)
             lastSequence = sequence
             lastSurface = observed
             if let request {
+                diagnostic?.step = .consume_pending
                 try StartupAXFiles.need(pendingInteraction == request && interactions.count < 11)
                 let proof = observed.interaction!
                 let key = ["field", "message", "panel"].contains(request.kind) ? request.kind : request.kind + ":" + request.label
+                diagnostic?.step = .consume_target_identity
                 try StartupAXFiles.need(interactionTargets[key] == nil || interactionTargets[key] == proof.target_id)
                 interactionTargets[key] = proof.target_id
                 interactionProof = proof
@@ -502,6 +596,7 @@ final class StartupAXClient {
                     consumed_ns: String(consumed), deadline_ns: request.deadline_ns, finalized_ns: "0"))
                 return observed
             }
+            diagnostic?.step = .consume_evidence_limit
             try StartupAXFiles.need(evidence.count < 26)
             evidence.append(Evidence(sequence: receipt.sequence, began_ns: receipt.began_ns,
                 ended_ns: receipt.ended_ns, entered_ns: String(ticket.entered), consumed_ns: String(consumed),

@@ -107,6 +107,17 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
         self.assertIs(row['acceptance'], False)
         self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
         self.assertEqual(self.owner.failure, 'ax_companion_unavailable')
+        import re
+        source = Path(__file__).with_name('startup_xctest') / 'StartupAXReceipt.swift'
+        enumeration = source.read_text().split('enum StartupFailureStep:', 1)[1].split('\n}', 1)[0]
+        steps = re.findall(r'\b[a-z][a-z_]+\b', '\n'.join(
+            line.split('case ', 1)[1] for line in enumeration.splitlines() if 'case ' in line))
+        self.assertEqual(len(steps), len(set(steps)))
+        for step in steps:
+            with self.subTest(step=step):
+                expected, _ = self.preflight(dict(step=step))
+                self.assertEqual(self.owner.preflight_diagnostic(), expected)
+
 
     def test_malformed_private_unbound_or_duplicate_first_failure_is_dropped(self):
         for change in [dict(acceptance=True), dict(step='PRIVATE-CANARY'), dict(operation_index=True),
