@@ -1,20 +1,24 @@
 # PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
-C08 is a mechanical qualification caller derived from frozen C07
-`a533ed95b168f37dc2d8bbe5d54bc82f9b9c42e9`. It binds the source nominees
-H `6276182f7fc3074a6f04d5f73ec5a0a723cc246c` and
-Q `a7a59910990a6c61a2a5d887b33746d43207f00f` under the new
-`P12-integration-Qfinal-preflight-R7325-four-startup-source08` scope on
-`codex/private520-final-preflight-C08`. Nominee public availability is a separate
-Root admission check; no push, dispatch or runtime is authorized by this source.
+C09 is a mechanical qualification caller derived from exact frozen C08
+`51fcbdd049cf095119438a41117e8a28b9df9f7d`. It binds public source nominee
+H `6179380b40628aa7807518a83c18a61a5fca4111` (tree
+`e73986393a00e7c1200ec7c57d87e4b70a7bde63`) and
+Q `b5cb0a0afb2b1f90c703b980d210ac58546cddec` under the new
+`P12-integration-Qmainactor-SDK-R7325-four-startup-source09` scope on
+`codex/private520-mainactor-sdk-C09`. Nominee public availability and original
+SDK receipt verification remain separate Root admission checks. No push,
+dispatch or runtime is authorized by this source.
 
-Q has actual parent `2c144869d349be60005e0ec818ed076dd3fcebc5` and tree
-`46775a539326408593adeb0095c9a0852f5d03e9`; H has exact parent Q above.
-The final source retains a closed first local failure before existing teardown
-on the owned witness port, with held listener absence/signature bits. It also
-selects a Float-representable interior public coordinate, verifies its actual
-screenPoint, then retains and dispatches that same coordinate. No validation,
-authority, original failure/abort or cleanup guard is relaxed.
+Q has actual parent `1e1d6e043760dbd5802576b44021f499a13c1d13` and tree
+`eac881c140bbe050d6dcdb5f92963cdc6018c9ac`. H617's actual parent is
+`8b730b89618475782d71f2fb332f2f1ac839e762`, not Q; that parent's parent is Q.
+H617 adds only the frozen two-file CI SDK inspector correction above that
+composition. The actor, guards, materializer and runtime ci route are unchanged.
+The final source keeps first-error capture in lexical MainActor scope before
+existing teardown, retaining the original error. It preserves the same selected
+Float-representable public coordinate, exact request/readback, AX/focus/freshness,
+input and positive cleanup contracts. No guard or acceptance rule is relaxed.
 The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
 interaction preflight selects a public coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
 ancestry, then rechecks the same point/anchor, resources/incarnation and original
@@ -33,13 +37,15 @@ fields retain their original provenance; H/Q preparation parent/tree fields name
 the actual new nominees. Initial root selection and every original deadline,
 input, process and cleanup guard are unchanged in this caller.
 
-Actual10 remains failed/incomplete: R and onboarding passed; configuredLocal
-reached first-before input, then failed with input UNKNOWN and later cases UNRUN.
-The final listener-generation diagnostic does not establish the original cause;
-app/engine retirement was positive and the profile was removed. Actual09 and
-all earlier episodes retain their separate original evidence and spent clocks.
-All old episodes, sealed packets and spent allocations remain attributed and
-cannot provide a clock or retry for C08. Root's active goal owns this finite
+Actual11 remains failed/spent at original C08/H627/Qa7: R passed, then the
+first onboarding generated XCTest target build failed before public test
+admission; zero UI commands ran, input remained UNKNOWN, and later cases were
+UNRUN. Its retained fixture/integrity and unproven settlement/removal facts
+remain unchanged. Actual10, Actual09 and every earlier episode retain their
+original evidence and spent clocks. No source correction or later SDK result
+retags or supplies runtime credit to them. All old episodes, sealed packets
+and spent allocations remain attributed and cannot provide a clock or retry
+for C09. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -152,9 +158,12 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C08 preparation executes no SDK/helper actor. Current hosted full SDK,
-sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
-custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
+compile and Foundation control. C09 preparation executes no SDK/helper actor.
+Root reports H617's hosted compile-only SDK gate and36 selected panel controls
+passed; its original artifact and prepared-merge binding require separate Root
+receipt verification. That result establishes neither full public CI nor native
+UI acceptance. Fresh sandboxed receipt access, real focus/value/CFEqual/freshness/
+input/PNG/API/store/custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.
 
 
