@@ -633,6 +633,10 @@ class ReceiptControls(unittest.TestCase):
                         error_family='receipt_' + mode if mode in modes[:4] else mode))
                 self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
                 self.assertEqual(row['attachment']['error_family'], 'other' if mode == 'publish_failure' else ('receipt_' + mode if mode in modes[:4] else mode))
+                expected = dict(schema='nac342-first-preflight-failure-v1', acceptance=False,
+                    nonce='a'*64, configuration_sha256='b'*64, step='prepare_interaction', operation_index=1,
+                    error_family='other' if mode == 'publish_failure' else ('receipt_' + mode if mode in modes[:4] else mode))
+                self.assertEqual(row['attachment'], expected)
 
     def test_actual_journey_catch_preserves_error_identity_and_does_not_publish_success_or_unconfigured(self):
         identity, success, unconfigured, attachment_failure, both_failure = self.rows(
