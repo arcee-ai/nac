@@ -559,8 +559,15 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                 diagnostic_bytes += retain_failed_dispatches(selected, index, config, configuration_sha256,
                                                              witness, output, inventory_valid,
                                                              retained_bytes=diagnostic_bytes)
+            collection_order = selected
+            if test['result'] == 'Passed':
+                # Closed names declare operation/phase, not SDK chronology.
+                declared = iter(sorted((entry for entry in selected if entry[2] == 'dispatch'),
+                    key=lambda entry: (int(entry[1].split('-')[3]), entry[1].endswith('-after'))))
+                collection_order = [next(declared) if entry[2] == 'dispatch' else entry for entry in selected]
+                index['dispatch_representation'] = 'canonical_declared_operation_phase_not_execution_chronology'
             values, images, total = {}, {}, diagnostic_bytes
-            for file, name, kind in selected:
+            for file, name, kind in collection_order:
                 if kind in ('query_diagnostic', 'ax_refusal', 'first_failure') or (failed_test and kind == 'dispatch'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)

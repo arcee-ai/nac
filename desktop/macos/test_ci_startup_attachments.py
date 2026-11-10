@@ -496,6 +496,61 @@ class StartupAttachmentTests(unittest.TestCase):
         tool.path = '/unit/xcresulttool'
         return tool
 
+    def test_passed_complete_inventory_order_is_not_execution_chronology(self):
+        config, hashed, witness, original = self.fixture('configuredLocal')
+        swapped = [original[1], original[0], *original[2:]]
+        orders = [original, list(reversed(original)), swapped, original[::2] + original[1::2]]
+        declared = [json.loads(data) for name, data in original if name.startswith('nac342-dispatch-v1-')]
+        self.assertEqual(len(declared), 22)
+        for number, rows in enumerate(orders):
+            with self.subTest(order=number), tempfile.TemporaryDirectory() as tmp:
+                raw = Path(tmp); output = raw / 'selected'
+                index = collect(self.tool(raw, rows), raw / 'unit.xcresult', config, hashed, witness, output)
+                self.assertTrue(index['complete']); self.assertFalse(index['input_completion_unknown'])
+                self.assertEqual(index['dispatches'], declared)
+                self.assertEqual(index['dispatch_representation'],
+                                 'canonical_declared_operation_phase_not_execution_chronology')
+                actual_inventory = [(row['operation_index'], row['stage'])
+                                    for row in index['selection_metadata'] if row.get('kind') == 'dispatch']
+                expected_inventory = [(json.loads(data)['operation_index'], json.loads(data)['stage'])
+                                      for name, data in rows if name.startswith('nac342-dispatch-v1-')]
+                self.assertEqual(actual_inventory, expected_inventory)
+                self.assertEqual(index['ax_guards']['count'], 26)
+                self.assertEqual(index['ax_guards']['interaction_count'], 11)
+                png_name, png = next((name, data) for name, data in original if name == 'nac342-ordinary-configuredLocal')
+                self.assertEqual((output / (png_name + '.png')).read_bytes(), png)
+
+    def test_passed_normalization_cannot_complete_invalid_or_incomplete_evidence(self):
+        for defect in ('missing', 'duplicate', 'foreign', 'mislabeled', 'malformed',
+                       'unsafe', 'oversize', 'nonfinite', 'ax_missing', 'cleanup', 'png'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
+                raw = Path(tmp); config, hashed, witness, rows = self.fixture('configuredLocal')
+                mutate = None
+                if defect == 'missing': rows.pop(21)
+                elif defect == 'duplicate': rows.insert(1, rows[0])
+                elif defect == 'mislabeled': rows[0] = ('nac342-dispatch-v1-99-before', rows[0][1])
+                elif defect == 'malformed': rows[0] = (rows[0][0], b'{')
+                elif defect == 'oversize': rows[0] = (rows[0][0], rows[0][1] + b' ' * retention.MAX_JSON)
+                elif defect == 'nonfinite': rows[0] = (rows[0][0], rows[0][1].replace(b'1234.5', b'NaN'))
+                elif defect == 'foreign':
+                    value = json.loads(rows[0][1]); value['configuration_sha256'] = '0' * 64
+                    rows[0] = (rows[0][0], json.dumps(value).encode())
+                elif defect == 'ax_missing': rows = [r for r in rows if r[0] != 'nac342-ax-guards-v1-configuredLocal']
+                elif defect == 'cleanup':
+                    number = next(i for i, (name, _) in enumerate(rows) if name == 'nac342-cleanup-v1-configuredLocal')
+                    value = json.loads(rows[number][1]); value['app_termination_observed'] = False
+                    rows[number] = (rows[number][0], json.dumps(value).encode())
+                elif defect == 'png':
+                    number = next(i for i, (name, _) in enumerate(rows) if name == 'nac342-ordinary-configuredLocal')
+                    rows[number] = (rows[number][0], b'not PNG')
+                else:
+                    def mutate(export, groups): groups[0]['attachments'][0]['exportedFileName'] = '../outside'
+                with self.assertRaises(RuntimeError):
+                    collect(self.tool(raw, list(reversed(rows)), mutate=mutate), raw / 'unit.xcresult',
+                            config, hashed, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+
     def test_all_four_cases_require_actual_named_bindings_and_preserve_large_png_intact(self):
         for case in CASES:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
@@ -515,7 +570,7 @@ class StartupAttachmentTests(unittest.TestCase):
                         self.assertNotIn(b'HOST-AUTOMATIC-MUST-NOT-BE-RETAINED', file.read_bytes())
 
     def test_partial_malformed_or_wrong_binding_never_retains_rejected_json_or_completes(self):
-        for failure in ('partial-before', 'gap', 'order', 'malformed', 'wrong-binding', 'wrong-stage', 'console'):
+        for failure in ('partial-before', 'gap', 'mislabeled', 'malformed', 'wrong-binding', 'wrong-stage', 'console'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary)
                 config, config_hash, witness, rows = self.fixture('configuredLocal')
@@ -523,8 +578,8 @@ class StartupAttachmentTests(unittest.TestCase):
                     rows = rows[:1]
                 elif failure == 'gap':
                     rows.pop(2)
-                elif failure == 'order':
-                    rows[2], rows[3] = rows[3], rows[2]
+                elif failure == 'mislabeled':
+                    rows[2] = (rows[3][0], rows[2][1])
                 elif failure == 'malformed':
                     rows[2] = (rows[2][0], b'{"FOREIGN-MUST-NOT-BE-RETAINED":')
                 elif failure in ('wrong-binding', 'wrong-stage'):
