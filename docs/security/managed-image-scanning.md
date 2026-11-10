@@ -274,8 +274,10 @@ inputs and Rust distribution/payload files for later rescans. Artifact upload al
 
 Daily selection uses only trusted `dev` push runs from
 `.github/workflows/stable-release.yml` and the exact completed
-`managed / build-smoke` job's successful `Inventory the exact tested image`
-step. The security verdict and unrelated workflow results can be red. Select the
+`managed-image / build-smoke` job's successful `Inventory the exact tested image`
+step. The selector also accepts the historical `managed / build-smoke` name and
+rejects ambiguous producer jobs. The security verdict and unrelated workflow
+results can be red. Select the
 newest qualifying inventory, then require its unique expected per-SHA artifact,
 `inventory/` layout, source identity, and input hashes. Missing, expired,
 unavailable, or corrupt selected evidence fails; it never falls back to an older
