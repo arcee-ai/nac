@@ -98,6 +98,58 @@ struct StartupAXReceipt: Codable {
 
 enum StartupAXReceiptError: Error { case missing, invalid, refused, expired }
 
+// First throwing journey step, published before its existing teardown defer.
+// Passive evidence on the existing owned port; never receipt/input authority.
+enum StartupFailureStep: String, Codable, CaseIterable {
+    case startup_checks, before_guard, before_record, public_target, prepare_interaction
+    case final_recheck, finish_interaction, input, after_guard, after_record, terminal
+}
+
+struct StartupFirstFailure: Encodable {
+    let schema = "nac342-first-preflight-failure-v1"
+    let acceptance = false
+    let nonce, configuration_sha256: String
+    let step: StartupFailureStep
+    let operation_index: Int
+    let error_family: String
+}
+
+final class StartupFailureEvidence {
+    var step: StartupFailureStep = .startup_checks
+    var operationIndex = 0
+    private var retained = false
+    private let declaration: StartupAXDeclaration?
+    private let configurationSHA: String
+    init(_ declaration: StartupAXDeclaration?, configurationSHA: String) {
+        self.declaration = declaration; self.configurationSHA = configurationSHA
+    }
+    static func family(_ error: Error) -> String {
+        if let error = error as? StartupAXReceiptError {
+            switch error {
+            case .missing: return "receipt_missing"
+            case .invalid: return "receipt_invalid"
+            case .refused: return "receipt_refused"
+            case .expired: return "receipt_expired"
+            }
+        }
+        if error is DecodingError { return "decoding" }
+        if error is CocoaError { return "foundation" }
+        return "other"
+    }
+    func run<Value>(_ body: () throws -> Value) rethrows -> Value {
+        do { return try body() }
+        catch {
+            if !retained, let declaration {
+                retained = true // First failure only, including publication failure.
+                let record = StartupFirstFailure(nonce: declaration.nonce, configuration_sha256: configurationSHA,
+                    step: step, operation_index: operationIndex, error_family: Self.family(error))
+                try? StartupAXFiles.publish(record, to: declaration.path + ".failure")
+            }
+            throw error // Never replace, suppress or retry the original throw.
+        }
+    }
+}
+
 enum StartupAXFiles {
     static let limit = 8192
     static func need(_ value: Bool) throws {

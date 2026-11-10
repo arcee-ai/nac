@@ -598,6 +598,8 @@ final class StartupJourneys: XCTestCase {
                 XCTAssertTrue(stopped, "Owned app termination unresolved; retain fixture")
             } catch { XCTFail("Owned app identity/cleanup attachment unavailable; retain fixture for external cleanup") }
         }
+        let failureEvidence = StartupFailureEvidence(fixture.ax_witness, configurationSHA: digest(bytes))
+        try failureEvidence.run {
         try require(ui.windows.firstMatch.waitForExistence(timeout: 45), "No startup window")
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
@@ -690,6 +692,8 @@ final class StartupJourneys: XCTestCase {
         func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
                       target: XCUIElement? = nil, kind: String = "button", keyboard: Bool = false,
                       action: (XCUICoordinate?) throws -> Void) throws {
+            failureEvidence.operationIndex = operations.count + 1
+            failureEvidence.step = .before_guard
             try guardTarget()
             let ticket = guardTicket
             let index = operations.count + 1
@@ -701,7 +705,9 @@ final class StartupJourneys: XCTestCase {
                     "app_path": paths.emittedPath, "native_sha256": fixture.native_sha256],
                     name: String(format: "nac342-dispatch-v1-%02d-%@", index, stage))
             }
+            failureEvidence.step = .before_record
             try retain("before")
+            failureEvidence.step = .public_target
             var coordinate: XCUICoordinate?
             if let client = axClient {
                 let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
@@ -716,11 +722,13 @@ final class StartupJourneys: XCTestCase {
                     let input = try goToField()
                     field = (input.frame, try XCTUnwrap(input.value as? String))
                 } else { field = nil }
+                failureEvidence.step = .prepare_interaction
                 let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: target.label,
                     keyboard: keyboard, value: value, rootFrame: root, field: field)
                 // Same public coordinate and anchor after AX proof, immediately
                 // before final freshness consumption and dispatch. This fence is
                 // bounded, not atomic with the eventual delivered OS event.
+                failureEvidence.step = .final_recheck
                 try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
                 try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
                     && target.exists && target.isEnabled && target.isHittable && target.label == request.label
@@ -728,13 +736,17 @@ final class StartupJourneys: XCTestCase {
                         anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
                     && (!keyboard || value == nil || target.value as? String == value),
                     "Interaction point, anchor, focus value or frozen resource changed")
+                failureEvidence.step = .finish_interaction
                 try client.finishInteraction(request)
                 coordinate = selected
             }
+            failureEvidence.step = .input
             try action(coordinate)
             operations.append(name)
             if let after { folderSurface = after }
+            failureEvidence.step = .after_guard
             try guardTarget()
+            failureEvidence.step = .after_record
             try retain("after")
         }
         func text(_ value: String, native: Bool = false) -> XCUIElement {
@@ -856,6 +868,7 @@ final class StartupJourneys: XCTestCase {
                 // the external354 fixture owner, not guessed from UI text.
             }
         }
+        failureEvidence.step = .terminal
         try guardTarget()
         let screenshot = ui.windows.firstMatch.screenshot()
         let image = screenshot.pngRepresentation
@@ -900,6 +913,7 @@ final class StartupJourneys: XCTestCase {
             "private_failure_observation": "not_read_by_public_UI_actor",
             "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
+        } // First failure is retained before the outer application teardown defer.
     }
 }
 

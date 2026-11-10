@@ -404,8 +404,45 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
         return ["accepted":retained && unchanged]
     } catch { return ["accepted":false] }
 }
+
+func firstFailureRun(_ mode: String) -> [String: Any] {
+    var directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
+        .appendingPathComponent(UUID().uuidString)
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let resolved = realpath(directory.path, nil)!
+    directory = URL(fileURLWithPath: String(cString: resolved)); free(resolved)
+    let declaration = StartupAXDeclaration(path: directory.appendingPathComponent("receipt.json").path,
+        nonce: String(repeating: "a", count: 64), helper_path: "/inert", helper_sha256: "", support_sha256: [:], owner_pid: 1, deadline_ns: "1")
+    let recorder = StartupFailureEvidence(declaration, configurationSHA: String(repeating: "b", count: 64))
+    recorder.step = .prepare_interaction; recorder.operationIndex = 1
+    let errors: [String: Error] = ["missing": StartupAXReceiptError.missing, "invalid": StartupAXReceiptError.invalid,
+        "refused": StartupAXReceiptError.refused, "expired": StartupAXReceiptError.expired,
+        "decoding": DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "PRIVATE-CANARY")),
+        "foundation": CocoaError(.fileReadUnknown), "other": NSError(domain: "PRIVATE-CANARY", code: 1)]
+    let selected = String(mode.dropFirst("first_".count)), error = errors[selected] ?? errors["other"]!
+    let path = declaration.path + ".failure"
+    if selected == "publish_failure" { try! FileManager.default.removeItem(at: directory) }
+    var beforeTeardown = false, events: [String] = []
+    func ui() throws {
+        defer { beforeTeardown = FileManager.default.fileExists(atPath: path); events.append("teardown") }
+        try recorder.run { events.append("throw"); throw error }
+    }
+    var preserved = false
+    do { try ui() } catch let caught { preserved = StartupFailureEvidence.family(caught) == StartupFailureEvidence.family(error) }
+    events.append("api_absent") // Inert subsequent listener sample, no OS query.
+    let first = try? Data(contentsOf: URL(fileURLWithPath: path))
+    recorder.step = .terminal
+    do { try recorder.run { throw StartupAXReceiptError.expired } } catch {}
+    let unchanged = first == (try? Data(contentsOf: URL(fileURLWithPath: path)))
+    let row = first.flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
+    return ["record": row, "before_teardown": beforeTeardown, "original_preserved": preserved,
+            "unchanged": unchanged, "order": events]
+}
+
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -428,6 +465,23 @@ class ReceiptControls(unittest.TestCase):
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
                          env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_first_real_journey_failure_is_closed_and_published_before_teardown_without_replacing_error(self):
+        modes = ['missing', 'invalid', 'refused', 'expired', 'decoding', 'foundation', 'other', 'publish_failure']
+        rows = self.rows(['first_' + mode for mode in modes])
+        for mode, row in zip(modes, rows):
+            with self.subTest(mode=mode):
+                self.assertTrue(row['original_preserved'])
+                self.assertTrue(row['unchanged'])
+                self.assertEqual(row['order'], ['throw', 'teardown', 'api_absent'])
+                self.assertEqual(row['before_teardown'], mode != 'publish_failure')
+                if mode == 'publish_failure':
+                    self.assertIsNone(row['record'])
+                else:
+                    self.assertEqual(row['record'], dict(schema='nac342-first-preflight-failure-v1', acceptance=False,
+                        nonce='a'*64, configuration_sha256='b'*64, step='prepare_interaction', operation_index=1,
+                        error_family='receipt_' + mode if mode in modes[:4] else mode))
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',
