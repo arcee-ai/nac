@@ -191,18 +191,30 @@ fn read_into<T>(
         }
         return Err(error);
     }
+    Err(invalid_record_size(pid, flavor, returned, size))
+}
+
+// Private size-mismatch classification shared with pure diagnostic controls.
+#[inline(always)]
+pub(super) fn invalid_record_size(
+    _pid: libc::pid_t,
+    _flavor: i32,
+    _returned: i32,
+    _size: i32,
+) -> io::Error {
+    let error = io::Error::new(
+        io::ErrorKind::InvalidData,
+        "unsupported native process identity record size",
+    );
     #[cfg(test)]
     super::diagnostics::record(
         super::diagnostics::Stage::MetadataRead,
-        pid,
+        _pid,
         3,
-        None,
-        [flavor as i128, returned as i128, size as i128],
+        Some(&error),
+        [_flavor as i128, _returned as i128, _size as i128],
     );
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "unsupported native process identity record size",
-    ))
+    error
 }
 
 #[inline(always)]

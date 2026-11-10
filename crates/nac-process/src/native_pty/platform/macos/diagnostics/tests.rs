@@ -151,6 +151,30 @@ fn calls() -> Vec<&'static str> {
 }
 
 #[test]
+fn positive_record_size_mismatch_logs_the_returned_invalid_data_error() {
+    for (flavor, size) in [(17, 56), (13, 64)] {
+        for returned in [1, size - 1, size + 1] {
+            let mut capture = Scope::new();
+            phase(Phase::Signal);
+            // This is read_into's actual positive-size-mismatch branch, not a
+            // generic diagnostic error supplied by the test. No Native syscall.
+            let error = inspection::invalid_record_size(200, flavor, returned, size);
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.raw_os_error(), None);
+            assert_eq!(
+                error.to_string(),
+                "unsupported native process identity record size"
+            );
+            let text = capture.take().unwrap();
+            assert!(text.contains(&format!(
+                "stage=metadata-read pid=200 result=3 errno=none kind=3 a={flavor} b={returned} c={size}\n"
+            )), "diagnostic disagrees with returned error: {text}");
+            assert_eq!(text.lines().count(), 2);
+        }
+    }
+}
+
+#[test]
 fn inspection_errno_source_and_original_order_are_preserved() {
     let order = ["unique", "short", "sid", "short", "sid", "unique"];
     let stages = [
