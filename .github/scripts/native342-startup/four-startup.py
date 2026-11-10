@@ -15,8 +15,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/private520-passive-retention-C20'
-SCOPE = 'P12-integration-Qpassive-retention-R7325-four-startup-source20'
+BRANCH = 'refs/heads/codex/private520-first-refusal-bsd-C21'
+SCOPE = 'P12-integration-Hsample-bsd-R7325-four-startup-source21'
 PURPOSE_SCOPES = {'native': SCOPE, 'build-only': SCOPE.replace('four-startup', 'signature-build-only')}
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'

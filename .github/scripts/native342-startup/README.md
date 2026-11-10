@@ -1,14 +1,20 @@
-# C20 private passive-retention controller
+# C21 private first-refusal/BSD diagnostic controller
 
 Private source candidate, no build, signature, SDK, native, public push or CI
-execution authorized by this source alone. Native19 consumed the last single
-qualification grant; no further Native execution is currently authorized.
-Later execution requires fresh Root/human authority. Native17/18/19 remain
-FAIL/SPENT and unusable.
+execution authorized by this source alone. Human call_79465ecb3b9244228d3df3189031aa9f
+approved source diagnostics and ONE remaining instrumented Native after Root's
+current-source, review and check gates. It is NOT currently admitted or dispatched.
+The corrected observer method must pass fresh current AppKit CI first; a local
+partial/source freeze is not acceptance. Native20 remains FAIL/SPENT; its unused
+2047 seconds are SPENT. All previous allocations retain their original counters.
 
-C20 consumes real frozen Source51 H
-`1e12b8f120f164ba969d3fc0392e76ddcfb7d78f`, whose direct parent is H
-`a3ce76376459bce86401290fd43b325e6e4ad248`. Immutable supplier Q remains
+The first H-published refusal context is NOT the exact Q-consumed receipt, and the
+BSD producer-failure timestamp is NOT syscall time. P12 is a compatible integration
+test product, not global current-dev product acceptance.
+
+C21 consumes real frozen Source59 H
+`6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d`, whose direct parent is H
+`df468dd4530461cc12afe62c50cd7d137588f09e`. Immutable supplier Q remains
 `8397bafe8fb5f439b702ebf3e941eed802ce71aa`; Q's direct parent is public H
 `3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf`, and its tree is
 `0f4e7c9c867caf8f6505a6354e76876e8ac5e4ba`. The ten immutable supplier bytes
@@ -23,10 +29,10 @@ app/engine/global write grant, new transport or native guard relaxation applies.
 
 Admission now requires the exact closed `purpose`, bound to a separate scope:
 
-- `native`: `P12-integration-Qpassive-retention-R7325-four-startup-source20`.
-- `build-only`: `P12-integration-Qpassive-retention-R7325-signature-build-only-source20`.
+- `native`: `P12-integration-Hsample-bsd-R7325-four-startup-source21`.
+- `build-only`: `P12-integration-Hsample-bsd-R7325-signature-build-only-source21`.
 
-Both bind the exact C20 controller SHA, genuine P12 producer/normal manifest,
+Both bind the exact C21 controller SHA, genuine P12 producer/normal manifest,
 one attempt, zero retries, reviewed image and the original queue-inclusive
 48-minute work / 10-minute cleanup / 2-minute retention limits. Unknown, omitted
 or mismatched purpose refuses before work in the workflow and controller.

@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qpassive-retention-R7325-four-startup-source20",
+  "scope": "P12-integration-Hsample-bsd-R7325-four-startup-source21",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,7 +9,7 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "1e12b8f120f164ba969d3fc0392e76ddcfb7d78f",
+  "H": "6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "8397bafe8fb5f439b702ebf3e941eed802ce71aa",
   "image": "20261102.0473.1",
