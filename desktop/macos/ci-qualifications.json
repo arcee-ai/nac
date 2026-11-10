@@ -27,7 +27,7 @@
   },
   "all-342-startup-macos26": {
     "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-    "test_source_sha": "a7a59910990a6c61a2a5d887b33746d43207f00f",
+    "test_source_sha": "48bc66ff0e022fbbf1cb382cb4563de4e49d10e4",
     "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
     "profile": "macos26",
     "suite": "startup",
@@ -39,14 +39,14 @@
       "futureStore"
     ],
     "test_files": {
-      "README.md": "843db56ab056c151256a328acbbde986aad57e4d5209a47724751462333762c7",
-      "StartupJourneys.swift": "e283f6d8662a73b735d6965cafe3df5155d05f73be655077b6e233b7397176b3",
+      "README.md": "bd8fa9ceeb757de628ef623b55c0f8c03472b4d99dbbe941db2459eb9d75b42c",
+      "StartupJourneys.swift": "324c2a2e99de56ecbce182c66817839aa7b0a8858f5c5f79507e8f32d6feae75",
       "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
       "test_contract.py": "94a287b12b1e164dbf4a5bf9d59db0a5437e31ea496ab63d0e8d9b592655b208",
       "StartupAXGuard.swift": "19950ee10989c2759e2054248ece07a53bef98ad39d8f6771a66fec55e3b3b7e",
-      "StartupAXReceipt.swift": "e725085aec733c885840b744e06f120f5d9db208477aabbdaa4de4eb3a04e1f7",
+      "StartupAXReceipt.swift": "3e51a5b26942f75317d4e012a42f3f4e43d3b69adb34adcc9188bd78bfff083e",
       "AX-WITNESS-CONTRACT.md": "c80ebadccc06c949d0492887b431ba9a95a47f0669fa224f087faff522a49d88",
-      "test_ax_witness.py": "9ea5fb30cad9c4b3b97f07f8fb9fa31e548a7f2eaec91c6459a23d90825bbf98",
+      "test_ax_witness.py": "26b9c7ebac4ee7476f14599788b1069479e3bc8e8d85fcb9a36fc1694174cb0a",
       "AGENTS.md": "aaf23530161152bb063960f2b05420882b41e0bbc4b3d397c2d1675aeb590920",
       "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
     },
