@@ -95,6 +95,29 @@ def elf_profile(stream, size):
     return {"kind": "elf", "machine": "x86_64", "type": kind, "needed": sorted(libraries)}
 
 
+OPAQUE_GO_SOURCE_PREFIXES = (
+    "/usr/local/go/src/crypto/internal/boring/syso/",
+    "/usr/local/go/src/debug/elf/testdata/",
+    "/usr/local/go/src/runtime/pprof/testdata/",
+    "/usr/local/go/src/runtime/race/",
+)
+
+
+def go_source_elf(stream, path, mode):
+    """Retain Go source ELF fixtures opaquely, including intentionally malformed ones.
+
+    Go ships cross-architecture objects and debug/elf parser test inputs. Their
+    full bytes are in the filesystem digest, while this bounded entry records
+    their presence without making dynamic-import or non-use claims.
+    """
+    require(not mode & 0o111 and path.startswith(OPAQUE_GO_SOURCE_PREFIXES),
+            "opaque ELF outside non-executable Go source fixtures")
+    stream.seek(0)
+    header = stream.read(64)
+    require(header.startswith(b"\x7fELF"), "invalid Go source ELF magic")
+    return {"kind": "opaque_go_source_elf", "header_hex": header.hex()}
+
+
 def filesystem_profile(archive):
     """Inventory every final-export entry. No extraction, execution or omissions."""
     require(archive.is_file() and not archive.is_symlink() and
@@ -124,7 +147,13 @@ def filesystem_profile(archive):
                     stream.seek(0)
                     start = stream.read(4096)
                     if start.startswith(b"\x7fELF"):
-                        consumers[path] = elf_profile(stream, member.size)
+                        try:
+                            consumers[path] = elf_profile(stream, member.size)
+                        except ValueError as error:
+                            if path.startswith(OPAQUE_GO_SOURCE_PREFIXES) and not member.mode & 0o111:
+                                consumers[path] = go_source_elf(stream, path, member.mode)
+                            else:
+                                raise ValueError(f"invalid ELF profile at {path}: {error}") from error
                     elif start.startswith(b"#!"):
                         first = start.partition(b"\n")[0]
                         require(len(first) < 4096, "oversized script interpreter directive")
@@ -162,6 +191,9 @@ def filesystem_profile(archive):
         if item["type"] == "hardlink":
             require(entries.get(item["target"], {}).get("type") == "file", "unresolved/nonregular hardlink")
             if item["target"] in consumers:
+                if consumers[item["target"]]["kind"] == "opaque_go_source_elf":
+                    require(path.startswith(OPAQUE_GO_SOURCE_PREFIXES) and not item["mode"] & 0o111,
+                            "opaque Go ELF hardlink outside non-executable source fixtures")
                 consumers[path] = consumers[item["target"]]
     named = {"sudo": [], "ftpd": []}
     for path, item in entries.items():

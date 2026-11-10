@@ -59,10 +59,16 @@ The three canonical JSON artifacts are:
   entries; regular-file SHA256/size and mode/owner metadata. Nothing is
   extracted. Duplicate, traversal, missing-parent, sparse, unsupported,
   truncated and nonzero trailing archive data are rejected.
-- `consumers.json`: every supported ELF file's type/machine and dynamic
+- `consumers.json`: every supported native ELF file's type/machine and dynamic
   `DT_NEEDED` entries, every shebang directive, other executable files as opaque
-  consumers, and conservative named sudo/ftpd paths, including links. Malformed
-  or unsupported ELF profiles fail closed instead of disappearing.
+  consumers, and conservative named sudo/ftpd paths, including links. The pinned
+  Go source tree also contains non-executable foreign-architecture objects and
+  intentionally malformed ELF parser fixtures. Valid native ELF files still
+  receive normal `DT_NEEDED` profiling. Unsupported files in the pinned source
+  fixture paths retain their first 64 header bytes and full-file hashes as
+  opaque entries; no dynamic-import or non-use claim is made for them.
+  Executable or misplaced ELF files fail closed when unsupported, and an
+  opaque hardlink cannot escape those source fixture paths.
 - `provenance.json`: immutable image/source/platform subject, export/source-lock
   hashes, actual original source/patch hashes, exact source/provenance and
   installed-payload bindings for `krb5-libs`, `curl` and `libcurl-openssl4`, both

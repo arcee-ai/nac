@@ -28,8 +28,21 @@ def elf(needed="libkrb5.so.3"):
     return bytes(value)
 
 
-def archive(path, files, links=None, hardlinks=None, extra=None):
-    links, hardlinks = links or {}, hardlinks or {}
+def foreign_elf(*, width=64, endian="little", machine=183, kind=1, programs=0):
+    value = bytearray(512)
+    value[:7] = b"\x7fELF" + bytes((width // 32, 1 if endian == "little" else 2, 1))
+    order = "<" if endian == "little" else ">"
+    struct.pack_into(order + "HHI", value, 16, kind, machine, 1)
+    header = 52 if width == 32 else 64
+    struct.pack_into(order + ("I" if width == 32 else "Q"), value, 28 if width == 32 else 32,
+                     header if programs else 0)
+    struct.pack_into(order + "HHH", value, 40 if width == 32 else 52,
+                     header, (32 if width == 32 else 56) if programs else 0, programs)
+    return bytes(value)
+
+
+def archive(path, files, links=None, hardlinks=None, extra=None, modes=None):
+    links, hardlinks, modes = links or {}, hardlinks or {}, modes or {}
     parents = set()
     for name in [*files, *links, *hardlinks]:
         parents.update(str(parent) for parent in Path(name).parents if str(parent) != ".")
@@ -40,7 +53,7 @@ def archive(path, files, links=None, hardlinks=None, extra=None):
             bundle.addfile(info)
         for name, data in files.items():
             info = tarfile.TarInfo(name)
-            info.size, info.mode = len(data), 0o755 if name.startswith("usr/bin/") else 0o644
+            info.size, info.mode = len(data), modes.get(name, 0o755 if name.startswith("usr/bin/") else 0o644)
             bundle.addfile(info, io.BytesIO(data))
         for values, kind in [(links, tarfile.SYMTYPE), (hardlinks, tarfile.LNKTYPE)]:
             for name, target in values.items():
@@ -248,6 +261,55 @@ class ApplicabilityEvidenceTests(unittest.TestCase):
             archive(self.archive, self.files)
             with self.subTest(length=len(data)), self.assertRaises(ValueError):
                 self.collect()
+
+    def test_nonexecutable_go_source_elf_is_retained_opaque(self):
+        cases = [foreign_elf(), foreign_elf(width=32, endian="big", machine=20),
+                 foreign_elf(width=32, machine=3, kind=2, programs=2),
+                 foreign_elf(machine=243, kind=2, programs=2)]
+        for index, data in enumerate(cases):
+            path = f"usr/local/go/src/debug/elf/testdata/foreign-{index}"
+            self.files[path] = data
+            archive(self.archive, self.files)
+            with self.subTest(path=path):
+                result = self.collect()
+                item = result["consumers"]["entries"]["/" + path]
+                self.assertEqual(item["kind"], "opaque_go_source_elf")
+                self.assertEqual(item["header_hex"], data[:64].hex())
+                self.assertNotIn("needed", item)
+                self.assertEqual(result["filesystem"]["entries"]["/" + path]["sha256"],
+                                 hashlib.sha256(data).hexdigest())
+            del self.files[path]
+
+    def test_opaque_go_source_scope_does_not_hide_other_elf(self):
+        for path in ("usr/bin/foreign", "usr/local/go/bin/foreign", "usr/local/go/src/unreviewed/foreign"):
+            self.files[path] = foreign_elf()
+            archive(self.archive, self.files)
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                self.collect()
+            del self.files[path]
+        path = "usr/local/go/src/debug/elf/testdata/foreign"
+        self.files[path] = foreign_elf(machine=62)
+        archive(self.archive, self.files)
+        self.assertEqual(self.collect()["consumers"]["entries"]["/" + path]["kind"], "elf")
+        self.files[path] = elf("libnative.so.1")
+        archive(self.archive, self.files)
+        self.assertEqual(self.collect()["consumers"]["entries"]["/" + path]["needed"], ["libnative.so.1"])
+        for data in (foreign_elf()[:50],
+                     foreign_elf(kind=2, programs=2)[:100],
+                     foreign_elf().replace(b"\x7fELF\x02", b"\x7fELF\x03", 1)):
+            self.files[path] = data
+            archive(self.archive, self.files)
+            with self.subTest(length=len(data)):
+                item = self.collect()["consumers"]["entries"]["/" + path]
+                self.assertEqual(item["kind"], "opaque_go_source_elf")
+                self.assertEqual(item["header_hex"], data[:64].hex())
+        self.files[path] = foreign_elf()
+        archive(self.archive, self.files, modes={path: 0o755})
+        with self.assertRaisesRegex(ValueError, "invalid ELF profile"):
+            self.collect()
+        archive(self.archive, self.files, hardlinks={"usr/bin/foreign-alias": path})
+        with self.assertRaisesRegex(ValueError, "opaque Go ELF hardlink"):
+            self.collect()
 
     def test_mutated_or_missing_evidence_never_validates(self):
         result = self.collect()
