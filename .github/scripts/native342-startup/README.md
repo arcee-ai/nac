@@ -1,19 +1,20 @@
-# PRIVATE NEVERMERGE: P12 integration, environment error family, four cases plus R
+# PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
-C07 is a mechanical qualification caller derived from frozen C06
-`0cfca405be97a6aecaaa3022e714ff448371a8da`. It binds the source nominees
-H `d017db04d8994c7c027ddbb32bb609dc3a389ac0` and
-Q `2e622aeb335cd4248e6cf397c3fc02ba19d063a1` under the new
-`P12-integration-Qpub-environment-family-R7325-four-startup-source07` scope on
-`codex/private520-environment-family-C07`. Nominee public availability is a separate
+C08 is a mechanical qualification caller derived from frozen C07
+`a533ed95b168f37dc2d8bbe5d54bc82f9b9c42e9`. It binds the source nominees
+H `6276182f7fc3074a6f04d5f73ec5a0a723cc246c` and
+Q `a7a59910990a6c61a2a5d887b33746d43207f00f` under the new
+`P12-integration-Qfinal-preflight-R7325-four-startup-source08` scope on
+`codex/private520-final-preflight-C08`. Nominee public availability is a separate
 Root admission check; no push, dispatch or runtime is authorized by this source.
 
-Q's full tree and parent remain unchanged. H has exact parent
-`a67a7146c80714cfb5e5b801b3c6ed885f16fee8` and preserves ownership_invalid for
-the existing environment rejection in the AX companion, with a focused control
-using the real validator and both production classifiers. The inherited closed,
-redacted discriminator grants no process admission, cleanup, freshness or UI
-authority; every existing refusal remains. No extra AX payload is exported.
+Q has actual parent `2c144869d349be60005e0ec818ed076dd3fcebc5` and tree
+`46775a539326408593adeb0095c9a0852f5d03e9`; H has exact parent Q above.
+The final source retains a closed first local failure before existing teardown
+on the owned witness port, with held listener absence/signature bits. It also
+selects a Float-representable interior public coordinate, verifies its actual
+screenPoint, then retains and dispatches that same coordinate. No validation,
+authority, original failure/abort or cleanup guard is relaxed.
 The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
 interaction preflight selects a public coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
 ancestry, then rechecks the same point/anchor, resources/incarnation and original
@@ -32,13 +33,13 @@ fields retain their original provenance; H/Q preparation parent/tree fields name
 the actual new nominees. Initial root selection and every original deadline,
 input, process and cleanup guard are unchanged in this caller.
 
-Actual09 remains failed/incomplete: R and onboarding passed; configuredLocal
-failed at the combined environment/argv validator before interaction preflight.
-Failed subject/predicate and app/engine settlement were unproven, input stayed
-UNKNOWN, the fixture was retained, and later cases were UNRUN. Actual08 and all
-earlier failures remain separately attributed.
+Actual10 remains failed/incomplete: R and onboarding passed; configuredLocal
+reached first-before input, then failed with input UNKNOWN and later cases UNRUN.
+The final listener-generation diagnostic does not establish the original cause;
+app/engine retirement was positive and the profile was removed. Actual09 and
+all earlier episodes retain their separate original evidence and spent clocks.
 All old episodes, sealed packets and spent allocations remain attributed and
-cannot provide a clock or retry for C07. Root's active goal owns this finite
+cannot provide a clock or retry for C08. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -151,7 +152,7 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C07 preparation executes no SDK/helper actor. Current hosted full SDK,
+compile and Foundation control. C08 preparation executes no SDK/helper actor. Current hosted full SDK,
 sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
 custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.

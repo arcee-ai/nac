@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qpub-environment-family-R7325-four-startup-source07",
+  "scope": "P12-integration-Qfinal-preflight-R7325-four-startup-source08",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "d017db04d8994c7c027ddbb32bb609dc3a389ac0",
+  "H": "6276182f7fc3074a6f04d5f73ec5a0a723cc246c",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "2e622aeb335cd4248e6cf397c3fc02ba19d063a1",
+  "Q": "a7a59910990a6c61a2a5d887b33746d43207f00f",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
