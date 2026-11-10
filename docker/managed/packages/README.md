@@ -24,8 +24,10 @@ vector, a too-short NegoEx common header at a guard page, and a KRB-CRED with
 fewer ticket-info entries than tickets each return the corrected error. The
 script reverses only the two checksum-locked upstream patches, with zero fuzz,
 in disposable source copies and requires each corresponding control to fault
-within five seconds. The test binaries are not installed. These controls
-exercise the corrected parser paths; they do not by themselves validate the
+within five seconds. The source and runner are retained with the other package
+build recipes in the final image; the compiled test binaries stay under the
+builder's `/work` directory and are not installed. These controls exercise
+the corrected parser paths; they do not by themselves validate the
 whole final image, every advisory record, or an applicability disposition.
 
 The GCC package changes the one affected template header in the exact checksum-pinned
