@@ -68,7 +68,7 @@ RUN apk upgrade --no-cache && apk add --no-cache build-base autoconf automake bi
 FROM runtime-package-sdk AS runtime-packages
 COPY docker/managed/packages/sources.lock.json docker/managed/packages/fetch-sources.sh /recipe/
 RUN sh /recipe/fetch-sources.sh
-COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-libraries.list /recipe/
+COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-libraries.list docker/managed/packages/test-krb5-regressions.sh docker/managed/packages/krb5-negoex-vector.c docker/managed/packages/krb5-negoex-header.c docker/managed/packages/krb5-cred-list.c /recipe/
 RUN sh /recipe/build-krb5.sh
 COPY docker/managed/packages/build-curl.sh /recipe/
 RUN sh /recipe/build-curl.sh
