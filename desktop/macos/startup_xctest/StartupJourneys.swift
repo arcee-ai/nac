@@ -599,7 +599,7 @@ final class StartupJourneys: XCTestCase {
             } catch { XCTFail("Owned app identity/cleanup attachment unavailable; retain fixture for external cleanup") }
         }
         let failureEvidence = StartupFailureEvidence(fixture.ax_witness, configurationSHA: digest(bytes))
-        try failureEvidence.run {
+        do {
         try require(ui.windows.firstMatch.waitForExistence(timeout: 45), "No startup window")
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
@@ -914,7 +914,10 @@ final class StartupJourneys: XCTestCase {
             "private_failure_observation": "not_read_by_public_UI_actor",
             "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
-        } // First failure is retained before the outer application teardown defer.
+        } catch {
+            failureEvidence.capture(error)
+            throw error // Preserve the original failure before the outer teardown defer.
+        }
     }
 }
 

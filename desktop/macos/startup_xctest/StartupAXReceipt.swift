@@ -136,16 +136,12 @@ final class StartupFailureEvidence {
         if error is CocoaError { return "foundation" }
         return "other"
     }
-    func run<Value>(_ body: () throws -> Value) rethrows -> Value {
-        do { return try body() }
-        catch {
-            if !retained, let declaration {
-                retained = true // First failure only, including publication failure.
-                let record = StartupFirstFailure(nonce: declaration.nonce, configuration_sha256: configurationSHA,
-                    step: step, operation_index: operationIndex, error_family: Self.family(error))
-                try? StartupAXFiles.publish(record, to: declaration.path + ".failure")
-            }
-            throw error // Never replace, suppress or retry the original throw.
+    func capture(_ error: Error) {
+        if !retained, let declaration {
+            retained = true // First failure only, including publication failure.
+            let record = StartupFirstFailure(nonce: declaration.nonce, configuration_sha256: configurationSHA,
+                step: step, operation_index: operationIndex, error_family: Self.family(error))
+            try? StartupAXFiles.publish(record, to: declaration.path + ".failure")
         }
     }
 }

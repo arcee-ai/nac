@@ -6,6 +6,31 @@ import subprocess
 import tempfile
 import unittest
 
+
+def journey_failure_catch():
+    source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+    return source.split('        } catch {\n            failureEvidence.capture(error)', 1)[1].split('\n    }\n}', 1)[0]
+
+
+class FailureScopeTests(unittest.TestCase):
+    def test_journey_keeps_nested_guards_in_the_main_actor_method_and_catches_before_outer_teardown(self):
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        method = source.split('    @MainActor\n    func testOrdinaryStartup() throws {', 1)[1]
+        teardown, body = method.split('        let failureEvidence = ', 1)
+        self.assertIn('        defer {', teardown)
+        self.assertIn('ui.terminate()', teardown)
+        self.assertIn('\n        do {\n', body)
+        self.assertNotIn('failureEvidence.run', body)
+        self.assertNotIn('assumeIsolated', body)
+        self.assertNotIn('Task {', body)
+        guards, caught = body.split('        } catch {\n            failureEvidence.capture(error)', 1)
+        self.assertIn('func guardTarget() throws {', guards)
+        self.assertIn('func dispatch(', guards)
+        self.assertEqual(guards.count('try guardWindow('), 2)
+        self.assertIn('throw error', caught)
+        self.assertNotIn('try ', caught)
+
+
 DRIVER = r'''
 import Foundation
 import CoreFoundation
@@ -405,6 +430,22 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
     } catch { return ["accepted":false] }
 }
 
+final class InertOriginalFailure: Error {}
+
+// Compile-only actor scope control, never instantiated or invoked. The catch
+// is extracted from the real journey; XCUI SDK compilation is still separate.
+@MainActor final class InertJourneyActorScope {
+    private func guardWindow() throws {}
+    func journey(_ failureEvidence: StartupFailureEvidence) throws {
+        defer {}
+        do {
+            func guardTarget() throws { try guardWindow() }
+            func dispatch() throws { try guardWindow(); try guardTarget() }
+            try dispatch()
+        __JOURNEY_FAILURE_CATCH__
+    }
+}
+
 func firstFailureRun(_ mode: String) -> [String: Any] {
     var directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
         .appendingPathComponent(UUID().uuidString)
@@ -422,26 +463,39 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
         "mode": info.st_mode & 0o777 == 0o700]
     let declaration = StartupAXDeclaration(path: directory.appendingPathComponent("receipt.json").path,
         nonce: String(repeating: "a", count: 64), helper_path: "/inert", helper_sha256: "", support_sha256: [:], owner_pid: 1, deadline_ns: "1")
-    let recorder = StartupFailureEvidence(declaration, configurationSHA: String(repeating: "b", count: 64))
+    let recorder = StartupFailureEvidence(mode == "first_unconfigured" ? nil : declaration,
+        configurationSHA: String(repeating: "b", count: 64))
     recorder.step = .prepare_interaction; recorder.operationIndex = 1
     let errors: [String: Error] = ["missing": StartupAXReceiptError.missing, "invalid": StartupAXReceiptError.invalid,
         "refused": StartupAXReceiptError.refused, "expired": StartupAXReceiptError.expired,
         "decoding": DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "PRIVATE-CANARY")),
-        "foundation": CocoaError(.fileReadUnknown), "other": NSError(domain: "PRIVATE-CANARY", code: 1)]
+        "foundation": CocoaError(.fileReadUnknown), "other": NSError(domain: "PRIVATE-CANARY", code: 1),
+        "identity": InertOriginalFailure()]
     let selected = String(mode.dropFirst("first_".count)), error = errors[selected] ?? errors["other"]!
     let path = declaration.path + ".failure"
     if selected == "publish_failure" { try! FileManager.default.removeItem(at: directory) }
     var beforeTeardown = false, events: [String] = []
     func ui() throws {
         defer { beforeTeardown = FileManager.default.fileExists(atPath: path); events.append("teardown") }
-        try recorder.run { events.append("throw"); throw error }
+        let failureEvidence = recorder
+        do {
+            if selected != "success" { events.append("throw"); throw error }
+        __JOURNEY_FAILURE_CATCH__
     }
     var preserved = false
-    do { try ui() } catch let caught { preserved = StartupFailureEvidence.family(caught) == StartupFailureEvidence.family(error) }
+    do { try ui() } catch let caught {
+        preserved = selected == "identity" ? (caught as? InertOriginalFailure) === (error as? InertOriginalFailure)
+            : StartupFailureEvidence.family(caught) == StartupFailureEvidence.family(error)
+    }
     events.append("api_absent") // Inert subsequent listener sample, no OS query.
     let first = try? Data(contentsOf: URL(fileURLWithPath: path))
+    if selected == "publish_failure" {
+        // A recovered writable port must not retry the first failed publication.
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700])
+    }
     recorder.step = .terminal
-    do { try recorder.run { throw StartupAXReceiptError.expired } } catch {}
+    if selected != "success" { recorder.capture(StartupAXReceiptError.expired) }
     let unchanged = first == (try? Data(contentsOf: URL(fileURLWithPath: path)))
     let row = first.flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
     return ["record": row, "before_teardown": beforeTeardown, "original_preserved": preserved,
@@ -503,7 +557,8 @@ class ReceiptControls(unittest.TestCase):
         cls.addClassCleanup(cls.temporary.cleanup)
         root = Path(cls.temporary.name).resolve()
         driver = root / 'main.swift'
-        driver.write_text(DRIVER)
+        catch = '        } catch {\n            failureEvidence.capture(error)' + journey_failure_catch()
+        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch))
         cls.binary = root / 'inert-client'
         sources = [Path(__file__).with_name(n) for n in ('StartupAXGuard.swift', 'StartupAXReceipt.swift')]
         result = subprocess.run(['/usr/bin/xcrun', 'swiftc', '-swift-version', '5', *map(str,sources), str(driver), '-o', str(cls.binary)],
@@ -546,6 +601,18 @@ class ReceiptControls(unittest.TestCase):
                         nonce='a'*64, configuration_sha256='b'*64, step='prepare_interaction', operation_index=1,
                         error_family='receipt_' + mode if mode in modes[:4] else mode))
                 self.assertNotIn('PRIVATE-CANARY', json.dumps(row))
+
+    def test_actual_journey_catch_preserves_error_identity_and_does_not_publish_success_or_unconfigured(self):
+        identity, success, unconfigured = self.rows(['first_identity', 'first_success', 'first_unconfigured'])
+        self.assertTrue(identity['original_preserved'])
+        self.assertTrue(identity['before_teardown'])
+        self.assertEqual(identity['record']['error_family'], 'other')
+        self.assertEqual(success['order'], ['teardown', 'api_absent'])
+        self.assertFalse(success['before_teardown'])
+        self.assertIsNone(success['record'])
+        self.assertTrue(unconfigured['original_preserved'])
+        self.assertFalse(unconfigured['before_teardown'])
+        self.assertIsNone(unconfigured['record'])
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',

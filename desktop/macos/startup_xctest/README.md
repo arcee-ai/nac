@@ -443,6 +443,17 @@ The previous Q55 actor built under Xcode26.6/SDK26.5/Swift5 language mode on H14
 the changed actor requires fresh exact-source full SDK build-for-testing and
 separate root runtime allocation. Neither is established by these local controls.
 
+First-failure evidence uses a lexical `do/catch` inside the existing
+`@MainActor` test method, beneath its application teardown defer. The catch
+calls the passive nonthrowing recorder and rethrows the original error before
+teardown. Keeping the journey's nested guard and dispatch functions in this
+lexical actor scope avoids a generic nonisolated callback boundary. Publication
+is best effort and first-only even if a failed file port later recovers.
+The inert receipt controls compile this actor scope and execute the exact
+journey catch with retained error identity, publication failure and success
+fixtures; they do not compile the XCUI target or run a public UI test. The full
+generated XCTest target remains a required separate SDK compilation gate.
+
 ## Local preparation checks
 
 ```sh
