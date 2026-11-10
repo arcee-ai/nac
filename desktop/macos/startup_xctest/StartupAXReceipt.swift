@@ -224,6 +224,16 @@ enum StartupAXFiles {
             && info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
             && info.st_uid == getuid() && info.st_mode & 0o777 == 0o700)
     }
+    // Fixed derived namespace; declaration and request payload remain unchanged.
+    // Proof/stop/failure stay in the nonwritable parent. Both owners use this.
+    static func requestPath(_ receiptPath: String, diagnostic: StartupFailureEvidence? = nil) throws -> String {
+        diagnostic?.step = .publish_parent
+        try parent(receiptPath)
+        let proofDirectory = (receiptPath as NSString).deletingLastPathComponent
+        let path = proofDirectory + "/requests/request.json"
+        try parent(path)
+        return path
+    }
     static func read(_ path: String, diagnostic: StartupFailureEvidence? = nil) throws -> Data {
         diagnostic?.step = .read_parent
         try parent(path)
@@ -531,7 +541,7 @@ final class StartupAXClient {
             pendingInteraction = request
             diagnostic?.step = .prepare_publication
             if let publish { try publish(request) }
-            else { try StartupAXFiles.publish(request, to: declaration.path + ".request", diagnostic: diagnostic) }
+            else { try StartupAXFiles.publish(request, to: try StartupAXFiles.requestPath(declaration.path, diagnostic: diagnostic), diagnostic: diagnostic) }
             let fresh = Ticket(sequence: lastSequence, refusal: ticket.refusal, entered: entered, deadline: ticket.deadline)
             _ = try consume(fresh, surface: StartupNativeFolderPolicy.Surface(rawValue: observed.surface)!,
                 rootFrame: rootFrame, field: field, request: request, diagnostic: diagnostic)
@@ -550,8 +560,8 @@ final class StartupAXClient {
                 && stamp < StartupAXFiles.number(request.deadline_ns))
             if let clear { try clear() }
             else {
-                try StartupAXFiles.need(try StartupAXInteractionRequest.read(declaration.path + ".request") == request)
-                try StartupAXFiles.need(unlink(declaration.path + ".request") == 0)
+                try StartupAXFiles.need(try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) == request)
+                try StartupAXFiles.need(unlink(try StartupAXFiles.requestPath(declaration.path)) == 0)
             }
             let finalized = try time()
             try StartupAXFiles.need(finalized >= ended && finalized - ended <= 1_000_000_000

@@ -39,3 +39,25 @@ successful test-side cleanup claim. Success and other-case teardown stay public.
 The cohesive test_ax_witness.py may exceed 800 lines because its single compiled
 fixture exercises the complete canonical receipt/client and actual journey
 catch/teardown with inert adapters; keep that shared compilation and all negatives.
+
+Approved test-runner exception — 2026-11-10. Maintainer Allison explicitly
+approved the reviewed request-only child grant, build-only signature verification
+and one fresh bounded qualification. Only the development configuredLocal XCTest
+Runner may gain
+read/write access to the one fresh H-owned canonical 0700 `requests` child under
+its existing private proof directory. Derive `requests/request.json` from the
+already validated receipt parent; keep the seven-key declaration and closed
+request payload unchanged. Atomic temporary/final requests stay in that child.
+App Sandbox remains enabled; proof, stop and best-effort failure files in the
+parent remain outside Runner write grants. The independent XCTest failure
+attachment remains required. No app, engine, HOME, NAC_HOME, store, profile,
+proof parent, ancestor/root, global or nonconfigured write expansion is allowed.
+The designated project generator owns the source entitlement input. Never edit
+generated xcent or re-sign a Runner. The existing build owner must build and
+independently inspect an ordinary SAME-source/configuration/toolchain baseline
+and BOTH actual candidate signed outputs, preserving their entire baseline
+including AX/testmanager with only the exact child grant. Missing propagation,
+identity or signature proof stops before any input. No retry, request reissue,
+predicate waiver or native acceptance follows from this exception. This text is
+limited authorization for this exception. All source/signature/custody/input
+and acceptance gates remain effective; no broader writes or retries are granted.

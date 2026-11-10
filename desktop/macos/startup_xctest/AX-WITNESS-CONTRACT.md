@@ -43,8 +43,11 @@ private String value (<=4096 UTF-8 bytes).
 Before each of the eleven configured inputs, Q selects a public XCUICoordinate
 from the intended element and reads its screenPoint. The point must be finite,
 exactly representable by the public AX Float API and inside the anchor frame.
-Q publishes one closed request at receipt.path+'.request', on the existing
-private port. It contains the nonce/config binding, opaque challenge/root token,
+Q publishes one closed request at the fixed derived path
+`parent(receipt.path)/requests/request.json`, on the existing private file port.
+H creates the canonical owned 0700 request-only child alongside its proof files.
+Only that child is a proposed Runner write grant; proof/stop/failure remain in
+the parent. Atomic temporary and final request files stay in the child. It contains the nonce/config binding, opaque challenge/root token,
 original ticket cutoff/generation/sequence, entry time, expected phase, point,
 anchor/root frames and a closed button/message/panel/field intent. Private exact
 label/value are used only for target/focus comparison; never exported.

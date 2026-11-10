@@ -4,8 +4,10 @@ The current ten-file test supplier contains StartupJourneys.swift and the shared
 StartupAXGuard.swift/StartupAXReceipt.swift actor and client, with its guides,
 contract and controls. H compiles those same two shared Swift files with its
 finite companion. The Runner publishes one closed private point request and
-consumes the readonly proof on that existing port. The ordinary app and Runner
-sandbox remain unchanged. P12 remains a normal integration-only product input;
+consumes the readonly proof on that existing port. The ordinary app sandbox
+is unchanged. The approved 2026-11-10 test-runner exception grants writes only
+to the derived request-only child, with App Sandbox and both signature gates
+required. P12 remains a normal integration-only product input;
 this supplier does not rebuild or relabel it.
 
 [AX-WITNESS-CONTRACT.md](AX-WITNESS-CONTRACT.md) is the current accepted contract.
@@ -567,7 +569,8 @@ unknown identity or cleanup still retains the fixture. Live API/origin/UI guards
 helper abort, input refusal, original error, deadlines and all acceptance checks
 remain unchanged. This avoids manufacturing listener absence before XCTest can
 commit its failed result; it does not establish Actual16's causal sequence or
-original failing predicate. Runner sandbox and entitlements are unchanged.
+original failing predicate. That teardown repair did not change Runner sandbox
+permissions; the separately approved request-only exception is described below.
 
 The existing receipt controls execute the actual catch and entire teardown with
 inert XCUI adapters across failed/successful/other-case/image-denial/terminated
@@ -581,3 +584,34 @@ already held `sample_deadline`, `ax_predicate_refused`, `target_retiring`, or
 The same once-only attachment and provenance merge apply; unknown/default stages
 remain omitted. This passive retention adds no witness reads, input, retry or
 acceptance authority and does not identify Actual18's unretained producer stage.
+
+## Approved request-only Runner directory (2026-11-10)
+
+Maintainer Allison approved the reviewed test-runner exception for the configured
+local development journey. H creates one fresh owned canonical 0700 `requests`
+child under the private proof directory. Both canonical Swift owners derive
+`parent(receipt.path)/requests/request.json` without changing the seven-key
+declaration or closed request payload. Atomic temporary/final requests and their
+readback/unlink stay in that child. Only its exact trailing-slash path may gain
+Runner read/write access. Proof, stop and best-effort failure siblings stay in
+the parent, outside the grant; the independent XCTest failure attachment remains.
+No app, engine, HOME, NAC_HOME, store, profile, parent/root or global write expands.
+
+The designated project writer supplies source entitlements for the configured
+case only. App Sandbox stays enabled. The existing build owner first builds and
+independently inspects a normal same-source/configuration/toolchain baseline,
+then both actual signed candidate outputs. Each candidate must preserve its
+entire typed normal baseline, including AX/testmanager, plus only the exact child
+grant. Canonical source/project/selected and ordinary scheme/configuration,
+binary/Info/xctestrun/toolchain and directory identities remain checked. Missing
+propagation or any broader/dropped permission fails before input. No generated
+xcent edits, re-signing workaround, new transport or automatic request reissue.
+Nonconfigured and compile-only SDK cases keep the ordinary single builder.
+
+This directory grant covers the child and descendants, not only one filename;
+nonce/configuration binding remains application validation. Inert controls and
+source approval establish neither actual Xcode propagation nor OS enforcement.
+Build-only verification must stop after generated_runner. Actual proof/stop
+nonwritability, alias/rename behavior, native AX/input predicates and positive
+process/profile/store settlement still require separately admitted evidence.
+The approval does not reset spent qualifications or waive any acceptance guard.

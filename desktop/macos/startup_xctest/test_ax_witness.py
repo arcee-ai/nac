@@ -863,7 +863,57 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+func requestChildRun(_ mode: String) -> [String: Any] {
+    let base = URL(fileURLWithPath:ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
+        .resolvingSymlinksInPath().appendingPathComponent("child-"+UUID().uuidString)
+    do {
+        try FileManager.default.createDirectory(at:base,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        defer { try? FileManager.default.removeItem(at:base) }
+        guard let resolved = realpath(base.path,nil) else { throw StartupAXReceiptError.invalid }
+        let root = String(cString:resolved);free(resolved)
+        let proof = root+"/receipt.json", stop = proof+".stop", child = root+"/requests"
+        try StartupAXFiles.publish(["proof":"UNCHANGED"],to:proof)
+        try StartupAXFiles.publish(["stop":"UNCHANGED"],to:stop)
+        if mode != "missing" {
+            try FileManager.default.createDirectory(atPath:child,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        }
+        if mode == "mode" { _ = chmod(child,0o755) }
+        if mode == "parentmode" { _ = chmod(root,0o755) }
+        if mode == "link" {
+            try FileManager.default.removeItem(atPath:child)
+            try FileManager.default.createSymbolicLink(atPath:child,withDestinationPath:root)
+        }
+        var selectedProof = proof
+        if mode == "parentlink" {
+            let alias=root+"/alias"
+            try FileManager.default.createSymbolicLink(atPath:alias,withDestinationPath:root)
+            selectedProof=alias+"/receipt.json"
+        }
+        let path=try StartupAXFiles.requestPath(selectedProof)
+        let request=StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:String(repeating:"a",count:64),
+            configuration_sha256:String(repeating:"b",count:64),id:UUID().uuidString,
+            root_id:UUID().uuidString,entered_ns:"100",deadline_ns:"1000",baseline_sequence:"3",refusal_generation:"0",
+            surface:"form",kind:"button",label:"Intended",keyboard:false,point:[20,25],
+            anchor_frame:[10,20,100,30],root_frame:[0,0,1024,674],value:nil)
+        if mode == "filelink" {
+            try FileManager.default.createSymbolicLink(atPath:path,withDestinationPath:proof)
+            _ = try StartupAXInteractionRequest.read(path)
+            return ["accepted":true]
+        }
+        try StartupAXFiles.publish(request,to:path)
+        let same = try StartupAXInteractionRequest.read(path) == request
+        let names=try FileManager.default.contentsOfDirectory(atPath:child)
+        let proofBody=try JSONSerialization.jsonObject(with:StartupAXFiles.read(proof)) as? [String:String]
+        let stopBody=try JSONSerialization.jsonObject(with:StartupAXFiles.read(stop)) as? [String:String]
+        try StartupAXFiles.need(unlink(path)==0)
+        return ["accepted":true,"request_same":same,"atomic":names == ["request.json"],
+            "derived":path == child+"/request.json","proof_unchanged":proofBody == ["proof":"UNCHANGED"],
+            "stop_unchanged":stopBody == ["stop":"UNCHANGED"],
+            "clear_child_only":try FileManager.default.contentsOfDirectory(atPath:child).isEmpty]
+    } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
+}
+
+let rows = modes.map { $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -1045,6 +1095,14 @@ class ReceiptControls(unittest.TestCase):
                           for step in ('publish_parent', 'publish_open_path', 'publish_rename')])
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
+        modes = ['positive','missing','mode','parentmode','link','parentlink','filelink']
+        rows = self.rows(['request_child_'+mode for mode in modes])
+        self.assertTrue(rows[0]['accepted'])
+        for key in ('request_same','atomic','derived','proof_unchanged','stop_unchanged','clear_child_only'):
+            self.assertTrue(rows[0][key], key)
+        for mode,row in zip(modes[1:],rows[1:]):
+            with self.subTest(mode=mode):self.assertFalse(row['accepted'])
+
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',
                  'label', 'value', 'oversize_value', 'unknown', 'duplicate']
         self.assertEqual(self.rows(['request_' + m for m in modes]), [{'accepted':True}] + [{'accepted':False}] * 12)
