@@ -18,7 +18,8 @@ enum StartupAXLifetime {
             try StartupObserver.need(current == target && latched != "retired")
             guard let windows = app["windows"] as? [Int] else { throw OwnershipError.invalid }
             if windows.isEmpty { latched = "retiring"; return "retiring" }
-            try StartupObserver.need(latched == nil && windows == [window])
+            try StartupObserver.need(latched == nil && windows.filter { $0 == window }.count == 1
+                && windows.count <= 128 && Set(windows).count == windows.count && windows.allSatisfy { $0 > 0 })
             return "ready"
         }
         let retired = snapshot["retired"] as? [[String: Any]] ?? []
@@ -78,39 +79,7 @@ enum StartupAXFailureDiagnostic {
 }
 // END AX FAILURE DIAGNOSTICS
 
-// BEGIN PRE-REFUSAL PAIRED DIAGNOSTIC (never input/ready authority)
-enum StartupAXPreRefusalDiagnostic {
-    static func eligible(complete: Bool, exactProcess: Bool, originalRoot: Bool,
-                         retainedRoot: Bool, pristine: Bool, withinSample: Bool) -> Bool {
-        complete && exactProcess && originalRoot && retainedRoot && pristine && withinSample
-    }
 
-    static func capture(windows: [Int], original: Int, retained: String,
-                        read: () throws -> StartupAXSurface, close: () throws -> Void) -> [String: Any] {
-        // IDs are a bounded CG inventory, not a CG-to-AX association.
-        let ids = [original] + Array(windows.filter { $0 != original }.prefix(7))
-        var result: [String: Any] = ["schema": "nac342-ax-pre-refusal-paired-v1", "acceptance": false,
-            "cg_window_count": windows.count, "cg_window_ids": ids,
-            "cg_ids_truncated": windows.count > ids.count, "original_window_number": original,
-            "outcome": "reader_refused", "closing_valid": false]
-        var observed: StartupAXSurface?
-        do { observed = try read() } catch { /* Original CG refusal stays primary. */ }
-        do { try close(); result["closing_valid"] = true }
-        catch { result["outcome"] = "closing_refused"; return result }
-        guard let observed, ["form", "panel", "goTo"].contains(observed.surface),
-              UUID(uuidString: observed.root_id) != nil, observed.root_id == retained,
-              observed.panel_id.map({ UUID(uuidString: $0) != nil }) ?? true,
-              observed.go_to_id.map({ UUID(uuidString: $0) != nil }) ?? true else { return result }
-        // Only the canonical successful projection crosses this boundary. In
-        // particular, focus.value and arbitrary AX attributes never cross it.
-        result["outcome"] = "observed"
-        result["canonical"] = ["surface": observed.surface, "root_id": observed.root_id,
-            "retained_root_equal": true, "panel_id": observed.panel_id as Any? ?? NSNull(),
-            "go_to_id": observed.go_to_id as Any? ?? NSNull()]
-        return result
-    }
-}
-// END PRE-REFUSAL PAIRED DIAGNOSTIC
 
 @MainActor
 enum StartupAXWitnessMode {
@@ -118,7 +87,6 @@ enum StartupAXWitnessMode {
         var diagnosticStage = StartupAXDiagnosticStage.configuration
         var diagnosticBinding: [String: String] = [:]
         var sequence: UInt64 = 0, refusals: UInt64 = 0
-        var pairedDiagnostic: [String: Any]?
         do {
             let bytes = try StartupAXPreflight.file(configPath, limit: 32768)
             let config = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
@@ -154,8 +122,6 @@ enum StartupAXWitnessMode {
             var target = empty, launch = 0.0, window = 0
             var retired: String?
             let reader = StartupAXReader()
-            var retainedRoot: String?
-            var pairedAttempted = false
             func receipt(_ status: String, began: UInt64, ended: UInt64,
                          observed: StartupAXSurface? = nil, stage: String? = nil, failure: Data? = nil) -> StartupAXReceipt {
                 StartupAXReceipt(schema: "nac342-ax-witness-v1", nonce: declaration.nonce,
@@ -200,75 +166,40 @@ enum StartupAXWitnessMode {
                     RunLoop.current.run(until: Date().addingTimeInterval(0.05)); continue
                 }
                 diagnosticStage = .lifetime
-                // This is the only pre-refusal diagnostic read. It replaces
-                // this sample's ordinary read, then the original CG refusal
-                // exits; it cannot publish ready or enter another AX sample.
-                if apps.count == 1, target.pid != 0,
-                   let cgWindows = apps[0]["windows"] as? [Int], cgWindows.count > 1 {
-                    do {
-                        let current = try decodedProcess(apps[0])
-                        let stamp = DispatchTime.now().uptimeNanoseconds
-                        let exact = current == target && target.valid
-                            && (apps[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
-                        let original = cgWindows.count <= 128 && cgWindows.allSatisfy { $0 > 0 }
-                            && Set(cgWindows).count == cgWindows.count && cgWindows.contains(window)
-                        if StartupAXPreRefusalDiagnostic.eligible(complete: snapshot["complete"] as? Bool == true,
-                            exactProcess: exact, originalRoot: original, retainedRoot: retainedRoot != nil,
-                            pristine: refusals == 0 && retired == nil && !pairedAttempted && reader.failureData == nil,
-                            withinSample: stamp >= began && stamp < deadline && stamp - began < 1_000_000_000) {
-                            // Recheck the same helper/config/source closure before
-                            // the first diagnostic AX call; no new process owner.
-                            try StartupObserver.need(resources.intact() && process(getpid()) == me
-                                && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                                && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
-                            let frame = try ownedFrame(target.pid, window)
-                            let readAt = DispatchTime.now().uptimeNanoseconds
-                            try StartupObserver.need(readAt >= began && readAt < deadline && readAt - began < 1_000_000_000)
-                            pairedAttempted = true
-                            pairedDiagnostic = StartupAXPreRefusalDiagnostic.capture(windows: cgWindows,
-                                original: window, retained: retainedRoot!, read: {
-                                    try reader.observe(pid: target.pid, frame: frame)
-                                }, close: {
-                                    let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
-                                    let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
-                                    try StartupObserver.need(closing["complete"] as? Bool == true && latest.count == 1
-                                        && decodedProcess(latest[0]) == target
-                                        && (latest[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
-                                        && (latest[0]["windows"] as? [Int])?.contains(window) == true
-                                        && resources.intact() && process(getpid()) == me
-                                        && ownedFrame(target.pid, window) == frame
-                                        && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                                        && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
-                                    let ended = DispatchTime.now().uptimeNanoseconds
-                                    try StartupObserver.need(ended >= began && ended < deadline && ended - began <= 1_000_000_000)
-                                })
-                        }
-                    } catch {
-                        // Optional opening failures omit diagnostics; they must
-                        // not replace the original extra-CG-window refusal.
-                    }
-                    throw OwnershipError.invalid // Original extra-CG-window refusal, always fatal.
-                }
+                // Additional raw CG surfaces do not establish or defeat interaction
+                // ownership. Canonical AX topology and a bound global point proof do.
                 if target.pid != 0 { if try terminal(snapshot, began: began) { continue } }
                 diagnosticStage = .app_window
                 try StartupObserver.need(apps.count == 1)
                 let app = apps[0], current = try decodedProcess(app)
                 let windows = app["windows"] as? [Int] ?? []
-                try StartupObserver.need(windows.count == 1)
                 if target.pid == 0 {
+                    try StartupObserver.need(windows.count == 1)
                     target = current; window = windows[0]
                     launch = (app["app_launch_epoch"] as! NSNumber).doubleValue
                 }
-                try StartupObserver.need(current == target && windows == [window])
+                try StartupObserver.need(current == target && windows.filter { $0 == window }.count == 1)
                 diagnosticStage = .owned_frame
                 let frame = try ownedFrame(target.pid, window)
                 var observed: StartupAXSurface?, stage: String?, failure: Data?
+                var request: StartupAXInteractionRequest?
+                do { request = try StartupAXInteractionRequest.read(declaration.path + ".request") }
+                catch StartupAXReceiptError.missing { request = nil }
+                if let pending = request, try StartupAXFiles.number(pending.entered_ns) >= began { request = nil }
+                if let request {
+                    try StartupObserver.need(request.nonce == declaration.nonce && request.configuration_sha256 == digest
+                        && request.refusal_generation == String(refusals)
+                        && StartupAXFiles.number(request.baseline_sequence) <= sequence
+                        && StartupAXFiles.number(request.entered_ns) < began
+                        && began < StartupAXFiles.number(request.deadline_ns)
+                        && StartupAXFiles.number(request.deadline_ns) <= deadline)
+                }
                 diagnosticStage = .ax_observation
                 do {
                     observed = try reader.observe(pid: target.pid, frame: frame)
-                    if let observed { retainedRoot = observed.root_id }
+                    if let request { observed?.interaction = try reader.interaction(request, pid: target.pid) }
                 }
-                catch { refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
+                catch { observed = nil; refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
                 diagnosticStage = .closing_snapshot
                 let closing = try StartupObserver.snapshot(config, resources: resources, known: &known)
                 diagnosticStage = .closing_lifetime
@@ -276,10 +207,17 @@ enum StartupAXWitnessMode {
                 diagnosticStage = .closing_integrity
                 let latest = (closing["nodes"] as! [[String: Any]]).filter { $0["kind"] as? String == "app" }
                 try StartupObserver.need(latest.count == 1 && decodedProcess(latest[0]) == target
-                    && latest[0]["windows"] as? [Int] == [window]
+                    && (latest[0]["windows"] as? [Int])?.filter { $0 == window }.count == 1
+                    && (latest[0]["app_launch_epoch"] as? NSNumber)?.doubleValue == launch
+                    && ownedFrame(target.pid, window) == frame
                     && resources.intact() && process(getpid()) == me
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
                     && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                if let request, observed != nil {
+                    // A second global hit must resolve to the SAME retained AX
+                    // target after the resource/incarnation/frame bookend.
+                    observed?.interaction = try reader.interaction(request, pid: target.pid)
+                }
                 sequence += 1
                 let ended = DispatchTime.now().uptimeNanoseconds
                 try StartupObserver.need(ended >= began && ended < deadline)
@@ -289,6 +227,24 @@ enum StartupAXWitnessMode {
                 diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(observed == nil ? "refused" : "ready", began: began,
                     ended: ended, observed: observed, stage: stage, failure: failure), to: declaration.path)
+                if let request {
+                    // Keep the proof publication stable until final consumption.
+                    // Metadata custody remains in its independent original owner.
+                    try StartupObserver.need(observed?.interaction != nil)
+                    while true {
+                        if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
+                        let pending: StartupAXInteractionRequest
+                        do { pending = try StartupAXInteractionRequest.read(declaration.path + ".request") }
+                        catch StartupAXReceiptError.missing { break }
+                        try StartupObserver.need(pending == request && getppid() == declaration.owner_pid
+                            && DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(request.deadline_ns)
+                            && resources.intact() && process(target.pid) == target && process(getpid()) == me
+                            && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
+                            && ownedFrame(target.pid, window) == frame
+                            && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+                    }
+                }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
             diagnosticStage = .parent_lost
@@ -296,10 +252,9 @@ enum StartupAXWitnessMode {
         } catch {
             // Unexpected ownership/deadline/stream failure exits nonzero. The
             // parent invalidates/aborts the test and retains original ownership.
-            var record = StartupAXFailureDiagnostic.record(stage: diagnosticStage, error: error,
+            let record = StartupAXFailureDiagnostic.record(stage: diagnosticStage, error: error,
                 observed: DispatchTime.now().uptimeNanoseconds, sequence: sequence, refusals: refusals,
                 binding: diagnosticBinding)
-            if let pairedDiagnostic { record["pre_refusal_paired"] = pairedDiagnostic }
             StartupAXFailureDiagnostic.emit(record, write: { try FileHandle.standardError.write(contentsOf: $0) })
             exit(1)
         }

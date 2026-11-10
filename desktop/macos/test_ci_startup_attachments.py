@@ -69,6 +69,8 @@ class StartupAttachmentTests(unittest.TestCase):
             proof.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
             proof.update(schema='nac342-ax-guards-v1', configuration_sha256=config_hash,
                          helper_sha256=config['ax_witness']['helper_sha256'], support_sha256=config['ax_witness']['support_sha256'], rows=facts)
+            from test_ci_startup_interaction import interaction_facts
+            proof['interactions'] = interaction_facts(proof['rows'])
             rows.insert(len(rows) - 2, ('nac342-ax-guards-v1-configuredLocal', json.dumps(proof).encode()))
         return config, config_hash, witness, rows
 

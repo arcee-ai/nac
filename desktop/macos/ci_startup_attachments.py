@@ -464,10 +464,10 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                 from ci_startup_ax import require_guard_proof
                 require('ax_guards' in values, 'ax_guards_missing')
                 name, data, row = values['ax_guards']
-                require(len(data) <= 16384, 'ax_guards_size')
+                require(len(data) <= 32768, 'ax_guards_size')
                 require_guard_proof(row, config, configuration_sha256, witness)
                 (output / (name + '.json')).write_bytes(data)
-                index['ax_guards'] = {'file': name + '.json', 'sha256': digest(data), 'count': len(row['rows'])}
+                index['ax_guards'] = {'file': name + '.json', 'sha256': digest(data), 'count': len(row['rows']), 'interaction_count': len(row['interactions'])}
             else:
                 require('ax_guards' not in values, 'foreign_ax_guards')
             index.update(complete=True, image=image, observation=observation, input_completion_unknown=False)

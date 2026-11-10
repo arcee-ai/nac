@@ -294,7 +294,7 @@ def require_guard_proof(row, config, configuration_sha256, witness):
     expected.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
     expected.update(schema='nac342-ax-guards-v1', configuration_sha256=configuration_sha256,
                     helper_sha256=config['ax_witness']['helper_sha256'], support_sha256=config['ax_witness']['support_sha256'])
-    require(type(row) is dict and set(row) == set(expected) | {'rows'}
+    require(type(row) is dict and set(row) == set(expected) | {'rows', 'interactions'}
         and all(row[k] == v and type(row[k]) is type(v) for k, v in expected.items() if k != 'app_launch_epoch')
         and type(row['app_launch_epoch']) in (int, float) and row['app_launch_epoch'] == witness['app_launch_epoch'], 'AX guard header')
     require(type(row['rows']) is list and len(row['rows']) == 26, 'AX guard count')
@@ -321,4 +321,51 @@ def require_guard_proof(row, config, configuration_sha256, witness):
             require(type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()
                 and identities.get(key, value) == value, 'AX guard retained identity')
             identities[key] = value
+    require_interaction_proof(row['interactions'], row['rows'])
     return row
+
+
+def require_interaction_proof(interactions, guards):
+    """Eleven private-text-free point proofs between the existing input fences."""
+    import math
+    import uuid
+    require(type(interactions) is list and len(interactions) == 11, 'AX interaction count')
+    ids, targets = set(), {}
+    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'button']
+    def number(text):
+        require(type(text) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', text) and int(text) < 2**64,
+                'AX interaction clock')
+        return int(text)
+    for index, (entry, kind) in enumerate(zip(interactions, kinds)):
+        keys = {'request_id', 'target_id', 'kind', 'surface', 'point', 'anchor_frame', 'keyboard', 'focus_checked',
+                'sequence', 'began_ns', 'ended_ns', 'entered_ns', 'consumed_ns', 'deadline_ns', 'finalized_ns'}
+        require(type(entry) is dict and set(entry) == keys, 'AX interaction fields')
+        for key in ('request_id', 'target_id'):
+            value = entry[key]
+            require(type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()
+                and (key != 'request_id' or value not in ids), 'AX interaction identity')
+            if key == 'request_id': ids.add(value)
+        target_key = kind if kind != 'button' else str(index)
+        require(targets.get(target_key, entry['target_id']) == entry['target_id'], 'AX interaction retained target')
+        targets[target_key] = entry['target_id']
+        before, after = guards[2 + index * 2:4 + index * 2]
+        keyboard = index in (2, 3, 4, 5, 9)
+        require(entry['kind'] == kind and entry['surface'] == before['surface']
+            and type(entry['keyboard']) is bool and entry['keyboard'] == keyboard
+            and type(entry['focus_checked']) is bool and entry['focus_checked'] == keyboard,
+            'AX interaction intent')
+        point, frame = entry['point'], entry['anchor_frame']
+        require(type(point) is list and len(point) == 2 and type(frame) is list and len(frame) == 4
+            and all(type(n) in (int, float) and math.isfinite(n) for n in point + frame)
+            and frame[2] > 0 and frame[3] > 0
+            and frame[0] <= point[0] < frame[0] + frame[2] and frame[1] <= point[1] < frame[1] + frame[3],
+            'AX interaction geometry')
+        seq, began, ended, entered, consumed, deadline, finalized = [number(entry[k]) for k in
+            ('sequence', 'began_ns', 'ended_ns', 'entered_ns', 'consumed_ns', 'deadline_ns', 'finalized_ns')]
+        require(number(before['sequence']) < seq < number(after['sequence'])
+            and number(before['consumed_ns']) <= entered < began <= ended <= consumed <= finalized
+            and finalized < number(after['entered_ns']) and finalized < deadline
+            and deadline <= number(before['entered_ns']) + 30_000_000_000
+            and ended - began <= 1_000_000_000 and finalized - ended <= 1_000_000_000,
+            'AX interaction final freshness/fences')
+    return interactions

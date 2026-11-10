@@ -36,18 +36,18 @@ class RequiredConsoleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'zero skips'):
             check.require_complete(good, 8)
 
-    def test_nine_total_cannot_hide_wrong_six_plus_three_class_distribution(self):
+    def test_thirteen_total_cannot_hide_wrong_six_plus_seven_class_distribution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); directory, hashes = self.source(root)
             text = 'import unittest\n'
-            for name, count in (('NativeFolderPolicyTests', 5), ('AXRefusalTests', 4)):
+            for name, count in (('NativeFolderPolicyTests', 5), ('AXRefusalTests', 8)):
                 text += 'class ' + name + '(unittest.TestCase):\n'
                 text += ''.join('    def test_' + str(n) + '(self): pass\n' for n in range(count))
             (directory / 'test_contract.py').write_text(text)
             hashes['test_contract.py'] = hashlib.sha256(text.encode()).hexdigest()
             with patch.object(check.sys, 'platform', 'darwin'), patch.object(fixture, 'TEST_FILES', hashes), \
                     patch.object(fixture, 'require_checkout'), patch.object(check.unittest, 'TextTestRunner') as runner:
-                with self.assertRaisesRegex(RuntimeError, 'exact six geometry and three AX'):
+                with self.assertRaisesRegex(RuntimeError, 'exact six geometry and seven AX'):
                     check.run_required(root, panel=True)
                 runner.assert_not_called()
 

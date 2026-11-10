@@ -12,7 +12,7 @@ const workflow = name => { const value = YAML.parse(readFileSync(`.github/workfl
 // Exact reviewed nomination; file digests checked against immutable Q and R sources.
 const reviewedStartupSupplier = {
   "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "test_source_sha": "ba266ba1b3bea331768d91fc8a0b2ee66b484d01",
+  "test_source_sha": "2e622aeb335cd4248e6cf397c3fc02ba19d063a1",
   "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
   "profile": "macos26",
   "suite": "startup",
@@ -24,16 +24,18 @@ const reviewedStartupSupplier = {
     "futureStore"
   ],
   "test_files": {
-    "README.md": "39c0b3aec37188e18eb141ef5537711e6f60b1fd384920d47d248cfd19758ed9",
-    "StartupJourneys.swift": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
+    "README.md": "843db56ab056c151256a328acbbde986aad57e4d5209a47724751462333762c7",
+    "StartupJourneys.swift": "e68d9439b208fc97a630f8850fee9b10f4a04c33889050a678f4ac056bc1ea52",
     "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
-    "test_contract.py": "493457530363e6992941960a6de2911c65da463db7452deb17f3af24443f916d",
-    "StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
-    "StartupAXReceipt.swift": "a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217",
-    "AX-WITNESS-CONTRACT.md": "1041bcef5739ebc1fe146673f7460ab82448d13dbb763af93c78f9cbf53c3bf6",
-    "test_ax_witness.py": "26e3fb9b290a03642e43eb07965564d2beb8013cc28d3294a6e07c946289cdc3",
-    "AGENTS.md": "074ff7d390c45a739b80048cf155274607ba3db5da74183cd5e4f673286a20fe"
+    "test_contract.py": "94a287b12b1e164dbf4a5bf9d59db0a5437e31ea496ab63d0e8d9b592655b208",
+    "StartupAXGuard.swift": "916a7c8141e624577773a69b841ddd315ecd70411a1495714759dae3ed028b99",
+    "StartupAXReceipt.swift": "5c217a484bc5b3d2081902ee5e1f4c0811dd8c3b924bde58d097d47ce8929a6b",
+    "AX-WITNESS-CONTRACT.md": "6e47b312a443b050fb989963d307ff044c78ee064841d8a56de42b2a318b711f",
+    "test_ax_witness.py": "99140de2e4699552eb41a50c7bcb3851f313d92fe08103945fbf63c1236644ed",
+    "AGENTS.md": "f149b4e37a1e1fe3fd61511974e4541c195ad23a0498fa1973380935e7e8ecb6",
+    "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
   },
+
   "protocol_files": {
     "Cargo.lock": "8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa",
     "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",

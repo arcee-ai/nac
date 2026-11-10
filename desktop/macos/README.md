@@ -137,19 +137,22 @@ This private P12 nomination binds product
 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
-`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the repaired immutable
-nine-file supplier `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`; its journey
-SHA256 is `7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8`.
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
+ten-file supplier `2e622aeb335cd4248e6cf397c3fc02ba19d063a1`; its journey
+SHA256 is `e68d9439b208fc97a630f8850fee9b10f4a04c33889050a678f4ac056bc1ea52`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
 historical startup/SDK results keep their original source and consumed counters.
 
-The H2 plus canonical Q2 observer inputs come from `observer_sources`; callers
+The H plus canonical Q observer inputs come from `observer_sources`; callers
 must compile all four, retaining the original guards/receipt/custody contracts.
 All four ordinary startup cases and independent R7325 remain required. R's actual
 compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
 under a separate Root admission; schema50 alone is insufficient. No runtime or
-publication is authorized by this nomination. Functional H/Q behavior is unchanged.
+publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
+AX preflight, preserving all original postconditions and positive cleanup.
+Raw CG extras no longer veto that contract. The accepted last-instant race is
+not atomic or independently observed delivered-event equality.
 
 ## Private launch contract (ALL-341)
 

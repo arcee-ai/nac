@@ -53,19 +53,19 @@ def run_required(root, *, suite=None, stream=None, panel=False):
                 spec.loader.exec_module(module)
                 policy = unittest.defaultTestLoader.loadTestsFromTestCase(module.NativeFolderPolicyTests)
                 diagnostic = unittest.defaultTestLoader.loadTestsFromTestCase(module.AXRefusalTests)
-                if policy.countTestCases() != 6 or diagnostic.countTestCases() != 4:
-                    raise RuntimeError('Require exact six geometry and three AX diagnostic controls plus one ancestry control')
+                if policy.countTestCases() != 6 or diagnostic.countTestCases() != 7:
+                    raise RuntimeError('Require exact six geometry and seven AX actor/refusal controls')
                 ax_spec = importlib.util.spec_from_file_location('nominated_Q_AX_controls', source.with_name('test_ax_witness.py'))
                 ax_module = importlib.util.module_from_spec(ax_spec)
                 ax_spec.loader.exec_module(ax_module)
                 witness = unittest.defaultTestLoader.loadTestsFromTestCase(ax_module.ReceiptControls)
-                if witness.countTestCases() != 7:
-                    raise RuntimeError('Require exact seven whole-client AX witness controls')
+                if witness.countTestCases() != 20:
+                    raise RuntimeError('Require exact twenty whole-client/request AX witness controls')
                 suite = unittest.TestSuite([policy, diagnostic, witness])
             else:
                 suite = unittest.defaultTestLoader.loadTestsFromName('test_ci_startup_console.StartupConsoleTests')
         result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-        require_complete(result, 17 if panel else 4)
+        require_complete(result, 33 if panel else 4)
         return result
     finally:
         if panel:

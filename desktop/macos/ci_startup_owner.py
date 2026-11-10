@@ -274,7 +274,12 @@ class OwnerWitness:
                 windows = apps[0]['windows']
                 if self.ui_root is None and not self.ui_failure and not self.ui_terminal and len(windows) == 1:
                     self.ui_root = windows[0]
-                if len(windows) > 1 or (self.ui_root is not None and windows and windows != [self.ui_root]):
+                interaction_contract = (self.config.get('scenario') == 'configuredLocal'
+                                        and type(self.config.get('ax_witness')) is dict)
+                invalid_inventory = (self.ui_root is None and len(windows) > 1) or (
+                    self.ui_root is not None and windows and (
+                        self.ui_root not in windows if interaction_contract else windows != [self.ui_root]))
+                if invalid_inventory:
                     self.ui_failure = self.ui_failure or 'app_windows'
                 if self.ui_root is not None and not windows:
                     self.ui_terminal = True
