@@ -554,3 +554,22 @@ retirement. Existing exact invocation/environment, ancestry, resource, freshness
 input and cleanup contracts remain. Canonical injected snapshot controls cover
 the transition and adversarial cases; they do not prove Actual15's unretained
 exec-race hypothesis or native acceptance. No raw argv diagnostics are exported.
+
+## Failed configured journey settlement
+
+After an already caught configuredLocal journey failure, preserve the original
+closed failure record, independent XCTest attachment, guarded failure image and
+throw. Its defer leaves app termination to the existing external exact-identity
+owner after failed XCTest result collection. It emits no test-side cleanup claim.
+Successful public teardown and every other case retain their original behavior.
+The external owner alone proves app/engine retirement and profile removal; an
+unknown identity or cleanup still retains the fixture. Live API/origin/UI guards,
+helper abort, input refusal, original error, deadlines and all acceptance checks
+remain unchanged. This avoids manufacturing listener absence before XCTest can
+commit its failed result; it does not establish Actual16's causal sequence or
+original failing predicate. Runner sandbox and entitlements are unchanged.
+
+The existing receipt controls execute the actual catch and entire teardown with
+inert XCUI adapters across failed/successful/other-case/image-denial/terminated
+states. Separate inert Python controls exercise the actual caller, audit, helper
+supervisor and settlement owner. They provide no SDK or native UI acceptance.

@@ -504,7 +504,7 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
 }
 
 final class InertOriginalFailure: Error {}
-struct InertFailureFixture { let scenario = "configuredLocal" }
+struct InertFailureFixture { var scenario = "configuredLocal" }
 func json(_ data: Data) throws -> [String: Any] {
     try JSONSerialization.jsonObject(with: data) as! [String: Any]
 }
@@ -516,13 +516,88 @@ func json(_ data: Data) throws -> [String: Any] {
     private func attachment(_ record: [String: Any], name: String) throws {}
     func journey(_ failureEvidence: StartupFailureEvidence) throws {
         let fixture = InertFailureFixture()
-        defer {}
+        var failedConfiguredPreflight = false
+        defer { _ = failedConfiguredPreflight }
         do {
             func guardTarget() throws { try guardWindow() }
             func dispatch() throws { try guardWindow(); try guardTarget() }
             try dispatch()
         __JOURNEY_FAILURE_CATCH__
     }
+}
+
+
+// The complete real journey teardown and catch run against inert XCUI adapters.
+// No XCTest/AppKit/application/OS process is created by this fixture.
+func lifecycleRun(_ mode: String) -> [String: Any] {
+    final class State { var events: [String] = []; var alive = true }
+    final class Running {
+        let state: State
+        init(_ state: State) { self.state = state }
+        var isTerminated: Bool { !state.alive }
+        let processIdentifier: Int32 = 400
+    }
+    struct Window { func screenshot() -> String { "inert-image" } }
+    struct Windows { let firstMatch = Window() }
+    final class UI {
+        enum Phase { case notRunning }
+        let state: State
+        let windows = Windows()
+        init(_ state: State) { self.state = state }
+        func terminate() { state.events += ["test_terminate", "listener_absent"]; state.alive = false }
+        func wait(for phase: Phase, timeout: Double) -> Bool { state.events.append("test_wait"); return !state.alive }
+    }
+    final class XCTAttachment {
+        enum Lifetime { case keepAlways }
+        var name = ""; var lifetime = Lifetime.keepAlways
+        init(screenshot: String) {}
+    }
+    let state = State()
+    let actualRunning = Running(state), ui = UI(state)
+    var fixture = InertFailureFixture()
+    if mode.hasPrefix("onboarding") { fixture.scenario = "onboarding" }
+    if mode.hasPrefix("invalidConfig") { fixture.scenario = "invalidConfig" }
+    if mode.hasPrefix("futureStore") { fixture.scenario = "futureStore" }
+    let paths = (emittedPath: "/inert/app", value: 0), launch = 1, bytes = Data()
+    let targetWindow: Int? = mode == "no_window" ? nil : 7
+    let captured = mode == "captured" || mode == "success"
+    let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
+        .resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let declaration = StartupAXDeclaration(path: directory.appendingPathComponent("receipt.json").path,
+        nonce: String(repeating:"a",count:64),helper_path:"/inert",helper_sha256:"",support_sha256:[:],owner_pid:1,deadline_ns:"1")
+    let recorder = StartupFailureEvidence(declaration, configurationSHA: String(repeating:"b",count:64))
+    let original = InertOriginalFailure()
+    func digest(_ bytes: Data) -> String { String(repeating:"b",count:64) }
+    func add(_ image: XCTAttachment) { state.events.append("failure_image") }
+    func guardWindow(_ ui: UI, running: Running, paths: (emittedPath:String,value:Int), launch:Int, number:Int) throws {
+        if mode == "guard_denied" { throw original }
+    }
+    func incarnation(_ running: Running, paths: (emittedPath:String,value:Int), launch:Int) throws { state.events.append("incarnation") }
+    func attachment(_ record: [String: Any], name:String) throws {
+        state.events.append(name.hasPrefix("nac342-first-preflight") ? "first_attachment" : "test_cleanup_attachment")
+    }
+    func XCTAssertTrue(_ value:Bool, _ message:String) { if !value { state.events.append("cleanup_assertion_failed") } }
+    func XCTFail(_ message:String) { state.events.append("cleanup_error") }
+    var preserved = false
+    func journey() throws {
+        let running = actualRunning
+        __JOURNEY_TEARDOWN__
+        let failureEvidence = recorder
+        do {
+            if mode != "success" {
+                if mode == "already_terminated" { state.alive = false }
+                state.events.append("local_throw"); throw original
+            }
+        __JOURNEY_FAILURE_CATCH__
+    }
+    do { try journey() } catch { preserved = (error as? InertOriginalFailure) === original }
+    let aliveAtCommit = state.alive
+    state.events.append("xcresult_commit")
+    _ = targetWindow; _ = captured
+    return ["events":state.events,"alive_at_commit":aliveAtCommit,"original_preserved":preserved,
+            "scenario":fixture.scenario]
 }
 
 
@@ -584,6 +659,8 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
     func ui() throws {
         defer { beforeTeardown = FileManager.default.fileExists(atPath: path); attachmentBeforeTeardown = attached != nil; events.append("teardown") }
         let failureEvidence = recorder
+        var failedConfiguredPreflight = false
+        defer { _ = failedConfiguredPreflight }
         do {
             if selected != "success" { events.append("throw"); throw error }
         __JOURNEY_FAILURE_CATCH__
@@ -661,7 +738,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -675,11 +752,12 @@ class ReceiptControls(unittest.TestCase):
         root = Path(cls.temporary.name).resolve()
         driver = root / 'main.swift'
         catch = journey_failure_catch()
+        teardown = '        // Cleanup is exact public application termination.' + Path(__file__).with_name('StartupJourneys.swift').read_text().split('        // Cleanup is exact public application termination.', 1)[1].split('        let failureEvidence = ', 1)[0]
         import re
         journey = Path(__file__).with_name('StartupJourneys.swift').read_text()
         request_name = re.search(r'client\.prepareInteraction\(ticket, point: point, anchor: anchor, kind: kind, label: ([^,\n]+),', journey).group(1)
         recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
-        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch)
+        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
                           .replace('__JOURNEY_REQUEST_NAME__', request_name)
                           .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
@@ -741,6 +819,26 @@ class ReceiptControls(unittest.TestCase):
                 self.assertEqual(row['attachment'], expected)
 
     def test_actual_journey_catch_preserves_error_identity_and_does_not_publish_success_or_unconfigured(self):
+        modes = ['configured_failure', 'guard_denied', 'no_window', 'captured', 'already_terminated',
+                 'success', 'onboarding_failure', 'invalidConfig_failure', 'futureStore_failure']
+        lifecycle = self.rows(['lifecycle_' + mode for mode in modes])
+        for mode, row in zip(modes, lifecycle):
+            with self.subTest(lifecycle=mode):
+                self.assertEqual(row['original_preserved'], mode != 'success')
+                events = row['events']
+                self.assertEqual(events[-1], 'xcresult_commit')
+                if mode in modes[:5]:
+                    self.assertNotIn('test_terminate', events)
+                    self.assertNotIn('test_wait', events)
+                    self.assertNotIn('test_cleanup_attachment', events)
+                    self.assertEqual(row['alive_at_commit'], mode != 'already_terminated')
+                    self.assertLess(events.index('first_attachment'), events.index('xcresult_commit'))
+                else:
+                    self.assertLess(events.index('test_terminate'), events.index('xcresult_commit'))
+                    self.assertIn('test_cleanup_attachment', events)
+                    self.assertFalse(row['alive_at_commit'])
+                self.assertEqual('failure_image' in events, mode not in ('guard_denied', 'no_window', 'captured', 'already_terminated', 'success'))
+
         identity, success, unconfigured, attachment_failure, both_failure = self.rows(
             ['first_identity', 'first_success', 'first_unconfigured', 'first_attachment_failure', 'first_both_failure'])
         self.assertTrue(identity['original_preserved'])

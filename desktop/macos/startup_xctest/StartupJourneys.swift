@@ -572,6 +572,7 @@ final class StartupJourneys: XCTestCase {
         var captured = false
         // Cleanup is exact public application termination. Engine/process-tree
         // settlement and profile deletion remain external owner observations.
+        var failedConfiguredPreflight = false
         defer {
             do {
                 if !running.isTerminated {
@@ -585,17 +586,21 @@ final class StartupJourneys: XCTestCase {
                             add(image)
                         }
                     }
-                    try incarnation(running, paths: paths, launch: launch)
-                    ui.terminate()
+                    if !failedConfiguredPreflight {
+                        try incarnation(running, paths: paths, launch: launch)
+                        ui.terminate()
+                    }
                 }
-                let stopped = ui.wait(for: .notRunning, timeout: 30)
-                try attachment(["schema": "nac342-cleanup-v1", "scenario": fixture.scenario,
-                    "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
-                    "app_path": paths.emittedPath, "app_termination_observed": stopped,
-                    "engine_cleanup": "requires_external_exact_owner_audit",
-                    "profile_cleanup": "requires_external_exact_owner_audit"],
-                    name: "nac342-cleanup-v1-" + fixture.scenario)
-                XCTAssertTrue(stopped, "Owned app termination unresolved; retain fixture")
+                if !failedConfiguredPreflight {
+                    let stopped = ui.wait(for: .notRunning, timeout: 30)
+                    try attachment(["schema": "nac342-cleanup-v1", "scenario": fixture.scenario,
+                        "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
+                        "app_path": paths.emittedPath, "app_termination_observed": stopped,
+                        "engine_cleanup": "requires_external_exact_owner_audit",
+                        "profile_cleanup": "requires_external_exact_owner_audit"],
+                        name: "nac342-cleanup-v1-" + fixture.scenario)
+                    XCTAssertTrue(stopped, "Owned app termination unresolved; retain fixture")
+                }
             } catch { XCTFail("Owned app identity/cleanup attachment unavailable; retain fixture for external cleanup") }
         }
         let failureEvidence = StartupFailureEvidence(fixture.ax_witness, configurationSHA: digest(bytes))
@@ -935,6 +940,10 @@ final class StartupJourneys: XCTestCase {
             "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
         } catch {
+            // Keep the failed XCTest result alive through its own commit. The
+            // existing external exact-identity owner settles this failed case
+            // after collection; this flag grants no input or cleanup authority.
+            failedConfiguredPreflight = fixture.scenario == "configuredLocal"
             if let record = failureEvidence.capture(error) {
                 try? attachment(json(JSONEncoder().encode(record)),
                     name: "nac342-first-preflight-failure-v1-" + fixture.scenario)

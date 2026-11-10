@@ -31,3 +31,11 @@ editable value alone never supplies semantic authority. Preserve public title/
 label and Message-only typed placeholder checks, unique same-query/anchor
 rechecks, global AX semantic/role/PID/CFEqual proof, exact focus/value and original
 point/freshness. Do not infer native label operands from identifier-query logs.
+
+An already caught configuredLocal failure keeps its original diagnostics/throw
+and hands app termination to the existing external exact-identity owner after
+failed XCTest collection. It grants no input or cleanup authority and emits no
+successful test-side cleanup claim. Success and other-case teardown stay public.
+The cohesive test_ax_witness.py may exceed 800 lines because its single compiled
+fixture exercises the complete canonical receipt/client and actual journey
+catch/teardown with inert adapters; keep that shared compilation and all negatives.

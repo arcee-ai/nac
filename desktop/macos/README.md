@@ -131,6 +131,12 @@ macOS 14 qualification, signing/notarization, consumer installation, background
 window lifecycle, native menus/bridge, or performance.
 Those have separate owners in the ALL-339 work map.
 
+A caught configuredLocal XCTest failure now preserves diagnostics and lets the
+existing external exact-identity owner settle the app after failed result
+collection. Successful teardown, other cases, audit/abort/sandbox/input/freshness
+and cleanup authority remain unchanged. This addresses a source-supported
+teardown/abort coupling, not a proven Actual16 cause or native acceptance.
+
 ## Ordinary startup supplier binding
 
 This private P12 nomination binds product
