@@ -1,3 +1,4 @@
+import { reverseImageApplicability } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
@@ -65,6 +66,7 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  reverseImageApplicability(normalized["managed-image-build"]);
   reverseAssetTokens(normalized["stable-release"]);
   reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
@@ -354,5 +356,18 @@ test("mutations cannot miss a cache role or change setup, quality, identity, pri
   ];
   for (const mutate of mutations) {
     const values = graph(); mutate(values); assert.throws(() => verify(values));
+  }
+});
+
+const imageEvidenceMutations = [
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ' --collect-applicability --collect-applicability'); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
+];
+
+test('image evidence and reporting deltas cannot weaken the original cold-cache contract', () => {
+  for (const mutate of imageEvidenceMutations) {
+    const value = graph(); mutate(value['managed-image-build'].jobs['build-smoke'].steps);
+    assert.throws(() => verify(value));
   }
 });
