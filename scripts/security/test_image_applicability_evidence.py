@@ -136,6 +136,7 @@ class ApplicabilityEvidenceTests(unittest.TestCase):
 
     def test_wrong_image_source_platform_or_volumes_are_rejected(self):
         for change in [{"Id": "sha256:" + "d" * 64}, {"Architecture": "arm64"}, {"Os": "windows"},
+                       {"Config": {"Labels": {}}},
                        {"Config": {"Labels": {"org.opencontainers.image.revision": "e" * 40}}},
                        {"Config": {**self.inspected[0]["Config"], "Volumes": {"/hidden": {}}}}]:
             broken = {**self.inspected[0], **change}

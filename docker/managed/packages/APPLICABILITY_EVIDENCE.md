@@ -16,6 +16,14 @@ export omits their contents. A candidate-supplied inspection JSON is not an
 independent identity observation. Retain the export and its SHA256, the inspect
 receipt and the exact collector/source revisions with the evidence.
 
+The final runtime stage records the explicitly supplied `NAC_SOURCE_REVISION`
+build argument as `org.opencontainers.image.revision`. Build with the truthful
+full source revision; an omitted argument remains empty. Legacy images lacking
+this label fail this new collection contract and need a freshly built candidate;
+the collector does not infer or fabricate a label. This metadata supplements
+the scanner's independent runtime/binary source verification. A matching label
+alone cannot prove that the binary or exported filesystem has that source.
+
 Use the existing reviewed source lock from the exact image source. Obtain the
 original curl/Kerberos source archives and all their listed patches through the
 existing pinned source-download process. Supply only the selected files to the

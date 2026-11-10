@@ -70,6 +70,12 @@ for name in ("NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"):
 PY_CACHE
 python3 "$repo_root/scripts/test-managed-dependency-layer.py"
 python3 "$repo_root/.github/scripts/image-build-driver.test.py"
+runtime_source_metadata=$(sed -n '/ AS runtime$/,$p' "$dockerfile")
+printf '%s\n' "$runtime_source_metadata" | grep -Fx 'ARG NAC_SOURCE_REVISION' >/dev/null || \
+    fail 'final runtime stage must receive the source revision without a fabricated default'
+# shellcheck disable=SC2016
+printf '%s\n' "$runtime_source_metadata" | grep -Fx 'LABEL org.opencontainers.image.revision="${NAC_SOURCE_REVISION}"' >/dev/null || \
+    fail 'final runtime image must retain the supplied source revision label'
 require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'

@@ -85,6 +85,11 @@ RUN python3 /recipe/package-runtime-apk.py /recipe/sources.lock.json \
 
 FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS runtime
 
+# Retain the caller's source identity in the final image as well as the binary.
+# An omitted build argument stays empty; evidence qualification rejects it.
+ARG NAC_SOURCE_REVISION
+LABEL org.opencontainers.image.revision="${NAC_SOURCE_REVISION}"
+
 ARG NODE_VERSION=24.22.1
 ARG NODE_SHA256=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
 ARG GO_VERSION=1.27.3
