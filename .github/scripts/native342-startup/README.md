@@ -1,9 +1,11 @@
 # PRIVATE NEVERMERGE: P12 integration product, Q3c7/H pins, four cases plus R
 
 This private source-binding candidate uses reviewed Q3c7 with the complete ten-file
-startup supplier roster and passive owner-stage H3 above authentic H02
-529b9d772da4d2e0afd9ae176e65f23355f446a6. H3 adds only static failure
-annotations; its affected source review is clear. C03 changes source bindings only.
+startup supplier roster and app-binding H4 above authentic H3
+d50fbbaa428b77251bb89252e969c6c7107c8b98. H4 permits one unique, exact-resource
+app-census refresh only when the initial selection is absent, with fresh kernel
+lifetime validation. Its affected review is SOURCE_CLEAR_WITH_LIMITS. C04 changes
+source bindings only; no historical runtime cause is established.
 All original acceptance, input, cleanup and timing guards are unchanged. The new
 scope/branch identify a prospective allocation; runtime remains unadmitted.
 P12 is the compatible normal INTEGRATION TEST PRODUCT containing the native picker,
@@ -20,24 +22,27 @@ attempts, first reporting repair and exhausted/STOP pools retain attribution.
 No execution, publication, actual allocation or goal is issued here.
 
 `pair.json` binds normal integration P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
-reviewed private Q `3c7acb4b609cea491a144947966d5dcd0872e4f3`, passive H3
-`d50fbbaa428b77251bb89252e969c6c7107c8b98`, and unchanged independent R
+reviewed private Q `3c7acb4b609cea491a144947966d5dcd0872e4f3`, app-binding H4
+`4c46110bb8e42db248eb2ef69d2e74906bdf23de`, and unchanged independent R
 `7325c48b3c9ec7036e255a6bd92f31c1a98c1607` (schema50/future51).
 Q has the exact ten reviewed799 source blobs/modes and remains above frozen
 UNMERGED L `1e873aa5200571940fe27dedb9c80b8f19966ebf`; it is a test supplier.
 P12 parent/native-boundary/source-context and historical SDK/preparation fields
-remain provenance for their original roles. H3's actual preparation parent is H02
-529b9d772da4d2e0afd9ae176e65f23355f446a6, itself above delivered Dca9. H3
-changes only the two diagnostic owners and their two focused test files; its
-TEST_SOURCE/TEST_FILES remain the exact H02 ten-file Q3c7 supplier roster.
+remain provenance for their original roles. H4's actual preparation parent is H3
+d50fbbaa428b77251bb89252e969c6c7107c8b98, above H02 and delivered Dca9. H4
+changes only the app-binding snapshot, its owning inert controls and their guide;
+TEST_SOURCE/TEST_FILES remain the exact H02/H3 ten-file Q3c7 supplier roster.
 The Q source roster is sealed by H TEST_FILES; current controller/H/Q availability
 must be separately arranged before any Root-admitted SDK/runtime episode.
 The preserved H01/C01 review remains SOURCE_CLEAR_WITH_LIMITS for its old H299 base.
-This H3 binding consumes the reviewed passive producer/consumer annotations
-while retaining the original observer/owner/cleanup decisions. It does not extend
-the historical old-base disposition or prove an Actual06 cause. Actual06 remains
-FAIL/INCOMPLETE: onboarding input UNKNOWN, positive app/engine cleanup unproven,
-fixture retained and later three cases UNRUN. No one-case/R0 path is introduced.
+This H4 binding retains passive producer/consumer annotations and consumes the
+reviewed narrow app-binding interleaving repair. Nonempty mismatches and adverse
+resource/lifetime/ancestry checks still reject; no input/cleanup authority changes.
+It does not extend the historical old-base disposition or prove a historical cause.
+Actual06 remains FAIL/INCOMPLETE with onboarding input and native cleanup unproven.
+Actual07 passed R and onboarding, then configuredLocal failed app_binding with
+input UNKNOWN, native cleanup unproven and fixture retained; two later cases UNRUN.
+No one-case/R0 path is introduced.
 Historical source/inert evidence retains its original attribution. No old
 compiler/runtime allowance is reset and no current-host episode is granted here.
 
