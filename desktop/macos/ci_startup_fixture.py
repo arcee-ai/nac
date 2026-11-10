@@ -16,20 +16,20 @@ from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
-TEST_SOURCE = '80b771ef59663e12df6822fb986aa8186fc244b3'
+TEST_SOURCE = '95a34b063ab1ec321f775bcfe14983d52dd97b2a'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': '6136f47e6c5ff17d4eacb890e8a112468c5da91e2523c479625c153644ce06bb',
-    'StartupJourneys.swift': 'be9d20567caff0317303b6c4491786d6e77273b73c3545692d4e48c2fa27bcfe',
+    'README.md': 'cceb74e21ec113881acd5f7cf2e93b6d935a07998cca8ce278c874131976b9bd',
+    'StartupJourneys.swift': '57902cda27adbd1c7bd215238ffe6a1091d9f24dcd8b237a21d2a1b9d3919945',
     'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
     'test_contract.py': 'c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e',
     'StartupAXGuard.swift': '923cfeb8cea1cf68dbb4b9af07dd9b7846ca0da0e233a4986d0c1ea1ae58127e',
     'StartupAXReceipt.swift': '49e49e4ac6091e612b3049f4ca46a4552c00abacf6fa80642263ea9b98a268a2',
     'AX-WITNESS-CONTRACT.md': '5541135c2f61f17c3ef093cb151af675a03d917f3f3ac2dcac9e3cc9b402099e',
-    'test_ax_witness.py': '21f22a5fc3da334c9b397e21a37d3e4209d05b2aaaa8f4df5d14700da58e0fbb',
-    'AGENTS.md': 'a8478ae6ebb8aefae3e21eb6cca6e3aa79718da6da96bee5ec87f0859fada448',
+    'test_ax_witness.py': '6a0ce767fefc9c43f1f9971f54a4d1ceebd8beeb417a5797c237896e6a51b480',
+    'AGENTS.md': 'c98d6333268d3d5039b5f316fd8297ebbadf92b148384442bea1a44b4c5e76c5',
     'test_title_assertion.py': 'e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef'
 }
 FUTURE_MESSAGE = ('The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. '
