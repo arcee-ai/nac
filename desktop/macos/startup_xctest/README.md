@@ -1,18 +1,35 @@
-# Current private AX witness source unit
+# Current interaction preflight supplier
 
-The canonical test target now consists of StartupJourneys.swift plus
-StartupAXGuard.swift and StartupAXReceipt.swift. H compiles the two shared files
-alongside its owned finite companion; the Runner only reads its private receipt.
-[AX-WITNESS-CONTRACT.md](AX-WITNESS-CONTRACT.md) defines the bounds and refusal
-semantics. This supersedes the historical four-file/one-Swift supplier statements
-below for a new explicit Q nomination. No app/runtime source is supplied.
+The current ten-file test supplier contains StartupJourneys.swift and the shared
+StartupAXGuard.swift/StartupAXReceipt.swift actor and client, with its guides,
+contract and controls. H compiles those same two shared Swift files with its
+finite companion. The Runner publishes one closed private point request and
+consumes the readonly proof on that existing port. The ordinary app and Runner
+sandbox remain unchanged. P12 remains a normal integration-only product input;
+this supplier does not rebuild or relabel it.
 
-The required macOS policy lane retains the six geometry and three original AX
-diagnostic controls, adds an ancestry control and seven whole-client inert tests,
-and rejects skips. Run the new controls with
-`NAC342_AX_WITNESS_PROOF=1 python3 -B -m unittest discover -s desktop/macos/startup_xctest -p test_ax_witness.py -v`.
-The Swift test driver invokes fake receipt/input ports, never the live AX reader.
-Complete helper compilation is additional source evidence, not SDK/native proof.
+[AX-WITNESS-CONTRACT.md](AX-WITNESS-CONTRACT.md) is the current accepted contract.
+It replaces exhaustive raw CG association with explicit public-coordinate global
+AX ownership preflight and accepts the last-instant coordinate race. Initial
+singleton root binding, retained AX identities, source/nonce binding, original
+30s ticket, <=1s sample/final freshness, exact focus/value, all postconditions and
+positive cleanup remain. Pointer dispatch uses the same checked public
+XCUICoordinate; no atomic or observed delivered-event equality is claimed.
+
+The source controls contain six geometry tests, seven exact reader/refusal tests
+with inert AX adapters, and twenty whole-client/file/request controls. Run:
+
+```sh
+NAC342_SWIFT_PANEL_PROOF=1 PYTHONPATH=desktop/macos/startup_xctest python3 -B -m unittest test_contract.NativeFolderPolicyTests test_contract.AXRefusalTests -v
+NAC342_AX_WITNESS_PROOF=1 python3 -B -m unittest discover -s desktop/macos/startup_xctest -p test_ax_witness.py -v
+```
+
+These compile actual source against deterministic value/API ports. They execute
+no live AX actor, app or input. Full helper SDK compilation and separately owned
+full-Xcode/native qualification remain distinct evidence obligations. Historical
+sections below retain their original attribution; superseded supplier counts,
+request prohibition and input-selection rules do not override the current
+contract linked above.
 
 # Ordinary startup XCTest proposal (ALL-342)
 

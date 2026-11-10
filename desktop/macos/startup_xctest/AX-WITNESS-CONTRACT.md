@@ -1,80 +1,112 @@
-# Configured-local read-only AX witness contract
+# Configured-local interaction preflight
 
-This test-only port changes neither Runner entitlements nor the ordinary app.
-H owns one finite companion process, its canonical target declaration and its
-read-only receipt location. The metadata observer remains independent. Q keeps
-all public XCUI queries/actions and all existing guard/dispatch sites.
+This is test infrastructure, outside the ordinary product compiler roster. H
+owns one finite readonly AX companion and the original metadata process. Q owns
+all public XCTest queries and input. No new OS/TCC permission, prompt, private
+API, AX action/write, production endpoint or reusable automation framework is
+introduced. Root accepted this interaction contract as a replacement for
+exhaustive raw-CG-to-AX inventory association. Extra CG IDs are neither mapped
+by inference nor a count veto. Initial root admission remains singleton; every
+later sample retains that exact original CG root and exact process incarnation.
+Unknown or replaced roots still fail. Other scenarios retain their old policy.
 
-Both Swift processes use `DispatchTime.now().uptimeNanoseconds` on the SAME host.
-All wire counters/timestamps are canonical decimal strings, never JSON doubles.
-The frozen declaration retains H’s original work cutoff minus its existing 15s
-reserve before SDK compilation. At companion start H fixes an effective case
-deadline at the earlier frozen cutoff or start plus the existing 300s case cap.
-The helper receives that immutable cutoff as one CLI argument and every receipt
-retains it; spending time compiling cannot reset the original cutoff. AX samples have a 1s TOTAL cap, including messaging; every individual AX call
-also retains the original <=1s messaging limit. Sampling pauses 50ms between
-completed samples. A guard has a new stricter 30s outer cap within the existing
-300s case cap, and accepted sample age is <=1s. These are fail-closed upper bounds,
-not permission to extend an original Root/phase deadline or retry an AX refusal.
+## Existing binding and deadlines
 
-Before local guard queries, Q reads a baseline sequence/refusal generation and
-then records guard-entry time. It consumes a DISTINCT subsequent sample whose
-BEGIN is strictly after entry, END is ordered and no later than consumption, and
-refusal generation has not changed. A read already in progress at entry cannot
-become fresh merely by publishing late. Repeated reads of an unchanged snapshot
-only wait for publication; any refusal or changed refusal generation fails at
-once, even if a later positive snapshot overwrote the failed one. No polling for
-a positive AX predicate is allowed. Sequence/helper/target/time rollback fails.
+The frozen declaration binds config, nonce, exact helper/support source hashes,
+owner PID and private profile-relative receipt path. All wire times are canonical
+UInt64 decimal strings from DispatchTime.uptimeNanoseconds on the SAME host.
+H freezes its original work cutoff minus 15s before SDK compilation; companion
+start fixes min(frozen deadline, start+300s). No build, guard or interaction renews
+that allowance. Each sample, including all AX calls and bookends, is <=1s; each
+AX message has at most the remaining sample allowance. Sampling pauses 50ms.
 
-H's companion retains the real root/panel/GoTo AX handles for the whole case.
-CFEqual, direct-sheet topology, finite geometry, scoped PID, typed positive focus,
-exact decoded String value and the <=16 ancestor walk keep their original owners
-and semantics in canonical StartupAXGuard.swift. Tokens name those retained
-handles and never rebind. Q independently applies its existing geometry/value
-and public XCUI checks. Geometry, labels, hashes or new process-per-guard tokens
-cannot replace that identity. Initial form admission precedes any panel binding.
+A guard reads a positive baseline sequence/refusal generation, records entry,
+then consumes a distinct sample BEGUN after entry. Refusal/generation change,
+malformed input, changed duplicate, rollback or admitted-port loss fails with
+zero next input; later positives cannot erase that failure. The original guard
+ticket is capped at 30s. A fully validated positive already older than 1s may
+await another publication within that same ticket, but stale data is never
+accepted. Final consumption still checks <=1s age. No predicate-refusal retry.
 
-Normal phase absence (no sheet in form, no GoTo in panel) is a positive topology,
-not an AX error. During an input action Q consumes no guard; any read refusal is
-counted. A baseline may only be taken from a positive sample; a refusal visible
-at entry fails rather than waiting it away. Within a guard ANY new refusal fails.
-The helper may observe a legitimate transition between guards, but it retains
-all previously accepted handles through disappearance/cancel/replacement.
+The canonical actor retains real CFEqual root/panel/GoTo handles through the
+case, including disappeared sheets. Exact original-root geometry, admitted PID,
+direct root→sheet→nested-sheet topology and membership of every AXWindows object
+remain enforced. Same-shaped replacements do not rebind. Q retains its exact
+logical window/sheet counts, geometry, enabled/hittable checks, console,
+resource and process checks. GoTo keyboard focus still requires exact PID,
+AXTextField role, true focus, retained-sheet ancestry, exact frame and exact
+private String value (<=4096 UTF-8 bytes).
 
-The sole receipt is below the externally owned profile, outside HOME/store and
-outside exported raw evidence. Parent directory is canonical/no-follow/0700;
-each complete <=8192B receipt is a regular, same-UID, single-link 0400 file,
-published by exclusive temporary creation and atomic replacement. Q only reads
-and verifies a stable opened file. Wrong source/config/nonce/helper/target,
-malformed/partial/oversize/symlink/foreign receipt or helper EOF/timeout/ownership
-loss refuses with ZERO NEXT INPUT. A parent-only `.stop` file containing the fixed nonce requests cooperative
-companion termination before profile removal; the Runner never writes it. No
-Runner request file/socket, arbitrary PID/attribute
-selector, AX write/action or product automation endpoint exists.
+## Bound public interaction point
 
-Exact field text is private ephemeral fixture data, bounded to 4096 UTF-8 bytes;
-it never enters exported diagnostics. Exported guard proof contains only typed
-equal/focused/bound facts, retained opaque tokens and counters/timestamps. The
-existing failure diagnostic remains bounded and contains no field/tree text.
+Before each of the eleven configured inputs, Q selects a public XCUICoordinate
+from the intended element and reads its screenPoint. The point must be finite,
+exactly representable by the public AX Float API and inside the anchor frame.
+Q publishes one closed request at receipt.path+'.request', on the existing
+private port. It contains the nonce/config binding, opaque challenge/root token,
+original ticket cutoff/generation/sequence, entry time, expected phase, point,
+anchor/root frames and a closed button/message/panel/field intent. Private exact
+label/value are used only for target/focus comparison; never exported.
 
-The successful path keeps initial direct console admission plus 26 guardTarget
-observations = 27, and all 11 inputs/22 before-after dispatch records. One fresh
-AX receipt is consumed per configured guardTarget, not an invented 27th AX read.
-No read/input atomicity is claimed beyond the original before/after fences.
-Missing original deadline, sample freshness, field equality or ownership is NO_GO.
+H uses AXUIElementCreateSystemWide with AXUIElementCopyElementAtPosition, so
+z-order occluders from another process are visible. The public hit must have
+admitted PID throughout a bounded, acyclic parent walk to the current retained
+root/sheet. Exactly one matching role/frame anchor is required on that path;
+button/message title or description must equal Q's intended label. Same PID
+unrelated surfaces, foreign hits, unsupported attributes, ambiguous anchors and
+missing ancestry refuse. The target is retained with CFEqual, both between the
+two hits for this request and for repeated field/message/panel/labelled-button
+intents. A second hit after the process/resource/root-frame bookend must resolve
+to that SAME handle. Keyboard preflight additionally proves focus is that exact
+field/message target with exact value, or an owned descendant of the retained
+panel for the panel shortcut. All previous GoTo focus checks also run.
 
-Source/inert controls are not actual AX, full SDK, or native acceptance. A new
-reviewed source nomination and separately bounded actual configured-local run
-must qualify this implementation with all original PNG/API/store/cleanup oracles.
+H publishes the challenge-bound proof in the existing receipt and holds it
+stable until Q clears its exact request. While held, H checks its original
+parent/deadline, target kernel identity, resource/config and original root frame;
+the independent metadata owner continues custody. Parent-only .stop still
+terminates cooperatively. Request loss is the consume acknowledgment, never a
+new input authority. The request uses the same no-follow/0700-directory,
+regular same-UID single-link 0400-file, <=8192B atomic publication rules. No
+arbitrary PID, attribute or action selector is accepted.
 
-H uses its existing owned `ci.run` supervisor for this separate process, with a
-finite per-helper phase and drained/reaped ownership receipt. A helper failure
-or unknown settlement retains the profile even if app settlement succeeded.
+Q consumes a newly begun request-bound sample under the SAME original ticket,
+then immediately rechecks target existence/enabled/hittable, anchor/root frame,
+selected coordinate screenPoint, config/resources/incarnation/console and exact
+keyboard value. Final consumption rereads the bound proof, checks generation,
+<=1s sample/final age and original deadline, clears the request, then records a
+final fresh timestamp. Pointer input dispatches coordinate.click() on that SAME
+public coordinate object. Keyboard input retains its public target action and
+exact focus/value preflight. Existing after-action guards and postconditions
+remain required. A failed preflight latches the client; no next input.
 
-Review repairs F1/F2/F3: receipt acquisition is O_NONBLOCK before regular-file
-admission, so a writerless FIFO cannot consume the guard allowance. Initial
-publication may wait; after a positive target receipt has been admitted, any
-load loss latches refusal for that client. Positive exact known-app retirement
-produces only a terminal non-ready receipt. It never restores AX/input authority
-or rebinds a target. H reconciles it only after complete original case proofs
-and positive exact app/engine metadata settlement; missing app alone is failure.
+Coordinates are dynamic. A last-instant race between the final checks and OS
+input remains explicitly ACCEPTED. This does not claim atomic dispatch or an
+independently observed delivered-event point. Geometry, count or root presence
+alone is never an interaction proof.
+
+## Evidence and cleanup
+
+Keep the original 27 exported console observations plus eleven immediate
+pre-dispatch console rechecks, 26 canonical guard receipts, 11
+inputs and 22 dispatch records. Eleven additional private-text-free interaction
+proofs record request/target tokens, intent, point/anchor and sequence/times,
+including final freshness. H verifies each lies between its existing before and
+after guard. Missing, replayed, stale, changed-intent or private-field proof fails
+collection. Existing PNG/API/store/provider/postcondition oracles remain.
+
+All private receipts/requests are outside HOME/store/exported raw evidence.
+Diagnostic export is closed and bounded; no field, focus value, label or AX tree
+text escapes. H's existing ci.run owner drains/reaps the helper before app and
+profile settlement. Missing ownership keeps the fixture. Window closure latches
+non-ready retiring; exact positive ESRCH latches retired. Neither can restore AX
+or input; reappearance/replacement fails. Final success still requires completed
+case proofs plus independent exact app/engine metadata settlement.
+
+Source controls and SDK compilation do not establish actual GUI acceptance.
+Original failures and spent allocations remain historical. Root separately
+routes the original affected review and exact-source full-Xcode/native run.
+
+Public references: [dynamic screenPoint](https://developer.apple.com/documentation/xcuiautomation/xcuicoordinate/screenpoint),
+[public normalized coordinate](https://developer.apple.com/documentation/xcuiautomation/xcuielement/coordinate(withnormalizedoffset:)),
+[global AX z-order hit-test](https://developer.apple.com/documentation/applicationservices/1462077-axuielementcopyelementatposition).

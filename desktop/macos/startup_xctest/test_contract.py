@@ -942,6 +942,7 @@ class AXRefusalTests(unittest.TestCase):
         policy = block('// BEGIN NATIVE FOLDER POLICY', '// END NATIVE FOLDER POLICY')
         diagnostic = block('// BEGIN AX REFUSAL', '// END AX REFUSAL')
         identity = block('// BEGIN AX IDENTITY', '// END AX IDENTITY')
+        interaction = block('// BEGIN INTERACTION POLICY', '// END INTERACTION POLICY')
         methods = source[source.index('    private typealias AXIdentity ='):source.index('    func observe(pid:')]
         # All public AX names below are inert local stubs, never framework calls.
         stubs = r"""
@@ -953,6 +954,15 @@ let kAXWindowsAttribute = "AXWindows", kAXChildrenAttribute = "AXChildren"
 let kAXRoleAttribute = "AXRole", kAXPositionAttribute = "AXPosition", kAXSizeAttribute = "AXSize"
 let kAXFocusedUIElementAttribute = "AXFocusedUIElement", kAXFocusedAttribute = "AXFocused"
 let kAXValueAttribute = "AXValue", kAXParentAttribute = "AXParent"
+let kAXTitleAttribute = "AXTitle", kAXDescriptionAttribute = "AXDescription"
+var systemHit = "button"
+func AXUIElementCreateSystemWide() -> AXUIElement { token("system") }
+func AXUIElementCopyElementAtPosition(_ system: AXUIElement, _ x: Float, _ y: Float,
+    _ output: UnsafeMutablePointer<AXUIElement?>) -> AXError {
+    calls.append("global:" + (system as String))
+    guard system as String == "system", mode != "interaction_api_error", x == 25, y == 27 else { return .failure }
+    output.pointee = token(systemHit);return .success
+}
 var attributes = [String: [String: AnyObject]]()
 var mode = "", calls = [String]()
 func token(_ name: String) -> CFString { name as CFString }
@@ -973,7 +983,7 @@ func AXUIElementCopyAttributeValue(_ element: AXUIElement, _ name: CFString,
     return .success
 }
 func AXUIElementGetPid(_ element: AXUIElement, _ result: UnsafeMutablePointer<pid_t>) -> AXError {
-    calls.append("pid:" + (element as String)); result.pointee = ["pid", "focus_pid"].contains(mode) ? 124 : 123
+    calls.append("pid:" + (element as String)); result.pointee = element as String == "foreign" ? 500 : ["pid", "focus_pid"].contains(mode) ? 124 : 123
     return .success
 }
 func AXValueGetType(_ value: AXValue) -> AXValueType {
@@ -992,6 +1002,25 @@ func prepare(_ selected: String) {
     attributes = ["app": ["AXWindows": [token("root")] as NSArray],
                   "root": ["AXRole": "AXWindow" as NSString, "AXPosition": value(1, 10, 20),
                            "AXSize": value(2, 100, 30), "AXChildren": [] as NSArray]]
+    if mode.hasPrefix("interaction_") {
+        systemHit = mode == "interaction_foreign" ? "foreign" : mode == "interaction_owned_occluder" ? "other" : "button"
+        let keyboard = mode.contains("keyboard") || mode.contains("focus_")
+        attributes["button"] = ["AXRole": (keyboard ? "AXTextArea" : "AXButton") as NSString,
+            "AXTitle": "Intended" as NSString, "AXPosition": value(1,20,25), "AXSize": value(2,20,10),
+            "AXParent": token("root"), "AXFocused": kCFBooleanTrue, "AXValue": "owned" as NSString]
+        attributes["foreign"] = attributes["button"];attributes["other"] = attributes["button"]
+        attributes["other"]?["AXParent"] = token("unrelated")
+        attributes["app"]?["AXFocusedUIElement"] = token("button")
+        if mode == "interaction_ambiguous" {
+            attributes["buttonChild"] = attributes["button"];attributes["buttonChild"]?["AXParent"] = token("button")
+            systemHit = "buttonChild"
+        }
+        if mode == "interaction_moved" { attributes["button"]?["AXPosition"] = value(1,21,25) }
+        if mode == "interaction_wrong_label" { attributes["button"]?["AXTitle"] = "Occluder" as NSString }
+        if mode == "interaction_focus_target" { attributes["app"]?["AXFocusedUIElement"] = token("other") }
+        if mode == "interaction_focus_value" { attributes["button"]?["AXValue"] = "wrong" as NSString }
+        if mode == "interaction_focus_flag" { attributes["button"]?["AXFocused"] = 1 as NSNumber }
+    }
     if mode.hasPrefix("focus_") {
         attributes["app"]?["AXFocusedUIElement"] = token("field")
         attributes["field"] = ["AXRole": "AXTextField" as NSString, "AXFocused": kCFBooleanTrue,
@@ -1035,6 +1064,28 @@ func prepare(_ selected: String) {
 """
         driver = r"""
     func run() -> [String: Any] {
+        if mode.hasPrefix("interaction_") {
+            do {
+                var binding = StartupNativeFolderPolicy.Binding<AXIdentity>()
+                guard axSurface(.form,pid:123,frame:CGRect(x:10,y:20,width:100,height:30),binding:&binding) != nil else {
+                    throw StartupAXReceiptError.refused
+                }
+                let stamp=DispatchTime.now().uptimeNanoseconds
+                readDeadline = mode == "interaction_expired" ? stamp : stamp + 1_000_000_000
+                let keyboard=mode.contains("keyboard") || mode.contains("focus_")
+                let request=StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:String(repeating:"a",count:64),
+                    configuration_sha256:String(repeating:"b",count:64),id:UUID().uuidString,root_id:rootID,
+                    entered_ns:String(stamp),deadline_ns:String(stamp+30_000_000_000),baseline_sequence:"1",refusal_generation:"0",
+                    surface:"form",kind:keyboard ? "message" : "button",label:"Intended",keyboard:keyboard,
+                    point:[25,27],anchor_frame:[20,25,20,10],root_frame:[10,20,100,30],value:keyboard ? "owned" : nil)
+                let first=try interaction(request,pid:123)
+                if mode == "interaction_replaced" {
+                    attributes["replacement"] = attributes["button"];systemHit="replacement"
+                }
+                let second=try interaction(request,pid:123)
+                return ["accepted":first == second,"globals":calls.filter{$0 == "global:system"}.count]
+            } catch { return ["accepted":false] }
+        }
         if mode.hasPrefix("focus_") {
             return ["accepted": focusedGoToField(pid:123, sheet:token("goTo")) != nil]
         }
@@ -1065,7 +1116,7 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows)
 """
         swift = root / 'main.swift'
         swift.write_text('import Foundation\nimport CoreFoundation\nimport CoreGraphics\nimport Darwin\n'
-                         + stubs + policy + diagnostic + identity + '\nprivate final class Probe {\n' + methods + driver)
+                         + stubs + policy + interaction + diagnostic + identity + '\nprivate final class Probe {\n' + methods + driver)
         cls.binary = root / 'proof'
         result = subprocess.run(['swiftc', '-swift-version', '5', str(Path(__file__).with_name('StartupAXReceipt.swift')), str(swift), '-o', str(cls.binary)],
                                 capture_output=True, text=True, timeout=90)
@@ -1076,6 +1127,18 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows)
         result = subprocess.run([str(self.binary)], input=json.dumps(modes), capture_output=True,
                                 text=True, timeout=10, check=True)
         return json.loads(result.stdout)
+
+    def test_exact_actor_uses_global_hits_and_retained_target_on_both_bookends(self):
+        self.assertEqual(self.run_modes(['interaction_positive', 'interaction_keyboard_positive']),
+                         [dict(accepted=True, globals=2)] * 2)
+
+    def test_exact_actor_denies_foreign_owned_occluder_ambiguous_moved_replaced_and_expired_point(self):
+        modes = ['foreign', 'owned_occluder', 'ambiguous', 'moved', 'wrong_label', 'replaced', 'expired', 'api_error']
+        self.assertEqual(self.run_modes(['interaction_' + m for m in modes]), [{'accepted':False}] * len(modes))
+
+    def test_exact_actor_keyboard_requires_same_focused_handle_typed_focus_and_value(self):
+        self.assertEqual(self.run_modes(['interaction_focus_target', 'interaction_focus_flag', 'interaction_focus_value']),
+                         [{'accepted':False}] * 3)
 
     def test_distinct_first_failure_facts_preserve_nil_and_never_poll_after_refusal(self):
         modes = ['timeout', 'api_error', 'missing', 'type', 'member', 'count', 'frame',

@@ -75,6 +75,49 @@ enum StartupNativeFolderPolicy {
 }
 // END NATIVE FOLDER POLICY
 
+// BEGIN INTERACTION POLICY (same algorithm, inert value ports in controls)
+enum StartupInteractionPolicy {
+    struct Binding<Token: Equatable> {
+        private var id: String?
+        private var target: Token?
+        mutating func accept(_ request: String, target candidate: Token) -> Bool {
+            guard id != request || target == candidate else { return false }
+            id = request; target = candidate; return true
+        }
+    }
+    struct Targets<Token: Equatable> {
+        private var values: [String: Token] = [:]
+        mutating func accept(_ key: String, target: Token) -> Bool {
+            guard values.count < 11 || values[key] != nil, values[key] == nil || values[key] == target else { return false }
+            values[key] = target; return true
+        }
+    }
+    static func unchanged(point: CGPoint, expected: CGPoint, anchor: CGRect, expectedAnchor: CGRect,
+                          root: CGRect, expectedRoot: CGRect) -> Bool {
+        [point.x, point.y].allSatisfy { $0.isFinite } && point == expected
+            && anchor == expectedAnchor && root == expectedRoot && anchor.contains(point)
+    }
+    static func target<Token: Equatable>(hit: Token, owner: Token, pid: Int32, anchor: CGRect,
+        roles: Set<String>, label: String?, project: (Token) throws -> (Int32, String, CGRect, String?),
+        parent: (Token) throws -> Token?) throws -> Token {
+        var node = hit, visited: [Token] = [], matches: [Token] = []
+        for _ in 0..<32 {
+            try StartupAXFiles.need(!visited.contains(node)); visited.append(node)
+            let fact = try project(node)
+            try StartupAXFiles.need(fact.0 == pid && pid > 0)
+            if roles.contains(fact.1) && fact.2 == anchor && (label == nil || fact.3 == label) { matches.append(node) }
+            if node == owner {
+                try StartupAXFiles.need(matches.count == 1)
+                return matches[0]
+            }
+            guard let next = try parent(node) else { throw StartupAXReceiptError.refused }
+            node = next
+        }
+        throw StartupAXReceiptError.refused
+    }
+}
+// END INTERACTION POLICY
+
 // BEGIN AX REFUSAL (inert extracted-source controls; never grants acceptance)
 struct StartupAXRefusal {
     private(set) var first: [String: Any]?
@@ -297,6 +340,88 @@ final class StartupAXReader {
                 focused: flag.boolValue, frame: frame, expectedFrame: frame, value: text, expectedValue: text) else { return nil }
         return StartupAXFocus(pid: owner, role: role, focused: flag.boolValue, attached: attached,
             frame: [frame.minX, frame.minY, frame.width, frame.height], value: text)
+    }
+
+    private var inputTargets = StartupInteractionPolicy.Targets<AXIdentity>()
+    private var interactionBinding = StartupInteractionPolicy.Binding<AXIdentity>()
+    private var inputTargetIDs: [String: String] = [:]
+
+    // Global z-order query, never app-scoped: foreign occluders must be seen.
+    private func hitTarget(_ request: StartupAXInteractionRequest, pid: pid_t) throws -> AXUIElement {
+        guard let projected, projected.0.rawValue == request.surface, request.root_id == rootID else {
+            throw StartupAXReceiptError.refused
+        }
+        let rootFrame = try StartupAXFiles.frame(request.root_frame)
+        guard axFrame(projected.1) == rootFrame else { throw StartupAXReceiptError.refused }
+        let owner = projected.3 ?? projected.2 ?? projected.1
+        let anchor = try StartupAXFiles.frame(request.anchor_frame)
+        let point = CGPoint(x: request.point[0], y: request.point[1])
+        let system = AXUIElementCreateSystemWide()
+        guard timeout(system) == .success else { throw StartupAXReceiptError.refused }
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+              let hit else { throw StartupAXReceiptError.refused }
+        let roles: [String: Set<String>] = ["button": ["AXButton"], "message": ["AXTextArea", "AXTextField"],
+            "panel": ["AXSheet"], "field": ["AXTextField"]]
+        let target = try StartupInteractionPolicy.target(hit: AXIdentity(element: hit),
+            owner: AXIdentity(element: owner), pid: pid, anchor: anchor, roles: roles[request.kind]!,
+            label: ["button", "message"].contains(request.kind) ? request.label : nil, project: { token in
+                let node = token.element as! AXUIElement
+                var actual: pid_t = 0
+                guard AXUIElementGetPid(node, &actual) == .success,
+                      let role = self.axRead(node, kAXRoleAttribute) as? String else { throw StartupAXReceiptError.refused }
+                let frame = roles[request.kind]!.contains(role) ? self.axFrame(node) : CGRect.zero
+                guard let frame else { throw StartupAXReceiptError.refused }
+                var label: String?
+                if roles[request.kind]!.contains(role) && ["button", "message"].contains(request.kind) {
+                    let title = self.axRead(node, kAXTitleAttribute) as? String
+                    label = title == request.label ? title : self.axRead(node, kAXDescriptionAttribute) as? String
+                }
+                return (actual, role, frame, label)
+            }, parent: { token in
+                guard let raw = self.axRead(token.element as! AXUIElement, kAXParentAttribute),
+                      CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+                return AXIdentity(element: raw)
+            }).element as! AXUIElement
+        if request.keyboard {
+            let app = AXUIElementCreateApplication(pid)
+            guard let raw = axRead(app, kAXFocusedUIElementAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+                throw StartupAXReceiptError.refused
+            }
+            let focus = raw as! AXUIElement
+            var focusedPID: pid_t = 0
+            guard AXUIElementGetPid(focus, &focusedPID) == .success, focusedPID == pid,
+                  let flag = axRead(focus, kAXFocusedAttribute) as? NSNumber,
+                  CFGetTypeID(flag) == CFBooleanGetTypeID(), flag.boolValue else { throw StartupAXReceiptError.refused }
+            if request.kind == "panel" {
+                var ancestor = focus, attached = false
+                for _ in 0..<16 {
+                    var ancestorPID: pid_t = 0
+                    guard AXUIElementGetPid(ancestor, &ancestorPID) == .success, ancestorPID == pid else { break }
+                    if CFEqual(ancestor, target) { attached = true; break }
+                    guard let raw = axRead(ancestor, kAXParentAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID() else { break }
+                    let next = raw as! AXUIElement
+                    if CFEqual(next, ancestor) { break }
+                    ancestor = next
+                }
+                guard attached else { throw StartupAXReceiptError.refused }
+            } else {
+                guard CFEqual(focus, target), let expected = request.value,
+                      axRead(focus, kAXValueAttribute) as? String == expected else { throw StartupAXReceiptError.refused }
+            }
+        }
+        guard DispatchTime.now().uptimeNanoseconds < readDeadline else { throw StartupAXReceiptError.expired }
+        return target
+    }
+    func interaction(_ request: StartupAXInteractionRequest, pid: pid_t) throws -> StartupAXInteraction {
+        try request.validate()
+        let target = try hitTarget(request, pid: pid)
+        let key = ["field", "message", "panel"].contains(request.kind) ? request.kind : request.kind + ":" + request.label
+        guard inputTargets.accept(key, target: AXIdentity(element: target)),
+              interactionBinding.accept(request.id, target: AXIdentity(element: target)) else { throw StartupAXReceiptError.refused }
+        if inputTargetIDs[key] == nil { inputTargetIDs[key] = UUID().uuidString }
+        return StartupAXInteraction(request_id: request.id, target_id: inputTargetIDs[key]!,
+            point: request.point, anchor_frame: request.anchor_frame, keyboard: request.keyboard, focus_checked: request.keyboard)
     }
 
     func observe(pid: pid_t, frame: CGRect) throws -> StartupAXSurface {

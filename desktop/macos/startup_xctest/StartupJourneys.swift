@@ -460,7 +460,7 @@ final class StartupJourneys: XCTestCase {
 
     @MainActor
     private func guardWindow(_ ui: XCUIApplication, running: NSRunningApplication,
-                             paths: StartupPaths, launch: Date, number: Int) throws {
+                             paths: StartupPaths, launch: Date, number: Int, record: Bool = true) throws {
         try incarnation(running, paths: paths, launch: launch)
         try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == running.processIdentifier
             && ui.windows.count == 1, "Ordinary app lost unique foreground window")
@@ -471,7 +471,8 @@ final class StartupJourneys: XCTestCase {
                 && ($0[kCGWindowNumber as String] as? NSNumber)?.intValue == number
                 && ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
         }.count == 1, "Exact owned window is not on screen")
-        observations.append(try console())
+        let state = try console()
+        if record { observations.append(state) }
     }
 
     @MainActor
@@ -663,6 +664,7 @@ final class StartupJourneys: XCTestCase {
             } else { field = nil }
             _ = try XCTUnwrap(axClient).consume(ticket, surface: folderSurface, rootFrame: rootWindow.frame, field: field)
         }
+        var guardTicket: StartupAXClient.Ticket?
         func guardTarget() throws {
             do {
                 let ticket = try axClient?.begin()
@@ -670,6 +672,7 @@ final class StartupJourneys: XCTestCase {
                 try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
                     "Frozen fixture configuration changed")
                 if let ticket { try validateFolderSurface(ticket) }
+                guardTicket = ticket
             } catch {
                 if !axRefusalEmitted, let data = axClient?.failureData,
                    var record = try? json(data) {
@@ -685,8 +688,10 @@ final class StartupJourneys: XCTestCase {
             }
         }
         func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
-                      action: () throws -> Void) throws {
+                      target: XCUIElement? = nil, kind: String = "button", keyboard: Bool = false,
+                      action: (XCUICoordinate?) throws -> Void) throws {
             try guardTarget()
+            let ticket = guardTicket
             let index = operations.count + 1
             func retain(_ stage: String) throws {
                 try attachment(["schema": "nac342-dispatch-v1", "scenario": fixture.scenario,
@@ -697,7 +702,36 @@ final class StartupJourneys: XCTestCase {
                     name: String(format: "nac342-dispatch-v1-%02d-%@", index, stage))
             }
             try retain("before")
-            try action()
+            var coordinate: XCUICoordinate?
+            if let client = axClient {
+                let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
+                let anchor = target.frame, root = rootWindow.frame
+                try require(target.exists && target.isEnabled && target.isHittable,
+                    "Interaction target lost public eligibility")
+                let selected = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let point = selected.screenPoint
+                let value = keyboard && ["field", "message"].contains(kind) ? try XCTUnwrap(target.value as? String) : nil
+                let field: (CGRect, String)?
+                if folderSurface == .goTo {
+                    let input = try goToField()
+                    field = (input.frame, try XCTUnwrap(input.value as? String))
+                } else { field = nil }
+                let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: target.label,
+                    keyboard: keyboard, value: value, rootFrame: root, field: field)
+                // Same public coordinate and anchor after AX proof, immediately
+                // before final freshness consumption and dispatch. This fence is
+                // bounded, not atomic with the eventual delivered OS event.
+                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
+                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
+                    && target.exists && target.isEnabled && target.isHittable && target.label == request.label
+                    && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
+                        anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
+                    && (!keyboard || value == nil || target.value as? String == value),
+                    "Interaction point, anchor, focus value or frozen resource changed")
+                try client.finishInteraction(request)
+                coordinate = selected
+            }
+            try action(coordinate)
             operations.append(name)
             if let after { folderSurface = after }
             try guardTarget()
@@ -711,7 +745,9 @@ final class StartupJourneys: XCTestCase {
             let elements = query.matching(identifier: label)
             try require(elements.firstMatch.waitForExistence(timeout: 20) && elements.count == 1
                 && elements.firstMatch.isHittable && elements.firstMatch.isEnabled, "Public control absent/ambiguous: " + label)
-            try dispatch("click:" + label) { elements.firstMatch.click() }
+            try dispatch("click:" + label, target: elements.firstMatch) { coordinate in
+                if let coordinate { coordinate.click() } else { elements.firstMatch.click() }
+            }
         }
         try guardTarget()
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
@@ -765,27 +801,30 @@ final class StartupJourneys: XCTestCase {
                     return control
                 }
                 let initial = try folderControl(fixture.home)
-                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel) {
-                    initial.click()
+                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel, target: initial) { coordinate in
+                    try XCTUnwrap(coordinate).click()
                     try require(rootWindow.children(matching: .sheet).firstMatch.waitForExistence(timeout: 10),
                         "Owned native folder panel did not appear")
                 }
-                try dispatch("key:command-shift-g-native-folder", after: .goTo) {
-                    try panel().typeKey("g", modifierFlags: [.command, .shift])
+                let shortcutPanel = try panel()
+                try dispatch("key:command-shift-g-native-folder", after: .goTo, target: shortcutPanel, kind: "panel", keyboard: true) { _ in
+                    shortcutPanel.typeKey("g", modifierFlags: [.command, .shift])
                     let nested = try panel().children(matching: .sheet)
                     try require(nested.firstMatch.waitForExistence(timeout: 10), "Owned Go to Folder sheet did not appear")
                 }
-                try dispatch("key:command-a-native-go-to-folder") {
-                    try goToField().typeKey("a", modifierFlags: .command)
+                let selectAllField = try goToField()
+                try dispatch("key:command-a-native-go-to-folder", target: selectAllField, kind: "field", keyboard: true) { _ in
+                    selectAllField.typeKey("a", modifierFlags: .command)
                 }
-                try dispatch("type:owned-workspace") {
-                    let field = try goToField()
-                    field.typeText(fixture.workspace)
-                    try require(field.value as? String == fixture.workspace, "Go to Folder value differs from declared workspace")
+                let workspaceField = try goToField()
+                try dispatch("type:owned-workspace", target: workspaceField, kind: "field", keyboard: true) { _ in
+                    workspaceField.typeText(fixture.workspace)
+                    try require(workspaceField.value as? String == fixture.workspace, "Go to Folder value differs from declared workspace")
                 }
                 let goTo = try panel().children(matching: .sheet).element(boundBy: 0)
-                try dispatch("key:return-native-go-to-folder", after: .panel) {
-                    try goToField().typeKey(.return, modifierFlags: [])
+                let returnField = try goToField()
+                try dispatch("key:return-native-go-to-folder", after: .panel, target: returnField, kind: "field", keyboard: true) { _ in
+                    returnField.typeKey(.return, modifierFlags: [])
                     try require(goTo.waitForNonExistence(timeout: 10), "Owned Go to Folder sheet survived submission")
                 }
                 let selectedPanel = try panel()
@@ -793,8 +832,8 @@ final class StartupJourneys: XCTestCase {
                 try require(select.firstMatch.waitForExistence(timeout: 10) && select.count == 1
                     && select.firstMatch.isEnabled && select.firstMatch.isHittable,
                     "Owned native Select absent or ambiguous")
-                try dispatch("click:native-folder-Select", after: .form) {
-                    select.element(boundBy: 0).click()
+                try dispatch("click:native-folder-Select", after: .form, target: select.element(boundBy: 0)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
                     try require(selectedPanel.waitForNonExistence(timeout: 10), "Owned native folder panel survived selection")
                 }
                 let filled = try folderControl(fixture.workspace)
@@ -804,9 +843,12 @@ final class StartupJourneys: XCTestCase {
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1
                     && message.firstMatch.isHittable, "Shared Message accessibility target absent/ambiguous")
-                try dispatch("click:Message") { message.firstMatch.click() }
-                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home") {
-                    message.firstMatch.typeText("FINDER_CONFIGURED_LOCAL_startup-home")
+                let messageField = message.firstMatch
+                try dispatch("click:Message", target: messageField, kind: "message") { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home", target: messageField, kind: "message", keyboard: true) { _ in
+                    messageField.typeText("FINDER_CONFIGURED_LOCAL_startup-home")
                 }
                 try click(ui.webViews.buttons, "Send")
                 try require(text("Finder configured local response.").waitForExistence(timeout: 55), "Dummy configured response absent")
@@ -825,14 +867,15 @@ final class StartupJourneys: XCTestCase {
         captured = true
         try guardTarget()
         if let axClient {
-            try require(axClient.evidence.count == 26, "External AX guard trace incomplete")
+            try require(axClient.evidence.count == 26 && axClient.interactions.count == 11, "External AX guard/interaction trace incomplete")
             let rows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.evidence))
+            let interactions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.interactions))
             try attachment(["schema": "nac342-ax-guards-v1", "configuration_sha256": digest(bytes),
                 "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
                 "harness_sha": fixture.harness_sha, "app_pid": Int(running.processIdentifier),
                 "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number,
                 "helper_sha256": axClient.declaration.helper_sha256,
-                "support_sha256": axClient.declaration.support_sha256, "rows": rows],
+                "support_sha256": axClient.declaration.support_sha256, "rows": rows, "interactions": interactions],
                 name: "nac342-ax-guards-v1-configuredLocal")
         }
         let expectedPrivateFailure: [String: Any] = fixture.scenario == "futureStore"
