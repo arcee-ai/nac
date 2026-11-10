@@ -1,50 +1,40 @@
-# PRIVATE NEVERMERGE: P12 integration product, Q3c7/H pins, four cases plus R
+# PRIVATE NEVERMERGE: P12 integration, bounded interaction, four cases plus R
 
-This private source-binding candidate uses reviewed Q3c7 with the complete ten-file
-startup supplier roster and app-binding H4 above authentic H3
-d50fbbaa428b77251bb89252e969c6c7107c8b98. H4 permits one unique, exact-resource
-app-census refresh only when the initial selection is absent, with fresh kernel
-lifetime validation. Its affected review is SOURCE_CLEAR_WITH_LIMITS. C04 changes
-source bindings only; no historical runtime cause is established.
-All original acceptance, input, cleanup and timing guards are unchanged. The new
-scope/branch identify a prospective allocation; runtime remains unadmitted.
-P12 is the compatible normal INTEGRATION TEST PRODUCT containing the native picker,
-not a build or acceptance claim for current dev, frozen unmerged L, or a later M.
-This does not establish ALL-342 Done or global Native completion. No mailbox or
-actual05 client-rejection channel is selected.
+C05 is a mechanical qualification caller derived from reviewed C04
+`379795e2eae1f316e274c1ba41514eefe2bed785`. It binds the reviewed public nominees
+H `a0c44b1f651401361053de66d4fb5bd8f99916f2` and
+Q `2e622aeb335cd4248e6cf397c3fc02ba19d063a1` under the new
+`P12-integration-Qpub-interaction-R7325-four-startup-source05` scope on
+`codex/private520-interaction-C05`. Nominee public availability is a separate
+Root admission check; no push, dispatch or runtime is authorized by this source.
 
-Prior run42461321245 remains FAIL: configured-local input completion UNKNOWN,
-process/profile settlement unproven and fixture retained; later cases UNRUN.
-R4, SDK2 and onboarding passed in that earlier run, with a genuine full-R-log
-retention gap. These source diagnostics do not identify its runtime cause or
-qualify the changed candidate. Old actual03 AXWindows-25211, all historical
-attempts, first reporting repair and exhausted/STOP pools retain attribution.
-No execution, publication, actual allocation or goal is issued here.
+Q's full tree equals reviewed private Qf82. H equals reviewed private9e68 apart
+from seven exact Q nomination literals. The complete ten-file Q inventory is
+owned by H TEST_FILES. The accepted interaction preflight selects a public
+coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
+ancestry, then rechecks the same point/anchor, resources/incarnation and original
+freshness immediately before dispatch. Exact keyboard focus/value, original30s
+ticket, <=1s sample/final consumption, sticky refusal/no next input and all
+postconditions/positive cleanup remain. Raw extra CG association/count is
+superseded on this path. The last-instant dynamic-coordinate race is accepted;
+no atomic or independently observed delivered-event equality is claimed.
 
-`pair.json` binds normal integration P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`,
-reviewed private Q `3c7acb4b609cea491a144947966d5dcd0872e4f3`, app-binding H4
-`4c46110bb8e42db248eb2ef69d2e74906bdf23de`, and unchanged independent R
-`7325c48b3c9ec7036e255a6bd92f31c1a98c1607` (schema50/future51).
-Q has the exact ten reviewed799 source blobs/modes and remains above frozen
-UNMERGED L `1e873aa5200571940fe27dedb9c80b8f19966ebf`; it is a test supplier.
-P12 parent/native-boundary/source-context and historical SDK/preparation fields
-remain provenance for their original roles. H4's actual preparation parent is H3
-d50fbbaa428b77251bb89252e969c6c7107c8b98, above H02 and delivered Dca9. H4
-changes only the app-binding snapshot, its owning inert controls and their guide;
-TEST_SOURCE/TEST_FILES remain the exact H02/H3 ten-file Q3c7 supplier roster.
-The Q source roster is sealed by H TEST_FILES; current controller/H/Q availability
-must be separately arranged before any Root-admitted SDK/runtime episode.
-The preserved H01/C01 review remains SOURCE_CLEAR_WITH_LIMITS for its old H299 base.
-This H4 binding retains passive producer/consumer annotations and consumes the
-reviewed narrow app-binding interleaving repair. Nonempty mismatches and adverse
-resource/lifetime/ancestry checks still reject; no input/cleanup authority changes.
-It does not extend the historical old-base disposition or prove a historical cause.
-Actual06 remains FAIL/INCOMPLETE with onboarding input and native cleanup unproven.
-Actual07 passed R and onboarding, then configuredLocal failed app_binding with
-input UNKNOWN, native cleanup unproven and fixture retained; two later cases UNRUN.
-No one-case/R0 path is introduced.
-Historical source/inert evidence retains its original attribution. No old
-compiler/runtime allowance is reset and no current-host episode is granted here.
+P12 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976` and its genuine normal artifact
+13607980704 remain an INTEGRATION TEST PRODUCT, not current-dev product
+acceptance. Independent R7325 and ALL FOUR UI cases remain required. No one-case,
+R0, diagnostics-only substitute, package rebuild, new framework or private L
+ancestry replay into public PRs is selected. Historical SDK/product/source-context
+fields retain their original provenance; H/Q preparation parent/tree fields name
+the actual new nominees. Initial root selection and every original deadline,
+input, process and cleanup guard are unchanged in this caller.
+
+Actual08 remains failed/incomplete: R and onboarding passed; configuredLocal
+failed, its second input completion stayed UNKNOWN, and later cases were UNRUN.
+All old episodes, sealed packets and spent allocations remain attributed and
+cannot provide a clock or retry for C05. Root's active goal owns this finite
+source preparation; the historical child goal remains unchanged. Root verifies
+source bindings and actual public availability before any fresh full runtime
+admission. This source is not a new feature PR and is nevermerge.
 
 ## Closed normal artifact admission
 
@@ -93,7 +83,8 @@ source/binary/config/xctestrun receipts, provider/API/persisted evidence where
 applicable, protected store, authorization policy, console/PNG/attachments and
 positive metadata app/engine cleanup. configuredLocal additionally owns the
 reviewed finite AX companion, readonly receipt, retained CF objects and terminal
-retirement reconciliation. Preserve27 console observations/26 fresh AX proofs,
+retirement reconciliation. Preserve27 exported console observations plus11 immediate console rechecks,
+26 fresh AX guard proofs plus11 bound point proofs,
 11 public inputs/22 dispatch records, zero-next-input refusal, privacy, EOF/time/
 bounds, exact resource/kernel/helper/source/nonce and phase custody. Failed input
 completion stays UNKNOWN; cleanup never creates success. All cases need current
@@ -119,7 +110,7 @@ For a full successful run, count every role explicitly:
   partial prefix is explicitly incomplete. The narrow R-log export verifies
   its bounded no-follow ownership receipt and raw digest, preserving both ends
   within2MiB; all other log limits and the12MiB aggregate limit stay unchanged.
-- One complete H2+Q2 observer compile90s; one CIEvidence compile90s and one CIGUI
+- One complete H+canonicalQ observer compile90s; one CIEvidence compile90s and one CIGUI
   compile90s. These are three direct Swift invocations, with the observer's four
   inputs retained separately.
 - Four existing pure-Foundation CommandEnvironment/CIStartupEnvironment resolver
@@ -152,9 +143,8 @@ Python sources into a temporary source fixture from Git objects in this owned re
 no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
-is invoked by these consumer tests. The source packet separately records one
-complete H2+Q2 compatibility compile (output never executed) and the explicitly
-admitted pure Foundation diagnostic mapping control. Current hosted full SDK,
+is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
+compile and Foundation control. C05 preparation executes no SDK/helper actor. Current hosted full SDK,
 sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
 custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.

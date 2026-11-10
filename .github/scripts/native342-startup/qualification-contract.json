@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Q3c7-app-binding-R7325-four-startup-source04",
+  "scope": "P12-integration-Qpub-interaction-R7325-four-startup-source05",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "4c46110bb8e42db248eb2ef69d2e74906bdf23de",
+  "H": "a0c44b1f651401361053de66d4fb5bd8f99916f2",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "3c7acb4b609cea491a144947966d5dcd0872e4f3",
+  "Q": "2e622aeb335cd4248e6cf397c3fc02ba19d063a1",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
@@ -26,7 +26,7 @@
       "overflow": "FAIL, retained prefix marked incomplete; no successful subset claim"
     },
     {
-      "role": "complete H2+canonicalQ2 observer",
+      "role": "complete H+canonicalQ observer",
       "invocations": 1,
       "inputs": 4,
       "cap_seconds": 90
@@ -94,7 +94,12 @@
     "zero_next_input_on_refusal": true,
     "readonly_receipt": true,
     "private_field_text_exported": false,
-    "positive_app_engine_companion_cleanup_required": true
+    "positive_app_engine_companion_cleanup_required": true,
+    "explicit_public_coordinate_preflight": true,
+    "global_AX_point_proofs": 11,
+    "immediate_console_rechecks": 11,
+    "retained_CFEqual_target_ancestry": true,
+    "last_instant_dynamic_coordinate_race": "ACCEPTED; no atomic or independently observed delivered-event equality"
   },
   "stop": "First failure/unknown prevents later cases; never a diagnostic subset success",
   "acceptance": "All four original current-source PNG/API/store/policy/input/custody oracles; Source/inert tests establish none",
