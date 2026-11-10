@@ -10,7 +10,7 @@ import unittest
 from ci_startup_attachments import StartupAttachmentError, collect, require_observation
 from ci_startup_fixture import CASES, TEST_FILES, operations
 from ci_xctest_attachments import digest
-from test_ci_startup_attachments import StartupAttachmentTests
+import test_ci_startup_attachments as attachment_controls
 
 
 class StartupConsoleTests(unittest.TestCase):
@@ -53,7 +53,7 @@ class StartupConsoleTests(unittest.TestCase):
         return trace + ['before-screenshot', 'after-screenshot']
 
     def producer_fixture(self, case):
-        fixture = StartupAttachmentTests()
+        fixture = attachment_controls.StartupAttachmentTests()
         config, config_hash, witness, rows = fixture.fixture(case)
         observation = json.loads(rows[-2][1])
         # Pure exporter controls use the local fixture, independent of external Q.
