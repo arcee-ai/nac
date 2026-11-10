@@ -13,8 +13,8 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/private520-environment-discriminator-C06'
-SCOPE = 'P12-integration-Qpub-environment-discriminator-R7325-four-startup-source06'
+BRANCH = 'refs/heads/codex/private520-environment-family-C07'
+SCOPE = 'P12-integration-Qpub-environment-family-R7325-four-startup-source07'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'

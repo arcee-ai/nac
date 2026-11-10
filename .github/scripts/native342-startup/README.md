@@ -1,18 +1,19 @@
-# PRIVATE NEVERMERGE: P12 integration, environment discriminator, four cases plus R
+# PRIVATE NEVERMERGE: P12 integration, environment error family, four cases plus R
 
-C06 is a mechanical qualification caller derived from reviewed C05
-`85957527ca9c5bd4cb62e09b7195fac0fe53dd1d`. It binds the source nominees
-H `a67a7146c80714cfb5e5b801b3c6ed885f16fee8` and
+C07 is a mechanical qualification caller derived from frozen C06
+`0cfca405be97a6aecaaa3022e714ff448371a8da`. It binds the source nominees
+H `d017db04d8994c7c027ddbb32bb609dc3a389ac0` and
 Q `2e622aeb335cd4248e6cf397c3fc02ba19d063a1` under the new
-`P12-integration-Qpub-environment-discriminator-R7325-four-startup-source06` scope on
-`codex/private520-environment-discriminator-C06`. Nominee public availability is a separate
+`P12-integration-Qpub-environment-family-R7325-four-startup-source07` scope on
+`codex/private520-environment-family-C07`. Nominee public availability is a separate
 Root admission check; no push, dispatch or runtime is authorized by this source.
 
 Q's full tree and parent remain unchanged. H has exact parent
-`45748064ea0adabd749192448b35191c3c70b556` and adds only the closed, redacted
-environment-validator rejection discriminator and neighboring characterization.
-Its class/previously-known/predicate/flags/fixed-field details grant no process
-admission, cleanup, freshness or UI authority; all existing refusals remain.
+`a67a7146c80714cfb5e5b801b3c6ed885f16fee8` and preserves ownership_invalid for
+the existing environment rejection in the AX companion, with a focused control
+using the real validator and both production classifiers. The inherited closed,
+redacted discriminator grants no process admission, cleanup, freshness or UI
+authority; every existing refusal remains. No extra AX payload is exported.
 The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
 interaction preflight selects a public coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
 ancestry, then rechecks the same point/anchor, resources/incarnation and original
@@ -37,7 +38,7 @@ Failed subject/predicate and app/engine settlement were unproven, input stayed
 UNKNOWN, the fixture was retained, and later cases were UNRUN. Actual08 and all
 earlier failures remain separately attributed.
 All old episodes, sealed packets and spent allocations remain attributed and
-cannot provide a clock or retry for C06. Root's active goal owns this finite
+cannot provide a clock or retry for C07. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -150,7 +151,7 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C06 preparation executes no SDK/helper actor. Current hosted full SDK,
+compile and Foundation control. C07 preparation executes no SDK/helper actor. Current hosted full SDK,
 sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
 custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.

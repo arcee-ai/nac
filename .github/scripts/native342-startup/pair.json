@@ -1,6 +1,6 @@
 {
-  "scope": "P12-integration-Qpub-environment-discriminator-R7325-four-startup-source06",
-  "H": "a67a7146c80714cfb5e5b801b3c6ed885f16fee8",
+  "scope": "P12-integration-Qpub-environment-family-R7325-four-startup-source07",
+  "H": "d017db04d8994c7c027ddbb32bb609dc3a389ac0",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
   "Q": "2e622aeb335cd4248e6cf397c3fc02ba19d063a1",
   "product_parent": "1cd48f95fbd239a43ef091c43b92649207fc86f5",
@@ -9,7 +9,7 @@
   "sdk_measured_H": "9863b7714c32ed77bd66867973de6d5b02a753f8",
   "q_swift_sha256": "e68d9439b208fc97a630f8850fee9b10f4a04c33889050a678f4ac056bc1ea52",
   "host_image": "20261102.0473.1",
-  "H_preparation_parent": "45748064ea0adabd749192448b35191c3c70b556",
+  "H_preparation_parent": "a67a7146c80714cfb5e5b801b3c6ed885f16fee8",
   "native_boundary": "8685729343c0ab806a9ab9cbdb5b6bf72e0c522c",
   "reviewed_preparation_origin": "0cb5f20ae98f273dce84fe3d1677aa5e607d636d",
   "landed_auth_integration": "4b852f065e2200f46c194b4ad2c5ace3fbd766a8",
