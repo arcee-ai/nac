@@ -517,6 +517,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
     case "empty": anchor.size.width = 0
     case "negative": anchor.size.width = -40
     case "infinite": anchor.origin.x = .infinity
+    case "native_infinite": anchor = .infinite; preferred = .zero
     case "nan": anchor.size.height = .nan
     default: break
     }
@@ -534,6 +535,14 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
             entered_ns:"1",deadline_ns:"100",baseline_sequence:"1",refusal_generation:"0",surface:"form",kind:"button",
             label:"Intended",keyboard:false,point:[point.x,point.y],anchor_frame:[anchor.minX,anchor.minY,anchor.width,anchor.height],
             root_frame:[0,0,1024,674],value:nil)
+        if mode == "native_infinite" {
+            let decoded = try JSONDecoder().decode(StartupAXInteractionRequest.self, from: JSONEncoder().encode(request))
+            for candidate in [request, decoded] {
+                do { try candidate.validate(); publications += 1; inputs += 1 } catch {}
+            }
+            return ["accepted": publications > 0, "publications": publications, "inputs": inputs,
+                    "native_is_infinite": anchor.isInfinite, "selected_zero": point == .zero]
+        }
         try request.validate(); publications += 1
         try StartupAXFiles.need(coordinate.point == point && StartupInteractionPolicy.unchanged(point:coordinate.point,
             expected:point,anchor:anchor,expectedAnchor:anchor,root:anchor,expectedRoot:anchor))
@@ -571,7 +580,7 @@ class ReceiptControls(unittest.TestCase):
 
     def test_float_selection_constructs_and_reads_back_the_same_representable_public_coordinate(self):
         modes = ['integer', 'fractional', 'lower', 'upper', 'tie_even', 'tie_next',
-                 'tiny', 'boundary_only', 'empty', 'negative', 'infinite', 'nan', 'readback']
+                 'tiny', 'boundary_only', 'empty', 'negative', 'infinite', 'nan', 'readback', 'native_infinite']
         rows = self.rows(['float_' + mode for mode in modes])
         for mode, row in zip(modes[:6], rows[:6]):
             with self.subTest(mode=mode):
@@ -583,7 +592,9 @@ class ReceiptControls(unittest.TestCase):
         import struct
         ulp = struct.unpack('f',struct.pack('I',struct.unpack('I',struct.pack('f',120))[0]+1))[0]-120
         self.assertEqual([rows[i]['point_x'] for i in (2,3,4,5)],[120+ulp,120+ulp,120,120+2*ulp])
-        self.assertEqual(rows[6:],[dict(accepted=False,publications=0,inputs=0)]*7)
+        self.assertEqual(rows[6:13],[dict(accepted=False,publications=0,inputs=0)]*7)
+        self.assertEqual(rows[13], dict(accepted=False,publications=0,inputs=0,
+                                       native_is_infinite=True,selected_zero=True))
 
     def test_first_real_journey_failure_is_closed_and_published_before_teardown_without_replacing_error(self):
         modes = ['missing', 'invalid', 'refused', 'expired', 'decoding', 'foundation', 'other', 'publish_failure']
