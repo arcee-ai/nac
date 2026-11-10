@@ -1,17 +1,20 @@
-# PRIVATE NEVERMERGE: P12 integration, bounded interaction, four cases plus R
+# PRIVATE NEVERMERGE: P12 integration, environment discriminator, four cases plus R
 
-C05 is a mechanical qualification caller derived from reviewed C04
-`379795e2eae1f316e274c1ba41514eefe2bed785`. It binds the reviewed public nominees
-H `a0c44b1f651401361053de66d4fb5bd8f99916f2` and
+C06 is a mechanical qualification caller derived from reviewed C05
+`85957527ca9c5bd4cb62e09b7195fac0fe53dd1d`. It binds the source nominees
+H `a67a7146c80714cfb5e5b801b3c6ed885f16fee8` and
 Q `2e622aeb335cd4248e6cf397c3fc02ba19d063a1` under the new
-`P12-integration-Qpub-interaction-R7325-four-startup-source05` scope on
-`codex/private520-interaction-C05`. Nominee public availability is a separate
+`P12-integration-Qpub-environment-discriminator-R7325-four-startup-source06` scope on
+`codex/private520-environment-discriminator-C06`. Nominee public availability is a separate
 Root admission check; no push, dispatch or runtime is authorized by this source.
 
-Q's full tree equals reviewed private Qf82. H equals reviewed private9e68 apart
-from seven exact Q nomination literals. The complete ten-file Q inventory is
-owned by H TEST_FILES. The accepted interaction preflight selects a public
-coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
+Q's full tree and parent remain unchanged. H has exact parent
+`45748064ea0adabd749192448b35191c3c70b556` and adds only the closed, redacted
+environment-validator rejection discriminator and neighboring characterization.
+Its class/previously-known/predicate/flags/fixed-field details grant no process
+admission, cleanup, freshness or UI authority; all existing refusals remain.
+The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
+interaction preflight selects a public coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
 ancestry, then rechecks the same point/anchor, resources/incarnation and original
 freshness immediately before dispatch. Exact keyboard focus/value, original30s
 ticket, <=1s sample/final consumption, sticky refusal/no next input and all
@@ -28,10 +31,13 @@ fields retain their original provenance; H/Q preparation parent/tree fields name
 the actual new nominees. Initial root selection and every original deadline,
 input, process and cleanup guard are unchanged in this caller.
 
-Actual08 remains failed/incomplete: R and onboarding passed; configuredLocal
-failed, its second input completion stayed UNKNOWN, and later cases were UNRUN.
+Actual09 remains failed/incomplete: R and onboarding passed; configuredLocal
+failed at the combined environment/argv validator before interaction preflight.
+Failed subject/predicate and app/engine settlement were unproven, input stayed
+UNKNOWN, the fixture was retained, and later cases were UNRUN. Actual08 and all
+earlier failures remain separately attributed.
 All old episodes, sealed packets and spent allocations remain attributed and
-cannot provide a clock or retry for C05. Root's active goal owns this finite
+cannot provide a clock or retry for C06. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -144,7 +150,7 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C05 preparation executes no SDK/helper actor. Current hosted full SDK,
+compile and Foundation control. C06 preparation executes no SDK/helper actor. Current hosted full SDK,
 sandboxed receipt access, real focus/value/CFEqual/freshness/input/PNG/API/store/
 custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
 any private source availability/actual admission. No automatic next unit follows.
