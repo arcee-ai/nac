@@ -251,19 +251,21 @@ def bundle_manifest(output, identity):
     # All evidence is bound to one image. Daily rescans verify these retained bytes.
     files = ["sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *sorted(RUST_FILES)]
     extended = (output / "applicability-context.json").is_file()
+    schema_version = applicability_bundle.version(output) if extended else 2
     if extended:
         subject = json.loads((output / "identity.json").read_text())
-        files += sorted(applicability_bundle.files(subject))
-    write_json(output / "bundle.json", {"schema_version": 3 if extended else 2, "image": identity,
+        files += sorted(applicability_bundle.files(subject, schema_version))
+    write_json(output / "bundle.json", {"schema_version": schema_version, "image": identity,
                "files": {name: sha256(output / name) for name in files}})
 
 
 def load_bundle(bundle, output):
-    manifest = json.loads((bundle / "bundle.json").read_text())
-    require(manifest.get("schema_version") in {2, 3},
+    manifest = applicability_bundle.read_json(bundle, "bundle.json", maximum=4 * 1024 ** 2)
+    require(manifest.get("schema_version") in {2, 3, 4},
             "unsupported evidence bundle; reinventory exact image for Rust coverage")
     expected = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
-    if manifest["schema_version"] == 3:
+    retained_sources = set()
+    if manifest["schema_version"] in {3, 4}:
         with os.fdopen(os.open(bundle / "identity.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
             metadata = os.fstat(source.fileno())
             require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 4 * 1024 * 1024,
@@ -273,14 +275,16 @@ def load_bundle(bundle, output):
                 hashlib.sha256(raw_subject).hexdigest() == manifest.get("files", {}).get("identity.json"),
                 "retained evidence hash mismatch: identity.json")
         subject = json.loads(raw_subject)
-        expected |= applicability_bundle.files(subject)
+        expected |= applicability_bundle.files(subject, manifest["schema_version"])
+        retained_sources = set(applicability_bundle.source_files(subject, manifest["schema_version"]).values())
     require(set(manifest.get("files", {})) == expected, "incomplete bundle")
     for name, digest in manifest["files"].items():
-        # V3 includes a complete image tar: never allocate its full size, follow
+        # V3/V4 include a complete image tar: never allocate its full size, follow
         # a source symlink, or accept bytes different from those actually copied.
         with os.fdopen(os.open(bundle / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
             metadata = os.fstat(source.fileno())
-            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 32 * 1024 ** 3,
+            maximum = applicability_bundle.MAX_SOURCE_BYTES if name in retained_sources else 32 * 1024 ** 3
+            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= maximum,
                     f"nonregular/oversized retained evidence: {name}")
             checksum, count = hashlib.sha256(), 0
             with (output / name).open("xb") as destination:
@@ -293,6 +297,9 @@ def load_bundle(bundle, output):
                     f"retained evidence hash mismatch: {name}")
     identity = json.loads((output / "identity.json").read_text())
     require(identity["image"] == manifest["image"], "retained identity mismatch")
+    if manifest["schema_version"] in {3, 4}:
+        require(applicability_bundle.version(output) == manifest["schema_version"],
+                "retained applicability capability differs from bundle version")
     return identity
 
 
@@ -414,7 +421,7 @@ def main():
     parser.add_argument("--trusted-applicability-policy", type=Path)
     parser.add_argument("--candidate-applicability-policy", type=Path)
     parser.add_argument("--collect-applicability", action="store_true",
-                        help="retain complete exact-image passive filesystem/source evidence")
+                        help="retain V4 exact-image passive filesystem/source evidence including owned libssh2")
     parser.add_argument("--inventory-only", action="store_true",
                         help="produce validated inputs only; never a security verdict")
     parser.add_argument("--bundle", type=Path, help="rescan retained SBOM/probes without rebuilding")

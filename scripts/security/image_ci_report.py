@@ -25,11 +25,13 @@ def report(directory, scanner_exit, *, image=None, source_revision=None):
             (image is None or image == identity["image"]) and
             (source_revision is None or source_revision == identity["source_revision"]),
             "CI report differs from the scanned image/source")
-    bundle = json.loads((directory / "bundle.json").read_text())
+    bundle = applicability_bundle.read_json(directory, "bundle.json", maximum=4 * 1024 ** 2)
     expected_files = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
-    if bundle.get("schema_version") == 3:
-        expected_files |= applicability_bundle.files(identity)
-    require(bundle.get("schema_version") in {2, 3} and bundle.get("image") == identity["image"] and
+    if bundle.get("schema_version") in {3, 4}:
+        expected_files |= applicability_bundle.files(identity, bundle["schema_version"])
+        require(applicability_bundle.version(directory) == bundle["schema_version"],
+                "CI report applicability capability differs from bundle version")
+    require(bundle.get("schema_version") in {2, 3, 4} and bundle.get("image") == identity["image"] and
             set(bundle.get("files", {})) == expected_files,
             "incomplete image inventory bundle")
     require(all(sha256(directory / name) == digest for name, digest in bundle["files"].items()),

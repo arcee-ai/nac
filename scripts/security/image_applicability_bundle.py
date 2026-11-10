@@ -6,8 +6,10 @@ they never turn candidate JSON assertions into current observations.
 """
 import datetime as dt
 import hashlib
+import os
 from pathlib import Path
 import re
+import stat
 from urllib.parse import urlsplit
 
 import image_applicability_evidence as collector
@@ -21,16 +23,29 @@ CONTAINER_INSPECT = "applicability-container-inspect.json"
 PROFILES = {name: "applicability-" + name + ".json"
             for name in ("provenance", "filesystem", "consumers")}
 MAX_ARCHIVE_BYTES = 32 * 1024 ** 3
-MAX_SOURCE_BYTES = 150 * 1024 ** 2
+MAX_SOURCE_BYTES = collector.MAX_SOURCE_BYTES
 MAX_JSON_BYTES = 512 * 1024 ** 2
 COORDINATES = {
     "krb5-libs": ("apk:krb5-libs", "upstream:mit/kerberos_5", "upstream-wolfi:krb5"),
     "curl": ("apk:curl", "upstream:haxx/curl", "upstream-wolfi:curl"),
     "libcurl-openssl4": ("apk:libcurl-openssl4", "upstream:haxx/curl", "upstream-wolfi:curl"),
 }
+LIBSSH2_COORDINATES = ("apk:libssh2", "upstream:libssh2/libssh2", "upstream-wolfi:libssh2")
 
 
-def source_files(identity):
+def profile(schema_version):
+    require(type(schema_version) is int and schema_version in {3, 4}, "unsupported applicability bundle version")
+    return collector.PROFILE if schema_version == 3 else collector.LIBSSH2_PROFILE
+
+
+def version(output):
+    context = read_json(Path(output), CONTEXT, maximum=4 * 1024 ** 2)
+    require(isinstance(context, dict) and type(context.get("schema_version")) is int and context["schema_version"] in {1, 2},
+            "unsupported applicability collection context")
+    return context["schema_version"] + 2
+
+
+def source_files(identity, schema_version=3):
     """Validate pins before deriving any filesystem paths or download requests."""
     require(isinstance(identity, dict), "missing applicability image identity")
     require(isinstance(identity.get("inspected"), dict), "missing scanned image inspection")
@@ -52,7 +67,7 @@ def source_files(identity):
         require(url.scheme == "https" and url.hostname and not url.username and not url.password and
                 not url.fragment, "noncanonical applicability source URL")
     selected = set()
-    for owner in ("curl", "krb5"):
+    for owner in sorted(set(collector.packages_for_profile(profile(schema_version)).values())):
         spec = pins.get(owner)
         require(isinstance(spec, dict) and all(isinstance(spec.get(field), str) and spec[field] and
                 not re.search(r"[\x00-\x20\x7f]", spec[field]) for field in
@@ -65,13 +80,15 @@ def source_files(identity):
         require(len(set(names)) == len(names) and all(name in downloads for name in names),
                 "missing/duplicate applicability source pins")
         selected.update(names)
+    if schema_version == 4:
+        collector.local_patches(pins)
     return {name: "applicability-source-" + name for name in sorted(selected)}
 
 
-def files(identity):
+def files(identity, schema_version=3):
     """Deterministic flat extension set; the caller owns the base bundle files."""
     return {ARCHIVE, CONTEXT, IMAGE_INSPECT, CONTAINER_INSPECT, *PROFILES.values(),
-            *source_files(identity).values()}
+            *source_files(identity, schema_version).values()}
 
 
 def regular(path, maximum):
@@ -80,8 +97,15 @@ def regular(path, maximum):
     return path
 
 
-def read_json(output, name):
-    return document(regular(output / name, MAX_JSON_BYTES).read_bytes(), name)
+def read_json(output, name, *, maximum=MAX_JSON_BYTES):
+    regular(output / name, maximum)
+    with os.fdopen(os.open(output / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        metadata = os.fstat(source.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= maximum,
+                "nonregular/oversized applicability JSON")
+        raw = source.read(metadata.st_size + 1)
+        require(len(raw) == metadata.st_size, "applicability JSON changed size while reading")
+    return document(raw, name)
 
 
 def write_json(output, name, value):
@@ -101,7 +125,7 @@ def inspections(identity, inspected, container_inspected, container_id):
             "applicability container identity/network/read-only configuration differs")
 
 
-def capture(identity, output, command, download):
+def capture(identity, output, command, download, *, schema_version=4):
     """Retain binary export by filename, pinned source bytes and passive profiles.
 
     `command` has the image scanner's text-only command interface. Docker writes
@@ -109,7 +133,7 @@ def capture(identity, output, command, download):
     timeout and the explicit post-export 32 GiB bound fail the operation closed.
     """
     output = Path(output)
-    retained, sources = files(identity), source_files(identity)
+    retained, sources = files(identity, schema_version), source_files(identity, schema_version)
     require(output.is_dir() and not output.is_symlink() and
             all(not (output / name).exists() and not (output / name).is_symlink() for name in retained),
             "applicability output already exists or is not a directory")
@@ -141,30 +165,31 @@ def capture(identity, output, command, download):
         downloads[name] = path
     evidence = collector.collect_evidence(output / ARCHIVE, image=identity["image"],
         source_revision=identity["source_revision"], inspected=inspected,
-        container_inspected=container_inspected, pins=pins, downloads=downloads)
+        container_inspected=container_inspected, pins=pins, downloads=downloads, profile=profile(schema_version))
     for name, filename in PROFILES.items():
         write_json(output, filename, evidence[name])
-    write_json(output, CONTEXT, {"schema_version": 1, "subject": evidence["provenance"]["subject"],
+    write_json(output, CONTEXT, {"schema_version": schema_version - 2, "subject": evidence["provenance"]["subject"],
         "collected_at": collected_at, "container_id": container_id,
         "archive_sha256": sha256(output / ARCHIVE),
         "image_inspect_sha256": sha256(output / IMAGE_INSPECT),
         "container_inspect_sha256": sha256(output / CONTAINER_INSPECT),
-        "source_sha256": {name: sha256(path) for name, path in downloads.items()}})
+        "source_sha256": {name: collector.source_digest(path) for name, path in downloads.items()}})
     return retained
 
 
 def validate(output, identity):
     """Recollect complete retained inputs; return observations at their old clock."""
     output = Path(output)
-    sources = source_files(identity)
     require(output.is_dir() and not output.is_symlink(), "invalid applicability retained directory")
-    for name in files(identity):
+    schema_version = version(output)
+    sources = source_files(identity, schema_version)
+    for name in files(identity, schema_version):
         maximum = MAX_ARCHIVE_BYTES if name == ARCHIVE else MAX_SOURCE_BYTES if name in sources.values() else MAX_JSON_BYTES
         regular(output / name, maximum)
     context = read_json(output, CONTEXT)
     require(isinstance(context, dict) and set(context) == {"schema_version", "subject", "collected_at",
             "container_id", "archive_sha256", "image_inspect_sha256", "container_inspect_sha256", "source_sha256"} and
-            type(context["schema_version"]) is int and context["schema_version"] == 1,
+            type(context["schema_version"]) is int and context["schema_version"] == schema_version - 2,
             "invalid applicability collection context")
     timestamp(context["collected_at"])
     subject = {"image": identity["image"], "source_revision": identity["source_revision"], "platform": "linux/amd64"}
@@ -175,15 +200,17 @@ def validate(output, identity):
     pins = identity["runtime_package_pins"]
     downloads = {name: output / filename for name, filename in sources.items()}
     require(context["source_sha256"] == {name: pins["downloads"][name]["sha256"] for name in sources} and
-            all(sha256(path) == context["source_sha256"][name] for name, path in downloads.items()),
+            all(collector.source_digest(path) == context["source_sha256"][name] for name, path in downloads.items()),
             "applicability retained source hashes differ")
     inspected, container_inspected = read_json(output, IMAGE_INSPECT), read_json(output, CONTAINER_INSPECT)
     inspections(identity, inspected, container_inspected, context["container_id"])
     provenance = collector.validate_evidence({name: read_json(output, filename) for name, filename in PROFILES.items()},
         output / ARCHIVE, image=identity["image"], source_revision=identity["source_revision"],
-        inspected=inspected, container_inspected=container_inspected, pins=pins, downloads=downloads)
+        inspected=inspected, container_inspected=container_inspected, pins=pins, downloads=downloads,
+        profile=profile(schema_version))
     observations = []
-    for installed, coordinates in COORDINATES.items():
+    coordinates_by_package = {**COORDINATES, **({"libssh2": LIBSSH2_COORDINATES} if schema_version == 4 else {})}
+    for installed, coordinates in coordinates_by_package.items():
         package = provenance["packages"][installed]
         for coordinate in coordinates:
             observed = {**subject, "package": coordinate, "installed_package": "apk:" + installed,
