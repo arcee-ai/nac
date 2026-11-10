@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import platform
 import plistlib
-import struct
 import sys
 
 from ci_qualifications import require_checkout
@@ -34,7 +33,7 @@ def canonical_root(value):
     return path
 
 
-def test_binary(target, runner):
+def test_binary(target, runner, command):
     products = runner.parent.resolve(strict=True)
 
     def resolve(value, host=None):
@@ -59,12 +58,15 @@ def test_binary(target, runner):
     executable = bundle / 'Contents/MacOS/NACStartupUITests'
     if executable.is_symlink() or not executable.is_file():
         raise RuntimeError('Startup test executable missing or symlinked')
-    with executable.open('rb') as stream:
-        header = stream.read(8)
-    if len(header) != 8 or struct.unpack('<II', header) != (0xFEEDFACF, 0x0100000C):
-        raise RuntimeError('Startup test executable is not ARM64 Mach-O')
+    # Canonical build-for-testing may emit a universal ARM64/x86_64 bundle.
+    # Use the selected toolchain's inspector rather than assuming a thin header.
+    architectures = command(['xcrun', 'lipo', '-archs', str(executable)]).split()
+    if ('arm64' not in architectures or len(architectures) != len(set(architectures))
+            or set(architectures) - {'arm64', 'x86_64'}):
+        raise RuntimeError('Startup test executable lacks an approved ARM64 architecture')
     return {'test_bundle': bundle.name, 'test_bundle_executable_sha256': digest(executable),
-            'test_bundle_info_sha256': digest(bundle / 'Contents/Info.plist'), 'architecture': 'arm64'}
+            'test_bundle_info_sha256': digest(bundle / 'Contents/Info.plist'),
+            'architecture': 'arm64', 'architectures': sorted(architectures)}
 
 
 def check(harness, expected_sha, tests, output, *, run, command):
@@ -122,7 +124,7 @@ def check(harness, expected_sha, tests, output, *, run, command):
         if len(calls) != 1:
             raise RuntimeError('Canonical SDK compiler was not invoked')
         report['stage'] = 'generated_artifacts'
-        report.update(test_binary(receipt['generated_target'], runner))
+        report.update(test_binary(receipt['generated_target'], runner, command))
         report.update(xctestrun_sha256=digest(runner), runner=receipt,
                       signing_overrides=list(SIGNING_OVERRIDES))
         require_checkout(harness, expected_sha)

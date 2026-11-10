@@ -45,6 +45,7 @@ class StartupSDKTests(unittest.TestCase):
         stack.enter_context(patch.dict(os.environ, {
             'PRIVATE_SDK_TOKEN': 'INERT-SECRET-CANARY', 'NAC_MANAGED_CONFIG': 'INERT-CONFIG-CANARY'}))
         self.calls = []
+        self.architecture_queries = []
         self.mode = None
 
     def repository(self, root):
@@ -57,6 +58,17 @@ class StartupSDKTests(unittest.TestCase):
     def command(self, args):
         if args[:2] == ['git', '-C']:
             return subprocess.check_output(args, text=True).strip()
+        if args[:3] == ['xcrun', 'lipo', '-archs']:
+            self.assertEqual(len(args), 4)
+            executable = Path(args[3])
+            self.assertTrue(executable.is_file())
+            self.assertTrue(executable.is_relative_to(self.output / 'derived/Build/Products'))
+            self.architecture_queries.append(args)
+            if self.mode == 'malformed-binary':
+                raise RuntimeError('Inert lipo rejected malformed Mach-O')
+            return {'universal': 'x86_64 arm64', 'wrong-architecture': 'x86_64',
+                    'invalid-architectures': 'arm64 invalid-architecture',
+                    'duplicate-architectures': 'arm64 arm64'}.get(self.mode, 'arm64')
         values = {('xcodebuild', '-version'): self.toolchain['xcode'],
                   ('xcrun', '--sdk', 'macosx', '--show-sdk-version'): self.toolchain['sdk'],
                   ('xcrun', 'swiftc', '--version'): self.toolchain['swift'],
@@ -97,8 +109,10 @@ class StartupSDKTests(unittest.TestCase):
             target['BlueprintName'] = 'NACNativeUITests'
         if self.mode == 'missing-binary':
             binary.unlink()
-        if self.mode == 'wrong-architecture':
-            binary.write_bytes(b'INERT-X86-HEADER')
+        if self.mode == 'universal':
+            binary.write_bytes(struct.pack('>II', 0xCAFEBABE, 2) + b'INERT-UNIVERSAL-NOT-EXECUTABLE')
+        if self.mode in ('wrong-architecture', 'malformed-binary'):
+            binary.write_bytes(b'INERT-NON-ARM64-OR-MALFORMED')
         if self.mode != 'missing-runner':
             (products / 'unit.xctestrun').write_bytes(plistlib.dumps({'unit': target}))
         if self.mode == 'two-runners':
@@ -123,9 +137,23 @@ class StartupSDKTests(unittest.TestCase):
             self.assertIn(str(self.tests / 'desktop/macos/startup_xctest' / name), report['selection']['sources'])
         self.assertEqual(self.calls[0][self.calls[0].index('-destination') + 1], 'platform=macOS,arch=arm64')
         self.assertEqual(report['architecture'], 'arm64')
+        self.assertEqual(report['architectures'], ['arm64'])
+        self.assertEqual(len(self.architecture_queries), 1)
         self.assertRegex(report['test_bundle_executable_sha256'], '^[a-f0-9]{64}$')
         self.assertEqual(report, json.loads((self.output / 'sdk-check.json').read_text()))
         self.assertFalse(list((self.output / 'project').rglob('*.swift')))
+
+    def test_universal_arm64_uses_trusted_inspector_and_same_canonical_compiler(self):
+        self.mode = 'universal'
+        report = self.check()
+        self.assertEqual(report['result'], 'passed')
+        self.assertEqual(report['architectures'], ['arm64', 'x86_64'])
+        self.assertEqual(len(self.architecture_queries), 1)
+        self.assertEqual(len(self.calls), 1)
+        self.assertFalse(any(arg.startswith(('ARCHS=', 'ONLY_ACTIVE_ARCH=')) for arg in self.calls[0]))
+        self.assertEqual(self.calls[0][-2:], sdk.SIGNING_OVERRIDES)
+        self.assertIs(report['acceptance'], False)
+        self.assertEqual(report['test_executions'], 0)
 
     def test_dirty_or_mutated_sources_fail_before_any_compiler(self):
         for root in (self.harness, self.tests):
@@ -160,7 +188,8 @@ class StartupSDKTests(unittest.TestCase):
 
     def test_compiler_and_actual_artifact_failures_remain_failed_with_evidence(self):
         for mode in ('compile-failure', 'wrong-binding', 'wrong-target', 'missing-binary',
-                     'wrong-architecture', 'missing-runner', 'two-runners'):
+                     'wrong-architecture', 'malformed-binary', 'invalid-architectures',
+                     'duplicate-architectures', 'missing-runner', 'two-runners'):
             with self.subTest(mode=mode):
                 self.mode = mode
                 with self.assertRaises((RuntimeError, FileNotFoundError)):
