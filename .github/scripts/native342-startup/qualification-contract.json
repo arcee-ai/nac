@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qpublish-open-errno-R7325-four-startup-source16",
+  "scope": "P12-integration-Qrequest-child-R7325-four-startup-source17",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "1837a616d63fca988e97137391c916d0ef264daa",
+  "H": "3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "a5113788dd04b870bbb9a260e5773fda5b1b1d52",
+  "Q": "90c997550099d233d753fcbc9d3c090350e70016",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
@@ -48,7 +48,7 @@
     },
     {
       "role": "full generated Q SDK build-for-testing",
-      "invocations": 4,
+      "invocations": 5,
       "cap_seconds": 240,
       "target_roles": [
         "generated runner",
@@ -58,7 +58,7 @@
     }
   ],
   "direct_Swift_compile_invocations_if_full_run": 7,
-  "full_SDK_build_commands_if_full_run": 4,
+  "full_SDK_build_commands_if_full_run": 5,
   "R_build_graphs_if_full_run": 1,
   "actual_XCTest_commands_if_full_run": 4,
   "existing_locked_setup_checkouts": 5,
@@ -80,7 +80,9 @@
     "admission_checks": {
       "required_R_remaining_seconds": 1155,
       "next_case_remaining_seconds": 615,
-      "expensive_helper_full_cap_plus_seconds": 15
+      "expensive_helper_full_cap_plus_seconds": 15,
+      "configured_case_remaining_seconds": 855,
+      "build_only_remaining_seconds": 1005
     },
     "worst_case_completion_guaranteed": false
   },
@@ -112,5 +114,16 @@
   },
   "product_role": "compatible_P12_integration_test_product",
   "current_dev_product_acceptance": false,
-  "global_native_completion": false
+  "global_native_completion": false,
+  "purposes": {
+    "native": "R then all four cases; separate exact admission",
+    "build-only": "actual normal/candidate signatures only; no R/app/XCTest/input"
+  },
+  "build_only": {
+    "direct_Swift_compile_invocations": 2,
+    "full_SDK_build_commands": 2,
+    "actual_XCTest_commands": 0,
+    "R_build_graphs": 0,
+    "signature_outputs": 4
+  }
 }

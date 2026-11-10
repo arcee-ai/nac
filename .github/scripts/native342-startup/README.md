@@ -1,3 +1,96 @@
+# C17 private request-child controller
+
+Private source candidate, no build, signature, SDK, native, public push or CI
+execution authorized by this source alone. Root separately reviews and admits
+build-only verification, then the explicitly approved single fresh native
+qualification. Old Native17/18 allocations remain FAIL/SPENT and unusable.
+
+C17 consumes real frozen integration34 H
+`3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf`, whose direct parent is Q
+`90c997550099d233d753fcbc9d3c090350e70016`; Q's direct parent is Source32 H
+`1294284b7261fb23911a0af02518f3374bea7898`, and its tree is
+`a55e4c2fa8327e9183b6609631d6805e9551694c`. The ten immutable supplier bytes
+match H's normal TEST_FILES nomination. Journey SHA256 is
+`e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
+H incorporates Source32 passive refusal retention and exactly the reviewed V3
+development test-runner request-child exception; Root relays explicit human
+approval. Normal development test signing is allowed in the later build gate;
+release signing remains deferred. Existing Sandbox and actual two-output
+normal-baseline signature comparisons remain mandatory. No parent/HOME/store/
+app/engine/global write grant, new transport or native guard relaxation applies.
+
+Admission now requires the exact closed `purpose`, bound to a separate scope:
+
+- `native`: `P12-integration-Qrequest-child-R7325-four-startup-source17`.
+- `build-only`: `P12-integration-Qrequest-child-R7325-signature-build-only-source17`.
+
+Both bind the exact C17 controller SHA, genuine P12 producer/normal manifest,
+one attempt, zero retries, reviewed image and the original queue-inclusive
+48-minute work / 10-minute cleanup / 2-minute retention limits. Unknown, omitted
+or mismatched purpose refuses before work in the workflow and controller.
+Root supplies new literal clocks; the source contains no episode epochs.
+
+Build-only creates its configured profile through live H Provider/prepare_profile,
+compiles the actual four-input observer without launching it, obtains H's actual
+ax_declaration and prepare_configuration, then calls H generated_runner with
+that SAME live profile/profiles-root/declaration and a bounded owned command port.
+H performs a genuine same-source/configuration/toolchain ordinary baseline and
+candidate build-for-testing (two commands, 240 seconds each), inspecting both
+actual Runner/testbundle signed outputs for each build. The controller preserves
+its existing generated-runner receipt check with the actual ordinary versus
+exact H-owned request-project selection. It never validates a candidate as the
+ordinary project or bypasses H's signature/scheme/source/directory checks.
+
+The build-only branch returns before R, native helper launching, app, XCTest or
+input. It leaves runtime attempts/cases/R/full-four-case/acceptance fields at
+zero/empty/false. Signature PASS does not establish OS permission enforcement,
+AX eligibility, input completion or native acceptance. Its pre-work reservation
+is 1005 seconds; each helper still requires its full cap plus the existing 15s
+reserve. Insufficient original time refuses, never renews the clock.
+
+Build-only cleanup uses all accepted bounded helper receipts (reaped, drained,
+not unknown), positively stopped Provider, immutable protected snapshot plus a
+bounded exact home inventory, and the original canonical 0700 root/proof/request
+identities. Configured native integrity expects a seeded database, so this
+no-engine signature fixture instead requires its originally absent config/store
+and whole home to remain exact. No DB is seeded merely to satisfy cleanup.
+Only those positive build-only facts support H's existing remove_profile; there
+is no fabricated native OwnerWitness receipt. Partial preparation, unknown
+helper/provider/root or integrity retains the fixture and diagnostic marker.
+The original work error survives cleanup/clock/evidence failure. Both generated
+DerivedData directories and the copied request project are discarded after
+bounded signature evidence, then the exact fixture is removed. Expanded binaries
+are never reused for a different fixture/nonce or subsequent native phase.
+
+Native still uses complete maintained R followed by all four original ordered
+cases and all their API/PNG/store/policy/input/custody gates. selected_episode
+is unchanged except its configuredLocal pre-work reservation grows from615 to
+855 seconds for the extra possible 240s normal baseline build; other cases stay
+615, R stays1155 and all original ticket/sample/input deadlines stay unchanged.
+A full native run requests five SDK build commands, four XCTest commands, one R
+compiler graph and seven direct Swift helper compilations. Build-only requests
+two SDK commands, two direct Swift helper compilations (observer and existing
+configuration resolver), zero R and zero XCTest/app/input. These role counts do
+not collapse Xcode's actual compiler invocations or waive per-helper ownership.
+
+P12 remains the integration test product `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`;
+R remains `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Genuine producer run
+42455455480 / artifact13607980704, normal manifest and closed normal-only handoff
+remain exact. The artifact expires Nov11 06:49Z; availability must be verified in
+the later admitted job. This implementation downloads/rebuilds nothing.
+Historical SDK/source-context fields retain their actual provenance.
+
+The old 67 function/class ASTs are audited explicitly: genuine admission,
+configured reservation, main routing and runtime project receipt changes plus
+their containing test classes/default admission fixtures are allowed; all old
+test assertions remain. New controls exercise live context forwarding, actual
+maintained H generator/signature gates with inert command ports, candidate
+receipt negatives, no-native return/sentinels, primary error/positive cleanup,
+unknown retention and both workflow/controller purpose refusals. No Swift,
+signing, SDK or native execution occurs in these controls.
+
+## Historical C16 record (unchanged evidence, not current routing)
+
 # PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
 C16 is a mechanical qualification caller derived from exact frozen C15

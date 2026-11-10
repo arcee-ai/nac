@@ -25,7 +25,7 @@ H = Path(fixture.name)
 paths = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', PAIR['H'], 'desktop/macos'],
                                 cwd=repository, text=True).splitlines()
 for name in paths:
-    if name.endswith('.py') or name in ('desktop/macos/ci-qualifications.json', 'desktop/macos/ci-toolchain.json'):
+    if name.endswith(('.py', '.xcscheme', '/project.pbxproj')) or name in ('desktop/macos/ci-qualifications.json', 'desktop/macos/ci-toolchain.json'):
         target = H / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(subprocess.check_output(['git', 'show', PAIR['H'] + ':' + name], cwd=repository))
@@ -50,7 +50,7 @@ class SourceControls(unittest.TestCase):
         self.mono += seconds
 
     def admission(self):
-        return dict(scope=controller.SCOPE, controller_sha='a' * 40, allocation_id='Root-new-four-source-schema',
+        return dict(scope=controller.SCOPE, controller_sha='a' * 40, purpose='native', allocation_id='Root-new-four-source-schema',
                     attempt=1, retries=0, manifest_sha256=controller.MANIFEST_SHA256,
                     producer=dict(run_id=controller.PRODUCER_RUN, artifact_id=controller.PRODUCER_ARTIFACT, controller_sha=controller.PRODUCER,
                                   branch=controller.PRODUCER_BRANCH, artifact_name=controller.PRODUCER_ARTIFACT_NAME),
@@ -393,6 +393,388 @@ class SourceControls(unittest.TestCase):
             with self.subTest(command=command), self.assertRaises(RuntimeError):
                 namespace['run'](command, path, 900, complete_output_limit=cap)
         self.assertEqual(ci.run.call_count, 1)
+
+
+
+class BuildOnlyControls(unittest.TestCase):
+    advance = SourceControls.advance
+
+    def setUp(self):
+        SourceControls.setUp(self)
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='nac-c17-inert-'))
+        self.base = Path(self.tmp).resolve()
+        self.profiles = self.base / 'profiles'
+        self.profiles.mkdir(mode=0o700)
+        self.events = []
+        self.original = ValueError('original inert work error')
+        self.cleanup_error = RuntimeError('inert cleanup error')
+        self.mode = None
+        self.profile = None
+        self.declaration = None
+        self.owned_runs = []
+        self.provider = Mock(spec=['start', 'stop', 'settled'])
+        self.provider.settled = False
+        def start():
+            self.events.append('provider-start')
+            return 'http://127.0.0.1:12345'
+        def stop(*, require_complete):
+            self.assertFalse(require_complete)
+            self.events.append('provider-stop')
+            if self.mode in ('provider', 'both'): raise self.cleanup_error
+            self.provider.settled = True
+        self.provider.start.side_effect = start
+        self.provider.stop.side_effect = stop
+        names = ['Provider', 'observer_sources', 'prepare_profile', 'ax_declaration', 'prepare_configuration',
+                 'generated_runner', 'immutable_snapshot', 'remove_profile', 'digest']
+        self.startup = Mock(spec=names)
+        self.startup.Provider.return_value = self.provider
+        self.sources = []
+        for name in ('Observer.swift', 'Witness.swift', 'Guard.swift', 'Receipt.swift'):
+            path = self.base / name
+            path.write_bytes(b'inert source')
+            self.sources.append(str(path))
+        self.selection = dict(project=str(self.base / 'ordinary.xcodeproj'), receipt=dict(
+            sources={path:controller.digest(path) for path in self.sources}))
+        self.startup.observer_sources.return_value = self.sources
+        self.startup.digest.side_effect = controller.digest
+        self.startup.immutable_snapshot.return_value = dict(config=None, store=None, wal_shm=[])
+        def prepare(parent, scenario, url, *, run, directory):
+            self.events.append('profile')
+            self.assertEqual((parent, scenario, url), (self.profiles, 'configuredLocal', 'http://127.0.0.1:12345/models-dev'))
+            root = Path(tempfile.mkdtemp(prefix='nac342-xctest-configuredLocal-', dir=parent))
+            home = root / 'home'
+            home.mkdir(mode=0o700)
+            (home / 'nac').mkdir(mode=0o700)
+            self.profile = dict(root=root, home=home, scenario=scenario)
+            run(['git', 'init'], directory / 'profile.log', 15)
+            if self.mode == 'prepare': raise self.original
+            return self.profile
+        self.startup.prepare_profile.side_effect = prepare
+        def declaration(profile, helper, tests):
+            self.events.append('declaration')
+            self.assertIs(profile, self.profile)
+            self.assertTrue(helper.is_file())
+            proof = profile['root'] / 'ax-witness'
+            proof.mkdir(mode=0o700)
+            (proof / 'requests').mkdir(mode=0o700)
+            self.declaration = dict(path=str(proof / 'receipt.json'), nonce='a'*64, owner_pid=os.getpid())
+            return self.declaration
+        self.startup.ax_declaration.side_effect = declaration
+        def configuration(profile, app, manifest, product, tests, harness_sha, *, run, directory, ax_witness):
+            self.events.append('configuration')
+            self.assertIs(profile, self.profile)
+            self.assertIs(ax_witness, self.declaration)
+            run(['inert-environment-resolver'], directory / 'environment.log', 45)
+            if self.mode == 'configuration': raise self.original
+            config = dict(scenario='configuredLocal', harness_sha=harness_sha, ax_witness=ax_witness)
+            path = profile['root'] / 'startup-config.json'
+            path.write_text(json.dumps(config))
+            return config, path, {'actual_normal_package':'inert port'}
+        self.startup.prepare_configuration.side_effect = configuration
+        def generated(folder, config_path, hashed, config, selection, run, *, private_request, command):
+            self.events.append('generated-runner')
+            self.assertIs(selection, self.selection)
+            self.assertIs(private_request['profile'], self.profile)
+            self.assertIs(private_request['declaration'], self.declaration)
+            self.assertEqual(private_request['profiles_root'], self.profiles)
+            self.assertEqual(hashed, controller.digest(config_path))
+            baseline = folder / 'normal-signature-baseline'
+            baseline.mkdir(mode=0o700)
+            command(['xcodebuild', '-version'])
+            for name, target in (('baseline',baseline), ('candidate',folder)):
+                self.events.append(name)
+                (target / 'derived').mkdir(mode=0o700)
+                run(['xcodebuild', 'build-for-testing'], target / 'build.log', 240)
+            port = Path(self.declaration['path']).parent / 'requests'
+            paths = (self.profile['root'], port.parent, port)
+            gate = dict(schema='nac342-request-child-signatures-v1', acceptance=False,
+                configuration_sha256=hashed, sources=selection['receipt']['sources'],
+                baseline=dict(runner={},testbundle={}), candidate=dict(runner={},testbundle={}),
+                both_actual_signatures_verified=True, request_port=dict(nonce=self.declaration['nonce'],
+                directory=str(port), identities={str(p):controller.directory_identity(p) for p in paths},
+                actual_runner_entitlements_verified=True, actual_testbundle_entitlements_verified=True))
+            for _ in range(4):
+                command(['/usr/bin/codesign','--verify','inert'])
+                command(['/usr/bin/codesign','--display','inert'])
+            if self.mode in ('signature', 'both'): raise self.original
+            if self.mode == 'missing-gate': gate['both_actual_signatures_verified'] = False
+            if self.mode == 'wrong-gate': gate['configuration_sha256'] = 'changed'
+            if self.mode == 'home': (self.profile['home'] / 'foreign.db').write_bytes(b'changed')
+            if self.mode == 'port': port.chmod(0o755)
+            if self.mode == 'root':
+                old=self.profile['root'];old.rename(old.with_name(old.name+'-retained'));old.mkdir(mode=0o700)
+            if self.mode == 'integrity': self.startup.immutable_snapshot.return_value = dict(changed=True)
+            return folder/'inert.xctestrun',dict(private_request_signature_gate=gate)
+        self.startup.generated_runner.side_effect = generated
+        def remove(profile, proof):
+            import shutil
+            self.events.append('remove')
+            self.assertIs(profile, self.profile)
+            self.assertTrue(proof['owned_processes_settled'])
+            self.assertTrue(proof['provider_settled'])
+            self.assertTrue(proof['helper_receipts'])
+            self.assertFalse(proof['public_test_requested'])
+            self.assertEqual(proof['root'], str(profile['root']))
+            if self.mode == 'remove': raise self.cleanup_error
+            shutil.rmtree(profile['root'])
+        self.startup.remove_profile.side_effect = remove
+
+    def read(self, path, limit):
+        self.assertLessEqual(path.stat().st_size, limit)
+        self.assertFalse(path.is_symlink())
+        return path.read_bytes()
+
+    def owned_port(self, argv, log, cap, **kwargs):
+        # Never invoke a command. The exact route/callback executes against data.
+        self.owned_runs.append((argv, log, cap))
+        self.assertNotIn('test-without-building', argv)
+        log.write_text('inert command port')
+        if '-o' in argv: Path(argv[argv.index('-o')+1]).write_bytes(b'inert nonexecutable helper')
+        owner=dict(accepted=True,pid=100+len(self.owned_runs),reaped=True,drain_settled=True,
+                   unknown=False,teardown_error=None)
+        path=log.with_name(log.name+'.ownership.json')
+        if self.mode=='unknown':owner['unknown']=True
+        if self.mode=='unreaped':owner['reaped']=False
+        if self.mode=='drain':owner['drain_settled']=False
+        if self.mode=='teardown':owner['teardown_error']='inert'
+        if self.mode!='missing-owner':path.write_text(json.dumps(owner))
+        if self.mode=='observer' and argv[0]=='xcrun':raise self.original
+        if self.mode=='baseline' and log.parent.name=='normal-signature-baseline':raise self.original
+        if self.mode=='candidate' and argv[:2]==['xcodebuild','build-for-testing'] and log.parent.name!='normal-signature-baseline':raise self.original
+
+    def execute(self, using=None):
+        return controller.signature_build_only(self.startup, self.clock, using or budget.using,
+            folder=self.base/'signature',profiles=self.profiles,app=self.base/'app',manifest=self.base/'manifest',
+            product=self.base/'P',tests=self.base/'Q',harness_sha=PAIR['H'],selection=self.selection,
+            observer=self.base/'observer',harness=self.base/'H',run=self.owned_port,bounded_file=self.read)
+
+    def test_live_fixture_pair_route_stops_before_native_and_uses_positive_cleanup(self):
+        proof=self.execute()
+        self.assertEqual(self.events,['provider-start','profile','declaration','configuration','generated-runner',
+                                     'baseline','candidate','provider-stop','remove'])
+        self.assertEqual([cap for argv,_,cap in self.owned_runs if argv[:2]==['xcodebuild','build-for-testing']],[240,240])
+        self.assertEqual(sum(argv[:2]==['/usr/bin/codesign','--verify'] for argv,_,_ in self.owned_runs),4)
+        self.assertEqual(sum(argv[:2]==['/usr/bin/codesign','--display'] for argv,_,_ in self.owned_runs),4)
+        self.assertEqual(proof['status'],'PASS')
+        self.assertTrue(proof['profile_removed'])
+        self.assertFalse(proof['public_test_requested'])
+        self.assertTrue(proof['input_completion_unknown'])
+        self.assertEqual(len(proof['helper_receipts']),len(self.owned_runs))
+        self.assertFalse(any(self.profiles.iterdir()))
+        self.assertFalse((self.base/'signature/derived').exists())
+        self.assertFalse((self.base/'signature/normal-signature-baseline/derived').exists())
+        # spec has no run_case/OwnerWitness/AXCompanion/setup_engine/native port.
+        self.assertNotIn('test-without-building',str(self.owned_runs))
+
+    def test_work_and_signature_failures_preserve_original_and_stop_without_native(self):
+        for mode in ('observer','prepare','configuration','baseline','candidate','signature','both'):
+            with self.subTest(mode=mode):
+                fixture=BuildOnlyControls('test_live_fixture_pair_route_stops_before_native_and_uses_positive_cleanup')
+                fixture.setUp()
+                try:
+                    fixture.mode=mode
+                    with self.assertRaises(ValueError) as caught:fixture.execute()
+                    self.assertIs(caught.exception,fixture.original)
+                    self.assertNotIn('test-without-building',str(fixture.owned_runs))
+                    if mode in ('prepare','configuration','both'):
+                        fixture.startup.remove_profile.assert_not_called()
+                        self.assertTrue((fixture.base/'signature/retained-fixture.json').exists())
+                    elif mode in ('baseline','candidate','signature'):
+                        self.assertFalse(any(fixture.profiles.iterdir()))
+                finally:fixture.doCleanups()
+
+    def test_unknown_helper_provider_identity_integrity_or_gate_fails_closed(self):
+        for mode in ('unknown','unreaped','drain','teardown','missing-owner','provider','root','port','home','integrity','remove',
+                     'missing-gate','wrong-gate'):
+            with self.subTest(mode=mode):
+                fixture=BuildOnlyControls('test_live_fixture_pair_route_stops_before_native_and_uses_positive_cleanup')
+                fixture.setUp()
+                try:
+                    fixture.mode=mode
+                    with self.assertRaises((RuntimeError,FileNotFoundError)):fixture.execute()
+                    proof=json.loads((fixture.base/'signature/build-only.json').read_text())
+                    self.assertEqual(proof['status'],'FAIL')
+                    self.assertFalse(proof['public_test_requested'])
+                    if mode not in ('missing-gate','wrong-gate'):
+                        self.assertTrue(any(fixture.profiles.iterdir()))
+                        self.assertTrue((fixture.base/'signature/retained-fixture.json').exists())
+                finally:fixture.doCleanups()
+
+    def test_cleanup_bound_failure_never_replaces_original_work_error(self):
+        from contextlib import contextmanager
+        self.mode='signature'
+        @contextmanager
+        def using(bound):
+            if bound.kind=='cleanup':raise self.cleanup_error
+            with budget.using(bound):yield
+        with self.assertRaises(ValueError) as caught:self.execute(using)
+        self.assertIs(caught.exception,self.original)
+        self.assertIs(caught.exception.__cause__,self.cleanup_error)
+        self.startup.remove_profile.assert_not_called()
+        self.assertTrue(any(self.profiles.iterdir()))
+
+    def test_missing_unknown_or_mismatched_purpose_refuses_and_both_closed_purposes_admit(self):
+        value=SourceControls.admission(self)
+        for purpose in ('native','build-only'):
+            correct={**value,'purpose':purpose,'scope':controller.PURPOSE_SCOPES[purpose]}
+            self.assertEqual(controller.admit(correct,'a'*40,now=1001),(1000,3880,4480,4600))
+        invalid=[{k:v for k,v in value.items() if k!='purpose'}]
+        invalid += [{**value,'purpose':p} for p in (None,True,[],{},'unknown','build-only')]
+        invalid += [{**value,'purpose':'native','scope':controller.PURPOSE_SCOPES['build-only']}]
+        for row in invalid:
+            with self.subTest(row=row),self.assertRaises((RuntimeError,TypeError,KeyError)):
+                controller.admit(row,'a'*40,now=1001)
+
+    def test_extra_baseline_is_reserved_before_configured_fixture_or_input(self):
+        execute,events,_=SourceControls.episode(self,elapsed=2100)
+        before=(self.clock.work.deadline,self.clock.cleanup.deadline,self.clock.retention.deadline)
+        with self.assertRaises((RuntimeError,TimeoutError)):execute()
+        self.assertEqual(events,['R-build','R-verify','onboarding','onboarding-cleanup'])
+        self.assertEqual(before,(self.clock.work.deadline,self.clock.cleanup.deadline,self.clock.retention.deadline))
+
+    def test_actual_main_build_only_branch_returns_before_native_helpers_and_R(self):
+        tree=ast.parse((HERE/'four-startup.py').read_bytes())
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        branch=next(n for n in ast.walk(main) if isinstance(n,ast.If) and isinstance(n.test,ast.Compare)
+                    and ast.unparse(n.test)=="admission['purpose'] == 'build-only'")
+        self.assertIsInstance(branch.body[-1],ast.Return)
+        text=ast.unparse(branch)
+        self.assertNotIn('selected_episode',text)
+        self.assertNotIn('run_case',text)
+        self.assertNotIn('console(',text)
+        self.assertNotIn('test-without-building',text)
+        self.assertIn('signature_build_only',text)
+        native=next(n for n in ast.walk(main) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+                    and n.func.id=='selected_episode')
+        self.assertLess(branch.end_lineno,native.lineno)
+
+    def test_actual_main_branch_returns_without_native_fallthrough_and_keeps_counters_separate(self):
+        tree=ast.parse((HERE/'four-startup.py').read_bytes())
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        branch=next(n for n in ast.walk(main) if isinstance(n,ast.If) and isinstance(n.test,ast.Compare)
+                    and ast.unparse(n.test)=="admission['purpose'] == 'build-only'")
+        output=self.base/'route-output';output.mkdir()
+        report=dict(package_before={'normal':'exact'},runtime_attempts=0,cases_requested=[],
+                    protocol_executed=False,full_four_case_run=False,prefix_binary_acceptance=False,
+                    final_integrated_native_acceptance=False)
+        startup=Mock(spec=['package_contract']);startup.package_contract.return_value=report['package_before']
+        build=Mock(return_value={'status':'PASS'})
+        native=Mock(side_effect=AssertionError('native fallthrough'))
+        body=[branch,ast.Expr(value=ast.Call(func=ast.Name(id='native',ctx=ast.Load()),args=[],keywords=[]))]
+        wrapped=ast.parse('def route():\n    pass\n').body[0];wrapped.body=body
+        namespace=dict(admission={'purpose':'build-only','controller_sha':'a'*40},output=output,Path=Path,
+            signature_build_only=build,startup=startup,clock=self.clock,using=budget.using,evidence=output,
+            app=output/'app',manifest=output/'manifest',roots={key:output/key for key in ('H','P','Q','R')},
+            pair=PAIR,selection=self.selection,run=self.owned_port,bounded_file=self.read,report=report,
+            require=controller.require,contract=object(),require_checkout=Mock(),controller=output/'controller',
+            STOP=[],native=native)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[wrapped],type_ignores=[])),'<actual-build-only-route>','exec'),namespace)
+        namespace['route']()
+        native.assert_not_called();build.assert_called_once()
+        self.assertEqual(report['status'],'PASS')
+        self.assertEqual((report['runtime_attempts'],report['cases_requested'],report['protocol_executed'],report['full_four_case_run']),
+                         (0,[],False,False))
+        self.assertFalse(report['prefix_binary_acceptance']);self.assertFalse(report['final_integrated_native_acceptance'])
+        self.assertFalse((output/'profiles').exists())
+
+    def test_actual_H_pair_and_controller_receipt_callback_gate_both_real_output_shapes(self):
+        # Real maintained pair/generator/validator/inspector, inert build/sign ports.
+        import sys
+        previous=list(sys.path);sys.path.insert(0,str(H/'desktop/macos'))
+        try:
+            spec=importlib.util.spec_from_file_location('c17_exact_signature_fixtures',H/'desktop/macos/test_ci_startup_signatures.py')
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            import ci_startup
+            from ci_xctest import require_generated_runner
+            from ci_xctest_attachments import bounded_file
+            tree=ast.parse((HERE/'four-startup.py').read_bytes())
+            main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+            callback=next(n for n in main.body if isinstance(n,ast.FunctionDef) and n.name=='runtime_build_receipt')
+            for mode in (None,'candidate-receipt','bundle-not-propagated','parent-grant'):
+                with self.subTest(mode=mode):
+                    fixture=module.PairTests('test_pair_real_wiring_builds_normal_baseline_first_and_gates_both_outputs')
+                    fixture.setUp()
+                    try:
+                        fixture.mode=mode
+                        source,source_hash=next(iter(fixture.selection['receipt']['sources'].items()))
+                        fixture.selection['receipt'].update(harness_sha=PAIR['H'],startup_sha=PAIR['Q'],
+                            startup_source_path=source,startup_source_sha256=source_hash)
+                        fixture.config['harness_sha']=PAIR['H'];fixture.marker.write_text(json.dumps(fixture.config))
+                        report={};namespace=dict(Path=Path,plistlib=__import__('plistlib'),require=controller.require,
+                            selection=fixture.selection,require_generated_runner=require_generated_runner,
+                            build_selection_receipt=controller.build_selection_receipt,bounded_file=bounded_file,
+                            digest=controller.digest,report=report,write=controller.write)
+                        exec(compile(ast.Module(body=[callback],type_ignores=[]),'<actual-runtime-build-receipt>','exec'),namespace)
+                        calls=[]
+                        def run(argv,log,cap,*,env):
+                            self.assertEqual(argv[:2],['xcodebuild','build-for-testing']);self.assertEqual(cap,240)
+                            project=Path(argv[argv.index('-project')+1])
+                            selected=fixture.selection if project==fixture.project else dict(project=str(project),
+                                scheme=module.m.TARGETS[2],receipt=json.loads((project.parent/'project-selection.json').read_text()))
+                            runner,receipt=fixture.build(log.parent,fixture.marker,controller.digest(fixture.marker),fixture.config,selected,None)
+                            target=receipt['generated_target'];target.update(IsUITestBundle=True,BlueprintName=module.m.TARGETS[2],
+                                EnvironmentVariables=dict(arg.split('=',1) for arg in argv if arg.startswith('NAC_')))
+                            target['EnvironmentVariables'].update(NAC_STARTUP_SOURCE_PATH=source,NAC_STARTUP_SOURCE_SHA256=source_hash)
+                            runner.write_bytes(__import__('plistlib').dumps(dict(actual_inert_target=target)))
+                            log.write_text('inert complete build port')
+                            calls.append(argv)
+                            if mode=='candidate-receipt' and project!=fixture.project:
+                                path=project.parent/'project-selection.json';bad=json.loads(path.read_text())
+                                bad['private_request_proposal']['nonce']='0'*64;path.write_text(json.dumps(bad))
+                            namespace['runtime_build_receipt'](argv)
+                        def execute():
+                            return ci_startup.generated_runner(fixture.folder,fixture.marker,controller.digest(fixture.marker),
+                                fixture.config,fixture.selection,run,private_request=fixture.context,command=fixture.command)
+                        if mode is None:
+                            _,receipt=execute()
+                            self.assertTrue(receipt['private_request_signature_gate']['both_actual_signatures_verified'])
+                            self.assertEqual(sum(a[1]=='--verify' for a in fixture.commands if a[0]=='/usr/bin/codesign'),4)
+                            self.assertEqual(len(report['runtime_builds']),2)
+                        else:
+                            with self.assertRaises(RuntimeError):execute()
+                        self.assertEqual(len(calls),2)
+                        self.assertEqual(calls[0][calls[0].index('NAC_UI_FIXTURE='+str(fixture.marker))],
+                                         calls[1][calls[1].index('NAC_UI_FIXTURE='+str(fixture.marker))])
+                    finally:fixture.doCleanups()
+        finally:sys.path[:]=previous
+
+    def test_actual_project_selection_uses_normal_or_exact_live_candidate_and_rejects_mutations(self):
+        import copy
+        normal=self.base/'ordinary.xcodeproj'
+        normal.mkdir()
+        (normal/'project.pbxproj').write_bytes(b'normal')
+        selection=dict(project=str(normal),receipt=dict(generated=True,generated_project_sha256=controller.digest(normal/'project.pbxproj'),sources={'source':'a'*64}))
+        folder=self.base/'case';folder.mkdir()
+        project=folder/'request-project'/normal.name;project.mkdir(parents=True)
+        (project/'project.pbxproj').write_bytes(b'candidate')
+        config=self.base/'config.json';config.write_text(json.dumps(dict(scenario='configuredLocal',ax_witness=dict(nonce='a'*64,path=str(self.base/'proof/receipt.json')))))
+        hashed=controller.digest(config)
+        proposal=dict(nonce='a'*64,configuration_sha256=hashed,directory=str(self.base/'proof/requests'))
+        candidate=dict(selection['receipt'],generated_project_sha256=controller.digest(project/'project.pbxproj'),private_request_proposal=proposal)
+        receipt=project.parent/'project-selection.json'
+        receipt.write_text(json.dumps(candidate))
+        argv=['xcodebuild','build-for-testing','-project',str(project),'-derivedDataPath',str(folder/'derived')]
+        self.assertIs(controller.build_selection_receipt(['-project',str(normal)],selection,config,hashed,self.read),selection['receipt'])
+        self.assertEqual(controller.build_selection_receipt(argv,selection,config,hashed,self.read),candidate)
+        for attack in ('sources','project','nonce','configuration','directory','extra','duplicate','alias','foreign-project','fixture'):
+            row=copy.deepcopy(candidate);actual=list(argv);original_project=(project/'project.pbxproj').read_bytes()
+            if attack=='sources':row['sources']={}
+            elif attack=='project':row['generated_project_sha256']='0'*64
+            elif attack in ('nonce','configuration','directory'):
+                key='configuration_sha256' if attack=='configuration' else attack
+                row['private_request_proposal'][key]='changed'
+            elif attack=='extra':row['extra']=True
+            elif attack=='foreign-project':actual[3]=str(normal.parent/'foreign.xcodeproj')
+            elif attack=='fixture':config.write_text('{}')
+            receipt.write_text(json.dumps(row))
+            if attack=='duplicate':receipt.write_text(receipt.read_text()[:-1]+',"generated":true}')
+            if attack=='alias':
+                real=receipt.with_name('real.json');receipt.rename(real);receipt.symlink_to(real)
+            with self.subTest(attack=attack),self.assertRaises((RuntimeError,AssertionError,KeyError,FileNotFoundError)):
+                controller.build_selection_receipt(actual,selection,config,hashed,self.read)
+            if attack=='alias':receipt.unlink();real.rename(receipt)
+            if attack=='fixture':config.write_text(json.dumps(dict(scenario='configuredLocal',ax_witness=dict(nonce='a'*64,path=str(self.base/'proof/receipt.json')))))
+            (project/'project.pbxproj').write_bytes(original_project)
 
 
 if __name__ == '__main__':

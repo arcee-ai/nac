@@ -14,7 +14,7 @@ spec.loader.exec_module(launch)
 
 class LauncherControls(unittest.TestCase):
     def admission(self):
-        return dict(scope=launch.case.SCOPE, controller_sha='a' * 40, allocation_id='Root-one',
+        return dict(scope=launch.case.SCOPE, controller_sha='a' * 40, purpose='native', allocation_id='Root-one',
             attempt=1, retries=0, manifest_sha256=launch.case.MANIFEST_SHA256,
             producer=dict(run_id=launch.case.PRODUCER_RUN, artifact_id=launch.case.PRODUCER_ARTIFACT, controller_sha=launch.case.PRODUCER,
                           branch=launch.case.PRODUCER_BRANCH, artifact_name=launch.case.PRODUCER_ARTIFACT_NAME),

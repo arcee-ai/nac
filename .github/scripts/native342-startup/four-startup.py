@@ -9,12 +9,15 @@ import platform
 import plistlib
 import re
 import signal
+import shutil
+import stat
 import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/private520-publish-open-errno-C16'
-SCOPE = 'P12-integration-Qpublish-open-errno-R7325-four-startup-source16'
+BRANCH = 'refs/heads/codex/private520-request-child-C17'
+SCOPE = 'P12-integration-Qrequest-child-R7325-four-startup-source17'
+PURPOSE_SCOPES = {'native': SCOPE, 'build-only': SCOPE.replace('four-startup', 'signature-build-only')}
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
@@ -42,9 +45,10 @@ def write(path, value):
 
 def admit(value, controller_sha, *, now=None):
     """Validate a declaration; this function never issues execution authority."""
-    require(set(value) == {'scope', 'controller_sha', 'allocation_id', 'attempt', 'retries',
+    require(set(value) == {'scope', 'purpose', 'controller_sha', 'allocation_id', 'attempt', 'retries',
                           'manifest_sha256', 'clock', 'producer'}, 'exact admission fields')
-    require(value['scope'] == SCOPE and value['controller_sha'] == controller_sha
+    require(type(value['purpose']) is str and value['purpose'] in PURPOSE_SCOPES
+            and value['scope'] == PURPOSE_SCOPES[value['purpose']] and value['controller_sha'] == controller_sha
             and re.fullmatch('[0-9a-f]{40}', controller_sha), 'frozen controller binding')
     require(type(value['attempt']) is int and value['attempt'] == 1
             and type(value['retries']) is int and value['retries'] == 0, 'one attempt, no retries')
@@ -96,7 +100,7 @@ def selected_episode(startup, protocol, clock, using, *, evidence, profiles, app
                         for row in process['observations']), 'required complete maintained R receipt')
         progress(protocol=process)
         for scenario in CASES:
-            clock.require_phase('case-' + scenario, 615)
+            clock.require_phase('case-' + scenario, 855 if scenario == 'configuredLocal' else 615)
             progress(requested=scenario)
             folder = evidence / ('startup-' + scenario)
             with using(clock.cleanup):
@@ -163,6 +167,185 @@ def make_clock(epochs, Bound):
     return Clock()
 
 
+def build_selection_receipt(argv, selection, config, configuration_sha256, bounded_file):
+    """Keep the actual ordinary/candidate project binding in the existing gate."""
+    project = Path(argv[argv.index('-project') + 1])
+    ordinary = selection['receipt']
+    if project == Path(selection['project']):
+        return ordinary
+    derived = Path(argv[argv.index('-derivedDataPath') + 1])
+    expected = derived.parent / 'request-project' / Path(selection['project']).name
+    require(project == expected and project.resolve(strict=True) == project,
+            'actual configured project outside exact H-owned copy')
+    receipt_path = project.parent / 'project-selection.json'
+    require(receipt_path.resolve(strict=True) == receipt_path, 'candidate selection alias')
+    def unique(pairs):
+        require(len(pairs) == len(dict(pairs)), 'duplicate candidate selection field')
+        return dict(pairs)
+    candidate = json.loads(bounded_file(receipt_path, 65536), object_pairs_hook=unique)
+    require(type(candidate) is dict and set(candidate) == set(ordinary) | {'private_request_proposal'}
+            and all(type(candidate[k]) is type(v) and candidate[k] == v for k, v in ordinary.items()
+                    if k != 'generated_project_sha256')
+            and hashlib.sha256(bounded_file(project / 'project.pbxproj', 256 * 1024)).hexdigest()
+                == candidate['generated_project_sha256'], 'candidate changed source or selection binding')
+    data = bounded_file(config, 32 * 1024)
+    require(hashlib.sha256(data).hexdigest() == configuration_sha256, 'candidate configuration changed')
+    fixture = json.loads(data)
+    proposal = candidate['private_request_proposal']
+    require(type(proposal) is dict and fixture['scenario'] == 'configuredLocal'
+            and proposal['configuration_sha256'] == configuration_sha256
+            and proposal['nonce'] == fixture['ax_witness']['nonce']
+            and proposal['directory'] == str(Path(fixture['ax_witness']['path']).parent / 'requests'),
+            'candidate selection differs from live fixture')
+    return candidate
+
+
+def directory_identity(path):
+    info = path.lstat()
+    require(path.resolve(strict=True) == path and stat.S_ISDIR(info.st_mode)
+            and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
+            'exact owned build-only directory')
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_mode)
+
+
+def build_only_snapshot(startup, profile, bounded_file):
+    # A build-only configured profile has no seeded DB. Normal post-native
+    # require_integrity requires a DB; use exact existing protected snapshots
+    # plus a bounded whole-home inventory instead, without seeding an engine.
+    entries = {}
+    for path in profile['home'].rglob('*'):
+        require(len(entries) < 128 and path.resolve(strict=True) == path and not path.is_symlink(),
+                'build-only home inventory alias/bound')
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode), 'build-only nonregular home member')
+        entries[str(path.relative_to(profile['home']))] = [info.st_dev, info.st_ino, info.st_mode,
+            hashlib.sha256(bounded_file(path, 64 * 1024)).hexdigest() if path.is_file() else None]
+    return dict(protected=startup.immutable_snapshot(profile), home=entries)
+
+
+def signature_build_only(startup, clock, using, *, folder, profiles, app, manifest,
+                         product, tests, harness_sha, selection, observer, harness, run, bounded_file):
+    """Actual H fixture/build owners only; no R, app, observer launch or XCTest."""
+    clock.require_phase('signature-build-only', 1005)
+    folder.mkdir(mode=0o700)
+    provider = startup.Provider(folder / 'provider.log')
+    profile = config = protected = identities = None
+    prepared = False
+    primary = None
+    cleanup_error = None
+    ledger = []
+    receipt = None
+    proof = dict(status='FAIL', purpose='build-only', public_test_requested=False,
+                 input_completion_unknown=True, profile_removed=False, helper_receipts=[])
+
+    def owned_run(argv, log, cap, **kwargs):
+        require('test-without-building' not in argv, 'build-only route cannot execute XCTest')
+        ledger.append(Path(log).with_name(Path(log).name + '.ownership.json'))
+        return run(argv, log, cap, **kwargs)
+
+    def command(argv):
+        log = folder / ('signature-command-' + str(len(ledger)) + '.log')
+        owned_run(argv, log, 30)
+        return bounded_file(log, 64 * 1024).decode().strip()
+
+    try:
+        with using(clock.work):
+            sources = startup.observer_sources(harness, tests)
+            before = {path: digest(path) for path in sources}
+            owned_run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', *sources, '-o', str(observer)],
+                      folder / 'observer-build.log', 90)
+            require({path: digest(path) for path in sources} == before, 'build-only observer sources changed')
+            proof['observer_sources_sha256'] = before
+            base = provider.start()
+            profile = startup.prepare_profile(profiles, 'configuredLocal', base + '/models-dev',
+                                              run=owned_run, directory=folder)
+            write(folder / 'fixture-location.json', {'root': str(profile['root']), 'scenario': 'configuredLocal'})
+            protected = build_only_snapshot(startup, profile, bounded_file)
+            declaration = startup.ax_declaration(profile, observer, tests)
+            paths = (profile['root'], Path(declaration['path']).parent, Path(declaration['path']).parent / 'requests')
+            identities = {str(path): directory_identity(path) for path in paths}
+            config, config_path, admission = startup.prepare_configuration(profile, app, manifest, product,
+                tests, harness_sha, run=owned_run, directory=folder, ax_witness=declaration)
+            configuration_sha256 = startup.digest(config_path)
+            write(folder / 'configuration.json', config)
+            write(folder / 'package-admission.json', admission)
+            prepared = True
+            _, receipt = startup.generated_runner(folder, config_path, configuration_sha256, config, selection,
+                owned_run, private_request=dict(profile=profile, profiles_root=profiles, declaration=declaration),
+                command=command)
+            gate = receipt.get('private_request_signature_gate')
+            require(type(gate) is dict and gate.get('both_actual_signatures_verified') is True
+                    and set(gate['baseline']) == set(gate['candidate']) == {'runner', 'testbundle'}
+                    and gate.get('schema') == 'nac342-request-child-signatures-v1' and gate.get('acceptance') is False
+                    and gate['sources'] == selection['receipt']['sources']
+                    and gate['configuration_sha256'] == configuration_sha256
+                    and gate['request_port']['nonce'] == declaration['nonce']
+                    and gate['request_port']['directory'] == str(paths[-1])
+                    and {path: tuple(value) for path, value in gate['request_port']['identities'].items()} == identities
+                    and gate['request_port']['actual_runner_entitlements_verified'] is True
+                    and gate['request_port']['actual_testbundle_entitlements_verified'] is True,
+                    'complete actual build-only signature gate required')
+            proof['signature_gate'] = gate
+    except BaseException as error:
+        primary = error
+    finally:
+        try:
+            with using(clock.cleanup):
+                try:
+                    provider.stop(require_complete=False)
+                    require(provider.settled, 'build-only provider settlement unknown')
+                    require(prepared and profile is not None and protected is not None and identities is not None,
+                            'partial build-only preparation retains fixture')
+                    require(ledger and len(ledger) == len(set(ledger)), 'complete unique helper ownership inventory')
+                    for path in ledger:
+                        owner = json.loads(bounded_file(path, 8192))
+                        require(owner.get('accepted') is True and type(owner.get('pid')) is int and owner['pid'] > 0
+                                and owner.get('reaped') is True and owner.get('drain_settled') is True
+                                and owner.get('unknown') is False and owner.get('teardown_error') is None,
+                                'build-only helper settlement unknown')
+                        proof['helper_receipts'].append(dict(file=str(path), sha256=digest(path)))
+                    require(build_only_snapshot(startup, profile, bounded_file) == protected,
+                            'build-only protected home/config/store changed')
+                    require(all(directory_identity(Path(path)) == expected for path, expected in identities.items()),
+                            'build-only fixture directory changed')
+                    for path in (folder / 'derived', folder / 'normal-signature-baseline' / 'derived', folder / 'request-project'):
+                        if path.exists() or path.is_symlink():
+                            require(path.resolve(strict=True) == path and path.is_dir(), 'build-only output alias')
+                            shutil.rmtree(path)
+                    settlement = dict(root=str(profile['root']), owned_processes_settled=True,
+                                      owner='build-only accepted helper receipts and stopped provider',
+                                      provider_settled=True, helper_receipts=proof['helper_receipts'],
+                                      public_test_requested=False)
+                    startup.remove_profile(profile, settlement)
+                    proof.update(profile_removed=True, cleanup=settlement)
+                except BaseException as error:
+                    cleanup_error = error
+                    write(folder / 'retained-fixture.json', dict(root=str(profile['root']) if profile else None,
+                        profiles_root=str(profiles), reason='build-only preparation/helper/provider/integrity/identity cleanup unknown'))
+                proof.update(status='PASS' if primary is None and cleanup_error is None else 'FAIL',
+                             error_type=type(primary).__name__ if primary else None,
+                             cleanup_error_type=type(cleanup_error).__name__ if cleanup_error else None)
+                write(folder / 'build-only.json', proof)
+        except BaseException as error:
+            cleanup_error = cleanup_error or error
+            proof.update(status='FAIL', error_type=type(primary).__name__ if primary else None,
+                         cleanup_error_type=type(cleanup_error).__name__)
+            try:
+                with using(clock.retention):
+                    write(folder / 'retained-fixture.json', dict(root=str(profile['root']) if profile else None,
+                        profiles_root=str(profiles), reason='build-only cleanup/evidence bound failed'))
+                    write(folder / 'build-only.json', proof)
+            except BaseException:
+                pass  # The original work/cleanup error remains primary.
+    if primary is not None:
+        if cleanup_error is not None:
+            raise primary from cleanup_error
+        raise primary
+    if cleanup_error is not None:
+        raise cleanup_error
+    return proof
+
+
 def main():
     require(len(sys.argv) == 1, 'no arbitrary commands or scenarios')
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'actual arm64 macOS host')
@@ -190,7 +373,7 @@ def main():
     evidence.mkdir(mode=0o700)
     exported = output / 'evidence'
     exported.mkdir(mode=0o700)
-    report = dict(status='FAIL', scope=SCOPE, pair=pair, pair_sha256=digest(pair_path),
+    report = dict(status='FAIL', scope=admission['scope'], purpose=admission['purpose'], pair=pair, pair_sha256=digest(pair_path),
         wrapper_sha256=digest(__file__), admission=admission, controller_sha=os.environ['GITHUB_SHA'],
         runtime_attempts=0, cases_requested=[], retries=0, full_four_case_run=False, protocol_executed=False, cases=[],
         prefix_binary_acceptance=False, final_integrated_native_acceptance=False,
@@ -207,6 +390,7 @@ def main():
     from ci_support import COMPLETE_LOG_LIMIT, export_evidence, qualify_toolchain, redact_values, require_console
     from ci_xctest import require_generated_runner, runner_environment
     from ci_xctest_project import materialize_project
+    from ci_xctest_attachments import bounded_file
 
     clock = make_clock((start, work, cleanup, hard), Bound)
     # Each work callback is independently clamped below; permit the maintained
@@ -246,7 +430,8 @@ def main():
         runners = list((derived / 'Build/Products').glob('*.xctestrun'))
         require(len(runners) == 1 and runners[0].stat().st_size <= 256 * 1024, 'one bounded actual runtime xctestrun')
         target = require_generated_runner(plistlib.loads(runners[0].read_bytes()), config, 'NACStartupUITests',
-            project_selection=selection['receipt'], startup_binding=binding)
+            project_selection=build_selection_receipt(argv, selection, config, binding['configuration_sha256'], bounded_file),
+            startup_binding=binding)
 
         def build_path(value, host=''):
             expanded = value.replace('__TESTROOT__', str(runners[0].parent)).replace('__TESTHOST__', host)
@@ -337,6 +522,27 @@ def main():
             selection = materialize_project(roots['H'], pair['H'], startup_root=roots['Q'], startup_sha=pair['Q'],
                 startup_source_sha256=pair['q_swift_sha256'], output=output / 'startup-project')
             report['selection'] = selection['receipt']
+            if admission['purpose'] == 'build-only':
+                profiles = output / 'profiles'
+                profiles.mkdir(mode=0o700)
+                report['build_only'] = signature_build_only(startup, clock, using,
+                    folder=evidence / 'signature-build-only', profiles=profiles, app=app, manifest=manifest,
+                    product=roots['P'], tests=roots['Q'], harness_sha=pair['H'], selection=selection,
+                    observer=output / 'startup-owner-observer', harness=roots['H'], run=run, bounded_file=bounded_file)
+                with using(clock.cleanup):
+                    report['package_after'] = startup.package_contract(contract, 'inspect_normal_package',
+                        [str(manifest), str(app), str(roots['P'])], dict(product_sha=pair['P']),
+                        tests=roots['Q'], directory=evidence, name='package-after', run=run)
+                    require(report['package_before'] == report['package_after'], 'package admission changed')
+                    require(not any(profiles.iterdir()), 'unknown/retained build-only fixture; stop')
+                    profiles.rmdir()
+                    for key, root in roots.items():
+                        require_checkout(root, pair[key])
+                    require_checkout(controller, admission['controller_sha'])
+                    require(not clock.failed and not STOP, 'clock/ownership failure remains latched')
+                    report['status'] = 'PASS'
+                return  # The original finally exports; never falls through to R/native.
+            require(admission['purpose'] == 'native', 'closed native purpose')
             observer, image_reader = output / 'startup-owner-observer', output / 'startup-image-reader'
             gui_reader = output / 'native-gui-reader'
             helper_sources = startup.observer_sources(roots['H'], roots['Q'])
