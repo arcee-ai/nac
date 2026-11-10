@@ -1822,7 +1822,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("button", { name: "Parent chat" })).toBeVisible();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
@@ -1850,7 +1850,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(mobilePanel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "Parent chat" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await showSidePanel(page);
   await page
