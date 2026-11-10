@@ -55,6 +55,19 @@ disk because AppKit cannot run its deletion callback; the smoke runner removes
 only its own recorded fixture after checking engine settlement.
 Watchdog diagnostics are best effort and never gate the forced-exit callback.
 
+## CI fixture allowance
+
+The ordinary `ci.py` fixture-discovery command has a 120-second allowance to
+accommodate suite growth and hosted-machine variance. Discovery, test and skip
+conditions, process supervision, and all other command limits stay unchanged.
+The enclosing CI deadline remains 30 minutes; native startup tickets and AX
+freshness retain their separate limits.
+
+The pending ALL-342 integration at `3e6d834d` exercised 600 methods (595 passed,
+five existing optional skips). That evidence belongs to its candidate, not this
+dev baseline. This resource adjustment changes no test inventory and requires
+no startup feature changes. Startup UI acceptance remains a separate gate.
+
 ## Acceptance checks
 
 An actual interactive Aqua login session is required; Chromium and Playwright
