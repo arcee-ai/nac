@@ -24,3 +24,10 @@ A configured journey may publish its first closed local failure to the existing
 owned witness path plus `.failure`, before application teardown. This passive,
 nonce/configuration-bound record never grants receipt/input/process authority,
 replaces the original throw, or establishes precedence over a concurrent audit.
+
+Named button/message interactions carry explicit trusted selector intent. Both
+adapters use the existing canonical semantic-name policy; a query identifier or
+editable value alone never supplies semantic authority. Preserve public title/
+label and Message-only typed placeholder checks, unique same-query/anchor
+rechecks, global AX semantic/role/PID/CFEqual proof, exact focus/value and original
+point/freshness. Do not infer native label operands from identifier-query logs.

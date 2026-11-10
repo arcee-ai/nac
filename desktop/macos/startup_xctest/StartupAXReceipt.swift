@@ -38,13 +38,38 @@ struct StartupAXInteractionRequest: Codable, Equatable {
     let value: String?
 
     func validate(diagnostic: StartupFailureEvidence? = nil) throws {
-        diagnostic?.step = .request_shape
-        try StartupAXFiles.need(schema == "nac342-ax-interaction-v1" && UUID(uuidString: id) != nil
-            && UUID(uuidString: root_id) != nil && ["form", "panel", "goTo"].contains(surface)
-            && ["button", "message", "panel", "field"].contains(kind) && label.utf8.count <= 1024
-            && (!["button", "message"].contains(kind) || !label.isEmpty)
-            && point.count == 2 && point.allSatisfy { $0.isFinite && Double(Float($0)) == $0 }
-            && (value == nil || (keyboard && ["message", "field"].contains(kind) && value!.utf8.count <= 4096)))
+        diagnostic?.step = .request_schema
+        try StartupAXFiles.need(schema == "nac342-ax-interaction-v1")
+        diagnostic?.step = .request_id
+        try StartupAXFiles.need(UUID(uuidString: id) != nil)
+        diagnostic?.step = .request_root_id
+        try StartupAXFiles.need(UUID(uuidString: root_id) != nil)
+        diagnostic?.step = .request_surface
+        try StartupAXFiles.need(["form", "panel", "goTo"].contains(surface))
+        diagnostic?.step = .request_kind
+        try StartupAXFiles.need(["button", "message", "panel", "field"].contains(kind))
+        diagnostic?.step = .request_label_size
+        try StartupAXFiles.need(label.utf8.count <= 1024)
+        diagnostic?.step = .request_label_required
+        try StartupAXFiles.need(!["button", "message"].contains(kind) || !label.isEmpty)
+        diagnostic?.step = .request_point_count
+        try StartupAXFiles.need(point.count == 2)
+        diagnostic?.step = .request_point_x_finite
+        try StartupAXFiles.need(point[0].isFinite)
+        diagnostic?.step = .request_point_x_float
+        try StartupAXFiles.need(Double(Float(point[0])) == point[0])
+        diagnostic?.step = .request_point_y_finite
+        try StartupAXFiles.need(point[1].isFinite)
+        diagnostic?.step = .request_point_y_float
+        try StartupAXFiles.need(Double(Float(point[1])) == point[1])
+        if let value {
+            diagnostic?.step = .request_value_keyboard
+            try StartupAXFiles.need(keyboard)
+            diagnostic?.step = .request_value_kind
+            try StartupAXFiles.need(["message", "field"].contains(kind))
+            diagnostic?.step = .request_value_size
+            try StartupAXFiles.need(value.utf8.count <= 4096)
+        }
         diagnostic?.step = .request_anchor_frame
         let anchor = try StartupAXFiles.frame(anchor_frame)
         diagnostic?.step = .request_root_frame
@@ -113,6 +138,10 @@ enum StartupFailureStep: String, Codable, CaseIterable {
     case startup_checks, before_guard, before_record, public_target, prepare_interaction
     case final_recheck, finish_interaction, input, after_guard, after_record, terminal
     case request_shape, request_anchor_frame, request_root_frame, request_containment
+    case request_schema, request_id, request_root_id, request_surface
+    case request_kind, request_label_size, request_label_required, request_point_count
+    case request_point_x_finite, request_point_x_float, request_point_y_finite, request_point_y_float
+    case request_value_keyboard, request_value_kind, request_value_size
     case request_deadline, request_counters, read_parent, read_open
     case read_metadata, read_bytes, publish_parent, publish_encode
     case publish_size, publish_open, publish_write, publish_mode

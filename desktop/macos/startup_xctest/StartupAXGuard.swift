@@ -110,6 +110,16 @@ enum StartupInteractionPolicy {
         return (selected, actual) // Retain and dispatch this same checked public coordinate.
     }
 
+    // The selector supplies the intended name. An identifier/value match alone
+    // is not semantic evidence; incidental attributes never replace that intent.
+    static func semanticName(expected: String, kind: String, title: String?, label: String?,
+                             placeholder: String? = nil) -> String? {
+        guard ["button", "message"].contains(kind), !expected.isEmpty,
+              expected.utf8.count <= 1024 else { return nil }
+        return title == expected || label == expected || (kind == "message" && placeholder == expected)
+            ? expected : nil
+    }
+
     struct Binding<Token: Equatable> {
         private var id: String?
         private var target: Token?
@@ -408,7 +418,14 @@ final class StartupAXReader {
                 var label: String?
                 if roles[request.kind]!.contains(role) && ["button", "message"].contains(request.kind) {
                     let title = self.axRead(node, kAXTitleAttribute) as? String
-                    label = title == request.label ? title : self.axRead(node, kAXDescriptionAttribute) as? String
+                    let description = title == request.label ? nil : self.axRead(node, kAXDescriptionAttribute) as? String
+                    label = StartupInteractionPolicy.semanticName(expected: request.label, kind: request.kind,
+                        title: title, label: description)
+                    if label == nil && request.kind == "message" {
+                        label = StartupInteractionPolicy.semanticName(expected: request.label, kind: request.kind,
+                            title: title, label: description,
+                            placeholder: self.axRead(node, kAXPlaceholderValueAttribute) as? String)
+                    }
                 }
                 return (actual, role, frame, label)
             }, parent: { token in

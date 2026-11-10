@@ -691,6 +691,7 @@ final class StartupJourneys: XCTestCase {
         }
         func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
                       target: XCUIElement? = nil, kind: String = "button", keyboard: Bool = false,
+                      semantic: (name: String, query: XCUIElementQuery)? = nil,
                       action: (XCUICoordinate?) throws -> Void) throws {
             failureEvidence.operationIndex = operations.count + 1
             failureEvidence.step = .before_guard
@@ -717,6 +718,21 @@ final class StartupJourneys: XCTestCase {
                 let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,
                     screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })
+                // The original selector supplies intent; matching(identifier:) can
+                // match a public title/placeholder even when .label is empty.
+                func namedTargetMatches(_ expected: String) -> Bool {
+                    guard let semantic, semantic.name == expected, semantic.query.count == 1,
+                          semantic.query.firstMatch.frame == anchor else { return false }
+                    return StartupInteractionPolicy.semanticName(expected: expected, kind: kind,
+                        title: target.title, label: target.label,
+                        placeholder: kind == "message" ? target.placeholderValue : nil) == expected
+                }
+                let semanticName: String
+                if ["button", "message"].contains(kind) {
+                    guard let semantic else { throw StartupAXReceiptError.invalid }
+                    semanticName = semantic.name
+                    try StartupAXFiles.need(namedTargetMatches(semanticName))
+                } else { semanticName = target.label }
                 let value = keyboard && ["field", "message"].contains(kind) ? try XCTUnwrap(target.value as? String) : nil
                 let field: (CGRect, String)?
                 if folderSurface == .goTo {
@@ -724,7 +740,7 @@ final class StartupJourneys: XCTestCase {
                     field = (input.frame, try XCTUnwrap(input.value as? String))
                 } else { field = nil }
                 failureEvidence.step = .prepare_interaction
-                let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: target.label,
+                let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: semanticName,
                     keyboard: keyboard, value: value, rootFrame: root, field: field, diagnostic: failureEvidence)
                 // Same public coordinate and anchor after AX proof, immediately
                 // before final freshness consumption and dispatch. This fence is
@@ -732,7 +748,8 @@ final class StartupJourneys: XCTestCase {
                 failureEvidence.step = .final_recheck
                 try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
                 try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
-                    && target.exists && target.isEnabled && target.isHittable && target.label == request.label
+                    && target.exists && target.isEnabled && target.isHittable
+                    && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
                     && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
                         anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
                     && (!keyboard || value == nil || target.value as? String == value),
@@ -758,7 +775,7 @@ final class StartupJourneys: XCTestCase {
             let elements = query.matching(identifier: label)
             try require(elements.firstMatch.waitForExistence(timeout: 20) && elements.count == 1
                 && elements.firstMatch.isHittable && elements.firstMatch.isEnabled, "Public control absent/ambiguous: " + label)
-            try dispatch("click:" + label, target: elements.firstMatch) { coordinate in
+            try dispatch("click:" + label, target: elements.firstMatch, semantic: (label, elements)) { coordinate in
                 if let coordinate { coordinate.click() } else { elements.firstMatch.click() }
             }
         }
@@ -801,7 +818,7 @@ final class StartupJourneys: XCTestCase {
             })
             if fixture.scenario == "configuredLocal" {
                 try click(ui.webViews.buttons, "Get Started")
-                func folderControl(_ path: String) throws -> XCUIElement {
+                func folderControl(_ path: String) throws -> (element: XCUIElement, query: XCUIElementQuery) {
                     let controls = rootWindow.webViews.buttons.matching(
                         NSPredicate(format: "label == %@", "Choose Working Folder: " + path))
                     try require(controls.firstMatch.waitForExistence(timeout: 10), "Working Folder control missing")
@@ -811,10 +828,11 @@ final class StartupJourneys: XCTestCase {
                     try require(StartupNativeFolderPolicy.usable(exists: control.exists, enabled: control.isEnabled,
                         hittable: control.isHittable, frame: control.frame, owner: rootWindow.frame),
                         "Working Folder control is not actionable")
-                    return control
+                    return (control, controls)
                 }
                 let initial = try folderControl(fixture.home)
-                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel, target: initial) { coordinate in
+                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel, target: initial.element,
+                    semantic: ("Choose Working Folder: " + fixture.home, initial.query)) { coordinate in
                     try XCTUnwrap(coordinate).click()
                     try require(rootWindow.children(matching: .sheet).firstMatch.waitForExistence(timeout: 10),
                         "Owned native folder panel did not appear")
@@ -845,22 +863,24 @@ final class StartupJourneys: XCTestCase {
                 try require(select.firstMatch.waitForExistence(timeout: 10) && select.count == 1
                     && select.firstMatch.isEnabled && select.firstMatch.isHittable,
                     "Owned native Select absent or ambiguous")
-                try dispatch("click:native-folder-Select", after: .form, target: select.element(boundBy: 0)) { coordinate in
+                try dispatch("click:native-folder-Select", after: .form, target: select.element(boundBy: 0),
+                    semantic: ("Select", select)) { coordinate in
                     try XCTUnwrap(coordinate).click()
                     try require(selectedPanel.waitForNonExistence(timeout: 10), "Owned native folder panel survived selection")
                 }
                 let filled = try folderControl(fixture.workspace)
-                try require(StartupNativeFolderPolicy.selected(filled.label, workspace: fixture.workspace),
+                try require(StartupNativeFolderPolicy.selected(filled.element.label, workspace: fixture.workspace),
                     "Exact declared workspace did not reach the normal project form")
                 try click(ui.webViews.buttons, "Create Project")
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1
                     && message.firstMatch.isHittable, "Shared Message accessibility target absent/ambiguous")
                 let messageField = message.firstMatch
-                try dispatch("click:Message", target: messageField, kind: "message") { coordinate in
+                try dispatch("click:Message", target: messageField, kind: "message", semantic: ("Message", message)) { coordinate in
                     try XCTUnwrap(coordinate).click()
                 }
-                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home", target: messageField, kind: "message", keyboard: true) { _ in
+                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home", target: messageField, kind: "message", keyboard: true,
+                    semantic: ("Message", message)) { _ in
                     messageField.typeText("FINDER_CONFIGURED_LOCAL_startup-home")
                 }
                 try click(ui.webViews.buttons, "Send")

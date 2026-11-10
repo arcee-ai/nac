@@ -505,3 +505,32 @@ latched before diagnostic publication, so a failed diagnostic write cannot
 replace its original step or error, and the independent XCTest attachment remains
 available. Inert failures distinguish checkpoints; they do not identify the
 Actual13 predicate or establish native input/acceptance.
+
+## Query semantic-name compatibility successor
+
+A unique matching(identifier:) query may succeed by title, label, value or
+placeholderValue; it does not establish a nonempty XCUIElement.label. Named
+button/message dispatches therefore carry the original selector's trusted name
+and frozen query explicitly. The same query cardinality, anchor and a matching
+public title/label (Message-only placeholder fallback) are required before the
+request and again after AX proof. The name is nonempty and bounded to1024 UTF8
+bytes, with no truncation or arbitrary identifier-only acceptance. A correct
+title is not vetoed by an unrelated empty or oversized label. The AX adapter
+checks the same intended name through existing title/description, with narrowly
+typed Message-only placeholder fallback; role, PID, global hit, retained CFEqual
+ancestry, focus/value and exact public coordinate/freshness remain required.
+
+The original request-name expression rejects the documented empty-label/correct-
+title case in the retained RED characterization; the repaired expression and
+exact extracted public recheck pass it and the oversized incidental-label case.
+Owning controls also reject missing/wrong/oversized intended names, identifier-
+only targets, button placeholders, duplicate/stale queries and wrong AX names or
+placeholder types, alongside all existing point/identity/focus/refusal controls.
+The selected23 receipt,6 geometry and7 AX methods remain unchanged in count.
+Atomic closed shape checkpoints preserve evaluation order and original errors.
+
+Actual14 localized request_shape/receipt_invalid/op1. Its raw label/length were
+not retained; empty versus oversized is unproven. This compatibility repair is
+supported by public API/source contracts, not a claim of that individual operand
+or native acceptance. Fresh SDK and full native qualification remain required.
+See Apple's [matching query documentation](https://developer.apple.com/documentation/xcuiautomation/xcuielementquery/matching(_:identifier:)).

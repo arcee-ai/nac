@@ -954,7 +954,7 @@ let kAXWindowsAttribute = "AXWindows", kAXChildrenAttribute = "AXChildren"
 let kAXRoleAttribute = "AXRole", kAXPositionAttribute = "AXPosition", kAXSizeAttribute = "AXSize"
 let kAXFocusedUIElementAttribute = "AXFocusedUIElement", kAXFocusedAttribute = "AXFocused"
 let kAXValueAttribute = "AXValue", kAXParentAttribute = "AXParent"
-let kAXTitleAttribute = "AXTitle", kAXDescriptionAttribute = "AXDescription"
+let kAXTitleAttribute = "AXTitle", kAXDescriptionAttribute = "AXDescription", kAXPlaceholderValueAttribute = "AXPlaceholderValue"
 var systemHit = "button"
 func AXUIElementCreateSystemWide() -> AXUIElement { token("system") }
 func AXUIElementCopyElementAtPosition(_ system: AXUIElement, _ x: Float, _ y: Float,
@@ -1017,6 +1017,21 @@ func prepare(_ selected: String) {
         }
         if mode == "interaction_moved" { attributes["button"]?["AXPosition"] = value(1,21,25) }
         if mode == "interaction_wrong_label" { attributes["button"]?["AXTitle"] = "Occluder" as NSString }
+        if mode == "interaction_description" {
+            attributes["button"]?["AXTitle"] = "" as NSString
+            attributes["button"]?["AXDescription"] = "Intended" as NSString
+        }
+        if mode == "interaction_incidental_description" {
+            attributes["button"]?["AXDescription"] = String(repeating:"wrong",count:300) as NSString
+        }
+        if mode.contains("placeholder") || mode == "interaction_identifier_only" {
+            attributes["button"]?["AXTitle"] = "" as NSString
+            attributes["button"]?["AXIdentifier"] = "Intended" as NSString
+            if mode != "interaction_identifier_only" {
+                attributes["button"]?["AXPlaceholderValue"] = mode.contains("wrong_type") ? 1 as NSNumber
+                    : (mode.contains("wrong_name") ? "Wrong" : "Intended") as NSString
+            }
+        }
         if mode == "interaction_focus_target" { attributes["app"]?["AXFocusedUIElement"] = token("other") }
         if mode == "interaction_focus_value" { attributes["button"]?["AXValue"] = "wrong" as NSString }
         if mode == "interaction_focus_flag" { attributes["button"]?["AXFocused"] = 1 as NSNumber }
@@ -1131,9 +1146,13 @@ FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: rows)
     def test_exact_actor_uses_global_hits_and_retained_target_on_both_bookends(self):
         self.assertEqual(self.run_modes(['interaction_positive', 'interaction_keyboard_positive']),
                          [dict(accepted=True, globals=2)] * 2)
+        self.assertEqual(self.run_modes(['interaction_description', 'interaction_incidental_description',
+                                        'interaction_keyboard_placeholder']), [dict(accepted=True, globals=2)] * 3)
+
 
     def test_exact_actor_denies_foreign_owned_occluder_ambiguous_moved_replaced_and_expired_point(self):
-        modes = ['foreign', 'owned_occluder', 'ambiguous', 'moved', 'wrong_label', 'replaced', 'expired', 'api_error']
+        modes = ['foreign', 'owned_occluder', 'ambiguous', 'moved', 'wrong_label', 'replaced', 'expired', 'api_error', 'button_placeholder', 'identifier_only',
+                 'keyboard_placeholder_wrong_type', 'keyboard_placeholder_wrong_name']
         self.assertEqual(self.run_modes(['interaction_' + m for m in modes]), [{'accepted':False}] * len(modes))
 
     def test_exact_actor_keyboard_requires_same_focused_handle_typed_focus_and_value(self):

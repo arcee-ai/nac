@@ -417,6 +417,63 @@ func interactionRun(_ name: String) -> [String: Any] {
         return ["accepted":false,"inputs":inputs,"clears":clears,"next_denied":denied]
     }
 }
+
+// Compile the actual journey's request-name expression against a documented
+// public-query compatibility case; this is not a native XCUI snapshot.
+func semanticCompatibilityRun(_ mode: String) -> [String: Any] {
+    struct PublicTarget { let label: String }
+    let target = PublicTarget(label: mode == "title" ? "" : String(repeating:"incidental",count:200))
+    let semanticName = "Get Started" // Explicit trusted query intent; public title matches.
+    let requestName = __JOURNEY_REQUEST_NAME__
+    do {
+        let request = StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:"",configuration_sha256:"",
+            id:UUID().uuidString,root_id:UUID().uuidString,entered_ns:"1",deadline_ns:"2",baseline_sequence:"1",
+            refusal_generation:"0",surface:"form",kind:"button",label:requestName,keyboard:false,
+            point:[20,25],anchor_frame:[10,20,100,30],root_frame:[10,20,100,30],value:nil)
+        try request.validate()
+        return ["accepted":true]
+    } catch { return ["accepted":false] }
+}
+
+func semanticPolicyRun(_ mode: String) -> [String: Any] {
+    struct PublicTarget { var title, label: String; var placeholderValue: String?; var frame: CGRect }
+    struct PublicQuery { var count: Int; var firstMatch: PublicTarget }
+    let kind = mode.hasPrefix("message_") ? "message" : "button"
+    let expected = mode == "empty" ? "" : mode == "oversize" ? String(repeating:"X",count:1025) : "Intended"
+    let anchor = CGRect(x:10,y:20,width:100,height:30)
+    var target = PublicTarget(title:expected,label:"",placeholderValue:nil,frame:anchor)
+    if mode == "incidental" { target.label = String(repeating:"unrelated",count:200) }
+    if mode == "label" { target.title = "";target.label = expected }
+    if ["identifier_only","wrong","message_placeholder","button_placeholder","message_wrong"].contains(mode) {
+        target.title = mode == "wrong" ? "Wrong" : "";target.label = ""
+    }
+    if mode.contains("placeholder") || mode == "message_wrong" { target.placeholderValue = mode == "message_wrong" ? "Wrong" : expected }
+    var query = PublicQuery(count:mode == "duplicate" ? 2 : 1,firstMatch:target)
+    if mode == "frame" { query.firstMatch.frame = anchor.offsetBy(dx:1,dy:0) }
+    let semantic: (name: String, query: PublicQuery)? = (expected,query)
+__JOURNEY_SEMANTIC_RECHECK__
+    let before = namedTargetMatches(expected)
+    if mode == "stale" { target.title = "Changed" }
+    return ["before":before,"after":namedTargetMatches(expected)]
+}
+func atomicShapeRun(_ mode: String) -> [String: Any] {
+    let diagnostic = StartupFailureEvidence(nil,configurationSHA:"")
+    let request = StartupAXInteractionRequest(schema:mode == "schema" ? "bad" : "nac342-ax-interaction-v1",nonce:"",configuration_sha256:"",
+        id:["schema","id"].contains(mode) ? "bad" : UUID().uuidString,
+        root_id:["id","root_id"].contains(mode) ? "bad" : UUID().uuidString,
+        entered_ns:"1",deadline_ns:"2",baseline_sequence:"1",refusal_generation:"0",
+        surface:["root_id","surface"].contains(mode) ? "bad" : "form",
+        kind:["surface","kind"].contains(mode) ? "bad" : mode == "value_size" ? "message" : "button",
+        label:["kind","label_size"].contains(mode) ? String(repeating:"X",count:1025) : mode == "label_required" ? "" : "Intended",
+        keyboard:["value_kind","value_size"].contains(mode),
+        point:["label_required","point_count"].contains(mode) ? [] :
+            [mode == "point_x_finite" ? .infinity : mode == "point_x_float" ? 0.1 : 20,
+             ["point_x_float","point_y_finite"].contains(mode) ? .nan : mode == "point_y_float" ? 25.1 : 25],
+        anchor_frame:[10,20,100,30],root_frame:[10,20,100,30],
+        value:mode.hasPrefix("value_") ? String(repeating:"private",count:mode == "value_size" ? 600 : 1) : nil)
+    do { try request.validate(diagnostic:diagnostic);return ["accepted":true] }
+    catch { return ["accepted":false,"step":diagnostic.step.rawValue,"family":StartupFailureEvidence.family(error),"inputs":0] }
+}
 func interactionPolicyRun(_ name: String) -> [String: Any] {
     let mode = String(name.dropFirst("point_".count)), anchor = CGRect(x:10,y:20,width:100,height:30)
     do {
@@ -604,7 +661,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -618,7 +675,13 @@ class ReceiptControls(unittest.TestCase):
         root = Path(cls.temporary.name).resolve()
         driver = root / 'main.swift'
         catch = journey_failure_catch()
-        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch))
+        import re
+        journey = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        request_name = re.search(r'client\.prepareInteraction\(ticket, point: point, anchor: anchor, kind: kind, label: ([^,\n]+),', journey).group(1)
+        recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
+        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch)
+                          .replace('__JOURNEY_REQUEST_NAME__', request_name)
+                          .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
         sources = [Path(__file__).with_name(n) for n in ('StartupAXGuard.swift', 'StartupAXReceipt.swift')]
         result = subprocess.run(['/usr/bin/xcrun', 'swiftc', '-swift-version', '5', *map(str,sources), str(driver), '-o', str(cls.binary)],
@@ -705,7 +768,7 @@ class ReceiptControls(unittest.TestCase):
         checkpoints = {
             'state': ('prepare_state', 'receipt_invalid'),
             'rollback': ('clock_monotonic', 'receipt_invalid'),
-            'shape': ('request_shape', 'receipt_invalid'),
+            'shape': ('request_kind', 'receipt_invalid'),
             'anchor': ('request_anchor_frame', 'receipt_invalid'),
             'root': ('request_root_frame', 'receipt_invalid'),
             'containment': ('request_containment', 'receipt_invalid'),
@@ -750,6 +813,20 @@ class ReceiptControls(unittest.TestCase):
         self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs']), (1, 4, 1, 1))
         self.assertEqual(row['deadline'], '33001000000')
         self.assertGreater(int(row['finalized']), 0)
+
+        self.assertEqual(self.rows(['semantic_compatibility_title', 'semantic_compatibility_incidental']),
+                         [dict(accepted=True), dict(accepted=True)])
+        positive = ['title', 'label', 'incidental', 'message_placeholder']
+        negative = ['empty', 'oversize', 'identifier_only', 'wrong', 'button_placeholder', 'message_wrong', 'duplicate', 'frame']
+        self.assertEqual(self.rows(['semantic_policy_' + mode for mode in positive + negative]),
+                         [dict(before=True, after=True)] * len(positive) + [dict(before=False, after=False)] * len(negative))
+        self.assertEqual(self.rows(['semantic_policy_stale']), [dict(before=True, after=False)])
+        modes = ['schema', 'id', 'root_id', 'surface', 'kind', 'label_size', 'label_required', 'point_count',
+                 'point_x_finite', 'point_x_float', 'point_y_finite', 'point_y_float',
+                 'value_keyboard', 'value_kind', 'value_size']
+        self.assertEqual(self.rows(['atomic_shape_' + mode for mode in modes]),
+                         [dict(accepted=False,step='request_' + mode,family='receipt_invalid',inputs=0) for mode in modes])
+
 
     def test_wrong_proof_refusal_stale_final_or_lost_channel_latches_no_next_input(self):
         modes = ['wrong_request', 'wrong_point', 'wrong_anchor', 'wrong_keyboard', 'focus_flag',

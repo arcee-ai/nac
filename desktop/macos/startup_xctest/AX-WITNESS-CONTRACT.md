@@ -52,7 +52,10 @@ H uses AXUIElementCreateSystemWide with AXUIElementCopyElementAtPosition, so
 z-order occluders from another process are visible. The public hit must have
 admitted PID throughout a bounded, acyclic parent walk to the current retained
 root/sheet. Exactly one matching role/frame anchor is required on that path;
-button/message title or description must equal Q's intended label. Same PID
+button/message title or description must equal Q's trusted intended semantic
+name. A typed AXPlaceholderValue string is an additional fallback for Message
+only, when title/description did not match; buttons never use placeholder or
+identifier/value naming fallbacks. Same PID
 unrelated surfaces, foreign hits, unsupported attributes, ambiguous anchors and
 missing ancestry refuse. The target is retained with CFEqual, both between the
 two hits for this request and for repeated field/message/panel/labelled-button
@@ -138,3 +141,20 @@ latched before diagnostic publication, so a failed diagnostic write cannot
 replace its original step or error, and the independent XCTest attachment remains
 available. Inert failures distinguish checkpoints; they do not identify the
 Actual13 predicate or establish native input/acceptance.
+
+Named interaction intent is supplied explicitly by the original selector, not
+inferred from XCUIElement.label. Apple's matching(identifier:) can select by
+identifier, title, label, value or placeholderValue. Before request creation and
+after AX proof, the same frozen query must still be unique at the captured
+anchor, with the expected bounded nonempty name matched by public title/label
+(or Message-only placeholder). An identifier alone is insufficient. A matching
+semantic title remains valid when an unrelated label is empty or oversized; no
+name is truncated. Both adapters use the canonical pure semantic-name policy.
+The global AX semantic match, role/PID, retained CFEqual identity, point, exact
+focus/value, original ticket and freshness remain independent requirements.
+
+The old request_shape step remains admissible for historical records. New shape
+checks retain the original short-circuit order and invalid error, recording each
+closed condition, including each point component's finite then Float-roundtrip
+check and the nullable value's keyboard/kind/size conditions. No raw semantic
+name, length, coordinate, field text or additional protocol field is exported.
