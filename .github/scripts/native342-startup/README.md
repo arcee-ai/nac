@@ -1,13 +1,14 @@
 # C20 private passive-retention controller
 
 Private source candidate, no build, signature, SDK, native, public push or CI
-execution authorized by this source alone. Root separately reviews and admits
-build-only verification, then the explicitly approved single fresh native
-qualification. Old Native17/18 allocations remain FAIL/SPENT and unusable.
+execution authorized by this source alone. Native19 consumed the last single
+qualification grant; no further Native execution is currently authorized.
+Later execution requires fresh Root/human authority. Native17/18/19 remain
+FAIL/SPENT and unusable.
 
-C20 consumes real frozen Source49 H
-`a3ce76376459bce86401290fd43b325e6e4ad248`, whose direct parent is H
-`c105f08cc6f34e55571ef44ba03e6d432d4fac72`. Immutable supplier Q remains
+C20 consumes real frozen Source51 H
+`1e12b8f120f164ba969d3fc0392e76ddcfb7d78f`, whose direct parent is H
+`a3ce76376459bce86401290fd43b325e6e4ad248`. Immutable supplier Q remains
 `8397bafe8fb5f439b702ebf3e941eed802ce71aa`; Q's direct parent is public H
 `3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf`, and its tree is
 `0f4e7c9c867caf8f6505a6354e76876e8ac5e4ba`. The ten immutable supplier bytes
