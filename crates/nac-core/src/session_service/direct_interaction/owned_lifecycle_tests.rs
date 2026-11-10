@@ -20,11 +20,33 @@ async fn idle_direct_wake_waits_for_persistence_without_leasing_mutations() {
     // The executor barrier keeps the wake in flight at its first store call.
     // A read with no durable work must leave mutation admission available.
     let mutation = sessions::SessionOperationLease::try_acquire(&path, "session");
+    let stopped =
+        tokio::time::timeout(Duration::from_secs(1), parts.service.stop_run_admission()).await;
+    let stopped_wake = parts.service.start_next_direct_inbox_item();
+    tokio::pin!(stopped_wake);
+    // Poll once after stop while the ORIGINAL wake still owns inbox_wake.
+    let first_poll = std::future::poll_fn(|cx| {
+        std::task::Poll::Ready(std::future::Future::poll(stopped_wake.as_mut(), cx))
+    })
+    .await;
+    let fence_pending = first_poll.is_pending();
     release.send(()).unwrap();
     pending.acknowledge().await.unwrap();
     assert!(wake.await.unwrap().unwrap().is_none());
+    let fenced = match first_poll {
+        std::task::Poll::Ready(result) => Ok(result),
+        std::task::Poll::Pending => {
+            tokio::time::timeout(Duration::from_secs(1), &mut stopped_wake).await
+        }
+    };
     owner.shutdown().await.unwrap();
     assert!(mutation.is_ok(), "idle wake held the operation lease");
+    stopped.unwrap().unwrap();
+    assert!(
+        fence_pending,
+        "stopped wake bypassed the original wake lock"
+    );
+    assert!(fenced.unwrap().unwrap().is_none());
 }
 
 #[tokio::test]
