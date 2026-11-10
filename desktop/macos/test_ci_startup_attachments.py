@@ -15,6 +15,62 @@ from ci_xctest_attachments import AttachmentTool, bounded_file, digest
 
 
 class StartupAttachmentTests(unittest.TestCase):
+    def test_first_failure_attachment_survives_incomplete_collection_and_rejects_unbound_private_records(self):
+        config, configuration_sha, witness, _ = self.fixture('configuredLocal')
+        config['ax_witness']['nonce'] = 'd' * 64
+        record = dict(schema='nac342-first-preflight-failure-v1', acceptance=False, nonce='d' * 64,
+                      configuration_sha256=configuration_sha, step='prepare_interaction', operation_index=1,
+                      error_family='receipt_invalid')
+        name = 'nac342-first-preflight-failure-v1-configuredLocal'
+        for mutation in (None, 'nonce', 'config', 'extra', 'step', 'family', 'bool_index', 'large_index',
+                         'duplicate_key', 'duplicate_attachment', 'oversize', 'wrong_name', 'passed'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary); value = dict(record)
+                if mutation == 'nonce': value['nonce'] = 'f' * 64
+                if mutation == 'config': value['configuration_sha256'] = 'f' * 64
+                if mutation == 'extra': value['raw_error'] = 'PRIVATE-CANARY'
+                if mutation == 'step': value['step'] = 'unknown'
+                if mutation == 'family': value['error_family'] = 'PRIVATE-CANARY'
+                if mutation == 'bool_index': value['operation_index'] = True
+                if mutation == 'large_index': value['operation_index'] = 12
+                data = json.dumps(value).encode()
+                if mutation == 'duplicate_key': data = data[:-1] + b',"acceptance":false}'
+                if mutation == 'oversize': data += b' ' * 2048
+                rows = [(name + '-foreign' if mutation == 'wrong_name' else name, data)]
+                if mutation == 'duplicate_attachment': rows *= 2
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(self.tool(raw, rows, result='Passed' if mutation == 'passed' else 'Failed'),
+                            raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+                retained = raw / 'selected' / (name + '.json')
+                self.assertEqual(retained.exists(), mutation is None)
+                if mutation is None:
+                    self.assertEqual(json.loads(retained.read_text()), record)
+                    self.assertEqual(index['first_preflight_failure']['retention'], 'retained')
+                    from ci_support import export_evidence
+                    export_evidence(raw / 'selected', raw / 'public', [], include_hashes=True)
+                    self.assertEqual(json.loads((raw / 'public' / retained.name).read_text()), record)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(index))
+
+    def test_first_failure_attachment_never_follows_a_destination_alias(self):
+        config, configuration_sha, witness, _ = self.fixture('configuredLocal')
+        config['ax_witness']['nonce'] = 'd' * 64
+        record = dict(schema='nac342-first-preflight-failure-v1', acceptance=False, nonce='d' * 64,
+                      configuration_sha256=configuration_sha, step='public_target', operation_index=1,
+                      error_family='receipt_invalid')
+        name = 'nac342-first-preflight-failure-v1-configuredLocal'
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary); outside = raw / 'outside'; outside.write_bytes(b'UNTOUCHED')
+            def alias(export, groups):
+                (raw / 'selected' / (name + '.json')).symlink_to(outside)
+            with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                collect(self.tool(raw, [(name, json.dumps(record).encode())], result='Failed', mutate=alias),
+                        raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+            self.assertEqual(outside.read_bytes(), b'UNTOUCHED')
+            index = json.loads((raw / 'selected/index.json').read_text())
+            self.assertEqual(index['first_preflight_failure']['retention'], 'rejected')
+
     def fixture(self, case):
         config = {key: 'a' * 64 for key in PROVENANCE}
         config.update(schema=SCHEMA, scenario=case, source_sha=PRODUCT, test_source_sha=TEST_SOURCE,

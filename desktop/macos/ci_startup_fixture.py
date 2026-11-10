@@ -16,19 +16,19 @@ from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
 PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
-TEST_SOURCE = 'b5cb0a0afb2b1f90c703b980d210ac58546cddec'
+TEST_SOURCE = 'f9b0ca23e9a1f5a370bac846479b1aa30fcb63ba'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': 'bd8fa9ceeb757de628ef623b55c0f8c03472b4d99dbbe941db2459eb9d75b42c',
-    'StartupJourneys.swift': '324c2a2e99de56ecbce182c66817839aa7b0a8858f5c5f79507e8f32d6feae75',
+    'README.md': '08a17badfaa91dc973d2e23e6034f3fa02861e49f43f189c5fa5687508cbb676',
+    'StartupJourneys.swift': '594c196b5bd0ff7467dd4bee9f196a3e225138da3f13ee27247a31f428762489',
     'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
     'test_contract.py': '94a287b12b1e164dbf4a5bf9d59db0a5437e31ea496ab63d0e8d9b592655b208',
     'StartupAXGuard.swift': '19950ee10989c2759e2054248ece07a53bef98ad39d8f6771a66fec55e3b3b7e',
-    'StartupAXReceipt.swift': '3e51a5b26942f75317d4e012a42f3f4e43d3b69adb34adcc9188bd78bfff083e',
+    'StartupAXReceipt.swift': '833d9a0cf0b5ccbc153808010d96e325e47ee92e7a9097d50556ef932c201ac9',
     'AX-WITNESS-CONTRACT.md': 'c80ebadccc06c949d0492887b431ba9a95a47f0669fa224f087faff522a49d88',
-    'test_ax_witness.py': '0a5a1fdc2f81bb9e5ac44c037a3b9d42df7b932470fef07b59d5170edbef9769',
+    'test_ax_witness.py': 'e07a435550c81083128237af3d7195f43f49d7d3a6cec4cd5f7c50ad1d57f5a4',
     'AGENTS.md': 'aaf23530161152bb063960f2b05420882b41e0bbc4b3d397c2d1675aeb590920',
     'test_title_assertion.py': 'e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef'
 }

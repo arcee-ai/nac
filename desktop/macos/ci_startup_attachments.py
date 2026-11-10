@@ -20,6 +20,8 @@ MAX_PNG = 2 * 1024 * 1024
 MAX_SELECTED = 4 * MAX_PNG + 2 * 1024 * 1024
 QUERY_DIAGNOSTIC = 'nac342-query-diagnostic-v1-onboarding'
 MAX_QUERY_DIAGNOSTIC = 8192
+FIRST_FAILURE = 'nac342-first-preflight-failure-v1-configuredLocal'
+MAX_FIRST_FAILURE = 2048
 QUERY_ORDER = ('app_webviews', 'window_webviews', 'legacy_title', 'app_static_title',
                'window_static_title', 'window_label_title', 'window_value_title', 'window_identifier_title',
                'window_button_start', 'legacy_button_start', 'window_label_subtitle', 'window_value_subtitle')
@@ -210,6 +212,52 @@ def retain_ax_refusal(selected, entries, index, config, configuration_sha256, wi
         return 0
 
 
+def retain_first_failure(selected, entries, index, config, configuration_sha256, output, inventory_valid):
+    """Independent closed XCTest record; retained before mandatory collection failure."""
+    receipt = index['first_preflight_failure']
+    if not any(isinstance(e, dict) and isinstance(e.get('suggestedHumanReadableName'), str)
+               and e['suggestedHumanReadableName'].startswith('nac342-first-preflight-failure-') for e in entries):
+        return 0
+    receipt.update(retention='rejected', reason='first_inventory')
+    files = [file for file, _, kind in selected if kind == 'first_failure']
+    if len(files) != 1 or not inventory_valid or index['selection_errors']:
+        return 0
+    destination, created = output / (FIRST_FAILURE + '.json'), False
+    try:
+        require(config['scenario'] == 'configuredLocal' and index['actual_test']['result'] == 'Failed', 'first_failure_only')
+        data = bounded_file(files[0], MAX_FIRST_FAILURE)
+        def unique(pairs):
+            require(len(pairs) == len(dict(pairs)), 'first_duplicate_key')
+            return dict(pairs)
+        row = json.loads(data, object_pairs_hook=unique,
+                         parse_constant=lambda _: require(False, 'first_nonfinite'))
+        nonce = config['ax_witness']['nonce']
+        require(type(nonce) is str and re.fullmatch('[0-9a-f]{64}', nonce)
+                and type(row) is dict and set(row) == {'schema', 'acceptance', 'nonce', 'configuration_sha256',
+                                                     'step', 'operation_index', 'error_family'}
+                and row['schema'] == 'nac342-first-preflight-failure-v1' and row['acceptance'] is False
+                and row['nonce'] == nonce and row['configuration_sha256'] == configuration_sha256, 'first_binding')
+        require(type(row['step']) is str and row['step'] in {'startup_checks', 'before_guard', 'before_record',
+                    'public_target', 'prepare_interaction', 'final_recheck', 'finish_interaction', 'input',
+                    'after_guard', 'after_record', 'terminal'} and type(row['operation_index']) is int
+                and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
+                    'receipt_expired', 'decoding', 'foundation', 'other'}, 'first_projection')
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        with os.fdopen(descriptor, 'wb') as stream:
+            require(stream.write(data) == len(data), 'first_partial_write')
+        receipt.clear()
+        receipt.update(retention='retained', file=destination.name, bytes=len(data), sha256=digest(data))
+        return len(data)
+    except BaseException as error:
+        receipt['reason'] = error.reason if isinstance(error, StartupAttachmentError) else 'first_unavailable_or_invalid'
+        if created:
+            try: destination.unlink(missing_ok=True)
+            except OSError: pass
+        return 0
+
+
 def selected_test(tree):
     def cases(value):
         if isinstance(value, dict):
@@ -351,7 +399,8 @@ def select_inventory(export, entries, fixed, pattern, index):
             row['kind'] = kind
             if dispatch:
                 row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
-            limit = MAX_QUERY_DIAGNOSTIC if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
+            limit = (MAX_FIRST_FAILURE if kind == 'first_failure' else MAX_QUERY_DIAGNOSTIC
+                     if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
             require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
             total += info.st_size
             selected.append((ordinal, file, canonical, kind))
@@ -372,7 +421,8 @@ def collect(tool, result, config, configuration_sha256, witness, output):
     output.mkdir()
     index = {'complete': False, 'selected': [], 'dispatches': [], 'automatic_omitted': 0,
              'input_completion_unknown': True, 'visible_paint': 'requires_actual_image_review',
-             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'}}
+             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'},
+             'first_preflight_failure': {'retention': 'missing'}}
     try:
         require(config['scenario'] in CASES and witness.get('preinstalled') is True
                 and witness.get('owned_incarnation_verified') is True, 'external_witness')
@@ -409,7 +459,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             fixed = {f'nac342-ordinary-{scenario}': 'png', f'nac342-failure-{scenario}': 'failure',
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup',
                      QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal',
-                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards'}
+                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards', FIRST_FAILURE: 'first_failure'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
             selected = select_inventory(export, entries, fixed, pattern, index)
@@ -420,9 +470,11 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                                                       witness, output, inventory_valid)
             diagnostic_bytes += retain_ax_refusal(selected, entries, index, config, configuration_sha256,
                                                   witness, output, inventory_valid)
+            diagnostic_bytes += retain_first_failure(selected, entries, index, config, configuration_sha256,
+                                                     output, inventory_valid)
             values, images, total = {}, {}, diagnostic_bytes
             for file, name, kind in selected:
-                if kind in ('query_diagnostic', 'ax_refusal'):
+                if kind in ('query_diagnostic', 'ax_refusal', 'first_failure'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
                 total += len(data)
@@ -460,6 +512,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             require(test['result'] == 'Passed', 'actual_test_result')
             require(index['query_diagnostic']['retention'] == 'missing', 'unexpected_failure_diagnostic')
             require(index['ax_refusal']['retention'] == 'missing', 'unexpected_ax_refusal')
+            require(index['first_preflight_failure']['retention'] == 'missing', 'unexpected_first_failure')
             if scenario == 'configuredLocal':
                 from ci_startup_ax import require_guard_proof
                 require('ax_guards' in values, 'ax_guards_missing')
