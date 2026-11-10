@@ -26,16 +26,58 @@ _PRODUCER_FAILURE_STAGES = frozenset((
 _PRODUCER_FAILURE_KINDS = frozenset((
     'process_probe', 'ownership_invalid', 'arguments_unavailable', 'other',
 ))
+_ENVIRONMENT_FIELDS = frozenset((
+    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+    'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other',
+))
+
+
+def _environment_rejection(value):
+    """No subject identity, arbitrary field names or values become diagnostic authority."""
+    common = {'executable_class', 'previously_known', 'predicate'}
+    if not (type(value) is dict and common <= set(value)
+            and type(value['executable_class']) is str
+            and value['executable_class'] in ('native', 'bundled_engine', 'descendant')
+            and type(value['previously_known']) is bool and type(value['predicate']) is str):
+        return None
+    predicate = value['predicate']
+    if predicate == 'contract':
+        valid = (set(value) == common | {'contract_check'} and type(value['contract_check']) is str
+                 and value['contract_check'] in ('key_set', 'empty_launcher', 'non_path_value'))
+    elif predicate == 'prohibited':
+        valid = (set(value) == common | {'category'} and type(value['category']) is str
+                 and value['category'] in ('token', 'api_key', 'managed_config'))
+    elif predicate in ('native_argv', 'engine_argv'):
+        valid = (set(value) == common | {'argv0_matches', 'helper_present', 'serving_present'}
+                 and all(type(value[key]) is bool for key in ('argv0_matches', 'helper_present', 'serving_present'))
+                 and value['executable_class'] == ('native' if predicate == 'native_argv' else 'bundled_engine'))
+        if valid:
+            valid = not (value['argv0_matches'] and (
+                not value['helper_present'] and not value['serving_present'] if predicate == 'native_argv'
+                else value['helper_present'] != value['serving_present']))
+    elif predicate == 'controlled_value':
+        valid = (set(value) == common | {'field', 'difference'} and type(value['field']) is str
+                 and value['field'] in _ENVIRONMENT_FIELDS and type(value['difference']) is str
+                 and value['difference'] in ('absent', 'different'))
+    else:
+        valid = False
+    return dict(value) if valid else None
 
 
 def _producer_failure(record):
     """Closed passive projection; malformed annotations never replace original failure."""
     value = record.get('producer_failure')
-    if (type(value) is dict and set(value) == {'stage', 'kind'}
+    if (type(value) is dict and {'stage', 'kind'} <= set(value) <= {'stage', 'kind', 'environment_rejection'}
             and type(value['stage']) is str and value['stage'] in _PRODUCER_FAILURE_STAGES
             and type(value['kind']) is str and value['kind'] in _PRODUCER_FAILURE_KINDS
             and ((value['kind'] == 'process_probe') == bool(record.get('unresolved')))):
-        return {'stage': value['stage'], 'kind': value['kind']}
+        projection = {'stage': value['stage'], 'kind': value['kind']}
+        if 'environment_rejection' in value:
+            detail = _environment_rejection(value['environment_rejection'])
+            if value['stage'] != 'environment' or value['kind'] != 'ownership_invalid' or detail is None:
+                return None
+            projection['environment_rejection'] = detail
+        return projection
     return None
 
 

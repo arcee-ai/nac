@@ -98,28 +98,55 @@ enum StartupProcessProbe {
 // END STARTUP PROCESS PROBES
 
 // BEGIN STARTUP ENVIRONMENT CHECKS (pure Foundation production controls)
+struct StartupEnvironmentRejection: Error {
+    // Closed diagnostic operands only. Never an identity or cleanup witness.
+    let detail: [String: Any]
+}
+
 enum StartupEnvironmentCheck {
     static func record(executable: String, nativePath: String, enginePath: String,
                        argv: [String], environment: [String: String],
-                       launcher: [String: String], child: [String: String]) throws -> [String: Any] {
-        guard Set(launcher.keys) == Set(child.keys), !launcher.isEmpty,
-              launcher.allSatisfy({ $0.key == "PATH" || child[$0.key] == $0.value }),
-              !environment.keys.contains(where: {
-                  $0.hasSuffix("_TOKEN") || $0.hasSuffix("_API_KEY") || $0 == "NAC_MANAGED_CONFIG"
-              }) else { throw OwnershipError.invalid }
+                       launcher: [String: String], child: [String: String],
+                       previouslyKnown: Bool = false) throws -> [String: Any] {
+        let executableClass = executable == nativePath ? "native"
+            : executable == enginePath ? "bundled_engine" : "descendant"
+        func rejection(_ predicate: String, _ operands: [String: Any]) -> StartupEnvironmentRejection {
+            var detail: [String: Any] = ["executable_class": executableClass,
+                "previously_known": previouslyKnown, "predicate": predicate]
+            detail.merge(operands) { _, new in new }
+            return StartupEnvironmentRejection(detail: detail)
+        }
+        guard Set(launcher.keys) == Set(child.keys) else {
+            throw rejection("contract", ["contract_check": "key_set"])
+        }
+        guard !launcher.isEmpty else { throw rejection("contract", ["contract_check": "empty_launcher"]) }
+        guard launcher.allSatisfy({ $0.key == "PATH" || child[$0.key] == $0.value }) else {
+            throw rejection("contract", ["contract_check": "non_path_value"])
+        }
+        for (suffix, category) in [("_TOKEN", "token"), ("_API_KEY", "api_key"), ("NAC_MANAGED_CONFIG", "managed_config")] {
+            if environment.keys.contains(where: { category == "managed_config" ? $0 == suffix : $0.hasSuffix(suffix) }) {
+                throw rejection("prohibited", ["category": category])
+            }
+        }
         let kind: String, role: String
         let helper = argv.contains("__desktop-configuration"), serving = argv.contains("--bind")
+        let flags = ["argv0_matches": argv.first == executable, "helper_present": helper, "serving_present": serving]
         if executable == nativePath {
-            guard argv.first == executable, !helper, !serving else { throw OwnershipError.invalid }
+            guard argv.first == executable, !helper, !serving else { throw rejection("native_argv", flags) }
             kind = "app"; role = "launcher"
         } else if executable == enginePath {
-            guard argv.first == executable, helper != serving else { throw OwnershipError.invalid }
+            guard argv.first == executable, helper != serving else { throw rejection("engine_argv", flags) }
             kind = "engine"; role = helper ? "configuration_helper" : "engine"
         } else {
             kind = "descendant"; role = "descendant"
         }
         let expected = kind == "app" ? launcher : child
-        guard expected.allSatisfy({ environment[$0.key] == $0.value }) else { throw OwnershipError.invalid }
+        let fields: Set<String> = ["HOME", "NAC_HOME", "PATH", "LANG", "NAC_TELEMETRY",
+            "NAC_ORCHESTRATION", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
+        for key in expected.keys.sorted() where environment[key] != expected[key] {
+            throw rejection("controlled_value", ["field": fields.contains(key) ? key : "other",
+                "difference": environment[key] == nil ? "absent" : "different"])
+        }
         // Emit the actual allowlisted projection after comparison, never
         // ambient variables or merely a copy of the declared expectation.
         let observed = environment.filter { expected[$0.key] != nil }
@@ -440,7 +467,7 @@ enum StartupObserver {
             note(.environment)
             let environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
                 nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
-                launcher: launcherEnvironment, child: childEnvironment)
+                launcher: launcherEnvironment, child: childEnvironment, previouslyKnown: known[pid] != nil)
             note(.detail_probe)
             guard let after = try StartupProcessProbe.observe(pid, previous: identity, scope: "detail", uid: getuid()) else {
                 if let old = known[pid] { retired.append(old.retirement) }
@@ -527,6 +554,7 @@ enum StartupObserver {
 
     static func failureKind(_ error: Error) -> String {
         if error is StartupProbeFailure { return "process_probe" }
+        if error is StartupEnvironmentRejection { return "ownership_invalid" }
         if let value = error as? OwnershipError {
             switch value {
             case .invalid: return "ownership_invalid"
@@ -551,9 +579,13 @@ enum StartupObserver {
     static func failureRecord(_ error: Error, known: [Int32: StartupProcessIdentity],
                               stage: FailureStage = .unspecified) -> [String: Any] {
         let failure = error as? StartupProbeFailure
+        var annotation: [String: Any] = ["stage": stage.rawValue, "kind": failureKind(error)]
+        if stage == .environment, let rejection = error as? StartupEnvironmentRejection {
+            annotation["environment_rejection"] = rejection.detail
+        }
         return ["schema": "nac342-owner-v1", "event": "failed", "complete": false,
                 "reason": "ownership_observation_unavailable",
-                "producer_failure": ["stage": stage.rawValue, "kind": failureKind(error)],
+                "producer_failure": annotation,
                 "retained_identities": known.keys.sorted().compactMap { known[$0]?.fingerprint },
                 "unresolved": failure.map { [["pid": Int($0.pid), "scope": $0.scope, "reason": $0.reason]] } ?? []]
     }

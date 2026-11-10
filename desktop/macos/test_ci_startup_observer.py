@@ -478,7 +478,11 @@ class ProductionObserverControls(unittest.TestCase):
             with self.subTest(mode=mode):
                 frames, config, audit = self.binding_frames(mode)
                 self.assertEqual(frames[-1]['event'], 'failed')
-                self.assertEqual(frames[-1]['producer_failure'], dict(stage=stage, kind=kind))
+                expected = dict(stage=stage, kind=kind)
+                if mode == 'bad-environment':
+                    expected['environment_rejection'] = dict(executable_class='native', previously_known=False,
+                                                              predicate='prohibited', category='token')
+                self.assertEqual(frames[-1]['producer_failure'], expected)
                 self.assertEqual(frames[-1]['retained_identities'], [])
                 self.assertEqual(audit['known_pids'], [])
                 self.assertEqual(audit['census_reads'], reads)
@@ -605,7 +609,11 @@ class ProductionObserverControls(unittest.TestCase):
                     expected = ('arguments_absence', 'process_probe')
                 else:
                     expected = ('arguments_absence', 'arguments_unavailable')
-                self.assertEqual(frames[-1]['producer_failure'], dict(zip(('stage', 'kind'), expected)))
+                annotation = dict(zip(('stage', 'kind'), expected))
+                if scenario == 'known-environment':
+                    annotation['environment_rejection'] = dict(executable_class='bundled_engine', previously_known=True,
+                                                                predicate='prohibited', category='token')
+                self.assertEqual(frames[-1]['producer_failure'], annotation)
                 self.assertFalse(audit['reached_settlement_barrier'])
                 self.assertFalse(owner.failure_receipt()['positive_settlement'])
                 self.assertEqual(set(owner.history), {10, 11, 12})
