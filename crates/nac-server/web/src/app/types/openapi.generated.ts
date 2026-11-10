@@ -1739,7 +1739,7 @@ export interface components {
     StartTraditionalChildRequest: {
       background?: boolean;
       child_session_id?: string | null;
-      description: string;
+      description?: string | null;
       profile: string;
       prompt: string;
     };

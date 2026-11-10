@@ -66,7 +66,12 @@ generation has already started.
 
 Continuing a terminal child starts its next generation with the same immutable
 profile, description, parent, model/backend, and workspace. Sending a prompt to
-a running child steers that generation. A parent can have at most four running
+a running child steers that generation. The description is the label a child
+was launched with: a new child requires one, but continuing or steering an
+existing child may omit it (or pass `null`) and keeps the original. A
+continuation that passes a different description is rejected before the child
+runs, with a message naming the original label; repeating it exactly remains
+valid. An unknown or unowned child ID is reported only as not found. A parent can have at most four running
 children, and the nesting limit is one: children cannot launch grandchildren.
 Deleting a parent deletes its child sessions as well.
 

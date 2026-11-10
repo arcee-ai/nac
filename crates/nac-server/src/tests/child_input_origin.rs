@@ -23,7 +23,7 @@ fn child_command(
         parent_session_id: "parent".into(),
         child_session_id: child,
         profile: "general".into(),
-        description: "intent child".into(),
+        description: Some("intent child".into()),
         prompt: prompt.into(),
         origin,
         execution_mode: TraditionalChildExecutionMode::Foreground,

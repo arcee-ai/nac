@@ -91,6 +91,13 @@ impl nac_core::traditional_children::TraditionalChildController
             if request.prompt.trim().is_empty() {
                 return Err(anyhow!("traditional child prompt is empty"));
             }
+            // Only creation needs a caller label; reject its absence before
+            // any repair or relationship mutation.
+            if request.child_session_id.is_none() {
+                nac_core::traditional_children::description_for_new_child(
+                    request.description.as_deref(),
+                )?;
+            }
             manager
                 .repair_orphaned_completion_suppressions_async(&request.parent_session_id)
                 .await?;
@@ -101,7 +108,9 @@ impl nac_core::traditional_children::TraditionalChildController
                         .create_traditional_child_session(
                             &request.parent_session_id,
                             &request.profile,
-                            &request.description,
+                            nac_core::traditional_children::description_for_new_child(
+                                request.description.as_deref(),
+                            )?,
                         )
                         .await?
                 }
@@ -118,12 +127,12 @@ impl nac_core::traditional_children::TraditionalChildController
                     relation.profile
                 ));
             }
-            if relation.description != request.description.trim() {
-                return Err(anyhow!(
-                    "traditional child description is immutable (expected '{}')",
-                    relation.description
-                ));
-            }
+            // Ownership was established above, so a mismatch may name the
+            // caller's own label. It rejects before attachment or any turn.
+            nac_core::traditional_children::check_continuation_description(
+                &relation,
+                request.description.as_deref(),
+            )?;
             let service = manager.attach_session(&child_session_id).await?;
             // The service reauthorizes each actual mutation. Do not retain a
             // host admission lease throughout a foreground delivery wait.
