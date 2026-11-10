@@ -17,7 +17,8 @@ from ci_xctest_attachments import digest as data_digest
 
 _PRODUCER_FAILURE_STAGES = frozenset((
     'unspecified', 'configuration', 'initial_empty', 'ready_emit',
-    'resources_candidates', 'include_probe', 'include_admission', 'process_list',
+    'resources_candidates', 'resources_pinned', 'resources_count', 'resources_urls',
+    'include_probe', 'include_admission', 'process_list',
     'pending_limit', 'children', 'arguments', 'arguments_absence',
     'environment', 'detail_probe', 'arguments_hash', 'app_binding',
     'app_launch', 'current_app', 'ancestry', 'known_coverage',

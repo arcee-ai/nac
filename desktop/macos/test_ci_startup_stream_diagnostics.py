@@ -307,6 +307,26 @@ class StreamDiagnosticsTests(unittest.TestCase):
                 self.assertFalse(result['positive_process_settlement'])
                 self.assertEqual(self.owner.last_accepted_uptime_ns, 99500000000)
 
+    def test_legacy_new_and_unknown_resource_stages_never_grant_ownership(self):
+        for stage in ('resources_candidates', 'resources_pinned', 'resources_count', 'resources_urls', 'PRIVATE-CANARY'):
+            with self.subTest(stage=stage):
+                self.setUp()
+                row = dict(schema='nac342-owner-v1', event='failed', complete=False,
+                    reason='ownership_observation_unavailable', retained_identities=[], unresolved=[],
+                    observed_uptime_ns='99700000000', producer_failure=dict(stage=stage, kind='ownership_invalid'))
+                result = self.read((json.dumps(row) + '\n').encode())
+                self.assertEqual(result['failure'], 'ownership_observation_unavailable')
+                if stage == 'PRIVATE-CANARY':
+                    self.assertNotIn('producer_failure', result['stream_diagnostic'])
+                else:
+                    self.assertEqual(result['stream_diagnostic']['producer_failure'], row['producer_failure'])
+                self.assertFalse(result['positive_process_settlement'])
+                self.assertFalse(self.owner.retired); self.assertFalse(self.owner.signals)
+                with patch('ci_startup_owner.os.kill') as send, patch('ci_startup_owner.ctypes.CDLL') as inspect:
+                    with self.assertRaises(RuntimeError): self.owner.signal_owned(self.owner.history[11], 15)
+                    send.assert_not_called(); inspect.assert_not_called()
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(result))
+
     def test_healthy_stream_and_expected_stop_gain_no_failure_or_settlement(self):
         result=self.read(healthy=True)
         self.assertIsNone(result['failure'])

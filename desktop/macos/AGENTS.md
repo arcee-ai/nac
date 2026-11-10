@@ -62,6 +62,11 @@ because it keeps deterministic kernel/AppKit adapters, exact production snapshot
 compilation and custody/launch-race assertions in one auditable fixture owner.
 Each selected batch compiles that fixture once; the file remains below 2,000 lines.
 
+The cohesive `test_ci_startup_attachments.py` module may exceed 800 lines because
+it owns the synthetic SDK inventory, shared payload fixtures, strict success
+validators and failure-only diagnostic retention together. Keeping those controls
+beside one collector prevents divergent fixture admission; it remains below 2,000 lines.
+
 A new, unadmitted native-image candidate may be observed during a bundled-engine
 spawn. Recovery is limited to a positively observed same-PID/birth/UID/owned-app-
 parent native-to-engine image transition and one fresh full tuple with coherent

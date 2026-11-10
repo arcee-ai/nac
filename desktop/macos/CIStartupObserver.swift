@@ -402,7 +402,13 @@ enum StartupObserver {
         let childEnvironment = config["child_environment"] as! [String: String]
         let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
         note(.resources_candidates)
-        try need(resources.intact() && candidates.count <= 1 && candidates.allSatisfy {
+        // Same short-circuit predicates/observations; only the passive stage distinguishes refusal.
+        note(.resources_pinned)
+        try need(resources.intact())
+        note(.resources_count)
+        try need(candidates.count <= 1)
+        note(.resources_urls)
+        try need(candidates.allSatisfy {
             resources.matches(bundle: $0.bundleURL, executable: $0.executableURL)
         })
         var app = candidates.first
@@ -583,7 +589,8 @@ enum StartupObserver {
     // Static, failure-only annotations. No clock, query, authority or error replacement.
     enum FailureStage: String, CaseIterable {
         case unspecified, configuration, initial_empty, ready_emit
-        case resources_candidates, include_probe, include_admission, process_list
+        case resources_candidates, resources_pinned, resources_count, resources_urls
+        case include_probe, include_admission, process_list
         case pending_limit, children, arguments, arguments_absence
         case environment, detail_probe, arguments_hash, app_binding
         case app_launch, current_app, ancestry, known_coverage

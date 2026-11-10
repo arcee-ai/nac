@@ -532,8 +532,8 @@ class ProductionObserverControls(unittest.TestCase):
     def test_app_binding_adverse_censuses_and_changed_lifetimes_stay_atomic(self):
         cases = {
             'initial-wrong': ('app_binding', 'ownership_invalid', 1),
-            'initial-ambiguous': ('resources_candidates', 'ownership_invalid', 1),
-            'initial-foreign': ('resources_candidates', 'ownership_invalid', 1),
+            'initial-ambiguous': ('resources_count', 'ownership_invalid', 1),
+            'initial-foreign': ('resources_urls', 'ownership_invalid', 1),
             'bad-environment': ('environment', 'ownership_invalid', 1),
             'bad-ancestry': ('ancestry', 'ownership_invalid', 2),
             'refresh-missing-date': ('app_launch', 'ownership_invalid', 2),
@@ -750,7 +750,7 @@ class ProductionObserverControls(unittest.TestCase):
         return owner
 
     def test_production_enum_and_all_failure_kinds_match_consumer_without_authority(self):
-        self.assertEqual(len(_PRODUCER_FAILURE_STAGES), 23)
+        self.assertEqual(len(_PRODUCER_FAILURE_STAGES), 26)
         self.assertEqual(len(_PRODUCER_FAILURE_KINDS), 4)
         for kind in sorted(_PRODUCER_FAILURE_KINDS):
             with self.subTest(kind=kind):

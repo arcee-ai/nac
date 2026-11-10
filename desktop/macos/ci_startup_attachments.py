@@ -447,6 +447,57 @@ def select_inventory(export, entries, fixed, pattern, index):
             if files[file.name] == 1 and names[name] == 1 and (kind != 'dispatch' or ordinal < first_error)]
 
 
+def retain_failed_dispatches(selected, index, config, configuration_sha256, witness, output, inventory_valid, *, retained_bytes=0):
+    """Failure-only inventory records; neither order nor pairs prove completed input."""
+    index['diagnostic_dispatches'] = []
+    index['diagnostic_dispatch_errors'] = []
+    index['diagnostic_dispatch_order'] = 'sdk_inventory_not_execution'
+    if not inventory_valid or index['selection_errors']:
+        return 0
+    require(type(retained_bytes) is int and 0 <= retained_bytes <= MAX_SELECTED, 'growing_total')
+    total = 0
+    for file, name, kind in selected:
+        if kind != 'dispatch':
+            continue
+        destination, created, retained = output / (name + '.json'), False, False
+        descriptor = None
+        try:
+            data = bounded_file(file, MAX_JSON)
+            def unique(pairs):
+                require(len(pairs) == len(dict(pairs)), 'dispatch_duplicate_key')
+                return dict(pairs)
+            row = json.loads(data, object_pairs_hook=unique,
+                             parse_constant=lambda _: require(False, 'dispatch_nonfinite'))
+            match = re.fullmatch(r'nac342-dispatch-v1-(\d{2})-(before|after)', name)
+            require(match is not None, 'dispatch_name')
+            number = int(match[1])
+            require(1 <= number <= len(operations(config)), 'dispatch_operation_bound')
+            ordinal = 2 * (number - 1) + (match[2] == 'after')
+            require_dispatch(row, config, configuration_sha256, witness, ordinal)
+            require(retained_bytes + total + len(data) <= MAX_SELECTED, 'growing_total')
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            created = True
+            stream = os.fdopen(descriptor, 'wb')
+            descriptor = None  # The stream owns the descriptor only after successful fdopen.
+            with stream:
+                require(stream.write(data) == len(data), 'dispatch_partial_write')
+            total += len(data)
+            index['diagnostic_dispatches'].append({'file': destination.name, 'bytes': len(data),
+                                                   'sha256': digest(data)})
+            retained = True
+        except Exception as error:
+            index['diagnostic_dispatch_errors'].append({'reason': error.reason if isinstance(error, StartupAttachmentError)
+                                                        else 'dispatch_unavailable_or_invalid'})
+        finally:
+            if descriptor is not None:
+                try: os.close(descriptor)
+                except OSError: pass
+            if created and not retained:
+                try: destination.unlink(missing_ok=True)
+                except OSError: pass
+    return total
+
+
 def collect(tool, result, config, configuration_sha256, witness, output):
     """Tool is the actual prepared H SDK observer; unit adapters are explicit."""
     output.mkdir()
@@ -503,9 +554,14 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                                                   witness, output, inventory_valid)
             diagnostic_bytes += retain_first_failure(selected, entries, index, config, configuration_sha256,
                                                      output, inventory_valid)
+            failed_test = test['result'] == 'Failed'
+            if failed_test:
+                diagnostic_bytes += retain_failed_dispatches(selected, index, config, configuration_sha256,
+                                                             witness, output, inventory_valid,
+                                                             retained_bytes=diagnostic_bytes)
             values, images, total = {}, {}, diagnostic_bytes
             for file, name, kind in selected:
-                if kind in ('query_diagnostic', 'ax_refusal', 'first_failure'):
+                if kind in ('query_diagnostic', 'ax_refusal', 'first_failure') or (failed_test and kind == 'dispatch'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
                 total += len(data)
