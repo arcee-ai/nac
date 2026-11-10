@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qfixture-budget-R7325-four-startup-source14",
+  "scope": "P12-integration-Qfailure-lifecycle-R7325-four-startup-source15",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "3e6d834d004dc31001ac3183fdda8c4ae5c67ccb",
+  "H": "3c85c704a033d55fb729e5a0e2bd09abb75e15fa",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "47d64f3b83272cb794318c657d2e9a622f66f9ad",
+  "Q": "95a34b063ab1ec321f775bcfe14983d52dd97b2a",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
