@@ -281,7 +281,12 @@ class ApplicabilityBundleTests(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], 3)
         retained = self.root / "rescan"
         retained.mkdir()
-        self.assertEqual(scan.load_bundle(self.output, retained), self.identity)
+        original_read = Path.read_bytes
+        def bounded_read(path):
+            self.assertNotEqual(path.name, bundle.ARCHIVE, "full retained image tar allocation")
+            return original_read(path)
+        with patch.object(Path, "read_bytes", bounded_read):
+            self.assertEqual(scan.load_bundle(self.output, retained), self.identity)
         scan.bundle_manifest(retained, IMAGE)
         observations = bundle.validate(retained, self.identity)
         actual_binding = observations[0]["binding"]
@@ -326,6 +331,27 @@ class ApplicabilityBundleTests(unittest.TestCase):
         corrupt.mkdir()
         with self.assertRaisesRegex(ValueError, "retained evidence hash mismatch"):
             scan.load_bundle(self.output, corrupt)
+
+    def test_bundle_loading_rejects_same_byte_source_symlinks_before_normalizing_them(self):
+        import image_scan as scan
+        from image_inventory import write_json
+        from image_rust import RUST_FILES
+
+        self.capture()
+        for name in ("runtime.json", "sbom.syft.json", "coverage.json", *RUST_FILES):
+            write_json(self.output / name, {"synthetic": True})
+        write_json(self.output / "identity.json", self.identity)
+        scan.bundle_manifest(self.output, IMAGE)
+        name = next(iter(bundle.source_files(self.identity).values()))
+        original = self.output / name
+        external = self.root / "external-source"
+        original.rename(external)
+        original.symlink_to(external)
+        output = self.root / "symlink-rescan"
+        output.mkdir()
+        with self.assertRaises(OSError):
+            scan.load_bundle(self.output, output)
+        self.assertFalse((output / name).exists())
 
 
 if __name__ == "__main__":

@@ -286,6 +286,8 @@ class DriverTests(unittest.TestCase):
         output.mkdir()
         self.assertEqual(scan.load_bundle(self.root, output)["image"], IMAGE)
         (self.root / "runtime.json").write_text("{}")
+        output = self.root / "corrupt-rescan"
+        output.mkdir()
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             scan.load_bundle(self.root, output)
 
