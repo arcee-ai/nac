@@ -120,11 +120,12 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && apk upgrade --no-cache \
     && apk add --no-cache \
         bash binutils build-base ca-certificates-bundle cmake coreutils \
+        glibc-2.44=2.44-r16 glibc-2.44-locale-posix=2.44-r16 ld-linux-2.44=2.44-r16 libcrypt1-2.44=2.44-r16 \
         gcc=16.2.0-r1 libgcc=16.2.0-r1 libstdc++=16.2.0-r1 libstdc++-dev=16.2.0-r1 \
         krb5-libs=1.22.2-r5 cyrus-sasl-heimdal-libs=2.1.28-r58 \
         curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 fd findutils git gzip jq libssh2=1.11.1-r11 openssl-dev=3.6.5-r5 make \
-        openssh-client pkgconf procps python-3.13=3.13.16_git20261016-r1 \
-        py3-pip=26.2.2-r0 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
+        openssh-client pkgconf procps python-3.13=3.13.18_git20261030-r0 \
+        py3-pip=26.2.2-r2 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
         zlib=1.3.2.1_rc20260921-r0 \
         libbrotlicommon1=1.2.1-r2 libbrotlidec1=1.2.1-r2 libbrotlienc1=1.2.1-r2 \
     && cd /usr/share/nac/runtime-package-build \
