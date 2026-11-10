@@ -62,8 +62,11 @@ class PortProposalTests(unittest.TestCase):
     def test_exact_grant_nonce_receipt_and_original_target_preserved(self):
         actual = self.propose()
         values = plistlib.loads((self.output / 'StartupPrivatePort.entitlements').read_bytes())
-        self.assertEqual(values, {'com.apple.security.app-sandbox': True,
-                                 m.PRIVATE_PORT_WRITE: [str(self.port) + '/']})
+        self.assertEqual(values, {
+            'com.apple.application-identifier': plistlib.loads(NORMAL_RUNNER_XML.encode())[
+                'com.apple.application-identifier'],
+            'com.apple.security.app-sandbox': True,
+            m.PRIVATE_PORT_WRITE: [str(self.port) + '/']})
         generated = (Path(actual['project']) / 'project.pbxproj').read_text()
         # Compare every original A object byte-for-byte, not just setting counts.
         pattern = r'^    A[0-9]{23} = \{\n.*?^    \};'
@@ -78,6 +81,16 @@ class PortProposalTests(unittest.TestCase):
         self.assertFalse(receipt['acceptance'])
         self.assertFalse(receipt['actual_runner_entitlements_verified'])
         self.assertFalse(receipt['actual_testbundle_entitlements_verified'])
+
+    def test_request_entitlements_cannot_rebind_selected_application_identity(self):
+        changed = self.generated.replace(b'ai.arcee.nac.ci.startup-ui-tests',
+                                         b'ai.arcee.nac.ci.another-ui-tests')
+        self.assertNotEqual(changed, self.generated)
+        (self.project / 'project.pbxproj').write_bytes(changed)
+        self.selection['receipt']['generated_project_sha256'] = m.digest(changed)
+        with self.assertRaisesRegex(RuntimeError, 'application identity'):
+            self.propose()
+        self.assertFalse(self.output.exists())
 
     def test_invalid_or_unbound_nonce_rejected_before_output(self):
         for nonce in ('', 'A'*64, 'a'*63, '../bad', 'b'*64):
@@ -466,6 +479,22 @@ class SignatureFormatTests(unittest.TestCase):
         m.require_private_port_signatures(actual,normal,Path('/inert/requests'))
         actual['runner']['entitlements']['com.apple.security.temporary-exception.files.absolute-path.read-only']=['/']
         with self.assertRaises(RuntimeError):m.require_private_port_signatures(actual,normal,Path('/inert/requests'))
+
+    def test_measured_missing_application_identifier_stays_rejected(self):
+        row = s.decoded_entitlements(NORMAL_RUNNER_XML, Path('/inert/runner'))
+        baseline = dict(runner=dict(presence='present', entitlements=row, mach_o_type=2),
+                        testbundle=dict(presence='absent', entitlements=None, mach_o_type=8))
+        candidate = copy.deepcopy(baseline)
+        candidate['runner']['entitlements'][m.PRIVATE_PORT_WRITE] = ['/inert/requests/']
+        m.require_private_port_signatures(candidate, baseline, Path('/inert/requests'))
+        for value in (None, 'ai.arcee.nac.ci.another-ui-tests.xctrunner', True):
+            bad = copy.deepcopy(candidate)
+            if value is None:
+                del bad['runner']['entitlements']['com.apple.application-identifier']
+            else:
+                bad['runner']['entitlements']['com.apple.application-identifier'] = value
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, 'entire typed baseline'):
+                m.require_private_port_signatures(bad, baseline, Path('/inert/requests'))
 
     def test_actual_header_only_library_result_is_not_empty_xml_or_unknown(self):
         exe=Path('/inert/NACStartupUITests')

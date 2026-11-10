@@ -333,9 +333,16 @@ def private_request_selection(selection, configuration, configuration_sha256, *,
             and not output.is_relative_to(original), 'new private output outside profiles/project')
     # Only public source entitlement input; never generated xcent or signatures.
     entitlements = output / 'StartupPrivatePort.entitlements'
-    values = {'com.apple.security.app-sandbox': True, PRIVATE_PORT_WRITE: [str(port) + '/']}
     marker = '    B10000000000000000000013 = {'
     before, after = base.decode().split(marker)
+    bundle_id = 'ai.arcee.nac.ci.startup-ui-tests'
+    require(after.count('PRODUCT_BUNDLE_IDENTIFIER = "' + bundle_id + '";') == 1,
+            'maintained startup application identity differs')
+    # Xcode omitted its normal Runner app ID with our custom entitlement file.
+    # Retain that measured identity as source input; actual signed output must
+    # still pass the independent whole-baseline comparison below.
+    values = {'com.apple.application-identifier': bundle_id + '.xctrunner',
+              'com.apple.security.app-sandbox': True, PRIVATE_PORT_WRITE: [str(port) + '/']}
     require('CODE_SIGN_ENTITLEMENTS' not in after and 'ENABLE_APP_SANDBOX' not in after,
             'unexpected existing selected-target entitlement settings')
     after = replace_once(after, 'NAC_UI_FIXTURE = "";',
