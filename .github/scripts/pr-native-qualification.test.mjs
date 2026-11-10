@@ -207,16 +207,16 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
 test("startup catalog binds exact P12 and interaction ten-file Q supplier", () => {
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
   assert.equal(startup.source_sha, "4b7a1f3e0bf6175a77c5ebf627fe965860e99976");
-  assert.equal(startup.test_source_sha, "f9b0ca23e9a1f5a370bac846479b1aa30fcb63ba");
+  assert.equal(startup.test_source_sha, "4052b2383be17ba3d683dd9d9c2bb5efdf8615fd");
   assert.deepEqual(startup.test_files, {
-  "README.md": "08a17badfaa91dc973d2e23e6034f3fa02861e49f43f189c5fa5687508cbb676",
-  "StartupJourneys.swift": "594c196b5bd0ff7467dd4bee9f196a3e225138da3f13ee27247a31f428762489",
+  "README.md": "040ec5acdf1f4052426ee001b8d9643f9b6019c005a69667b46e73ced42513d1",
+  "StartupJourneys.swift": "04c72c122a7acf240ac864983409d90da09cc36b42ed953c077cfa4acedf55ac",
   "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
   "test_contract.py": "94a287b12b1e164dbf4a5bf9d59db0a5437e31ea496ab63d0e8d9b592655b208",
   "StartupAXGuard.swift": "19950ee10989c2759e2054248ece07a53bef98ad39d8f6771a66fec55e3b3b7e",
-  "StartupAXReceipt.swift": "833d9a0cf0b5ccbc153808010d96e325e47ee92e7a9097d50556ef932c201ac9",
-  "AX-WITNESS-CONTRACT.md": "c80ebadccc06c949d0492887b431ba9a95a47f0669fa224f087faff522a49d88",
-  "test_ax_witness.py": "e07a435550c81083128237af3d7195f43f49d7d3a6cec4cd5f7c50ad1d57f5a4",
+  "StartupAXReceipt.swift": "21f6fbc44328c0666dd8368f4806117857a27129d527578133b5a0a88a5ea8de",
+  "AX-WITNESS-CONTRACT.md": "02a7051b832694514de52252f9b0e891df95edcd078f47f658e3abbe934e8bf0",
+  "test_ax_witness.py": "727350876d2a005cdc2d01f27dea7870bf3943242e419dee3250cb29886f38e4",
   "AGENTS.md": "aaf23530161152bb063960f2b05420882b41e0bbc4b3d397c2d1675aeb590920",
   "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
 });
