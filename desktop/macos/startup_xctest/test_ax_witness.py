@@ -411,8 +411,15 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
     try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
         attributes: [.posixPermissions: 0o700])
     defer { try? FileManager.default.removeItem(at: directory) }
-    let resolved = realpath(directory.path, nil)!
-    directory = URL(fileURLWithPath: String(cString: resolved)); free(resolved)
+    if mode != "first_alias" {
+        let resolved = realpath(directory.path, nil)!
+        directory = URL(fileURLWithPath: String(cString: resolved)); free(resolved)
+    }
+    var info = stat()
+    let statOK = lstat(directory.path, &info) == 0
+    let frontier: [String: Bool] = ["canonical": StartupAXFiles.canonical(directory.path), "stat": statOK,
+        "directory": info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR), "uid": info.st_uid == getuid(),
+        "mode": info.st_mode & 0o777 == 0o700]
     let declaration = StartupAXDeclaration(path: directory.appendingPathComponent("receipt.json").path,
         nonce: String(repeating: "a", count: 64), helper_path: "/inert", helper_sha256: "", support_sha256: [:], owner_pid: 1, deadline_ns: "1")
     let recorder = StartupFailureEvidence(declaration, configurationSHA: String(repeating: "b", count: 64))
@@ -438,7 +445,7 @@ func firstFailureRun(_ mode: String) -> [String: Any] {
     let unchanged = first == (try? Data(contentsOf: URL(fileURLWithPath: path)))
     let row = first.flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
     return ["record": row, "before_teardown": beforeTeardown, "original_preserved": preserved,
-            "unchanged": unchanged, "order": events]
+            "unchanged": unchanged, "order": events, "publisher_parent": frontier]
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]

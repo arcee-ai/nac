@@ -19,3 +19,8 @@ and readonly proof on the existing witness port. Preserve the exact selected
 public coordinate, retained CFEqual ancestry, original ticket/freshness and
 sticky refusal. Coordinate dynamics retain an accepted last-instant race; never
 claim atomic or independently observed delivered-event equality.
+
+A configured journey may publish its first closed local failure to the existing
+owned witness path plus `.failure`, before application teardown. This passive,
+nonce/configuration-bound record never grants receipt/input/process authority,
+replaces the original throw, or establishes precedence over a concurrent audit.

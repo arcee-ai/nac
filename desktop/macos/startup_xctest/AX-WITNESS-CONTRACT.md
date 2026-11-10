@@ -110,3 +110,10 @@ routes the original affected review and exact-source full-Xcode/native run.
 Public references: [dynamic screenPoint](https://developer.apple.com/documentation/xcuiautomation/xcuicoordinate/screenpoint),
 [public normalized coordinate](https://developer.apple.com/documentation/xcuiautomation/xcuielement/coordinate(withnormalizedoffset:)),
 [global AX z-order hit-test](https://developer.apple.com/documentation/applicationservices/1462077-axuielementcopyelementatposition).
+
+First-failure evidence uses the same owned file publisher at the fixed `.failure`
+suffix. Only a closed step/error family and bounded operation ordinal accompany
+the existing nonce/configuration binding. It is written before the journey's
+teardown defer, best effort, once per journey; publication failure preserves the
+original error. It contains no label, value, path or process identity and grants
+no input, freshness, process ownership, settlement or acceptance authority.
