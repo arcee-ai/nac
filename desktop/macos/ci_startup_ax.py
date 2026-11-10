@@ -267,6 +267,8 @@ class AXCompanion:
                     'read_parent', 'read_open', 'read_metadata',
                     'read_bytes', 'publish_parent', 'publish_encode',
                     'publish_size', 'publish_open', 'publish_write',
+                    'publish_open_access_denied', 'publish_open_not_permitted', 'publish_open_read_only',
+                    'publish_open_exists', 'publish_open_resource', 'publish_open_path', 'publish_open_other',
                     'publish_mode', 'publish_close', 'publish_rename',
                     'decode_size', 'decode_keys', 'decode_json',
                     'decode_object', 'decode_fields', 'decode_process',

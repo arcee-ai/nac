@@ -145,6 +145,8 @@ enum StartupFailureStep: String, Codable, CaseIterable {
     case request_deadline, request_counters, read_parent, read_open
     case read_metadata, read_bytes, publish_parent, publish_encode
     case publish_size, publish_open, publish_write, publish_mode
+    case publish_open_access_denied, publish_open_not_permitted, publish_open_read_only
+    case publish_open_exists, publish_open_resource, publish_open_path, publish_open_other
     case publish_close, publish_rename, decode_size, decode_keys
     case decode_json, decode_object, decode_fields, decode_process
     case decode_observation, decode_interaction, decode_focus, decode_types
@@ -251,7 +253,19 @@ enum StartupAXFiles {
         let temporary = path + "." + UUID().uuidString
         diagnostic?.step = .publish_open
         let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        try need(fd >= 0)
+        if fd < 0 {
+            let failureErrno = errno // Capture before any Foundation or diagnostic work.
+            switch failureErrno {
+            case EACCES: diagnostic?.step = .publish_open_access_denied
+            case EPERM: diagnostic?.step = .publish_open_not_permitted
+            case EROFS: diagnostic?.step = .publish_open_read_only
+            case EEXIST: diagnostic?.step = .publish_open_exists
+            case ENOSPC, EDQUOT, EMFILE, ENFILE, ENOMEM: diagnostic?.step = .publish_open_resource
+            case ENOENT, ENOTDIR, ELOOP, ENAMETOOLONG: diagnostic?.step = .publish_open_path
+            default: diagnostic?.step = .publish_open_other
+            }
+            throw StartupAXReceiptError.invalid
+        }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         defer { _ = unlink(temporary) }
         diagnostic?.step = .publish_write

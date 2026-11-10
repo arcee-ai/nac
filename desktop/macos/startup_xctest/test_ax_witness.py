@@ -39,6 +39,55 @@ import CoreFoundation
 import CoreGraphics
 import Darwin
 
+// Interpose only the three-argument POSIX publication port in this inert binary.
+var forcedPublishErrno: Int32?
+var publishOpenCalls = 0
+func open(_ path: String, _ flags: Int32) -> Int32 {
+    path.withCString { Darwin.open($0, flags) }
+}
+func open(_ path: String, _ flags: Int32, _ mode: mode_t) -> Int32 {
+    publishOpenCalls += 1
+    if let code = forcedPublishErrno { errno = code; return -1 }
+    return path.withCString { Darwin.open($0, flags, mode) }
+}
+
+func publishErrnoRun(_ mode: String) -> [String: Any] {
+    let codes: [String: Int32] = ["access":EACCES,"permission":EPERM,"readonly":EROFS,"exists":EEXIST,
+        "space":ENOSPC,"quota":EDQUOT,"processfds":EMFILE,"systemfds":ENFILE,"memory":ENOMEM,
+        "missing":ENOENT,"notdir":ENOTDIR,"loop":ELOOP,"long":ENAMETOOLONG,"unknown":Int32.max,"zero":0,"nil":EACCES]
+    let directory = URL(fileURLWithPath:ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
+        .resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+    do {
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false,
+            attributes:[.posixPermissions:0o700])
+        defer { forcedPublishErrno = nil; try? FileManager.default.removeItem(at:directory) }
+        guard let resolved = realpath(directory.path, nil) else { throw StartupAXReceiptError.invalid }
+        let canonicalDirectory = String(cString:resolved)
+        free(resolved)
+        let path = canonicalDirectory + "/receipt.json"
+        let declaration = StartupAXDeclaration(path:path,nonce:String(repeating:"a",count:64),
+            helper_path:"/inert/helper",helper_sha256:"",support_sha256:[:],owner_pid:1,deadline_ns:"100")
+        let diagnostic = StartupFailureEvidence(declaration,configurationSHA:String(repeating:"b",count:64))
+        diagnostic.operationIndex = 1; diagnostic.step = .before_record
+        forcedPublishErrno = codes[mode]; publishOpenCalls = 0
+        do {
+            try StartupAXFiles.publish(["closed":true],to:path,diagnostic:mode == "nil" ? nil : diagnostic)
+            let data = try StartupAXFiles.read(path)
+            let files = try FileManager.default.contentsOfDirectory(atPath:directory.path)
+            return ["accepted":true,"step":diagnostic.step.rawValue,"calls":publishOpenCalls,
+                    "exact":try JSONSerialization.jsonObject(with:data) as? [String:Bool] == ["closed":true],
+                    "atomic":files == ["receipt.json"]]
+        } catch {
+            // A later errno change must not alter the retained first failure.
+            errno = EEXIST
+            let record = diagnostic.capture(error)!
+            let noRetry = diagnostic.capture(error) == nil
+            return ["accepted":false,"family":StartupFailureEvidence.family(error),"calls":publishOpenCalls,
+                    "record":try JSONSerialization.jsonObject(with:JSONEncoder().encode(record)),"no_retry":noRetry]
+        }
+    } catch { return ["adapter_error":true] }
+}
+
 func run(_ mode: String) -> [String: Any] {
     var stamp: UInt64 = 3_000_000_000, loads = 0, inputs = 0
     let root = "00000000-0000-0000-0000-000000000001"
@@ -755,7 +804,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -907,8 +956,8 @@ class ReceiptControls(unittest.TestCase):
                 self.assertEqual(row['original_preserved'], mode == 'publish_error')
                 self.assertNotIn('Intended', json.dumps(row))
         self.assertEqual(self.rows(['publisher_checkpoint_' + mode for mode in ('parent', 'open', 'rename')]),
-                         [dict(accepted=False, step='publish_' + mode, family='receipt_invalid')
-                          for mode in ('parent', 'open', 'rename')])
+                         [dict(accepted=False, step=step, family='receipt_invalid')
+                          for step in ('publish_parent', 'publish_open_path', 'publish_rename')])
 
     def test_real_private_request_port_accepts_only_closed_bound_finite_interaction_shapes(self):
         modes = ['positive', 'point', 'precision', 'frame', 'deadline', 'clock', 'kind', 'root',
@@ -1067,6 +1116,18 @@ class ReceiptControls(unittest.TestCase):
     def test_real_read_port_refuses_symlink_hardlink_oversize_and_foreign_parent(self):
         modes=['file_positive','file_publish','file_symlink','file_hardlink','file_oversize','file_foreign_parent']
         self.assertEqual([r['accepted'] for r in self.rows(modes)],[True]*2+[False]*4)
+        categories = dict(access='access_denied', permission='not_permitted', readonly='read_only', exists='exists',
+                          space='resource', quota='resource', processfds='resource', systemfds='resource', memory='resource',
+                          missing='path', notdir='path', loop='path', long='path', unknown='other', zero='other', nil=None)
+        for mode, row in zip(categories, self.rows(['errno_' + m for m in categories])):
+            with self.subTest(errno_mode=mode):
+                self.assertEqual((row['accepted'], row['family'], row['calls'], row['no_retry']),
+                                 (False, 'receipt_invalid', 2, True))
+                self.assertEqual(row['record'], dict(schema='nac342-first-preflight-failure-v1', acceptance=False,
+                    nonce='a'*64, configuration_sha256='b'*64, operation_index=1, error_family='receipt_invalid',
+                    step='publish_open_' + categories[mode] if categories[mode] else 'before_record'))
+        self.assertEqual(self.rows(['errno_success']),
+                         [dict(accepted=True, step='publish_rename', calls=1, exact=True, atomic=True)])
 
     def test_real_cfequal_wrapper_retains_cancelled_handle_and_rejects_same_shaped_replacement(self):
         self.assertEqual(self.rows(['identity'])[0],dict(accepted=True,retained=True,replacement_rejected=True))

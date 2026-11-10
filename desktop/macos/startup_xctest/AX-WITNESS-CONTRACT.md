@@ -141,6 +141,9 @@ shape, anchor/root frame, containment, deadline, ticket, publication and consume
 guards. File publication marks parent, encoding/size, open, write, mode, close and
 rename before those original operations; receipt reading marks its existing
 file, decoding, identity, sequence, refusal, surface, focus and freshness guards.
+Failed open snapshots errno immediately into seven finite step categories
+(access denied, not permitted, read-only, exists, resource, path, other), retaining
+the original invalid throw and seven-field record without raw errno or paths.
 Only the optional passive recorder reference travels through these calls.
 There is no callback/actor hop or additional protocol. The first record is still
 latched before diagnostic publication, so a failed diagnostic write cannot

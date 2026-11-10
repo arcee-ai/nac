@@ -23,13 +23,17 @@ class StartupAttachmentTests(unittest.TestCase):
                       error_family='receipt_invalid')
         name = 'nac342-first-preflight-failure-v1-configuredLocal'
         for mutation in (None, 'nonce', 'config', 'extra', 'step', 'family', 'bool_index', 'large_index',
-                         'duplicate_key', 'duplicate_attachment', 'oversize', 'wrong_name', 'passed'):
+                         'duplicate_key', 'duplicate_attachment', 'oversize', 'wrong_name', 'passed',
+                         'raw_errno_step', 'extra_errno', 'raw_path'):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary); value = dict(record)
                 if mutation == 'nonce': value['nonce'] = 'f' * 64
                 if mutation == 'config': value['configuration_sha256'] = 'f' * 64
                 if mutation == 'extra': value['raw_error'] = 'PRIVATE-CANARY'
                 if mutation == 'step': value['step'] = 'unknown'
+                if mutation == 'raw_errno_step': value['step'] = 'publish_open_errno_13'
+                if mutation == 'extra_errno': value['errno'] = 13
+                if mutation == 'raw_path': value['path'] = '/PRIVATE-CANARY/request'
                 if mutation == 'family': value['error_family'] = 'PRIVATE-CANARY'
                 if mutation == 'bool_index': value['operation_index'] = True
                 if mutation == 'large_index': value['operation_index'] = 12
