@@ -135,8 +135,6 @@ impl Identity {
         #[cfg(test)]
         let mut failure_observation = signal_diagnostics::FailureObservation::default();
         for _ in 0..3 {
-            #[cfg(test)]
-            signal_diagnostics::record(self.pid, || "stage=inspect.begin".to_owned());
             let Some(current) = inspect(self.pid)? else {
                 return Ok(false);
             };
@@ -152,21 +150,16 @@ impl Identity {
             key[5] = self.pid as u32;
             key[7] = current.unique.version as u32;
             #[cfg(test)]
-            signal_diagnostics::record(self.pid, || {
-                format!(
-                    "stage=audit.begin token_pid={} token_version={} signal={signal}",
-                    key[5], key[7]
-                )
-            });
-            #[cfg(test)]
             let send_started = std::time::Instant::now();
             // SAFETY: runtime symbol has the installed libproc signature; key
             // is initialized audit-token-sized storage valid for this call.
             let result = unsafe { send(&key, signal) };
             #[cfg(test)]
+            let send_elapsed = send_started.elapsed();
+            #[cfg(test)]
             diagnostics::native_send(self.pid, signal, current.unique.version, result);
             #[cfg(test)]
-            failure_observation.observe(self.pid, self.uniqueid, result, send_started.elapsed(), || {
+            failure_observation.observe(self.pid, self.uniqueid, result, send_elapsed, || {
                 inspection::snapshot(self.pid, &inspection::Native)
             });
             if result == 0 {

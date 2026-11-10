@@ -25,6 +25,14 @@ pub(in crate::native_pty::platform) enum Stage {
     Inspect,
     Validate,
     NativeSend,
+    PostAudit,
+    PostIdentity,
+    PostParent,
+    PostStatus,
+    MetadataRead,
+    MetadataCredentials,
+    MetadataStatus,
+    Actor,
     Counts,
     Leader,
     Members,
@@ -45,6 +53,14 @@ impl Stage {
             Self::Inspect => "inspect",
             Self::Validate => "validate",
             Self::NativeSend => "native-send",
+            Self::PostAudit => "post-audit",
+            Self::PostIdentity => "post-identity",
+            Self::PostParent => "post-parent",
+            Self::PostStatus => "post-status",
+            Self::MetadataRead => "metadata-read",
+            Self::MetadataCredentials => "metadata-credentials",
+            Self::MetadataStatus => "metadata-status",
+            Self::Actor => "actor",
             Self::Counts => "counts",
             Self::Leader => "leader",
             Self::Members => "members",
@@ -68,6 +84,7 @@ impl Stage {
 type Inspector = fn(libc::pid_t) -> io::Result<Option<Row>>;
 struct Capture {
     phase: Phase,
+    signal_pid: Option<libc::pid_t>,
     census_iteration: Option<u32>,
     buffers: [String; 3],
     dropped: [u32; 3],
@@ -102,6 +119,7 @@ impl Scope {
             }
             *slot = Some(Capture {
                 phase: Phase::Setup,
+                signal_pid: None,
                 census_iteration,
                 buffers: Default::default(),
                 dropped: [0; 3],
@@ -113,7 +131,7 @@ impl Scope {
         Self {
             active,
             emit: |record| {
-                let _ = writeln!(io::stderr().lock(), "{record}");
+                emit(record, &mut io::stderr().lock());
             },
             _thread: PhantomData,
         }
@@ -141,6 +159,7 @@ impl Scope {
             capture.dropped[0] = 0;
             capture.sequence = 0;
             capture.phase = Phase::Setup;
+            capture.signal_pid = None;
         });
     }
     fn take(&mut self) -> Option<String> {
@@ -167,6 +186,35 @@ impl Drop for Scope {
         }
     }
 }
+pub(super) fn emit(record: &str, output: &mut impl Write) {
+    // A failed diagnostic sink must not replace the original fixture unwind.
+    let _ = writeln!(output, "{record}");
+}
+pub(in crate::native_pty::platform) fn signal_target(pid: libc::pid_t) {
+    CAPTURE.with(|slot| {
+        if let Some(capture) = slot.borrow_mut().as_mut() {
+            capture.phase = Phase::Signal;
+            capture.signal_pid = Some(pid);
+        }
+    });
+    // Preserve the existing fixture's scalar caller identity, never a token.
+    // SAFETY: these scalar identity queries have no preconditions.
+    let actor = unsafe {
+        [
+            libc::getpid() as i128,
+            libc::getuid() as i128,
+            libc::geteuid() as i128,
+        ]
+    };
+    begin(Stage::Actor, pid, actor);
+}
+pub(super) fn observing_signal(pid: libc::pid_t) -> bool {
+    CAPTURE.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|capture| {
+            capture.phase == Phase::Signal && capture.signal_pid == Some(pid)
+        })
+    })
+}
 pub(in crate::native_pty::platform) fn phase(value: Phase) {
     CAPTURE.with(|slot| {
         if let Some(capture) = slot.borrow_mut().as_mut() {
@@ -189,7 +237,7 @@ fn kind(error: &io::Error) -> u8 {
     }
 }
 // result=0 began, 1 returned Ok, 2 absent/false, 3 returned Err. Ok is not settlement.
-fn record(
+pub(super) fn record(
     stage: Stage,
     pid: libc::pid_t,
     result: u8,

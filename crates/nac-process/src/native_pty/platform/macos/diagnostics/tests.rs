@@ -483,6 +483,68 @@ fn census_setup_and_prune_do_not_fill_the_signal_budget() {
 }
 
 #[test]
+fn inherited_post_error_observation_uses_the_same_numeric_budget() {
+    use super::super::signal_diagnostics::FailureObservation;
+    use std::time::Duration;
+
+    for outcome in 0..3 {
+        let mut capture = Scope::census();
+        capture.begin_iteration();
+        signal_target(200);
+        native_send(200, libc::SIGKILL, 1, libc::EPERM);
+        let mut observation = FailureObservation::default();
+        observation.observe(200, 7, libc::EPERM, Duration::ZERO, || match outcome {
+            0 => Ok(Some(inspection::Snapshot {
+                short: inspection::Short {
+                    pid: 200,
+                    ppid: 50,
+                    status: 3,
+                },
+                sid: 900,
+                unique: Unique {
+                    uniqueid: 7,
+                    parent_uniqueid: 9,
+                    version: 1,
+                },
+            })),
+            1 => Ok(None),
+            _ => Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "PRIVATE-CREDENTIAL",
+            )),
+        });
+        let text = capture.take().unwrap();
+        assert!(text.len() < 8192);
+        assert!(text.contains("stage=native-send pid=200 result=3 errno=1"));
+        assert!(text.contains("stage=post-audit pid=200"));
+        assert!(text.contains(&format!(
+            "stage=post-identity pid=200 result={}",
+            outcome + 1
+        )));
+        if outcome == 0 {
+            assert!(text
+                .contains("stage=post-parent pid=200 result=1 errno=none kind=0 a=9 b=50 c=900"));
+            assert!(text.contains("stage=post-status pid=200 result=1 errno=none kind=0 a=3"));
+        }
+        assert!(!text.contains("PRIVATE"));
+    }
+}
+
+#[test]
+fn rotation_and_prune_disable_the_inherited_post_error_probe() {
+    let mut capture = Scope::census();
+    capture.begin_iteration();
+    signal_target(200);
+    assert!(observing_signal(200));
+    assert!(!observing_signal(201));
+    capture.begin_iteration();
+    assert!(!observing_signal(200));
+    signal_target(201);
+    phase(Phase::Prune);
+    assert!(!observing_signal(201));
+}
+
+#[test]
 fn census_teardown_prevents_rotation_of_the_failure_and_result_budgets() {
     let mut capture = Scope::census();
     capture.begin_iteration();

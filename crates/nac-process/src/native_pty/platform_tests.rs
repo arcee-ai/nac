@@ -237,7 +237,7 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         );
         let weak = Arc::downgrade(&identity);
         #[cfg(target_os = "macos")]
-        diagnostics::phase(Phase::Signal);
+        diagnostics::signal_target(pid);
         identity.signal(libc::SIGKILL).unwrap();
         #[cfg(target_os = "macos")]
         diagnostics::phase(Phase::Prune);
@@ -289,7 +289,7 @@ fn active_prune_preserves_original_parent_arc_in_pending_obligation() {
         .pending_capture
         .insert(key, (row, Evidence::Parent(Arc::clone(&parent))));
     #[cfg(target_os = "macos")]
-    diagnostics::phase(Phase::Signal);
+    diagnostics::signal_target(pid);
     parent.signal(libc::SIGKILL).unwrap();
     #[cfg(target_os = "macos")]
     diagnostics::phase(Phase::Prune);
