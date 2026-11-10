@@ -36,13 +36,21 @@ var argumentAbsenceChecks = 0
 var argumentSignals = 0
 var argumentSettlementDemands = 0
 var argumentReachedBarrier = false
+var bindingCensusReads = 0
+var bindingRefreshBSDReads = 0
+var bindingBSDReads: [Int32: Int] = [:]
+var bindingArgumentReads: [Int32: Int] = [:]
+var bindingTrace: [String] = []
+func binding(_ mode: String) -> Bool { argumentScenario == "binding-" + mode }
+var bindingControl: Bool { argumentScenario.hasPrefix("binding-") }
 func getuid() -> UInt32 { 501 }
 func fixturePath(_ pid: Int32) -> String {
     if pid == 99 { return "/foreign/unowned" }
     return argumentRoot + "/Moved app folder with spaces/NAC.app/Contents/" +
-        (pid == 10 ? "MacOS/NACPreview" : "Resources/nac-web")
+        ((pid == 10 || (bindingControl && pid == 20)) ? "MacOS/NACPreview" : "Resources/nac-web")
 }
 func fixturePIDs() -> [Int32] {
+    if bindingControl { return binding("initial-wrong") ? [10, 11, 20, 99] : [10, 11, 99] }
     if argumentPhase == 2 { return [99] }
     let helper = argumentScenario.hasPrefix("known-") || argumentPhase == 1
     return [10, 11] + (helper ? [12] : []) + [99]
@@ -50,20 +58,39 @@ func fixturePIDs() -> [Int32] {
 func proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ argument: UInt64,
                   _ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
     if argumentPhase == 2 || (pid == 12 && argumentHelperGone) { errno = ESRCH; return 0 }
+    if bindingControl {
+        bindingBSDReads[pid, default: 0] += 1
+        if pid == 10 && bindingCensusReads > 1 {
+            bindingRefreshBSDReads += 1
+            if binding("refresh-gone") { errno = ESRCH; return 0 }
+            if binding("refresh-denied") { errno = EACCES; return 0 }
+        }
+    }
     var value = proc_bsdinfo()
     value.pbi_pid = UInt32(pid); value.pbi_ppid = pid == 10 ? 1 : 10
+    if bindingControl && pid == 20 { value.pbi_ppid = 1 }
+    if binding("bad-ancestry") && pid == 11 { value.pbi_ppid = 99 }
     value.pbi_uid = 501; value.pbi_start_tvsec = 1234
     value.pbi_start_tvusec = pid == 12 && argumentHelperReused ? 999 : UInt64(pid)
+    if bindingControl && bindingCensusReads > 1 && pid == 10 {
+        if binding("refresh-reused") || (binding("refresh-bookend-reused") && bindingRefreshBSDReads == 2) {
+            value.pbi_start_tvusec = 999
+        }
+        if binding("refresh-uid") { value.pbi_uid = 502 }
+        if binding("refresh-parent") { value.pbi_ppid = 99 }
+    }
     output!.assumingMemoryBound(to: proc_bsdinfo.self).pointee = value
     return Int32(MemoryLayout<proc_bsdinfo>.size)
 }
 func proc_pidpath(_ pid: Int32, _ output: UnsafeMutableRawPointer?, _ size: UInt32) -> Int32 {
     if argumentPhase == 2 && pid != 99 { errno = ESRCH; return 0 }
-    let bytes = Array(fixturePath(pid).utf8) + [0]
+    let path = binding("refresh-path") && bindingCensusReads > 1 && pid == 10 ? "/foreign/unowned" : fixturePath(pid)
+    let bytes = Array(path.utf8) + [0]
     bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
     return Int32(bytes.count - 1)
 }
 func proc_listallpids(_ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    if bindingControl && output == nil { bindingTrace.append("kernel:10") }
     let pids = fixturePIDs()
     if let output { pids.withUnsafeBytes { _ = memcpy(output, $0.baseAddress!, $0.count) } }
     return Int32(pids.count)
@@ -77,6 +104,7 @@ func proc_listchildpids(_ pid: Int32, _ output: UnsafeMutableRawPointer?, _ size
 func kill(_ pid: Int32, _ signal: Int32) -> Int32 {
     if signal != 0 { argumentSignals += 1; errno = EPERM; return -1 }
     argumentAbsenceChecks += 1
+    if binding("refresh-gone") && bindingCensusReads > 1 && pid == 10 { errno = ESRCH; return -1 }
     if argumentPhase == 2 { errno = ESRCH; return -1 }
     if pid == 12 && argumentScenario == "known-unknown" { errno = EIO; return -1 }
     if pid == 12 && argumentHelperGone { errno = ESRCH; return -1 }
@@ -87,6 +115,7 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
             _ replacement: UnsafeMutableRawPointer?, _ replacementSize: Int) -> Int32 {
     let pid = mib![2]
     argumentReads += 1
+    if bindingControl { bindingArgumentReads[pid, default: 0] += 1 }
     if pid == 12 && argumentPhase == 1 {
         if argumentScenario.hasSuffix("exit") || argumentScenario == "known-unknown" {
             argumentHelperGone = true; errno = ESRCH; return -1
@@ -108,9 +137,12 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
         }
     }
     let executable = fixturePath(pid)
-    let argv = [executable] + (pid == 10 ? [] :
+    let argv = [executable] + ((pid == 10 || (bindingControl && pid == 20)) ? [] :
         (pid == 12 ? ["__desktop-configuration"] : ["--bind", "127.0.0.1:4321"]))
     var environment = ["HOME": "/private/owned home", "NAC_HOME": "/private/owned home/nac"]
+    if binding("bad-environment") && pid == 10 {
+        environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
+    }
     if pid == 12 && argumentPhase == 1 && argumentScenario == "known-environment" {
         environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
         argumentHelperGone = true
@@ -129,21 +161,72 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
     return 0
 }
 struct NSRunningApplication {
-    let processIdentifier: Int32 = 10
-    let isTerminated = false
-    var bundleURL: URL? { URL(fileURLWithPath: argumentRoot + "/Moved app folder with spaces/NAC.app") }
-    var executableURL: URL? { URL(fileURLWithPath: fixturePath(10)) }
-    let launchDate: Date? = Date(timeIntervalSince1970: 1234.5)
+    var processIdentifier: Int32 = 10
+    var terminated = false
+    var foreign = false
+    var missingURLs = false
+    var isTerminated: Bool {
+        terminated || (binding("refresh-terminated-after-probe") && bindingRefreshBSDReads >= 2)
+    }
+    var bundleURL: URL? {
+        missingURLs ? nil : URL(fileURLWithPath: argumentRoot +
+            (foreign ? "/foreign/NAC.app" : "/Moved app folder with spaces/NAC.app"))
+    }
+    var executableURL: URL? { missingURLs ? nil : URL(fileURLWithPath: fixturePath(10)) }
+    var launchDate: Date? { binding("refresh-missing-date") ? nil : Date(timeIntervalSince1970: 1234.5) }
     static func runningApplications(withBundleIdentifier: String) -> [Self] {
-        argumentPhase == 2 ? [] : [Self()]
+        if bindingControl {
+            bindingCensusReads += 1
+            if bindingCensusReads == 1 {
+                if binding("stable") { bindingTrace.append("app:10"); return [Self()] }
+                if binding("initial-wrong") { bindingTrace.append("app:20"); return [Self(processIdentifier: 20)] }
+                if binding("initial-ambiguous") { return [Self(), Self(processIdentifier: 20)] }
+                if binding("initial-foreign") { return [Self(foreign: true)] }
+                bindingTrace.append("app:empty")
+                return [] // Launch occurs only after this census, before the kernel list.
+            }
+            bindingTrace.append("refresh")
+            if binding("refresh-missing") { return [] }
+            if binding("refresh-terminated") { return [Self(terminated: true)] }
+            if binding("refresh-ambiguous") { return [Self(), Self(processIdentifier: 20)] }
+            if binding("refresh-foreign") { return [Self(foreign: true)] }
+            if binding("refresh-wrong") { return [Self(processIdentifier: 20)] }
+            if binding("refresh-missing-urls") { return [Self(missingURLs: true)] }
+            return [Self()]
+        }
+        return argumentPhase == 2 ? [] : [Self()]
     }
 }
+
 enum FixtureWindowOption { case optionOnScreenOnly, excludeDesktopElements }
 let kCGNullWindowID: UInt32 = 0
 let kCGWindowOwnerPID = "owner", kCGWindowLayer = "layer", kCGWindowNumber = "number"
 func CGWindowListCopyWindowInfo(_ options: [FixtureWindowOption], _ window: UInt32) -> Any? {
     [[kCGWindowOwnerPID: 10, kCGWindowLayer: 0, kCGWindowNumber: 17]]
 }
+func runBindingControl() throws {
+    argumentScenario = CommandLine.arguments[1]
+    argumentRoot = CommandLine.arguments[3]
+    let environment = ["HOME": "/private/owned home", "NAC_HOME": "/private/owned home/nac"]
+    let config: [String: Any] = ["app_path": argumentRoot + "/Moved app folder with spaces/NAC.app",
+        "bundle_id": "ai.arcee.nac.dev", "environment": environment, "child_environment": environment]
+    let resources = try StartupURLResources(root: argumentRoot, app: config["app_path"] as! String)
+    var known: [Int32: StartupProcessIdentity] = [:]
+    var stage: StartupObserver.FailureStage = .unspecified
+    try StartupObserver.emit(StartupObserver.readyRecord(CommandLine.arguments[2]))
+    do {
+        try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known, note: { stage = $0 }))
+    } catch {
+        try StartupObserver.emit(StartupObserver.failureRecord(error, known: known, stage: stage))
+    }
+    let audit: [String: Any] = ["census_reads": bindingCensusReads, "trace": bindingTrace,
+        "app_bsd_reads": bindingBSDReads[10, default: 0], "refresh_bsd_reads": bindingRefreshBSDReads,
+        "app_argument_reads": bindingArgumentReads[10, default: 0],
+        "known_pids": known.keys.sorted(), "nonzero_signals": argumentSignals,
+        "all_kernel_appkit_calls_mocked": true]
+    FileHandle.standardError.write(try JSONSerialization.data(withJSONObject: audit))
+}
+
 func runArgumentControl() throws {
     argumentScenario = String(CommandLine.arguments[1].dropFirst("argument-".count))
     argumentRoot = CommandLine.arguments[3]
@@ -290,7 +373,8 @@ class ProductionObserverControls(unittest.TestCase):
         prefix = prefix.replace('import AppKit\n', '')
         body = body.split('    @MainActor\n    static func main()', 1)[0]
         text = (prefix + ARGUMENT_KERNEL + '\nenum StartupObserver {\n' + body + '\n}\n'
-                + 'if CommandLine.arguments[1].hasPrefix("argument-") {\n'
+                + 'if CommandLine.arguments[1].hasPrefix("binding-") {\n'
+                + 'try runBindingControl()\n} else if CommandLine.arguments[1].hasPrefix("argument-") {\n'
                 + 'try runArgumentControl()\n} else {\n' + DRIVER + '\n}\n')
         file = folder / 'main.swift'
         file.write_text(text)
@@ -327,6 +411,90 @@ class ProductionObserverControls(unittest.TestCase):
         config = self.config(str(root))
         config['app_path'] = str(app)
         return frames, config, audit
+
+    def binding_frames(self, mode):
+        with tempfile.TemporaryDirectory(prefix='nac342-xctest-binding-inert-') as temporary:
+            root = Path(temporary).resolve()
+            native = root / 'Moved app folder with spaces/NAC.app/Contents/MacOS/NACPreview'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b'inert resource; never executed')
+            result = subprocess.run([str(self.executable), 'binding-' + mode, 'b' * 64, str(root)],
+                                    capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr[-4096:])
+            self.assertNotIn(b'fixture-secret-never-emitted', result.stdout)
+            frames = [json.loads(line) for line in result.stdout.splitlines()]
+            audit = json.loads(result.stderr)
+            self.records['binding-' + mode] = dict(frames=frames, audit=audit)
+            self.assertTrue(audit['all_kernel_appkit_calls_mocked'])
+            self.assertEqual(audit['nonzero_signals'], 0)
+            config = self.config(str(root))
+            config['app_path'] = str(native.parent.parent.parent)
+            return frames, config, audit
+
+    def test_empty_app_census_then_kernel_launch_binds_one_fresh_census(self):
+        frames, config, audit = self.binding_frames('launch')
+        self.assertTrue(frames[-1]['complete'], frames[-1].get('producer_failure'))
+        self.assertEqual(audit['trace'], ['app:empty', 'kernel:10', 'refresh'])
+        self.assertEqual(audit['census_reads'], 2)
+        self.assertEqual(audit['refresh_bsd_reads'], 2)
+        self.assertEqual(audit['known_pids'], [10, 11])
+        owner = OwnerWitness(config, 'b' * 64, uid=501)
+        for frame in frames: owner.observe(frame)
+        self.assertIsNone(owner.failure)
+        self.assertEqual(owner.app['pid'], 10)
+        self.assertEqual(owner.app['windows'], [17])
+        self.assertEqual(set(owner.history), {10, 11})
+        self.assertFalse(owner.failure_receipt()['positive_process_settlement'])
+        self.assertFalse(owner.retired)
+        self.assertFalse(owner.signals)
+        inspect = Mock(return_value={**owner.history[10], 'start_microseconds': 999})
+        send = Mock()
+        with self.assertRaises(RuntimeError): owner.signal_owned(owner.history[10], 15, inspect=inspect, send=send)
+        inspect.assert_called_once_with(10)
+        send.assert_not_called()
+
+    def test_existing_app_selection_never_refreshes(self):
+        frames, config, audit = self.binding_frames('stable')
+        self.assertTrue(frames[-1]['complete'])
+        self.assertEqual(audit['census_reads'], 1)
+        self.assertEqual(audit['refresh_bsd_reads'], 0)
+        self.assertEqual(audit['known_pids'], [10, 11])
+
+    def test_app_binding_adverse_censuses_and_changed_lifetimes_stay_atomic(self):
+        cases = {
+            'initial-wrong': ('app_binding', 'ownership_invalid', 1),
+            'initial-ambiguous': ('resources_candidates', 'ownership_invalid', 1),
+            'initial-foreign': ('resources_candidates', 'ownership_invalid', 1),
+            'bad-environment': ('environment', 'ownership_invalid', 1),
+            'bad-ancestry': ('ancestry', 'ownership_invalid', 2),
+            'refresh-missing-date': ('app_launch', 'ownership_invalid', 2),
+        }
+        for mode in ('missing', 'terminated', 'ambiguous', 'foreign', 'wrong', 'missing-urls',
+                     'gone', 'terminated-after-probe'):
+            cases['refresh-' + mode] = ('app_binding', 'ownership_invalid', 2)
+        for mode in ('reused', 'bookend-reused', 'denied', 'path', 'uid', 'parent'):
+            cases['refresh-' + mode] = ('app_binding', 'process_probe', 2)
+        for mode, (stage, kind, reads) in cases.items():
+            with self.subTest(mode=mode):
+                frames, config, audit = self.binding_frames(mode)
+                self.assertEqual(frames[-1]['event'], 'failed')
+                self.assertEqual(frames[-1]['producer_failure'], dict(stage=stage, kind=kind))
+                self.assertEqual(frames[-1]['retained_identities'], [])
+                self.assertEqual(audit['known_pids'], [])
+                self.assertEqual(audit['census_reads'], reads)
+                owner = OwnerWitness(config, 'b' * 64, uid=501)
+                for frame in frames: owner.observe(frame)
+                self.assertEqual(owner.failure, 'ownership_observation_unavailable')
+                self.assertFalse(owner.history)
+                self.assertFalse(owner.latest)
+                self.assertFalse(owner.retired)
+                self.assertFalse(owner.signals)
+                self.assertFalse(owner.failure_receipt()['positive_process_settlement'])
+                with patch('ci_startup_owner.ctypes.CDLL') as inspect, patch('ci_startup_owner.os.kill') as send:
+                    with self.assertRaises(RuntimeError): owner.settle(0)
+                    with self.assertRaises(RuntimeError): owner.attachment_binding()
+                    inspect.assert_not_called()
+                    send.assert_not_called()
 
     def argument_exit(self, scenario, *, previously_known):
         with tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
