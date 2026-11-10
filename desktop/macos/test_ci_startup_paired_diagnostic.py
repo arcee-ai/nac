@@ -30,15 +30,100 @@ class InteractionSourceControls(unittest.TestCase):
         self.assertNotIn('AXUIElementSetAttributeValue', actor)
         self.assertNotIn('AXUIElementPerformAction', actor)
 
+    def interaction_sources(self):
+        directory = SOURCE.with_name('startup_xctest')
+        return (directory.joinpath('StartupJourneys.swift').read_text(),
+                directory.joinpath('StartupAXGuard.swift').read_text())
+
+    def assert_coordinate_path(self, journey, actor):
+        # Scoped lexical fences for the reviewed integration, not a Swift parser
+        # or a substitute for the existing inert/SDK/native behavior checks.
+        dispatch = journey.split('func dispatch(', 1)[1].split('func text(', 1)[0]
+        selection = ('let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))\n'
+                     '                let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                     '                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })')
+        fences = ('let ticket = guardTicket',
+                  'let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)', selection,
+                  'let request = try client.prepareInteraction(ticket, point: point, anchor: anchor,',
+                  'try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)',
+                  'StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,',
+                  'try client.finishInteraction(request)', 'coordinate = selected', 'try action(coordinate)')
+        for fence in fences:
+            self.assertEqual(dispatch.count(fence), 1, fence)
+        positions = [dispatch.index(fence) for fence in fences]
+        self.assertEqual(positions, sorted(positions))
+        guards = [match.start() for match in re.finditer(r'try guardTarget\(\)', dispatch)]
+        self.assertEqual(len(guards), 2)
+        self.assertLess(guards[0], positions[0])
+        self.assertGreater(guards[1], positions[-1])
+        self.assertEqual(re.findall(r'(?m)^\s*coordinate\s*=\s*(.*)$', dispatch), ['selected'])
+        self.assertEqual(dispatch.count('try action('), 1)
+        self.assertEqual(dispatch.count('client.prepareInteraction('), 1)
+        self.assertEqual(dispatch.count('client.finishInteraction('), 1)
+        self.assertIn('try client.finishInteraction(request)\n                coordinate = selected', dispatch)
+
+        adapter = actor.split('static func selectCoordinate<Coordinate>(', 1)[1].split('struct Binding<Token:', 1)[0]
+        offset = ('let selected = selectedPoint == original ? center\n'
+                  '            : offset(center, CGVector(dx: selectedPoint.x - original.x, dy: selectedPoint.y - original.y))')
+        readback = ('let actual = screenPoint(selected)\n'
+                    '        try StartupAXFiles.need(actual == selectedPoint && anchor.contains(actual)\n'
+                    '            && actual.x > anchor.minX && actual.y > anchor.minY\n'
+                    '            && [actual.x, actual.y].allSatisfy { $0.isFinite && Double(Float($0)) == Double($0) })\n'
+                    '        return (selected, actual)')
+        self.assertEqual(adapter.count(offset), 1)
+        self.assertEqual(adapter.count(readback), 1)
+        self.assertLess(adapter.index(offset), adapter.index(readback))
+        self.assertEqual(adapter.count('return ('), 1)
+
     def test_same_public_coordinate_and_original_ticket_are_used_before_dispatch(self):
-        journey = SOURCE.with_name('startup_xctest').joinpath('StartupJourneys.swift').read_text()
-        before = journey.split('func dispatch(', 1)[1].split('func text(', 1)[0]
-        for fence in ('let ticket = guardTicket', 'let point = selected.screenPoint',
-                      'client.prepareInteraction(ticket', 'StartupInteractionPolicy.unchanged(',
-                      'try client.finishInteraction(request)', 'try action(coordinate)'):
-            self.assertIn(fence, before)
-        self.assertLess(before.index('finishInteraction'), before.index('try action(coordinate)'))
+        journey, actor = self.interaction_sources()
+        self.assert_coordinate_path(journey, actor)
         self.assertIn('coordinate.click()', journey)
+
+    def test_removed_bypassed_or_old_center_dispatch_and_late_finish_are_rejected(self):
+        journey, actor = self.interaction_sources()
+        selection = ('let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                     '                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })')
+        bypass = ('var (selected, point) = (center, center.screenPoint)\n'
+                  '                if false {\n'
+                  '                    (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                  '                        screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })\n'
+                  '                }')
+        finish = 'try client.finishInteraction(request)'
+        mutations = {
+            'removed-adapter': (selection, 'let (selected, point) = (center, center.screenPoint)'),
+            'bypassed-adapter': (selection, bypass),
+            'wrong-readback-port': ('screenPoint: { $0.screenPoint }', 'screenPoint: { _ in center.screenPoint }'),
+            'bypassed-public-offset': ('offset: { $0.withOffset($1) }', 'offset: { coordinate, _ in coordinate }'),
+            'renewed-ticket': ('client.prepareInteraction(ticket,', 'client.prepareInteraction(try client.begin(),'),
+            'old-center-final-fence': ('unchanged(point: selected.screenPoint,', 'unchanged(point: center.screenPoint,'),
+            'old-center-dispatch': ('coordinate = selected', 'coordinate = center'),
+            'overwritten-dispatch': ('coordinate = selected', 'coordinate = selected\n                coordinate = center'),
+            'late-finalization': (finish, 'finalize = { try client.finishInteraction(request) }'),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(journey.count(before), 1, name)
+            changed = journey.replace(before, after, 1)
+            if name == 'late-finalization':
+                changed = changed.replace('var coordinate: XCUICoordinate?',
+                    'var finalize: (() throws -> Void)?\n            var coordinate: XCUICoordinate?', 1)
+                changed = changed.replace('try action(coordinate)', 'try action(coordinate)\n            try finalize?()', 1)
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                self.assert_coordinate_path(changed, actor)
+
+    def test_missing_or_bypassed_actual_adapter_readback_is_rejected(self):
+        journey, actor = self.interaction_sources()
+        mutations = {
+            'missing-actual-readback': ('let actual = screenPoint(selected)', 'let actual = selectedPoint'),
+            'wrong-coordinate-readback': ('let actual = screenPoint(selected)', 'let actual = screenPoint(center)'),
+            'bypassed-readback-validation': ('need(actual == selectedPoint &&', 'need(true || actual == selectedPoint &&'),
+            'wrong-returned-coordinate': ('return (selected, actual)', 'return (center, actual)'),
+            'wrong-returned-point': ('return (selected, actual)', 'return (selected, original)'),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(actor.count(before), 1, name)
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                self.assert_coordinate_path(journey, actor.replace(before, after, 1))
 
     def test_failure_emitter_preserves_original_error_and_never_exports_request_fields(self):
         source = SOURCE.read_text()
