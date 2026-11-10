@@ -570,9 +570,68 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
 }
 
 final class InertOriginalFailure: Error {}
-struct InertFailureFixture { var scenario = "configuredLocal" }
+struct InertFailureFixture {
+    var scenario = "configuredLocal"
+    let source_sha = "source", test_source_sha = "supplier", harness_sha = "harness", startup_source_sha256 = "journey"
+}
 func json(_ data: Data) throws -> [String: Any] {
     try JSONSerialization.jsonObject(with: data) as! [String: Any]
+}
+
+// The real guardTarget catch consumes only the client's already held refusal.
+// Populate it with one actual client read; repeated retention never reads again.
+func refusalRetentionRun(_ mode: String) -> [String: Any] {
+    let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:2,executable:"/inert/helper")
+    let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:3,start_microseconds:4,executable:"/inert/app")
+    let declaration = StartupAXDeclaration(path:"/inert/receipt",nonce:String(repeating:"a",count:64),
+        helper_path:helper.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64), "StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
+    let allowed = ["sample_deadline", "ax_predicate_refused", "target_retiring", "target_retired"]
+    let stage: String? = mode == "default" ? nil : mode == "empty" ? "" : allowed.contains(mode) ? mode : "sample_deadline"
+    var rich = StartupAXRefusal()
+    rich.note("attribute_error",attribute:"AXWindows",code:-25204); rich.stop("windows_unavailable")
+    let richRecord = rich.record(binding:["scenario":"foreign","source_sha":"foreign"])!
+    let richBytes = Data((" \n" + String(decoding:try! JSONSerialization.data(withJSONObject:richRecord,options:[.sortedKeys]),as:UTF8.self)).utf8)
+    let data: Data? = mode == "rich" ? richBytes : mode == "malformed" ? Data("{".utf8) : mode == "empty_data" ? Data() : nil
+    let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,
+        configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,
+        helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:"1",refusal_generation:"0",
+        began_ns:"1000000000",ended_ns:"1100000000",status:"refused",case_deadline_ns:"50000000000",
+        observation:nil,refusal_stage:mode == "unknown" ? "unknown" : stage,refusal:data)
+    var loads = 0, clocks = 0, pauses = 0
+    let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
+        now:{ clocks += 1; return 3_000_000_000 },pause:{ pauses += 1 },load:{ loads += 1; return try JSONEncoder().encode(receipt) })
+    var readFamily = "unread"
+    if mode != "unavailable" {
+        do { _ = try client.begin(); readFamily = "accepted" }
+        catch { readFamily = StartupFailureEvidence.family(error) }
+    }
+    let clocksBefore = clocks
+    let selected = StartupAXRefusal.diagnosticData(client.failureData,stage:client.refusalStage)
+    let fixture = InertFailureFixture(), bytes = Data("frozen".utf8)
+    let axClient: StartupAXClient? = client
+    let folderSurface = StartupNativeFolderPolicy.Surface.form
+    struct Running { let processIdentifier: Int32 = 400 }
+    let running = Running(), launch = Date(timeIntervalSince1970:10), number = 7
+    func digest(_ data: Data) -> String { data == bytes ? String(repeating:"d",count:64) : "changed" }
+    var axRefusalEmitted = false, attempts = 0, records: [[String:Any]] = []
+    func attachment(_ record: [String:Any], name: String) throws {
+        attempts += 1
+        records.append(record.merging(["attachment_name":name]) { _,new in new })
+        throw InertOriginalFailure() // Attachment failure cannot replace the original or retry.
+    }
+    let original = InertOriginalFailure()
+    func retain() throws {
+        do { throw original
+__JOURNEY_GUARD_CATCH__
+    }
+    var preserved = 0
+    for _ in 0..<2 {
+        do { try retain() } catch { if (error as AnyObject) === original { preserved += 1 } }
+    }
+    return ["read_family":readFamily,"loads":loads,"pauses":pauses,"extra_clocks":clocks-clocksBefore,
+        "preserved":preserved,"attempts":attempts,"emitted":axRefusalEmitted,"records":records,
+        "rich_bytes_exact":data == nil || selected == data,"selected":selected != nil,
+        "held_stage":client.refusalStage,"evidence":client.evidence.count,"interactions":client.interactions.count]
 }
 
 // Compile-only actor scope control, never instantiated or invoked. The catch
@@ -804,7 +863,7 @@ func floatSelectionRun(_ name: String) -> [String: Any] {
 }
 
 let modes = try JSONSerialization.jsonObject(with: FileHandle.standardInput.readDataToEndOfFile()) as! [String]
-let rows = modes.map { $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -823,7 +882,8 @@ class ReceiptControls(unittest.TestCase):
         journey = Path(__file__).with_name('StartupJourneys.swift').read_text()
         request_name = re.search(r'client\.prepareInteraction\(ticket, point: point, anchor: anchor, kind: kind, label: ([^,\n]+),', journey).group(1)
         recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
-        driver.write_text(DRIVER.replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
+        guard_catch = '            } catch {' + journey.split('        func guardTarget() throws {', 1)[1].split('        func dispatch(', 1)[0].split('            } catch {', 1)[1].rsplit('\n        }', 1)[0]
+        driver.write_text(DRIVER.replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
                           .replace('__JOURNEY_REQUEST_NAME__', request_name)
                           .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
@@ -885,6 +945,31 @@ class ReceiptControls(unittest.TestCase):
                 self.assertEqual(row['attachment'], expected)
 
     def test_actual_journey_catch_preserves_error_identity_and_does_not_publish_success_or_unconfigured(self):
+        stages = ['sample_deadline', 'ax_predicate_refused', 'target_retiring', 'target_retired']
+        modes = stages + ['rich', 'malformed', 'empty_data', 'unknown', 'default', 'empty', 'unavailable']
+        for mode, row in zip(modes, self.rows(['retention_' + m for m in modes])):
+            with self.subTest(retention=mode):
+                emitted = mode in stages + ['rich']
+                self.assertEqual(row['read_family'], 'unread' if mode == 'unavailable' else 'receipt_refused')
+                self.assertEqual(row['loads'], 0 if mode == 'unavailable' else 1)
+                self.assertEqual((row['pauses'], row['extra_clocks'], row['evidence'], row['interactions']), (0, 0, 0, 0))
+                self.assertEqual(row['preserved'], 2)
+                self.assertEqual((row['attempts'], row['emitted']), (int(emitted), emitted))
+                self.assertTrue(row['rich_bytes_exact'])
+                self.assertEqual(row['selected'], mode in stages + ['rich', 'malformed', 'empty_data'])
+                if not emitted:
+                    self.assertEqual(row['records'], [])
+                    continue
+                record, = row['records']
+                first = ({'stage': 'attribute_error', 'attribute': 'AXWindows', 'api_code': -25204}
+                         if mode == 'rich' else {'stage': mode})
+                terminal = {'stage': 'windows_unavailable' if mode == 'rich' else mode}
+                self.assertEqual(record, dict(schema='nac342-ax-refusal-v1', acceptance=False,
+                    first_observed_refusal=first, terminal_refusal=terminal, scenario='configuredLocal', surface='form',
+                    source_sha='source', test_source_sha='supplier', harness_sha='harness', startup_source_sha256='journey',
+                    configuration_sha256='d'*64, app_pid=400, app_launch_epoch=10, window_number=7,
+                    attachment_name='nac342-ax-refusal-v1-configuredLocal'))
+
         modes = ['configured_failure', 'guard_denied', 'no_window', 'captured', 'already_terminated',
                  'success', 'onboarding_failure', 'invalidConfig_failure', 'futureStore_failure']
         lifecycle = self.rows(['lifecycle_' + mode for mode in modes])

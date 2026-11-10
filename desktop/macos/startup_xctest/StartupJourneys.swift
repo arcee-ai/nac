@@ -681,7 +681,8 @@ final class StartupJourneys: XCTestCase {
                 if let ticket { try validateFolderSurface(ticket) }
                 guardTicket = ticket
             } catch {
-                if !axRefusalEmitted, let data = axClient?.failureData,
+                if !axRefusalEmitted, let client = axClient,
+                   let data = StartupAXRefusal.diagnosticData(client.failureData, stage: client.refusalStage),
                    var record = try? json(data) {
                     axRefusalEmitted = true
                     record.merge(["scenario": fixture.scenario, "surface": folderSurface.rawValue,

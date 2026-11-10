@@ -156,9 +156,14 @@ class StartupAttachmentTests(unittest.TestCase):
                    configuration_sha256=config_hash,
                    first_observed_refusal={'stage': 'attribute_error', 'attribute': 'AXWindows', 'api_code': -25204},
                    terminal_refusal={'stage': 'windows_unavailable'})
-        for invalid in (None, 'binding', 'private', 'duplicate', 'oversize', 'passed'):
+        stages = ('sample_deadline', 'ax_predicate_refused', 'target_retiring', 'target_retired')
+        for invalid in (None, *stages, 'unknown', 'external_witness_unavailable', 'external_witness_refused', '',
+                        'binding', 'private', 'duplicate', 'oversize', 'passed'):
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary); value = copy.deepcopy(row)
+                retained = invalid is None or invalid in stages
+                if invalid in (*stages, 'unknown', 'external_witness_unavailable', 'external_witness_refused', ''):
+                    value['first_observed_refusal'] = value['terminal_refusal'] = {'stage': invalid}
                 if invalid == 'binding': value['test_source_sha'] = '0' * 40
                 if invalid == 'private': value['first_observed_refusal']['raw_text'] = 'FOREIGN-MUST-NOT-BE-RETAINED'
                 data = json.dumps(value).encode()
@@ -170,8 +175,10 @@ class StartupAttachmentTests(unittest.TestCase):
                             raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
                 index = json.loads((raw / 'selected/index.json').read_text())
                 self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
-                self.assertEqual(index['ax_refusal']['retention'], 'retained' if invalid is None else 'rejected')
-                self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists(), invalid is None)
+                self.assertEqual(index['ax_refusal']['retention'], 'retained' if retained else 'rejected')
+                self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists(), retained)
+                if retained:
+                    self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').read_bytes(), data)
 
     def test_ax_optional_cannot_qualify_passed_or_failed_canonical_payloads(self):
         config, hashed, witness, rows = self.fixture('configuredLocal')

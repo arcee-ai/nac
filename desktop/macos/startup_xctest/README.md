@@ -573,3 +573,11 @@ The existing receipt controls execute the actual catch and entire teardown with
 inert XCUI adapters across failed/successful/other-case/image-denial/terminated
 states. Separate inert Python controls exercise the actual caller, audit, helper
 supervisor and settlement owner. They provide no SDK or native UI acceptance.
+
+Initial guard refusal diagnostics preserve nonnil rich bytes exactly, including
+malformed bytes (which cannot trigger a fallback). Only absent rich data with an
+already held `sample_deadline`, `ax_predicate_refused`, `target_retiring`, or
+`target_retired` stage supplies the existing stage-only first/terminal refusal.
+The same once-only attachment and provenance merge apply; unknown/default stages
+remain omitted. This passive retention adds no witness reads, input, retry or
+acceptance authority and does not identify Actual18's unretained producer stage.

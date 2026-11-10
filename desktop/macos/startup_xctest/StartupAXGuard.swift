@@ -166,6 +166,19 @@ struct StartupAXRefusal {
     private(set) var first: [String: Any]?
     private(set) var terminal: [String: Any]?
 
+    // Retain rich bytes verbatim, even when invalid. Only these already observed
+    // producer stages can supply a stage-only diagnostic when rich data is absent.
+    static func diagnosticData(_ data: Data?, stage: String) -> Data? {
+        if let data { return data }
+        guard ["sample_deadline", "ax_predicate_refused", "target_retiring", "target_retired"].contains(stage) else {
+            return nil
+        }
+        var refusal = StartupAXRefusal()
+        refusal.stop(stage)
+        guard let record = refusal.record(binding: [:]) else { return nil }
+        return try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+    }
+
     private func geometry(_ frame: CGRect) -> [Any] {
         [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height].map {
             $0.isFinite ? NSNumber(value: Double($0)) : NSNull()

@@ -183,7 +183,8 @@ def retain_ax_refusal(selected, entries, index, config, configuration_sha256, wi
                   'elements_member_type', 'frame_value_type', 'frame_encoding', 'frame_position_decode', 'frame_size_decode',
                   'application_timeout', 'windows_unavailable', 'root_role_or_type', 'root_frame_mismatch', 'root_matches',
                   'child_role_type', 'root_children', 'root_sheet_count', 'panel_children', 'nested_sheet_count',
-                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding', 'focus_unavailable'}
+                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding', 'focus_unavailable',
+                  'sample_deadline', 'ax_predicate_refused', 'target_retiring', 'target_retired'}
         attributes = {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize', 'AXFocusedUIElement', 'AXFocused', 'AXValue', 'AXParent'}
         for key in ('first_observed_refusal', 'terminal_refusal'):
             fact = row[key]
