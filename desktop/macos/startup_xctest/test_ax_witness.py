@@ -354,7 +354,8 @@ func interactionRun(_ name: String) -> [String: Any] {
     let diagnostic = StartupFailureEvidence(nil, configurationSHA: String(repeating:"d", count:64))
     diagnostic.operationIndex = 1
     let original = InertOriginalFailure()
-    var stamp: UInt64 = 3_000_000_000, loads = 0, inputs = 0, clears = 0, published: StartupAXInteractionRequest?
+    var stamp: UInt64 = 3_000_000_000, loads = 0, inputs = 0, clears = 0, pauses = 0, published: StartupAXInteractionRequest?
+    var ticketDeadline: UInt64 = 0
     var last = Data(), finalEnd: UInt64 = 0
     let root = "00000000-0000-0000-0000-000000000001"
     let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
@@ -364,7 +365,10 @@ func interactionRun(_ name: String) -> [String: Any] {
         support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],
         owner_pid:200,deadline_ns:"100000000000")
     let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,
-        executable:target.executable,now:{stamp += 1_000_000;return stamp},pause:{stamp += 31_000_000_000},load:{
+        executable:target.executable,now:{
+            if !(mode.hasPrefix("held_") && loads >= 3) { stamp += 1_000_000 }
+            return stamp
+        },pause:{pauses += 1;stamp += 31_000_000_000},load:{
             loads += 1
             if loads >= 4 {
                 if mode == "final_stale" { stamp = finalEnd + 1_100_000_000 }
@@ -374,9 +378,13 @@ func interactionRun(_ name: String) -> [String: Any] {
             let began: UInt64 = loads == 1 ? 1_000_000_000 : loads == 2 ? 3_100_000_000 : UInt64(published!.entered_ns)! + 10_000_000
             let ended = began + 10_000_000
             stamp = max(stamp,ended+1_000_000); finalEnd = ended
+            if loads == 3 && mode.hasPrefix("held_") {
+                // The real producer holds these exact bytes until request clear.
+                stamp = ended + (mode.hasPrefix("held_stale") ? 1_000_000_001 : mode == "held_exact" ? 1_000_000_000 : 500_000_000)
+            }
             var observed = StartupAXSurface(surface:"form",root_id:root,panel_id:nil,go_to_id:nil,root_frame:loads == 3 && mode == "consume_frame" ? [11,20,100,30] : [10,20,100,30],focus:nil)
             if let request = published, mode != "no_proof" {
-                observed.interaction = StartupAXInteraction(request_id:mode == "wrong_request" ? UUID().uuidString : request.id,
+                observed.interaction = StartupAXInteraction(request_id:["wrong_request", "held_stale_wrong_request"].contains(mode) ? UUID().uuidString : request.id,
                     target_id:mode == "target_token" ? "invalid" : UUID().uuidString,
                     point:mode == "wrong_point" ? [21,25] : request.point,
                     anchor_frame:mode == "wrong_anchor" ? [11,20,100,30] : request.anchor_frame,
@@ -395,6 +403,7 @@ func interactionRun(_ name: String) -> [String: Any] {
         })
     do {
         let ticket = try client.begin()
+        ticketDeadline = ticket.deadline
         if mode != "state" { _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30)) }
         if mode == "rollback" { stamp = 0 }
         let usedTicket = mode == "ticket" ? StartupAXClient.Ticket(sequence:ticket.sequence,refusal:1,entered:ticket.entered,deadline:ticket.deadline) : mode == "deadline" ? StartupAXClient.Ticket(sequence:ticket.sequence,refusal:ticket.refusal,entered:ticket.entered,deadline:stamp) : ticket
@@ -406,6 +415,10 @@ func interactionRun(_ name: String) -> [String: Any] {
             kind:mode == "shape" ? "foreign" : "button",label:"Intended",keyboard:false,value:nil,rootFrame:mode == "root" ? .zero : CGRect(x:10,y:20,width:100,height:30),publish:publisher,diagnostic:diagnosing ? diagnostic : nil)
         try client.finishInteraction(request,clear:{if mode == "clear_loss" { throw StartupAXReceiptError.invalid };clears += 1})
         inputs += 1
+        if mode.hasPrefix("held_") {
+            return ["accepted":true,"inputs":inputs,"loads":loads,"clears":clears,"proofs":client.interactions.count,
+                    "pauses":pauses,"deadline":request.deadline_ns,"now":String(stamp),"ended":String(finalEnd)]
+        }
         return ["accepted":true,"inputs":inputs,"loads":loads,"clears":clears,"proofs":client.interactions.count,
                 "deadline":request.deadline_ns,"finalized":client.interactions[0].finalized_ns]
     } catch {
@@ -413,6 +426,10 @@ func interactionRun(_ name: String) -> [String: Any] {
         let sameError = (error as AnyObject) === original
         var denied = false
         do { _ = try client.begin() } catch { denied = true }
+        if mode.hasPrefix("held_") {
+            return ["accepted":false,"inputs":inputs,"loads":loads,"clears":clears,"proofs":client.interactions.count,
+                    "pauses":pauses,"next_denied":denied,"error":family,"step":retainedStep,"deadline":String(ticketDeadline),"now":String(stamp)]
+        }
         if diagnosing { return ["accepted":false,"inputs":inputs,"next_denied":denied,"step":retainedStep,"family":family,"original_preserved":sameError] }
         return ["accepted":false,"inputs":inputs,"clears":clears,"next_denied":denied]
     }
@@ -927,6 +944,25 @@ class ReceiptControls(unittest.TestCase):
 
 
     def test_wrong_proof_refusal_stale_final_or_lost_channel_latches_no_next_input(self):
+        for mode, age in [('held_fresh', 500_000_000), ('held_exact', 1_000_000_000)]:
+            with self.subTest(mode=mode):
+                row = self.rows(['interaction_' + mode])[0]
+                self.assertTrue(row['accepted'])
+                self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs'], row['pauses']), (1, 4, 1, 1, 0))
+                self.assertEqual(int(row['now']) - int(row['ended']), age)
+                self.assertEqual(row['deadline'], '33001000000')
+        held, invalid = self.rows(['interaction_diag_held_stale', 'interaction_diag_held_stale_wrong_request'])
+        self.assertFalse(held['accepted'])
+        self.assertEqual((held['inputs'], held['loads'], held['clears'], held['proofs'], held['pauses']), (0, 3, 0, 0, 0))
+        self.assertTrue(held['next_denied'])
+        self.assertEqual(held['error'], 'receipt_expired')
+        self.assertEqual(held['step'], 'consume_freshness')
+        self.assertEqual(held['deadline'], '33001000000')
+        self.assertLess(int(held['now']), int(held['deadline']))
+        self.assertEqual((invalid['accepted'], invalid['inputs'], invalid['loads'], invalid['clears'], invalid['proofs'], invalid['pauses']),
+                         (False, 0, 3, 0, 0, 0))
+        self.assertTrue(invalid['next_denied'])
+        self.assertEqual((invalid['error'], invalid['step']), ('receipt_invalid', 'consume_proof_binding'))
         modes = ['wrong_request', 'wrong_point', 'wrong_anchor', 'wrong_keyboard', 'focus_flag',
                  'target_token', 'generation', 'refused', 'no_proof', 'final_stale', 'final_loss', 'clear_loss']
         for mode, row in zip(modes, self.rows(['interaction_' + m for m in modes])):

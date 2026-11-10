@@ -602,6 +602,10 @@ final class StartupAXClient {
                     && began > StartupAXFiles.number(request.entered_ns))
             }
             if expiredPublication {
+                if request != nil {
+                    diagnostic?.step = .consume_freshness
+                    throw StartupAXReceiptError.expired // A request-bound proof is held, never republished.
+                }
                 pause(); continue // Only an otherwise fully validated positive may await publication.
             }
             let consumed = try time(diagnostic: diagnostic)

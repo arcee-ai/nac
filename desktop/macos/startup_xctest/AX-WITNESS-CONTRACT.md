@@ -24,9 +24,10 @@ A guard reads a positive baseline sequence/refusal generation, records entry,
 then consumes a distinct sample BEGUN after entry. Refusal/generation change,
 malformed input, changed duplicate, rollback or admitted-port loss fails with
 zero next input; later positives cannot erase that failure. The original guard
-ticket is capped at 30s. A fully validated positive already older than 1s may
-await another publication within that same ticket, but stale data is never
-accepted. Final consumption still checks <=1s age. No predicate-refusal retry.
+ticket is capped at 30s. For ordinary guard sampling, a fully validated positive
+already older than 1s may await another publication within that same ticket, but
+stale data is never accepted. Final consumption still checks <=1s age. No
+predicate-refusal retry.
 
 The canonical actor retains real CFEqual root/panel/GoTo handles through the
 case, including disappeared sheets. Exact original-root geometry, admitted PID,
@@ -72,6 +73,11 @@ terminates cooperatively. Request loss is the consume acknowledgment, never a
 new input authority. The request uses the same no-follow/0700-directory,
 regular same-UID single-link 0400-file, <=8192B atomic publication rules. No
 arbitrary PID, attribute or action selector is accepted.
+
+A request-bound proof already older than 1s at initial consumption expires
+immediately and latches Q without input or request clear. H cannot publish a
+replacement while that request is held. This changes no ordinary guard retry,
+original ticket, proof/final freshness or external cleanup requirement.
 
 Q consumes a newly begun request-bound sample under the SAME original ticket,
 then immediately rechecks target existence/enabled/hittable, anchor/root frame,
