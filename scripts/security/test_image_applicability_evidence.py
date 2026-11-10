@@ -1,5 +1,6 @@
 """Synthetic passive controls; none exercises or clears an advisory."""
 import hashlib
+import copy
 import io
 import json
 from pathlib import Path
@@ -81,7 +82,12 @@ class ApplicabilityEvidenceTests(unittest.TestCase):
         self.files["usr/bin/runner"] = b"#!/usr/bin/python3\nprint('benign fixture')\n"
         self.inspected = [{"Id": IMAGE, "Os": "linux", "Architecture": "amd64",
                            "Config": {"Labels": {"org.opencontainers.image.revision": SOURCE}}}]
+        self.container_inspected = [{"Image": IMAGE, "Config": {"Image": IMAGE}, "RestartCount": 0,
+                                     "State": {"Status": "created", "Running": False,
+                                               "StartedAt": "0001-01-01T00:00:00Z"},
+                                     "HostConfig": {}, "Mounts": []}]
         self.kwargs = {"image": IMAGE, "source_revision": SOURCE, "inspected": self.inspected,
+                       "container_inspected": self.container_inspected,
                        "pins": self.pins, "downloads": self.downloads}
         archive(self.archive, self.files)
 
@@ -134,16 +140,45 @@ class ApplicabilityEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provenance mismatch"):
             self.collect()
 
-    def test_wrong_image_source_platform_or_volumes_are_rejected(self):
+    def test_wrong_image_source_or_platform_is_rejected(self):
         for change in [{"Id": "sha256:" + "d" * 64}, {"Architecture": "arm64"}, {"Os": "windows"},
                        {"Config": {"Labels": {}}},
-                       {"Config": {"Labels": {"org.opencontainers.image.revision": "e" * 40}}},
-                       {"Config": {**self.inspected[0]["Config"], "Volumes": {"/hidden": {}}}}]:
+                       {"Config": {"Labels": {"org.opencontainers.image.revision": "e" * 40}}}]:
             broken = {**self.inspected[0], **change}
             with self.subTest(change=change), self.assertRaises(ValueError):
                 evidence.collect_evidence(self.archive, **{**self.kwargs, "inspected": [broken]})
         with self.assertRaises(ValueError):
             evidence.collect_evidence(self.archive, **{**self.kwargs, "image": "mutable:tag"})
+
+    def test_declared_volumes_are_underlying_image_scope_and_profile_bound(self):
+        original = self.collect()
+        self.inspected[0]["Config"]["Volumes"] = {"/var/lib/nac": {}, "/repositories": {}}
+        self.container_inspected[0]["Mounts"] = [
+            {"Destination": path, "Type": "volume", "Name": "d" * 64} for path in ("/var/lib/nac", "/repositories")]
+        result = self.collect()
+        self.assertEqual(result["provenance"]["declared_volume_paths"], ["/repositories", "/var/lib/nac"])
+        self.assertEqual(result["provenance"]["filesystem_scope"], "final-underlying-image-filesystem")
+        self.assertNotEqual(original["provenance"]["application_profile_sha256"],
+                            result["provenance"]["application_profile_sha256"])
+        self.assertIn("runtime-volume absence", result["provenance"]["limitations"][-1])
+
+    def test_wrong_started_or_user_mounted_export_container_fails(self):
+        original = copy.deepcopy(self.container_inspected)
+        changes = [("Image", "sha256:" + "d" * 64), ("Config", {"Image": "mutable:tag"}),
+                   ("State", {"Status": "exited", "Running": False, "StartedAt": "2026-11-10T00:00:00Z"}),
+                   ("RestartCount", 1), ("HostConfig", {"Binds": ["/tmp:/data"]}),
+                   ("HostConfig", {"Mounts": [{"Type": "volume", "Target": "/data"}]}),
+                   ("HostConfig", {"Tmpfs": {"/data": ""}}), ("HostConfig", {"VolumesFrom": ["another"]}),
+                   ("Mounts", [{"Type": "volume", "Destination": "/unexpected", "Name": "d" * 64}])]
+        for key, value in changes:
+            self.container_inspected[0] = {**original[0], key: value}
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                self.collect()
+        self.container_inspected[0] = original[0]
+        for volumes in (["/data"], {"/noncanonical/../data": {}}, {"relative": {}}, {"/data": {"unknown": True}}):
+            self.inspected[0]["Config"]["Volumes"] = volumes
+            with self.subTest(volumes=volumes), self.assertRaises(ValueError):
+                self.collect()
 
     def test_introduced_named_application_changes_bound_profile(self):
         original = self.collect()

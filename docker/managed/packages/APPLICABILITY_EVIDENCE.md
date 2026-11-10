@@ -10,11 +10,22 @@ replace those checks or establish that a patch has the intended semantics.
 
 The caller must independently inspect the exact immutable loaded image, verify
 its expected source revision and `linux/amd64` platform, then export a newly
-created, never-started container from that same image ID. No mounts, credentials
-or network access are needed. Reject declared image volumes because Docker
-export omits their contents. A candidate-supplied inspection JSON is not an
-independent identity observation. Retain the export and its SHA256, the inspect
-receipt and the exact collector/source revisions with the evidence.
+created, never-started container from that same image ID, with no user mounts,
+credentials or network access. Supply independently obtained image and container
+inspection receipts. The container must identify that exact immutable image,
+remain in its original never-started state, and have no binds, explicit mounts,
+tmpfs or inherited volumes. Only the anonymous volumes created automatically at
+the exact image-declared volume paths are allowed. Candidate-supplied inspection
+JSON is not an independent identity observation. Retain the export and its
+SHA256, both receipts and the exact collector/source revisions with the evidence.
+
+The scope is explicitly `final-underlying-image-filesystem`.
+[Docker export](https://docs.docker.com/reference/cli/docker/container/export/)
+includes the underlying image directory when a volume covers that directory;
+it excludes the mounted volume contents. Preserve NAC's six declared runtime
+volumes. Record their exact sorted paths and bind them into the profile. This
+profile cannot establish absence in runtime mounted volumes, later bind mounts,
+or mutable workload state. Never turn an empty exported path into such a claim.
 
 The final runtime stage records the explicitly supplied `NAC_SOURCE_REVISION`
 build argument as `org.opencontainers.image.revision`. Build with the truthful
@@ -34,6 +45,7 @@ performs no downloading and does not execute image code:
 python3 scripts/security/image_applicability_evidence.py \
   --filesystem /absolute/receipts/final-filesystem.tar \
   --inspect /absolute/receipts/inspect.json \
+  --container-inspect /absolute/receipts/container-inspect.json \
   --pins /absolute/exact-source/docker/managed/packages/sources.lock.json \
   --downloads /absolute/receipts/source-downloads \
   --image sha256:<exact-inspected-immutable-image-id> \
@@ -54,17 +66,21 @@ The three canonical JSON artifacts are:
 - `provenance.json`: immutable image/source/platform subject, export/source-lock
   hashes, actual original source/patch hashes, exact source/provenance and
   installed-payload bindings for `krb5-libs`, `curl` and `libcurl-openssl4`, both
-  profile artifact hashes, and `application_profile_sha256`.
+  profile artifact hashes, declared volume paths, explicit filesystem scope,
+  container-inspection hash and `application_profile_sha256`.
 
 All artifact digests hash `canonical_json(value)`: sorted keys, compact JSON,
 UTF-8 bytes and one final newline. `patches_sha256` hashes the canonical mapping
 of selected patch filenames to SHA256; `payload_sha256` hashes the original
 installed-payload mapping. `application_profile_sha256` hashes the canonical
-mapping `{"filesystem": <filesystem SHA256>, "consumers": <consumers SHA256>}`.
+mapping `{"filesystem": <filesystem SHA256>, "consumers": <consumers SHA256>,
+"filesystem_scope": "final-underlying-image-filesystem",
+"declared_volume_paths": <sorted image-declared paths>}`.
 
 The Python API is `collect_evidence(export_path, *, image, source_revision,
-inspected, pins, downloads)`, where `downloads` maps selected names to local
-paths. It returns a mapping with `provenance`, `filesystem` and `consumers`.
+inspected, container_inspected, pins, downloads)`, where `downloads` maps
+selected names to local paths. It returns a mapping with `provenance`,
+`filesystem` and `consumers`.
 `validate_evidence(bundle, export_path, **same_independent_expected_inputs)`
 reconstructs and compares every artifact. There is deliberately no JSON-only
 completeness-validation path. A retained export must independently remain bound
@@ -94,3 +110,16 @@ Kerberos NegoEx/KRB-CRED regressions, exact combined native-image collection,
 accepted advisory analysis, fresh scan/rescan and current-head CI remain
 separate, unproven ALL-502 acceptance work. No unavailable upstream release,
 source/license substitution or policy exception is introduced.
+
+The opt-in local Docker control builds only an owned `FROM scratch` image with
+one benign text file beneath a declared volume. It creates but never starts a
+container, verifies the image/container association and actual export bytes,
+and removes only that owned container, its anonymous volume and fixture image:
+
+```sh
+NAC_TEST_DOCKER_EXPORT=1 python3 -m unittest discover -s scripts/security \
+  -p test_image_applicability_export.py -v
+```
+
+This proves the Docker underlying-directory behavior, not actual NAC image or
+runtime-volume qualification.

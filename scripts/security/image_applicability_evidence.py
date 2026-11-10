@@ -12,11 +12,13 @@ from image_inventory import require, sha256
 
 PACKAGES = {"krb5-libs": "krb5", "curl": "curl", "libcurl-openssl4": "curl"}
 PROFILE = "nac-curl-krb5-filesystem-v1"
+FILESYSTEM_SCOPE = "final-underlying-image-filesystem"
 LIMITATIONS = [
     "Named-path absence does not prove absence of renamed or embedded applications.",
     "ELF DT_NEEDED and shebang enumeration does not resolve dlopen, static linkage or runtime execution.",
     "Source/package integrity is not proof of applied-patch semantics or upstream regression acceptance.",
     "Candidate evidence is untrusted until independently qualified and human-reviewed; no finding is cleared.",
+    "Export covers underlying image directories, never mounted volume contents or runtime-volume absence.",
 ]
 
 
@@ -170,8 +172,8 @@ def filesystem_profile(archive):
             named["sudo"].append(path)
         if name in {"ftpd", "in.ftpd", "gssftpd", "gssftp"}:
             named["ftpd"].append(path)
-    return ({"schema_version": 1, "profile": PROFILE, "entries": dict(sorted(entries.items()))},
-            {"schema_version": 1, "profile": PROFILE, "entries": dict(sorted(consumers.items())),
+    return ({"schema_version": 1, "profile": PROFILE, "scope": FILESYSTEM_SCOPE, "entries": dict(sorted(entries.items()))},
+            {"schema_version": 1, "profile": PROFILE, "scope": FILESYSTEM_SCOPE, "entries": dict(sorted(consumers.items())),
              "named_applications": {key: sorted(paths) for key, paths in named.items()}}, retained)
 
 
@@ -217,13 +219,41 @@ def subject_identity(image, source_revision, inspected):
     require(isinstance(inspected, list) and len(inspected) == 1, "missing/ambiguous image inspection")
     actual = inspected[0]
     require(actual.get("Id") == image and actual.get("Os") == "linux" and actual.get("Architecture") == "amd64" and
-            actual.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == source_revision and
-            not actual.get("Config", {}).get("Volumes"), "wrong image/source/platform or hidden image volumes")
+            actual.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") == source_revision,
+            "wrong image/source/platform")
     return {"image": image, "source_revision": source_revision, "platform": "linux/amd64"}
 
 
-def collect_evidence(filesystem_archive, *, image, source_revision, inspected, pins, downloads):
+def export_container(image, inspected, container_inspected):
+    """Bind a fresh, never-started export container; mounted data is out of scope."""
+    volumes = inspected[0].get("Config", {}).get("Volumes")
+    volumes = {} if volumes is None else volumes
+    require(isinstance(volumes, dict) and all(
+        isinstance(path, str) and path.startswith("/") and safe_path(path[1:]) == path and value == {}
+        for path, value in volumes.items()), "malformed declared image volumes")
+    declared = sorted(volumes)
+    require(isinstance(container_inspected, list) and len(container_inspected) == 1,
+            "missing/ambiguous export container inspection")
+    container = container_inspected[0]
+    state, host = container.get("State", {}), container.get("HostConfig", {})
+    require(container.get("Image") == image and container.get("Config", {}).get("Image") == image and
+            state.get("Status") == "created" and state.get("Running") is False and
+            state.get("StartedAt") == "0001-01-01T00:00:00Z" and container.get("RestartCount") == 0,
+            "export container differs from immutable image or was started")
+    require(all(not host.get(key) for key in ("Binds", "Mounts", "Tmpfs", "VolumesFrom")),
+            "export container has user-supplied mounts")
+    mounts = container.get("Mounts")
+    require(isinstance(mounts, list) and len(mounts) == len(declared) and
+            sorted(mount.get("Destination", "") for mount in mounts) == declared and
+            all(mount.get("Type") == "volume" and isinstance(mount.get("Name"), str) and
+                re.fullmatch(r"[a-f0-9]{64}", mount["Name"]) for mount in mounts),
+            "export mounts differ from declared anonymous image volumes")
+    return declared
+
+
+def collect_evidence(filesystem_archive, *, image, source_revision, inspected, container_inspected, pins, downloads):
     subject = subject_identity(image, source_revision, inspected)
+    declared = export_container(image, inspected, container_inspected)
     filesystem, consumers, retained = filesystem_profile(Path(filesystem_archive))
     require(retained.get("/usr/share/nac/runtime-package-build/sources.lock.json") == pins,
             "installed source lock differs from reviewed image source")
@@ -250,10 +280,13 @@ def collect_evidence(filesystem_archive, *, image, source_revision, inspected, p
                           "source_commit": spec["source_commit"], "source_sha256": source_files[spec["archive"]]["sha256"],
                           "patches_sha256": digest(patches), "payload_sha256": digest(payload)}
     provenance = {"schema_version": 1, "profile": PROFILE, "subject": subject,
+                  "filesystem_scope": FILESYSTEM_SCOPE, "declared_volume_paths": declared,
+                  "container_inspection_sha256": digest(container_inspected),
                   "filesystem_archive_sha256": sha256(Path(filesystem_archive)), "source_lock_sha256": digest(pins),
                   "source_downloads": source_files, "packages": packages,
                   "filesystem_sha256": digest(filesystem), "consumers_sha256": digest(consumers),
-                  "application_profile_sha256": digest({"filesystem": digest(filesystem), "consumers": digest(consumers)}),
+                  "application_profile_sha256": digest({"filesystem": digest(filesystem), "consumers": digest(consumers),
+                                                        "filesystem_scope": FILESYSTEM_SCOPE, "declared_volume_paths": declared}),
                   "limitations": LIMITATIONS}
     return {"provenance": provenance, "filesystem": filesystem, "consumers": consumers}
 
@@ -269,7 +302,7 @@ def validate_evidence(evidence, filesystem_archive, **expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("filesystem", "inspect", "pins", "downloads", "output"):
+    for name in ("filesystem", "inspect", "container-inspect", "pins", "downloads", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-revision", required=True)
@@ -277,7 +310,8 @@ def main():
     pins = json.loads(args.pins.read_text())
     names = {name for owner in set(PACKAGES.values()) for name in [pins[owner]["archive"], *pins[owner]["patches"]]}
     result = collect_evidence(args.filesystem, image=args.image, source_revision=args.source_revision,
-                              inspected=json.loads(args.inspect.read_text()), pins=pins,
+                              inspected=json.loads(args.inspect.read_text()),
+                              container_inspected=json.loads(args.container_inspect.read_text()), pins=pins,
                               downloads={name: args.downloads / name for name in names})
     args.output.mkdir(parents=True, exist_ok=False)
     for name, value in result.items():
