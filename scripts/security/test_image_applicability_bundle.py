@@ -86,10 +86,38 @@ class ApplicabilityBundleTests(unittest.TestCase):
         self.downloads.append((url, limit))
         return self.payloads[url]
 
-    def capture(self):
+    def capture(self, schema_version=3):
         clock = SimpleNamespace(datetime=SimpleNamespace(now=lambda timezone: NOW), timezone=dt.timezone)
         with patch.object(bundle, "dt", clock):
-            return bundle.capture(self.identity, self.output, self.docker, self.download)
+            return bundle.capture(self.identity, self.output, self.docker, self.download, schema_version=schema_version)
+
+    def add_libssh2(self):
+        names = ["libssh2.tar.gz", "libssh2-debian.tar.xz", "libssh2-supplier-55200.patch", "libssh2-supplier-sftp.patch"]
+        for name in names:
+            data, url = ("reviewed fixture " + name).encode(), "https://example.invalid/" + name
+            self.payloads[url] = data
+            self.pins["downloads"][name] = {"url": url, "sha256": hashlib.sha256(data).hexdigest()}
+        fixes = []
+        for name in sorted(collector.LIBSSH2_LOCAL_PATCHES):
+            data = ("benign local correction " + name).encode()
+            self.tree["usr/share/nac/runtime-package-build/" + name] = data
+            fixes.append({"patch": name, "sha256": hashlib.sha256(data).hexdigest()})
+        self.pins["libssh2"] = {"version": "1.11.1", "package_version": "1.11.1-r12", "source_commit": "f" * 40,
+            "archive": names[0], "patches": names[1:], "license": "BSD-3-Clause", "upstream_name": "libssh2",
+            "downstream_fixes": fixes}
+        payload = elf("libcrypto.so.4")
+        self.tree["usr/lib/libssh2.so.1"] = payload
+        for name, data in list(self.tree.items()):
+            if name.startswith("usr/share/nac/package-provenance/"):
+                record = json.loads(data)
+                record["downloads"] = self.pins["downloads"]
+                self.tree[name] = collector.canonical_json(record)
+        self.tree["usr/share/nac/package-provenance/libssh2.json"] = collector.canonical_json({
+            "schema_version": 1, "supplier": "NAC", "package": "libssh2", **self.pins["libssh2"],
+            "downloads": self.pins["downloads"],
+            "installed_payload": {"/usr/lib/libssh2.so.1": {"sha256": hashlib.sha256(payload).hexdigest()}}})
+        self.tree["usr/share/nac/runtime-package-build/sources.lock.json"] = collector.canonical_json(self.pins)
+        archive(self.archive, self.tree)
 
     def rewrite(self, name, value):
         (self.output / name).write_bytes(collector.canonical_json(value))
@@ -352,6 +380,177 @@ class ApplicabilityBundleTests(unittest.TestCase):
         with self.assertRaises(OSError):
             scan.load_bundle(self.output, output)
         self.assertFalse((output / name).exists())
+
+    def test_v4_adds_exact_libssh2_bindings_without_changing_legacy_observations(self):
+        self.add_libssh2()
+        self.capture(3)
+        legacy = bundle.validate(self.output, self.identity)
+        original = {name: (self.output / name).read_bytes() for name in bundle.files(self.identity, 3)}
+        self.output = self.root / "v4"
+        self.output.mkdir()
+        retained = self.capture(4)
+        self.assertEqual(retained, bundle.files(self.identity, 4))
+        self.assertEqual(bundle.version(self.output), 4)
+        observed = bundle.validate(self.output, self.identity)
+        self.assertEqual(observed[:9], legacy)
+        self.assertEqual(len(observed), 12)
+        self.assertEqual({item["binding"]["package"] for item in observed[9:]}, set(bundle.LIBSSH2_COORDINATES))
+        self.assertEqual({item["binding"]["installed_package"] for item in observed[9:]}, {"apk:libssh2"})
+        self.assertEqual({item["observed_at"] for item in observed}, {"2026-11-10T12:00:00Z"})
+        provenance = bundle.read_json(self.output, bundle.PROFILES["provenance"])
+        self.assertEqual(provenance["profile"], collector.LIBSSH2_PROFILE)
+        patches = {name: self.pins["downloads"][name]["sha256"] for name in self.pins["libssh2"]["patches"]}
+        patches.update(collector.local_patches(self.pins))
+        self.assertEqual(provenance["packages"]["libssh2"]["patches_sha256"], collector.digest(patches))
+        for item in observed[9:]:
+            self.assertEqual(item["binding"]["upstream_version"], "1.11.1")
+            self.assertEqual(item["binding"]["package_version"], "1.11.1-r12")
+        # Existing V3 bytes remain replayable even when the image already owns libssh2.
+        old = self.root / "old-v3"
+        old.mkdir()
+        for name, data in original.items():
+            (old / name).write_bytes(data)
+        self.assertEqual(bundle.version(old), 3)
+        self.assertEqual(bundle.validate(old, self.identity), legacy)
+
+    def test_v4_remote_and_local_patch_bytes_and_payload_are_required(self):
+        self.add_libssh2()
+        self.capture(4)
+        for name in set(bundle.source_files(self.identity, 4).values()) - set(bundle.source_files(self.identity, 3).values()):
+            path = self.output / name
+            original = path.read_bytes()
+            for changed in (None, b"tampered"):
+                path.unlink()
+                if changed is not None:
+                    path.write_bytes(changed)
+                with self.subTest(source=name, changed=changed), self.assertRaises(ValueError):
+                    bundle.validate(self.output, self.identity)
+                if path.exists():
+                    path.unlink()
+                path.write_bytes(original)
+            outside = self.root / name
+            path.rename(outside)
+            path.symlink_to(outside)
+            with self.assertRaises(ValueError):
+                bundle.validate(self.output, self.identity)
+            path.unlink()
+            outside.rename(path)
+        for path in [*("usr/share/nac/runtime-package-build/" + name for name in collector.LIBSSH2_LOCAL_PATCHES),
+                     "usr/lib/libssh2.so.1", "usr/share/nac/package-provenance/libssh2.json"]:
+            original = self.tree[path]
+            for changed in (None, b"{}"):
+                self.tree.pop(path)
+                if changed is not None:
+                    self.tree[path] = changed
+                archive(self.output / bundle.ARCHIVE, self.tree)
+                context = bundle.read_json(self.output, bundle.CONTEXT)
+                context["archive_sha256"] = bundle.sha256(self.output / bundle.ARCHIVE)
+                self.rewrite(bundle.CONTEXT, context)
+                with self.subTest(path=path, changed=changed), self.assertRaises(ValueError):
+                    bundle.validate(self.output, self.identity)
+                self.tree[path] = original
+        for kind in ("links", "hardlinks"):
+            path = "usr/share/nac/runtime-package-build/libssh2-list-followups.patch"
+            data = self.tree.pop(path)
+            self.tree["usr/share/nac/runtime-package-build/same-bytes"] = data
+            archive(self.output / bundle.ARCHIVE, self.tree, **{kind: {path: "usr/share/nac/runtime-package-build/same-bytes"}})
+            context = bundle.read_json(self.output, bundle.CONTEXT)
+            context["archive_sha256"] = bundle.sha256(self.output / bundle.ARCHIVE)
+            self.rewrite(bundle.CONTEXT, context)
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "local patch bytes"):
+                bundle.validate(self.output, self.identity)
+            self.tree[path] = data
+            del self.tree["usr/share/nac/runtime-package-build/same-bytes"]
+
+    def test_v4_local_pin_shapes_and_source_limits_fail_closed(self):
+        self.add_libssh2()
+        original = copy.deepcopy(self.pins["libssh2"]["downstream_fixes"])
+        for fixes in ([], original[:1], original * 2,
+                      [{**original[0], "patch": "../escape"}, original[1]],
+                      [{**original[0], "sha256": "bad"}, original[1]]):
+            self.pins["libssh2"]["downstream_fixes"] = fixes
+            with self.subTest(fixes=fixes), self.assertRaisesRegex(ValueError, "local patch pins"):
+                self.capture(4)
+        self.assertEqual(self.docker.calls, [])
+        self.pins["libssh2"]["downstream_fixes"] = original
+        path = self.root / "source"
+        path.write_bytes(b"bounded original source")
+        link = self.root / "source-link"
+        link.symlink_to(path)
+        with self.assertRaises(OSError):
+            collector.source_digest(link)
+        metadata = path.stat()
+        for size in (150 * 1024 ** 2 + 1, metadata.st_size - 1, metadata.st_size + 1):
+            changed = SimpleNamespace(st_mode=metadata.st_mode, st_size=size)
+            with self.subTest(size=size), patch.object(collector.os, "fstat", return_value=changed), self.assertRaises(ValueError):
+                collector.source_digest(path)
+        with path.open("rb") as source:
+            self.assertEqual(collector.source_digest(path), hashlib.sha256(source.read()).hexdigest())
+
+    def test_v4_scan_bundle_load_and_report_keep_all_raw_blockers(self):
+        import image_scan as scan
+        import image_ci_report as reporter
+        import image_applicability_gate as gate
+        from image_inventory import write_json, sha256
+        from image_rust import RUST_FILES
+
+        self.add_libssh2()
+        self.capture(4)
+        for name in ("runtime.json", "sbom.syft.json", "coverage.json", *RUST_FILES):
+            write_json(self.output / name, {"synthetic": True})
+        write_json(self.output / "identity.json", self.identity)
+        scan.bundle_manifest(self.output, IMAGE)
+        self.assertEqual(json.loads((self.output / "bundle.json").read_text())["schema_version"], 4)
+        capped = self.root / "v4-capped"
+        capped.mkdir()
+        with patch.object(bundle, "MAX_SOURCE_BYTES", 1), self.assertRaisesRegex(ValueError, "oversized retained evidence"):
+            scan.load_bundle(self.output, capped)
+        retained = self.root / "v4-rescan"
+        retained.mkdir()
+        original_read = Path.read_bytes
+        def bounded_read(path):
+            self.assertNotEqual(path.name, bundle.ARCHIVE, "full retained image tar allocation")
+            return original_read(path)
+        with patch.object(Path, "read_bytes", bounded_read):
+            self.assertEqual(scan.load_bundle(self.output, retained), self.identity)
+        scan.bundle_manifest(retained, IMAGE)
+        observations = bundle.validate(retained, self.identity)
+        findings = [{"package": coordinate, "advisory": "CVE-SYNTHETIC-UNQUALIFIED", "version": "1.11.1",
+                     "severity": "High", "source": "synthetic", "context": "managed-image"}
+                    for coordinate in bundle.LIBSSH2_COORDINATES]
+        source = {"blocking": findings, "excepted": [], "reporting": []}
+        policy = self.root / "empty-policy.json"
+        policy.write_text('{"schema_version":1,"rules":[]}')
+        receipt = gate.evaluate(findings, trusted_path=policy, candidate_path=policy, evidence_directory=None,
+            observations=observations, scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"}, now=NOW)
+        write_json(retained / "findings.json", findings)
+        raw = (retained / "findings.json").read_bytes()
+        write_json(retained / "policy-result.json", source)
+        decision = gate.retain_decision(retained, source, receipt, self.identity)
+        self.assertEqual(decision["blocking_indexes"], [0, 1, 2])
+        write_json(retained / "result.json", {"status": "blocked", "image": IMAGE, "blocking": 3, "findings": 3,
+            "applicability": receipt["status"], "decision_sha256": sha256(retained / "decision.json")})
+        (retained / "report.md").write_text("Synthetic passive evidence; no security qualification.\n")
+        self.assertEqual(reporter.report(retained, 1)["blocking"], 3)
+        self.assertEqual((retained / "findings.json").read_bytes(), raw)
+        self.assertEqual(json.loads((retained / "policy-result.json").read_text()), source)
+        manifest = json.loads((self.output / "bundle.json").read_text())
+        manifest["schema_version"] = 3
+        write_json(self.output / "bundle.json", manifest)
+        downgraded = self.root / "downgraded"
+        downgraded.mkdir()
+        with self.assertRaisesRegex(ValueError, "incomplete bundle"):
+            scan.load_bundle(self.output, downgraded)
+        for name in bundle.files(self.identity, 4) - bundle.files(self.identity, 3):
+            del manifest["files"][name]
+        write_json(self.output / "bundle.json", manifest)
+        disguised = self.root / "disguised-v3"
+        disguised.mkdir()
+        with self.assertRaisesRegex(ValueError, "capability differs"):
+            scan.load_bundle(self.output, disguised)
+        write_json(retained / "bundle.json", manifest)
+        with self.assertRaisesRegex(ValueError, "capability differs"):
+            reporter.report(retained, 1)
 
 
 if __name__ == "__main__":

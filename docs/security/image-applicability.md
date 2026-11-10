@@ -152,11 +152,16 @@ retained tar and source bytes using its original collection timestamp; it never
 relabels old evidence as freshly observed. Schema-v2 inventory remains readable
 and supplies no applicability observations.
 
-The collector establishes curl/Kerberos observations only. The integrator maps
-exactly the documented APK and synthetic upstream coordinates to their actual
-installed APK, separately binding package and upstream versions. No libssh2
-observation or production disposition is manufactured. Unsupported rules or
-missing qualified inputs fail closed. Actual native image qualification, the
+New collection emits schema-v4/context-2 with an explicitly versioned libssh2
+provenance capability. It adds the locked libssh2 source, Debian/supplier patch
+bytes, both original local downstream fixes retained in the export, and exact
+installed record/payload bindings. Schema-v3 replay keeps its original source
+set and curl/Kerberos observations; identical V4 inputs retain those observations
+and add `apk:libssh2`, `upstream:libssh2/libssh2` and `upstream-wolfi:libssh2`, each
+bound to the installed `apk:libssh2`. No arbitrary alias inference occurs.
+This passive support creates no production disposition: all raw libssh2 findings
+remain unresolved. Unsupported rules or missing qualified inputs fail closed.
+Actual native V4 image qualification, the
 separately reviewed private-publisher scanner pin and beta/recovery acceptance
 remain incomplete. Production rules require a separate human-reviewed policy
 PR after accepted ALL-501/ALL-502 evidence.
