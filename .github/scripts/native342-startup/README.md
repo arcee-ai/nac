@@ -1,30 +1,37 @@
 # PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
-C15 is a mechanical qualification caller derived from exact frozen C14
-`9f24009a2dc3259147e55e5b51ded4190bd55d64`. It binds PRIVATE prepared nominee
-H `3c85c704a033d55fb729e5a0e2bd09abb75e15fa` (tree
-`a975874c23b4acc49134020429286a2905f641fa`) and
-Q `95a34b063ab1ec321f775bcfe14983d52dd97b2a` under the new
-`P12-integration-Qfailure-lifecycle-R7325-four-startup-source15` scope on
-`codex/private520-failure-lifecycle-C15`. Original G1 review, exact public source
+C16 is a mechanical qualification caller derived from exact frozen C15
+`63141edc838042d5c2685bfc242bfa2aa6577a7c`. It binds PRIVATE prepared nominee
+H `1837a616d63fca988e97137391c916d0ef264daa` (tree
+`898933a9b2d0b9ef3ee036ee1b93d6e0a82034f4`) and
+Q `a5113788dd04b870bbb9a260e5773fda5b1b1d52` under the new
+`P12-integration-Qpublish-open-errno-R7325-four-startup-source16` scope on
+`codex/private520-publish-open-errno-C16`. Original G1 review, exact public source
 availability and a fresh full SDK receipt remain separate Root admission checks.
 No push, dispatch, new clock or runtime is authorized by this source.
 
-H's actual parent is Q above. Q has actual parent
-`eb8cf59ae2ea47afd5b78ad840ce4609d3ad3b16` and tree
-`fea4c6fe618561420ef1f14c2844528dcb0fda09`. Root prepared this integration of reviewed
-Source26 onto current dev; historical SDK/product/source-context fields keep their
-original provenance. All ten supplier bytes/hashes/modes match frozen Source26
-H `2d0eee3bd381658d4e33878160f7456c35dc0d72`. Journey SHA256 is
+H's actual parent is Q above. Q has actual parent reviewed Source27 H
+`2696022d8be085b85bd8d86b59cdc5fc98b86ea7` and tree
+`3a11cc3044699d8c82145e3e8465f3afe8ded7dc`. All ten supplier bytes/hashes/modes match the
+Source29 frozen nomination. Journey SHA256 remains
 `57902cda27adbd1c7bd215238ffe6a1091d9f24dcd8b237a21d2a1b9d3919945`.
-An already caught configuredLocal failure preserves its original closed capture,
-independent attachment, guarded failure image and throw; app termination then
-belongs to the existing external exact-identity owner after failed XCTest result
-collection. Successful public teardown and other cases remain unchanged. No fake
-cleanup claim, audit/abort/UI/input/sandbox relaxation, new protocol or deadline.
-Source24's ordinary120-second fixture allowance remains separate and unchanged.
-This removes a source-supported teardown/abort hazard, not a proven Actual16
-cause or runtime remedy. C15 changes no caller execution behavior.
+Source27 repairs conditional expiry of stale held proof. Source29 captures a
+closed errno category immediately after failed request-file open; the original
+invalid throw, seven-field failure record,94 old step semantics and all authority
+remain unchanged. Both H projections whitelist101 fixed tags. No sandbox,
+location or permission repair is selected. Source26's existing-owner failed-case
+handoff and all successful/other-case teardown, audit/abort/input/freshness/
+cleanup contracts remain. C16 changes no caller execution behavior.
+
+Native17 remains FAIL/SPENT at C15/H3c/Q95: R and onboarding passed,
+configuredLocal failed/input UNKNOWN, invalidConfig/futureStore UNRUN. Its valid
+bound XCTest record localized publish_open/receipt_invalid/operation1; no errno
+was measured or retained. The passive channel has no retained valid record;
+physical file absence is not proven.
+Natural XCTest failure and closed attachment survived without caller audit abort.
+Both reached app/engine/profile and configured AX settlement were positive;
+configured store/policy stayed unchanged. Its unused1970.108591 seconds remain
+SPENT. Future closed categories do not retag this failure or promise Native18.
 
 Actual16 remains FAIL/SPENT at C14/H3e/Q47: R and onboarding passed,
 configuredLocal failed/input UNKNOWN, invalidConfig/futureStore UNRUN. Both first-
@@ -72,7 +79,7 @@ App/engine/companion settlement and profile removal were positive. The last two
 cases were UNRUN. Actual11 and all earlier episodes retain their original
 failure, fixture, cleanup and spent-clock facts. Source16 and any later SDK
 result neither retag them nor supply runtime credit. No old episode, sealed
-packet or spent allocation can provide a clock or retry for C15. Root's active goal owns this finite
+packet or spent allocation can provide a clock or retry for C16. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -185,9 +192,9 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C15 preparation executes no SDK/helper actor.
+compile and Foundation control. C16 preparation executes no SDK/helper actor.
 Root reported Source16 H00's hosted compile-only SDK gate and36 selected panel
-controls passed for that earlier pair only. This integrated Source26 pair requires fresh SDK evidence;
+controls passed for that earlier pair only. This Source27/29 pair requires fresh SDK evidence;
 no previous receipt supplies it. That result establishes neither full public CI nor native
 UI acceptance. Fresh sandboxed receipt access, real focus/value/CFEqual/freshness/
 input/PNG/API/store/custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
