@@ -475,12 +475,15 @@ func publisherCheckpointRun(_ mode: String) -> [String: Any] {
     do {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }
+        guard let resolved = realpath(directory.path, nil) else { throw StartupAXReceiptError.invalid }
+        let canonicalDirectory = String(cString: resolved)
+        free(resolved)
         let path: String
-        if mode == "open" { path = directory.appendingPathComponent(String(repeating:"x",count:300)).path }
+        if mode == "open" { path = canonicalDirectory + "/" + String(repeating:"x",count:300) }
         else if mode == "rename" {
-            path = directory.appendingPathComponent("destination").path
+            path = canonicalDirectory + "/destination"
             try FileManager.default.createDirectory(atPath:path,withIntermediateDirectories:false)
-        } else { path = directory.appendingPathComponent("missing/record").path }
+        } else { path = canonicalDirectory + "/missing/record" }
         try StartupAXFiles.publish(["closed":true],to:path,diagnostic:diagnostic)
         return ["accepted":true]
     } catch { return ["accepted":false,"step":diagnostic.step.rawValue,"family":StartupFailureEvidence.family(error)] }
