@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qsemantic-name-R7325-four-startup-source12",
+  "scope": "P12-integration-Qnew-candidate-exec-R7325-four-startup-source13",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "0b8818d97b6459f0eb4a3bd4546b967f4fc23806",
+  "H": "5884c9ce5862486828c12f6446110c2f2e61e51a",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "e86772e2380f865b4c324da304f4b3cd286f00fa",
+  "Q": "80b771ef59663e12df6822fb986aa8186fc244b3",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",

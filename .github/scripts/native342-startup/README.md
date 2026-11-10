@@ -1,39 +1,43 @@
 # PRIVATE NEVERMERGE: P12 integration, final preflight suppliers, four cases plus R
 
-C12 is a mechanical qualification caller derived from exact frozen C11
-`afff6fc2d64a1325d1ba3b048d90e0deae6a7579`. It binds PRIVATE prepared nominee
-H `0b8818d97b6459f0eb4a3bd4546b967f4fc23806` (tree
-`219c234236ed1f99acf2eb8369509b40e98ca479`) and
-Q `e86772e2380f865b4c324da304f4b3cd286f00fa` under the new
-`P12-integration-Qsemantic-name-R7325-four-startup-source12` scope on
-`codex/private520-semantic-name-C12`. Original G1 review, public source
+C13 is a mechanical qualification caller derived from exact frozen C12
+`d6857ca61c3f5650f3ea02ec18fa4cda132aa4ee`. It binds PRIVATE prepared nominee
+H `5884c9ce5862486828c12f6446110c2f2e61e51a` (tree
+`6aba6760ee77c7fd4258c1d5db4adc63b74d5c40`) and
+Q `80b771ef59663e12df6822fb986aa8186fc244b3` under the new
+`P12-integration-Qnew-candidate-exec-R7325-four-startup-source13` scope on
+`codex/private520-new-candidate-exec-C13`. Original G1 review, public source
 availability and a fresh full SDK receipt remain separate Root admission checks.
 No push, dispatch or runtime is authorized by this source.
 
-H's actual parent is Q above. Q has actual parent public H561
-`56102f90ccfa61222b7532c1ad48878977a99cfd` and tree
-`8f7cb61ea27925d2fa56aebb545bec3e268b7559`. This source pair descends from dev15cb
+H's actual parent is Q above. Q has actual parent public H0b
+`0b8818d97b6459f0eb4a3bd4546b967f4fc23806` and tree
+`18f48332c8ebda7ef956ddbe44b365aee33fb68d`. This pair descends from dev15cb
 `15cb2bd955ee9525cd6760bf0e881453e5e2d1eb`, including landed669 exactly once.
-Source21 repairs the independently documented query-name compatibility mismatch:
-a matching(identifier:) query may resolve by title/placeholder while .label is
-empty. Named dispatches carry explicit trusted selector intent, checked against
-appropriate public semantics before request and after AX proof. The same bounded
-nonempty name is verified by global AX title/description, with a typed Message-
-only placeholder fallback. Identifier alone and generic editable values are not
-semantic authority. Correct title is not vetoed by an unrelated oversized label.
-All original same-point/anchor, role/PID/CFEqual, exact focus/value, freshness,
-refusal/input and positive cleanup requirements remain. Fifteen ordered atomic
-shape checkpoints retain original errors and all legacy closed values/readers.
+Source22 narrowly recaptures a NEW unadmitted candidate only after positive
+same-PID/birth/UID/owned-app-parent Native-to-bundled-engine image observations.
+The rejected argv/environment are discarded; one fresh full tuple must pass
+exact original checks and coherent bookends before atomic known publication.
+Stable invalid native argv, known identity changes, ambiguous or denied probes,
+foreign/birth/UID/parent changes, repeated transitions, malformed data and
+prohibited environment remain fail-closed. No marker-based role, alias
+normalization, partial success, retirement fallback or raw argv diagnostics.
+Source21 query naming, all supplier Swift/tests, semantic/point/CFEqual/focus/
+freshness/input and cleanup contracts remain unchanged. The supplier README
+hash changes; the journey hash remains the actual unchanged Source21 hash.
 Source/focused checks establish no SDK or native acceptance.
 
-Actual14 remains failed/spent at original C11/H561/Q4052: its bound attachment
-records request_shape/receipt_invalid/op1. The raw label/length were not retained;
-blank versus oversized is UNPROVEN. R/onboarding passed, configuredLocal failed,
-input is UNKNOWN and invalidConfig/futureStore were UNRUN. App/engine/AX cleanup
-and both profile removals were positive; configured store and policy unchanged.
-Source21 is a supported API compatibility correction, not proof of Actual14's
-individual operand or a guaranteed full-journey pass. Prior episodes, clocks,
-source/SDK/compiler/runtime counts and payloads retain their original identities.
+Actual15 remains failed/spent at original C12/H0b/Qe867. Both first-preflight
+channels and configured screenshot are absent. The owner diagnostic reports
+environment/native_argv with argv0_matches false, helper_present false,
+serving_present true and previously_known false. The actual rejected process,
+raw argv and post-argv image were not retained; an exec race is UNPROVEN.
+R/onboarding passed, configuredLocal failed during Window wait, input is UNKNOWN
+and invalidConfig/futureStore were UNRUN. Onboarding cleanup passed; configured
+app/profile retirement remains UNKNOWN with a retained fixture marker. AX/helper
+settlement supplies no missing app/profile authority. Store/policy unchanged.
+No old fixture or PID is operated, no prior clock/counter/evidence is retagged,
+and this source correction promises no full-journey or current-dev product pass.
 The complete ten-file Q inventory remains owned by H TEST_FILES. The accepted
 interaction preflight selects a public coordinate, verifies global AX hit/PID and retained CFEqual target/root/sheet
 ancestry, then rechecks the same point/anchor, resources/incarnation and original
@@ -60,7 +64,7 @@ App/engine/companion settlement and profile removal were positive. The last two
 cases were UNRUN. Actual11 and all earlier episodes retain their original
 failure, fixture, cleanup and spent-clock facts. Source16 and any later SDK
 result neither retag them nor supply runtime credit. No old episode, sealed
-packet or spent allocation can provide a clock or retry for C12. Root's active goal owns this finite
+packet or spent allocation can provide a clock or retry for C13. Root's active goal owns this finite
 source preparation; the historical child goal remains unchanged. Root verifies
 source bindings and actual public availability before any fresh full runtime
 admission. This source is not a new feature PR and is nevermerge.
@@ -173,9 +177,9 @@ no other active checkout or new worktree is used. Artifact controls read Root's
 already acquired bytes without executing/extracting binaries, plus synthetic
 adverse closed inventories. No compiler, app, AX, provider, SQLite, input or signal
 is invoked by these consumer tests. The historical source packet separately records its earlier compatibility
-compile and Foundation control. C12 preparation executes no SDK/helper actor.
+compile and Foundation control. C13 preparation executes no SDK/helper actor.
 Root reported Source16 H00's hosted compile-only SDK gate and36 selected panel
-controls passed for that earlier pair only. Source21 requires fresh SDK evidence;
+controls passed for that earlier pair only. Source22 requires fresh SDK evidence;
 no previous receipt supplies it. That result establishes neither full public CI nor native
 UI acceptance. Fresh sandboxed receipt access, real focus/value/CFEqual/freshness/
 input/PNG/API/store/custody and minimum-OS qualification remain UNRUN. Root routes original-G1 affected alignment and then
