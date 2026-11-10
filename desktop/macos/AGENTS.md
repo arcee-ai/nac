@@ -61,3 +61,11 @@ The cohesive `test_ci_startup_observer.py` test module may exceed 800 lines
 because it keeps deterministic kernel/AppKit adapters, exact production snapshot
 compilation and custody/launch-race assertions in one auditable fixture owner.
 Each selected batch compiles that fixture once; the file remains below 2,000 lines.
+
+A new, unadmitted native-image candidate may be observed during a bundled-engine
+spawn. Recovery is limited to a positively observed same-PID/birth/UID/owned-app-
+parent native-to-engine image transition and one fresh full tuple with coherent
+bookends. Never rebind a known identity, reuse rejected argv/environment, infer
+role from flags, omit an ambiguous candidate, or normalize paths to pass checks.
+Prohibited environment/parse/denial failures remain sticky; a disappearance in
+the recovery path grants no retirement or input authority.

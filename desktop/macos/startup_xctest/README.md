@@ -534,3 +534,23 @@ not retained; empty versus oversized is unproven. This compatibility repair is
 supported by public API/source contracts, not a claim of that individual operand
 or native acceptance. Fresh SDK and full native qualification remain required.
 See Apple's [matching query documentation](https://developer.apple.com/documentation/xcuiautomation/xcuielementquery/matching(_:identifier:)).
+
+## New-candidate process-image capture
+
+The external metadata owner may observe an unadmitted child between its native
+image census and a bundled-engine argv capture. Only an original native_argv
+rejection can enter the narrow recovery: the candidate is not already known,
+its allowed parent is the retained native app and independently rechecked, and
+its PID, birth, UID and parent are unchanged while a new positive probe shows
+the exact bundled-engine image. The rejected tuple is discarded; one fresh full
+argv/environment capture is checked against that engine image and a final
+coherent identity/parent bookend before normal atomic record/known publication.
+
+Stable invalid native argv, known identity changes, foreign/new identity or
+parent changes, repeated transitions, missing/denied probes, malformed captures
+and prohibited credentials remain fail-closed. No marker flag is role authority,
+no argv0 alias is normalized and no ambiguity produces partial success or
+retirement. Existing exact invocation/environment, ancestry, resource, freshness,
+input and cleanup contracts remain. Canonical injected snapshot controls cover
+the transition and adversarial cases; they do not prove Actual15's unretained
+exec-race hypothesis or native acceptance. No raw argv diagnostics are exported.

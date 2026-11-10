@@ -448,8 +448,9 @@ enum StartupObserver {
             }
         }
         var observed: [Int32: StartupProcessIdentity] = [:]
-        for (pid, identity) in identities {
-            let actual = identity.executable
+        for (pid, originalIdentity) in identities {
+            var identity = originalIdentity
+            var actual = identity.executable
             let details: ([String], [String: String])
             do {
                 note(.arguments)
@@ -463,17 +464,54 @@ enum StartupObserver {
                 else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
                 continue
             }
-            let (argv, environment) = details
+            var (argv, environment) = details
+            var recoveredCandidate = false
+            let environmentRecord: [String: Any]
             note(.environment)
-            let environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
-                nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
-                launcher: launcherEnvironment, child: childEnvironment, previouslyKnown: known[pid] != nil)
+            do {
+                environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
+                    nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
+                    launcher: launcherEnvironment, child: childEnvironment, previouslyKnown: known[pid] != nil)
+            } catch let rejection as StartupEnvironmentRejection {
+                // An unadmitted spawn may change image between the independent
+                // census and argument read. Never reinterpret a committed identity
+                // or use argv markers as proof of an engine/parent relationship.
+                guard known[pid] == nil, actual == nativePath,
+                      rejection.detail["predicate"] as? String == "native_argv",
+                      let parentPID = Int32(exactly: identity.parent), let parent = known[parentPID],
+                      parent.executable == nativePath, app?.processIdentifier == parentPID else { throw rejection }
+                let transitioned: StartupProcessIdentity
+                do {
+                    note(.detail_probe)
+                    guard let checkedParent = try StartupProcessProbe.observe(parentPID, previous: parent,
+                              scope: "detail", uid: getuid()), checkedParent.parent == parent.parent,
+                          let candidate = try StartupProcessProbe.observe(pid, previous: nil, scope: "detail", uid: getuid()),
+                          candidate.pid == identity.pid, candidate.uid == identity.uid,
+                          candidate.seconds == identity.seconds, candidate.microseconds == identity.microseconds,
+                          candidate.parent == identity.parent, candidate.executable == enginePath else { throw rejection }
+                    transitioned = candidate
+                } catch {
+                    note(.environment)
+                    throw rejection // No absence, denial or ambiguity authorizes recovery/retirement.
+                }
+                identity = transitioned
+                actual = identity.executable
+                note(.arguments)
+                (argv, environment) = try arguments(pid) // One fresh FULL tuple; never reuse rejected bytes.
+                note(.environment)
+                environmentRecord = try StartupEnvironmentCheck.record(executable: actual,
+                    nativePath: nativePath, enginePath: enginePath, argv: argv, environment: environment,
+                    launcher: launcherEnvironment, child: childEnvironment, previouslyKnown: false)
+                recoveredCandidate = true
+            }
             note(.detail_probe)
             guard let after = try StartupProcessProbe.observe(pid, previous: identity, scope: "detail", uid: getuid()) else {
+                try need(!recoveredCandidate) // A recovered tuple must have positive coherent bookends.
                 if let old = known[pid] { retired.append(old.retirement) }
                 else { enumeratedExits.append(["pid": Int(pid), "parent": Int(identity.parent), "proof": "kill_zero_ESRCH"]) }
                 continue
             }
+            try need(!recoveredCandidate || after.parent == originalIdentity.parent)
             observed[pid] = after
             var node = after.record
             node.merge(environmentRecord) { _, new in new }
