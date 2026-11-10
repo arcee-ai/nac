@@ -138,8 +138,8 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `0802cfc65b54c86fdc5966bf8dd3dead07daa2c9`; its journey
-SHA256 is `74b630f3490b851a6de6627a01e84332b17564a5f5d2061741c5c3262985ca84`.
+ten-file supplier `a7a59910990a6c61a2a5d887b33746d43207f00f`; its journey
+SHA256 is `e283f6d8662a73b735d6965cafe3df5155d05f73be655077b6e233b7397176b3`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
 historical startup/SDK results keep their original source and consumed counters.
@@ -151,6 +151,9 @@ compiler/typed-protocol/source/engine/schema/integrity/retirement checks must ru
 under a separate Root admission; schema50 alone is insufficient. No runtime or
 publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
 AX preflight, preserving all original postconditions and positive cleanup.
+The selected public coordinate is Float-representable and inside its actual
+anchor; fractional centers use a public offset coordinate with exact screenPoint
+readback before publication. The same coordinate is retained for dispatch.
 Raw CG extras no longer veto that contract. The accepted last-instant race is
 not atomic or independently observed delivered-event equality.
 

@@ -59,13 +59,13 @@ def run_required(root, *, suite=None, stream=None, panel=False):
                 ax_module = importlib.util.module_from_spec(ax_spec)
                 ax_spec.loader.exec_module(ax_module)
                 witness = unittest.defaultTestLoader.loadTestsFromTestCase(ax_module.ReceiptControls)
-                if witness.countTestCases() != 21:
-                    raise RuntimeError('Require exact twenty-one whole-client/request AX witness controls')
+                if witness.countTestCases() != 22:
+                    raise RuntimeError('Require exact twenty-two whole-client/request AX witness controls')
                 suite = unittest.TestSuite([policy, diagnostic, witness])
             else:
                 suite = unittest.defaultTestLoader.loadTestsFromName('test_ci_startup_console.StartupConsoleTests')
         result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-        require_complete(result, 34 if panel else 4)
+        require_complete(result, 35 if panel else 4)
         return result
     finally:
         if panel:
