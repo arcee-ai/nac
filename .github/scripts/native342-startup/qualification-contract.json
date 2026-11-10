@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Qrequest-child-R7325-four-startup-source17",
+  "scope": "P12-integration-Qlibrary-role-R7325-four-startup-source18",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf",
+  "H": "ef133a3250e6bb221f8e2effa2c6a5a711c32af5",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "90c997550099d233d753fcbc9d3c090350e70016",
+  "Q": "8397bafe8fb5f439b702ebf3e941eed802ce71aa",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
