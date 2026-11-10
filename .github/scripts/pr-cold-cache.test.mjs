@@ -1,4 +1,4 @@
-import { reverseImageApplicability } from './image-security-wiring.mjs';
+import { reverseImageApplicability, reverseStrictImageSummary } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
@@ -67,6 +67,7 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 function verify(values) {
   const normalized = structuredClone(values);
   reverseImageApplicability(normalized["managed-image-build"]);
+  reverseStrictImageSummary(normalized["managed-image-build"]);
   reverseAssetTokens(normalized["stable-release"]);
   reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
@@ -365,8 +366,16 @@ const imageEvidenceMutations = [
   steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
 ];
 
+const strictImageMutations = [
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('### Strict exact-image security result', '### Image findings are advisory; enforcement is deferred'); },
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('Blocking findings and incomplete scans fail this job.', 'Findings are advisory.'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('|| scan_status=$?', '|| true'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scanner-exit "$scan_status"', '--scanner-exit 0'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scan-output image-security-evidence/security', '--scan-output stale-evidence'); },
+];
+
 test('image evidence and reporting deltas cannot weaken the original cold-cache contract', () => {
-  for (const mutate of imageEvidenceMutations) {
+  for (const mutate of [...imageEvidenceMutations, ...strictImageMutations]) {
     const value = graph(); mutate(value['managed-image-build'].jobs['build-smoke'].steps);
     assert.throws(() => verify(value));
   }
