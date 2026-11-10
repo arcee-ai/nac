@@ -107,13 +107,19 @@ jobs:
           if-no-files-found: error
 
   startup-panel-policy:
-    name: Immutable startup native-folder policy source controls
+    name: Immutable startup policy and full XCTest SDK
     runs-on: macos-26
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: ci-harness
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.source-sha }}
+          path: ci-harness
           persist-credentials: false
       - name: Resolve immutable startup policy supplier
         id: policy-source
@@ -121,12 +127,27 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ steps.policy-source.outputs.revision }}
-          path: .startup-panel-q
+          path: qualification-tests
           persist-credentials: false
       - name: Require geometry, AX diagnostic and whole-client witness controls without skips
         env:
           NAC342_SWIFT_PANEL_PROOF: "1"
           NAC342_AX_WITNESS_PROOF: "1"
         run: |
-          python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel
-          NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/.startup-panel-q" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py
+          python3 -B desktop/macos/ci_startup_console_check.py --source-root "$GITHUB_WORKSPACE/qualification-tests" --panel
+          NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/qualification-tests" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py
+      - name: Compile the full canonical startup XCTest target without signing or execution
+        env:
+          EXPECTED_SHA: ${{ inputs.source-sha }}
+        run: >-
+          python3 -B desktop/macos/ci_startup_sdk.py --expected-sha "$EXPECTED_SHA"
+          --source-root "$GITHUB_WORKSPACE/qualification-tests"
+          --output "$RUNNER_TEMP/startup-sdk-evidence"
+      - name: Retain compile-only startup SDK identities and bounded logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: startup-sdk-${{ inputs.source-sha }}
+          path: ${{ runner.temp }}/startup-sdk-evidence
+          if-no-files-found: error
+          retention-days: 7

@@ -138,7 +138,7 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `48bc66ff0e022fbbf1cb382cb4563de4e49d10e4`; its journey
+ten-file supplier `b5cb0a0afb2b1f90c703b980d210ac58546cddec`; its journey
 SHA256 is `324c2a2e99de56ecbce182c66817839aa7b0a8858f5c5f79507e8f32d6feae75`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
@@ -151,6 +151,13 @@ compiler/typed-protocol/source/engine/schema/integrity/retirement checks must ru
 under a separate Root admission; schema50 alone is insufficient. No runtime or
 publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
 AX preflight, preserving all original postconditions and positive cleanup.
+The required panel policy lane admits exactly six geometry, seven AX/refusal,
+and twenty-three whole-client/request receipt methods: thirty-six total with
+zero skips. The receipt methods include the original-error identity/catch-order
+control and the true native infinite-rectangle fixture within the existing
+point-selection method. Exact count checks reject missing or extra controls;
+these source controls do not replace the full generated XCTest SDK gate or
+later native UI qualification.
 The selected public coordinate is Float-representable and inside its actual
 anchor; fractional centers use a public offset coordinate with exact screenPoint
 readback before publication. The same coordinate is retained for dispatch.

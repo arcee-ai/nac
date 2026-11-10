@@ -73,19 +73,50 @@ class RequiredConsoleTests(unittest.TestCase):
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
         return directory, hashes
 
-    def test_panel_gate_requires_exactly_nine_with_zero_skips(self):
+    def test_panel_gate_requires_exactly_thirty_six_with_zero_skips(self):
         def skip():
             raise unittest.SkipTest('panel proof skipped')
         good = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(9)]))
-        check.require_complete(good, 9)
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(36)]))
+        check.require_complete(good, 36)
         bad = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(8)]
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(35)]
                                + [unittest.FunctionTestCase(skip)]))
-        with self.assertRaisesRegex(RuntimeError, 'all 9 tests with zero skips'):
-            check.require_complete(bad, 9)
-        with self.assertRaisesRegex(RuntimeError, 'zero skips'):
-            check.require_complete(good, 8)
+        with self.assertRaisesRegex(RuntimeError, 'all 36 tests with zero skips'):
+            check.require_complete(bad, 36)
+        for wrong_count in (35, 37):
+            with self.assertRaisesRegex(RuntimeError, 'zero skips'):
+                check.require_complete(good, wrong_count)
+
+    def test_actual_nominated_panel_classes_require_six_seven_twenty_three_without_execution(self):
+        source = Path(check.__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift')
+        result = unittest.TestResult()
+        result.testsRun = 36
+        with patch.object(check.sys, 'platform', 'darwin'), patch.object(check, 'admit_source', return_value=source), \
+                patch.object(check.unittest, 'TextTestRunner') as runner:
+            runner.return_value.run.return_value = result
+            self.assertIs(check.run_required('/unused', panel=True), result)
+            suite = runner.return_value.run.call_args.args[0]
+            self.assertEqual([group.countTestCases() for group in suite], [6, 7, 23])
+            names = [case.id() for group in suite for case in group]
+            self.assertTrue(any('catch_preserves_error_identity' in name for name in names))
+            self.assertTrue(any('float_selection' in name for name in names))
+
+    def test_twenty_two_or_twenty_four_receipt_controls_fail_before_any_runner(self):
+        source = Path(check.__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift')
+        loader = check.unittest.defaultTestLoader.loadTestsFromTestCase
+        for count in (22, 24):
+            def load(case):
+                if case.__name__ == 'ReceiptControls':
+                    return unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(count)])
+                return loader(case)
+            with self.subTest(count=count), patch.object(check.sys, 'platform', 'darwin'), \
+                    patch.object(check, 'admit_source', return_value=source), \
+                    patch.object(check.unittest.defaultTestLoader, 'loadTestsFromTestCase', side_effect=load), \
+                    patch.object(check.unittest, 'TextTestRunner') as runner:
+                with self.assertRaisesRegex(RuntimeError, 'exact twenty-three'):
+                    check.run_required('/unused', panel=True)
+                runner.assert_not_called()
 
     def test_thirteen_total_cannot_hide_wrong_six_plus_seven_class_distribution(self):
         with tempfile.TemporaryDirectory() as temporary:
