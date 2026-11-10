@@ -9,6 +9,57 @@ from unittest.mock import patch
 
 import ci_startup_console_check as check
 import ci_startup_fixture as fixture
+import test_ci_startup_console as console
+
+
+class ConsoleRecordingSourceTests(unittest.TestCase):
+    def source(self):
+        data = Path(__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift').read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), fixture.TEST_FILES['StartupJourneys.swift'])
+        return data.decode()
+
+    def trace(self, source, case):
+        # Exercise the real source-trace assertions with isolated mutant bytes.
+        # Only this synthetic control replaces their digest; production source
+        # admission still requires the exact nominated checkout and inventory.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'StartupJourneys.swift'
+            path.write_text(source)
+            hashes = {**fixture.TEST_FILES, 'StartupJourneys.swift': hashlib.sha256(path.read_bytes()).hexdigest()}
+            with patch.dict(os.environ, {'NAC_STARTUP_TEST_SOURCE': str(path)}), \
+                    patch.object(console, 'TEST_FILES', hashes):
+                return console.StartupConsoleTests().source_trace(case)
+
+    def test_checked_default_and_nonrecorded_input_checks_keep_exact_export_counts(self):
+        source = self.source()
+        self.assertEqual(len(fixture.operations({'scenario': 'configuredLocal', 'home': '/private/owned home'})), 11)
+        for case, expected in (('onboarding', 5), ('configuredLocal', 27), ('invalidConfig', 4), ('futureStore', 4)):
+            with self.subTest(case=case):
+                self.assertEqual(len(self.trace(source, case)), expected)
+
+    def test_missing_swallowed_disabled_or_wrong_default_recording_is_rejected(self):
+        source = self.source()
+        ordinary = 'try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)'
+        immediate = ordinary[:-1] + ', record: false)'
+        record = 'if record { observations.append(state) }'
+        mutations = {
+            'wrong-default': ('record: Bool = true', 'record: Bool = false'),
+            'missing-console': ('let state = try console()', 'let state: [String: Any] = [:]'),
+            'swallowed-console': ('let state = try console()', 'let state = (try? console()) ?? [:]'),
+            'disabled-recording': (record, 'if false { observations.append(state) }'),
+            'missing-recording': (record, '_ = state'),
+            'unconditional-recording': (record, 'observations.append(state)'),
+            'duplicate-recording': (record, record + '\n        observations.append(state)'),
+            'ordinary-not-recorded': (ordinary, immediate),
+            'immediate-recorded': (immediate, ordinary[:-1] + ', record: true)'),
+            'missing-immediate-check': (immediate, '_ = number'),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(source.count(before), 1, name)
+            changed = source.replace(before, after, 1)
+            for case in fixture.CASES:
+                with self.subTest(mutation=name, case=case), self.assertRaises(AssertionError):
+                    self.trace(changed, case)
 
 
 class RequiredConsoleTests(unittest.TestCase):
