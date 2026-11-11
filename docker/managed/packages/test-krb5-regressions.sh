@@ -4,6 +4,8 @@ set -eu
 # Compile the actual patched functions in the owned source tree.  The negative
 # controls reverse only the two locked upstream patches in disposable copies.
 # Nothing here is installed into the runtime package or opens a socket.
+# The managed Wolfi builder uses BusyBox ash, which supports this core limit.
+# shellcheck disable=SC3045
 ulimit -c 0
 root=/work/krb5-regressions
 recipe=${NAC_REGRESSION_RECIPE:-/recipe}
@@ -48,7 +50,7 @@ expect_vulnerable_fault() {
     label=$1
     binary=$2
     set +e
-    timeout 5s sh -c 'LD_LIBRARY_PATH=/work/krb5/src/lib "$1"' sh "$binary" \
+    LD_LIBRARY_PATH=/work/krb5/src/lib timeout 5s "$binary" \
         > "$root/$label.vulnerable.log" 2>&1
     status=$?
     set -e
