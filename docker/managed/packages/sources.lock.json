@@ -102,6 +102,22 @@
     "sasl-debian.patch": {
       "url": "https://sources.debian.org/data/main/c/cyrus-sasl2/2.1.28%2Bdfsg1-12/debian/patches/0043-CVE-2026-107161.patch",
       "sha256": "dcca99138d67cf123d69ce4976a4f3444715a48311f63bf78b7b1eb8f9d5f82c"
+    },
+    "libssh2.tar.gz": {
+      "url": "https://www.libssh2.org/download/libssh2-1.11.1.tar.gz",
+      "sha256": "d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7"
+    },
+    "libssh2-debian.tar.xz": {
+      "url": "https://deb.debian.org/debian/pool/main/libs/libssh2/libssh2_1.11.1-1%2Bdeb13u2.debian.tar.xz",
+      "sha256": "ee81e3ea0d65fdbc979c50f1433966d0139e33ac09242d7dc7c83567139126a7"
+    },
+    "libssh2-supplier-55200.patch": {
+      "url": "https://raw.githubusercontent.com/wolfi-dev/os/9be4d78acb4341573db86b483142a0ff0fbb95be/libssh2/fix-CVE-2026-55200.patch",
+      "sha256": "2aea7cd9dde3a3b771ee26735a17c6a4257585b62840bc5223da576df8aaf735"
+    },
+    "libssh2-supplier-sftp.patch": {
+      "url": "https://raw.githubusercontent.com/wolfi-dev/os/9be4d78acb4341573db86b483142a0ff0fbb95be/libssh2/CVE-2025-15661.patch",
+      "sha256": "8c2552e5b15fa5ab1740203143e7c5ade901d46c0bafc9faebe6c321174b240a"
     }
   },
   "gcc_headers": {
@@ -157,6 +173,119 @@
     ],
     "supplier_packages": {
       "cyrus-sasl-heimdal-libs": "2.1.28-r58"
+    }
+  },
+  "libssh2": {
+    "version": "1.11.1",
+    "package_version": "1.11.1-r12",
+    "source_commit": "a312b43325e3383c865a87bb1d26cb52e3292641",
+    "license": "BSD-3-Clause",
+    "archive": "libssh2.tar.gz",
+    "patches": [
+      "libssh2-debian.tar.xz",
+      "libssh2-supplier-55200.patch",
+      "libssh2-supplier-sftp.patch"
+    ],
+    "upstream_name": "libssh2",
+    "project_url": "https://libssh2.org/",
+    "supplier_packages": {
+      "libssh2": "1.11.1-r11"
+    },
+    "supplier_baseline": {
+      "archive_sha256": "0764536365a359259a272baa9ba2c29a507a4c238dd342ab9e746e2e7ceef3dc",
+      "recipe_commit": "1a6d2a25c5ad7e68b4e031e94f8bd4d6d2a56365",
+      "preserved_corrections": [
+        "CVE-2026-7598",
+        "CVE-2026-55199",
+        "CVE-2026-55200",
+        "CVE-2025-15661"
+      ],
+      "crypto_abi": "libcrypto.so.4"
+    },
+    "upstream_fixes": [
+      {
+        "advisories": [
+          "CVE-2026-66032"
+        ],
+        "commit": "5e4776146552d898b9c0e1b313cd093fa8dc92d0",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-66032.patch",
+        "reviewed_upstream_patch_sha256": "a70ff256ce24fc5e4144fcc4409a5874c397e1f9e1b1d437120e4be3f5fc051d"
+      },
+      {
+        "advisories": [
+          "CVE-2026-66033"
+        ],
+        "commit": "a2ed82d40964bbc0d64cd717aa0a5a892117d2e6",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-66033.patch",
+        "reviewed_upstream_patch_sha256": "f59ff6d6575ec8f17af41825aac4dc6c8ddcdd6909dc6ae3a535fa13dba8a290"
+      },
+      {
+        "advisories": [
+          "CVE-2026-66034"
+        ],
+        "commit": "a13bb6c773f0d55ad1628cede57e99803cd898d9",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-66034.patch",
+        "reviewed_upstream_patch_sha256": "896ff800992af462519f0b2d2f47a84f5096728f27c9faf36b1676eaa9c6620f"
+      },
+      {
+        "advisories": [
+          "CVE-2026-66035"
+        ],
+        "commit": "42e33d81577ed4b95d4b4f6f845e5ee8efe5eeb4",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-66035.patch",
+        "reviewed_upstream_patch_sha256": "0422c11e22df21dc8154fa0aeb812157d0798d990bd9ab2cd05844dc21653693"
+      },
+      {
+        "advisories": [
+          "CVE-2026-58050"
+        ],
+        "commit": "34497525929b9a47f03dfb81887ac896202b7e12",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-58050.patch",
+        "reviewed_upstream_patch_sha256": "9cb033e07004a755675e2095eb7f05ebeaafa70b0920a1fdb8f6ad23498047d9"
+      },
+      {
+        "advisories": [
+          "CVE-2026-58051"
+        ],
+        "commit": "a9758da45a52bc8c630ec9493804d0c6ea30b24a",
+        "patch": "libssh2-debian.tar.xz",
+        "archive_member": "debian/patches/CVE-2026-58051.patch",
+        "reviewed_upstream_patch_sha256": "0aee020bbc88acd2a3d828f1c85861f9f5a36204c07543cddc0abd68d4b5ed0a"
+      }
+    ],
+    "downstream_fixes": [
+      {
+        "patch": "libssh2-list-followups.patch",
+        "sha256": "91e0470c733735f023b7baa9d074731d387d64f9cbb518f020b734272da78893",
+        "upstream_commits": [
+          "c2f1a3a21b4c922cbcf50bf7c009b740141a1e7a",
+          "ad16eb112f4a9591acdf5f6f2981328613e6b626"
+        ],
+        "status": "NAC adaptation of accepted upstream follow-up to 1.11.1; original naming/control flow retained"
+      },
+      {
+        "patch": "libssh2-pointer-followup.patch",
+        "sha256": "cad569a81ee2d2f21201e8dbd5f7076c58a36781fc414009fbbea881247163aa",
+        "upstream_commits": [
+          "a0334dbe952950da6489876c6592b478938384fb"
+        ],
+        "status": "NAC adaptation of accepted upstream follow-up to 1.11.1; original naming/control flow retained"
+      }
+    ],
+    "reviewed_source_files": {
+      "src/userauth.c": "4fff87fde157b9936c536fe545c2966a1b2d7f4e387db352849220020f98eadc",
+      "src/packet.c": "6ec4270e721ec1e0a5e57af52f59006b87438568bcca6057eb76cdcfd3a0b6ca",
+      "src/sftp.c": "b079d008de1352fadf6015943f1037afb30d6771f482a77d37775be3f5f176db",
+      "src/openssl.c": "2df90530491643625921e42abbab3f7c4ffc981ce2276e1d0826cc38e896f484",
+      "src/publickey.c": "d5c7ea98aef3c057cad74e7f7c3471be41302a3fc19326620206ad16b814a54e",
+      "src/transport.c": "c9315507031a8caf0094b9fef1d07a8e517de919074f7cebb9dfd85aa64214fe",
+      "include/libssh2.h": "86cc9fcfd0daa10ba25442e5ecea23db618027362bc85fdc591ec7f5d9d39a91",
+      "configure": "171bf05c065e5c17235adb80dcc3804e807c34587fa0599f4622ea22ce5637ae"
     }
   }
 }
