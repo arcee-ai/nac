@@ -17,6 +17,27 @@ Each `build-*.sh` owns one component's normal source build or exact header
 replacement. Kerberos runs its ordinary upstream `make check`; fixture skips
 remain visible in its build log. Its 23 library/plugin paths match the original
 installed package scope. SASL preserves the existing Heimdal/plugin configuration.
+
+The Kerberos package stage additionally compiles three bounded source-linked
+regressions against its configured Linux tree. An out-of-bounds NegoEx extension
+vector, a too-short NegoEx common header at a guard page, and a KRB-CRED with
+fewer ticket-info entries than tickets each return the corrected error. The
+script reverses only the two checksum-locked upstream patches, with zero fuzz,
+in disposable source copies and requires each corresponding control to fault
+within five seconds. The source and runner are retained with the other package
+build recipes in the final image; the compiled test binaries stay under the
+builder's `/work` directory and are not installed. These controls exercise
+the corrected parser paths; they do not by themselves validate the
+whole final image, every advisory record, or an applicability disposition.
+
+The curl stage checks the exact 8.23.0 `multi_done` source SHA and the official
+cleanup-order patch SHA. It requires request cleanup before connection filter
+notification and detach, with pending scheduling after connection return and
+guarded by `data->multi`. The exact upstream patch reversal must fail this
+ordering check. This is patch-presence evidence, not a runtime use-after-free
+regression or an advisory clearance. The patch and checker are retained as
+package-build recipe evidence; no test binary is installed.
+
 The GCC package changes the one affected template header in the exact checksum-pinned
 supplier development payload. Curl restores supported SSH/LDAP/NTLM/zstd options;
 Allison accepted upstream RTMP, SMB/SMBS and TLS-SRP removals on October 22, 2026.

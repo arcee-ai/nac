@@ -70,6 +70,19 @@ for name in ("NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"):
 PY_CACHE
 python3 "$repo_root/scripts/test-managed-dependency-layer.py"
 python3 "$repo_root/.github/scripts/image-build-driver.test.py"
+python3 - "$dockerfile" <<'PY_SOURCE_LABEL'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1]).read_text().splitlines()
+runtime = source[next(i for i, line in enumerate(source) if line.endswith(" AS runtime")):]
+arg = [i for i, line in enumerate(runtime) if line == "ARG NAC_SOURCE_REVISION"]
+label = [i for i, line in enumerate(runtime) if line == 'LABEL org.opencontainers.image.revision="${NAC_SOURCE_REVISION}"']
+last_build = max(i for i, line in enumerate(runtime) if line.startswith(("RUN ", "COPY ")))
+user = next(i for i, line in enumerate(runtime) if line.startswith("USER "))
+if len(arg) != 1 or len(label) != 1 or not last_build < arg[0] < label[0] < user:
+    sys.exit("managed image contract: exact source revision label must follow all final runtime build steps")
+PY_SOURCE_LABEL
 require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'
