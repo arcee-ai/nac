@@ -136,27 +136,32 @@ class ApplicabilityTests(unittest.TestCase):
                 self.assertEqual(run(f)["dispositions"][0]["rule_id"], "synthetic-rule")
 
     def test_shared_upstream_coordinate_cannot_clear_one_of_two_installed_apks(self):
-        f = fixture()
-        coordinate = "upstream:haxx/curl"
-        f["findings"][0]["package"] = coordinate
-        f["rules"][0]["finding"]["package"] = coordinate
-        f["rules"][0]["binding"]["package"] = coordinate
-        f["observations"][0]["binding"]["package"] = coordinate
-        f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
-        sibling = copy.deepcopy(f["observations"][0])
-        sibling["binding"]["installed_package"] = "apk:libcurl-openssl4"
-        sibling["binding"]["payload_sha256"] = "d" * 64
-        f["observations"].append(sibling)
-        with self.assertRaisesRegex(ValueError, "aggregate installed-payload proof"):
-            run(f)
-        # The actual package coordinates remain independently reviewable.
-        f["findings"][0]["package"] = "apk:fixture-library"
-        f["rules"][0]["finding"]["package"] = "apk:fixture-library"
-        f["rules"][0]["binding"]["package"] = "apk:fixture-library"
-        f["observations"][0]["binding"]["package"] = "apk:fixture-library"
-        f["observations"][1]["binding"]["package"] = "apk:libcurl-openssl4"
-        f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
-        self.assertEqual(run(f)["dispositions"][0]["rule_id"], "synthetic-rule")
+        for coordinate in ("upstream:haxx/curl", "upstream-wolfi:curl"):
+            with self.subTest(coordinate=coordinate):
+                f = fixture()
+                f["findings"][0]["package"] = coordinate
+                f["rules"][0]["finding"]["package"] = coordinate
+                f["rules"][0]["binding"]["package"] = coordinate
+                f["record"]["binding"]["package"] = coordinate
+                f["observations"][0]["binding"]["package"] = coordinate
+                f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
+                # One installed APK alone satisfies the old rule shape.
+                self.assertEqual(run(f)["dispositions"][0]["rule_id"], "synthetic-rule")
+                sibling = copy.deepcopy(f["observations"][0])
+                sibling["binding"]["installed_package"] = "apk:libcurl-openssl4"
+                sibling["binding"]["payload_sha256"] = "d" * 64
+                f["observations"].append(sibling)
+                with self.assertRaisesRegex(ValueError, "aggregate installed-payload proof"):
+                    run(f)
+                # The actual package coordinate remains independently reviewable.
+                f["findings"][0]["package"] = "apk:fixture-library"
+                f["rules"][0]["finding"]["package"] = "apk:fixture-library"
+                f["rules"][0]["binding"]["package"] = "apk:fixture-library"
+                f["record"]["binding"]["package"] = "apk:fixture-library"
+                f["observations"][0]["binding"]["package"] = "apk:fixture-library"
+                f["observations"][1]["binding"]["package"] = "apk:libcurl-openssl4"
+                f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
+                self.assertEqual(run(f)["dispositions"][0]["rule_id"], "synthetic-rule")
 
     def test_absence_evidence_cannot_survive_introduced_consumer_or_executable(self):
         for role in ("complete_filesystem", "complete_consumers"):
