@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from rust_test_support import add_rust_bundle, rust_fixture
 import image_inventory as inv
 import image_packages as packages
 import image_scan as scan
@@ -134,6 +135,7 @@ class PackageIntegrityTests(unittest.TestCase):
                 ("identity.json", {"image": IMAGE, "source_revision": "a" * 40,
                     "go_application_pins": PINS, "runtime_package_pins": pins}), ("coverage.json", {})]:
                 inv.write_json(root / name, value)
+            add_rust_bundle(root)
             scan.bundle_manifest(root, IMAGE)
             args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=root,
                                       output=root / "result", tool_cache=root, db_cache=root)
@@ -160,6 +162,7 @@ class PackageIntegrityTests(unittest.TestCase):
                 ("identity.json", {"image": IMAGE, "source_revision": "a" * 40,
                     "go_application_pins": PINS, "runtime_package_pins": pins}), ("coverage.json", {})]:
                 inv.write_json(root / name, value)
+            add_rust_bundle(root)
             scan.bundle_manifest(root, IMAGE)
             policy = root / "policy.json"
             policy.write_text('{"schema_version":1,"exceptions":[]}')
@@ -175,7 +178,7 @@ class PackageIntegrityTests(unittest.TestCase):
                 report = {"descriptor": {"name": "grype"}, "distro": {"name": "wolfi", "version": "20230201"},
                           "matches": matches}
                 with patch.object(scan, "install_tools", return_value=({}, {})), patch.object(
-                    scan, "scan_sbom", return_value=report), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
+                    scan, "scan_sbom", return_value=report), patch.object(scan, "query_runtimes", return_value=[]), patch.object(scan, "query_rust", return_value=[]), patch.object(
                     scan, "scan_owned_upstreams", return_value=extra), patch.object(
                     scan, "command", wraps=scan.command) as child:
                     self.assertEqual(scan.run(args), expected)
