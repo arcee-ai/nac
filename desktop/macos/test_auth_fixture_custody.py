@@ -113,16 +113,42 @@ class AuthFixtureCustodyTests(unittest.TestCase):
 
     def terminal(self, scenario='external-auth', build=BUILD, store=None):
         root = Path(tempfile.gettempdir()).resolve() / ('nac-mac-preview-' + str(uuid.uuid4()))
-        return {'scenario': scenario, 'passed': True, 'commands_retired': True, 'stopped': True,
-                'engine_reaped': True, 'identity_retired': True, 'profile_removed': True,
-                'app_pid': 12345, 'engine_pid': 12346, 'launch_incarnation': str(uuid.uuid4()),
-                'ready_source': build['source_revision'], 'ready_build': build['build_id'],
-                'ready_track': build['track'], 'profile': str(root),
-                'ready_store': str(store or root / 'store.db'), 'selected_store': str(store),
-                'external_browser_observed': True}
+        record = {'scenario': scenario, 'passed': True, 'commands_retired': True, 'stopped': True,
+                  'engine_reaped': True, 'identity_retired': True, 'profile_removed': True,
+                  'app_pid': 12345, 'engine_pid': 12346, 'launch_incarnation': str(uuid.uuid4()),
+                  'ready_source': build['source_revision'], 'ready_build': build['build_id'],
+                  'ready_track': build['track'], 'profile': str(root),
+                  'ready_store': str(store or root / 'store.db'), 'selected_store': str(store),
+                  'external_browser_observed': True}
+        if scenario == 'external-auth':
+            recorder = str(uuid.uuid4())
+            runtime = {'source_revision': build['source_revision'], 'build_id': build['build_id'],
+                       'schema_version': 50, 'scenario': 'native-external-auth',
+                       'store_engine': 'sqlite', 'journal_mode': 'wal'}
+            rows = [{'name': 'nac.mcp.oauth.callback.' + name, 'kind': 'diagnostic', 'outcome': outcome,
+                     'timestamp_unix_ms': 1, 'export_recorder_id': recorder,
+                     'correlation': {'generation': 7}, 'runtime': runtime}
+                    for name, outcome in [('listening', 'started'), ('state_rejected', 'error')]]
+            proof = {'source': build['source_revision'], 'build': build['build_id'], 'schema': 50,
+                     'engine_pid': record['engine_pid'], 'engine_incarnation': record['launch_incarnation'],
+                     'document': str(uuid.uuid4()), 'view': str(uuid.uuid4()),
+                     'launch': record['launch_incarnation'], 'recorder_id': recorder, 'owner': '7',
+                     'rejection_observed_ns': '100', 'cancel_issued_ns': '101',
+                     'token_counts_before': [1, 1], 'token_counts_after': [1, 1], 'observations': rows,
+                     'state_rejection_observed': True, 'rejection_before_cancel': True,
+                     'complete_stream_capture': False}
+            final = {'process_id': record['engine_pid'], 'recorder_id': recorder, 'runtime': runtime,
+                     'final_receipt': True, 'capacity': 1024, 'receipt_failures': 0,
+                     'stats': {'accepted': 2, 'exported': 2, 'dropped': 0, 'failures': 0}}
+            record.update(ready_schema=50,
+                          external_auth={'wrong_state_rejected_then_canceled': True,
+                                         'wrong_state_callback_witness': proof},
+                          engine_log_after_shutdown='nac-telemetry-export ' + json.dumps(final) + '\n')
+        return record
 
     def exercise(self, *, marked=False, receipt='complete', changes=None, spawn_error=None,
-                 client=None, restart_error=None, inspection=None, listener_error=None, notice_error=False):
+                 client=None, restart_error=None, inspection=None, listener_error=None, notice_error=False,
+                 clock_values=None):
         build = MARKED if marked else BUILD
         self.write_receipt(build, marked)
         source_bytes = {str(f.relative_to(self.source)): f.read_bytes() for f in self.source.rglob('*') if f.is_file()}
@@ -174,7 +200,9 @@ class AuthFixtureCustodyTests(unittest.TestCase):
             if hasattr(device, 'cleanup_failed_case'):
                 stack.enter_context(patch.object(device, 'cleanup_failed_case'))
             stack.enter_context(patch('sys.argv', ['runner', str(self.source), str(output)]))
-            stack.enter_context(patch.object(external.time, 'monotonic', side_effect=[0, 181] if client and client.returncode is None else None))
+            stack.enter_context(patch.object(external.time, 'monotonic', return_value=0.0,
+                side_effect=clock_values if clock_values is not None else
+                    ([0, 181] if client and client.returncode is None else None)))
             stack.enter_context(patch('builtins.print', side_effect=OSError('notice failure') if notice_error else None))
             try:
                 (device.main if marked else external.main)()
@@ -232,6 +260,9 @@ class AuthFixtureCustodyTests(unittest.TestCase):
         self.assertTrue(any('client retirement' in note for note in error.__notes__))
         self.assertTrue(any('retention notice' in note for note in error.__notes__))
         self.retained()
+        error, _, _ = self.exercise(clock_values=[0, 181])
+        self.assertIsInstance(error, TimeoutError)
+        self.retained()
 
     def test_nonzero_launch_and_marked_bad_receipt_retain(self):
         client = Client()
@@ -254,6 +285,11 @@ class AuthFixtureCustodyTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertTrue((output / 'browser-observations.json').exists())
         self.assertTrue(all(not root.exists() for root in self.relocations))
+        for changes in [{'external_auth': {}}, {'engine_log_after_shutdown': ''}]:
+            with self.subTest(incomplete_witness=changes):
+                error, _, _ = self.exercise(changes=changes)
+                self.assertIsInstance(error, AssertionError)
+                self.assertTrue(self.relocations[-1].exists())
 
     def test_device_success_then_restart_spawn_failure_retains_same_profile(self):
         primary = RuntimeError('restart launch uncertain')
