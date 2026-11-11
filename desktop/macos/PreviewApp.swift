@@ -38,12 +38,21 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     private var storeRetryButton: NSButton?
     private var launchIdentity: EngineIdentity?
     private var failedViewRetainedEngine = false
+    private var notificationDelivery: NativeAttentionDelivery!
+    private var attention: NativeAttentionCoordinator?
     #endif
     #if PREVIEW_SMOKE
     #if LIFECYCLE_SMOKE || !LOCAL_APP
     private var recoverySmoke: RecoverySmoke?
     #endif
-    #if LIFECYCLE_SMOKE
+    #if ATTENTION_SMOKE
+    private var attentionSmoke: AttentionSmoke?
+    var attentionSmokeSnapshot: [String: Any] { attention?.smokeSnapshot ?? [:] }
+    func attentionSmokeObservation(paused: Bool) throws {
+        guard let attention else { throw DesktopStartupError.message("Attention owner unavailable") }
+        try attention.smokeObservation(paused: paused)
+    }
+    #elseif LIFECYCLE_SMOKE
     private var lifecycleSmoke: LifecycleSmoke?
     #elseif INSTANCE_SMOKE
     private var instanceSmoke: InstanceSmoke?
@@ -62,6 +71,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         NSApp.appearance = NSAppearance(named: .darkAqua)
         #if LOCAL_APP
         let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC"
+        #if ATTENTION_SMOKE
+        notificationDelivery = AttentionSmokeDelivery()
+        #else
+        notificationDelivery = NativeNotificationCenter()
+        #endif
         #else
         let name = "NAC Development Preview"
         #endif
@@ -115,7 +129,10 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         #if PREVIEW_SMOKE
-        #if LIFECYCLE_SMOKE
+        #if ATTENTION_SMOKE
+        attentionSmoke = AttentionSmoke(app: self, delivery: notificationDelivery as! AttentionSmokeDelivery)
+        attentionSmoke?.start()
+        #elseif LIFECYCLE_SMOKE
         if CommandLine.arguments.contains("--recovery-output") {
             recoverySmoke = RecoverySmoke(app: self)
             recoverySmoke?.start()
@@ -191,7 +208,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             launchIdentity = identity
             var arguments = Array(CommandLine.arguments.dropFirst())
             #if PREVIEW_SMOKE
-            #if LIFECYCLE_SMOKE
+            #if ATTENTION_SMOKE
+            arguments = AttentionSmoke.launchArguments(arguments)
+            #elseif LIFECYCLE_SMOKE
             arguments = recoverySmoke != nil ? RecoverySmoke.launchArguments(arguments) : LifecycleSmoke.launchArguments(arguments)
             #elseif INSTANCE_SMOKE
             arguments = InstanceSmoke.launchArguments(arguments)
@@ -279,6 +298,20 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
                 webView = nil
                 commands = nil
             }
+            #endif
+            #if LOCAL_APP
+            if attention == nil, let workspaceStorage {
+                attention = NativeAttentionCoordinator(storage: workspaceStorage,
+                    receipt: { [weak self] in self?.engine.receipt }, delivery: notificationDelivery,
+                    activate: { [weak self] in
+                        _ = self?.appInstance.reopen()
+                        NSApp.activate(ignoringOtherApps: true)
+                        self?.updatePresentation()
+                    }, navigate: { [weak self] target, completion in
+                        self?.commands?.openSessionTarget(session: target.session, occurrence: target.occurrence,
+                                                         completion: completion) ?? false
+                    })
+            } else { attention?.rebind() }
             #endif
             recovery.seedRoute(String(route.dropFirst()))
             guard recovery.engineReady(receipt) else { return }
@@ -387,6 +420,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         status.isHidden = true
         webView.isHidden = false
         recovery.documentLoaded()
+        updatePresentation()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
@@ -461,6 +495,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         let result = appInstance.reopen()
+        updatePresentation()
         #if INSTANCE_SMOKE
         instanceSmoke?.didReopen()
         #endif
@@ -494,6 +529,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #if LOCAL_APP
         workspaceStorageSelection?.task.cancel()
         workspaceStorageSelection = nil
+        attention?.suspend()
         #endif
         recovery.cancelPending()
         nativePaths?.retire()
@@ -540,6 +576,32 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    private func updatePresentation() {
+        guard let window else { return }
+        let visible = window.isVisible && !window.isMiniaturized && !NSApp.isHidden &&
+            window.occlusionState.contains(.visible)
+        commands?.setVisibility(visible)
+        #if LOCAL_APP
+        attention?.presentation(focused: visible && NSApp.isActive && window.isKeyWindow)
+        #endif
+    }
+    func windowDidBecomeKey(_ notification: Notification) { updatePresentation() }
+    func windowDidResignKey(_ notification: Notification) { updatePresentation() }
+    func windowDidMiniaturize(_ notification: Notification) { updatePresentation() }
+    func windowDidDeminiaturize(_ notification: Notification) { updatePresentation() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { updatePresentation() }
+    func applicationDidBecomeActive(_ notification: Notification) { updatePresentation() }
+    func applicationDidResignActive(_ notification: Notification) { updatePresentation() }
+    func applicationDidHide(_ notification: Notification) { updatePresentation() }
+    func applicationDidUnhide(_ notification: Notification) { updatePresentation() }
+    func applicationDidChangeOcclusionState(_ notification: Notification) { updatePresentation() }
+    func windowWillClose(_ notification: Notification) {
+        commands?.setVisibility(false)
+        #if LOCAL_APP
+        attention?.presentation(focused: false)
+        #endif
+    }
 
     #if LIFECYCLE_SMOKE
     func applicationWillTerminate(_ notification: Notification) { lifecycleSmoke?.willTerminate() }
@@ -602,12 +664,29 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         #if INSTANCE_SMOKE
         instanceSmoke?.prepareForStop()
         #endif
+        #if LOCAL_APP
+        if let attention {
+            attention.retire { [weak self] durable in
+                if !durable { fputs("NAC notification storage did not confirm a durable checkpoint before Quit.\n", stderr) }
+                self?.continueShutdown(completion: completion)
+            }
+            return
+        }
+        #endif
+        continueShutdown(completion: completion)
+    }
+
+    private func continueShutdown(completion: @escaping () -> Void) {
         // Closing a window retains the document. Actual Stop releases the
         // document itself; stopLoading alone does not release its ownership.
         workspaceIncarnation = nil
         navigationIncarnations.removeAll()
         activeNavigation = nil
+        #if ATTENTION_SMOKE
+        if !quit.attentionFixtureCleanup { window.makeFirstResponder(nil) }
+        #else
         window.makeFirstResponder(nil)
+        #endif
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView?.stopLoading()
@@ -635,7 +714,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             }
             #endif
             #if PREVIEW_SMOKE
-            #if LIFECYCLE_SMOKE
+            #if ATTENTION_SMOKE
+            self.attentionSmoke?.didStop()
+            #elseif LIFECYCLE_SMOKE
             if let recoverySmoke = self.recoverySmoke { recoverySmoke.didStop() }
             else { self.lifecycleSmoke?.didStop() }
             #elseif INSTANCE_SMOKE
@@ -669,6 +750,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     func beginWorkspaceRetirement() -> WorkspaceRetirement {
         // Repeated retirement still fences a newly bound renderer waiter.
         // Its app-owned profile open remains alive for the current successor.
+        #if LOCAL_APP
+        attention?.documentRetiring()
+        #endif
         if baseURL != nil { loading?.cancel() }
         nativePaths?.retire()
         nativePaths = nil
@@ -683,6 +767,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             self.webView = nil
             self.commands = nil
         }
+        #if ATTENTION_SMOKE
+        // An earlier recovery retirement may complete after cleanup custody
+        // was lost. Read the current flag, not a captured eligibility value.
+        retirement.attentionFixtureCleanup = { [weak self] in self?.quit.attentionFixtureCleanup ?? true }
+        #endif
         workspaceRetirement = retirement
         return retirement
     }
@@ -740,8 +829,15 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         window.contentView!.addSubview(replacement, positioned: .below, relativeTo: status)
         commands = NativeCommands(webView: replacement, receipt: { [weak self] in self?.engine.receipt },
             connectionLost: { [weak self] in self?.recovery.connectionLost() }, workspaceStorage: workspaceStorage)
+        #if LOCAL_APP
+        commands.sessionTargetReady = { [weak self] in self?.attention?.navigationReady() }
+        #endif
         commands.installMenus(applicationName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "NAC")
         recovery.installMenus()
+        #if LOCAL_APP
+        attention?.installMenu(in: NSApp.mainMenu?.items.first?.submenu)
+        #endif
+        updatePresentation()
         recovery.showLossNotice()
         commands.bind()
         nativePaths?.retire()
@@ -769,6 +865,7 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         }
         #if LOCAL_APP
         let ownedLaunch = quit.launch
+        attention?.suspend()
         #endif
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             var settled = false

@@ -12,6 +12,7 @@ final class Navigation: NSObject {}
 struct NativeDocumentBinding {}
 @MainActor final class Commands {
     func bind() {}; func retire() {}
+    func openSessionTarget(session: String, occurrence: String?, completion: @escaping (Bool) -> Void) -> Bool { false }
     func currentDocument(in view: View) -> NativeDocumentBinding? { nil }
 }
 // Inert construction adapter required by the verbatim folder-joined load().
@@ -23,6 +24,18 @@ struct NativeDocumentBinding {}
 }
 struct Profile { let digest = "owned-profile" }
 @MainActor final class Storage { let profile = Profile() }
+// Inert attention construction ports for the verbatim load() composition.
+// Callbacks are never invoked; notification delivery is outside these controls.
+struct AttentionTarget { let session: String; let occurrence: String? }
+@MainActor final class NativeAttentionCoordinator {
+    init(storage: Storage, receipt: @escaping () -> EngineReceipt?, delivery: Bool,
+         activate: @escaping () -> Void,
+         navigate: @escaping (AttentionTarget, @escaping (Bool) -> Void) -> Bool) {}
+    func rebind() {}
+}
+@MainActor final class Instance { func reopen() -> Bool { false } }
+@MainActor final class Application { func activate(ignoringOtherApps: Bool) {} }
+@MainActor let NSApp = Application()
 @MainActor final class Barrier {
     var waiting = false
     private var continuation: CheckedContinuation<Void, Never>?
@@ -51,6 +64,9 @@ struct Profile { let digest = "owned-profile" }
     var webView: View! = View()
     var commands: Commands! = Commands()
     var nativePaths: NativePathBridge?
+    var attention: NativeAttentionCoordinator?
+    let notificationDelivery = false, appInstance = Instance()
+    func updatePresentation() {}
     var stopping = false
     var failure: String?
     var baseURL: URL? = URL(string: "http://127.0.0.1:1234")

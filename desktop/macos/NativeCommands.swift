@@ -11,6 +11,7 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     private var bridge: NativeCommandBridge?
     private var externalNavigation: ExternalNavigation?
     private var bound = false
+    var sessionTargetReady: (() -> Void)?
     #if PREVIEW_SMOKE
     var smokeSnapshot: [String: Any] { bridge?.smokeSnapshot ?? ["installed": false] }
     var smokeExternalNavigation: [String: Any] { externalNavigation?.smokeSnapshot ?? [:] }
@@ -35,7 +36,7 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
         guard !bound, let webView, receipt() != nil else { return }
         bound = true
         bridge = NativeCommandBridge(webView: webView, receipt: receipt, connectionLost: connectionLost,
-                                     workspaceStorage: workspaceStorage)
+                                     workspaceStorage: workspaceStorage, targetReady: { [weak self] in self?.sessionTargetReady?() })
         externalNavigation = ExternalNavigation(webView: webView, receipt: receipt)
     }
 
@@ -49,6 +50,11 @@ final class NativeCommands: NSObject, NSMenuItemValidation, WKUIDelegate {
     }
     func navigationFinished(in view: WKWebView, navigation: WKNavigation?) { bridge?.navigationFinished(in: view, navigation: navigation) }
     func currentDocument(in view: WKWebView) -> NativeDocumentBinding? { bridge?.currentDocument(in: view) }
+    func setVisibility(_ visible: Bool) { bridge?.setVisibility(visible) }
+    @discardableResult
+    func openSessionTarget(session: String, occurrence: String, completion: @escaping (NativeSessionTarget.Outcome) -> Void) -> Bool {
+        bridge?.openSessionTarget(session: session, occurrence: occurrence, completion: completion) ?? false
+    }
     func allows(_ action: WKNavigationAction, in view: WKWebView) -> Bool {
         if bridge?.allows(action, in: view) == true { return true }
         guard bridge?.currentDocument(in: view) != nil else { return false }

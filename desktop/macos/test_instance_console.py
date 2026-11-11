@@ -22,6 +22,33 @@ def unlocked():
                             windows=[dict(owner='Finder', pid=42, on_screen=True, layer=0)]))
 
 
+class StageCustodyTests(unittest.TestCase):
+    def test_observed_stage_cannot_bypass_the_current_console_guard(self):
+        for deadline in (None, 1):
+            with self.subTest(deadline=deadline):
+                journey = object.__new__(AppJourney)
+                journey.observer = Path('/owned/observer')
+                journey.console_checks = []
+                journey.read = Mock(return_value={'stage': 'ready'})
+                journey.observe = Mock()
+                with patch('instance_smoke.time.monotonic', return_value=0), \
+                        patch('instance_smoke.require_console', side_effect=AssertionError('locked')) as guard:
+                    with self.assertRaisesRegex(AssertionError, 'locked'):
+                        journey.stage('ready', deadline=deadline)
+                guard.assert_called_once_with(journey.observer, journey.console_checks, 'observed-stage-ready')
+                journey.observe.assert_not_called()
+
+    def test_expired_deadline_refuses_before_collecting_console_state(self):
+        journey = object.__new__(AppJourney)
+        journey.observer = Path('/owned/observer')
+        journey.console_checks = []
+        with patch('instance_smoke.time.monotonic', return_value=10), \
+                patch('instance_smoke.require_console') as guard:
+            with self.assertRaises(TimeoutError):
+                journey.guard_console('late-stage', deadline=9)
+        guard.assert_not_called()
+
+
 class PredicateTests(unittest.TestCase):
     def test_independent_positive_facts_allow_absent_optional_lock_observations(self):
         state = unlocked()

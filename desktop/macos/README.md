@@ -548,6 +548,44 @@ initial startup and a new engine retain their existing behavior. Native renderer
 crash, sleep/wake, replacement and trusted-input acceptance require separately
 qualified actual AppKit/WKWebView evidence; headless controls and compilation do
 not establish those behaviors.
+
+## Native attention (ALL-350)
+
+The native **Notifications** menu defaults off. Enabling saves a completion
+cutoff before requesting system permission; a saved opt-in survives ordinary
+cold launches without another permission request. Muting keeps unread attention
+accounting. Clear completion indicator clears its native count; Reset notification
+settings removes only native notification preferences. A failed save suspends
+delivery and warns that the previous saved setting may return next launch.
+Generic notification content contains no prompt, goal, tool or approval text.
+System scheduling acknowledgement does not establish that a banner was shown.
+While a current decision projection is unavailable or reconnecting, the Dock
+shows `?` (or a retained completion count plus `?`), rather than claiming there
+are no pending decisions. Only a current accepted baseline/resolution can clear
+that uncertainty; muting or system denial does not hide it.
+Clicking opens the existing app's normal shared chat after a canonical session
+lookup. IME composition, a modal or an editor without retained text defers the
+response; it never triggers a later automatic navigation.
+
+`preview.sh attention-build` creates a separate fixture bundle plus
+`InstanceObservation` and `AttentionFixtureCleanup` helpers. In an explicitly
+admitted Aqua/browser lane, run `python3 -B desktop/macos/attention_app_smoke.py
+APP OUTPUT INSTANCE_OBSERVER`. The driver uses an external disposable profile,
+actual system WK, real committed engine completions and an injected notification
+center. It covers default-off, durable opt-in/cold restore, hidden completion,
+click into shared chat, retained draft on close/reopen, Cancel/Stop, reset and
+exact-owned WebKit/profile cleanup. It cannot qualify signed OS banners, trusted
+IME input or hidden CPU/wakeups. Those remain required separate acceptance lanes.
+
+The portable source contracts run with
+`npm --prefix crates/nac-server/web run test:attention-fixtures`, and are included
+in `npm test` (also reached by `make test-web` and the existing frontend CI lane).
+They cover absolute deadlines, custody/publication/capture ordering, default
+callers, the actual route builder, and the verbatim chat-readiness script against
+negative DOM cases and real React component structure with inert providers.
+The passive observer under `test_support/` is a test fixture; its OS calls are
+mocked by these controls. Geometry and hit testing are symbolic JSDOM checks,
+not actual AppKit/WKWebView paint, input or native-delivery qualification.
 ## Fixed hosted lifecycle qualification (ALL-344)
 
 `all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
