@@ -8,7 +8,9 @@ its exact bundled child. Rust remains the execution/persistence/permission
 authority; the production React UI and HTTP/SSE client remain shared.
 
 - Bundle `nac-web` and its existing embedded assets. No second frontend build,
-  native chat client, privileged script message handler, or production bridge.
+  native chat client or privileged script message handler. NativeCommands owns
+  the bounded UI-only page-world adapter: named actions go to shared React owners;
+  web-to-native messages report only readiness/settlement, never operation authority.
 - Preview builds create a private temporary HOME/NAC_HOME/workspace/store.
   `LOCAL_APP` builds use DesktopStartup and the bundled Rust preflight to reuse
   normal configuration, credential and track owners. Never seed/delete a normal
@@ -32,7 +34,9 @@ authority; the production React UI and HTTP/SSE client remain shared.
   fences each failed child's retirement; only explicit native Retry restarts the
   pinned selected configuration through the ordinary Rust serving lease.
   Preserve PreviewApp's common private `fail(String)` funnel and the engine's
-  receipt invalidation before callbacks. Menus/bridge remain the separate346 owner.
+  receipt invalidation before callbacks. NativeCommands owns menus/bridge and retires through the common fail/actual-stop
+  funnel. Hiding an intact window does not retire its bridge. Native Edit stays
+  in the AppKit/WK responder chain; never synthesize trusted terminal intent.
 - The read-only `BundleIdentity.sh` helper maps the exact bundled engine identity's track to approved
   normal bundle IDs. Preview and instance-smoke identities stay separate. Normal
   source lists and binaries exclude all preview providers and smoke definitions;
