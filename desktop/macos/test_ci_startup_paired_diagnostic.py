@@ -9,111 +9,159 @@ import test_ci_startup_ax_diagnostics as fixtures
 SOURCE = Path(__file__).with_name('CIStartupAXWitness.swift')
 
 
-class PairedDiagnosticSourceControls(unittest.TestCase):
-    def setUp(self):
-        self.source = SOURCE.read_text()
-        self.policy = self.source.split('// BEGIN PRE-REFUSAL PAIRED DIAGNOSTIC', 1)[1].split('// END PRE-REFUSAL PAIRED DIAGNOSTIC', 1)[0]
-        self.branch = self.source.split('if apps.count == 1, target.pid != 0,', 1)[1].split('if target.pid != 0 { if try terminal', 1)[0]
+class InteractionSourceControls(unittest.TestCase):
+    def test_old_extra_cg_fatal_branch_is_replaced_without_loosening_initial_root_selection(self):
+        source = SOURCE.read_text()
+        self.assertNotIn('cgWindows.count > 1', source)
+        self.assertNotIn('StartupAXPreRefusalDiagnostic', source)
+        self.assertIn('try StartupObserver.need(windows.count == 1)', source)
+        self.assertIn('windows.filter { $0 == window }.count == 1', source)
+        self.assertIn('ownedFrame(target.pid, window) == frame', source)
 
-    def test_actual_boolean_eligibility_expression_denies_every_missing_precondition(self):
-        # Evaluate the production expression itself, restricted to six Boolean
-        # names/operators; this does not emulate an AX or Swift runtime.
-        expression = re.search(r'withinSample: Bool\) -> Bool \{\s*([^}]+)', self.policy).group(1).strip()
-        names = ('complete', 'exactProcess', 'originalRoot', 'retainedRoot', 'pristine', 'withinSample')
-        self.assertEqual(set(re.findall(r'[A-Za-z]+', expression)), set(names))
-        self.assertNotIn('||', expression)
-        for values in itertools.product((False, True), repeat=6):
-            result = eval(expression.replace('&&', ' and '), {'__builtins__': {}}, dict(zip(names, values)))
-            self.assertEqual(result, all(values))
-        for guard in ('current == target && target.valid', 'cgWindows.contains(window)',
-                      'retainedRoot != nil', 'refusals == 0 && retired == nil && !pairedAttempted && reader.failureData == nil',
-                      'process(getpid()) == me', 'declaration.helper_sha256', '== digest',
-                      'readAt - began < 1_000_000_000'):
-            self.assertIn(guard, self.branch)
-        self.assertIn('cgWindows.count > 1', self.branch)
-        self.assertNotIn('target =', self.branch)
-        self.assertNotIn('window =', self.branch)
+    def test_global_hit_is_shared_canonical_and_rechecked_after_resource_bookend(self):
+        source = SOURCE.read_text()
+        actor = SOURCE.with_name('startup_xctest').joinpath('StartupAXGuard.swift').read_text()
+        self.assertEqual(source.count('reader.interaction(request, pid: target.pid)'), 2)
+        self.assertIn('AXUIElementCreateSystemWide()', actor)
+        self.assertIn('AXUIElementCopyElementAtPosition(system,', actor)
+        self.assertIn('StartupInteractionPolicy.target(', actor)
+        self.assertIn('interactionBinding.accept(request.id', actor)
+        self.assertIn('inputTargets.accept(key', actor)
+        self.assertNotIn('AXUIElementSetAttributeValue', actor)
+        self.assertNotIn('AXUIElementPerformAction', actor)
 
-    def test_only_one_canonical_read_precedes_original_fatal_refusal_without_ready_or_retry(self):
-        self.assertEqual(self.branch.count('try reader.observe('), 1)
-        self.assertEqual(self.branch.count('StartupAXPreRefusalDiagnostic.capture('), 1)
-        self.assertLess(self.branch.index('pairedAttempted = true'), self.branch.index('try reader.observe('))
-        self.assertLess(self.branch.index('try reader.observe('), self.branch.index('throw OwnershipError.invalid'))
-        self.assertNotIn('publish(', self.branch)
-        self.assertNotIn('continue', self.branch)
-        self.assertNotIn('RunLoop', self.branch)
-        self.assertNotIn('AXUIElement', self.policy)
-        self.assertNotIn('while ', self.policy)
-        self.assertNotIn('for ', self.policy)
-        self.assertEqual(self.policy.count('try read()'), 1)
-        self.assertEqual(self.policy.count('try close()'), 1)
-        self.assertLess(self.policy.index('try read()'), self.policy.index('try close()'))
-        self.assertIn('catch { /* Original CG refusal stays primary. */ }', self.policy)
-        self.assertIn('catch { result["outcome"] = "closing_refused"; return result }', self.policy)
-        self.assertIn('"acceptance": false', self.policy)
-        self.assertIn('snapshot(config, resources: resources, known: &known)', self.branch)
-        self.assertIn('(latest[0]["windows"] as? [Int])?.contains(window) == true', self.branch)
-        self.assertIn('decodedProcess(latest[0]) == target', self.branch)
-        self.assertIn('ownedFrame(target.pid, window) == frame', self.branch)
-        self.assertIn('ended - began <= 1_000_000_000', self.branch)
+    def interaction_sources(self):
+        directory = SOURCE.with_name('startup_xctest')
+        return (directory.joinpath('StartupJourneys.swift').read_text(),
+                directory.joinpath('StartupAXGuard.swift').read_text())
 
-    def test_every_optional_opening_fault_is_contained_before_original_refusal(self):
-        # Trace actual source block boundaries. This is not executed Swift:
-        # every opening throw must exit to the optional catch, then encounter
-        # the original CG refusal without reaching the canonical read.
-        code = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', lambda m: ' ' * len(m[0]), self.branch)
-        opening = re.search(r'\bdo\s*\{', code)
-        self.assertIsNotNone(opening, 'Optional opening rechecks have no containing catch')
-        start = code.index('{', opening.start())
-        def end_of_block(begin):
-            depth = 1
-            for index in range(begin + 1, len(code)):
-                depth += (code[index] == '{') - (code[index] == '}')
-                if depth == 0: return index
-            self.fail('Unclosed production block')
-        end = end_of_block(start)
-        catch = re.match(r'\s*catch\s*\{', code[end + 1:])
-        self.assertIsNotNone(catch, 'Opening checks must have an unfiltered catch')
-        catch_start = code.index('{', end + 1)
-        catch_end = end_of_block(catch_start)
-        self.assertNotIn('throw', code[catch_start:catch_end])
-        self.assertNotIn('reader.observe', code[catch_start:catch_end])
-        self.assertRegex(code[catch_end + 1:], r'^\s*throw OwnershipError.invalid')
-        read = code.index('try reader.observe(')
-        capture = code.index('StartupAXPreRefusalDiagnostic.capture(')
-        for fault in ('try decodedProcess(apps[0])', 'resources.intact()', 'process(getpid()) == me',
-                      'StartupAXPreflight.file(binary,', 'StartupAXPreflight.file(configPath,',
-                      'try ownedFrame(target.pid, window)', 'try StartupObserver.need(readAt'):
-            with self.subTest(opening_fault=fault):
-                at = code.index(fault)
-                self.assertLess(start, at)
-                self.assertLess(at, capture)
-                self.assertLess(capture, read)
-                self.assertLess(read, end)
-        self.assertNotIn('continue', code[start:catch_end])
-        self.assertNotIn('return', code[start:catch_end])
-        self.assertNotIn('publish(', code[start:catch_end])
+    def assert_coordinate_path(self, journey, actor):
+        # Scoped lexical fences for the reviewed integration, not a Swift parser
+        # or a substitute for the existing inert/SDK/native behavior checks.
+        dispatch = journey.split('func dispatch(', 1)[1].split('func text(', 1)[0]
+        selection = ('let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))\n'
+                     '                let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                     '                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })')
+        fences = ('let ticket = guardTicket',
+                  'let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)', selection,
+                  'let request = try client.prepareInteraction(ticket, point: point, anchor: anchor,',
+                  'try client.finishInteraction(request, recheck: {',
+                  'try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)',
+                  'StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,',
+                  'actionRequest = request', 'coordinate = selected', 'try action(coordinate)',
+                  'if let request = actionRequest { try axClient!.completeInteraction(request) }')
+        for fence in fences:
+            self.assertEqual(dispatch.count(fence), 1, fence)
+        positions = [dispatch.index(fence) for fence in fences]
+        self.assertEqual(positions, sorted(positions))
+        guards = [match.start() for match in re.finditer(r'try guardTarget\(\)', dispatch)]
+        self.assertEqual(len(guards), 2)
+        self.assertLess(guards[0], positions[0])
+        self.assertGreater(guards[1], positions[-1])
+        self.assertEqual(re.findall(r'(?m)^\s*coordinate\s*=\s*(.*)$', dispatch), ['selected'])
+        self.assertEqual(dispatch.count('try action('), 1)
+        self.assertEqual(dispatch.count('client.prepareInteraction('), 1)
+        self.assertEqual(dispatch.count('client.finishInteraction('), 1)
+        semantic_fences = ('try StartupAXFiles.need(namedTargetMatches(semanticName))',
+                           'kind: kind, label: semanticName,', 'namedTargetMatches(request.label)')
+        semantic_positions = []
+        for fence in semantic_fences:
+            self.assertEqual(dispatch.count(fence), 1)
+            semantic_positions.append(dispatch.index(fence))
+        self.assertEqual(semantic_positions, sorted(semantic_positions))
+        self.assertGreater(semantic_positions[0], dispatch.index(selection))
+        finish = 'try client.finishInteraction(request, recheck: {'
+        self.assertGreater(semantic_positions[-1], dispatch.index(finish))
+        callback = dispatch.split(finish, 1)[1].split('                })', 1)[0]
+        self.assertIn('namedTargetMatches(request.label)', callback)
+        self.assertIn('try guardWindow(', callback)
+        self.assertIn('StartupInteractionPolicy.unchanged(', callback)
+        self.assertRegex(dispatch, r'(?m)^                try client\.finishInteraction\(request, recheck: \{$')
+        for fence in ('semantic.query.count == 1', 'semantic.query.firstMatch.frame == anchor',
+                      'title: target.title, label: target.label',
+                      'placeholder: kind == "message" ? target.placeholderValue : nil'):
+            self.assertIn(fence, dispatch)
 
-    def test_publication_fault_cannot_replace_original_error_or_issue_ready(self):
-        emit = self.source.split('static func emit(', 1)[1].split('// END AX FAILURE DIAGNOSTICS', 1)[0]
+        self.assertIn('                })\n                actionRequest = request\n                coordinate = selected', dispatch)
+
+        adapter = actor.split('static func selectCoordinate<Coordinate>(', 1)[1].split('struct Binding<Token:', 1)[0]
+        offset = ('let selected = selectedPoint == original ? center\n'
+                  '            : offset(center, CGVector(dx: selectedPoint.x - original.x, dy: selectedPoint.y - original.y))')
+        readback = ('let actual = screenPoint(selected)\n'
+                    '        try StartupAXFiles.need(actual == selectedPoint && anchor.contains(actual)\n'
+                    '            && actual.x > anchor.minX && actual.y > anchor.minY\n'
+                    '            && [actual.x, actual.y].allSatisfy { $0.isFinite && Double(Float($0)) == Double($0) })\n'
+                    '        return (selected, actual)')
+        self.assertEqual(adapter.count(offset), 1)
+        self.assertEqual(adapter.count(readback), 1)
+        self.assertLess(adapter.index(offset), adapter.index(readback))
+        self.assertEqual(adapter.count('return ('), 1)
+
+    def test_same_public_coordinate_and_original_ticket_are_used_before_dispatch(self):
+        journey, actor = self.interaction_sources()
+        self.assert_coordinate_path(journey, actor)
+        self.assertIn('coordinate.click()', journey)
+
+    def test_removed_bypassed_or_old_center_dispatch_and_late_finish_are_rejected(self):
+        journey, actor = self.interaction_sources()
+        selection = ('let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                     '                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })')
+        bypass = ('var (selected, point) = (center, center.screenPoint)\n'
+                  '                if false {\n'
+                  '                    (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
+                  '                        screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })\n'
+                  '                }')
+        finish = '                try client.finishInteraction(request, recheck: {'
+        finish_block = finish + journey.split(finish, 1)[1].split('                })', 1)[0] + '                })'
+        mutations = {
+            'removed-adapter': (selection, 'let (selected, point) = (center, center.screenPoint)'),
+            'removed-initial-name': ('try StartupAXFiles.need(namedTargetMatches(semanticName))', 'try StartupAXFiles.need(true)'),
+            'label-only-request': ('kind: kind, label: semanticName,', 'kind: kind, label: target.label,'),
+            'removed-final-name': ('namedTargetMatches(request.label)', 'true'),
+            'identifier-only-name': ('title: target.title, label: target.label', 'title: target.identifier, label: target.label'),
+
+            'bypassed-adapter': (selection, bypass),
+            'wrong-readback-port': ('screenPoint: { $0.screenPoint }', 'screenPoint: { _ in center.screenPoint }'),
+            'bypassed-public-offset': ('offset: { $0.withOffset($1) }', 'offset: { coordinate, _ in coordinate }'),
+            'renewed-ticket': ('client.prepareInteraction(ticket,', 'client.prepareInteraction(try client.begin(),'),
+            'old-center-final-fence': ('unchanged(point: selected.screenPoint,', 'unchanged(point: center.screenPoint,'),
+            'old-center-dispatch': ('coordinate = selected', 'coordinate = center'),
+            'overwritten-dispatch': ('coordinate = selected', 'coordinate = selected\n                coordinate = center'),
+            'late-finalization': (finish_block, ''),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(journey.count(before), 1, name)
+            changed = journey.replace(before, after, 1)
+            if name == 'late-finalization':
+                changed = changed.replace('try action(coordinate)', 'try action(coordinate)\n' + finish_block, 1)
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                self.assert_coordinate_path(changed, actor)
+
+    def test_missing_or_bypassed_actual_adapter_readback_is_rejected(self):
+        journey, actor = self.interaction_sources()
+        mutations = {
+            'missing-actual-readback': ('let actual = screenPoint(selected)', 'let actual = selectedPoint'),
+            'wrong-coordinate-readback': ('let actual = screenPoint(selected)', 'let actual = screenPoint(center)'),
+            'bypassed-readback-validation': ('need(actual == selectedPoint &&', 'need(true || actual == selectedPoint &&'),
+            'wrong-returned-coordinate': ('return (selected, actual)', 'return (center, actual)'),
+            'wrong-returned-point': ('return (selected, actual)', 'return (selected, original)'),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(actor.count(before), 1, name)
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                self.assert_coordinate_path(journey, actor.replace(before, after, 1))
+
+    def test_failure_emitter_preserves_original_error_and_never_exports_request_fields(self):
+        source = SOURCE.read_text()
+        emit = source.split('static func emit(', 1)[1].split('// END AX FAILURE DIAGNOSTICS', 1)[0]
         self.assertIn('do { try write(data) } catch {', emit)
-        self.assertEqual(emit.count('try write(data)'), 1)
-        self.assertNotIn('throw ', emit)
         self.assertIn('$0.count < 2048', emit)
-        outer = self.source.split('var record = StartupAXFailureDiagnostic.record(', 1)[1]
-        self.assertIn('error: error', outer)
-        self.assertIn('record["pre_refusal_paired"] = pairedDiagnostic', outer)
+        outer = source.split('// Unexpected ownership/deadline/stream failure', 1)[1]
+        self.assertIn('var record = StartupAXFailureDiagnostic.record(', outer)
+        self.assertLess(outer.index('fatalDiagnosticEmitted = true'), outer.index('StartupAXFailureDiagnostic.emit'))
         self.assertLess(outer.index('StartupAXFailureDiagnostic.emit'), outer.index('exit(1)'))
-        self.assertNotIn('"ready"', outer.split('exit(1)', 1)[0])
-
-    def test_projection_is_explicit_and_never_exports_focus_or_invents_association(self):
-        self.assertIn('Array(windows.filter { $0 != original }.prefix(7))', self.policy)
-        self.assertIn('observed.root_id == retained', self.policy)
-        self.assertIn('"retained_root_equal": true', self.policy)
-        for private in ('observed.focus', 'observed.root_frame', 'AXTitle', 'AXValue', 'localizedDescription'):
-            self.assertNotIn(private, self.policy)
-        self.assertNotIn('ax_windows_count', self.policy)
-        self.assertNotIn('cg_to_ax', self.policy)
+        for private in ('request.value', 'request.label', 'localizedDescription'):
+            self.assertNotIn(private, outer.split('exit(1)', 1)[0])
 
 
 class PairedDiagnosticIngestionControls(unittest.TestCase):

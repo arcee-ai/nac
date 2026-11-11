@@ -131,25 +131,55 @@ macOS 14 qualification, signing/notarization, consumer installation, background
 window lifecycle, native menus/bridge, or performance.
 Those have separate owners in the ALL-339 work map.
 
+A caught configuredLocal XCTest failure now preserves diagnostics and lets the
+existing external exact-identity owner settle the app after failed result
+collection. Successful teardown, other cases, audit/abort/sandbox/input/freshness
+and cleanup authority remain unchanged. This addresses a source-supported
+teardown/abort coupling, not a proven Actual16 cause or native acceptance.
+
 ## Ordinary startup supplier binding
 
 This private P12 nomination binds product
 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
-`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the repaired immutable
-nine-file supplier `ba266ba1b3bea331768d91fc8a0b2ee66b484d01`; its journey
-SHA256 is `7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8`.
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
+ten-file supplier `f671fd15f002e3bda4df5040df998e80be1f6dd8`; its journey
+SHA256 is `90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
 historical startup/SDK results keep their original source and consumed counters.
 
-The H2 plus canonical Q2 observer inputs come from `observer_sources`; callers
+The H plus canonical Q observer inputs come from `observer_sources`; callers
 must compile all four, retaining the original guards/receipt/custody contracts.
 All four ordinary startup cases and independent R7325 remain required. R's actual
 compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
 under a separate Root admission; schema50 alone is insufficient. No runtime or
-publication is authorized by this nomination. Functional H/Q behavior is unchanged.
+publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
+AX preflight, preserving all original postconditions and positive cleanup.
+The required panel policy lane admits exactly six geometry, seven AX/refusal,
+and thirty-one whole-client/request receipt methods: forty-four total with
+zero skips. The receipt methods include the original-error identity/catch-order
+control and the true native infinite-rectangle fixture within the existing
+point-selection method. Exact count checks reject missing or extra controls;
+these source controls do not replace the full generated XCTest SDK gate or
+later native UI qualification. The canonical reader accepts the bounded readonly snapshot
+of an already opened inode after atomic replacement or unlink; the next named
+open still fails when absent. This does not prove continuous name presence or
+immutability against another writer with the same UID.
+The selected public coordinate is Float-representable and inside its actual
+anchor; fractional centers use a public offset coordinate with exact screenPoint
+readback before publication. The same coordinate is retained for dispatch.
+Raw CG extras no longer veto that contract. The accepted last-instant race is
+not atomic or independently observed delivered-event equality.
+
+The configured journey also retains a first closed local failure before its
+existing teardown, using the same owned witness publisher at the fixed `.failure`
+suffix. H copies only a strict nonce/configuration-bound passive projection into
+case evidence before profile cleanup. Missing or malformed evidence changes no
+error precedence, input, process, freshness or settlement authority. Listener
+generation refusals retain only already-held absence/signature-mismatch bits;
+no extra kernel sample or raw identity is introduced.
 
 ## Private launch contract (ALL-341)
 

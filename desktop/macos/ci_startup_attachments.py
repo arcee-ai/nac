@@ -20,6 +20,8 @@ MAX_PNG = 2 * 1024 * 1024
 MAX_SELECTED = 4 * MAX_PNG + 2 * 1024 * 1024
 QUERY_DIAGNOSTIC = 'nac342-query-diagnostic-v1-onboarding'
 MAX_QUERY_DIAGNOSTIC = 8192
+FIRST_FAILURE = 'nac342-first-preflight-failure-v1-configuredLocal'
+MAX_FIRST_FAILURE = 2048
 QUERY_ORDER = ('app_webviews', 'window_webviews', 'legacy_title', 'app_static_title',
                'window_static_title', 'window_label_title', 'window_value_title', 'window_identifier_title',
                'window_button_start', 'legacy_button_start', 'window_label_subtitle', 'window_value_subtitle')
@@ -181,7 +183,8 @@ def retain_ax_refusal(selected, entries, index, config, configuration_sha256, wi
                   'elements_member_type', 'frame_value_type', 'frame_encoding', 'frame_position_decode', 'frame_size_decode',
                   'application_timeout', 'windows_unavailable', 'root_role_or_type', 'root_frame_mismatch', 'root_matches',
                   'child_role_type', 'root_children', 'root_sheet_count', 'panel_children', 'nested_sheet_count',
-                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding', 'focus_unavailable'}
+                  'pid_mismatch', 'pid_error', 'owned_pid', 'foreign_window', 'incarnation_binding', 'focus_unavailable',
+                  'sample_deadline', 'ax_predicate_refused', 'target_retiring', 'target_retired'}
         attributes = {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize', 'AXFocusedUIElement', 'AXFocused', 'AXValue', 'AXParent'}
         for key in ('first_observed_refusal', 'terminal_refusal'):
             fact = row[key]
@@ -204,6 +207,82 @@ def retain_ax_refusal(selected, entries, index, config, configuration_sha256, wi
         return len(data)
     except BaseException as error:
         receipt['reason'] = error.reason if isinstance(error, StartupAttachmentError) else 'ax_unavailable_or_invalid'
+        if created:
+            try: destination.unlink(missing_ok=True)
+            except OSError: pass
+        return 0
+
+
+def retain_first_failure(selected, entries, index, config, configuration_sha256, output, inventory_valid):
+    """Independent closed XCTest record; retained before mandatory collection failure."""
+    receipt = index['first_preflight_failure']
+    if not any(isinstance(e, dict) and isinstance(e.get('suggestedHumanReadableName'), str)
+               and e['suggestedHumanReadableName'].startswith('nac342-first-preflight-failure-') for e in entries):
+        return 0
+    receipt.update(retention='rejected', reason='first_inventory')
+    files = [file for file, _, kind in selected if kind == 'first_failure']
+    if len(files) != 1 or not inventory_valid or index['selection_errors']:
+        return 0
+    destination, created = output / (FIRST_FAILURE + '.json'), False
+    try:
+        require(config['scenario'] == 'configuredLocal' and index['actual_test']['result'] == 'Failed', 'first_failure_only')
+        data = bounded_file(files[0], MAX_FIRST_FAILURE)
+        def unique(pairs):
+            require(len(pairs) == len(dict(pairs)), 'first_duplicate_key')
+            return dict(pairs)
+        row = json.loads(data, object_pairs_hook=unique,
+                         parse_constant=lambda _: require(False, 'first_nonfinite'))
+        nonce = config['ax_witness']['nonce']
+        require(type(nonce) is str and re.fullmatch('[0-9a-f]{64}', nonce)
+                and type(row) is dict and set(row) == {'schema', 'acceptance', 'nonce', 'configuration_sha256',
+                                                     'step', 'operation_index', 'error_family'}
+                and row['schema'] == 'nac342-first-preflight-failure-v1' and row['acceptance'] is False
+                and row['nonce'] == nonce and row['configuration_sha256'] == configuration_sha256, 'first_binding')
+        require(type(row['step']) is str and row['step'] in {'startup_checks', 'before_guard', 'before_record',
+                    'public_target', 'prepare_interaction', 'final_recheck', 'finish_interaction', 'input',
+                    'after_guard', 'after_record', 'terminal',
+                    'request_schema', 'request_id', 'request_root_id',
+                    'request_surface', 'request_kind', 'request_label_size',
+                    'request_label_required', 'request_point_count', 'request_point_x_finite',
+                    'request_point_x_float', 'request_point_y_finite', 'request_point_y_float',
+                    'request_value_keyboard', 'request_value_kind', 'request_value_size',
+                    'request_shape', 'request_anchor_frame', 'request_root_frame',
+                    'request_containment', 'request_deadline', 'request_counters',
+                    'read_parent', 'read_open', 'read_metadata',
+                    'read_bytes', 'publish_parent', 'publish_encode',
+                    'publish_size', 'publish_open', 'publish_write',
+                    'publish_open_access_denied', 'publish_open_not_permitted', 'publish_open_read_only',
+                    'publish_open_exists', 'publish_open_resource', 'publish_open_path', 'publish_open_other',
+                    'publish_mode', 'publish_close', 'publish_rename',
+                    'decode_size', 'decode_keys', 'decode_json',
+                    'decode_object', 'decode_fields', 'decode_process',
+                    'decode_observation', 'decode_interaction', 'decode_focus',
+                    'decode_types', 'clock_monotonic', 'read_declaration',
+                    'read_port', 'read_load', 'read_numbers',
+                    'read_clock', 'read_window', 'read_case_deadline',
+                    'read_sample_order', 'read_sequence_bytes', 'read_binding',
+                    'read_helper_identity', 'read_waiting', 'read_target_binding',
+                    'read_target_identity', 'read_sequence', 'read_status',
+                    'read_observation', 'read_folder_binding', 'prepare_state',
+                    'prepare_ticket', 'prepare_publication', 'consume_deadline',
+                    'consume_numbers', 'consume_refusal', 'consume_sample_numbers',
+                    'consume_sample_window', 'consume_sequence', 'consume_observation',
+                    'consume_surface_binding', 'consume_focus_presence', 'consume_focus',
+                    'consume_no_focus', 'consume_proof_presence', 'consume_proof_binding',
+                    'consume_freshness', 'consume_pending', 'consume_target_identity',
+                    'consume_evidence_limit', 'read_cutoff'} and type(row['operation_index']) is int
+                and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
+                    'receipt_expired', 'decoding', 'foundation', 'other'}, 'first_projection')
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        with os.fdopen(descriptor, 'wb') as stream:
+            require(stream.write(data) == len(data), 'first_partial_write')
+        receipt.clear()
+        receipt.update(retention='retained', file=destination.name, bytes=len(data), sha256=digest(data))
+        return len(data)
+    except BaseException as error:
+        receipt['reason'] = error.reason if isinstance(error, StartupAttachmentError) else 'first_unavailable_or_invalid'
         if created:
             try: destination.unlink(missing_ok=True)
             except OSError: pass
@@ -351,7 +430,8 @@ def select_inventory(export, entries, fixed, pattern, index):
             row['kind'] = kind
             if dispatch:
                 row.update(operation_index=int(dispatch[1]), stage=dispatch[2])
-            limit = MAX_QUERY_DIAGNOSTIC if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON
+            limit = (MAX_FIRST_FAILURE if kind == 'first_failure' else MAX_QUERY_DIAGNOSTIC
+                     if kind in ('query_diagnostic', 'ax_refusal') else MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
             require(info.st_size <= limit and total + info.st_size <= MAX_SELECTED, 'selected_size')
             total += info.st_size
             selected.append((ordinal, file, canonical, kind))
@@ -367,12 +447,64 @@ def select_inventory(export, entries, fixed, pattern, index):
             if files[file.name] == 1 and names[name] == 1 and (kind != 'dispatch' or ordinal < first_error)]
 
 
+def retain_failed_dispatches(selected, index, config, configuration_sha256, witness, output, inventory_valid, *, retained_bytes=0):
+    """Failure-only inventory records; neither order nor pairs prove completed input."""
+    index['diagnostic_dispatches'] = []
+    index['diagnostic_dispatch_errors'] = []
+    index['diagnostic_dispatch_order'] = 'sdk_inventory_not_execution'
+    if not inventory_valid or index['selection_errors']:
+        return 0
+    require(type(retained_bytes) is int and 0 <= retained_bytes <= MAX_SELECTED, 'growing_total')
+    total = 0
+    for file, name, kind in selected:
+        if kind != 'dispatch':
+            continue
+        destination, created, retained = output / (name + '.json'), False, False
+        descriptor = None
+        try:
+            data = bounded_file(file, MAX_JSON)
+            def unique(pairs):
+                require(len(pairs) == len(dict(pairs)), 'dispatch_duplicate_key')
+                return dict(pairs)
+            row = json.loads(data, object_pairs_hook=unique,
+                             parse_constant=lambda _: require(False, 'dispatch_nonfinite'))
+            match = re.fullmatch(r'nac342-dispatch-v1-(\d{2})-(before|after)', name)
+            require(match is not None, 'dispatch_name')
+            number = int(match[1])
+            require(1 <= number <= len(operations(config)), 'dispatch_operation_bound')
+            ordinal = 2 * (number - 1) + (match[2] == 'after')
+            require_dispatch(row, config, configuration_sha256, witness, ordinal)
+            require(retained_bytes + total + len(data) <= MAX_SELECTED, 'growing_total')
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            created = True
+            stream = os.fdopen(descriptor, 'wb')
+            descriptor = None  # The stream owns the descriptor only after successful fdopen.
+            with stream:
+                require(stream.write(data) == len(data), 'dispatch_partial_write')
+            total += len(data)
+            index['diagnostic_dispatches'].append({'file': destination.name, 'bytes': len(data),
+                                                   'sha256': digest(data)})
+            retained = True
+        except Exception as error:
+            index['diagnostic_dispatch_errors'].append({'reason': error.reason if isinstance(error, StartupAttachmentError)
+                                                        else 'dispatch_unavailable_or_invalid'})
+        finally:
+            if descriptor is not None:
+                try: os.close(descriptor)
+                except OSError: pass
+            if created and not retained:
+                try: destination.unlink(missing_ok=True)
+                except OSError: pass
+    return total
+
+
 def collect(tool, result, config, configuration_sha256, witness, output):
     """Tool is the actual prepared H SDK observer; unit adapters are explicit."""
     output.mkdir()
     index = {'complete': False, 'selected': [], 'dispatches': [], 'automatic_omitted': 0,
              'input_completion_unknown': True, 'visible_paint': 'requires_actual_image_review',
-             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'}}
+             'query_diagnostic': {'retention': 'missing'}, 'ax_refusal': {'retention': 'missing'},
+             'first_preflight_failure': {'retention': 'missing'}}
     try:
         require(config['scenario'] in CASES and witness.get('preinstalled') is True
                 and witness.get('owned_incarnation_verified') is True, 'external_witness')
@@ -409,7 +541,7 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             fixed = {f'nac342-ordinary-{scenario}': 'png', f'nac342-failure-{scenario}': 'failure',
                      f'nac342-ordinary-v1-{scenario}': 'observation', f'nac342-cleanup-v1-{scenario}': 'cleanup',
                      QUERY_DIAGNOSTIC: 'query_diagnostic', 'nac342-ax-refusal-v1-configuredLocal': 'ax_refusal',
-                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards'}
+                     'nac342-ax-guards-v1-configuredLocal': 'ax_guards', FIRST_FAILURE: 'first_failure'}
             uuid = r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}'
             pattern = r'(nac342-[A-Za-z0-9-]+?)(?:_\d+_' + uuid + r')?(?:\.(?:json|png))?'
             selected = select_inventory(export, entries, fixed, pattern, index)
@@ -420,9 +552,23 @@ def collect(tool, result, config, configuration_sha256, witness, output):
                                                       witness, output, inventory_valid)
             diagnostic_bytes += retain_ax_refusal(selected, entries, index, config, configuration_sha256,
                                                   witness, output, inventory_valid)
+            diagnostic_bytes += retain_first_failure(selected, entries, index, config, configuration_sha256,
+                                                     output, inventory_valid)
+            failed_test = test['result'] == 'Failed'
+            if failed_test:
+                diagnostic_bytes += retain_failed_dispatches(selected, index, config, configuration_sha256,
+                                                             witness, output, inventory_valid,
+                                                             retained_bytes=diagnostic_bytes)
+            collection_order = selected
+            if test['result'] == 'Passed':
+                # Closed names declare operation/phase, not SDK chronology.
+                declared = iter(sorted((entry for entry in selected if entry[2] == 'dispatch'),
+                    key=lambda entry: (int(entry[1].split('-')[3]), entry[1].endswith('-after'))))
+                collection_order = [next(declared) if entry[2] == 'dispatch' else entry for entry in selected]
+                index['dispatch_representation'] = 'canonical_declared_operation_phase_not_execution_chronology'
             values, images, total = {}, {}, diagnostic_bytes
-            for file, name, kind in selected:
-                if kind in ('query_diagnostic', 'ax_refusal'):
+            for file, name, kind in collection_order:
+                if kind in ('query_diagnostic', 'ax_refusal', 'first_failure') or (failed_test and kind == 'dispatch'):
                     continue
                 data = bounded_file(file, MAX_PNG if kind in ('png', 'failure') else MAX_JSON)
                 total += len(data)
@@ -460,14 +606,15 @@ def collect(tool, result, config, configuration_sha256, witness, output):
             require(test['result'] == 'Passed', 'actual_test_result')
             require(index['query_diagnostic']['retention'] == 'missing', 'unexpected_failure_diagnostic')
             require(index['ax_refusal']['retention'] == 'missing', 'unexpected_ax_refusal')
+            require(index['first_preflight_failure']['retention'] == 'missing', 'unexpected_first_failure')
             if scenario == 'configuredLocal':
                 from ci_startup_ax import require_guard_proof
                 require('ax_guards' in values, 'ax_guards_missing')
                 name, data, row = values['ax_guards']
-                require(len(data) <= 16384, 'ax_guards_size')
+                require(len(data) <= 32768, 'ax_guards_size')
                 require_guard_proof(row, config, configuration_sha256, witness)
                 (output / (name + '.json')).write_bytes(data)
-                index['ax_guards'] = {'file': name + '.json', 'sha256': digest(data), 'count': len(row['rows'])}
+                index['ax_guards'] = {'file': name + '.json', 'sha256': digest(data), 'count': len(row['rows']), 'interaction_count': len(row['interactions'])}
             else:
                 require('ax_guards' not in values, 'foreign_ax_guards')
             index.update(complete=True, image=image, observation=observation, input_completion_unknown=False)

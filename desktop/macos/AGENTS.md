@@ -47,10 +47,12 @@ a sticky UI rejection never authorizes input or a new window binding. Positive
 process history plus a fresh exact kernel identity may still support cleanup.
 Helper, app/engine, and profile settlement are separate proofs. Cleanup success
 cannot clear the original UI failure, infer completed input, or admit another case.
-The companion's single pre-refusal paired diagnostic is false-acceptance evidence
-only: it may reuse its canonical reader once under exact original ownership and
-pristine lifetime, then must terminate with the original extra-window refusal.
-Never retry AX after that diagnostic, infer CG-to-AX membership, or export field values.
+Configured-local interactions use the explicitly accepted public-coordinate/global
+AX ownership preflight in startup_xctest/AX-WITNESS-CONTRACT.md. Additional raw CG
+surfaces do not veto that contract or prove association. Initial singleton root
+binding, exact retained root/process, sticky refusal, freshness, resource and
+positive cleanup requirements remain. Pointer dispatch uses the checked public
+coordinate; its accepted last-instant dynamics are not atomic delivery proof.
 
 Shared-host execution instructions supplied by the user take precedence over
 local defaults. Keep all builds and use of a shared binary inside its lease.
@@ -59,3 +61,16 @@ The cohesive `test_ci_startup_observer.py` test module may exceed 800 lines
 because it keeps deterministic kernel/AppKit adapters, exact production snapshot
 compilation and custody/launch-race assertions in one auditable fixture owner.
 Each selected batch compiles that fixture once; the file remains below 2,000 lines.
+
+The cohesive `test_ci_startup_attachments.py` module may exceed 800 lines because
+it owns the synthetic SDK inventory, shared payload fixtures, strict success
+validators and failure-only diagnostic retention together. Keeping those controls
+beside one collector prevents divergent fixture admission; it remains below 2,000 lines.
+
+A new, unadmitted native-image candidate may be observed during a bundled-engine
+spawn. Recovery is limited to a positively observed same-PID/birth/UID/owned-app-
+parent native-to-engine image transition and one fresh full tuple with coherent
+bookends. Never rebind a known identity, reuse rejected argv/environment, infer
+role from flags, omit an ambiguous candidate, or normalize paths to pass checks.
+Prohibited environment/parse/denial failures remain sticky; a disappearance in
+the recovery path grants no retirement or input authority.

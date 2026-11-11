@@ -41,7 +41,11 @@ persisted_transcript_matches_snapshot unexpected_terminal event_schema canonical
 def diagnostic_facts(facts):
     result = {}
     for key, value in (facts or {}).items():
-        if key in ('expected_bytes', 'actual_bytes', 'asset_ordinal', 'http_status'):
+        if key in ('actual_absent', 'mismatch_pid', 'mismatch_start_seconds',
+                   'mismatch_start_microseconds', 'mismatch_uid', 'mismatch_executable'):
+            if type(value) is bool:
+                result[key] = value
+        elif key in ('expected_bytes', 'actual_bytes', 'asset_ordinal', 'http_status'):
             # entry_assets reads one byte past its cap to detect overflow.
             limit = DIAGNOSTIC_INT_LIMIT + 1 if key == 'actual_bytes' else DIAGNOSTIC_INT_LIMIT
             if type(value) is int and 0 <= value <= limit:
@@ -237,7 +241,11 @@ class ListenerPending(RuntimeError):
 
 def owned_listener(pid, expected):
     actual = native_identity(pid)
-    require(actual is not None and signature(actual) == signature(expected), 'listener_process_generation')
+    # Only already-held identity values; no additional probe or raw value export.
+    facts = {'actual_absent': actual is None}
+    facts.update({'mismatch_' + key: actual is not None and actual[key] != expected[key]
+                  for key in ('pid', 'start_seconds', 'start_microseconds', 'uid', 'executable')})
+    require(actual is not None and signature(actual) == signature(expected), 'listener_process_generation', facts=facts)
     result = subprocess.run(['/usr/sbin/lsof', '-nP', '-a', '-p', str(pid), '-iTCP', '-sTCP:LISTEN', '-Fpn'],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
     if result.returncode == 1 and result.stdout == b'':

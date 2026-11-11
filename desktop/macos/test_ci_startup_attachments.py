@@ -1,6 +1,9 @@
 """Production collector controls with synthetic SDK exports, never native proof."""
 import copy
 import json
+import itertools
+import os
+import ci_startup_attachments as retention
 from pathlib import Path
 import struct
 import tempfile
@@ -15,6 +18,80 @@ from ci_xctest_attachments import AttachmentTool, bounded_file, digest
 
 
 class StartupAttachmentTests(unittest.TestCase):
+    def test_first_failure_attachment_survives_incomplete_collection_and_rejects_unbound_private_records(self):
+        config, configuration_sha, witness, _ = self.fixture('configuredLocal')
+        config['ax_witness']['nonce'] = 'd' * 64
+        record = dict(schema='nac342-first-preflight-failure-v1', acceptance=False, nonce='d' * 64,
+                      configuration_sha256=configuration_sha, step='prepare_interaction', operation_index=1,
+                      error_family='receipt_invalid')
+        name = 'nac342-first-preflight-failure-v1-configuredLocal'
+        for mutation in (None, 'nonce', 'config', 'extra', 'step', 'family', 'bool_index', 'large_index',
+                         'duplicate_key', 'duplicate_attachment', 'oversize', 'wrong_name', 'passed',
+                         'raw_errno_step', 'extra_errno', 'raw_path'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary); value = dict(record)
+                if mutation == 'nonce': value['nonce'] = 'f' * 64
+                if mutation == 'config': value['configuration_sha256'] = 'f' * 64
+                if mutation == 'extra': value['raw_error'] = 'PRIVATE-CANARY'
+                if mutation == 'step': value['step'] = 'unknown'
+                if mutation == 'raw_errno_step': value['step'] = 'publish_open_errno_13'
+                if mutation == 'extra_errno': value['errno'] = 13
+                if mutation == 'raw_path': value['path'] = '/PRIVATE-CANARY/request'
+                if mutation == 'family': value['error_family'] = 'PRIVATE-CANARY'
+                if mutation == 'bool_index': value['operation_index'] = True
+                if mutation == 'large_index': value['operation_index'] = 12
+                data = json.dumps(value).encode()
+                if mutation == 'duplicate_key': data = data[:-1] + b',"acceptance":false}'
+                if mutation == 'oversize': data += b' ' * 2048
+                rows = [(name + '-foreign' if mutation == 'wrong_name' else name, data)]
+                if mutation == 'duplicate_attachment': rows *= 2
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(self.tool(raw, rows, result='Passed' if mutation == 'passed' else 'Failed'),
+                            raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+                retained = raw / 'selected' / (name + '.json')
+                self.assertEqual(retained.exists(), mutation is None)
+                if mutation is None:
+                    self.assertEqual(json.loads(retained.read_text()), record)
+                    self.assertEqual(index['first_preflight_failure']['retention'], 'retained')
+                    from ci_support import export_evidence
+                    export_evidence(raw / 'selected', raw / 'public', [], include_hashes=True)
+                    self.assertEqual(json.loads((raw / 'public' / retained.name).read_text()), record)
+                self.assertNotIn('PRIVATE-CANARY', json.dumps(index))
+
+        import re
+        source = Path(__file__).with_name('startup_xctest') / 'StartupAXReceipt.swift'
+        enumeration = source.read_text().split('enum StartupFailureStep:', 1)[1].split('\n}', 1)[0]
+        steps = re.findall(r'\b[a-z][a-z_]+\b', '\n'.join(
+            line.split('case ', 1)[1] for line in enumeration.splitlines() if 'case ' in line))
+        for step in steps:
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as temporary:
+                raw = Path(temporary)
+                expected = dict(record, step=step)
+                with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                    collect(self.tool(raw, [(name, json.dumps(expected).encode())], result='Failed'),
+                            raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+                self.assertEqual(json.loads((raw / 'selected' / (name + '.json')).read_text()), expected)
+
+    def test_first_failure_attachment_never_follows_a_destination_alias(self):
+        config, configuration_sha, witness, _ = self.fixture('configuredLocal')
+        config['ax_witness']['nonce'] = 'd' * 64
+        record = dict(schema='nac342-first-preflight-failure-v1', acceptance=False, nonce='d' * 64,
+                      configuration_sha256=configuration_sha, step='public_target', operation_index=1,
+                      error_family='receipt_invalid')
+        name = 'nac342-first-preflight-failure-v1-configuredLocal'
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary); outside = raw / 'outside'; outside.write_bytes(b'UNTOUCHED')
+            def alias(export, groups):
+                (raw / 'selected' / (name + '.json')).symlink_to(outside)
+            with self.assertRaisesRegex(RuntimeError, 'cleanup_missing'):
+                collect(self.tool(raw, [(name, json.dumps(record).encode())], result='Failed', mutate=alias),
+                        raw / 'unit.xcresult', config, configuration_sha, witness, raw / 'selected')
+            self.assertEqual(outside.read_bytes(), b'UNTOUCHED')
+            index = json.loads((raw / 'selected/index.json').read_text())
+            self.assertEqual(index['first_preflight_failure']['retention'], 'rejected')
+
     def fixture(self, case):
         config = {key: 'a' * 64 for key in PROVENANCE}
         config.update(schema=SCHEMA, scenario=case, source_sha=PRODUCT, test_source_sha=TEST_SOURCE,
@@ -69,6 +146,8 @@ class StartupAttachmentTests(unittest.TestCase):
             proof.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
             proof.update(schema='nac342-ax-guards-v1', configuration_sha256=config_hash,
                          helper_sha256=config['ax_witness']['helper_sha256'], support_sha256=config['ax_witness']['support_sha256'], rows=facts)
+            from test_ci_startup_interaction import interaction_facts
+            proof['interactions'] = interaction_facts(proof['rows'])
             rows.insert(len(rows) - 2, ('nac342-ax-guards-v1-configuredLocal', json.dumps(proof).encode()))
         return config, config_hash, witness, rows
 
@@ -80,9 +159,14 @@ class StartupAttachmentTests(unittest.TestCase):
                    configuration_sha256=config_hash,
                    first_observed_refusal={'stage': 'attribute_error', 'attribute': 'AXWindows', 'api_code': -25204},
                    terminal_refusal={'stage': 'windows_unavailable'})
-        for invalid in (None, 'binding', 'private', 'duplicate', 'oversize', 'passed'):
+        stages = ('sample_deadline', 'ax_predicate_refused', 'target_retiring', 'target_retired')
+        for invalid in (None, *stages, 'unknown', 'external_witness_unavailable', 'external_witness_refused', '',
+                        'binding', 'private', 'duplicate', 'oversize', 'passed'):
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary); value = copy.deepcopy(row)
+                retained = invalid is None or invalid in stages
+                if invalid in (*stages, 'unknown', 'external_witness_unavailable', 'external_witness_refused', ''):
+                    value['first_observed_refusal'] = value['terminal_refusal'] = {'stage': invalid}
                 if invalid == 'binding': value['test_source_sha'] = '0' * 40
                 if invalid == 'private': value['first_observed_refusal']['raw_text'] = 'FOREIGN-MUST-NOT-BE-RETAINED'
                 data = json.dumps(value).encode()
@@ -94,14 +178,16 @@ class StartupAttachmentTests(unittest.TestCase):
                             raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
                 index = json.loads((raw / 'selected/index.json').read_text())
                 self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
-                self.assertEqual(index['ax_refusal']['retention'], 'retained' if invalid is None else 'rejected')
-                self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists(), invalid is None)
+                self.assertEqual(index['ax_refusal']['retention'], 'retained' if retained else 'rejected')
+                self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').exists(), retained)
+                if retained:
+                    self.assertEqual((raw / 'selected/nac342-ax-refusal-v1-configuredLocal.json').read_bytes(), data)
 
     def test_ax_optional_cannot_qualify_passed_or_failed_canonical_payloads(self):
         config, hashed, witness, rows = self.fixture('configuredLocal')
         _, _, _, row = self.ax_row()
         rows.append(('nac342-ax-refusal-v1-configuredLocal', json.dumps(row).encode()))
-        for result, reason in (('Passed', 'unexpected_ax_refusal'), ('Failed', 'actual_test_result')):
+        for result, reason in (('Passed', 'unexpected_ax_refusal'), ('Failed', 'dispatch_completion')):
             with self.subTest(result=result), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary)
                 with self.assertRaisesRegex(RuntimeError, reason):
@@ -209,6 +295,176 @@ class StartupAttachmentTests(unittest.TestCase):
             self.assertEqual(index['ax_refusal']['retention'], 'rejected')
             self.assertEqual(outside.read_bytes(), b'UNTOUCHED')
 
+    def failed_dispatch_fixture(self, raw, rows, *, mutate=None):
+        config, hashed, witness, complete = self.fixture('configuredLocal')
+        config['ax_witness'] = {'nonce': 'd' * 64}
+        first = json.dumps(dict(schema='nac342-first-preflight-failure-v1', acceptance=False,
+            nonce='d' * 64, configuration_sha256=hashed, step='after_guard',
+            operation_index=2, error_family='receipt_refused')).encode()
+        first_name = 'nac342-first-preflight-failure-v1-configuredLocal'
+        evidence = [*rows, ('nac342-failure-configuredLocal', self.png()),
+                    (first_name, first), complete[-1]]
+        with self.assertRaises(RuntimeError):
+            collect(self.tool(raw, evidence, result='Failed', mutate=mutate), raw / 'unit.xcresult',
+                    config, hashed, witness, raw / 'selected')
+        index = json.loads((raw / 'selected/index.json').read_text())
+        self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+        self.assertEqual(index['dispatches'], [])
+        return index, raw / 'selected', first_name, first
+
+    def test_failed_dispatch_all_six_inventory_orders_retain_descriptors_without_input_credit(self):
+        _, _, _, rows = self.fixture('configuredLocal')
+        three = [rows[2], rows[1], rows[0]]
+        for order in itertools.permutations(three):
+            with self.subTest(order=[r[0] for r in order]), tempfile.TemporaryDirectory() as tmp:
+                index, output, first_name, first = self.failed_dispatch_fixture(Path(tmp), order)
+                self.assertEqual(index['diagnostic_dispatch_order'], 'sdk_inventory_not_execution')
+                self.assertFalse(index['diagnostic_dispatch_errors'])
+                self.assertEqual([x['file'] for x in index['diagnostic_dispatches']], [n + '.json' for n, _ in order])
+                for descriptor, (_, data) in zip(index['diagnostic_dispatches'], order):
+                    self.assertEqual(set(descriptor), {'file', 'bytes', 'sha256'})
+                    self.assertEqual((output / descriptor['file']).read_bytes(), data)
+                    self.assertEqual(descriptor['bytes'], len(data))
+                    self.assertEqual(descriptor['sha256'], retention.digest(data))
+                self.assertEqual((output / (first_name + '.json')).read_bytes(), first)
+                self.assertTrue((output / 'nac342-failure-configuredLocal.png').exists())
+
+    def test_failed_dispatch_bad_payload_cannot_hide_independent_failure(self):
+        _, _, _, rows = self.fixture('configuredLocal'); name, original = rows[2]
+        for mutation in ('config', 'pid', 'bool', 'operation', 'extra', 'duplicate', 'nonfinite', 'index'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                value = json.loads(original); altered_name = name
+                if mutation == 'config': value['configuration_sha256'] = '0' * 64
+                if mutation == 'pid': value['app_pid'] += 1
+                if mutation == 'bool': value['operation_index'] = True
+                if mutation == 'operation': value['operation'] = 'FOREIGN-CANARY'
+                if mutation == 'extra': value['private'] = 'FOREIGN-CANARY'
+                data = json.dumps(value).encode()
+                if mutation == 'duplicate': data = data[:-1] + b',"stage":"before"}'
+                if mutation == 'nonfinite': data = data.replace(b'1234.5', b'NaN')
+                if mutation == 'index': altered_name = 'nac342-dispatch-v1-99-before'
+                index, output, first_name, first = self.failed_dispatch_fixture(Path(tmp), [(altered_name, data), rows[0]])
+                self.assertEqual(len(index['diagnostic_dispatches']), 1)
+                self.assertTrue(index['diagnostic_dispatch_errors'])
+                self.assertFalse((output / (altered_name + '.json')).exists())
+                self.assertEqual((output / (first_name + '.json')).read_bytes(), first)
+                self.assertNotIn('FOREIGN-CANARY', json.dumps(index))
+
+    def test_failed_dispatch_ambiguous_and_oversized_inventory_denies_copy(self):
+        _, _, _, rows = self.fixture('configuredLocal')
+        for mode in ('duplicate', 'file_alias', 'symlink', 'oversize'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                selected = [rows[2], rows[0]]
+                if mode == 'oversize': selected[0] = (selected[0][0], selected[0][1] + b' ' * retention.MAX_JSON)
+                def mutate(export, groups):
+                    entries = groups[0]['attachments']
+                    if mode == 'duplicate': entries.append(dict(entries[0]))
+                    if mode == 'file_alias': entries[-1]['exportedFileName'] = entries[0]['exportedFileName']
+                    if mode == 'symlink':
+                        file = export / entries[0]['exportedFileName']; file.unlink()
+                        file.symlink_to(export / entries[1]['exportedFileName'])
+                index, output, _, _ = self.failed_dispatch_fixture(Path(tmp), selected, mutate=mutate)
+                self.assertFalse(index['diagnostic_dispatches'])
+                self.assertFalse((output / (rows[2][0] + '.json')).exists())
+
+    def test_failed_dispatch_budget_includes_previously_retained_diagnostics(self):
+        config, hashed, witness, rows = self.fixture('configuredLocal')
+        prior = 304
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp); selected = []
+            for i, (name, data) in enumerate(rows[:2]):
+                source = output / ('source-' + str(i)); source.write_bytes(data)
+                selected.append((source, name, 'dispatch'))
+            index = {'selection_errors': []}
+            with patch.object(retention, 'MAX_SELECTED', prior + len(rows[0][1])):
+                count = retention.retain_failed_dispatches(selected, index, config, hashed, witness,
+                                                          output, True, retained_bytes=prior)
+            self.assertEqual(count, len(rows[0][1]))
+            self.assertEqual(len(index['diagnostic_dispatches']), 1)
+            self.assertIn({'reason': 'growing_total'}, index['diagnostic_dispatch_errors'])
+            self.assertFalse((output / (rows[1][0] + '.json')).exists())
+        with tempfile.TemporaryDirectory() as tmp, patch.object(retention, 'retain_failed_dispatches',
+                wraps=retention.retain_failed_dispatches) as retain:
+            index, output, first_name, first = self.failed_dispatch_fixture(Path(tmp), rows[:2])
+            self.assertEqual(retain.call_args.kwargs['retained_bytes'], len(first))
+
+    def test_failed_dispatch_interrupts_propagate_and_fd_acquisition_failure_is_clean(self):
+        config, hashed, witness, rows = self.fixture('configuredLocal')
+        for exception in (KeyboardInterrupt, SystemExit):
+            with self.subTest(exception=exception), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp); source = output / 'source'; source.write_bytes(rows[0][1])
+                with patch.object(retention, 'bounded_file', side_effect=exception):
+                    with self.assertRaises(exception):
+                        retention.retain_failed_dispatches([(source, rows[0][0], 'dispatch')],
+                            {'selection_errors': []}, config, hashed, witness, output, True)
+                self.assertFalse((output / (rows[0][0] + '.json')).exists())
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp); source = output / 'source'; source.write_bytes(rows[0][1]); index = {'selection_errors': []}
+            opened = []; opening = os.open
+            def acquire(*args, **kwargs):
+                fd = opening(*args, **kwargs); opened.append(fd); return fd
+            fdopening = os.fdopen
+            def fail_write(fd, mode):
+                if mode == 'wb': raise OSError('inert fdopen failure')
+                return fdopening(fd, mode)
+            with patch.object(retention.os, 'open', side_effect=acquire), patch.object(retention.os, 'fdopen', side_effect=fail_write):
+                retention.retain_failed_dispatches([(source, rows[0][0], 'dispatch')], index,
+                                                   config, hashed, witness, output, True)
+            self.assertFalse((output / (rows[0][0] + '.json')).exists())
+            for fd in opened:
+                with self.assertRaises(OSError): os.fstat(fd)
+
+    def test_failed_dispatch_interrupt_after_open_closes_fd_and_removes_only_new_file(self):
+        config, hashed, witness, rows = self.fixture('configuredLocal')
+        for exception in (KeyboardInterrupt, SystemExit):
+            with self.subTest(exception=exception), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp); source = output / 'source'; source.write_bytes(rows[0][1])
+                opened = []; opening, fdopening = os.open, os.fdopen
+                def acquire(path, flags, *args, **kwargs):
+                    fd = opening(path, flags, *args, **kwargs)
+                    if flags & os.O_ACCMODE == os.O_WRONLY: opened.append(fd)
+                    return fd
+                def interrupt(fd, mode):
+                    if mode == 'wb': raise exception()
+                    return fdopening(fd, mode)
+                index = {'selection_errors': []}
+                with patch.object(retention.os, 'open', side_effect=acquire), \
+                        patch.object(retention.os, 'fdopen', side_effect=interrupt):
+                    with self.assertRaises(exception):
+                        retention.retain_failed_dispatches([(source, rows[0][0], 'dispatch')], index,
+                                                           config, hashed, witness, output, True)
+                self.assertEqual(len(opened), 1)
+                with self.assertRaises(OSError): os.fstat(opened[0])
+                self.assertFalse((output / (rows[0][0] + '.json')).exists())
+                self.assertEqual(source.read_bytes(), rows[0][1])
+                self.assertFalse(index['diagnostic_dispatches'])
+
+    def test_failed_dispatch_write_refusal_preserves_preexisting_destination(self):
+        config, hashed, witness, rows = self.fixture('configuredLocal')
+        for mode in ('alias', 'partial'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp); source = output / 'source'; source.write_bytes(rows[0][1])
+                outside = output / 'outside'; outside.write_bytes(b'UNTOUCHED')
+                destination = output / (rows[0][0] + '.json')
+                index = {'selection_errors': []}
+                if mode == 'alias': destination.symlink_to(outside)
+                opening = os.fdopen
+                class Partial:
+                    def __init__(self, fd): self.fd = fd
+                    def __enter__(self): return self
+                    def __exit__(self, *_): os.close(self.fd)
+                    def write(self, data): os.write(self.fd, data[:7]); return 7
+                def partial(fd, file_mode):
+                    return Partial(fd) if file_mode == 'wb' else opening(fd, file_mode)
+                with patch.object(retention.os, 'fdopen', side_effect=partial):
+                    count = retention.retain_failed_dispatches([(source, rows[0][0], 'dispatch')], index,
+                                                              config, hashed, witness, output, True)
+                self.assertEqual(count, 0); self.assertFalse(index['diagnostic_dispatches'])
+                self.assertTrue(index['diagnostic_dispatch_errors'])
+                self.assertEqual(outside.read_bytes(), b'UNTOUCHED')
+                if mode == 'alias': self.assertTrue(destination.is_symlink())
+                else: self.assertFalse(destination.exists())
+
     def png(self):
         def chunk(kind, body):
             return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)
@@ -240,6 +496,61 @@ class StartupAttachmentTests(unittest.TestCase):
         tool.path = '/unit/xcresulttool'
         return tool
 
+    def test_passed_complete_inventory_order_is_not_execution_chronology(self):
+        config, hashed, witness, original = self.fixture('configuredLocal')
+        swapped = [original[1], original[0], *original[2:]]
+        orders = [original, list(reversed(original)), swapped, original[::2] + original[1::2]]
+        declared = [json.loads(data) for name, data in original if name.startswith('nac342-dispatch-v1-')]
+        self.assertEqual(len(declared), 22)
+        for number, rows in enumerate(orders):
+            with self.subTest(order=number), tempfile.TemporaryDirectory() as tmp:
+                raw = Path(tmp); output = raw / 'selected'
+                index = collect(self.tool(raw, rows), raw / 'unit.xcresult', config, hashed, witness, output)
+                self.assertTrue(index['complete']); self.assertFalse(index['input_completion_unknown'])
+                self.assertEqual(index['dispatches'], declared)
+                self.assertEqual(index['dispatch_representation'],
+                                 'canonical_declared_operation_phase_not_execution_chronology')
+                actual_inventory = [(row['operation_index'], row['stage'])
+                                    for row in index['selection_metadata'] if row.get('kind') == 'dispatch']
+                expected_inventory = [(json.loads(data)['operation_index'], json.loads(data)['stage'])
+                                      for name, data in rows if name.startswith('nac342-dispatch-v1-')]
+                self.assertEqual(actual_inventory, expected_inventory)
+                self.assertEqual(index['ax_guards']['count'], 26)
+                self.assertEqual(index['ax_guards']['interaction_count'], 11)
+                png_name, png = next((name, data) for name, data in original if name == 'nac342-ordinary-configuredLocal')
+                self.assertEqual((output / (png_name + '.png')).read_bytes(), png)
+
+    def test_passed_normalization_cannot_complete_invalid_or_incomplete_evidence(self):
+        for defect in ('missing', 'duplicate', 'foreign', 'mislabeled', 'malformed',
+                       'unsafe', 'oversize', 'nonfinite', 'ax_missing', 'cleanup', 'png'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
+                raw = Path(tmp); config, hashed, witness, rows = self.fixture('configuredLocal')
+                mutate = None
+                if defect == 'missing': rows.pop(21)
+                elif defect == 'duplicate': rows.insert(1, rows[0])
+                elif defect == 'mislabeled': rows[0] = ('nac342-dispatch-v1-99-before', rows[0][1])
+                elif defect == 'malformed': rows[0] = (rows[0][0], b'{')
+                elif defect == 'oversize': rows[0] = (rows[0][0], rows[0][1] + b' ' * retention.MAX_JSON)
+                elif defect == 'nonfinite': rows[0] = (rows[0][0], rows[0][1].replace(b'1234.5', b'NaN'))
+                elif defect == 'foreign':
+                    value = json.loads(rows[0][1]); value['configuration_sha256'] = '0' * 64
+                    rows[0] = (rows[0][0], json.dumps(value).encode())
+                elif defect == 'ax_missing': rows = [r for r in rows if r[0] != 'nac342-ax-guards-v1-configuredLocal']
+                elif defect == 'cleanup':
+                    number = next(i for i, (name, _) in enumerate(rows) if name == 'nac342-cleanup-v1-configuredLocal')
+                    value = json.loads(rows[number][1]); value['app_termination_observed'] = False
+                    rows[number] = (rows[number][0], json.dumps(value).encode())
+                elif defect == 'png':
+                    number = next(i for i, (name, _) in enumerate(rows) if name == 'nac342-ordinary-configuredLocal')
+                    rows[number] = (rows[number][0], b'not PNG')
+                else:
+                    def mutate(export, groups): groups[0]['attachments'][0]['exportedFileName'] = '../outside'
+                with self.assertRaises(RuntimeError):
+                    collect(self.tool(raw, list(reversed(rows)), mutate=mutate), raw / 'unit.xcresult',
+                            config, hashed, witness, raw / 'selected')
+                index = json.loads((raw / 'selected/index.json').read_text())
+                self.assertFalse(index['complete']); self.assertTrue(index['input_completion_unknown'])
+
     def test_all_four_cases_require_actual_named_bindings_and_preserve_large_png_intact(self):
         for case in CASES:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
@@ -259,7 +570,7 @@ class StartupAttachmentTests(unittest.TestCase):
                         self.assertNotIn(b'HOST-AUTOMATIC-MUST-NOT-BE-RETAINED', file.read_bytes())
 
     def test_partial_malformed_or_wrong_binding_never_retains_rejected_json_or_completes(self):
-        for failure in ('partial-before', 'gap', 'order', 'malformed', 'wrong-binding', 'wrong-stage', 'console'):
+        for failure in ('partial-before', 'gap', 'mislabeled', 'malformed', 'wrong-binding', 'wrong-stage', 'console'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 raw = Path(temporary)
                 config, config_hash, witness, rows = self.fixture('configuredLocal')
@@ -267,8 +578,8 @@ class StartupAttachmentTests(unittest.TestCase):
                     rows = rows[:1]
                 elif failure == 'gap':
                     rows.pop(2)
-                elif failure == 'order':
-                    rows[2], rows[3] = rows[3], rows[2]
+                elif failure == 'mislabeled':
+                    rows[2] = (rows[3][0], rows[2][1])
                 elif failure == 'malformed':
                     rows[2] = (rows[2][0], b'{"FOREIGN-MUST-NOT-BE-RETAINED":')
                 elif failure in ('wrong-binding', 'wrong-stage'):
@@ -411,7 +722,8 @@ class StartupAttachmentTests(unittest.TestCase):
         self.assertNotIn('image', index)
         self.assertNotIn('observation', index)
         self.assertTrue(all(item['name'] != QUERY_DIAGNOSTIC for item in index['selected']))
-        self.assertEqual(len(index['dispatches']), prefix)
+        self.assertEqual(index['dispatches'], [])
+        self.assertEqual(len(index['diagnostic_dispatches']), prefix)
         return index
 
     def test_optional_complete_partial_and_exact_bound_are_retained_without_success_or_input_credit(self):

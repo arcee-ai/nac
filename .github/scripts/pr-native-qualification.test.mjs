@@ -204,20 +204,21 @@ test("new ordinary app lane retains the current explicit cold-cache and source-b
   assert.deepEqual(Object.keys(native.jobs), ['native']);
 });
 
-test("startup catalog binds exact P12 and repaired nine-file Q supplier", () => {
+test("startup catalog binds exact P12 and interaction ten-file Q supplier", () => {
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
   assert.equal(startup.source_sha, "4b7a1f3e0bf6175a77c5ebf627fe965860e99976");
-  assert.equal(startup.test_source_sha, "ba266ba1b3bea331768d91fc8a0b2ee66b484d01");
+  assert.equal(startup.test_source_sha, "f671fd15f002e3bda4df5040df998e80be1f6dd8");
   assert.deepEqual(startup.test_files, {
-    "README.md": "39c0b3aec37188e18eb141ef5537711e6f60b1fd384920d47d248cfd19758ed9",
-    "StartupJourneys.swift": "7b731b4c4f40f890fb62ed97652b9c6b480c4fda463770a9fe5a95b1f30eb4f8",
-    "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
-    "test_contract.py": "493457530363e6992941960a6de2911c65da463db7452deb17f3af24443f916d",
-    "StartupAXGuard.swift": "3be7835fe8cf48164bcfae3d5e803a1423b188ba78512ccb658858486dfa4a18",
-    "StartupAXReceipt.swift": "a25b94b791e2ff24cb15016b976f78cf366540d15382c01f9bce8ec585f93217",
-    "AX-WITNESS-CONTRACT.md": "1041bcef5739ebc1fe146673f7460ab82448d13dbb763af93c78f9cbf53c3bf6",
-    "test_ax_witness.py": "26e3fb9b290a03642e43eb07965564d2beb8013cc28d3294a6e07c946289cdc3",
-    "AGENTS.md": "074ff7d390c45a739b80048cf155274607ba3db5da74183cd5e4f673286a20fe"
+  "README.md": "eeb6d84c341b0e68ad6af24d08f6a7a2493bf8c0d7071efc2cd67a53d3db2f00",
+  "StartupJourneys.swift": "90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3",
+  "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
+  "test_contract.py": "c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e",
+  "StartupAXGuard.swift": "266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d",
+  "StartupAXReceipt.swift": "94e3f3512a9caaebc42841d8cffc34e8a1275cdff2bc4d43501e5deaba202247",
+  "AX-WITNESS-CONTRACT.md": "67ef84950affed7cf3ab5cff9df9127a5081b3a93d1dff1469e67a83fddb0191",
+  "test_ax_witness.py": "4400ffed7d2b30ed1613e3829d0e2d61b740f7a3fd352a092f22eac9f7fee878",
+  "AGENTS.md": "3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6",
+  "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
 });
   assert.equal(startup.protocol_source_sha, "7325c48b3c9ec7036e255a6bd92f31c1a98c1607");
   assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);

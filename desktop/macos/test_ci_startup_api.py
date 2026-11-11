@@ -13,6 +13,25 @@ from ci_startup_fixture import PRODUCT
 
 
 class StartupAPITests(unittest.TestCase):
+    def test_primary_listener_failure_retains_only_held_absence_or_signature_bits(self):
+        expected = dict(pid=123, parent=50, uid=501, start_seconds=100, start_microseconds=2,
+                        executable='/PRIVATE-CANARY')
+        fields = ('pid', 'start_seconds', 'start_microseconds', 'uid', 'executable')
+        for field in (None, *fields):
+            actual = None if field is None else {**expected, field: 'PRIVATE-CANARY' if field == 'executable' else expected[field]+1}
+            if field == 'executable': actual[field] = '/changed/PRIVATE-CANARY'
+            with patch('ci_startup_api.native_identity', return_value=actual) as query, \
+                    patch('ci_startup_api.subprocess.run') as command, self.assertRaises(FixtureFailure) as caught:
+                owned_listener(123, expected)
+            query.assert_called_once_with(123); command.assert_not_called()
+            metadata = failure_metadata(caught.exception)
+            self.assertEqual(metadata['guard_code'], 'listener_process_generation')
+            self.assertEqual(metadata['operands'], dict(actual_absent=field is None,
+                **{'mismatch_'+key: key == field for key in fields}))
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(metadata))
+        for value in (1, 'true', None, [], {}):
+            self.assertEqual(failure_metadata(FixtureFailure('listener_process_generation', {'actual_absent':value}))['operands'], {})
+
     def test_diagnostic_byte_sentinel_is_bounded_and_only_applies_to_actual_bytes(self):
         limit = 8 * 1024 * 1024
         for value in (0, limit, limit + 1):

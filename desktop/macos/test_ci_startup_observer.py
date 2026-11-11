@@ -5,6 +5,8 @@ signal, product engine, app, browser or XCTest is executed by these controls.
 The resulting production-schema records enter the actual Python owner/caller.
 """
 from contextlib import ExitStack
+import ctypes
+import errno
 import hashlib
 import io
 import json
@@ -21,16 +23,23 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 from ci_startup import run_case
-from ci_startup_owner import OwnerWitness, _PRODUCER_FAILURE_KINDS, _PRODUCER_FAILURE_STAGES
+from ci_startup_owner import BSDInfo, OwnerWitness, _PRODUCER_FAILURE_KINDS, _PRODUCER_FAILURE_STAGES
 
 ARGUMENT_KERNEL = r'''
 // All process/AppKit entry points used by snapshot are deterministic fixture
 // adapters. No live PID, window service, sysctl or signal is reached.
 var argumentRoot = ""
+var passiveBSDMode = ""
+var passiveBSDTrace: [String] = []
 var argumentScenario = ""
 var argumentPhase = 0
+var candidateExecPhase = 0
+var candidateArgumentReads = 0
+var candidateDetailReads = 0
+var candidateExecControl: Bool { argumentScenario.hasPrefix("new-exec") }
 var argumentHelperGone = false
 var argumentHelperReused = false
+var argumentHelperImageChanged = false
 var argumentReads = 0
 var argumentAbsenceChecks = 0
 var argumentSignals = 0
@@ -46,18 +55,41 @@ var bindingControl: Bool { argumentScenario.hasPrefix("binding-") }
 func getuid() -> UInt32 { 501 }
 func fixturePath(_ pid: Int32) -> String {
     if pid == 99 { return "/foreign/unowned" }
+    if argumentHelperImageChanged && pid == 12 {
+        return argumentRoot + "/Moved app folder with spaces/NAC.app/Contents/MacOS/NACPreview"
+    }
+    if candidateExecControl && pid == 12 && candidateExecPhase > 0 && argumentScenario == "new-exec-foreign" {
+        return "/foreign/unowned"
+    }
+    let inherited = candidateExecControl && pid == 12 && argumentPhase == 1
+        && (candidateExecPhase == 0 || argumentScenario == "new-exec-stable"
+            || (argumentScenario == "new-exec-repeated" && candidateExecPhase > 1))
     return argumentRoot + "/Moved app folder with spaces/NAC.app/Contents/" +
-        ((pid == 10 || (bindingControl && pid == 20)) ? "MacOS/NACPreview" : "Resources/nac-web")
+        ((pid == 10 || inherited || (bindingControl && pid == 20)) ? "MacOS/NACPreview" : "Resources/nac-web")
 }
 func fixturePIDs() -> [Int32] {
     if bindingControl { return binding("initial-wrong") ? [10, 11, 20, 99] : [10, 11, 99] }
     if argumentPhase == 2 { return [99] }
+    if candidateExecControl { return argumentPhase == 0 ? [10, 99] : [10, 12, 99] }
     let helper = argumentScenario.hasPrefix("known-") || argumentPhase == 1
     return [10, 11] + (helper ? [12] : []) + [99]
 }
 func proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ argument: UInt64,
                   _ output: UnsafeMutableRawPointer?, _ size: Int32) -> Int32 {
+    if !passiveBSDMode.isEmpty {
+        passiveBSDTrace.append("bsd")
+        if passiveBSDMode != "live" {
+            errno = passiveBSDMode == "denied" ? EACCES : passiveBSDMode == "zeroErrno" ? 0 : EIO
+            return passiveBSDMode == "short" ? size - 1 : passiveBSDMode == "negative" ? -1 : 0
+        }
+    }
     if argumentPhase == 2 || (pid == 12 && argumentHelperGone) { errno = ESRCH; return 0 }
+    if candidateExecControl && candidateExecPhase > 0 {
+        if pid == 12 { candidateDetailReads += 1 }
+        if pid == 12 && argumentScenario == "new-exec-absent" { argumentHelperGone = true; errno = ESRCH; return 0 }
+        if pid == 12 && argumentScenario == "new-exec-denied" { errno = EACCES; return 0 }
+        if pid == 10 && argumentScenario == "new-exec-parent-denied" { errno = EACCES; return 0 }
+    }
     if bindingControl {
         bindingBSDReads[pid, default: 0] += 1
         if pid == 10 && bindingCensusReads > 1 {
@@ -72,6 +104,14 @@ func proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ argument: UInt64,
     if binding("bad-ancestry") && pid == 11 { value.pbi_ppid = 99 }
     value.pbi_uid = 501; value.pbi_start_tvsec = 1234
     value.pbi_start_tvusec = pid == 12 && argumentHelperReused ? 999 : UInt64(pid)
+    if candidateExecControl && candidateExecPhase > 0 {
+        if pid == 12 && argumentScenario == "new-exec-birth" { value.pbi_start_tvusec = 999 }
+        if pid == 12 && argumentScenario == "new-exec-uid" { value.pbi_uid = 502 }
+        if pid == 12 && argumentScenario == "new-exec-parent" { value.pbi_ppid = 99 }
+        if pid == 12 && argumentScenario == "new-exec-fresh-parent" && candidateExecPhase > 1 { value.pbi_ppid = 1 }
+        if pid == 10 && argumentScenario == "new-exec-parent-uid" { value.pbi_uid = 502 }
+        if pid == 10 && argumentScenario == "new-exec-parent-birth" { value.pbi_start_tvusec = 999 }
+    }
     if bindingControl && bindingCensusReads > 1 && pid == 10 {
         if binding("refresh-reused") || (binding("refresh-bookend-reused") && bindingRefreshBSDReads == 2) {
             value.pbi_start_tvusec = 999
@@ -136,9 +176,26 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
             return 0
         }
     }
-    let executable = fixturePath(pid)
-    let argv = [executable] + ((pid == 10 || (bindingControl && pid == 20)) ? [] :
-        (pid == 12 ? ["__desktop-configuration"] : ["--bind", "127.0.0.1:4321"]))
+    if candidateExecControl && pid == 12 {
+        candidateArgumentReads += 1
+        if argumentScenario == "new-exec-arg-denied"
+            || (argumentScenario == "new-exec-fresh-denied" && candidateArgumentReads == 2) {
+            errno = EPERM; return -1
+        }
+        if argumentScenario == "new-exec-malformed"
+            || (argumentScenario == "new-exec-fresh-malformed" && candidateArgumentReads == 2) {
+            let bytes = [UInt8](repeating:0,count:8)
+            bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
+            size!.pointee = bytes.count;return 0
+        }
+    }
+    let executable = candidateExecControl && pid == 12
+        ? argumentRoot + "/Moved app folder with spaces/NAC.app/Contents/Resources/nac-web" : fixturePath(pid)
+    let knownNativeInvalid = argumentScenario == "known-native-argv" && pid == 10 && argumentPhase == 1
+    let argv0 = knownNativeInvalid || (candidateExecControl && pid == 12 && candidateArgumentReads == 2
+        && argumentScenario == "new-exec-fresh-wrong-argv") ? "/wrong/argv0" : executable
+    let argv = [argv0] + (knownNativeInvalid ? ["--bind"] : (pid == 10 || (bindingControl && pid == 20)) ? [] :
+        (pid == 12 && !candidateExecControl ? ["__desktop-configuration"] : ["--bind", "127.0.0.1:4321"]))
     var environment = ["HOME": "/private/owned home", "NAC_HOME": "/private/owned home/nac"]
     if binding("bad-environment") && pid == 10 {
         environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
@@ -146,6 +203,18 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
     if pid == 12 && argumentPhase == 1 && argumentScenario == "known-environment" {
         environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
         argumentHelperGone = true
+    }
+    if candidateExecControl && pid == 12 && candidateArgumentReads == 1 {
+        environment["HOME"] = "/stale-first-tuple-must-not-be-reused"
+    }
+    if candidateExecControl && pid == 12 {
+        if argumentScenario == "new-exec-prohibited"
+            || (argumentScenario == "new-exec-fresh-prohibited" && candidateArgumentReads == 2) {
+            environment["GITHUB_TOKEN"] = "fixture-secret-never-emitted"
+        }
+        if argumentScenario == "new-exec-fresh-environment" && candidateArgumentReads == 2 {
+            environment["HOME"] = "/wrong-controlled-home"
+        }
     }
     var nargs = Int32(argv.count)
     var bytes = withUnsafeBytes(of: &nargs) { Array($0) }
@@ -155,6 +224,15 @@ func sysctl(_ mib: UnsafeMutablePointer<Int32>?, _ count: UInt32,
     bytes.append(0)
     bytes.withUnsafeBytes { _ = memcpy(output!, $0.baseAddress!, bytes.count) }
     size!.pointee = bytes.count
+    if candidateExecControl && pid == 12 {
+        candidateExecPhase += 1
+        if (argumentScenario == "new-exec-fresh-absent" || argumentScenario == "new-exec-fresh-prohibited")
+            && candidateArgumentReads == 2 { argumentHelperGone = true }
+        if argumentScenario == "new-exec-prohibited" { argumentHelperGone = true }
+    }
+    if pid == 12 && argumentPhase == 1 && argumentScenario == "known-image-after-arguments" {
+        argumentHelperImageChanged = true
+    }
     if pid == 12 && argumentPhase == 1 && argumentScenario == "known-reused-after-arguments" {
         argumentHelperReused = true
     }
@@ -242,7 +320,7 @@ func runArgumentControl() throws {
     do {
         try StartupObserver.emit(StartupObserver.snapshot(config, resources: resources, known: &known, note: { failureStage = $0 }))
         argumentReachedBarrier = true
-        for _ in 0..<2 {
+        for _ in 0..<(candidateExecControl ? 0 : 2) {
             // The consumer requests each fresh settlement observation first.
             guard try FileHandle.standardInput.read(upToCount: 1) == Data([1]) else {
                 throw OwnershipError.invalid
@@ -254,7 +332,9 @@ func runArgumentControl() throws {
     } catch {
         try StartupObserver.emit(StartupObserver.failureRecord(error, known: known, stage: failureStage))
     }
-    let audit: [String: Any] = ["actual_arguments_reads": argumentReads,
+    let audit: [String: Any] = ["candidate_arguments_reads": candidateArgumentReads,
+        "candidate_detail_reads": candidateDetailReads,
+        "actual_arguments_reads": argumentReads,
         "independent_absence_checks": argumentAbsenceChecks, "nonzero_signals": argumentSignals,
         "all_kernel_appkit_calls_mocked": true, "settlement_demands": argumentSettlementDemands,
         "reached_settlement_barrier": argumentReachedBarrier]
@@ -306,6 +386,31 @@ func injected(_ pid: Int32, previous: StartupProcessIdentity?, scope: String, mo
             return mode == "gone"
         })
 }
+if CommandLine.arguments[1].hasPrefix("bsd-passive-") {
+    passiveBSDMode = String(CommandLine.arguments[1].dropFirst("bsd-passive-".count))
+    let old = try injected(11, previous: nil, scope: "candidate", mode: "live")!
+    var result: [String: Any] = [:]
+    do {
+        let observed = try StartupProcessProbe.observe(11, previous: old, scope: "known", uid: 501,
+            readPath: { pid in passiveBSDTrace.append("path"); return executable(pid) },
+            isAbsent: { _ in
+                passiveBSDTrace.append("absent"); errno = ERANGE
+                if passiveBSDMode == "precedence" {
+                    throw StartupProbeFailure(pid: 11, scope: "existence", reason: "existence_unavailable")
+                }
+                return passiveBSDMode == "gone"
+            })
+        result["outcome"] = observed == nil ? "absent" : "live"
+    } catch {
+        result["outcome"] = "failed"
+        result["failure"] = StartupObserver.failureRecord(error, known: [11: old], stage: .include_probe)
+    }
+    result["trace"] = passiveBSDTrace
+    result["errno_after"] = errno
+    result["expected"] = MemoryLayout<proc_bsdinfo>.size
+    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
+    exit(0)
+}
 let scenario = CommandLine.arguments[1], configurationSHA = CommandLine.arguments[2]
 var known: [Int32: StartupProcessIdentity] = [:]
 for pid: Int32 in [10, 11] { known[pid] = try injected(pid, previous: nil, scope: "candidate", mode: "live")! }
@@ -354,6 +459,33 @@ do {
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'), 'Darwin Swift Foundation probe controls unavailable')
 class ProductionObserverControls(unittest.TestCase):
+    def test_original_bsd_operands_survive_later_absence_errno_and_keep_exact_query_trace(self):
+        for mode in ('denied', 'unavailable', 'zeroErrno', 'short', 'negative', 'live', 'gone', 'precedence'):
+            with self.subTest(mode=mode):
+                run = subprocess.run([str(self.executable), 'bsd-passive-' + mode], capture_output=True, timeout=5)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                row = json.loads(run.stdout)
+                self.assertEqual(row['trace'], ['bsd', 'path', 'bsd', 'path'] if mode == 'live' else ['bsd', 'absent'])
+                if mode in ('live', 'gone'):
+                    self.assertEqual(row['outcome'], 'absent' if mode == 'gone' else 'live')
+                    self.assertNotIn('failure', row)
+                    continue
+                failure = row['failure']
+                self.assertFalse(failure['complete'])
+                self.assertEqual(len(failure['retained_identities']), 1)
+                self.assertEqual(len(failure['unresolved']), 1)
+                annotation = failure['producer_failure']
+                if mode == 'precedence':
+                    self.assertEqual(failure['unresolved'][0]['reason'], 'existence_unavailable')
+                    self.assertNotIn('bsd_read', annotation)
+                    continue
+                self.assertEqual(row['errno_after'], errno.ERANGE)
+                detail = annotation['bsd_read']
+                self.assertEqual(detail, dict(returned_count=row['expected']-1 if mode == 'short' else -1 if mode == 'negative' else 0,
+                    expected_count=row['expected'], errno=errno.EACCES if mode == 'denied' else 0 if mode == 'zeroErrno' else errno.EIO))
+                self.assertEqual(failure['unresolved'][0], dict(pid=11, scope='known', reason='bsd_denied' if mode == 'denied' else 'bsd_unavailable'))
+                self.assertNotIn('observed_uptime_ns', failure)  # emit(), not the syscall, owns that later timestamp.
+
     @classmethod
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix='nac354-observer-source-controls-')
@@ -463,8 +595,8 @@ class ProductionObserverControls(unittest.TestCase):
     def test_app_binding_adverse_censuses_and_changed_lifetimes_stay_atomic(self):
         cases = {
             'initial-wrong': ('app_binding', 'ownership_invalid', 1),
-            'initial-ambiguous': ('resources_candidates', 'ownership_invalid', 1),
-            'initial-foreign': ('resources_candidates', 'ownership_invalid', 1),
+            'initial-ambiguous': ('resources_count', 'ownership_invalid', 1),
+            'initial-foreign': ('resources_urls', 'ownership_invalid', 1),
             'bad-environment': ('environment', 'ownership_invalid', 1),
             'bad-ancestry': ('ancestry', 'ownership_invalid', 2),
             'refresh-missing-date': ('app_launch', 'ownership_invalid', 2),
@@ -478,7 +610,13 @@ class ProductionObserverControls(unittest.TestCase):
             with self.subTest(mode=mode):
                 frames, config, audit = self.binding_frames(mode)
                 self.assertEqual(frames[-1]['event'], 'failed')
-                self.assertEqual(frames[-1]['producer_failure'], dict(stage=stage, kind=kind))
+                expected = dict(stage=stage, kind=kind)
+                if mode == 'bad-environment':
+                    expected['environment_rejection'] = dict(executable_class='native', previously_known=False,
+                                                              predicate='prohibited', category='token')
+                if mode == 'refresh-denied':
+                    expected['bsd_read'] = dict(returned_count=0, expected_count=ctypes.sizeof(BSDInfo), errno=errno.EACCES)
+                self.assertEqual(frames[-1]['producer_failure'], expected)
                 self.assertEqual(frames[-1]['retained_identities'], [])
                 self.assertEqual(audit['known_pids'], [])
                 self.assertEqual(audit['census_reads'], reads)
@@ -579,6 +717,47 @@ class ProductionObserverControls(unittest.TestCase):
                 process.stdout.close()
                 process.stderr.close()
 
+    def test_new_candidate_exec_during_arguments_requires_fresh_coherent_tuple(self):
+        with tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
+            frames, config, audit = self.argument_frames('new-exec', Path(temporary).resolve())
+            self.assertTrue(frames[-1]['complete'], frames[-1].get('producer_failure'))
+            self.assertEqual(audit['candidate_arguments_reads'], 2)
+            owner = OwnerWitness(config, 'b' * 64, uid=501)
+            for frame in frames:
+                owner.observe(frame)
+            self.assertIsNone(owner.failure)
+            self.assertEqual(set(owner.history), {10, 12})
+            self.assertEqual(owner.history[12]['kind'], 'engine')
+            self.assertTrue(owner.history[12]['serving'])
+            self.assertEqual(owner.history[12]['environment']['HOME'], '/private/owned home')
+            self.assertEqual(owner.signals, [])
+
+    def test_new_candidate_exec_recovery_never_accepts_ambiguous_or_invalid_tuples(self):
+        modes = ['stable', 'foreign', 'birth', 'uid', 'parent', 'absent', 'denied',
+                 'parent-denied', 'parent-uid', 'parent-birth', 'repeated', 'fresh-parent',
+                 'arg-denied', 'malformed', 'prohibited', 'fresh-denied', 'fresh-malformed',
+                 'fresh-prohibited', 'fresh-environment', 'fresh-wrong-argv', 'fresh-absent']
+        for mode in modes:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
+                frames, config, audit = self.argument_frames('new-exec-' + mode, Path(temporary).resolve())
+                self.assertEqual(frames[-1]['event'], 'failed')
+                self.assertFalse(audit['reached_settlement_barrier'])
+                self.assertLessEqual(audit['candidate_arguments_reads'], 2)
+                owner = OwnerWitness(config, 'b' * 64, uid=501)
+                for frame in frames:
+                    owner.observe(frame)
+                self.assertEqual(set(owner.history), {10})
+                self.assertEqual(owner.signals, [])
+                self.assertFalse(owner.failure_receipt()['positive_process_settlement'])
+                if mode in ('arg-denied', 'malformed', 'prohibited', 'fresh-denied', 'fresh-malformed',
+                            'fresh-prohibited', 'fresh-environment', 'fresh-wrong-argv'):
+                    self.assertEqual(audit['independent_absence_checks'], 0)
+                if mode in ('prohibited', 'fresh-prohibited'):
+                    self.assertEqual(frames[-1]['producer_failure']['environment_rejection']['predicate'], 'prohibited')
+                if mode == 'prohibited':
+                    self.assertEqual(audit['candidate_arguments_reads'], 1)
+                    self.assertEqual(audit['candidate_detail_reads'], 0)
+
     def test_actual_argument_known_helper_exit_retires_and_settles(self):
         self.argument_exit('known-exit', previously_known=True)
 
@@ -587,7 +766,7 @@ class ProductionObserverControls(unittest.TestCase):
 
     def test_actual_argument_live_denied_unknown_reuse_and_validation_remain_fail_closed(self):
         for scenario in ('known-live', 'known-denied', 'known-access-denied', 'known-unknown',
-                         'known-reused', 'known-reused-after-arguments', 'known-malformed',
+                         'known-reused', 'known-reused-after-arguments', 'known-image-after-arguments', 'known-native-argv', 'known-malformed',
                          'known-environment'):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory(prefix='nac342-xctest-') as temporary:
                 frames, config, audit = self.argument_frames(scenario, Path(temporary).resolve())
@@ -597,15 +776,22 @@ class ProductionObserverControls(unittest.TestCase):
                 self.assertEqual(frames[-1]['event'], 'failed')
                 if scenario in ('known-denied', 'known-access-denied', 'known-malformed'):
                     expected = ('arguments', 'ownership_invalid')
-                elif scenario == 'known-environment':
+                elif scenario in ('known-environment', 'known-native-argv'):
                     expected = ('environment', 'ownership_invalid')
-                elif scenario == 'known-reused-after-arguments':
+                elif scenario in ('known-reused-after-arguments', 'known-image-after-arguments'):
                     expected = ('detail_probe', 'process_probe')
                 elif scenario == 'known-unknown':
                     expected = ('arguments_absence', 'process_probe')
                 else:
                     expected = ('arguments_absence', 'arguments_unavailable')
-                self.assertEqual(frames[-1]['producer_failure'], dict(zip(('stage', 'kind'), expected)))
+                annotation = dict(zip(('stage', 'kind'), expected))
+                if scenario == 'known-environment':
+                    annotation['environment_rejection'] = dict(executable_class='bundled_engine', previously_known=True,
+                                                                predicate='prohibited', category='token')
+                if scenario == 'known-native-argv':
+                    annotation['environment_rejection'] = dict(executable_class='native', previously_known=True,
+                        predicate='native_argv', argv0_matches=False, helper_present=False, serving_present=True)
+                self.assertEqual(frames[-1]['producer_failure'], annotation)
                 self.assertFalse(audit['reached_settlement_barrier'])
                 self.assertFalse(owner.failure_receipt()['positive_settlement'])
                 self.assertEqual(set(owner.history), {10, 11, 12})
@@ -613,7 +799,7 @@ class ProductionObserverControls(unittest.TestCase):
                         side_effect=AssertionError('No live PID probe')), patch('ci_startup_owner.os.kill',
                         side_effect=AssertionError('No real signal')):
                     owner.settle(0)
-                if scenario in ('known-denied', 'known-access-denied', 'known-malformed', 'known-environment'):
+                if scenario in ('known-denied', 'known-access-denied', 'known-malformed', 'known-environment', 'known-native-argv'):
                     self.assertEqual(audit['independent_absence_checks'], 0)
 
     def config(self, root='/private/nac342-xctest-unit'):
@@ -629,7 +815,7 @@ class ProductionObserverControls(unittest.TestCase):
         return owner
 
     def test_production_enum_and_all_failure_kinds_match_consumer_without_authority(self):
-        self.assertEqual(len(_PRODUCER_FAILURE_STAGES), 23)
+        self.assertEqual(len(_PRODUCER_FAILURE_STAGES), 26)
         self.assertEqual(len(_PRODUCER_FAILURE_KINDS), 4)
         for kind in sorted(_PRODUCER_FAILURE_KINDS):
             with self.subTest(kind=kind):
