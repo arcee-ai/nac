@@ -205,7 +205,7 @@ No channel is inherited by ordinary CLI invocations, whose existing lifetime
 and worker/helper dispatch remain independent.
 
 The native consumer seam is `PreviewEngine.receipt` and the existing
-`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+`onReady(URL)`, `onFailure(EngineFailure)`, `onExit(Int32)` and `stop(completion)`
 callbacks. The receipt is available only for the current verified live launch;
 stop, channel failure and exit retire it before notifying consumers. Its launch
 UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
@@ -263,34 +263,15 @@ directories only in that smoke bundle. Dummy provider results do not establish
 real-vendor authentication; locked-session DOM results do not establish visible
 paint or trusted OS input.
 
-`node desktop/macos/startup_lifecycle.mjs NAC.app OUTPUT` exercises the ordinary
-uninstrumented app under a native/browser lease. It identifies the unique
-relocated app and exact bundled child before observing that child's loopback
-listener, then verifies an actual bundled worker consumes a dummy credential
-through the Rust owner. A second case holds the configuration publication lock
-while the app exits and checks that its preflight child exits without creating a
-database. Termination and cleanup require matching this fixture's bundle paths;
-unknown ownership retains the disposable profile for inspection.
-
-For the separately authorized real-vendor case, set `NAC_STARTUP_REAL_VENDOR=1`
-and `NAC_STARTUP_SCENARIOS=startup-real-arcee` when invoking the same runner.
-It uses the existing ARCEE_API_KEY child-environment reference and selects a
-model listed by the existing authenticated provider discovery through the
-ordinary catalog UI.
-It creates no key preset and verifies `arcee-api` plus the environment variable
-name before sending one text-only prompt through the shared UI. The key is never
-put in arguments or evidence; HOME/NAC_HOME/store remain disposable. This case
-is excluded from default runs and never uses OAuth refresh or personal stores.
-For selection-only repair verification, `NAC_STARTUP_VENDOR_SELECTION_ONLY=1`
-stops after verifying that the session persisted the exact discovered model,
-before sending any model prompt.
-
 Every builder mode emits `Contents/Resources/build-receipt.json` with source,
 compiler flags, native source hashes, engine identity and both executable
 hashes. It rejects an engine from another source revision or source changes
 during compilation. This is unsigned compiler provenance for the packaging
 owner; signing requires a separate final artifact manifest. The local builder's
 development bundle identifier is not the distribution or track identity contract.
+This receipt also records the selected bundle ID/name, build-support hashes
+and whether instance instrumentation was compiled. Distribution/signing policy
+remains separately owned.
 
 
 ### External AX environment preflight (source only)
@@ -325,6 +306,69 @@ four-case driver would request unauthorized XCTest/input; changing that driver
 or inventing a launch path is outside this source unit. Q057, all guards and
 inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.
 
+## App instances and store conflicts (ALL-343)
+
+`app-run` uses ordinary LaunchServices opening, without `-n`. Finder/Dock reopen
+events focus or restore the existing window; they never start another engine
+or replay a command. The current close-to-quit policy remains unchanged.
+
+Normal app identities come only from the exact bundled engine's compiled track:
+
+| Track | Bundle ID | Display name |
+| --- | --- | --- |
+| stable | `ai.arcee.nac` | NAC |
+| beta | `ai.arcee.nac.beta` | NAC Beta |
+| dev | `ai.arcee.nac.dev` | NAC Development |
+
+The read-only `BundleIdentity.sh` metadata helper is the mapping owner. Inherited
+`NAC_BUILD_TRACK` cannot select a different bundle identity. The preview retains
+its separate development identity. This partition adds no beta publication policy.
+
+Rust's ordinary serving lease still decides ownership. A typed busy error uses
+the existing private version-1 failure envelope with `stage: startup` and
+`code: store_owned`. Swift validates version/incarnation before recognizing it;
+unknown codes and peer text never become native diagnostic text. A conflict
+shows the selected canonical store and track, explains deliberate owner shutdown
+or an explicit different `--store-path`, and enables **Retry** only after the
+failed bundled child is reaped. Retry keeps the selected configuration and asks
+the ordinary engine to start again. It cannot signal an existing CLI, delete a
+lock, select another store, attach to a server or grant execution authority.
+No custom app discovery/PID records are introduced; a retained lock file is
+not proof of a live owner.
+
+`instance-build` produces the separate `NAC Instance Smoke.app` with
+`LOCAL_APP`, `PREVIEW_SMOKE` and `INSTANCE_SMOKE`, plus `InstanceObservation`.
+Its bundle ID has an `.instance-smoke` suffix. Use separate output directories
+and exact same-source private dev/stable engines to build the two track fixtures.
+Then run under the native/browser lease:
+
+```sh
+python3 -B desktop/macos/instance_smoke.py DEV_APP OUTPUT OBSERVER STABLE_APP
+```
+
+`instance-smoke` combines build/run; supply the stable fixture through
+`NAC_MAC_STABLE_APP`. `NAC_INSTANCE_SCENARIOS` selects bounded cases and records
+whether the full set ran. The eight cases cover simultaneous ordinary opens,
+same-window reopen, real CLI conflicts through canonical/file/directory aliases,
+retry while the CLI remains live, graceful/crash/draining-owner exit, app-crash
+relaunch and dev/stable coexistence. The runner verifies served assets, native
+window/engine/store identities, screenshots and bounded fixture cleanup. It
+fails before app launch on a locked console. Only its own live app incarnation
+and fixture-owned CLI handles can receive cleanup controls; focus restoration
+is conditional on the fixture still being frontmost. These checks require
+actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
+
+The coexist fixture runs each bundled configuration helper with the exact owned
+profile as both process cwd and `--directory`. Before accessing its store, it
+requires selected version 1, the expected dev/stable track, the same canonical
+root and a canonical absolute store path strictly inside that owned root;
+foreign paths and symlink escapes fail before app creation. Fresh track defaults are `dev.db` and
+`stable.db`; legacy stable `store.db` reuse applies only when that file exists.
+On mismatch, `dev/configuration-failure.json` or
+`stable/configuration-failure.json` retains bounded allowlisted protocol facts
+and output byte counts/hashes. Arbitrary helper text and stderr are redacted.
+Run the adjacent fixture contracts with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_instance_*.py'`.
 ## Fixed hosted lifecycle qualification (ALL-344)
 
 `all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
