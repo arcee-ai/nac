@@ -201,6 +201,10 @@ final class InertRecovery { func engineExited(_ message: String) {} }
         if arguments.filter({$0=="--smoke-scenario"}).count == 1,
            let index=arguments.firstIndex(of:"--smoke-scenario"), index+1<arguments.count {
             recording=arguments[index+1]=="external-navigation-recording"
+            if arguments[index+1]=="external-auth" {
+                expected["NAC_TELEMETRY"]="stderr"
+                expected["NAC_TELEMETRY_SCENARIO"]="native-external-auth"
+            }
         }
         #endif
         if recording {
@@ -312,6 +316,10 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
             ['--smoke-scenario', 'offline-api-key-extra'],
             ['--smoke-scenario', 'offline-api-key', '--smoke-scenario', 'normal'],
             ['--smoke-scenario', 'stale-launch'], ['--smoke-scenario', 'external-auth'],
+            ['--smoke-scenario', 'external-auth-extra'], ['--smoke-scenario=external-auth'],
+            ['--smoke-scenario', 'external-auth', '--smoke-scenario', 'normal'],
+            ['--smoke-scenario', 'normal', '--smoke-scenario', 'external-auth'],
+            ['--smoke-scenario', 'external-auth', '--smoke-scenario', 'external-auth'],
             ['--smoke-scenario', 'external-navigation-recording-extra'],
             ['--smoke-scenario', 'external-navigation-recording', '--smoke-scenario', 'normal'],
             ['--smoke-scenario', 'normal', '--smoke-scenario', 'external-navigation-recording'],
@@ -325,6 +333,7 @@ class RecordingLaunchConfigurationTests(unittest.TestCase):
 
     def test_ordinary_preview_ignores_recording_arguments(self):
         self.check('ordinary', ['--smoke-scenario', 'external-navigation-recording'])
+        self.check('ordinary', ['--smoke-scenario', 'external-auth'])
 
 
 if __name__ == '__main__':
