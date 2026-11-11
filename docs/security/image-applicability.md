@@ -73,6 +73,12 @@ targets and verified actual inventory, never from the candidate evidence's
 claimed mapping. For example `upstream:mit/kerberos_5` and
 `upstream-wolfi:krb5` bind to verified `apk:krb5-libs`; this does not authorize
 other coordinates or aliases to inherit that observation.
+Version 1 rejects a rule for a scanner coordinate observed on multiple installed
+APKs. `upstream:haxx/curl` and `upstream-wolfi:curl` represent both `apk:curl`
+and `apk:libcurl-openssl4`; proving only one payload cannot clear their shared
+raw row. Those rows remain blocking until a separately reviewed aggregate
+binding can verify both installed payloads. Each distinct APK coordinate can
+still be evaluated on its own evidence.
 
 An observation is exactly `{binding, observed_at}`. Its binding must equal the
 rule and reviewed evidence binding and share the caller's exact scan identity.
