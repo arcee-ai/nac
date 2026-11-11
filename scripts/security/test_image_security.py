@@ -21,9 +21,9 @@ import image_qualify as qualification
 
 IMAGE = "sha256:" + "1" * 64
 NOW = dt.datetime(2026, 10, 21, 12, tzinfo=dt.timezone.utc)
-RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.3 linux/amd64",
+RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.4 linux/amd64",
            "gh": "gh version 2.103.0 (2026-10-21)\nhttps://github.com/cli/cli/releases/tag/v2.103.0",
-           "git_lfs": "git-lfs/3.8.0 (GitHub; linux amd64; go 1.27.3; git aece9221f8c09221a14395d964806b956289bc07)",
+           "git_lfs": "git-lfs/3.8.0 (GitHub; linux amd64; go 1.27.4; git aece9221f8c09221a14395d964806b956289bc07)",
            "uv": "uv 0.13.4 (abc 2026-10-20)", "dpkg": "base-files\t12.4+deb12u12"}
 SBOM = {"descriptor": {"name": "syft"}, "source": {"type": "image", "metadata": {"imageID": IMAGE}},
         "distro": {"id": "debian", "versionID": "12", "versionCodename": "bookworm"}, "artifacts": [
