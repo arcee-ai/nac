@@ -45,6 +45,9 @@
 
 #define FILL_BYTE 0xAA
 
+static size_t g_comment_attribute_allocs;
+static int g_track_comment_attribute_alloc;
+
 typedef union {
     size_t n;
     max_align_t align;
@@ -54,6 +57,9 @@ static void *t_alloc(size_t count, void **abstract)
 {
     alloc_hdr *h;
     (void)abstract;
+    if(g_track_comment_attribute_alloc &&
+       count == sizeof(libssh2_publickey_attribute))
+        g_comment_attribute_allocs++;
     h = malloc(sizeof(*h) + count);
     if(!h)
         return NULL;
@@ -323,6 +329,8 @@ static int case_66034_comment_overrun(void)
     size_t p;
 
     fixture_init(&f, 1);
+    g_comment_attribute_allocs = 0;
+    g_track_comment_attribute_alloc = 1;
 
     /* Wire format is [packet_len][payload]; the payload begins with the
        response id. A v1 entry whose comment_len runs past the packet must
@@ -335,6 +343,12 @@ static int case_66034_comment_overrun(void)
 
     script_rx(rx, p);
     rc = libssh2_publickey_list_fetch(&f.pkey, &num, &list);
+    g_track_comment_attribute_alloc = 0;
+    if(g_comment_attribute_allocs != 0) {
+        printf("     unexpected comment attribute allocation: %zu\n",
+               g_comment_attribute_allocs);
+        return 1;
+    }
 
     return expect_error(&f, rc, LIBSSH2_ERROR_BUFFER_TOO_SMALL,
                         "BUFFER_TOO_SMALL");

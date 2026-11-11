@@ -147,16 +147,17 @@ binds installed payload hashes, loads libssh2, and verifies OpenSSL4 and curl
 dynamic consumer linkage.
 
 `libssh2-regressions.c` adds one malformed-input case per corrected seam and is
-compiled and run by `build-libssh2.sh` against the patched tree, so a dropped or
-reverted correction fails the build. It is never installed. Each case was
-confirmed to abort on a tree carrying only the 7598/55199 corrections and to
-pass on the fully patched tree: 66032 double-frees the stale SFTP open reply,
-66033 trips the AES-GCM block assertion, 66034 frees an out-of-bounds publickey
-attribute pointer, 66035 corrupts the heap on a short ETM packet, 58050
-over-allocates on the attribute count, and 58051 frees an uninitialised list
-entry. 32-bit execution remains separate acceptance evidence; these cases run
-at the build architecture only. No blocked applicability regression work is
-delegated to this build.
+compiled and run by `build-libssh2.sh` against the final patched tree. It is
+never installed. The 66034 case also requires the oversized comment to be
+rejected before an attribute-sized allocation attempt; checking only the final
+error missed the early bounds guard. Bounded exact-source patch reversals fault
+only the corresponding 66032, 66033 and 66035 cases. The 58051 reversal faults
+its case and other publickey cases sharing its uninitialised-list path. The
+66034 reversal, tested before NAC's overlapping publickey follow-ups, fails
+only its allocation-order case; the final packaged tree passes all six cases.
+The 58050 integer-overflow seam requires separate 32-bit execution evidence;
+the linux/amd64 builder does not provide it. These source controls do not clear raw
+scanner findings or establish applicability.
 
 libssh2 becomes a sixth owned APK with the scanner's corresponding exact owned
 package, canonical upstream CPE and plain-upstream Wolfi search identities. The
