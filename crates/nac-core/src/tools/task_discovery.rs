@@ -326,12 +326,12 @@ impl NativeTool for FindTasksTool {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                    "session_id": {"type":"string","maxLength":MAX_ID_BYTES,"description":"Exact task session ID"},
-                    "reference": {"type":"string","maxLength":store::MAX_TASK_REFERENCE_BYTES,"description":"Work-unit or ticket reference matched as a whole token"},
-                    "text": {"type":"string","maxLength":store::MAX_TASK_TEXT_BYTES,"description":"Case-insensitive substring of title or last prompt"},
-                    "project_id": {"type":"string","maxLength":MAX_ID_BYTES,"description":"Saved project to search instead of this chat's own"},
-                    "after": {"type":"string","maxLength":512,"description":"next_after from the previous page"},
-                    "limit": {"type":"integer","minimum":1,"maximum":store::MAX_TASK_SEARCH_LIMIT,"default":DEFAULT_LIMIT}
+                    "session_id": {"type":["string","null"],"maxLength":MAX_ID_BYTES,"description":"Exact task session ID; omit or null when unused"},
+                    "reference": {"type":["string","null"],"maxLength":store::MAX_TASK_REFERENCE_BYTES,"description":"Work-unit or ticket reference matched as a whole token; omit or null when unused"},
+                    "text": {"type":["string","null"],"maxLength":store::MAX_TASK_TEXT_BYTES,"description":"Case-insensitive substring of title or last prompt; omit or null when unused"},
+                    "project_id": {"type":["string","null"],"maxLength":MAX_ID_BYTES,"description":"Saved project to search; omit or null for this chat's own"},
+                    "after": {"type":["string","null"],"maxLength":512,"description":"next_after from the previous page; omit or null for the first page"},
+                    "limit": {"type":["integer","null"],"minimum":1,"maximum":store::MAX_TASK_SEARCH_LIMIT,"default":DEFAULT_LIMIT,"description":"Page size; omit or null for the default"}
                 }
             }),
         )
@@ -350,7 +350,7 @@ impl NativeTool for FindTasksTool {
             .count();
         if selectors > 1 {
             return Err(invalid(
-                "give at most one of session_id, reference and text",
+                "give at most one of session_id, reference and text; omit or use null for unused selectors, not empty strings",
             ));
         }
         if let Some(session_id) = &input.session_id {
@@ -570,7 +570,7 @@ impl NativeTool for ReadTaskTool {
                 "required": ["session_id"],
                 "properties": {
                     "session_id": {"type":"string","maxLength":MAX_ID_BYTES,"description":"Exact task session ID"},
-                    "project_id": {"type":"string","maxLength":MAX_ID_BYTES,"description":"The task's saved project, required to read across projects"}
+                    "project_id": {"type":["string","null"],"maxLength":MAX_ID_BYTES,"description":"The task's saved project, required across projects; omit or null for this chat's own"}
                 }
             }),
         )
