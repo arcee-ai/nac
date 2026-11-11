@@ -58,6 +58,8 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
          desktop/macos/NativeCommandScript.swift desktop/macos/NativeCommandBridge.swift
          desktop/macos/WorkspaceRecovery.swift desktop/macos/WorkspaceRetirement.swift
          desktop/macos/WorkspaceReadiness.swift
+          desktop/macos/WorkspaceCheckpoint.swift desktop/macos/WorkspaceStorage.swift
+          desktop/macos/WorkspaceStorageBridge.swift desktop/macos/WorkspaceStorageScript.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then

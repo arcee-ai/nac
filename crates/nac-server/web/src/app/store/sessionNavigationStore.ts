@@ -65,7 +65,7 @@ export function createSessionNavigationStore(storage?: Pick<Storage, "getItem" |
 
   const { getState, setState, subscribe, useStore } = sessionNavigationStore;
 
-  subscribe(() => {
+  const stopPersistence = subscribe(() => {
     try {
       storage?.setItem(STORAGE_KEY, serializeSessionNavigation(getState()));
     } catch {
@@ -114,6 +114,7 @@ export function createSessionNavigationStore(storage?: Pick<Storage, "getItem" |
     useStore((state) => state.lastViewedAt[sessionId]);
   return {
     release: () => {
+      stopPersistence();
       sessionNavigationStore.setState(initial_sessionNavigationStore);
     },
     restoreSessionNavigation,
