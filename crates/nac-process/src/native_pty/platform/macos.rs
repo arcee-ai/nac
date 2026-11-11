@@ -12,6 +12,8 @@ use std::io;
 use std::sync::OnceLock;
 
 mod census;
+#[cfg(test)]
+pub(in crate::native_pty::platform) mod diagnostics;
 mod discovery;
 mod inspection;
 #[cfg(test)]
@@ -123,34 +125,21 @@ impl Identity {
 
     pub fn signal(&self, signal: i32) -> io::Result<bool> {
         #[cfg(test)]
-        signal_diagnostics::record(self.pid, || {
-            format!(
-                "stage=capability.resolve.begin retained_uniqueid={} signal={signal}",
-                self.uniqueid
-            )
-        });
+        let signal_function = || diagnostics::resolve(signal_function());
         self.signal_with(signal, signal_function()?)
     }
 
     fn signal_with(&self, signal: i32, send: AuditSignal) -> io::Result<bool> {
         #[cfg(test)]
-        signal_diagnostics::record(self.pid, || "stage=signal_with.enter".to_owned());
+        let inspect = diagnostics::signal_inspector(inspect);
         #[cfg(test)]
         let mut failure_observation = signal_diagnostics::FailureObservation::default();
         for _ in 0..3 {
-            #[cfg(test)]
-            signal_diagnostics::record(self.pid, || "stage=inspect.begin".to_owned());
             let Some(current) = inspect(self.pid)? else {
                 return Ok(false);
             };
             #[cfg(test)]
-            signal_diagnostics::record(self.pid, || {
-                format!(
-                    "stage=inspect.snapshot retained_uniqueid={} current_uniqueid={} version={} parent_uniqueid={} ppid={} sid={} live={}",
-                    self.uniqueid, current.unique.uniqueid, current.unique.version,
-                    current.unique.parent_uniqueid, current.ppid, current.sid, current.live,
-                )
-            });
+            diagnostics::validation(self.pid, self.uniqueid, &current);
             if current.unique.uniqueid != self.uniqueid || !current.live {
                 return Ok(false);
             }
@@ -161,13 +150,6 @@ impl Identity {
             key[5] = self.pid as u32;
             key[7] = current.unique.version as u32;
             #[cfg(test)]
-            signal_diagnostics::record(self.pid, || {
-                format!(
-                    "stage=audit.begin token_pid={} token_version={} signal={signal}",
-                    key[5], key[7]
-                )
-            });
-            #[cfg(test)]
             let send_started = std::time::Instant::now();
             // SAFETY: runtime symbol has the installed libproc signature; key
             // is initialized audit-token-sized storage valid for this call.
@@ -175,9 +157,7 @@ impl Identity {
             #[cfg(test)]
             let send_elapsed = send_started.elapsed();
             #[cfg(test)]
-            signal_diagnostics::record(self.pid, || {
-                format!("stage=audit.result return_code={result}")
-            });
+            diagnostics::native_send(self.pid, signal, current.unique.version, result);
             #[cfg(test)]
             failure_observation.observe(self.pid, self.uniqueid, result, send_elapsed, || {
                 inspection::snapshot(self.pid, &inspection::Native)
