@@ -1,29 +1,38 @@
-# C22 private opened-inode receipt controller
+# C23 private current-source and fresh-P12 controller
 
-Private source candidate. Human call_53bda80add8f41569570dede38ae7f66 approved
-Source64 and exactly ONE NEW conditional full Native. Root holds that grant
-UNDISPATCHED; this source supplies no runtime admission or execution authority.
-Fresh Native22 requires source/review/current-head CI/Bugbot/SDK/AppKit/caller/ref
-and unexpired-P12 gates, then separate Root literal admission under the original
-48-minute work / 10-minute cleanup / 2-minute retention limits. Same G1 affected
-alignment and fresh public CI remain pending. Native21 is FAIL/SPENT with input
-and configured cleanup UNKNOWN; all old allocations and unused time are SPENT.
-Source64 accepts links0-or1 on the same validated opened receipt. This does not
-prove Native21's cause or fix its resources_urls/ownership_invalid cleanup. Main's
-25 green source controls provide no Native or configured cleanup qualification.
+Private source candidate. Root's existing ONE conditional Native23 remains
+RESERVED UNDISPATCHED; no runtime authority or literal episode epochs are supplied
+by this source. Native22 remains FAIL/SPENT, with configured input and
+app/engine/profile cleanup UNKNOWN. Earlier allocations retain their original
+outcomes and counters. Source and package controls never create Native acceptance
+or transfer spent/unused time.
+Root merged dependency PR679 at 15:22:51UTC onto dev
+`6c5c2a43028db602fe299158e21ae64f263919ce` under explicit manual CI-gap authority;
+Ubuntu DNS gaps remain documented, not a claim of full green CI. Main's two
+Python fixture changes are SAME-G1 reviewed. Final private integration H and
+fresh current-H CI/SDK/AppKit/Bugbot/source/caller/ref gates remain Root-owned.
+Fresh unexpired P12 package-only producer43040555596/artifact13865588339 passed;
+its compiler/owned-settlement evidence is not app/AX/input/Native qualification.
+Native23 requires a new separate Root queue-inclusive48+10+2 literal admission
+after all gates; no local Swift/SDK/compiler/runtime execution is authorized here.
 
 The first H-published refusal context is NOT the exact Q-consumed receipt, and the
 BSD producer-failure timestamp is NOT syscall time. P12 is a compatible integration
 test product, not global current-dev product acceptance.
 
-C22 consumes real frozen Source64 H
-`b686ebe79e8b392a6f1e6621570162958c9fcae6`, whose direct parent is H
-`6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d`. Immutable supplier Q is
-`225d0c489785dcc5c1c8a6fcbe913f24604d9350`; Q's direct parent is canonical Q
-`8397bafe8fb5f439b702ebf3e941eed802ce71aa`, and its tree is
-`d35092bccf2176695041cf7c6207026950ea20c3`. The ten immutable supplier bytes
-match H's normal TEST_FILES nomination. Journey SHA256 is
-`e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
+C23 consumes actual two-parent private integration H
+`a64bfd5cd009fc594986d194648c707ece2baf12` (tree
+`19d24c64de17fdf6d7d5638694e28ccb8b902673`), whose ordered parents are
+`518675520d3444fb314e25b6563ba8c6bc16d175` and
+`6c5c2a43028db602fe299158e21ae64f263919ce`.
+The singular H_preparation_parent field records the actual first parent only;
+it does not claim sole-parent ancestry. Genuine immutable supplier Q is
+`f671fd15f002e3bda4df5040df998e80be1f6dd8`, direct parent
+`225d0c489785dcc5c1c8a6fcbe913f24604d9350`, tree
+`1d94c0c356b0bcf708df98d63b95330ccb38f680`. All ten supplier bytes/modes
+match H's TEST_FILES nomination. Journey SHA256 is
+`90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3`.
+
 H incorporates Source32 passive refusal retention and exactly the reviewed V3
 development test-runner request-child exception; Root relays explicit human
 approval. Normal development test signing is allowed in the later build gate;
@@ -33,10 +42,10 @@ app/engine/global write grant, new transport or native guard relaxation applies.
 
 Admission now requires the exact closed `purpose`, bound to a separate scope:
 
-- `native`: `P12-integration-Qopen-inode-R7325-four-startup-source22`.
-- `build-only`: `P12-integration-Qopen-inode-R7325-signature-build-only-source22`.
+- `native`: `P12-integration-current-HQ-R7325-four-startup-source23`.
+- `build-only`: `P12-integration-current-HQ-R7325-signature-build-only-source23`.
 
-Both bind the exact C22 controller SHA, genuine P12 producer/normal manifest,
+Both bind the exact C23 controller SHA, genuine P12 producer/normal manifest,
 one attempt, zero retries, reviewed image and the original queue-inclusive
 48-minute work / 10-minute cleanup / 2-minute retention limits. Unknown, omitted
 or mismatched purpose refuses before work in the workflow and controller.
@@ -87,10 +96,15 @@ not collapse Xcode's actual compiler invocations or waive per-helper ownership.
 
 P12 remains the integration test product `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`;
 R remains `7325c48b3c9ec7036e255a6bd92f31c1a98c1607`. Genuine producer run
-42455455480 / artifact13607980704, normal manifest and closed normal-only handoff
-remain exact. The artifact expires Nov11 06:49Z; availability must be verified in
+43040555596 / artifact13865588339, normal manifest and closed normal-only handoff
+remain exact. The fresh artifact expires Nov14 14:59:46UTC; availability must be verified in
 the later admitted job. This implementation downloads/rebuilds nothing.
 Historical SDK/source-context fields retain their actual provenance.
+The expired old artifact13607980704/run42455455480 remains historical only;
+new artifact.json seals every actual fresh outer member size/hash. The new
+normal manifest/container digest is independently verified; actual P12 source
+and signed normal binary identities happen to match old bytes, without any
+transfer of old runtime success. Fresh producer unused1174.879462s are SPENT.
 
 The old 67 function/class ASTs are audited explicitly: genuine admission,
 configured reservation, main routing and runtime project receipt changes plus
@@ -193,9 +207,9 @@ admission. This source is not a new feature PR and is nevermerge.
 
 Only producer0210a3c52062ec28e9c6ae74098040e432e09a65 on
 `codex/experimental-native-p12-lifecycle-package-20261108`, successful first manual
-same-repository run42455455480/artifact13607980704,
-`ff8-host-package-42455455480-1`, is admitted. Original outer ZIP66384125bytes has
-SHA256 `b51fb4fe4ae8d017f2f30f45f1da886244d537bc0df5ab467ee686252bb60312`.
+same-repository run43040555596/artifact13865588339,
+`ff8-host-package-43040555596-1`, is admitted. Fresh original outer ZIP66384479bytes has
+SHA256 `74db7e1d1d5f117b91162e5434338037d01ef6c131a9a9035cacefa8bffd18fd`.
 GitHub metadata must match that size/digest, original source/run/branch/attempt,
 repository ownership and nonexpiry before download. The initial inline gate
 checks exact producer/normal-manifest declaration and image before any checkout.
@@ -205,9 +219,9 @@ independently verified original artifact. Canonical, no-follow, regular, same-UI
 single-link members and exact directory/file inventory are required. Extra/missing
 files/directories, changed bytes, symlinks/hardlinks and foreign roles reject.
 The normal role alone is transferred/extracted: manifest34298bytes SHA256
-`b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e`, normal ZIP
+`74107ef9af370dc98778fa6aa0f18236a137750cc8f7b3ea1f5780b07a4f2b68`, normal ZIP
 32794219bytes SHA256
-`f3255d4dcf01b9e632895cd2971a52b425bd235859d46e7380752d954917b9ba`.
+`95322479098f5a7a9f11106f93826901fde4bd46c7b9df04a0f68d9c287b0e3c`.
 The package-only receipt, source, normal purpose and recorded handoff hashes
 remain required. Separate lifecycle files are sealed for custody but are never
 selected, extracted or used for startup acceptance. Q's normal13/input42/assets83

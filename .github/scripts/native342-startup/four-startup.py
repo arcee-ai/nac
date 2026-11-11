@@ -15,16 +15,16 @@ import sys
 import time
 
 STOP = []
-BRANCH = 'refs/heads/codex/private520-open-inode-C22'
-SCOPE = 'P12-integration-Qopen-inode-R7325-four-startup-source22'
+BRANCH = 'refs/heads/codex/private520-current-C23-20261111'
+SCOPE = 'P12-integration-current-HQ-R7325-four-startup-source23'
 PURPOSE_SCOPES = {'native': SCOPE, 'build-only': SCOPE.replace('four-startup', 'signature-build-only')}
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 PRODUCER = '0210a3c52062ec28e9c6ae74098040e432e09a65'
 PRODUCER_BRANCH = 'codex/experimental-native-p12-lifecycle-package-20261108'
-PRODUCER_RUN = 42455455480
-PRODUCER_ARTIFACT = 13607980704
-PRODUCER_ARTIFACT_NAME = 'ff8-host-package-42455455480-1'
-MANIFEST_SHA256 = 'b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e'
+PRODUCER_RUN = 43040555596
+PRODUCER_ARTIFACT = 13865588339
+PRODUCER_ARTIFACT_NAME = 'ff8-host-package-43040555596-1'
+MANIFEST_SHA256 = '74107ef9af370dc98778fa6aa0f18236a137750cc8f7b3ea1f5780b07a4f2b68'
 
 
 def require(condition, reason):

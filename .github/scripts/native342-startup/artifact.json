@@ -1,9 +1,9 @@
 {
-  "run_id": 42455455480,
-  "artifact_id": 13607980704,
-  "artifact_name": "ff8-host-package-42455455480-1",
-  "outer_bytes": 66384125,
-  "outer_sha256": "b51fb4fe4ae8d017f2f30f45f1da886244d537bc0df5ab467ee686252bb60312",
+  "run_id": 43040555596,
+  "artifact_id": 13865588339,
+  "artifact_name": "ff8-host-package-43040555596-1",
+  "outer_bytes": 66384479,
+  "outer_sha256": "74db7e1d1d5f117b91162e5434338037d01ef6c131a9a9035cacefa8bffd18fd",
   "producer_sha": "0210a3c52062ec28e9c6ae74098040e432e09a65",
   "producer_branch": "codex/experimental-native-p12-lifecycle-package-20261108",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
@@ -13,39 +13,39 @@
   "files": {
     "ff8-host-package-output/handoff/NAC-normal-app-preparation-arm64.zip": {
       "bytes": 32794219,
-      "sha256": "f3255d4dcf01b9e632895cd2971a52b425bd235859d46e7380752d954917b9ba"
+      "sha256": "95322479098f5a7a9f11106f93826901fde4bd46c7b9df04a0f68d9c287b0e3c"
     },
     "ff8-host-package-output/handoff/host-package.json": {
-      "bytes": 9688,
-      "sha256": "49e8777f94089c181be29ca654127cacee183ecd42d9b41f831e7bddc556aac7"
+      "bytes": 9694,
+      "sha256": "68204d93f99ab58f5be0806903ffc2105fcee0e7249fe82a98dbba9c3117c7fd"
     },
     "ff8-host-package-output/handoff/lifecycle/NAC-lifecycle-fixture-arm64.zip": {
       "bytes": 33455110,
-      "sha256": "e7dc33e4e8c0025dfed792beb4b339fbda7f0c807120cfb599ebca2c98bd9eca"
+      "sha256": "864aab44066b2f217c0fd4a61a9a19ad1138064ed3200a86f508c339169bbf47"
     },
     "ff8-host-package-output/handoff/lifecycle/manifest.json": {
       "bytes": 35394,
-      "sha256": "1ddcf153b7dabeb82b3e662b8770ab57ea734566343e16496c4932c72391cf78"
+      "sha256": "068225858af104d8623d16630d780cb8fb23f226d3805dbea4e9897acd9d2e0c"
     },
     "ff8-host-package-output/handoff/manifest.json": {
       "bytes": 34298,
-      "sha256": "b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e"
+      "sha256": "74107ef9af370dc98778fa6aa0f18236a137750cc8f7b3ea1f5780b07a4f2b68"
     },
     "ff8-host-package-output/handoff/receipts/H-tools-setup.log": {
-      "bytes": 7805,
-      "sha256": "6afdc64e60055a3a91fea00c1e6b7b56c7c87fb53b6a4be6564b583e7c6735f0"
+      "bytes": 8039,
+      "sha256": "264d6fe0cd93e2a93eddaf68cfdfa38988231550337fd813f76d9827c13a401a"
     },
     "ff8-host-package-output/handoff/receipts/H-tools-setup.log.ownership.json": {
       "bytes": 136,
-      "sha256": "1994512d398fe6c6366064b0e0453a6d8aaba00cece555621c76dd84268e445a"
+      "sha256": "946be91e643c23aed21531065e90f42ffdb6a1177e2c7e68065c8c2e4b05ea94"
     },
     "ff8-host-package-output/handoff/receipts/P-setup.log": {
-      "bytes": 958,
-      "sha256": "414ebd56d06c7bc1ceb9ee4f2d1a46edcfd01d7f7b24b49009ae0f2ab427ddae"
+      "bytes": 959,
+      "sha256": "6a89eeea065d3c3023922df3cb682e4051d7fe6285ea29e1e747ef772ec85dd0"
     },
     "ff8-host-package-output/handoff/receipts/P-setup.log.ownership.json": {
       "bytes": 136,
-      "sha256": "802221649320daa2c725b4e6332dca8750030bb42b6d8257742aa546127a5596"
+      "sha256": "329829b8dbf01f4bb1b3b8b9a3bdb207f504ef34a25c283b275a49ecbde67398"
     },
     "ff8-host-package-output/handoff/receipts/Q-and-role-inspection.log": {
       "bytes": 0,
@@ -53,19 +53,19 @@
     },
     "ff8-host-package-output/handoff/receipts/Q-and-role-inspection.log.ownership.json": {
       "bytes": 137,
-      "sha256": "14fb76b55c6b2a2bfc4d9f53e69f20f8bab48202b0416f772b56871c23f3adff"
+      "sha256": "43562c081302a1b288e9933d05410cd8cc28f8a7a90d946cd5a8e02d8c6486a5"
     },
     "ff8-host-package-output/handoff/receipts/Q-package-admission.json": {
       "bytes": 8963,
-      "sha256": "c7d635e22852c5f617c81afc818c2d50dd79f63cca6f580a8374219de5d54c36"
+      "sha256": "cf5d96dfb5a47cc57d8de4c6bdf1997913969f8dd626ce6b6338e92a389c7e47"
     },
     "ff8-host-package-output/handoff/receipts/export.json": {
-      "bytes": 6674,
-      "sha256": "8fcfae8f4fff1c4b827c7d791c9beada998aa7a4367c2611464c2ca8f840293a"
+      "bytes": 6675,
+      "sha256": "df391aee8e316c56fe969c04803c58a6c8437b2ba168146e77e171b73e1faabc"
     },
     "ff8-host-package-output/handoff/receipts/host-package.json": {
-      "bytes": 9576,
-      "sha256": "44ffbba9a69c9fa8deeebe7a280a5b9209fd6b73b10ba6d2e924da515df17fa1"
+      "bytes": 9582,
+      "sha256": "cc5de5e7467c00412bde8f7d57b11e0562b85c2033f8afb8a6fff6f418d99b17"
     },
     "ff8-host-package-output/handoff/receipts/lifecycle-build.log": {
       "bytes": 156,
@@ -73,15 +73,15 @@
     },
     "ff8-host-package-output/handoff/receipts/lifecycle-build.log.ownership.json": {
       "bytes": 137,
-      "sha256": "5b5745fb947eb2bdefe4e2aa772acebe27eb7c804f22e1f5a245b68e3f5ba691"
+      "sha256": "38b99f9d04797f321e6601de83732682b2ddebebff6bb4e49fd62572a4a3b456"
     },
     "ff8-host-package-output/handoff/receipts/lifecycle-package-admission.json": {
       "bytes": 5359,
-      "sha256": "d384e4a81946ad09b27f39834d1204d907ccbbba68342bfc177aa6f584b7efb5"
+      "sha256": "03b80add09dffdb8958feceb1a6e7453ca120eb037478412e498e20ac6630e8f"
     },
     "ff8-host-package-output/handoff/receipts/normal-before-lifecycle.json": {
       "bytes": 3934,
-      "sha256": "6f19f43da0194cb0abc8da3ddb6b4ea98cb14ee8829625c11585dfc5d075bdeb"
+      "sha256": "ff72f04fcbb98240e8fe105da6917d24c7549287a355780ca7ff905cc1b02d07"
     },
     "ff8-host-package-output/handoff/receipts/normal.log": {
       "bytes": 134,
@@ -89,23 +89,23 @@
     },
     "ff8-host-package-output/handoff/receipts/normal.log.ownership.json": {
       "bytes": 137,
-      "sha256": "a0a0ea95e040a840a4454c492db0bc159b838f5bffdd51da733db0d0287c1653"
+      "sha256": "a8ea4437f6ac82c0f8d92721d052cb5a95e9c8dec8ced7c5d29e1721506abf84"
     },
     "ff8-host-package-output/handoff/receipts/prepare-engine.log": {
-      "bytes": 978,
-      "sha256": "a4da3f3c3e76af5cf47da4a6913a01b4f73ac50d0d3e05d896852658ed98ac6d"
+      "bytes": 1066,
+      "sha256": "42f1bc8eec56ce92c02791c8faf4d4c9688d9958500ee5fb9384b4647a646cbd"
     },
     "ff8-host-package-output/handoff/receipts/prepare-engine.log.ownership.json": {
       "bytes": 136,
-      "sha256": "e39fd5b72de96a83fbe4e3a92f7cef3918c8713255b7c02aec37e45fc18a053d"
-    },
-    "ff8-host-package-output/handoff/receipts/relocate-check.log.ownership.json": {
-      "bytes": 137,
-      "sha256": "24b314c940f201da5fac5e886c3364191baa5239a104eb7fe12265e8d426f2ee"
+      "sha256": "3de2d88d9feca8c747882e0bdb8ccaf6f1008f572f380b182baddf7db46ec902"
     },
     "ff8-host-package-output/handoff/receipts/relocate-check.log": {
       "bytes": 76,
       "sha256": "e2d672edf0c9d9b23f45a2053cf080d444c9d49d8e0ee0218db6de5e1c6ebfe2"
+    },
+    "ff8-host-package-output/handoff/receipts/relocate-check.log.ownership.json": {
+      "bytes": 137,
+      "sha256": "98b70fcefdd638e2975318199ff93e704912bbd73b7d31dd5217f1d377f23190"
     },
     "ff8-host-package-output/handoff/receipts/verify-lifecycle.log": {
       "bytes": 99,
@@ -113,7 +113,7 @@
     },
     "ff8-host-package-output/handoff/receipts/verify-lifecycle.log.ownership.json": {
       "bytes": 137,
-      "sha256": "0e84c2fa96d78b0f4e85d09e4a80485e553b8f639fac8e5f969dc56f7d192bd0"
+      "sha256": "0d2ca0743d2db1b015f946679fcfb32689230cb59ff7d40f7d408aeb34c08ade"
     },
     "ff8-host-package-output/handoff/receipts/verify.log": {
       "bytes": 94,
@@ -121,31 +121,31 @@
     },
     "ff8-host-package-output/handoff/receipts/verify.log.ownership.json": {
       "bytes": 137,
-      "sha256": "57c0f0da01a7f93533d9bc8b405ddea0cb198455e1784ed906730f7891c50fef"
+      "sha256": "587f8da756c4b527a9cf9dfeea2a6fd8fe646667fd66f58588d272dd7ba552a5"
     },
     "ff8-host-package-gate/clock-checkout-H.json": {
-      "bytes": 286,
-      "sha256": "050cb7e890bc309d83cbadc2bc6fbfa917db88a92dd5719b8e4da0731b4daa63"
+      "bytes": 290,
+      "sha256": "16d59dd09cc45347cc4d82dba53ad64fe765dfb50913662e6d5ed4be539bc2b6"
     },
     "ff8-host-package-gate/clock-checkout-P.json": {
-      "bytes": 286,
-      "sha256": "8b278d42341c3b2a8aa15ae33b57511fe3683ba61aa941a03faa5544cf8e2890"
+      "bytes": 290,
+      "sha256": "64fe606f76cd6db3ba316aa92c839bf7a774e2cc810a81b6c45746ab504882b5"
     },
     "ff8-host-package-gate/clock-node.json": {
-      "bytes": 280,
-      "sha256": "41039f4fee7041800733fb6e40dc9ac2f5af3828bbcfc594f62006719046848a"
-    },
-    "ff8-host-package-gate/clock-rust.json": {
-      "bytes": 280,
-      "sha256": "48eebd842e93ef19c0608d8615e0df454e2215a0fc9522d768b33cab3c6b6465"
+      "bytes": 285,
+      "sha256": "8324a37e2f23a6824c6f57ef0bf784d97bfa6778f9ec2d013a97496f351a52cf"
     },
     "ff8-host-package-gate/clock-restore-cache.json": {
       "bytes": 490,
-      "sha256": "d7a974b5b761e9d9c66710aefa6717a7707bab663106471341b2494169292586"
+      "sha256": "de684de81719bafd3ab8f9505aad987c9c87d021f71112ab6eef7238d3de4cfd"
+    },
+    "ff8-host-package-gate/clock-rust.json": {
+      "bytes": 285,
+      "sha256": "7f2d6be2eb58cef7a7b33d96ffa3e0598f0359f9c2da89ed837c105472d94833"
     },
     "ff8-host-package-gate/initial.json": {
       "bytes": 576,
-      "sha256": "b577831f024bbb12a4225fcaa53ef524645d55956d7082a38c203983bad15f15"
+      "sha256": "c8a79852a8268b9a5590f37da4fea4cf9dcb49c0eac0f7dce9d534153fa80437"
     }
   }
 }
