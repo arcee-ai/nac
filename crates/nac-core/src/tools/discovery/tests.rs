@@ -720,6 +720,11 @@ async fn symlink_escapes_are_structured_and_never_followed() {
     fs::create_dir_all(&outside).expect("create outside fixture");
     fs::write(outside.join("secret.rs"), "ExecutionBackend\n").expect("write outside file");
     symlink(&outside, root.join("escape")).expect("create escaping symlink");
+    symlink(
+        format!("{}/", outside.display()),
+        root.join("escape-target-slash"),
+    )
+    .expect("create escaping symlink with a trailing slash in its target");
     let output = parsed(execute("glob", json!({"pattern": "**"}), &runtime).await);
     assert!(output["errors"]
         .as_array()
@@ -752,6 +757,31 @@ async fn symlink_escapes_are_structured_and_never_followed() {
         .expect("errors")
         .iter()
         .any(|error| error["code"] == "symlink_escape" && error["path"] == "escape"));
+
+    // Both caller spelling and symlink target spelling must retain the same
+    // capability boundary through the actual glob/grep discovery adapter.
+    for scoped_root in ["escape/", "escape-target-slash", "escape-target-slash/"] {
+        for (tool, records) in [("glob", "entries"), ("grep", "matches")] {
+            let args = if tool == "glob" {
+                json!({"pattern": "**", "root": scoped_root})
+            } else {
+                json!({"pattern": "ExecutionBackend", "regex": false, "roots": [scoped_root]})
+            };
+            let scoped = parsed(execute(tool, args, &runtime).await);
+            assert!(
+                scoped[records].as_array().expect("records").is_empty(),
+                "{tool} {scoped_root}"
+            );
+            assert!(
+                scoped["errors"]
+                    .as_array()
+                    .expect("errors")
+                    .iter()
+                    .any(|error| error["code"] == "symlink_escape"),
+                "{tool} {scoped_root}: {scoped}"
+            );
+        }
+    }
 
     fs::write(root.join(".gitignore"), "ignored.rs\nescape\n").expect("ignore symlink fixture");
     let ignored = parsed(execute("glob", json!({"pattern": "**"}), &runtime).await);
