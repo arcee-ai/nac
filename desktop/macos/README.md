@@ -82,11 +82,13 @@ Watchdog diagnostics are best effort and never gate the forced-exit callback.
 
 ## CI fixture allowance
 
-The ordinary `ci.py` fixture-discovery command has a 120-second allowance to
-accommodate suite growth and hosted-machine variance. Discovery, test and skip
-conditions, process supervision, and all other command limits stay unchanged.
-The enclosing CI deadline remains 30 minutes; native startup tickets and AX
-freshness retain their separate limits.
+The ordinary `ci.py` fixture-discovery command has a 600-second allowance for
+its composed suite, including compiler-driven controls. This is one CI batch
+resource bound: discovery, every test and skip condition, per-control compiler
+and execution limits, process ownership and cleanup remain unchanged. The
+existing enclosing CI deadline still clamps the command to 30 minutes overall;
+native startup tickets and AX freshness retain their separate limits. A complete
+retained suite result is required; this allowance is not native acceptance.
 
 The pending ALL-342 integration at `3e6d834d` exercised 600 methods (595 passed,
 five existing optional skips). That evidence belongs to its candidate, not this

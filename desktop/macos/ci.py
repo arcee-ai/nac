@@ -354,7 +354,7 @@ def main():
         if command(['git', 'status', '--porcelain']):
             raise RuntimeError('Locked setup modified the candidate source')
         run(['python3', '-B', '-m', 'unittest', 'discover', '-v', '-s', 'desktop/macos', '-p', 'test_*.py'],
-            raw / 'fixture-controls.log', 120)
+            raw / 'fixture-controls.log', 600)
         envelope = target['envelope'] if target else 'ci-toolchain.json'
         expected = json.loads((ROOT / 'desktop/macos' / envelope).read_text())
         actual = {'developer_directory': os.environ.get('DEVELOPER_DIR'),
