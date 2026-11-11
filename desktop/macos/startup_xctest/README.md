@@ -628,3 +628,41 @@ unmeasured until a fresh admitted build: changed/present library payload,
 missing Runner XML, broader or nonpropagated process grants still fail closed.
 False-acceptance actual signature observations are retained before admission.
 No re-signing, generated-xcent edit or library-entitlements forcing is used.
+
+## Approved one-action handoff (2026-11-10)
+
+The immutable request now stays present through one public input and its existing
+bounded postcondition. Q publishes a closed nonce/config/request/target/cutoff
+claim at `requests/request.json.handoff`; H acknowledges it in readonly
+`receipt.json.handoff` without refreshing the existing AX sample. Q waits within
+that SAME sample's <=1s age, then performs the existing final public query,
+semantic/point/geometry/focus/value checks and final original proof validation
+immediately before the ONE action. H pauses AX only in that declared handoff,
+continuing its parent/process/resource/config/helper/frame checks under the
+original cutoff while the independent metadata owner continues custody.
+
+After the existing action/postcondition returns, Q completes the same claim.
+The after guard must consume a complete newly begun <=1s AX sample with exact
+completion identity, same retained roots and ORIGINAL ticket cutoff. H holds
+the first post-action result (including refusal); Q clears the request only
+after the complete after guard. No next prepare, action replay, refusal retry,
+freshness renewal, sleep, permission expansion or product behavior follows.
+The canonical inert class now has31 methods (25 legacy plus6 handoff controls);
+the required H gate composes6 geometry+7 AX/refusal+31 receipt controls=44 with
+zero skips. Its actual-H-loop control reads the current H producer source path
+provided by that gate; canonical Q client/lease/journey bytes remain immutable.
+Source/SDK checks are separate from actual native and positive cleanup evidence.
+
+After consuming the after guard, Q unlinks its request/claim and waits within the
+SAME post-sample freshness/original cutoff for H's exact completed drain ACK in
+the readonly parent. H publishes it only when its held post-proof loop observes
+request loss. Q cannot prepare the next request before this explicit drain ACK;
+there is no polling-timing assumption or sleep-based request-order barrier.
+
+The canonical client may await only the exact already-validated outgoing ready
+publication at action-completion and ordinary-return boundaries; those bytes
+never count as the new guard. Original cutoff, sequence/generation, refusal,
+malformed/changed-byte and foreign-marker checks remain terminal. During drain,
+Q retains and revalidates the completed child claim through H's exact readonly
+ACK, then removes it before clearing local pending state. Actual H post-hold
+controls interleave request opening and claim reading to cover this ordering.

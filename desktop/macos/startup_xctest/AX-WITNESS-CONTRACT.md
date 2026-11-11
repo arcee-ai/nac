@@ -72,8 +72,8 @@ H publishes the challenge-bound proof in the existing receipt and holds it
 stable until Q clears its exact request. While held, H checks its original
 parent/deadline, target kernel identity, resource/config and original root frame;
 the independent metadata owner continues custody. Parent-only .stop still
-terminates cooperatively. Request loss is the consume acknowledgment, never a
-new input authority. The request uses the same no-follow/0700-directory,
+terminates cooperatively. Request loss acknowledges successful AFTER-action guard consumption, never
+input start or a new input authority. The request uses the same no-follow/0700-directory,
 regular same-UID single-link 0400-file, <=8192B atomic publication rules. No
 arbitrary PID, attribute or action selector is accepted.
 
@@ -86,8 +86,8 @@ Q consumes a newly begun request-bound sample under the SAME original ticket,
 then immediately rechecks target existence/enabled/hittable, anchor/root frame,
 selected coordinate screenPoint, config/resources/incarnation/console and exact
 keyboard value. Final consumption rereads the bound proof, checks generation,
-<=1s sample/final age and original deadline, clears the request, then records a
-final fresh timestamp. Pointer input dispatches coordinate.click() on that SAME
+<=1s sample/final age and original deadline, retains the request through the
+one-shot action handoff, then records a final fresh timestamp. Pointer input dispatches coordinate.click() on that SAME
 public coordinate object. Keyboard input retains its public target action and
 exact focus/value preflight. Existing after-action guards and postconditions
 remain required. A failed preflight latches the client; no next input.
@@ -182,3 +182,46 @@ Strict verification, APPL/BNDL/generated-hosted roles, bounded all-slice Mach-O
 kind, canonical source/scheme/configuration/binary/Info and directory custody
 remain required. Unexpected library payload or missing/broader Runner grants
 refuse before input. Candidate output is measured, never inferred from xcent.
+
+## Approved bounded action handoff (2026-11-10)
+
+After the existing request-bound proof, Q publishes one closed action claim at
+`requests/request.json.handoff`; it binds nonce/configuration, request/target
+IDs, original deadline and input-entry time. H accepts prepared→armed once and
+writes its exact ACK at readonly `receipt.json.handoff`. This ACK does not run
+AX or refresh the held sample. ACK waiting spends the original <=1s proof age;
+Q rereads and finally consumes that same fresh proof immediately before its
+one existing public action plus existing bounded postcondition. The request
+stays present, so H cannot restart ambient AX during this declared transition.
+H continues parent, original deadline, exact process/resource/config/helper and
+root-frame checks; the independent metadata owner remains continuous.
+
+Only after that action/postcondition returns, Q adds the closed completion time
+to the same claim. H requires the exact armed claim/target/intent/cutoff, then
+starts a wholly new complete AX sample after completion. The receipt includes
+that exact completed handoff. Q's first after guard uses the ORIGINAL ticket
+cutoff, checks phase binding/new beginning/full sample/final freshness plus all
+public topology/geometry/focus/retained-identity rules before clearing request
+and claim. H holds the FIRST post-action result, even refusal, until this ACK;
+later positives cannot erase a failed sample. Pre-action bytes never satisfy an
+after guard. Duplicate/out-of-order/replayed/foreign claims, actor loss, request
+loss before after-guard ACK, invalid state or expired original cutoff fail closed.
+No next prepare is permitted while an action remains pending. No broader
+permissions, freshness/deadline relaxation, action replay, refusal retry or
+product change. The existing <=1s sample/freshness and last-instant dispatch
+limitations remain. This is not Native22 causal proof or actual acceptance.
+
+After consuming the after guard, Q unlinks only its request, retains the exact
+completed child claim, and waits within the SAME post-sample freshness/original
+cutoff for H's exact completed drain ACK in
+the readonly parent. H publishes it only when its held post-proof loop observes
+request loss. Q cannot prepare the next request before this explicit drain ACK;
+there is no polling-timing assumption or sleep-based request-order barrier.
+
+At action-completion and ordinary-return boundaries, only exact already-validated
+outgoing ready bytes may be awaited under the current ticket. They are never
+new-phase evidence. Refusal/generation change, malformed/changed duplicate,
+rollback, unrelated markers and original expiry still fail closed. After drain
+ACK, Q revalidates/removes its retained completed claim before clearing pending
+state. The ACK cannot race away the claim between H's separate request/claim
+reads; no broadly ignored missing-record path is introduced.

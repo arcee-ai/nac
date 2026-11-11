@@ -98,6 +98,51 @@ struct StartupAXInteractionRequest: Codable, Equatable {
     }
 }
 
+// Closed one-shot claim on the existing request child; ACK is readonly in proof parent.
+struct StartupAXActionHandoff: Codable, Equatable {
+    let schema, request_id, target_id, nonce, configuration_sha256, deadline_ns, input_ns: String
+    var completed_ns: String? = nil
+    func validate(_ request: StartupAXInteractionRequest, target: String, now: UInt64) throws {
+        try StartupAXFiles.need(schema == "nac342-action-handoff-v1" && request_id == request.id
+            && target_id == target && UUID(uuidString: target_id) != nil && nonce == request.nonce
+            && configuration_sha256 == request.configuration_sha256 && deadline_ns == request.deadline_ns)
+        let input = try StartupAXFiles.number(input_ns), cutoff = try StartupAXFiles.number(deadline_ns)
+        try StartupAXFiles.need(input >= StartupAXFiles.number(request.entered_ns) && input <= now && now < cutoff)
+        if let completed_ns {
+            let completed = try StartupAXFiles.number(completed_ns)
+            try StartupAXFiles.need(completed >= input && completed <= now && completed < cutoff)
+        }
+    }
+    static func read(_ path: String) throws -> Self {
+        let bytes = try StartupAXFiles.read(path)
+        try StartupAXFiles.uniqueKeys(bytes)
+        let body = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+        let required: Set<String> = ["schema", "request_id", "target_id", "nonce", "configuration_sha256", "deadline_ns", "input_ns"]
+        try StartupAXFiles.need(body.map { required.isSubset(of: Set($0.keys))
+            && Set($0.keys).isSubset(of: required.union(["completed_ns"])) } == true)
+        return try JSONDecoder().decode(Self.self, from: bytes)
+    }
+}
+
+// Both real producer and inert controls use this same state/intent predicate.
+struct StartupAXActionLease {
+    let request: StartupAXInteractionRequest
+    let target: String
+    private(set) var armed: StartupAXActionHandoff?
+    private(set) var completed: StartupAXActionHandoff?
+    mutating func arm(_ claim: StartupAXActionHandoff, now: UInt64) throws {
+        try claim.validate(request, target: target, now: now)
+        try StartupAXFiles.need(armed == nil && completed == nil && claim.completed_ns == nil)
+        armed = claim
+    }
+    mutating func complete(_ claim: StartupAXActionHandoff, now: UInt64) throws {
+        try claim.validate(request, target: target, now: now)
+        var initial = claim; initial.completed_ns = nil
+        try StartupAXFiles.need(armed == initial && completed == nil && claim.completed_ns != nil)
+        completed = claim
+    }
+}
+
 struct StartupAXInteraction: Codable, Equatable {
     let request_id, target_id: String
     let point, anchor_frame: [Double]
@@ -126,6 +171,7 @@ struct StartupAXReceipt: Codable {
     // Closed diagnostic facts only; never the private field value.
     let refusal_stage: String?
     let refusal: Data?
+    var action_handoff: StartupAXActionHandoff? = nil
 }
 
 enum StartupAXReceiptError: Error { case missing, invalid, refused, expired }
@@ -329,11 +375,15 @@ enum StartupAXFiles {
         let required: Set<String> = ["schema", "nonce", "configuration_sha256", "helper_sha256", "support_sha256",
             "helper", "target", "trusted", "app_launch_epoch", "window_number", "sequence", "refusal_generation",
             "began_ns", "ended_ns", "status", "case_deadline_ns"]
-        let optional: Set<String> = ["observation", "refusal_stage", "refusal"]
+        let optional: Set<String> = ["observation", "refusal_stage", "refusal", "action_handoff"]
         diagnostic?.step = .decode_object
         guard let body else { throw StartupAXReceiptError.invalid }
         diagnostic?.step = .decode_fields
         try need(required.isSubset(of: Set(body.keys)) && Set(body.keys).isSubset(of: required.union(optional)))
+        if let handoff = body["action_handoff"] as? [String: Any] {
+            let keys: Set<String> = ["schema", "request_id", "target_id", "nonce", "configuration_sha256", "deadline_ns", "input_ns"]
+            try need(keys.isSubset(of: Set(handoff.keys)) && Set(handoff.keys).isSubset(of: keys.union(["completed_ns"])))
+        }
         let processKeys: Set<String> = ["pid", "parent", "uid", "start_seconds", "start_microseconds", "executable"]
         for key in ["helper", "target"] {
             diagnostic?.step = .decode_process
@@ -397,6 +447,9 @@ final class StartupAXClient {
     private var caseDeadline: UInt64?
     private var lastSurface: StartupAXSurface?
     private var pendingInteraction: StartupAXInteractionRequest?
+    private var actionHandoff: StartupAXActionHandoff?
+    private var actionCompleted = false
+    private var outgoingPublication: Data?
     private var interactionProof: StartupAXInteraction?
     private var interactionTargets: [String: String] = [:]
     struct InteractionEvidence: Codable {
@@ -505,10 +558,21 @@ final class StartupAXClient {
         return receipt
     }
     func begin() throws -> Ticket {
+        do {
+        if let request = pendingInteraction {
+            guard actionCompleted, let claim = actionHandoff, let completed = claim.completed_ns else {
+                portLost = true; throw StartupAXReceiptError.invalid
+            }
+            let stamp = try time(), cutoff = try StartupAXFiles.number(request.deadline_ns)
+            try StartupAXFiles.need(!portLost && stamp < cutoff)
+            return Ticket(sequence: lastSequence, refusal: try StartupAXFiles.number(request.refusal_generation),
+                entered: try StartupAXFiles.number(completed), deadline: cutoff)
+        }
         let deadline = min(try StartupAXFiles.number(declaration.deadline_ns), try time() + 30_000_000_000)
         while true {
             do {
                 let baseline = try read()
+                try StartupAXFiles.need(baseline.action_handoff == nil || observedBytes == outgoingPublication)
                 let entered = try time()
                 if entered >= deadline { throw StartupAXReceiptError.expired }
                 return Ticket(sequence: try StartupAXFiles.number(baseline.sequence),
@@ -519,6 +583,7 @@ final class StartupAXClient {
                 pause() // Initial publication only; malformed/refused never retries.
             }
         }
+        } catch { portLost = true; throw error }
     }
     func prepareInteraction(_ ticket: Ticket, point: CGPoint, anchor: CGRect, kind: String, label: String,
                             keyboard: Bool, value: String?, rootFrame: CGRect,
@@ -527,7 +592,7 @@ final class StartupAXClient {
                             diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXInteractionRequest {
         do {
             diagnostic?.step = .prepare_state
-            guard let observed = lastSurface, pendingInteraction == nil else { throw StartupAXReceiptError.invalid }
+            guard !portLost, let observed = lastSurface, pendingInteraction == nil else { throw StartupAXReceiptError.invalid }
             let entered = try time(diagnostic: diagnostic)
             let request = StartupAXInteractionRequest(schema: "nac342-ax-interaction-v1", nonce: declaration.nonce,
                 configuration_sha256: configurationSHA, id: UUID().uuidString, root_id: observed.root_id,
@@ -548,32 +613,77 @@ final class StartupAXClient {
             return request
         } catch { portLost = true; throw error }
     }
-    func finishInteraction(_ request: StartupAXInteractionRequest, clear: (() throws -> Void)? = nil) throws {
+    func finishInteraction(_ request: StartupAXInteractionRequest,
+                           arm: ((StartupAXActionHandoff) throws -> Void)? = nil,
+                           acknowledgment: (() throws -> StartupAXActionHandoff)? = nil,
+                           recheck: () throws -> Void = {}) throws {
         do {
-            try StartupAXFiles.need(pendingInteraction == request)
-            let receipt = try read(), stamp = try time()
-            let ended = try StartupAXFiles.number(receipt.ended_ns)
-            try StartupAXFiles.need(receipt.observation?.interaction == interactionProof
-                && receipt.observation?.interaction?.request_id == request.id
-                && receipt.refusal_generation == request.refusal_generation
-                && stamp >= ended && stamp - ended <= 1_000_000_000
-                && stamp < StartupAXFiles.number(request.deadline_ns))
-            if let clear { try clear() }
+            try StartupAXFiles.need(!portLost && pendingInteraction == request && actionHandoff == nil)
+            let entered = try time()
+            let claim = StartupAXActionHandoff(schema: "nac342-action-handoff-v1", request_id: request.id,
+                target_id: try { guard let proof = interactionProof else { throw StartupAXReceiptError.invalid }; return proof.target_id }(),
+                nonce: request.nonce, configuration_sha256: request.configuration_sha256,
+                deadline_ns: request.deadline_ns, input_ns: String(entered))
+            try claim.validate(request, target: claim.target_id, now: entered)
+            let before = try read(), initial = try time(), originalEnd = try StartupAXFiles.number(before.ended_ns)
+            try StartupAXFiles.need(before.observation?.interaction == interactionProof
+                && before.refusal_generation == request.refusal_generation && before.action_handoff == nil
+                && initial >= originalEnd && initial - originalEnd <= 1_000_000_000
+                && initial < StartupAXFiles.number(request.deadline_ns))
+            if let arm { try arm(claim) }
             else {
                 try StartupAXFiles.need(try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) == request)
-                try StartupAXFiles.need(unlink(try StartupAXFiles.requestPath(declaration.path)) == 0)
+                try StartupAXFiles.publish(claim, to: try StartupAXFiles.requestPath(declaration.path) + ".handoff")
             }
-            let finalized = try time()
-            try StartupAXFiles.need(finalized >= ended && finalized - ended <= 1_000_000_000
+            while true {
+                // ACK never refreshes the held AX proof; every wait spends its original age.
+                let stamp = try time()
+                try StartupAXFiles.need(stamp >= originalEnd && stamp - originalEnd <= 1_000_000_000
+                    && stamp < StartupAXFiles.number(request.deadline_ns))
+                do {
+                    let ack = try acknowledgment?() ?? StartupAXActionHandoff.read(declaration.path + ".handoff")
+                    try StartupAXFiles.need(ack == claim)
+                    break
+                } catch StartupAXReceiptError.missing { pause() }
+            }
+            // Public query/point/focus/value rechecks happen AFTER ACK and before final proof.
+            try recheck()
+            if arm == nil {
+                let path = try StartupAXFiles.requestPath(declaration.path)
+                try StartupAXFiles.need(try StartupAXInteractionRequest.read(path) == request)
+                try StartupAXFiles.need(try StartupAXActionHandoff.read(path + ".handoff") == claim)
+                try StartupAXFiles.need(try StartupAXActionHandoff.read(declaration.path + ".handoff") == claim)
+            }
+            let final = try read(), finalized = try time(), ended = try StartupAXFiles.number(final.ended_ns)
+            try StartupAXFiles.need(final.observation?.interaction == interactionProof
+                && final.refusal_generation == request.refusal_generation && final.action_handoff == nil
+                && finalized >= ended && finalized - ended <= 1_000_000_000
                 && finalized < StartupAXFiles.number(request.deadline_ns))
             interactions[interactions.count - 1].finalized_ns = String(finalized)
-            pendingInteraction = nil
+            actionHandoff = claim
+            outgoingPublication = observedBytes
+        } catch { portLost = true; throw error }
+    }
+    func completeInteraction(_ request: StartupAXInteractionRequest,
+                             publish: ((StartupAXActionHandoff) throws -> Void)? = nil) throws {
+        do {
+            guard !portLost, pendingInteraction == request, var claim = actionHandoff, !actionCompleted else { throw StartupAXReceiptError.invalid }
+            claim.completed_ns = String(try time())
+            try claim.validate(request, target: claim.target_id, now: try time())
+            if let publish { try publish(claim) }
+            else {
+                let path = try StartupAXFiles.requestPath(declaration.path)
+                try StartupAXFiles.need(try StartupAXInteractionRequest.read(path) == request)
+                try StartupAXFiles.need(try StartupAXActionHandoff.read(path + ".handoff") == actionHandoff)
+                try StartupAXFiles.publish(claim, to: path + ".handoff")
+            }
+            actionHandoff = claim; actionCompleted = true
         } catch { portLost = true; throw error }
     }
     func consume(_ ticket: Ticket, surface: StartupNativeFolderPolicy.Surface, rootFrame: CGRect,
                  field: (CGRect, String)? = nil, request: StartupAXInteractionRequest? = nil,
                  diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXSurface {
-        while true {
+        do { while true {
             let checkedTime = try time(diagnostic: diagnostic)
             diagnostic?.step = .consume_deadline
             if checkedTime >= ticket.deadline { throw StartupAXReceiptError.expired }
@@ -588,6 +698,16 @@ final class StartupAXClient {
             let began = try StartupAXFiles.number(receipt.began_ns), ended = try StartupAXFiles.number(receipt.ended_ns)
             diagnostic?.step = .consume_sample_window
             try StartupAXFiles.need(began <= ended && ended <= stamp && ended - began <= 1_000_000_000)
+            // Recognize only the exact already-validated outgoing publication.
+            // Await its replacement; these bytes never satisfy the next phase.
+            if observedBytes == outgoingPublication && sequence <= ticket.sequence {
+                pause(); continue
+            }
+            if actionCompleted, let claim = actionHandoff {
+                try StartupAXFiles.need(request == nil && receipt.action_handoff == claim
+                    && began > StartupAXFiles.number(claim.completed_ns!)
+                    && receipt.observation?.interaction == nil)
+            } else { try StartupAXFiles.need(receipt.action_handoff == nil) }
             if sequence <= ticket.sequence || began <= ticket.entered {
                 pause(); continue // Wait for a newly BEGUN sample, never a later positive after refusal.
             }
@@ -655,11 +775,33 @@ final class StartupAXClient {
             }
             diagnostic?.step = .consume_evidence_limit
             try StartupAXFiles.need(evidence.count < 26)
+            if actionCompleted {
+                try StartupAXFiles.need(pendingInteraction != nil)
+                let path = try StartupAXFiles.requestPath(declaration.path)
+                try StartupAXFiles.need(try StartupAXInteractionRequest.read(path) == pendingInteraction)
+                try StartupAXFiles.need(try StartupAXActionHandoff.read(path + ".handoff") == actionHandoff)
+                try StartupAXFiles.need(unlink(path) == 0)
+                var armed = actionHandoff!; armed.completed_ns = nil
+                while true {
+                    let drained = try StartupAXActionHandoff.read(declaration.path + ".handoff")
+                    if drained == actionHandoff { break }
+                    try StartupAXFiles.need(drained == armed)
+                    let stamp = try time()
+                    try StartupAXFiles.need(stamp < ticket.deadline && stamp >= ended && stamp - ended <= 1_000_000_000)
+                    pause()
+                }
+                let acknowledged = try time()
+                try StartupAXFiles.need(acknowledged < ticket.deadline && acknowledged >= ended && acknowledged - ended <= 1_000_000_000)
+                try StartupAXFiles.need(try StartupAXActionHandoff.read(path + ".handoff") == actionHandoff)
+                try StartupAXFiles.need(unlink(path + ".handoff") == 0)
+                outgoingPublication = observedBytes
+                pendingInteraction = nil; actionHandoff = nil; actionCompleted = false
+            }
             evidence.append(Evidence(sequence: receipt.sequence, began_ns: receipt.began_ns,
                 ended_ns: receipt.ended_ns, entered_ns: String(ticket.entered), consumed_ns: String(consumed),
                 surface: observed.surface, root_id: observed.root_id, panel_id: observed.panel_id,
                 go_to_id: observed.go_to_id, focus_checked: surface == .goTo))
             return observed
-        }
+        } } catch { portLost = true; throw error }
     }
 }
