@@ -205,7 +205,11 @@ class ProductionFailureClassifierTests(unittest.TestCase):
         # inert adapters; there is no app, AX call, process query or input actor.
         lifecycle = 'var firstRefusedSample:' + companion.split('var firstRefusedSample:', 1)[1].split('        do {', 1)[0]
         publish_start = '                diagnosticStage = .receipt_publication\n                try StartupAXFiles.publish(receipt(observed'
-        publication = publish_start + companion.split(publish_start, 1)[1].split('                if let request {\n                    // Keep', 1)[0]
+        publication_end = '                if let request {\n                    try StartupObserver.need(observed?.interaction != nil)'
+        assert companion.count(publish_start) == 1
+        publication_tail = companion.split(publish_start, 1)[1]
+        assert publication_tail.count(publication_end) == 1
+        publication = publish_start + publication_tail.split(publication_end, 1)[0]
         fatal = companion.split('            // Unexpected ownership/deadline/stream failure', 1)[1].split('            exit(1)', 1)[0]
         fatal = '// Unexpected ownership/deadline/stream failure' + fatal + 'exitCode = 1'
         write = 'try FileHandle.standardError.write(contentsOf: $0)'

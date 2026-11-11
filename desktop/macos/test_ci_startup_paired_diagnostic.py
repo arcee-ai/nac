@@ -45,9 +45,11 @@ class InteractionSourceControls(unittest.TestCase):
         fences = ('let ticket = guardTicket',
                   'let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)', selection,
                   'let request = try client.prepareInteraction(ticket, point: point, anchor: anchor,',
+                  'try client.finishInteraction(request, recheck: {',
                   'try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)',
                   'StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,',
-                  'try client.finishInteraction(request)', 'coordinate = selected', 'try action(coordinate)')
+                  'actionRequest = request', 'coordinate = selected', 'try action(coordinate)',
+                  'if let request = actionRequest { try axClient!.completeInteraction(request) }')
         for fence in fences:
             self.assertEqual(dispatch.count(fence), 1, fence)
         positions = [dispatch.index(fence) for fence in fences]
@@ -68,13 +70,19 @@ class InteractionSourceControls(unittest.TestCase):
             semantic_positions.append(dispatch.index(fence))
         self.assertEqual(semantic_positions, sorted(semantic_positions))
         self.assertGreater(semantic_positions[0], dispatch.index(selection))
-        self.assertLess(semantic_positions[-1], dispatch.index('try client.finishInteraction(request)'))
+        finish = 'try client.finishInteraction(request, recheck: {'
+        self.assertGreater(semantic_positions[-1], dispatch.index(finish))
+        callback = dispatch.split(finish, 1)[1].split('                })', 1)[0]
+        self.assertIn('namedTargetMatches(request.label)', callback)
+        self.assertIn('try guardWindow(', callback)
+        self.assertIn('StartupInteractionPolicy.unchanged(', callback)
+        self.assertRegex(dispatch, r'(?m)^                try client\.finishInteraction\(request, recheck: \{$')
         for fence in ('semantic.query.count == 1', 'semantic.query.firstMatch.frame == anchor',
                       'title: target.title, label: target.label',
                       'placeholder: kind == "message" ? target.placeholderValue : nil'):
             self.assertIn(fence, dispatch)
 
-        self.assertIn('try client.finishInteraction(request)\n                coordinate = selected', dispatch)
+        self.assertIn('                })\n                actionRequest = request\n                coordinate = selected', dispatch)
 
         adapter = actor.split('static func selectCoordinate<Coordinate>(', 1)[1].split('struct Binding<Token:', 1)[0]
         offset = ('let selected = selectedPoint == original ? center\n'
@@ -103,7 +111,8 @@ class InteractionSourceControls(unittest.TestCase):
                   '                    (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,\n'
                   '                        screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })\n'
                   '                }')
-        finish = 'try client.finishInteraction(request)'
+        finish = '                try client.finishInteraction(request, recheck: {'
+        finish_block = finish + journey.split(finish, 1)[1].split('                })', 1)[0] + '                })'
         mutations = {
             'removed-adapter': (selection, 'let (selected, point) = (center, center.screenPoint)'),
             'removed-initial-name': ('try StartupAXFiles.need(namedTargetMatches(semanticName))', 'try StartupAXFiles.need(true)'),
@@ -118,15 +127,13 @@ class InteractionSourceControls(unittest.TestCase):
             'old-center-final-fence': ('unchanged(point: selected.screenPoint,', 'unchanged(point: center.screenPoint,'),
             'old-center-dispatch': ('coordinate = selected', 'coordinate = center'),
             'overwritten-dispatch': ('coordinate = selected', 'coordinate = selected\n                coordinate = center'),
-            'late-finalization': (finish, 'finalize = { try client.finishInteraction(request) }'),
+            'late-finalization': (finish_block, ''),
         }
         for name, (before, after) in mutations.items():
             self.assertEqual(journey.count(before), 1, name)
             changed = journey.replace(before, after, 1)
             if name == 'late-finalization':
-                changed = changed.replace('var coordinate: XCUICoordinate?',
-                    'var finalize: (() throws -> Void)?\n            var coordinate: XCUICoordinate?', 1)
-                changed = changed.replace('try action(coordinate)', 'try action(coordinate)\n            try finalize?()', 1)
+                changed = changed.replace('try action(coordinate)', 'try action(coordinate)\n' + finish_block, 1)
             with self.subTest(mutation=name), self.assertRaises(AssertionError):
                 self.assert_coordinate_path(changed, actor)
 
