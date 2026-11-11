@@ -7,7 +7,8 @@ from image_inventory import require
 
 LOCK_PATH = "docker/managed/packages/sources.lock.json"
 PACKAGE_OWNERS = {"krb5-libs": "krb5", "libcurl-openssl4": "curl", "curl": "curl",
-                  "cyrus-sasl-heimdal-libs": "sasl", "libstdc++-dev": "gcc_headers"}
+                  "cyrus-sasl-heimdal-libs": "sasl", "libstdc++-dev": "gcc_headers",
+                  "libssh2": "libssh2"}
 
 # Runs inside the already selected, read-only, network-disabled image. It only
 # reads package records, archives and their installed /usr payloads. It does not
