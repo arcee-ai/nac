@@ -49,8 +49,11 @@ directories, tools, readiness and signal/persistence contracts.
   zero was insufficient: actual Kerberos, SASL and GCC header bytes require
   the owned corrections below. Never filter findings or weaken the policy.
 - The approved supplier profile includes glibc 2.44, GCC 16.2, OpenSSL 4 runtime
-  libraries alongside the OpenSSL 3 development interface, Python
-  3.13.16_git20261016 and zlib 1.3.2.1_rc20260921. Keep these snapshot identities
+  libraries alongside the OpenSSL 3 development interface, and zlib
+  1.3.2.1_rc20260921. The original Python snapshot was
+  3.13.16_git20261016; the current managed image pins Python
+  3.13.18_git20261030-r0 and py3-pip 26.2.2-r2 against reported fixes. Pin
+  all four coupled glibc packages to 2.44-r16. Keep these exact identities
   visible; qualify GNU ABI, compiler execution, Python venv/SSL, locale and
   mounted HOME/read-only-root behavior against the actual image.
 - Own temporary APK revisions for upstream Kerberos 1.22.2 with accepted commits
@@ -93,7 +96,8 @@ directories, tools, readiness and signal/persistence contracts.
   the persistent HOME. The approved dependency-only build overlay in
   `docker/managed/git-lfs/go.mod` and `go.sum` selects x/net 0.60.0 and its
   required x/crypto 0.57.0, x/text 0.42.0, x/sys 0.48.0 and x/sync 0.23.0;
-  these retain the Go Authors' BSD-3-Clause terms. Generate changes with Go
+  these retain the Go Authors' BSD-3-Clause terms. The overlay also pins
+  klauspost/compress v1.20.2 for its reported fix. Generate changes with Go
   tooling against the checksum-verified upstream release and build with
   `-mod=readonly`; never run floating `go get` in the image build. Application
   source remains at revision `aece9221f8c09221a14395d964806b956289bc07`.
