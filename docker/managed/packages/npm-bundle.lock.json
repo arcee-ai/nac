@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "parent": {
+    "name": "npm",
+    "version": "11.21.1",
+    "url": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
+    "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b",
+    "license": "Artistic-2.0"
+  },
+  "corrections": {
+    "undici": {
+      "from": "6.29.0",
+      "version": "6.29.1",
+      "url": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
+      "sha256": "29c4b8e0b2d86cb8795571c1959012ce057a14ecfd34858335f47c31e770a04f",
+      "consumer": "node-gyp",
+      "requirement": "^6.25.0",
+      "license": "MIT",
+      "advisories": ["GHSA-xjj6-f33q-929c"]
+    },
+    "ip-address": {
+      "from": "10.7.2",
+      "version": "10.7.4",
+      "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.4.tgz",
+      "sha256": "f9e1d0dd369c002f43770c6ee35942c8078e76d080a1e18e89113eef865f26ff",
+      "consumer": "socks",
+      "requirement": "^10.1.1",
+      "license": "MIT",
+      "advisories": []
+    }
+  }
+}
