@@ -22,7 +22,7 @@ function initialGate({ image = '20261102.0473.1', now = 1100, clock = {}, tempNa
     if (alias) fs.symlinkSync(actualTemp, runnerTemp);
     const environment = path.join(fixture, 'github-env');
     const output = path.join(fixture, 'github-output');
-    const admission = { scope: 'P12-integration-Hsample-bsd-R7325-four-startup-source21', controller_sha: 'a'.repeat(40),
+    const admission = { scope: 'P12-integration-Qopen-inode-R7325-four-startup-source22', controller_sha: 'a'.repeat(40),
       purpose: 'native', allocation_id: 'inert-workflow-source-control', attempt: 1, retries: 0, manifest_sha256: 'b1fb601ed4118029d538d0b9c673ecb927426a13651cb50a1befa279ed8cf70e',
       producer: { run_id:42455455480, artifact_id:13607980704, controller_sha:'0210a3c52062ec28e9c6ae74098040e432e09a65', branch:'codex/experimental-native-p12-lifecycle-package-20261108', artifact_name:'ff8-host-package-42455455480-1' }, clock: { STARTED: 1000, WORK_DEADLINE: 3880, CLEANUP_DEADLINE: 4480, HARD_DEADLINE: 4600, ...clock }, ...declaration };
     // Execute only the actual initial inline Python, with a fixed wall clock.
@@ -75,7 +75,7 @@ test('rejected image, original clock, or multiline root never exports launch roo
 test('only the new manual four-case source is reachable and independent R is checked out', () => {
   assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
   assert.deepEqual(Object.keys(workflow.jobs), ['four_startup']);
-  assert.match(job.if, /refs\/heads\/codex\/private520-first-refusal-bsd-C21/);
+  assert.match(job.if, /refs\/heads\/codex\/private520-open-inode-C22/);
   assert.match(job.if, /github.run_attempt == 1/);
   assert.equal(job['timeout-minutes'], 60);
   assert.equal(job.env.ROOT_STARTUP_ADMISSION, '${{ inputs.startup_admission }}');
@@ -89,7 +89,7 @@ test('only the new manual four-case source is reachable and independent R is che
 });
 
 test('purpose and exact scope bind build-only versus native before any work', () => {
-  const buildScope = 'P12-integration-Hsample-bsd-R7325-signature-build-only-source21';
+  const buildScope = 'P12-integration-Qopen-inode-R7325-signature-build-only-source22';
   const accepted = initialGate({ declaration: { purpose: 'build-only', scope: buildScope } });
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(accepted.report.status, 'PASS');

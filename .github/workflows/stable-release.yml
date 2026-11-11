@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   four_startup:
-    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/private520-first-refusal-bsd-C21' && github.run_attempt == 1
+    if: github.repository == 'arcee-ai/nac' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/private520-open-inode-C22' && github.run_attempt == 1
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -39,7 +39,7 @@ jobs:
           try:
               a = json.loads(os.environ['ROOT_STARTUP_ADMISSION'])
               assert set(a) == {'scope','purpose','controller_sha','allocation_id','attempt','retries','manifest_sha256','clock','producer'}
-              scopes = {'native':'P12-integration-Hsample-bsd-R7325-four-startup-source21', 'build-only':'P12-integration-Hsample-bsd-R7325-signature-build-only-source21'}
+              scopes = {'native':'P12-integration-Qopen-inode-R7325-four-startup-source22', 'build-only':'P12-integration-Qopen-inode-R7325-signature-build-only-source22'}
               assert type(a['purpose']) is str and a['purpose'] in scopes and a['scope'] == scopes[a['purpose']]
               assert a['controller_sha'] == os.environ['GITHUB_SHA']
               assert type(a['attempt']) is int and a['attempt'] == 1 and type(a['retries']) is int and a['retries'] == 0

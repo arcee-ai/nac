@@ -1,23 +1,27 @@
-# C21 private first-refusal/BSD diagnostic controller
+# C22 private opened-inode receipt controller
 
-Private source candidate, no build, signature, SDK, native, public push or CI
-execution authorized by this source alone. Human call_79465ecb3b9244228d3df3189031aa9f
-approved source diagnostics and ONE remaining instrumented Native after Root's
-current-source, review and check gates. It is NOT currently admitted or dispatched.
-The corrected observer method must pass fresh current AppKit CI first; a local
-partial/source freeze is not acceptance. Native20 remains FAIL/SPENT; its unused
-2047 seconds are SPENT. All previous allocations retain their original counters.
+Private source candidate. Human call_53bda80add8f41569570dede38ae7f66 approved
+Source64 and exactly ONE NEW conditional full Native. Root holds that grant
+UNDISPATCHED; this source supplies no runtime admission or execution authority.
+Fresh Native22 requires source/review/current-head CI/Bugbot/SDK/AppKit/caller/ref
+and unexpired-P12 gates, then separate Root literal admission under the original
+48-minute work / 10-minute cleanup / 2-minute retention limits. Same G1 affected
+alignment and fresh public CI remain pending. Native21 is FAIL/SPENT with input
+and configured cleanup UNKNOWN; all old allocations and unused time are SPENT.
+Source64 accepts links0-or1 on the same validated opened receipt. This does not
+prove Native21's cause or fix its resources_urls/ownership_invalid cleanup. Main's
+25 green source controls provide no Native or configured cleanup qualification.
 
 The first H-published refusal context is NOT the exact Q-consumed receipt, and the
 BSD producer-failure timestamp is NOT syscall time. P12 is a compatible integration
 test product, not global current-dev product acceptance.
 
-C21 consumes real frozen Source59 H
-`6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d`, whose direct parent is H
-`df468dd4530461cc12afe62c50cd7d137588f09e`. Immutable supplier Q remains
-`8397bafe8fb5f439b702ebf3e941eed802ce71aa`; Q's direct parent is public H
-`3fc4d80d7b0f2a228e7f1f401446677f9cb65fbf`, and its tree is
-`0f4e7c9c867caf8f6505a6354e76876e8ac5e4ba`. The ten immutable supplier bytes
+C22 consumes real frozen Source64 H
+`b686ebe79e8b392a6f1e6621570162958c9fcae6`, whose direct parent is H
+`6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d`. Immutable supplier Q is
+`225d0c489785dcc5c1c8a6fcbe913f24604d9350`; Q's direct parent is canonical Q
+`8397bafe8fb5f439b702ebf3e941eed802ce71aa`, and its tree is
+`d35092bccf2176695041cf7c6207026950ea20c3`. The ten immutable supplier bytes
 match H's normal TEST_FILES nomination. Journey SHA256 is
 `e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
 H incorporates Source32 passive refusal retention and exactly the reviewed V3
@@ -29,10 +33,10 @@ app/engine/global write grant, new transport or native guard relaxation applies.
 
 Admission now requires the exact closed `purpose`, bound to a separate scope:
 
-- `native`: `P12-integration-Hsample-bsd-R7325-four-startup-source21`.
-- `build-only`: `P12-integration-Hsample-bsd-R7325-signature-build-only-source21`.
+- `native`: `P12-integration-Qopen-inode-R7325-four-startup-source22`.
+- `build-only`: `P12-integration-Qopen-inode-R7325-signature-build-only-source22`.
 
-Both bind the exact C21 controller SHA, genuine P12 producer/normal manifest,
+Both bind the exact C22 controller SHA, genuine P12 producer/normal manifest,
 one attempt, zero retries, reviewed image and the original queue-inclusive
 48-minute work / 10-minute cleanup / 2-minute retention limits. Unknown, omitted
 or mismatched purpose refuses before work in the workflow and controller.

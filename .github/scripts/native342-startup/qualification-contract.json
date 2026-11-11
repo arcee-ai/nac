@@ -1,6 +1,6 @@
 {
   "state": "SOURCE_ONLY_UNADMITTED",
-  "scope": "P12-integration-Hsample-bsd-R7325-four-startup-source21",
+  "scope": "P12-integration-Qopen-inode-R7325-four-startup-source22",
   "cases": [
     "onboarding",
     "configuredLocal",
@@ -9,9 +9,9 @@
   ],
   "independent_R_required": true,
   "R": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
-  "H": "6a20b00f9c6fa0f514e9a20e234715fe2de9ab6d",
+  "H": "b686ebe79e8b392a6f1e6621570162958c9fcae6",
   "P": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "Q": "8397bafe8fb5f439b702ebf3e941eed802ce71aa",
+  "Q": "225d0c489785dcc5c1c8a6fcbe913f24604d9350",
   "image": "20261102.0473.1",
   "xcode": "26.6 (17F113)",
   "SDK": "26.5",
