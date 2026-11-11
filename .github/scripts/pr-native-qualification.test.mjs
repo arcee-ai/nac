@@ -108,8 +108,8 @@ test("ordinary workflow semantics permissions steps contexts and release gates r
   const stable = read("stable-release");
   reverseNativeQualification(stable);
   assert.equal(createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
-    "93711739910ed3f5b024b351fc18ce58cd54d5051c400c10b62e18e29f883879",
-    "reversing only the reviewed route and path-test step recovers current dev exactly");
+    "0568ebceb223a768301b443c50b13b41ae62d75d08a33b1569306ae51d981f28",
+    "reversing qualification wiring retains the combined ordinary graph, including the reviewed auth fixture step");
 });
 
 test("native call binds this exact reviewed dispatch commit and keeps read-only bounded reusable jobs", () => {
@@ -157,6 +157,8 @@ test("actual admission Python rejects wrong ref retry absent or foreign custody 
 
 
 test("ordinary preservation rejects changes to admission, caches, source security and supplier inputs", () => {
+  const authStep = w => w.jobs['test-server'].steps.find(step =>
+    step.name === 'Test isolated native-auth fixture boundary');
   const mutations = [
     w => { w.jobs.prepare.if = '${{ always() }}'; },
     w => { w.jobs['required-pr-checks'].name = 'Required PR checks'; },
@@ -166,13 +168,20 @@ test("ordinary preservation rejects changes to admission, caches, source securit
     w => { w.jobs['source-security'].permissions = {contents:'write'}; },
     w => { w.jobs['browser-binary'].steps.find(s => s.uses?.startsWith('Swatinem/')).with['save-if'] = 'true'; },
     w => { delete w.jobs['ci-admission']; },
+    w => {
+      const steps = w.jobs['test-server'].steps;
+      steps.splice(steps.indexOf(authStep(w)), 1);
+    },
+    w => { authStep(w).run = authStep(w).run.replace('native_auth_fixture::tests::', 'unrelated::tests::'); },
+    w => { delete authStep(w).env.EXPECTED_SOURCE_SHA; },
+    w => { authStep(w).run = authStep(w).run.replace('test "$fixture_sha" = "$EXPECTED_SOURCE_SHA"', 'true'); },
   ];
   for (const change of mutations) {
     const w = read('stable-release'); change(w);
     assert.throws(() => {
       reverseNativeQualification(w);
       assert.equal(createHash('sha256').update(JSON.stringify(w)).digest('hex'),
-        '93711739910ed3f5b024b351fc18ce58cd54d5051c400c10b62e18e29f883879');
+        '0568ebceb223a768301b443c50b13b41ae62d75d08a33b1569306ae51d981f28');
     });
   }
 });

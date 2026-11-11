@@ -513,8 +513,10 @@ impl ArceeAuthService {
 
     #[cfg(any(test, feature = "test-support"))]
     pub(super) fn for_test(base_url: &str) -> Self {
-        let parsed = Url::parse(base_url).expect("test auth service URL must be absolute");
-        assert!(matches!(parsed.scheme(), "http" | "https"));
+        assert!(
+            Url::parse(base_url).is_ok_and(|url| matches!(url.scheme(), "http" | "https")),
+            "test auth service URL must be absolute HTTP(S)"
+        );
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
         }
@@ -617,6 +619,19 @@ pub(super) async fn begin_arcee_device_login() -> Result<ArceeDeviceLogin> {
         service,
         LEGACY_CLIENT_ID,
         auth_issuer,
+        ArceeLoginDestination::Local,
+    )
+    .await
+}
+
+#[cfg(feature = "test-support")]
+pub(super) async fn begin_local_arcee_device_login_for_test(
+    auth_service_base_url: &str,
+) -> Result<ArceeDeviceLogin> {
+    begin_arcee_device_login_with_service(
+        ArceeAuthService::for_test(auth_service_base_url),
+        LEGACY_CLIENT_ID,
+        ARCEE_AUTH_PRODUCTION_ISSUER.to_string(),
         ArceeLoginDestination::Local,
     )
     .await

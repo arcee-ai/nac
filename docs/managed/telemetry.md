@@ -94,6 +94,8 @@ transaction results, schema, connection limits, or shutdown budgets.
 | `nac.runtime.activity.active` | gauge | orchestrator/worker/child-process | `nac-core::agent` and process call sites |
 | `nac.runtime.child_process` | diagnostic | started/stopped; PID as a non-series field | `nac-core` process call sites |
 | `nac.runtime.resource.sample` | gauge | engine; correlation digests are exemplars, not series dimensions | `nac-core::telemetry` |
+| `nac.mcp.oauth.callback.listening` | diagnostic | numeric generation, started | `nac-server` loopback OAuth task |
+| `nac.mcp.oauth.callback.state_rejected` | diagnostic | numeric generation, error | `nac-server` loopback OAuth task |
 | `nac.http.request.duration` | span | matched route pattern, outcome | `nac-server::delivery` |
 
 `nac.store.operation.duration` uses these exact operation values:
@@ -141,3 +143,21 @@ links the retained qualification evidence. The event schema keeps
 `store_engine`, `journal_mode`, and numeric error identity explicit for
 attribution. A different backend requires new explicit decision and
 qualification work.
+
+## Native external-auth callback witness
+
+The loopback owner emits at most one listening and one state-rejected observation
+per flow through the existing bounded recorder. These carry only the existing
+numeric generation: no callback URL, state, code, token, server name, store path
+or sensitive-value hash. They do not change callback validation or results.
+This adds fixed Rust/JSON diagnostic names, not HTTP routes or persisted schema.
+
+Only the disposable `PREVIEW_SMOKE` non-`LOCAL_APP` external-auth child opts in
+to stderr telemetry; normal/device/other fixture and host defaults remain unchanged.
+This also enables ordinary content-free telemetry/accounting and its bounded
+export thread. A missing/dropped/failed witness fails qualification, never auth.
+The native test retains two positively observed rows before cancellation, binds
+the recorder/generation/source/build/engine/document, and separately checks its
+final receipt and physical engine/app/profile/browser retirement. It does not
+claim an independently joined exporter, observed ExportShutdown enum,100ms pass
+or complete zero-loss capture from the64KiB diagnostic tail.

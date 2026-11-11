@@ -7,6 +7,7 @@ import type {
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { recoveryForRuntime, type TerminalInputRecoveryLease } from "./inputRecovery";
 import { mayOfferInputControl } from "./useInputOwnership";
+import type { TerminalLinkMode } from "./terminalLinkMode";
 
 export function useTerminalController(
   sessionId: string,
@@ -15,12 +16,14 @@ export function useTerminalController(
   source?: ExecutionStatus,
   options: {
     readonly?: boolean;
+    linkMode?: TerminalLinkMode;
     inputControl?: InputControlStatus | null;
     inputPaused?: boolean;
   } = {},
 ) {
   const runtime = useNativeRuntime();
   const { api } = runtime;
+  const linkMode = options.linkMode ?? "browser";
   const current = useRef<TerminalControls | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState("Connecting");
@@ -81,6 +84,7 @@ export function useTerminalController(
       api,
       source: latestSource.current,
       readonly: options.readonly,
+      linkMode,
       inputControl: latestInput.current.binding,
       inputPaused: latestInput.current.paused,
       sessionId,
@@ -119,6 +123,7 @@ export function useTerminalController(
     source?.input,
     source?.resize,
     options.readonly,
+    linkMode,
   ]);
 
   return {

@@ -47,7 +47,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
     #elseif INSTANCE_SMOKE
     private var instanceSmoke: InstanceSmoke?
     #elseif LOCAL_APP
+    #if NATIVE_AUTH_FIXTURE
+    var startupSmoke: DeviceAuthSmoke?
+    #else
     var startupSmoke: StartupSmoke?
+    #endif
     #else
     var smoke: PreviewSmoke?
     #endif
@@ -73,6 +77,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = workspaceDataStore
         webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
+        #if NATIVE_AUTH_FIXTURE && LOCAL_APP && PREVIEW_SMOKE
+        DeviceAuthSmoke.configure(webView)
+        #endif
         #if INSTANCE_SMOKE
         InstanceSmoke.configure(webView)
         #endif
@@ -123,7 +130,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             failure: { [weak self] in self?.failure }, requestQuit: { [weak self] in self?.quit.stopFixture() })
         instanceSmoke?.start()
         #elseif LOCAL_APP
+        #if NATIVE_AUTH_FIXTURE
+        startupSmoke = DeviceAuthSmoke(app: self)
+        #else
         startupSmoke = StartupSmoke(app: self)
+        #endif
         startupSmoke?.start()
         #else
         if CommandLine.arguments.contains("--recovery-output") {
@@ -184,7 +195,11 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             #elseif INSTANCE_SMOKE
             arguments = InstanceSmoke.launchArguments(arguments)
             #else
+            #if NATIVE_AUTH_FIXTURE
+            arguments = DeviceAuthSmoke.launchArguments(arguments)
+            #else
             arguments = StartupSmoke.launchArguments(arguments)
+            #endif
             #endif
             #endif
             let configuration: EngineLaunchConfiguration
@@ -202,6 +217,9 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             guard let profile else { return }
             var environment = profile.environment
             environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+            #if PREVIEW_SMOKE
+            environment = PreviewEngine.recordingEnvironment(environment, provider: provider.baseURL, arguments: CommandLine.arguments)
+            #endif
             let configuration = retryConfiguration ?? EngineLaunchConfiguration(cwd: profile.workspace, store: profile.store, environment: environment)
             launchConfiguration = configuration
             try engine.launch(executable: executable, configuration: configuration)
@@ -219,7 +237,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
             let project: String
             if let fixtureProject { project = fixtureProject }
             else {
+                #if PREVIEW_SMOKE
+                project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider,
+                    seedModel: !OfflineProviderPolicy.selected(), session: smoke?.offline?.session)
+                #else
                 project = try await FixtureBootstrap.seed(base: url, profile: profile, provider: provider)
+                #endif
                 guard !Task.isCancelled, !stopping, engine.receipt?.incarnation == incarnation else { return }
                 fixtureProject = project
             }
@@ -676,6 +699,12 @@ final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNav
         frame.origin.y += recovery.noticeHeight
         frame.size.height -= recovery.noticeHeight
         let replacement = WKWebView(frame: frame, configuration: configuration)
+        #if NATIVE_AUTH_FIXTURE && LOCAL_APP && PREVIEW_SMOKE
+        DeviceAuthSmoke.configure(replacement)
+        #endif
+        #if PREVIEW_SMOKE && !LOCAL_APP
+        smoke?.configure(replacement)
+        #endif
         #if INSTANCE_SMOKE
         InstanceSmoke.configure(replacement)
         #endif

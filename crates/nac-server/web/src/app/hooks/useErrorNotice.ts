@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import type { ChatSessionMessageAction } from "@/app/atoms/chat-session-message";
 
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { managedAuthProvider } from "@/app/lib/providers";
@@ -8,7 +9,7 @@ import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 export interface ErrorNotice {
   title: string;
   description?: string;
-  action?: { label: string; onClick: () => void };
+  action?: ChatSessionMessageAction;
 }
 
 /**
@@ -61,7 +62,7 @@ function noticeAction(
         ? undefined
         : {
             label: fix.label,
-            onClick: () => window.open(fix.url, "_blank", "noopener,noreferrer"),
+            href: fix.url,
           };
   }
 }

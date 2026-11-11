@@ -10,6 +10,8 @@ final class FixtureProvider {
     private var connections: [UUID: NWConnection] = [:]
     private(set) var responseCount = 0
     #if PREVIEW_SMOKE
+    var offline: OfflineProviderPolicy?
+    private var offlineRetiredConnections: [NWConnection]?
     var holdResponses = false
     private(set) var heldResponseCount = 0
     private var heldResponses: [() -> Void] = []
@@ -19,6 +21,8 @@ final class FixtureProvider {
         heldResponses.removeAll()
         completions.forEach { $0() }
     }
+    // Main-queue fixture observation only; never retains a proxy destination.
+    private(set) var rejectedConnectCount = 0
     #endif
     private var startContinuation: CheckedContinuation<Void, Error>?
     var baseURL: URL!
@@ -48,6 +52,9 @@ final class FixtureProvider {
             }
             listener.newConnectionHandler = { [weak self] connection in
                 guard let self else { connection.cancel(); return }
+                #if PREVIEW_SMOKE
+                if self.offline?.retired == true { connection.cancel(); return }
+                #endif
                 let id = UUID()
                 self.connections[id] = connection
                 connection.stateUpdateHandler = { [weak self] state in
@@ -65,6 +72,11 @@ final class FixtureProvider {
     }
 
     func stop() {
+        #if PREVIEW_SMOKE
+        if offline?.retired == true, offlineRetiredConnections == nil {
+            offlineRetiredConnections = Array(connections.values)
+        }
+        #endif
         listener?.cancel()
         for connection in connections.values { connection.cancel() }
         connections.removeAll()
@@ -72,6 +84,30 @@ final class FixtureProvider {
         heldResponses.removeAll()
         #endif
     }
+
+    #if PREVIEW_SMOKE
+    /// Only the separately owned offline target uses this observation. A new
+    /// target is forbidden until exact listener/connection cancellation settles.
+    @MainActor func awaitOfflineControlStop(deadline: TimeInterval) async throws {
+        guard offline?.retired == true else { throw OfflineProviderPolicy.Refusal.invalid }
+        while true {
+            let listenerStopped: Bool
+            if let listener { if case .cancelled = listener.state { listenerStopped = true } else { listenerStopped = false } }
+            else { listenerStopped = true }
+            let connectionsStopped = (offlineRetiredConnections ?? []).allSatisfy {
+                if case .cancelled = $0.state { return true }; return false
+            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { throw OfflineProviderPolicy.Refusal.missingObservation }
+            if listenerStopped && connectionsStopped {
+                listener = nil
+                offlineRetiredConnections = nil
+                return
+            }
+            try await Task.sleep(nanoseconds: UInt64(min(0.02, remaining) * 1_000_000_000))
+        }
+    }
+    #endif
 
     private func receive(_ connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, done, error in
@@ -97,6 +133,34 @@ final class FixtureProvider {
 
     private func respond(_ connection: NWConnection, headers: String, body: Data) {
         let route = headers.components(separatedBy: "\r\n")[0]
+        #if PREVIEW_SMOKE
+        if let offline {
+            guard !offline.retired else { connection.cancel(); return }
+            if OfflineProviderPolicy.isProxyRequest(route) {
+                offline.reject(route)
+                send(connection, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n", final: true)
+                return
+            }
+            offline.noteDirectRequest()
+            let path = route.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+            if route.hasPrefix("GET "), let nonce = offline.directCanary(path) {
+                let json = encode(["nonce": nonce])
+                send(connection, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n\(json)", final: true)
+                return
+            }
+            if route == "GET /models HTTP/1.1" || route == "POST /responses HTTP/1.1" {
+                guard offline.authorize(headers, response: route.hasPrefix("POST ")) else {
+                    send(connection, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", final: true)
+                    return
+                }
+                if route.hasPrefix("GET ") {
+                    let json = encode(["object": "list", "data": [["id": "gpt-5.6-sol", "object": "model", "owned_by": "fixture"]]])
+                    send(connection, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nConnection: close\r\n\r\n\(json)", final: true)
+                    return
+                }
+            }
+        }
+        #endif
         if route.hasPrefix("GET /models-dev") {
             send(connection, "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", final: true)
             return
@@ -104,6 +168,9 @@ final class FixtureProvider {
         guard route == "POST /responses HTTP/1.1",
               let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               request["model"] as? String == "gpt-5.6-sol" else {
+            #if PREVIEW_SMOKE
+            if route.hasPrefix("CONNECT ") { rejectedConnectCount = min(32, rejectedConnectCount + 1) }
+            #endif
             send(connection, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", final: true)
             return
         }

@@ -47,7 +47,7 @@ export function HeaderMenu({
     setOpen(false);
     action();
   };
-  const openExternally = (url: string) => act(() => window.open(url, "_blank", "noopener"));
+  const externalLinkClasses = cn("btn btn-icon tab-btn w-full tab-btn-regular", itemSize);
 
   return (
     <Popover
@@ -105,16 +105,28 @@ export function HeaderMenu({
             </TabButton>
           ) : null}
           <Separator />
-          <TabButton size={itemSize} onClick={openExternally(DOCS_URL)}>
+          <a
+            className={externalLinkClasses}
+            href={DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setOpen(false)}
+          >
             <Icon iconName={IconName.Book} />
             <span className="text-left flex-grow">See docs</span>
             <Icon iconName={IconName.External} />
-          </TabButton>
-          <TabButton size={itemSize} onClick={openExternally(REPO_URL)}>
+          </a>
+          <a
+            className={externalLinkClasses}
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setOpen(false)}
+          >
             <Icon iconName={IconName.Github} />
             <span className="text-left flex-grow">See Github</span>
             <Icon iconName={IconName.External} />
-          </TabButton>
+          </a>
         </div>
       }
     >

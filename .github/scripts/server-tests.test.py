@@ -288,14 +288,14 @@ class Controls(unittest.TestCase):
         control_consumer = delivery_functions['version_two_managed_repair_holds_upgrade_admission_until_completion']
         self.assertNotIn('serve_with_policy(', control_consumer)
 
-    def test_loopback_group_matches_only_the_two_real_callback_port_owners(self):
+    def test_loopback_group_matches_only_the_three_real_callback_port_owners(self):
         source = (runner.ROOT / 'crates/nac-server/src/tests/mcp_oauth/loopback.rs').read_text()
         functions = {part.split('(', 1)[0]: part for part in
                      re.split(r'(?m)^(?:async )?fn ', source)[1:]}
         owners = {name for name, body in functions.items()
                   if 'loopback_case(' in body.split('{', 1)[1]}
         self.assertEqual(owners, set(runner.OAUTH_LOOPBACK_TESTS))
-        self.assertEqual(len(owners), 2)
+        self.assertEqual(len(owners), 3)
         self.assertIn('127.0.0.1:1456', source)
         self.assertEqual(runner.OAUTH_LOOPBACK_FILTER,
                          'package(=nac-server) & test(/^tests::mcp_oauth::loopback::('

@@ -150,6 +150,81 @@ test("release-local guide drift runs before a reusable quality receipt", () => {
     "standalone managed full quality must check the same guide sources");
 });
 
+test("native-auth fixture tests bind the checkout and fail closed without leaking fixture identity", () => {
+  const stable = workflow("stable-release");
+  const job = stable.jobs["test-server"];
+  const index = job.steps.findIndex(s => s.name === "Test isolated native-auth fixture boundary");
+  const ordinary = job.steps.findIndex(s => s.name === "Run nac-server tests");
+  const readiness = job.steps.findIndex(s => s.name === "Exercise stable binary readiness and status identity");
+  assert.ok(ordinary >= 0 && index > ordinary && readiness > index);
+  assert.equal(job.steps[ordinary].run, "python3 .github/scripts/server-tests.py");
+  assert.equal(job.steps[readiness].run, "make test-stable-binary");
+  assert.equal(job.steps.filter(s => s.name === "Test isolated native-auth fixture boundary").length, 1);
+  const step = job.steps[index];
+  assert.equal(step.if, undefined);
+  assert.equal(step["continue-on-error"], undefined);
+  assert.deepEqual(step.env, { EXPECTED_SOURCE_SHA: "${{ needs.prepare.outputs.sha }}" });
+  assert.equal(job.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
+  assert.equal(job["continue-on-error"], undefined);
+  assert.ok(requiredJobs.includes("test-server"));
+  assert.ok(stable.jobs["required-pr-checks"].needs.includes("test-server"));
+  assert.ok(stable.jobs.quality.needs.includes("test-server"));
+  assert.doesNotMatch(step.run, /GITHUB_ENV/);
+  for (const environment of [stable.env, job.env]) {
+    for (const key of ["NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"]) {
+      assert.equal(environment?.[key], undefined);
+    }
+  }
+  for (const [name, other] of Object.entries(stable.jobs)) {
+    if (name !== "test-server") assert.doesNotMatch(JSON.stringify(other), /native-auth-fixture/);
+  }
+
+  // Run the actual workflow shell with inert commands. An empty executable PATH
+  // prevents a future command-shape change from invoking real Git or Cargo.
+  const script = [
+    "git() {",
+    "  test \"$*\" = \"rev-parse --verify HEAD\" || return 91",
+    "  printf '%s\\n' \"$CONTROL_SOURCE_SHA\"",
+    "}",
+    "cargo() {",
+    "  printf 'cargo-arg:%s\\n' \"$@\"",
+    "  printf 'cargo-track:%s\\n' \"$NAC_BUILD_TRACK\"",
+    "  printf 'cargo-build:%s\\n' \"$NAC_BUILD_ID\"",
+    "  printf 'cargo-source:%s\\n' \"$NAC_SOURCE_REVISION\"",
+    "  return \"$CONTROL_CARGO_EXIT\"",
+    "}",
+    step.run,
+    "printf 'outer-track:%s\\n' \"$NAC_BUILD_TRACK\"",
+    "printf 'outer-build:%s\\n' \"$NAC_BUILD_ID\"",
+    "printf 'outer-source:%s\\n' \"$NAC_SOURCE_REVISION\"",
+  ].join("\n");
+  const invoke = (extra = {}) => spawnSync("/bin/bash", ["-e", "-c", script], {
+    encoding: "utf8", env: {
+      ...process.env, PATH: "/nonexistent/nac-native-auth-policy-no-executables",
+      EXPECTED_SOURCE_SHA: sha, CONTROL_SOURCE_SHA: sha, CONTROL_CARGO_EXIT: "0",
+      NAC_BUILD_TRACK: "outer-track", NAC_BUILD_ID: "outer-build", NAC_SOURCE_REVISION: "outer-source",
+      ...extra,
+    },
+  });
+  const positive = invoke();
+  assert.equal(positive.status, 0, positive.stderr);
+  assert.deepEqual(positive.stdout.split("\n").filter(line => line.startsWith("cargo-arg:"))
+    .map(line => line.slice("cargo-arg:".length)), [
+    "test", "--locked", "-p", "nac-server", "--lib", "--features", "native-auth-fixture", "native_auth_fixture::tests::",
+  ]);
+  for (const line of [
+    "cargo-track:dev", `cargo-build:native-auth-fixture-v1-${sha}`, `cargo-source:${sha}`,
+    "outer-track:outer-track", "outer-build:outer-build", "outer-source:outer-source",
+  ]) assert.ok(positive.stdout.split("\n").includes(line), line);
+  const mismatch = invoke({ EXPECTED_SOURCE_SHA: "b".repeat(40) });
+  assert.notEqual(mismatch.status, 0);
+  assert.doesNotMatch(mismatch.stdout, /cargo-arg:/);
+  const failed = invoke({ CONTROL_CARGO_EXIT: "73" });
+  assert.equal(failed.status, 73, failed.stderr);
+  assert.match(failed.stdout, /cargo-arg:test/);
+  assert.doesNotMatch(failed.stdout, /outer-track:/);
+});
+
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
 const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "browser-shards"]);
 test("compiler caches preserve independent roles and one trusted server/browser writer", () => {
