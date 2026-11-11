@@ -7,8 +7,10 @@ from image_packages import PACKAGE_OWNERS
 # Canonical NVD identities, independently of Wolfi origin names or APK -rN.
 # These are search identities, never a list of advisories to discard.
 UPSTREAM_CPES = {"krb5": ("mit", "kerberos_5"), "curl": ("haxx", "curl"),
-                 "gcc_headers": ("gnu", "gcc"), "sasl": ("cyrusimap", "cyrus-sasl")}
-WOLFI_ORIGINS = {"krb5": "krb5", "curl": "curl", "gcc_headers": "gcc", "sasl": "cyrus-sasl"}
+                 "gcc_headers": ("gnu", "gcc"), "sasl": ("cyrusimap", "cyrus-sasl"),
+                 "libssh2": ("libssh2", "libssh2")}
+WOLFI_ORIGINS = {"krb5": "krb5", "curl": "curl", "gcc_headers": "gcc", "sasl": "cyrus-sasl",
+                 "libssh2": "libssh2"}
 
 
 def upstream_targets(coverage):

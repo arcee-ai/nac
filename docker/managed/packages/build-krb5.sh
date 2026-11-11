@@ -17,6 +17,7 @@ CPPFLAGS='-fPIC -I/usr/include/et' ./configure \
     --sbindir=/usr/bin || { tail -n 200 config.log; exit 1; }
 make -j2
 make check
+sh /recipe/test-krb5-regressions.sh
 make DESTDIR=/stage/krb5 install
 # Match the stock library package's scope; server programs are not introduced.
 while IFS= read -r filename; do
