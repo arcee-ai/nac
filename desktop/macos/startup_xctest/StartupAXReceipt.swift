@@ -245,7 +245,7 @@ enum StartupAXFiles {
         var info = stat()
         diagnostic?.step = .read_metadata
         try need(fstat(fd, &info) == 0 && info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
-            && info.st_uid == getuid() && info.st_nlink == 1 && info.st_mode & 0o777 == 0o400
+            && info.st_uid == getuid() && (info.st_nlink == 0 || info.st_nlink == 1) && info.st_mode & 0o777 == 0o400
             && info.st_size > 0 && info.st_size <= limit)
         diagnostic?.step = .read_bytes
         let data = handle.readData(ofLength: limit + 1)

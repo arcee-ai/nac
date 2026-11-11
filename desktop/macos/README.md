@@ -144,7 +144,7 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `8397bafe8fb5f439b702ebf3e941eed802ce71aa`; its journey
+ten-file supplier `225d0c489785dcc5c1c8a6fcbe913f24604d9350`; its journey
 SHA256 is `e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
@@ -158,12 +158,15 @@ under a separate Root admission; schema50 alone is insufficient. No runtime or
 publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
 AX preflight, preserving all original postconditions and positive cleanup.
 The required panel policy lane admits exactly six geometry, seven AX/refusal,
-and twenty-three whole-client/request receipt methods: thirty-six total with
+and twenty-five whole-client/request receipt methods: thirty-eight total with
 zero skips. The receipt methods include the original-error identity/catch-order
 control and the true native infinite-rectangle fixture within the existing
 point-selection method. Exact count checks reject missing or extra controls;
 these source controls do not replace the full generated XCTest SDK gate or
-later native UI qualification.
+later native UI qualification. The canonical reader accepts the bounded readonly snapshot
+of an already opened inode after atomic replacement or unlink; the next named
+open still fails when absent. This does not prove continuous name presence or
+immutability against another writer with the same UID.
 The selected public coordinate is Float-representable and inside its actual
 anchor; fractional centers use a public offset coordinate with exact screenPoint
 readback before publication. The same coordinate is retained for dispatch.
