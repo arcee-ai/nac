@@ -181,7 +181,7 @@ class XCTestPolicyTests(unittest.TestCase):
 
 
 class XCTestLaunchEnvironmentTests(unittest.TestCase):
-    def exercise_launch(self, *, failure=None):
+    def exercise_launch(self, *, failure=None, command_fixture=False):
         """Exercise the real launcher with inert bundle/result/process adapters."""
         permitted = {'PATH': '/Selected/tools:/usr/bin', 'DEVELOPER_DIR': '/Selected/Xcode',
                      'SDKROOT': '/Selected/SDK', 'LANG': 'en_US.UTF-8', 'LC_ALL': 'C',
@@ -199,10 +199,16 @@ class XCTestLaunchEnvironmentTests(unittest.TestCase):
             'automation_status': 'Automation DOES NOT REQUIRE authentication.'}
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             raw = Path(temporary)
-            executable = raw / 'NAC Development Preview Smoke.app/Contents/MacOS/NACPreview'
+            app_root = raw / 'supplied-app' if command_fixture else raw
+            executable = app_root / 'NAC Development Preview Smoke.app/Contents/MacOS/NACPreview'
             executable.parent.mkdir(parents=True)
             executable.write_bytes(b'inert fixture executable; never executed')
-            evidence = raw / 'evidence/ci-terminal-xctest.json'
+            scenario = 'commands-input' if command_fixture else 'ci-terminal-xctest'
+            options = {'scenario': scenario}
+            if command_fixture:
+                options.update(app_path=executable.parents[2], test_name='testTrustedCommands',
+                               fixture_binding={'source': 'a' * 40, 'native_sha256': 'b' * 64, 'engine_sha256': 'c' * 64})
+            evidence = raw / 'evidence' / (scenario + '.json')
             profile = raw / 'removed-profile'
 
             def fake_run(args, log, timeout, **kwargs):
@@ -253,13 +259,14 @@ class XCTestLaunchEnvironmentTests(unittest.TestCase):
             if failure:
                 with self.assertRaisesRegex(RuntimeError, 'inert ' + ('build' if failure == 'build' else 'test') + ' failure'):
                     ci_xctest.run_terminal(raw, fake_run, lambda args: '{}', cleanup=cleanup,
-                                           validate=lambda record: {'inert': True})
+                                           validate=lambda record: {'inert': True}, **options)
             else:
                 result = ci_xctest.run_terminal(raw, fake_run, lambda args: '{}', cleanup=cleanup,
-                                                validate=lambda record: {'inert': True})
+                                                validate=lambda record: {'inert': True}, **options)
                 self.assertEqual(result['terminal'], {'inert': True})
                 config = json.loads((raw / 'xctest-fixture.json').read_text())
-                self.assertEqual(config['scenario'], 'ci-terminal-xctest')
+                self.assertEqual(config['scenario'], scenario)
+                self.assertEqual(config['command_binding'], options.get('fixture_binding'))
                 self.assertEqual(result['runner']['generated_target']['EnvironmentVariables'],
                                  {'NAC_UI_FIXTURE': str(raw / 'xctest-fixture.json')})
             self.assertEqual(dict(os.environ), ambient, 'Parent environment must remain unchanged')
@@ -283,6 +290,11 @@ class XCTestLaunchEnvironmentTests(unittest.TestCase):
                 self.assertEqual(environment, permitted)
                 self.assertTrue(set(forbidden).isdisjoint(environment))
                 self.assertTrue(set(forbidden.values()).isdisjoint(environment.values()))
+
+    def test_command_fixture_retains_existing_policy_environment_and_failure_cleanup(self):
+        for failure in (None, 'test', 'cleanup'):
+            with self.subTest(failure=failure):
+                self.exercise_launch(failure=failure, command_fixture=True)
 
     def test_both_xcodebuild_children_filter_ambient_credentials(self):
         self.exercise_launch()

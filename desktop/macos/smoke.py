@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Actual AppKit/WKWebView acceptance; requires an interactive Aqua session."""
+import argparse
 import hashlib
 from ci_paths_budget import check as budget_check, timeout_options
 import json
@@ -104,7 +105,12 @@ def cleanup_failed_case(evidence, relocated):
 
 
 def main():
-    app, output = map(lambda value: Path(value).resolve(), sys.argv[1:])
+    parser = argparse.ArgumentParser()
+    parser.add_argument('app', type=Path)
+    parser.add_argument('output', type=Path)
+    parser.add_argument('--commands-xctest-evidence', type=Path)
+    args = parser.parse_args()
+    app, output = args.app.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     selection = os.environ.get('NAC_MAC_SMOKE_SCENARIOS')
     available = SCENARIOS + (('ci-terminal',) if os.environ.get('NAC_MAC_CI_TERMINAL') == '1' else ())
@@ -177,6 +183,17 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
+                    if scenario == 'commands-input' and args.commands_xctest_evidence is not None:
+                        from ci_commands import accepted_case
+                        binding = {'source': metadata['source_head'],
+                                   'native_sha256': metadata['native_sha256'],
+                                   'engine_sha256': metadata['engine_sha256']}
+                        result = accepted_case(args.commands_xctest_evidence, binding)
+                        assert result['profile'] not in [row['profile'] for row in results]
+                        (output / 'commands-input.json').write_text(json.dumps(result, indent=2) + '\n')
+                        results.append({'scenario': scenario, 'passed': True, 'profile': result['profile'],
+                                        'visible_paint_qualified': False, 'public_xctest_verified': True})
+                        continue
                     if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal', 'commands', 'commands-input') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':

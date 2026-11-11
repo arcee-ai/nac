@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 mode="${1:-run}"
-case "$mode" in build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|auth-build|attention-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|auth-build|attention-build]' >&2; exit 2 ;; esac
+case "$mode" in build|run|smoke|smoke-build|smoke-prepare|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|auth-build|attention-build) ;; *) echo 'usage: preview.sh [build|run|smoke|smoke-build|smoke-prepare|app-build|app-run|startup-build|startup-smoke|instance-build|instance-smoke|lifecycle-build|auth-build|attention-build]' >&2; exit 2 ;; esac
 local_app=0
 case "$mode" in app-*|startup-*|instance-*|lifecycle-*|auth-build|attention-*) local_app=1 ;; esac
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
@@ -12,7 +12,7 @@ output="${NAC_MAC_OUTPUT:-$PWD/target/macos-preview}"
 mkdir -p "$output"
 output="$(cd "$output" && pwd)"
 app="$output/NAC Development Preview.app"
-if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then app="$output/NAC Development Preview Smoke.app"; fi
+if [[ "$mode" == smoke || "$mode" == smoke-build || "$mode" == smoke-prepare ]]; then app="$output/NAC Development Preview Smoke.app"; fi
 if [[ "$mode" == app-* ]]; then app="$output/NAC.app"; fi
 if [[ "$mode" == startup-* ]]; then app="$output/NAC Startup Smoke.app"; fi
 if [[ "$mode" == instance-* ]]; then app="$output/NAC Instance Smoke.app"; fi
@@ -110,7 +110,7 @@ else
     sources+=(desktop/macos/PreviewProfile.swift desktop/macos/FixtureProvider.swift desktop/macos/FixtureBootstrap.swift)
     flags+=(-framework Network)
 fi
-if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
+if [[ "$mode" == smoke || "$mode" == smoke-build || "$mode" == smoke-prepare ]]; then
     sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift desktop/macos/NativePathSmoke.swift desktop/macos/WorkspaceSmoke.swift desktop/macos/WorkspaceFixture.swift desktop/macos/WorkspaceJourneys.swift desktop/macos/WorkspaceLegacy.swift)
     sources+=(desktop/macos/OfflineProviderPolicy.swift desktop/macos/OfflineNetworkFence.swift
               desktop/macos/OfflineWebProbe.swift desktop/macos/OfflineProviderSmoke.swift desktop/macos/OfflineHTTPControlTarget.swift)
@@ -164,7 +164,7 @@ case "$mode" in
         fi
         ;;
     startup-smoke) exec python3 -B desktop/macos/startup_smoke.py "$app" "$output/startup-evidence" ;;
-    smoke)
+    smoke|smoke-prepare)
         xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 -O \
             desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift desktop/macos/ProtocolTests.swift \
             -o "$output/EngineProtocolTests"
@@ -175,6 +175,8 @@ case "$mode" in
             -o "$output/NativeCommandStateTests"
         "$output/NativeCommandStateTests"
         python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
-        exec python3 -B desktop/macos/smoke.py "$app" "$output/evidence"
+        if [[ "$mode" == smoke ]]; then
+            exec python3 -B desktop/macos/smoke.py "$app" "$output/evidence"
+        fi
         ;;
 esac

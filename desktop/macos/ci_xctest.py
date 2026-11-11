@@ -217,7 +217,7 @@ def result_receipt(path):
 def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.app',
                  scenario='ci-terminal-xctest', test_name='testTrustedLocalTerminal',
                  operations=None, validate=require_terminal_evidence, cleanup=cleanup_failed_case,
-                 observer_binding=None):
+                 observer_binding=None, app_path=None, fixture_binding=None):
     # Every command here is an observation. Missing prerequisites stop before
     # XCTest launch; enabling automation or requesting Accessibility is forbidden.
     status = observe_prerequisites(command)
@@ -227,7 +227,7 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
         require_source_binding(observer_binding)
     evidence = raw / 'evidence' / (scenario + '.json')
     evidence.parent.mkdir(exist_ok=True)
-    app = raw / app_name
+    app = Path(app_path) if app_path is not None else raw / app_name
     result = raw / 'native-input.xcresult'
     with relocation_directory(raw) as relocation, \
             tempfile.TemporaryDirectory(prefix='nac-xctest-build-') as derived:
@@ -239,7 +239,8 @@ def run_terminal(raw, run, command, *, app_name='NAC Development Preview Smoke.a
         config.write_text(json.dumps({'app_path': str(relocated), 'evidence': str(evidence),
                                       'native_sha256': native_hash, 'scenario': scenario,
                                       'operations': operations,
-                                      'observer_binding': observer_binding}, indent=2) + '\n')
+                                      'observer_binding': observer_binding,
+                                      'command_binding': fixture_binding}, indent=2) + '\n')
         run(['xcodebuild', 'build-for-testing', '-project',
              'desktop/macos/NativeUITests/NACNativeUITests.xcodeproj', '-scheme', 'NACNativeUITests',
              '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', derived,

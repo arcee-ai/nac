@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import CryptoKit
 import Dispatch
+import Darwin
 import IOKit
 import XCTest
 import XCUIAutomation
@@ -25,6 +26,189 @@ final class NativeJourneys: XCTestCase {
             throw NSError(domain: "NACUI", code: 1)
         }
         return record
+    }
+
+
+    private struct CommandPhase: Decodable {
+        let version, sequence, pid, window: Int
+        let episode, launch, view, document, source, native_sha256, engine_sha256, phase, kind: String
+        let verified_phases: [String]
+        let accepted: Bool?
+    }
+
+    /// The existing app fixture owns readiness and independent UI settlement.
+    /// This actor supplies only the ten fixed public keyboard operations.
+    @MainActor
+    func testTrustedCommands() throws {
+        continueAfterFailure = false
+        executionTimeAllowance = 180
+        let configPath = try XCTUnwrap(ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"])
+        let configBytes = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        let config = try XCTUnwrap(JSONSerialization.jsonObject(with: configBytes) as? [String: Any])
+        let binding = try XCTUnwrap(config["command_binding"] as? [String: String])
+        try require(Set(binding.keys) == Set(["source", "native_sha256", "engine_sha256"])
+            && config["scenario"] as? String == "commands-input", "Unexpected command fixture contract")
+        let appURL = URL(fileURLWithPath: try XCTUnwrap(config["app_path"] as? String)).resolvingSymlinksInPath()
+        try require(appURL.lastPathComponent == "NAC Development Preview Smoke.app"
+            && appURL.path.contains("/nac-mac-relocation-"), "Unexpected command bundle")
+        let digest = SHA256.hash(data: try Data(contentsOf: appURL.appendingPathComponent("Contents/MacOS/NACPreview")))
+            .map { String(format: "%02x", $0) }.joined()
+        let engine = SHA256.hash(data: try Data(contentsOf: appURL.appendingPathComponent("Contents/Resources/nac-web")))
+            .map { String(format: "%02x", $0) }.joined()
+        try require(digest == binding["native_sha256"] && engine == binding["engine_sha256"]
+            && digest == config["native_sha256"] as? String, "Command executable identity changed")
+        let output = try XCTUnwrap(config["evidence"] as? String)
+        let parent = URL(fileURLWithPath: output).deletingLastPathComponent().resolvingSymlinksInPath()
+        let directory = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        try require(directory >= 0, "Command evidence directory unavailable")
+        defer { close(directory) }
+        var held = stat()
+        try require(fstat(directory, &held) == 0 && held.st_uid == getuid() && held.st_mode & 0o077 == 0,
+                    "Command evidence is not a private owned directory")
+        try require(NSRunningApplication.runningApplications(withBundleIdentifier: "ai.arcee.nac.development-preview")
+            .allSatisfy { $0.isTerminated }, "Refusing an existing preview instance")
+        try requireUnlockedConsole()
+        let app = XCUIApplication(url: appURL)
+        app.launchArguments = ["--smoke-output", output, "--smoke-scenario", "commands-input", "--commands-external"]
+        app.launchEnvironment = ["NAC_HOME": "/DO-NOT-USE-PERSONAL-NAC", "NAC_MANAGED_CONFIG": "/DO-NOT-INHERIT",
+                                 "OPENAI_API_KEY": "must-not-reach-engine"]
+        app.launch()
+        let names = ["type-fixture", "copy", "cut", "paste", "undo", "redo", "settings",
+                     "close-settings", "new-session", "close-new-session"]
+        let keys: Set<String> = ["version", "episode", "pid", "window", "launch", "view", "document",
+            "source", "native_sha256", "engine_sha256", "sequence", "phase", "verified_phases", "kind"]
+        var first: [String: Any]?
+        var owner: NSRunningApplication?
+        var birth: Date?
+        var attempts: [[String: Any]] = []
+        for (index, name) in names.enumerated() {
+            let deadline = Date().addingTimeInterval(index == 0 ? 50 : 30)
+            var ready: [String: Any]?
+            while Date() < deadline {
+                if let record = try? evidence(output) {
+                    try require(record["error"] == nil && record["passed"] as? Bool != false,
+                                "Command app rejected the episode")
+                }
+                if let row = try commandRecord(directory, parent: parent, held: held) {
+                    let data = try JSONSerialization.data(withJSONObject: row)
+                    let phase = try JSONDecoder().decode(CommandPhase.self, from: data)
+                    try require(Set(row.keys) == keys && phase.version == 1 && phase.accepted == nil
+                        && phase.sequence > 0 && phase.sequence <= index + 1 && phase.sequence >= max(1, index)
+                        && names[phase.sequence - 1] == phase.phase, "Command phase skipped, replayed or malformed")
+                    try require([phase.episode, phase.launch, phase.view, phase.document].allSatisfy {
+                        UUID(uuidString: $0) != nil && $0 != "00000000-0000-0000-0000-000000000000"
+                    } && phase.pid > 0 && phase.window > 0
+                        && phase.source == binding["source"] && phase.native_sha256 == digest
+                        && phase.engine_sha256 == engine, "Command phase source/incarnation changed")
+                    if let initial = first {
+                        for key in ["episode", "pid", "window", "launch", "view", "document", "source", "native_sha256", "engine_sha256"] {
+                            try require(NSDictionary(dictionary: [key: row[key]!]).isEqual(to: [key: initial[key]!]),
+                                        "Command phase identity changed")
+                        }
+                    } else {
+                        try require(phase.sequence == 1, "Command episode did not start at phase one")
+                        let running = try XCTUnwrap(NSRunningApplication(processIdentifier: pid_t(phase.pid)))
+                        try require(running.bundleURL?.resolvingSymlinksInPath() == appURL, "Command process URL differs")
+                        first = row; owner = running; birth = try XCTUnwrap(running.launchDate)
+                    }
+                    if phase.sequence == index + 1 {
+                        try require(phase.kind == "ready" && phase.verified_phases == Array(names.prefix(index)),
+                                    "Command phase lacks prior independent settlement")
+                        ready = row; break
+                    }
+                    try require(["ready", "settled"].contains(phase.kind)
+                        && phase.verified_phases == Array(names.prefix(index - (phase.kind == "ready" ? 1 : 0))),
+                                "Previous command phase changed")
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.025))
+            }
+            let row = try XCTUnwrap(ready, "Command phase readiness deadline exceeded: " + name)
+            func guardOperation() throws {
+                try requireTarget(try XCTUnwrap(owner), url: appURL, launch: try XCTUnwrap(birth),
+                                  window: try XCTUnwrap(row["window"] as? Int))
+                try require(app.windows.count == 1, "Command window became ambiguous")
+                let current = try XCTUnwrap(commandRecord(directory, parent: parent, held: held))
+                try require(NSDictionary(dictionary: current).isEqual(to: row), "Command phase changed before input/ack")
+            }
+            try guardOperation()
+            var ack = row; ack["kind"] = "attempted"
+            attempts.append(ack) // One attempt only, before any public operation; no retry path.
+            try commandWrite(["version": 1, "configuration_sha256": SHA256.hash(data: configBytes)
+                .map { String(format: "%02x", $0) }.joined(), "attempts": attempts],
+                name: "commands-xctest-driver.json", directory: directory, limit: 32 * 1024)
+            try guardOperation()
+            switch name {
+            case "type-fixture":
+                let composers = app.webViews.descendants(matching: .any).matching(identifier: "Message")
+                try require(composers.count == 1, "Expected one Message accessibility element")
+                app.typeKey("a", modifierFlags: .command)
+                try guardOperation()
+                for character in "NAC_NATIVE_EDIT_FIXTURE" {
+                    try guardOperation()
+                    try require(composers.count == 1, "Command composer became ambiguous")
+                    composers.firstMatch.typeText(String(character))
+                }
+            case "copy":
+                app.typeKey("a", modifierFlags: .command)
+                try guardOperation(); app.typeKey("c", modifierFlags: .command)
+            case "cut": app.typeKey("x", modifierFlags: .command)
+            case "paste": app.typeKey("v", modifierFlags: .command)
+            case "undo": app.typeKey("z", modifierFlags: .command)
+            case "redo": app.typeKey("z", modifierFlags: [.command, .shift])
+            case "settings": app.typeKey(",", modifierFlags: .command)
+            case "new-session": app.typeKey("n", modifierFlags: .command)
+            case "close-settings", "close-new-session": app.typeKey(.escape, modifierFlags: [])
+            default: throw NSError(domain: "NACCommands", code: 1)
+            }
+            try guardOperation()
+            try commandWrite(ack, name: "commands-input-ack.json", directory: directory, limit: 4096)
+        }
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 60), "Command app did not settle and close")
+        let final = try XCTUnwrap(commandRecord(directory, parent: parent, held: held))
+        try require(final["kind"] as? String == "finished" && final["accepted"] as? Bool == true
+            && final["verified_phases"] as? [String] == names, "Command app did not verify all ten attempts")
+        let result = try evidence(output)
+        XCTAssertEqual(result["passed"] as? Bool, true)
+        XCTAssertEqual(result["engine_reaped"] as? Bool, true)
+        XCTAssertEqual(result["profile_removed"] as? Bool, true)
+    }
+
+    private func commandRecord(_ directory: Int32, parent: URL, held: stat) throws -> [String: Any]? {
+        var current = stat()
+        try require(lstat(parent.path, &current) == 0 && current.st_dev == held.st_dev
+            && current.st_ino == held.st_ino && current.st_uid == getuid() && current.st_mode & 0o077 == 0,
+                    "Command directory replaced or privacy changed")
+        let fd = openat(directory, "commands-input-phase.json", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0 && errno == ENOENT { return nil }
+        try require(fd >= 0, "Cannot open known command phase")
+        defer { close(fd) }
+        var before = stat(), after = stat()
+        try require(fstat(fd, &before) == 0 && before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
+            && before.st_uid == getuid() && before.st_nlink == 1 && before.st_size > 0 && before.st_size <= 4096,
+                    "Command phase is nonregular, unowned or oversized")
+        var bytes = [UInt8](repeating: 0, count: 4097)
+        let count = bytes.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+        try require(fstat(fd, &after) == 0 && count == Int(before.st_size) && before.st_size == after.st_size
+            && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec
+            && before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec
+            && before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec
+            && before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec, "Command phase changed during read")
+        try require(lstat(parent.path, &current) == 0 && current.st_dev == held.st_dev
+            && current.st_ino == held.st_ino && current.st_mode & 0o077 == 0, "Command directory changed during read")
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes.prefix(count))) as? [String: Any])
+    }
+
+    private func commandWrite(_ value: [String: Any], name: String, directory: Int32, limit: Int) throws {
+        try require(["commands-input-ack.json", "commands-xctest-driver.json"].contains(name), "Unknown command receipt")
+        let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        try require(data.count <= limit, "Command receipt exceeds its bound")
+        let temporary = ".commands-xctest-" + UUID().uuidString
+        let fd = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        try require(fd >= 0, "Cannot create command receipt")
+        defer { close(fd); unlinkat(directory, temporary, 0) }
+        let count = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+        try require(count == data.count && renameat(directory, temporary, directory, name) == 0,
+                    "Command receipt publication failed")
     }
 
     @MainActor

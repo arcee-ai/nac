@@ -452,6 +452,9 @@ def main():
                     json.loads((raw / 'workspace/matrix.json').read_text())['provenance'],
                     raw / 'workspace/workspace-direct-rich-chat.png', source_root / 'desktop/macos/WorkspaceFixture.swift')
                 report['rich_capture']['episode_sha256'] = hashlib.sha256((raw / 'workspace/workspace-direct.json').read_bytes()).hexdigest()
+            elif not target:
+                from ci_commands import qualify as qualify_commands
+                report['command_input'] = qualify_commands(raw, run, command, report['source_sha'])
             else:
                 run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
             if target and not workspace:
