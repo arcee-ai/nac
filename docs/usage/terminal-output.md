@@ -1,5 +1,41 @@
 # On-demand terminal output
 
+## Command deadlines and PTY polls
+
+Use `exec_command` without `tty` (or with `tty: false`) for ordinary commands.
+Omit `timeout_ms` for the 30000 ms default hard deadline. Set it explicitly for
+a different budget, covering the **entire shell command**, including every
+sequential network call, build, test, and chained step:
+
+```json
+{"cmd":"cargo build --locked && cargo test --locked","timeout_ms":300000}
+```
+
+A short non-PTY deadline terminates the command; it is not a resumable output
+poll. NAC never automatically increases the budget or replays the command.
+`yield_time_ms` remains a legacy non-PTY deadline alias. `_nac.timeout_ms` is
+also an alias: all explicitly supplied timing values must agree, or preparation
+rejects the call before any process starts. Timing fields accept integers from
+0 through 3600000 ms; zero preserves the immediate-deadline behavior, not an
+unlimited budget. The reserved `_nac.timeout_ms` range remains 1–3600000.
+Explicit null, fractional, negative, and out-of-range timing values are invalid.
+
+Use `tty: true` only for a foreground program requiring PTY transport, never to
+escape a deadline. PTYs reject `timeout_ms` with guidance to use `yield_time_ms`.
+For `exec_command` PTYs and `write_stdin`, `yield_time_ms` (default 500 ms) and
+its `_nac.timeout_ms` alias are output polls, **not process lifetime caps**.
+Poll the same original process with its exact handle; retention rules do not
+change.
+
+Non-PTY results retain structured `status`, partial sanitized stdout/stderr,
+and `output_id` paging. `timeout_ms` reports the effective deadline.
+`termination_status` reports `terminated` only after termination succeeds;
+`cleanup_pending` means cleanup did not fully settle and must not be described
+as successful termination. Cleanup errors remain in `stderr_preview`. A
+completed process may still have a nonzero exit code.
+
+## Inspect existing output
+
 In a direct primary chat, ask the agent to inspect a failed terminal command.
 It can discover the chat's existing human shells, agent executions and exact
 human `!` commands, then retrieve or search bounded sanitized output without a

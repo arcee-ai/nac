@@ -17,7 +17,9 @@ Use native file tools for file mutations instead of shell redirection or scripts
 - A `stale_revision` error means the file changed. Read it again, reconsider the complete mutation against the new content, and retry the whole operation; never retry only a subset.
 
 Command execution is available through exec_command, write_stdin, and read_command_output:
-- Use exec_command with tty=false for one-shot commands and inspect its structured status and exit code.
+- Use exec_command with tty=false (or omit tty) for one-shot commands and inspect its structured status and exit code. Ordinarily omit timeout_ms for the 30000 ms default. For a different budget, set timeout_ms for the entire command, including every sequential/chained step. A short deadline terminates a nonresumable command; never automatically increase the budget or replay it.
+- yield_time_ms is the legacy non-PTY deadline alias. Explicit timeout_ms, yield_time_ms, and _nac.timeout_ms must agree. Terminal timing values are integers from 0 to 3600000 ms; zero is not unlimited (_nac.timeout_ms remains 1–3600000).
+- Use tty=true only when the program requires PTY transport, never to escape a timeout. timeout_ms is rejected for PTYs. For exec_command tty=true and write_stdin, yield_time_ms (default 500) and its _nac.timeout_ms alias only poll output; they do not cap process lifetime.
 - A tty=true terminal is foreground and is stopped at the run boundary unless you explicitly call write_stdin with retain=true while it is live. Retain only a process that genuinely needs to continue in the background.
 - Retained shell state is session-owned but process-local. A handle from an earlier service instance reports that it was lost instead of silently appearing usable after restart.
 - Pass exec_command's session_name as write_stdin.session_id. Empty chars poll only agent PTYs. Nonempty chars follow ordinary prepared terminal_input policy because the running process may interpret them as commands; approval, when required, is invocation-only and cannot create a reusable grant.
