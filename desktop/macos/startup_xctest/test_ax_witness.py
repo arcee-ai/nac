@@ -39,11 +39,18 @@ import CoreFoundation
 import CoreGraphics
 import Darwin
 
-// Interpose only the three-argument POSIX publication port in this inert binary.
+// Test-only syscall ports. The one-shot read hook runs after the REAL open
+// and before the unmodified canonical reader performs its own metadata check.
 var forcedPublishErrno: Int32?
 var publishOpenCalls = 0
+var afterReadOpen: ((Int32) -> Void)?
 func open(_ path: String, _ flags: Int32) -> Int32 {
-    path.withCString { Darwin.open($0, flags) }
+    let fd = path.withCString { Darwin.open($0, flags) }
+    if fd >= 0, let hook = afterReadOpen {
+        afterReadOpen = nil
+        hook(fd)
+    }
+    return fd
 }
 func open(_ path: String, _ flags: Int32, _ mode: mode_t) -> Int32 {
     publishOpenCalls += 1
@@ -302,6 +309,65 @@ func publicationRun(_ name: String) -> [String: Any] {
         inputs += 1
         return result(true,"")
     } catch { return result(false,String(describing:error)) }
+}
+
+
+func fileInterleaveRun(_ mode: String) -> [String: Any] {
+    var root = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!)
+        .appendingPathComponent(UUID().uuidString)
+    var result: [String: Any] = ["accepted": false, "hook_calls": 0, "hook_failed": false]
+    var writer: Int32 = -1
+    defer {
+        afterReadOpen = nil
+        if writer >= 0 { _ = close(writer) }
+        try? FileManager.default.removeItem(at: root)
+    }
+    let diagnostic = StartupFailureEvidence(nil, configurationSHA: "")
+    do {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700])
+        guard let resolved = realpath(root.path, nil) else { throw StartupAXReceiptError.invalid }
+        root = URL(fileURLWithPath: String(cString: resolved)); free(resolved)
+        let path = root.appendingPathComponent("receipt.json").path
+        try StartupAXFiles.publish(["snapshot": "old"], to: path)
+        let old = try StartupAXFiles.read(path)
+        if ["empty", "oversize"].contains(mode) {
+            try StartupAXFiles.need(chmod(path, 0o600) == 0)
+            writer = path.withCString { Darwin.open($0, O_WRONLY | O_CLOEXEC) }
+            try StartupAXFiles.need(writer >= 0 && chmod(path, 0o400) == 0)
+        }
+        afterReadOpen = { fd in
+            result["hook_calls"] = 1
+            var before = stat(), after = stat()
+            do {
+                try StartupAXFiles.need(Darwin.fstat(fd, &before) == 0)
+                if mode == "unlinked" { try StartupAXFiles.need(unlink(path) == 0) }
+                else { try StartupAXFiles.publish(["snapshot": "new"], to: path) }
+                if mode == "mode" { try StartupAXFiles.need(fchmod(fd, 0o600) == 0) }
+                if mode == "empty" { try StartupAXFiles.need(ftruncate(writer, 0) == 0) }
+                if mode == "oversize" { try StartupAXFiles.need(ftruncate(writer, 8193) == 0) }
+                try StartupAXFiles.need(Darwin.fstat(fd, &after) == 0)
+                result["same_inode"] = before.st_dev == after.st_dev && before.st_ino == after.st_ino
+                result["zero_links"] = after.st_nlink == 0
+            } catch { result["hook_failed"] = true }
+        }
+        // REAL canonical open/fstat/type/UID/link/mode/size/read path, no copied
+        // acceptance predicate. The hook does not alter production arguments.
+        let bytes = try StartupAXFiles.read(path, diagnostic: diagnostic)
+        result["accepted"] = true
+        result["old_bytes_exact"] = bytes == old
+        if mode == "unlinked" {
+            do { _ = try StartupAXFiles.read(path); result["named_missing"] = false }
+            catch StartupAXReceiptError.missing { result["named_missing"] = true }
+        } else {
+            let current = try StartupAXFiles.read(path)
+            result["new_bytes_at_name"] = try JSONSerialization.jsonObject(with: current) as? [String: String] == ["snapshot": "new"]
+        }
+    } catch {
+        result["family"] = StartupFailureEvidence.family(error)
+        result["step"] = diagnostic.step.rawValue
+    }
+    return result
 }
 
 func fileRun(_ mode: String) -> [String: Any] {
@@ -913,7 +979,7 @@ func requestChildRun(_ mode: String) -> [String: Any] {
     } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
 }
 
-let rows = modes.map { $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -1255,6 +1321,31 @@ class ReceiptControls(unittest.TestCase):
     def test_complete_client_compares_exact_focus_value_role_pid_geometry_and_ancestry(self):
         modes=['focus_positive','focus_pid','focus_role','focus_false','focus_ancestor','focus_frame','focus_value']
         self.assertEqual([r['accepted'] for r in self.rows(modes)],[True]+[False]*6)
+
+    def test_real_canonical_reader_accepts_open_inode_snapshot_after_atomic_replace_or_unlink(self):
+        rows = self.rows(['file_interleave_replaced', 'file_interleave_unlinked'])
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertTrue(row['accepted'])
+            self.assertEqual(row['hook_calls'], 1)
+            self.assertFalse(row['hook_failed'])
+            self.assertTrue(row['same_inode'])
+            self.assertTrue(row['zero_links'])
+            self.assertTrue(row['old_bytes_exact'])
+        self.assertTrue(rows[0]['new_bytes_at_name'])
+        self.assertTrue(rows[1]['named_missing'])
+
+    def test_zero_link_snapshot_does_not_bypass_mode_or_size_and_multilink_stays_rejected(self):
+        rows = self.rows(['file_interleave_' + mode for mode in ('mode', 'empty', 'oversize')])
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertFalse(row['accepted'])
+            self.assertEqual(row['hook_calls'], 1)
+            self.assertFalse(row['hook_failed'])
+            self.assertTrue(row['same_inode'])
+            self.assertTrue(row['zero_links'])
+            self.assertEqual((row['family'], row['step']), ('receipt_invalid', 'read_metadata'))
+        self.assertEqual(self.rows(['file_hardlink']), [dict(accepted=False)])
 
     def test_real_read_port_refuses_symlink_hardlink_oversize_and_foreign_parent(self):
         modes=['file_positive','file_publish','file_symlink','file_hardlink','file_oversize','file_foreign_parent']
