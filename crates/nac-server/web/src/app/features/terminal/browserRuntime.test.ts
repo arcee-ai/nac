@@ -6,6 +6,7 @@ import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { useTerminalController } from "./useTerminalController";
+import { TerminalInputRecovery } from "./inputRecovery";
 
 const factory = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("./xtermAdapter", () => ({ createTerminalRenderer: factory.create }));
@@ -449,3 +450,33 @@ describe("scoped terminal observation", () => {
     textarea.remove();
   });
 });
+
+it.each([true, false])(
+  "distinguishes observational unavailability (%s) from exhausted live recovery capacity",
+  async (observationOnly) => {
+    const f = fixture();
+    const owner = new TerminalInputRecovery(128, true);
+    if (!observationOnly)
+      for (let id = 0; id < 128; id++) owner.acquire("session", `live-${id}`).release();
+    const lease = owner.acquire("session", "same-identity", observationOnly);
+    expect(lease.available).toBe(false);
+    expect(lease.acknowledge()).toBe(false);
+    closers.push(
+      openTerminalObservation({ ...f.ports, readonly: observationOnly, previousFailure: lease }),
+    );
+    await vi.waitFor(() => expect(f.ports.phase).toHaveBeenCalledWith("Connected"));
+    expect(f.view.terminal.options.disableStdin).toBe(true);
+    const capacityNotice =
+      "Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal.";
+    if (observationOnly) {
+      expect(f.ports.notice).not.toHaveBeenCalledWith(capacityNotice);
+      lease.release();
+      const live = owner.acquire("session", "same-identity");
+      expect(live.available).toBe(true);
+      expect(live.current).toBe(true); // The readonly observation did not acknowledge this live identity.
+    } else {
+      expect(f.ports.notice).toHaveBeenCalledWith(capacityNotice);
+      expect(owner.acquire("session", "live-0").current).toBe(true);
+    }
+  },
+);

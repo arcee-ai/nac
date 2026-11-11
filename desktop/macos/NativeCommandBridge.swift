@@ -8,6 +8,7 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private let receipt: () -> EngineReceipt?
     private let state: NativeCommandState
+    private let connectionLost: (() -> Void)?
     private var installed = true
     private var navigation: WKNavigation?
     #if PREVIEW_SMOKE
@@ -21,11 +22,12 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
     }
     #endif
 
-    init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?) {
+    init?(webView: WKWebView, receipt: @escaping () -> EngineReceipt?, connectionLost: (() -> Void)? = nil) {
         guard let current = receipt(), let state = NativeCommandState(receipt: current) else { return nil }
         self.webView = webView
         self.receipt = receipt
         self.state = state
+        self.connectionLost = connectionLost
         super.init()
         let controller = webView.configuration.userContentController
         controller.add(self, contentWorld: .page, name: NativeCommandScript.handler)
@@ -72,16 +74,20 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         return true
     }
 
-    func retire() {
-        guard installed else { return }
+    func retire(completion: @escaping (Bool) -> Void = { _ in }) {
+        guard installed else { completion(false); return }
         installed = false
         navigation = nil
-        if let webView, let binding = state.binding {
-            webView.callAsyncJavaScript("window.__nacDesktop?.retire(binding)",
-                                        arguments: ["binding": object(binding)], in: nil, in: .page)
-        }
         state.retire()
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: NativeCommandScript.handler, contentWorld: .page)
+        guard let webView else { completion(false); return }
+        // Disposal belongs to this exact view, including its unactivated page
+        // or the old page during provisional navigation. It invokes no action.
+        webView.callAsyncJavaScript("return window.__nacDesktop?.retireView() === true",
+            arguments: [:], in: nil, in: .page) { result in
+            if case .success(let value) = result { completion((value as? Bool) == true) }
+            else { completion(false) }
+        }
         // This bridge must be installed before its view's first load. It does
         // not remove other owners' user scripts or reuse a retired WebView.
     }
@@ -102,6 +108,18 @@ final class NativeCommandBridge: NSObject, WKScriptMessageHandler {
         components.port = source.port
         let accepted = state.receive(body, origin: components.url, mainFrame: message.frameInfo.isMainFrame,
                                      currentView: message.webView === webView, receipt: receipt())
+        if accepted, let binding = state.pendingConnectionLoss {
+            // Receipt admission fences commands immediately. Retiring the WK
+            // handler/view must wait until this message callback has returned.
+            RunLoop.main.perform(inModes: [.common]) { [weak self, weak webView] in
+                MainActor.assumeIsolated {
+                    guard let self, let webView, self.installed, self.webView === webView,
+                          self.state.matches(self.receipt()),
+                          self.state.consumeConnectionLoss(binding) else { return }
+                    self.connectionLost?()
+                }
+            }
+        }
         #if PREVIEW_SMOKE
         if accepted { acceptedReceipts += 1 } else { rejectedReceipts += 1 }
         #else

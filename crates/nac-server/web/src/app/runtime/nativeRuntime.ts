@@ -41,6 +41,8 @@ export interface NativeRuntimeOptions {
   storage?: Pick<Storage, "getItem" | "setItem">;
   /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
   draftStorage?: PromptDraftStorage;
+  /** Same-engine native document recovery; conservative restriction, never input authority. */
+  requireTerminalAcknowledgement?: boolean;
   assets?: NativePresentationAssets;
   eventSource?: SessionStreamOptions["eventSource"];
   /** Hosted reads default to no replay; standalone retains its one retry. */
@@ -59,7 +61,7 @@ export class NativeRuntime {
   readonly productNavigation: ProductNavigation;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
-  readonly terminalInputRecovery = new TerminalInputRecovery();
+  readonly terminalInputRecovery: TerminalInputRecovery;
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -70,6 +72,10 @@ export class NativeRuntime {
   constructor(options: NativeRuntimeOptions) {
     if (options.scope.endpoint !== options.client.transport.endpoint)
       throw new Error("Runtime scope must name the supplied client's endpoint.");
+    this.terminalInputRecovery = new TerminalInputRecovery(
+      128,
+      options.requireTerminalAcknowledgement ?? false,
+    );
     this.queryClient = new QueryClient({
       defaultOptions: {
         queries: {

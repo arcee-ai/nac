@@ -1,4 +1,4 @@
-import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as k, F as A, Fi as ee, Fn as j, Ft as te, G as ne, Gi as re, Gn as ie, Gr as M, Gt as ae, H as N, Hi as oe, Hn as se, Hr as ce, Ht as le, I as ue, Ii as de, In as fe, Ir as pe, It as me, J as he, Ji as P, Jn as ge, Jr as _e, Jt as F, K as ve, Ki as ye, Kn as be, Kr as I, Kt as xe, L as Se, Li as Ce, Ln as we, Lr as Te, Lt as Ee, M as De, Mi as Oe, Mn as ke, Mr as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as Re, On as ze, Or as Be, Ot as Ve, P as He, Pi as Ue, Pn as We, Pr as Ge, Pt as Ke, Q as qe, Qi as Je, Qn as Ye, Qr as Xe, Qt as Ze, R as Qe, Ri as $e, Rn as et, Rr as L, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as ut, Tt as dt, U as ft, Ui as pt, Un as mt, Ur as ht, Ut as gt, V as _t, Vi as vt, Vn as yt, Vr as bt, Vt as xt, W as St, Wi as Ct, Wn as wt, Wr as R, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as kt, Xt as At, Y as jt, Yi as Mt, Yn as Nt, Yr as Pt, Yt as Ft, Z as It, Zi as Lt, Zn as Rt, Zr as zt, Zt as Bt, _ as Vt, _i as Ht, _n as Ut, _r as z, _t as Wt, a as Gt, ai as Kt, an as qt, ar as Jt, at as Yt, b as Xt, bi as Zt, bn as Qt, br as $t, bt as en, c as tn, ci as nn, cn as rn, cr as an, ct as on, d as sn, di as cn, dn as ln, dr as un, dt as dn, ea as fn, ei as pn, en as mn, er as hn, et as gn, f as _n, fi as vn, fn as yn, fr as bn, ft as xn, g as Sn, gi as Cn, gn as wn, gr as B, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, ot as ur, p as dr, pi as fr, pn as pr, pr as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as V, sn as Er, sr as Dr, st as Or, t as kr, ta as Ar, ti as jr, tn as Mr, tr as Nr, tt as Pr, u as Fr, ui as Ir, un as Lr, ur as Rr, ut as zr, v as Br, vi as Vr, vn as Hr, vr as H, vt as Ur, w as Wr, wi as Gr, wn as Kr, wr as qr, wt as Jr, x as Yr, xi as Xr, xn as Zr, xr as Qr, xt as $r, y as ei, yi as ti, yn as ni, yr as U, yt as ri, z as ii, zi as ai, zn as oi, zr as si, zt as ci } from "./chunks/PerfProfiler-DM0_FTXE.js";
+import { $ as e, $i as t, $n as n, $r as r, $t as i, A as a, Ai as o, An as s, Ar as c, At as l, B as u, Bi as d, Bn as f, Br as p, Bt as m, C as h, Ci as g, Cn as _, Cr as v, Ct as y, D as b, Di as x, Dn as S, Dr as C, Dt as w, E as T, Ei as E, En as D, Er as O, Et as k, F as A, Fi as ee, Fn as j, Ft as te, G as ne, Gi as re, Gn as ie, Gr as M, Gt as ae, H as N, Hi as oe, Hn as se, Hr as ce, Ht as le, I as ue, Ii as de, In as fe, Ir as pe, It as me, J as he, Ji as P, Jn as ge, Jr as _e, Jt as F, K as ve, Ki as ye, Kn as be, Kr as I, Kt as xe, L as Se, Li as Ce, Ln as we, Lr as Te, Lt as Ee, M as De, Mi as Oe, Mn as ke, Mr as Ae, Mt as je, N as Me, Ni as Ne, Nn as Pe, Nr as Fe, Nt as Ie, O as Le, Oi as Re, On as ze, Or as Be, Ot as Ve, P as He, Pi as Ue, Pn as We, Pr as Ge, Pt as Ke, Q as qe, Qi as Je, Qn as Ye, Qr as Xe, Qt as Ze, R as Qe, Ri as $e, Rn as et, Rr as L, Rt as tt, S as nt, Si as rt, Sn as it, Sr as at, St as ot, T as st, Ti as ct, Tn as lt, Tr as ut, Tt as dt, U as ft, Ui as pt, Un as mt, Ur as ht, Ut as gt, V as _t, Vi as vt, Vn as yt, Vr as bt, Vt as xt, W as St, Wi as Ct, Wn as wt, Wr as R, Wt as Tt, X as Et, Xi as Dt, Xn as Ot, Xr as kt, Xt as At, Y as jt, Yi as Mt, Yn as Nt, Yr as Pt, Yt as Ft, Z as It, Zi as Lt, Zn as Rt, Zr as zt, Zt as Bt, _ as Vt, _i as Ht, _n as Ut, _r as z, _t as Wt, a as Gt, ai as Kt, an as qt, ar as Jt, at as Yt, b as Xt, bi as Zt, bn as Qt, br as $t, bt as en, c as tn, ci as nn, cn as rn, cr as an, ct as on, d as sn, di as cn, dn as ln, dr as un, dt as dn, ea as fn, ei as pn, en as mn, er as hn, et as gn, f as _n, fi as vn, fn as yn, fr as bn, ft as xn, g as Sn, gi as Cn, gn as wn, gr as B, gt as Tn, h as En, hi as Dn, hn as On, hr as kn, ht as An, i as jn, ii as Mn, in as Nn, ir as Pn, it as Fn, j as In, ji as Ln, jn as Rn, jr as zn, jt as Bn, k as Vn, ki as Hn, kn as Un, kr as Wn, kt as Gn, l as Kn, li as qn, ln as Jn, lr as Yn, lt as Xn, m as Zn, mi as Qn, mn as $n, mr as er, mt as tr, n as nr, ni as rr, nn as ir, nr as ar, nt as or, o as sr, oi as cr, on as lr, ot as ur, p as dr, pi as fr, pn as pr, pr as mr, pt as hr, q as gr, qi as _r, qn as vr, qr as yr, qt as br, ri as xr, rn as Sr, rr as Cr, rt as wr, s as Tr, si as V, sn as Er, sr as Dr, st as Or, t as kr, ta as Ar, ti as jr, tn as Mr, tr as Nr, tt as Pr, u as Fr, ui as Ir, un as Lr, ur as Rr, ut as zr, v as Br, vi as Vr, vn as Hr, vr as H, vt as Ur, w as Wr, wi as Gr, wn as Kr, wr as qr, wt as Jr, x as Yr, xi as Xr, xn as Zr, xr as Qr, xt as $r, y as ei, yi as ti, yn as ni, yr as U, yt as ri, z as ii, zi as ai, zn as oi, zr as si, zt as ci } from "./chunks/PerfProfiler-B1d19jNg.js";
 import * as li from "react";
 import ui, { Fragment as di, Suspense as fi, createContext as pi, lazy as mi, memo as hi, use as gi, useCallback as W, useContext as _i, useEffect as G, useId as vi, useLayoutEffect as yi, useMemo as K, useRef as q, useState as J, useSyncExternalStore as bi } from "react";
 import { QueryClientProvider as xi, QueryObserver as Si, replaceEqualDeep as Ci, useIsFetching as wi, useMutation as Ti, useQueries as Ei, useQuery as Di, useQueryClient as Oi } from "@tanstack/react-query";
@@ -15759,7 +15759,7 @@ function Zv(e, t) {
 // src/app/lib/markdownChunk.ts
 var Qv = null, $v = !1;
 function ey() {
-	return Qv ??= import("./chunks/markdown-renderer-Bctxub4c.js").then((e) => e.t).then((e) => ($v = !0, e)), Qv;
+	return Qv ??= import("./chunks/markdown-renderer-Dbo6XVki.js").then((e) => e.t).then((e) => ($v = !0, e)), Qv;
 }
 function ty() {
 	return $v;
@@ -22547,7 +22547,7 @@ function cC(e) {
 		let E = new ResizeObserver(() => h(C));
 		o(() => E.disconnect()), E.observe(e.host), n.terminal.element && E.observe(n.terminal.element), e.phase("Connecting"), e.notice(""), e.inputFailure(e.previousFailure.current);
 		let D = yield* oC("attach", () => r.attach(i.signal, e.reconnect ? "reconnect" : "attach"));
-		a() && (l = !0, u = D.alive, v(), e.previousFailure.current && e.notice("Input delivery was not confirmed. Check the shell before enabling fresh input."), e.previousFailure.available === !1 && e.notice("Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal."), e.phase(D.alive ? "Connected" : "Retained output"), yield* C, document.fonts.ready.then(() => {
+		a() && (l = !0, u = D.alive, v(), e.previousFailure.current && e.notice("Input delivery was not confirmed. Check the shell before enabling fresh input."), e.previousFailure.available === !1 && !e.previousFailure.observationOnly && e.notice("Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal."), e.phase(D.alive ? "Connected" : "Retained output"), yield* C, document.fonts.ready.then(() => {
 			a() && h(C);
 		}), yield* oC("observe", () => r.run(i.signal, (t) => {
 			u = t.terminal.alive, u || (x = null), v(), t.gap && a() && e.notice("Earlier output was discarded. The display was reset before retained output was replayed.");
@@ -22584,9 +22584,9 @@ function lC(e, t, n, r, i = {}) {
 	}, [C, i.inputPaused]), G(() => {
 		let r = n.current;
 		if (!r) return;
-		let l = cn(a).acquire(e, t);
-		g.current = l;
-		let u = cC({
+		let l = w.current, u = !!i.readonly || l !== void 0 && !WS(l, !1), f = cn(a).acquire(e, t, u);
+		g.current = f;
+		let m = cC({
 			api: o,
 			source: w.current,
 			readonly: i.readonly,
@@ -22596,7 +22596,7 @@ function lC(e, t, n, r, i = {}) {
 			terminalId: t,
 			host: r,
 			reconnect: c !== 0,
-			previousFailure: l,
+			previousFailure: f,
 			controls: (e) => {
 				s.current = e, e?.updateInput(E.current.binding, E.current.paused);
 			},
@@ -22605,7 +22605,7 @@ function lC(e, t, n, r, i = {}) {
 			inputFailure: h
 		});
 		return () => {
-			u(), l.release(), g.current === l && (g.current = null);
+			m(), f.release(), g.current === f && (g.current = null);
 		};
 	}, [
 		a,

@@ -148,124 +148,162 @@ test("trusted pointer reports retain the public renderer's literal PTY encoding"
   await api.terminateTerminal(session, shell.terminal_id);
 });
 
-test("manual human terminal freezes accepted uncertain input until acknowledgement without replay", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const session = await createDirectSession(request, harness);
-  const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
-  await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  // Document load can precede the session query and React's panel controls.
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
-  await expect(pane).toBeVisible();
-  await pane.getByRole("button", { name: /^New shell$/i }).click();
-  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-  const shell = (await api.listUserTerminals(session)).terminals[0];
-  const legacyInputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
-  const executionInputUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input`;
-  const inputUrls = new Set([legacyInputUrl, executionInputUrl]);
-  const inputs: number[][] = [];
-  let controlledInputUsed = false;
-  page.on("request", (sent) => {
-    if (inputUrls.has(sent.url()) && sent.method() === "POST")
-      inputs.push(sent.postDataJSON().bytes);
-    if (sent.url() === executionInputUrl && sent.method() === "POST") controlledInputUsed = true;
+for (const replaceDocument of [false, true]) {
+  test(`manual human terminal freezes accepted uncertain input until acknowledgement without replay${replaceDocument ? " after same-engine document replacement" : ""}`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    const session = await createDirectSession(request, harness);
+    const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
+    await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
+    const show = page.getByRole("button", { name: "Show panel", exact: true });
+    const pane = page.getByRole("region", { name: "Session terminal", exact: true });
+    // Document load can precede the session query and React's panel controls.
+    await expect(show.or(pane)).toBeVisible();
+    if (await show.isVisible()) await show.click();
+    await expect(pane).toBeVisible();
+    await pane.getByRole("button", { name: /^New shell$/i }).click();
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    const shell = (await api.listUserTerminals(session)).terminals[0];
+    const legacyInputUrl = `${harness.baseUrl}/sessions/${session}/user-terminals/${shell.terminal_id}/input`;
+    const executionInputUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input`;
+    const inputUrls = new Set([legacyInputUrl, executionInputUrl]);
+    const inputs: number[][] = [];
+    let controlledInputUsed = false;
+    page.on("request", (sent) => {
+      if (inputUrls.has(sent.url()) && sent.method() === "POST")
+        inputs.push(sent.postDataJSON().bytes);
+      if (sent.url() === executionInputUrl && sent.method() === "POST") controlledInputUsed = true;
+    });
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+    const command = "printf accepted >> uncertain-effects.txt";
+    await page.keyboard.type(command);
+    await expect(pane.locator(".xterm-accessibility")).toContainText(command);
+    // The Enter reaches the real process. Only its reply is replaced, proving
+    // accepted-but-uncertain delivery instead of a pre-dispatch failure.
+    let injectedReceiptLoss = false;
+    await page.route(
+      (url) => inputUrls.has(url.href),
+      async (route) => {
+        const response = await route.fetch();
+        if (route.request().url() === legacyInputUrl) expect(response.status()).toBe(204);
+        else {
+          expect(response.status()).toBe(200);
+          expect((await response.json()).outcome).toBe("written");
+        }
+        injectedReceiptLoss = true;
+        await route.fulfill({ status: 500, json: { error: "Input receipt lost" } });
+      },
+      { times: 1 },
+    );
+    await page.keyboard.press("Enter");
+    const file = path.join(harness.runRoot, "workspace/uncertain-effects.txt");
+    await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("accepted");
+    expect(injectedReceiptLoss).toBe(true);
+    const acknowledge = pane.getByRole("button", {
+      name: "Acknowledge failure and enable fresh input",
+      exact: true,
+    });
+    await expect(acknowledge).toBeVisible();
+    const count = inputs.length;
+    if (replaceDocument) {
+      expect(controlledInputUsed).toBe(true);
+      expect(await api.getTerminalInputControl(session, shell.terminal_id)).toMatchObject({
+        controller: "human",
+        in_flight: false,
+        frozen: false,
+      });
+      const beforeBinding = await page.locator("#nac-presentation-binding").textContent();
+      // Native-port/document-start emulation against the actual built app. This
+      // proves a fresh JS document/runtime, not WK process death or OS behavior.
+      await page.addInitScript(() => {
+        if (globalThis !== (globalThis as unknown as { top: unknown }).top) return;
+        Object.defineProperty(globalThis, "__nacRequireTerminalAcknowledgement", {
+          value: true,
+          writable: false,
+          configurable: false,
+        });
+        Object.defineProperty(globalThis, "__nacDesktop", {
+          value: {
+            connect() {
+              return () => {};
+            },
+          },
+        });
+      });
+      await page.reload();
+      await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+      await expect(acknowledge).toBeVisible();
+      expect(await page.locator("#nac-presentation-binding").textContent()).toBe(beforeBinding);
+      expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
+      expect(await fs.readFile(file, "utf8")).toBe("accepted");
+      await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+      await page.keyboard.type("replacement-must-stay-frozen");
+      expect(inputs).toHaveLength(count);
+    }
+    await page.keyboard.type("must-not-send");
+    await page.evaluate((hash) => {
+      (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+    }, `/session/${session}/files`);
+    await expect(pane).toHaveCount(0);
+    await page.evaluate((hash) => {
+      (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+    }, `/session/${session}/terminal`);
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    await expect(acknowledge).toBeVisible();
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+    await page.keyboard.type("source-switch-must-stay-frozen");
+    expect(inputs).toHaveLength(count);
+    await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    await expect(acknowledge).toBeVisible();
+    await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+    await page.keyboard.type("still-frozen");
+    expect(inputs).toHaveLength(count);
+    expect(await fs.readFile(file, "utf8")).toBe("accepted");
+    const controlUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input-control`;
+    const beforeControl = controlledInputUsed
+      ? await api.getTerminalInputControl(session, shell.terminal_id)
+      : undefined;
+    const confirmed = beforeControl
+      ? page.waitForResponse((response) => {
+          if (response.url() !== controlUrl || response.request().method() !== "POST") return false;
+          const body = response.request().postDataJSON();
+          return (
+            body.expected_revision === beforeControl.revision &&
+            body.acknowledge_uncertainty === true
+          );
+        })
+      : undefined;
+    await acknowledge.click();
+    if (confirmed && beforeControl) {
+      const response = await confirmed;
+      expect(response.status()).toBe(200);
+      const afterControl = await response.json();
+      expect(afterControl.controller).toBe("human");
+      expect(afterControl.frozen).toBe(false);
+      expect(BigInt(afterControl.revision)).toBe(BigInt(beforeControl.revision) + 1n);
+    }
+    await expect(acknowledge).toHaveCount(0);
+    // Confirm the existing public terminal focus behavior after server acceptance.
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
+    await page.keyboard.type("printf fresh >> uncertain-effects.txt");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("acceptedfresh");
+    const permissions = await api.getPermissions(session);
+    expect(permissions.approval_mode).toBe("manual");
+    expect(permissions.requests).toHaveLength(0);
+    expect(permissions.grants).toHaveLength(0);
+    expect(harness.provider.requests).toHaveLength(0);
+    await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
+    await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
+    await expect
+      .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).alive)
+      .toBe(false);
   });
-  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
-  const command = "printf accepted >> uncertain-effects.txt";
-  await page.keyboard.type(command);
-  await expect(pane.locator(".xterm-accessibility")).toContainText(command);
-  // The Enter reaches the real process. Only its reply is replaced, proving
-  // accepted-but-uncertain delivery instead of a pre-dispatch failure.
-  let injectedReceiptLoss = false;
-  await page.route(
-    (url) => inputUrls.has(url.href),
-    async (route) => {
-      const response = await route.fetch();
-      if (route.request().url() === legacyInputUrl) expect(response.status()).toBe(204);
-      else {
-        expect(response.status()).toBe(200);
-        expect((await response.json()).outcome).toBe("written");
-      }
-      injectedReceiptLoss = true;
-      await route.fulfill({ status: 500, json: { error: "Input receipt lost" } });
-    },
-    { times: 1 },
-  );
-  await page.keyboard.press("Enter");
-  const file = path.join(harness.runRoot, "workspace/uncertain-effects.txt");
-  await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("accepted");
-  expect(injectedReceiptLoss).toBe(true);
-  const acknowledge = pane.getByRole("button", {
-    name: "Acknowledge failure and enable fresh input",
-    exact: true,
-  });
-  await expect(acknowledge).toBeVisible();
-  const count = inputs.length;
-  await page.keyboard.type("must-not-send");
-  await page.evaluate((hash) => {
-    (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
-  }, `/session/${session}/files`);
-  await expect(pane).toHaveCount(0);
-  await page.evaluate((hash) => {
-    (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
-  }, `/session/${session}/terminal`);
-  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-  await expect(acknowledge).toBeVisible();
-  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
-  await page.keyboard.type("source-switch-must-stay-frozen");
-  expect(inputs).toHaveLength(count);
-  await pane.getByRole("button", { name: "Terminal options", exact: true }).click();
-  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
-  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-  await expect(acknowledge).toBeVisible();
-  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
-  await page.keyboard.type("still-frozen");
-  expect(inputs).toHaveLength(count);
-  expect(await fs.readFile(file, "utf8")).toBe("accepted");
-  const controlUrl = `${harness.baseUrl}/sessions/${session}/executions/${shell.terminal_id}/input-control`;
-  const beforeControl = controlledInputUsed
-    ? await api.getTerminalInputControl(session, shell.terminal_id)
-    : undefined;
-  const confirmed = beforeControl
-    ? page.waitForResponse((response) => {
-        if (response.url() !== controlUrl || response.request().method() !== "POST") return false;
-        const body = response.request().postDataJSON();
-        return (
-          body.expected_revision === beforeControl.revision && body.acknowledge_uncertainty === true
-        );
-      })
-    : undefined;
-  await acknowledge.click();
-  if (confirmed && beforeControl) {
-    const response = await confirmed;
-    expect(response.status()).toBe(200);
-    const afterControl = await response.json();
-    expect(afterControl.controller).toBe("human");
-    expect(afterControl.frozen).toBe(false);
-    expect(BigInt(afterControl.revision)).toBe(BigInt(beforeControl.revision) + 1n);
-  }
-  await expect(acknowledge).toHaveCount(0);
-  // Confirm the existing public terminal focus behavior after server acceptance.
-  await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
-  await page.keyboard.type("printf fresh >> uncertain-effects.txt");
-  await page.keyboard.press("Enter");
-  await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("acceptedfresh");
-  const permissions = await api.getPermissions(session);
-  expect(permissions.approval_mode).toBe("manual");
-  expect(permissions.requests).toHaveLength(0);
-  expect(permissions.grants).toHaveLength(0);
-  expect(harness.provider.requests).toHaveLength(0);
-  await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
-  await pane.getByRole("button", { name: "Close Shell 1", exact: true }).click();
-  await expect
-    .poll(async () => (await api.getUserTerminal(session, shell.terminal_id)).alive)
-    .toBe(false);
-});
+}
 
 test("reattach observation sends no retained terminal-query replies before focused input", async ({
   harness,

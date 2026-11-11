@@ -36,6 +36,7 @@ interface TerminalPorts {
   previousFailure: {
     current: boolean;
     readonly available?: boolean;
+    readonly observationOnly?: boolean;
     subscribe?: (listener: () => void) => () => void;
   };
   controls: (value: TerminalControls | null) => void;
@@ -305,7 +306,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       ports.notice(
         "Input delivery was not confirmed. Check the shell before enabling fresh input.",
       );
-    if (ports.previousFailure.available === false)
+    if (ports.previousFailure.available === false && !ports.previousFailure.observationOnly)
       ports.notice(
         "Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal.",
       );
