@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use super::macos::diagnostics::{self, Phase, Stage};
 use super::{Authority, Evidence, TestIdentity};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -139,14 +141,57 @@ impl Root {
 }
 impl Drop for Root {
     fn drop(&mut self) {
-        let _ = self.authority.terminate_leader();
-        let _ = self.authority.terminate_members();
+        #[cfg(target_os = "macos")]
+        diagnostics::phase(Phase::Teardown);
+        #[cfg(target_os = "macos")]
+        diagnostics::begin(
+            Stage::Counts,
+            self.child.id() as i32,
+            [
+                self.authority.members.len() as i128,
+                self.authority.pending_capture.len() as i128,
+                self.jobs.len() as i128,
+            ],
+        );
+        #[cfg(target_os = "macos")]
+        diagnostics::begin(Stage::Leader, self.child.id() as i32, [0; 3]);
+        let _result = self.authority.terminate_leader();
+        #[cfg(target_os = "macos")]
+        diagnostics::result(Stage::Leader, self.child.id() as i32, &_result, [0; 3]);
+        #[cfg(target_os = "macos")]
+        diagnostics::begin(Stage::Members, self.child.id() as i32, [0; 3]);
+        let _result = self.authority.terminate_members();
+        #[cfg(target_os = "macos")]
+        diagnostics::result(Stage::Members, self.child.id() as i32, &_result, [0; 3]);
         for job in &mut self.jobs {
-            let _ = job.kill();
+            #[cfg(target_os = "macos")]
+            diagnostics::begin(Stage::Job, 0, [0; 3]);
+            let _result = job.kill();
+            #[cfg(target_os = "macos")]
+            diagnostics::result(Stage::Job, 0, &_result, [0; 3]);
         }
         // Direct child remains exclusively unreaped, including assertion unwind.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        #[cfg(target_os = "macos")]
+        diagnostics::begin(Stage::ChildKill, self.child.id() as i32, [0; 3]);
+        let _result = self.child.kill();
+        #[cfg(target_os = "macos")]
+        diagnostics::result(Stage::ChildKill, self.child.id() as i32, &_result, [0; 3]);
+        #[cfg(target_os = "macos")]
+        diagnostics::begin(Stage::ChildWait, self.child.id() as i32, [0; 3]);
+        let _result = self.child.wait();
+        #[cfg(target_os = "macos")]
+        diagnostics::result(
+            Stage::ChildWait,
+            self.child.id() as i32,
+            &_result,
+            [
+                _result.as_ref().ok().map_or(-1, |status| {
+                    std::os::unix::process::ExitStatusExt::into_raw(*status)
+                }) as i128,
+                0,
+                0,
+            ],
+        );
     }
 }
 
@@ -170,10 +215,15 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         assert!(status.success(), "isolated FD stress failed: {status}");
         return;
     }
+    // The exec'd child owns its capture; Root teardown precedes scope emission.
+    #[cfg(target_os = "macos")]
+    let mut _diagnostic = diagnostics::Scope::census();
     let mut root = Root::new().unwrap();
     #[cfg(target_os = "linux")]
     let fd_baseline = std::fs::read_dir("/proc/self/fd").unwrap().count();
-    for _iteration in 0..48 {
+    for _ in 0..48 {
+        #[cfg(target_os = "macos")]
+        _diagnostic.begin_iteration();
         let pid = root.job().unwrap();
         root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
         assert!(!root.authority.leader_exited().unwrap());
@@ -187,11 +237,10 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
         );
         let weak = Arc::downgrade(&identity);
         #[cfg(target_os = "macos")]
-        let signal_trace =
-            super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, _iteration);
+        diagnostics::signal_target(pid);
         identity.signal(libc::SIGKILL).unwrap();
         #[cfg(target_os = "macos")]
-        drop(signal_trace);
+        diagnostics::phase(Phase::Prune);
         drop(identity);
         root.until(|authority| {
             authority.members.is_empty() && authority.pending_capture.is_empty()
@@ -211,6 +260,9 @@ fn active_census_releases_dead_capabilities_after_child_discovery() {
 
 #[test]
 fn active_prune_preserves_original_parent_arc_in_pending_obligation() {
+    // Declared first: Root teardown runs before this one bounded record is emitted.
+    #[cfg(target_os = "macos")]
+    let _diagnostic = diagnostics::Scope::new();
     let mut root = Root::new().unwrap();
     let pid = root.job().unwrap();
     root.until(|authority| authority.members.keys().any(|key| key.0 == pid));
@@ -229,16 +281,18 @@ fn active_prune_preserves_original_parent_arc_in_pending_obligation() {
         .find(|row| row.pid == pid)
         .unwrap();
     #[cfg(target_os = "macos")]
+    diagnostics::phase(Phase::CapturedRow);
+    #[cfg(target_os = "macos")]
     let row = super::macos::inspect(pid).unwrap().unwrap();
     // Pending proof holds the original exact parent capability independently.
     root.authority
         .pending_capture
         .insert(key, (row, Evidence::Parent(Arc::clone(&parent))));
     #[cfg(target_os = "macos")]
-    let signal_trace = super::macos::signal_diagnostics::Scope::new(root.child.id(), pid, 0);
+    diagnostics::signal_target(pid);
     parent.signal(libc::SIGKILL).unwrap();
     #[cfg(target_os = "macos")]
-    drop(signal_trace);
+    diagnostics::phase(Phase::Prune);
     drop(parent);
     let deadline = Instant::now() + Duration::from_secs(3);
     while root.authority.members.contains_key(&key) {
