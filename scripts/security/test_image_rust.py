@@ -177,6 +177,28 @@ class RustAdvisoryTests(unittest.TestCase):
                 self.assertEqual({f["identity_namespace"] for f in findings}, {"source", "distribution"})
             self.assertEqual(len(normalized), 2)
 
+    def test_exclusive_next_major_bound_uses_current_component_namespace(self):
+        cases = (("cargo", "cargo", ">= 0.72.0, < 1.0.0", "source"),
+                 ("cargo", "cargo", "< 2.0.0, >= 1.71.0", "distribution"),
+                 ("rust", "std", ">= 1.71.0, < 2.0.0", "component"))
+        for repo, name, expression, namespace in cases:
+            with self.subTest(expression=expression):
+                normalized, findings = advisories.advisory_records(
+                    repo, [record(repo, name, expression)], self.coverage)
+                self.assertEqual(len(findings), 1)
+                self.assertEqual(findings[0]["identity_namespace"], namespace)
+                self.assertTrue(normalized[0]["evaluated"][0]["affected"])
+
+    def test_unanchored_cargo_upper_bound_cannot_silently_clear_source(self):
+        normalized, findings = advisories.advisory_records(
+            "cargo", [record(affected="< 1.0.0")], self.coverage)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["identity_namespace"], "source")
+        self.assertTrue(normalized[0]["evaluated"][0]["affected"])
+        for expression in ("< 1.72.0", "<= 1.0.0"):
+            with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, "unanchored Cargo"):
+                advisories.advisory_records("cargo", [record(affected=expression)], self.coverage)
+
     def test_std_known_vulnerable_fixed_unknown_severity_and_withdrawn(self):
         item = record("rust", "std", "<= 1.58.0", None)
         item["vulnerabilities"][0]["patched_versions"] = "1.58.1"
@@ -219,7 +241,9 @@ class RustAdvisoryTests(unittest.TestCase):
             advisories.advisory_records("cargo", [item], coverage)
 
     def test_unsupported_mixed_ranges_or_identity_or_schema_never_clear(self):
-        for expression in ("*", "^1.72", ">= 0.72, < 1.72", "< 1.72-beta", "", ">= 2.0.0", "<= 1.72", ">= 1.72.0, < 1.71.0"):
+        for expression in ("*", "^1.72", ">= 0.72, < 1.72", "< 1.8.0, < 2.0.0",
+                           "< 1.0.0, < 2.0.0", ">= 0.72.0, < 1.0.1",
+                           ">= 0.72.0, <= 1.0.0", "< 1.72-beta", "", ">= 2.0.0", "<= 1.72", ">= 1.72.0, < 1.71.0"):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
                 advisories.advisory_records("cargo", [record(affected=expression)], self.coverage)
         for key, value in (("vulnerabilities", []), ("severity", "none"), ("published_at", None), ("state", "draft")):

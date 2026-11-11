@@ -34,8 +34,17 @@ def parse_range(value):
             require(match[2].count(".") == 2 or match[1] in {"<", ">="},
                     "ambiguous partial Rust advisory comparator")
             bounds.append((match[1] or "=", version_tuple(match[2])))
-        require(len({version[0] for _, version in bounds}) == 1,
-                "ambiguous mixed-major Rust advisory range")
+        majors = {version[0] for _, version in bounds}
+        if len(majors) > 1:
+            major = min(majors)
+            # The only unambiguous cross-major comparator is an exclusive
+            # next-major zero bound, which closes the current namespace.
+            require(majors == {major, major + 1} and
+                    any(operator in {">", ">=", "="} and version[0] == major
+                        for operator, version in bounds) and
+                    all(version[0] == major or operator == "<" and version == (major + 1, 0, 0)
+                        for operator, version in bounds),
+                    "ambiguous mixed-major Rust advisory range")
         lower = max((v for op, v in bounds if op in {">", ">=", "="}), default=None)
         upper = min((v for op, v in bounds if op in {"<", "<=", "="}), default=None)
         require(lower is None or upper is None or lower < upper or
@@ -92,8 +101,18 @@ def advisory_records(repo, records, coverage):
             patched = patched or ""
             matched, evaluated = False, []
             for bounds in ranges:
-                major = bounds[0][1][0]
+                # parse_range permits only a next-major exclusive zero bound;
+                # that sentinel does not select the installed namespace.
+                major = min(version[0] for _, version in bounds)
                 if component == "cargo":
+                    if not any(operator in {">", ">=", "="} for operator, _ in bounds):
+                        # Cargo source is 0.x and the distributed binary is
+                        # 1.x. A sole <1.0.0 selects source; wider unanchored
+                        # 1.x bounds straddle both identities and cannot clear.
+                        if bounds == [("<", (1, 0, 0))]:
+                            major = 0
+                        else:
+                            require(major == 0, "ambiguous unanchored Cargo advisory namespace")
                     require(major in {0, 1}, "unsupported Cargo advisory version namespace")
                     namespace = "source" if major == 0 else "distribution"
                     version = (coverage["components"]["cargo"]["version"] if major == 0 else coverage["distribution"])
