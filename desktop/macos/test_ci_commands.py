@@ -3,6 +3,7 @@ import ast
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -39,6 +40,57 @@ def fixture():
 
 
 class CommandEvidenceTests(unittest.TestCase):
+    def test_publisher_transient_settled_and_coalesced_next_ready_contract(self):
+        # Characterize producer frames and their source consumer shape; this
+        # deliberately does not claim to execute Swift without an SDK admission.
+        root = Path(__file__).parent
+        actor = (root / 'NativeUITests/NativeJourneys.swift').read_text()
+        producer = (root / 'NativeCommandInput.swift').read_text()
+        self.assertIn('try write(kind: "settled", accepted: true)', producer)
+        self.assertIn('keys.union(settled ? ["accepted"] : [])', actor)
+        self.assertIn('(settled ? phase.accepted == true : phase.accepted == nil)', actor)
+        self.assertIn('ready = row; break', actor)
+        attempts = fixture()[2]['attempts']
+        for index in range(1, 10):
+            previous = {**attempts[index - 1], 'kind': 'settled', 'accepted': True,
+                        'verified_phases': list(commands.PHASES[:index])}
+            following = {**attempts[index], 'kind': 'ready'}
+            self.assertEqual(set(previous), set(following) | {'accepted'})
+            self.assertEqual(previous['verified_phases'], following['verified_phases'])
+            self.assertEqual(previous['sequence'] + 1, following['sequence'])
+            for key in commands.IDENTITY: self.assertEqual(previous[key], following[key])
+            # Either polling trace reaches the same next ready; settlement is
+            # ephemeral and must never be a mandatory observed intermediate.
+            for trace in ([previous, following], [following]):
+                self.assertEqual(next(row for row in trace if row['kind'] == 'ready'), following)
+
+    def test_atomic_publisher_retirement_preserves_open_phase_inode(self):
+        actor = (Path(__file__).parent / 'NativeUITests/NativeJourneys.swift').read_text()
+        self.assertIn('(before.st_nlink == 0 || before.st_nlink == 1)', actor)
+        self.assertIn('(after.st_nlink == 0 || after.st_nlink == 1)', actor)
+        self.assertIn('(before.st_nlink == 1 && after.st_nlink == 0)', actor)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'phase.json'
+            original = b'{"kind":"settled","accepted":true}'
+            for replace_before_stat in (False, True):
+                path.write_bytes(original)
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                try:
+                    if not replace_before_stat: before = os.fstat(fd)
+                    temporary = Path(directory) / 'next.json'
+                    temporary.write_bytes(b'{"kind":"ready"}')
+                    os.replace(temporary, path)
+                    if replace_before_stat: before = os.fstat(fd)
+                    self.assertIn(before.st_nlink, (0, 1))
+                    self.assertEqual(os.read(fd, 4097), original)
+                    after = os.fstat(fd)
+                    self.assertEqual(after.st_nlink, 0)
+                    self.assertEqual(before.st_ino, after.st_ino)
+                    self.assertEqual(before.st_size, after.st_size)
+                    self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
+                    self.assertEqual(path.read_bytes(), b'{"kind":"ready"}')
+                finally: os.close(fd)
+
     def test_ten_attempts_require_independent_app_settlement(self):
         values = fixture()
         result = commands.require_command_evidence(*values)

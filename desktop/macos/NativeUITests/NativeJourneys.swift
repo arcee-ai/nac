@@ -92,7 +92,9 @@ final class NativeJourneys: XCTestCase {
                 if let row = try commandRecord(directory, parent: parent, held: held) {
                     let data = try JSONSerialization.data(withJSONObject: row)
                     let phase = try JSONDecoder().decode(CommandPhase.self, from: data)
-                    try require(Set(row.keys) == keys && phase.version == 1 && phase.accepted == nil
+                    let settled = phase.kind == "settled"
+                    try require(Set(row.keys) == keys.union(settled ? ["accepted"] : []) && phase.version == 1
+                        && (settled ? phase.accepted == true : phase.accepted == nil)
                         && phase.sequence > 0 && phase.sequence <= index + 1 && phase.sequence >= max(1, index)
                         && names[phase.sequence - 1] == phase.phase, "Command phase skipped, replayed or malformed")
                     try require([phase.episode, phase.launch, phase.view, phase.document].allSatisfy {
@@ -184,15 +186,22 @@ final class NativeJourneys: XCTestCase {
         defer { close(fd) }
         var before = stat(), after = stat()
         try require(fstat(fd, &before) == 0 && before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG)
-            && before.st_uid == getuid() && before.st_nlink == 1 && before.st_size > 0 && before.st_size <= 4096,
+            && before.st_uid == getuid() && (before.st_nlink == 0 || before.st_nlink == 1)
+            && before.st_size > 0 && before.st_size <= 4096,
                     "Command phase is nonregular, unowned or oversized")
         var bytes = [UInt8](repeating: 0, count: 4097)
         let count = bytes.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
         try require(fstat(fd, &after) == 0 && count == Int(before.st_size) && before.st_size == after.st_size
+            && before.st_dev == after.st_dev && before.st_ino == after.st_ino
+            && before.st_uid == after.st_uid && before.st_mode == after.st_mode
+            && (after.st_nlink == 0 || after.st_nlink == 1)
             && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec
             && before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec
-            && before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec
-            && before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec, "Command phase changed during read")
+            // Atomic publication can retire this already-open immutable inode.
+            && ((before.st_nlink == 1 && after.st_nlink == 0)
+                || (before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec
+                    && before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec)),
+                    "Command phase changed during read")
         try require(lstat(parent.path, &current) == 0 && current.st_dev == held.st_dev
             && current.st_ino == held.st_ino && current.st_mode & 0o077 == 0, "Command directory changed during read")
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes.prefix(count))) as? [String: Any])
