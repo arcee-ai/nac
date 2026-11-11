@@ -50,6 +50,35 @@ final class WorkspaceStorage {
     private var pending = 0
     private var waiters: [UUID: (Bool) -> Void] = [:]
 
+    #if PREVIEW_SMOKE && LOCAL_APP
+    // Observation only; every actual enqueue has one sequence, including native writes.
+    static var smokeQ1Event: (([String: Any], String?) -> Void)?
+    private let smokeQ1Owner = UUID().uuidString
+    private var smokeQ1Sequence = 0
+    private func smokeQ1Report(_ kind: String, sequence: Int,
+                               ordinary: (namespace: String, key: String, value: String?)? = nil,
+                               checkpoint: Data? = nil, durable: Bool? = nil,
+                               observer: (([String: Any], String?) -> Void)?) {
+        var event: [String: Any] = ["kind": kind, "owner": smokeQ1Owner,
+            "profile": profile.digest, "sequence": sequence]
+        if kind != "flush" {
+            event["writeClass"] = ordinary == nil ? "native-notifications" : "ordinary"
+        }
+        if let ordinary {
+            event["namespace"] = ordinary.namespace
+            event["keySHA256"] = Self.smokeQ1Hash(Data(ordinary.key.utf8))
+            event["valueSHA256"] = Self.smokeQ1Hash(Data((ordinary.value ?? "").utf8))
+            event["clear"] = ordinary.value == nil
+        }
+        if let checkpoint { event["checkpointSHA256"] = Self.smokeQ1Hash(checkpoint) }
+        if let durable { event["durable"] = durable }
+        observer?(event, ordinary?.value)
+    }
+    private static func smokeQ1Hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    #endif
+
     private init(profile: WorkspaceStorageProfile) {
         self.profile = profile
         checkpoint = WorkspaceCheckpoint(home: profile.home, profile: profile.digest, track: profile.track)
@@ -125,12 +154,33 @@ final class WorkspaceStorage {
               let data = try? JSONSerialization.data(withJSONObject: ["version": 1, "profile": profile.digest, "values": next]),
               data.count <= WorkspaceCheckpoint.limit else { return false }
         values = next
-        guard available else { completion(false); return true }
+        guard available else {
+            #if PREVIEW_SMOKE && LOCAL_APP
+            smokeQ1Report("not-enqueued", sequence: smokeQ1Sequence,
+                          ordinary: (namespace, key, value), checkpoint: data, durable: false,
+                          observer: Self.smokeQ1Event)
+            #endif
+            completion(false); return true
+        }
+        #if PREVIEW_SMOKE && LOCAL_APP
+        smokeQ1Sequence += 1
+        // Bind observation at acceptance; a later hook must never receive an
+        // unpaired completion for an earlier write. The disk queue is unchanged.
+        let q1Observer = Self.smokeQ1Event
+        let q1Sequence = smokeQ1Sequence
+        let q1Ordinary = (namespace: namespace, key: key, value: value)
+        smokeQ1Report("accepted", sequence: q1Sequence, ordinary: q1Ordinary,
+                      checkpoint: data, observer: q1Observer)
+        #endif
         pending += 1
         // DispatchQueue order is the accepted-write order, including empty tombstones.
         checkpoint.write(data) { [self] durable in
             pending -= 1
             if !durable { available = false }
+            #if PREVIEW_SMOKE && LOCAL_APP
+            smokeQ1Report("completed", sequence: q1Sequence, ordinary: q1Ordinary,
+                          checkpoint: data, durable: durable && available, observer: q1Observer)
+            #endif
             completion(durable && available)
             if pending == 0 {
                 let callbacks = waiters.values
@@ -144,6 +194,14 @@ final class WorkspaceStorage {
     /// A bound prevents disk failure from lengthening the existing stop policy.
     /// Timeout is not success and does not reissue/cancel the owned disk write.
     func flush(timeout: TimeInterval = 0.5, completion: @escaping (Bool) -> Void) {
+        #if PREVIEW_SMOKE && LOCAL_APP
+        let originalCompletion = completion, q1Sequence = smokeQ1Sequence
+        let q1Observer = Self.smokeQ1Event
+        let completion: (Bool) -> Void = { [self] durable in
+            smokeQ1Report("flush", sequence: q1Sequence, durable: durable, observer: q1Observer)
+            originalCompletion(durable)
+        }
+        #endif
         guard pending > 0 else { completion(available); return }
         let token = UUID()
         waiters[token] = completion
