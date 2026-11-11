@@ -159,6 +159,12 @@ def policy(raw, now):
 
 
 def evidence_for(rule, evidence, observations, now):
+    # One upstream scanner row can represent multiple installed APKs. A v1 rule
+    # proves one payload, so it cannot safely admit a shared coordinate.
+    coordinate_observations = [item for item in observations
+                               if item["binding"]["package"] == rule["finding"]["package"]]
+    require(len(coordinate_observations) == 1,
+            "shared/missing scanner coordinate requires aggregate installed-payload proof")
     evidence_sha = rule["evidence_sha256"]
     require(evidence_sha in evidence, "missing reviewed evidence")
     raw = evidence[evidence_sha]
