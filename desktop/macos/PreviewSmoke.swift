@@ -61,6 +61,11 @@ final class PreviewSmoke {
                     evidence["offline_phase"] = "offline_journey"
                     recordOfflineDiagnostic()
                     evidence["offline_provider"] = try await OfflineProviderSmoke(app: app, fence: offline).run()
+                } else if scenario.hasPrefix("workspace-") {
+                    try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
                 } else if scenario == "external-navigation-recording" {
                     evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
                 } else if scenario == "external-auth" {

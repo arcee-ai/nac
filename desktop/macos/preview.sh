@@ -111,7 +111,7 @@ else
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift desktop/macos/NativePathSmoke.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift desktop/macos/NativePathSmoke.swift desktop/macos/WorkspaceSmoke.swift desktop/macos/WorkspaceFixture.swift desktop/macos/WorkspaceJourneys.swift desktop/macos/WorkspaceLegacy.swift)
     sources+=(desktop/macos/OfflineProviderPolicy.swift desktop/macos/OfflineNetworkFence.swift
               desktop/macos/OfflineWebProbe.swift desktop/macos/OfflineProviderSmoke.swift desktop/macos/OfflineHTTPControlTarget.swift)
     flags+=(-D PREVIEW_SMOKE -framework IOKit)
