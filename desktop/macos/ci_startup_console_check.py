@@ -36,12 +36,14 @@ def run_required(root, *, suite=None, stream=None, panel=False):
     previous = os.environ.get('NAC_STARTUP_TEST_SOURCE')
     previous_panel = os.environ.get('NAC342_SWIFT_PANEL_PROOF')
     previous_ax = os.environ.get('NAC342_AX_WITNESS_PROOF')
+    previous_producer = os.environ.get('NAC342_ACTION_PRODUCER_SOURCE')
     previous_contract = sys.modules.get('contract')
     os.environ['NAC_STARTUP_TEST_SOURCE'] = str(source)
     try:
         if panel:
             os.environ['NAC342_SWIFT_PANEL_PROOF'] = '1'
             os.environ['NAC342_AX_WITNESS_PROOF'] = '1'
+            os.environ['NAC342_ACTION_PRODUCER_SOURCE'] = str(Path(__file__).with_name('CIStartupAXWitness.swift').resolve())
         if suite is None:
             if panel:
                 contract_spec = importlib.util.spec_from_file_location('contract', source.with_name('contract.py'))
@@ -59,13 +61,13 @@ def run_required(root, *, suite=None, stream=None, panel=False):
                 ax_module = importlib.util.module_from_spec(ax_spec)
                 ax_spec.loader.exec_module(ax_module)
                 witness = unittest.defaultTestLoader.loadTestsFromTestCase(ax_module.ReceiptControls)
-                if witness.countTestCases() != 25:
-                    raise RuntimeError('Require exact twenty-five whole-client/request AX witness controls')
+                if witness.countTestCases() != 31:
+                    raise RuntimeError('Require exact thirty-one whole-client/request AX witness controls')
                 suite = unittest.TestSuite([policy, diagnostic, witness])
             else:
                 suite = unittest.defaultTestLoader.loadTestsFromName('test_ci_startup_console.StartupConsoleTests')
         result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-        require_complete(result, 38 if panel else 4)
+        require_complete(result, 44 if panel else 4)
         return result
     finally:
         if panel:
@@ -73,6 +75,10 @@ def run_required(root, *, suite=None, stream=None, panel=False):
                 sys.modules.pop('contract', None)
             else:
                 sys.modules['contract'] = previous_contract
+        if previous_producer is None:
+            os.environ.pop('NAC342_ACTION_PRODUCER_SOURCE', None)
+        else:
+            os.environ['NAC342_ACTION_PRODUCER_SOURCE'] = previous_producer
         if previous_ax is None:
             os.environ.pop('NAC342_AX_WITNESS_PROOF', None)
         else:

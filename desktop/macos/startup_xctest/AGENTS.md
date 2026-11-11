@@ -64,3 +64,29 @@ identity or signature proof stops before any input. No retry, request reissue,
 predicate waiver or native acceptance follows from this exception. This text is
 limited authorization for this exception. All source/signature/custody/input
 and acceptance gates remain effective; no broader writes or retries are granted.
+
+Approved action-handoff exception — 2026-11-10. Allison explicitly approved
+one declared action plus its existing bounded public postcondition while AX
+sampling pauses. The immutable interaction request remains in the same child;
+its closed `.handoff` claim is the only extra child file. H acknowledges it at
+readonly `receipt.json.handoff` in the proof parent without refreshing AX proof.
+Q consumes that acknowledgment and the ORIGINAL fresh proof immediately before
+input. Completion keeps the original ticket cutoff, and no next input is allowed
+until a newly begun complete <=1s post-action guard with the same retained
+identities and exact handoff binding succeeds. Request disappearance acknowledges
+that AFTER guard, never input start. Refusal, unknown state, replay, timeout,
+actor loss or changed intent/target/cutoff stays terminal. No new permissions,
+retry, sleeps or cleanup authority follow. H owns the producer-loop source used
+by the nominated inert controls; the required gate supplies its exact H path.
+
+StartupAXReceipt.swift keeps the closed private request/receipt/action-lease
+schemas and their one canonical client together around800 lines so publication,
+phase binding, freshness and one-shot input ownership remain directly auditable.
+Do not split this state across competing validators or framework layers.
+
+At the approved handoff boundaries, only exact previously validated outgoing
+ready bytes may await replacement within the same cutoff; they never satisfy
+the next guard. Retain the completed child claim through readonly drain ACK,
+then revalidate/remove it. Unknown/changed/missing claims outside that exact
+ordering remain terminal. The cohesive receipt/client stays together above800
+lines to keep its one canonical phase, freshness and publication owner auditable.

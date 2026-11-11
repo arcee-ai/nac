@@ -144,8 +144,8 @@ This private P12 nomination binds product
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
 `04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
-ten-file supplier `225d0c489785dcc5c1c8a6fcbe913f24604d9350`; its journey
-SHA256 is `e516e4352f68e18a0a2ee9ae14742722d035e8a6668d5e87b0d7cdc41babec68`.
+ten-file supplier `f671fd15f002e3bda4df5040df998e80be1f6dd8`; its journey
+SHA256 is `90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3`.
 The normal P12 package has independent genuine supplier evidence; that evidence
 supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
 historical startup/SDK results keep their original source and consumed counters.
@@ -158,7 +158,7 @@ under a separate Root admission; schema50 alone is insufficient. No runtime or
 publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
 AX preflight, preserving all original postconditions and positive cleanup.
 The required panel policy lane admits exactly six geometry, seven AX/refusal,
-and twenty-five whole-client/request receipt methods: thirty-eight total with
+and thirty-one whole-client/request receipt methods: forty-four total with
 zero skips. The receipt methods include the original-error identity/catch-order
 control and the true native infinite-rectangle fixture within the existing
 point-selection method. Exact count checks reject missing or extra controls;

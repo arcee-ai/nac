@@ -155,15 +155,20 @@ enum StartupAXWitnessMode {
                 start_microseconds: 0, executable: "")
             var target = empty, launch = 0.0, window = 0
             var retired: String?
+            var postAction: StartupAXActionHandoff?
+            var postRequest: StartupAXInteractionRequest?
+            var usedRequests: Set<String> = []
             let reader = StartupAXReader()
             func receipt(_ status: String, began: UInt64, ended: UInt64,
                          observed: StartupAXSurface? = nil, stage: String? = nil, failure: Data? = nil) -> StartupAXReceipt {
-                StartupAXReceipt(schema: "nac342-ax-witness-v1", nonce: declaration.nonce,
+                var value = StartupAXReceipt(schema: "nac342-ax-witness-v1", nonce: declaration.nonce,
                     configuration_sha256: digest, helper_sha256: declaration.helper_sha256,
                     support_sha256: declaration.support_sha256, trusted: trusted, helper: me, target: target,
                     app_launch_epoch: launch, window_number: window, sequence: String(sequence),
                     refusal_generation: String(refusals), began_ns: String(began), ended_ns: String(ended),
                     status: status, case_deadline_ns: caseDeadline, observation: observed, refusal_stage: stage, refusal: failure)
+                value.action_handoff = postAction
+                return value
             }
             func terminal(_ snapshot: [String: Any], began: UInt64) throws -> Bool {
                 let state = try StartupAXLifetime.outcome(snapshot, target: target, window: window, latched: &retired)
@@ -220,7 +225,17 @@ enum StartupAXWitnessMode {
                 do { request = try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) }
                 catch StartupAXReceiptError.missing { request = nil }
                 if let pending = request, try StartupAXFiles.number(pending.entered_ns) >= began { request = nil }
+                if let completed = postAction {
+                    try StartupObserver.need(request == postRequest
+                        && began > StartupAXFiles.number(completed.completed_ns!))
+                    try StartupObserver.need(try StartupAXActionHandoff.read(try StartupAXFiles.requestPath(declaration.path) + ".handoff") == completed)
+                    request = nil // The action is over; never re-prove or replay its old intent.
+                }
                 if let request {
+                    try StartupObserver.need(!usedRequests.contains(request.id) && usedRequests.count < 11)
+                    let ack = declaration.path + ".handoff"
+                    do { _ = try StartupAXActionHandoff.read(ack); try StartupObserver.need(unlink(ack) == 0) }
+                    catch StartupAXReceiptError.missing { }
                     try StartupObserver.need(request.nonce == declaration.nonce && request.configuration_sha256 == digest
                         && request.refusal_generation == String(refusals)
                         && StartupAXFiles.number(request.baseline_sequence) <= sequence
@@ -270,19 +285,53 @@ enum StartupAXWitnessMode {
                             "refusal_generation": $0.refusal_generation] }, failure: failure)
                 }
                 if let request {
-                    // Keep the proof publication stable until final consumption.
-                    // Metadata custody remains in its independent original owner.
                     try StartupObserver.need(observed?.interaction != nil)
+                    usedRequests.insert(request.id)
+                    var lease = StartupAXActionLease(request: request, target: observed!.interaction!.target_id)
                     while true {
                         if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
-                        let pending: StartupAXInteractionRequest
-                        do { pending = try StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(declaration.path)) }
-                        catch StartupAXReceiptError.missing { break }
-                        try StartupObserver.need(pending == request && getppid() == declaration.owner_pid
-                            && DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(request.deadline_ns)
+                        let stamp = DispatchTime.now().uptimeNanoseconds
+                        let path = try StartupAXFiles.requestPath(declaration.path)
+                        try StartupObserver.need(try StartupAXInteractionRequest.read(path) == request)
+                        try StartupObserver.need(getppid() == declaration.owner_pid
+                            && stamp < StartupAXFiles.number(request.deadline_ns)
                             && resources.intact() && process(target.pid) == target && process(getpid()) == me
                             && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
                             && ownedFrame(target.pid, window) == frame
+                            && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                        do {
+                            let claim = try StartupAXActionHandoff.read(path + ".handoff")
+                            if claim.completed_ns == nil {
+                                if lease.armed == nil {
+                                    try lease.arm(claim, now: DispatchTime.now().uptimeNanoseconds)
+                                    // Acknowledgment is NOT a new AX sample or freshness grant.
+                                    try StartupAXFiles.publish(claim, to: declaration.path + ".handoff")
+                                } else { try StartupObserver.need(claim == lease.armed) }
+                            } else {
+                                try lease.complete(claim, now: DispatchTime.now().uptimeNanoseconds)
+                                postAction = claim; postRequest = request
+                                break
+                            }
+                        } catch StartupAXReceiptError.missing { try StartupObserver.need(lease.armed == nil) }
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+                    }
+                } else if let completed = postAction, let original = postRequest {
+                    // Hold the FIRST post-action result, including a refusal. No recovery retry.
+                    while true {
+                        if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
+                        let path = try StartupAXFiles.requestPath(declaration.path)
+                        do { try StartupObserver.need(try StartupAXInteractionRequest.read(path) == original) }
+                        catch StartupAXReceiptError.missing {
+                            // Explicit drain ACK prevents the next request overtaking this held phase.
+                            try StartupAXFiles.publish(completed, to: declaration.path + ".handoff")
+                            postAction = nil; postRequest = nil; break
+                        }
+                        try StartupObserver.need(try StartupAXActionHandoff.read(path + ".handoff") == completed)
+                        try StartupObserver.need(getppid() == declaration.owner_pid
+                            && DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(original.deadline_ns)
+                            && resources.intact() && process(target.pid) == target && process(getpid()) == me
+                            && ownedFrame(target.pid, window) == frame
+                            && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
                             && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
                         RunLoop.current.run(until: Date().addingTimeInterval(0.01))
                     }

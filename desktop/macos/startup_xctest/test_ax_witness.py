@@ -463,6 +463,248 @@ func requestRun(_ name: String) -> [String: Any] {
         return ["accepted":true]
     } catch { return ["accepted":false] }
 }
+struct StartupObserver { static func need(_ value: Bool) throws { try StartupAXFiles.need(value) } }
+struct StartupAXPreflight {
+    static func file(_ path: String, limit: Int) throws -> Data { Data("inert-sealed".utf8) }
+    static func hash(_ bytes: Data) -> String { String(repeating:"b",count:64) }
+}
+struct InertActionResources { let valid: Bool; func intact() -> Bool { valid } }
+func producerHoldRun(_ mode: String) -> [String: Any] {
+    var root = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!).appendingPathComponent(UUID().uuidString)
+    var actions = 0, checks = 0
+    do {
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        defer { try? FileManager.default.removeItem(at:root) }
+        guard let physical = realpath(root.path,nil) else { throw StartupAXReceiptError.invalid }
+        root = URL(fileURLWithPath:String(cString:physical));free(physical)
+        try FileManager.default.createDirectory(at:root.appendingPathComponent("requests"),withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        let path = root.appendingPathComponent("receipt.json").path
+        let stamp = DispatchTime.now().uptimeNanoseconds
+        let me = StartupAXProcess(pid:getpid(),parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+        let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+        let declaration = StartupAXDeclaration(path:path,nonce:String(repeating:"a",count:64),helper_path:me.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:[:],owner_pid:200,deadline_ns:String(stamp+29_000_000_000))
+        let request = StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"b",count:64),
+            id:UUID().uuidString,root_id:UUID().uuidString,entered_ns:String(stamp-100),deadline_ns:declaration.deadline_ns,baseline_sequence:"1",refusal_generation:"0",
+            surface:"form",kind:"button",label:"Intended",keyboard:false,point:[20,25],anchor_frame:[10,20,100,30],root_frame:[10,20,100,30],value:nil)
+        let token = UUID().uuidString
+        var observed: StartupAXSurface? = StartupAXSurface(surface:"form",root_id:request.root_id,panel_id:nil,go_to_id:nil,root_frame:request.root_frame,focus:nil)
+        observed!.interaction = StartupAXInteraction(request_id:request.id,target_id:token,point:request.point,anchor_frame:request.anchor_frame,keyboard:false,focus_checked:false)
+        var claim = StartupAXActionHandoff(schema:"nac342-action-handoff-v1",request_id:request.id,target_id:token,nonce:request.nonce,configuration_sha256:request.configuration_sha256,deadline_ns:request.deadline_ns,input_ns:String(stamp))
+        if mode == "complete_first" { claim.completed_ns = String(stamp) }
+        try StartupAXFiles.publish(request,to:try StartupAXFiles.requestPath(path))
+        try StartupAXFiles.publish(claim,to:try StartupAXFiles.requestPath(path)+".handoff")
+        let resources = InertActionResources(valid:mode != "resource")
+        let binary = "/inert/helper", configPath = "/inert/config", digest = String(repeating:"b",count:64)
+        let frame = CGRect(x:10,y:20,width:100,height:30), window = 7
+        var postAction: StartupAXActionHandoff?, postRequest: StartupAXInteractionRequest?
+        func getppid() -> Int32 { ["parent_lost", "post_parent_lost"].contains(mode) ? 201 : 200 }
+        func ownedFrame(_ pid: Int32, _ window: Int) throws -> CGRect { mode == "frame" ? .zero : frame }
+        func process(_ pid: Int32) throws -> StartupAXProcess {
+            checks += 1
+            if actions == 0, (try? StartupAXActionHandoff.read(path+".handoff")) != nil {
+                actions += 1
+                if mode == "request_loss" { _ = unlink(try StartupAXFiles.requestPath(path)) }
+                else {
+                    claim.completed_ns = String(DispatchTime.now().uptimeNanoseconds)
+                    if mode == "foreign_completion" { claim = StartupAXActionHandoff(schema:claim.schema,request_id:claim.request_id,target_id:UUID().uuidString,nonce:claim.nonce,configuration_sha256:claim.configuration_sha256,deadline_ns:claim.deadline_ns,input_ns:claim.input_ns,completed_ns:claim.completed_ns) }
+                    try StartupAXFiles.publish(claim,to:try StartupAXFiles.requestPath(path)+".handoff")
+                }
+            }
+            return pid == target.pid ? target : me
+        }
+        func heldLoop() throws {
+__PRODUCER_ACTION_HOLD__
+        }
+        func postHeldLoop(_ completed: StartupAXActionHandoff, _ original: StartupAXInteractionRequest) throws {
+__PRODUCER_POST_HOLD__
+        }
+        if mode.hasPrefix("post_") {
+            claim.completed_ns = String(DispatchTime.now().uptimeNanoseconds)
+            try StartupAXFiles.publish(claim,to:try StartupAXFiles.requestPath(path)+".handoff")
+            postAction = claim; postRequest = request
+            afterReadOpen = { _ in
+                // Deterministic Q drain AFTER H opened request but BEFORE H reads claim.
+                _ = unlink(try! StartupAXFiles.requestPath(path))
+                if mode == "post_claim_lost" { _ = unlink(try! StartupAXFiles.requestPath(path)+".handoff") }
+                if mode == "post_claim_changed" {
+                    var foreign = claim; foreign.completed_ns = String(UInt64(claim.completed_ns!)! + 1)
+                    try! StartupAXFiles.publish(foreign,to:try! StartupAXFiles.requestPath(path)+".handoff")
+                }
+            }
+            defer { afterReadOpen = nil }
+            do {
+                try postHeldLoop(claim,request)
+                return ["accepted":postAction == nil && postRequest == nil,
+                    "drain_ack":try StartupAXActionHandoff.read(path+".handoff") == claim,
+                    "claim_retained":try StartupAXActionHandoff.read(try StartupAXFiles.requestPath(path)+".handoff") == claim,
+                    "custody_checks":checks,"actions":actions]
+            } catch { return ["accepted":false,"custody_checks":checks,"actions":actions] }
+        }
+        do {
+            try heldLoop()
+            return ["accepted":postAction?.completed_ns != nil && postRequest == request,"actions":actions,"custody_checks":checks]
+        } catch { return ["accepted":false,"actions":actions,"custody_checks":checks] }
+    } catch { return ["accepted":false,"fixture_failure":true,"actions":actions] }
+}
+
+func handoffRun(_ mode: String) -> [String: Any] {
+    var directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!).appendingPathComponent(UUID().uuidString)
+    var inputs = 0, postconditions = 0, afterGuards = 0, clock: UInt64 = 3_000_000_000
+    var sequence = 0, held = Data(), lease: StartupAXActionLease?, post: StartupAXActionHandoff?
+    var postPublished = false, drained = false, ordinaryRequested = false
+    var heldPreLoads = 0, heldPostLoads = 0, completedAt: String?
+    let rootID = UUID().uuidString, panelID = UUID().uuidString, targetID = UUID().uuidString
+    do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        guard let resolved = realpath(directory.path, nil) else { throw StartupAXReceiptError.invalid }
+        directory = URL(fileURLWithPath: String(cString: resolved)); free(resolved)
+        let path = directory.appendingPathComponent("receipt.json").path
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("requests"), withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        _ = try StartupAXFiles.requestPath(path)
+        let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+        let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+        let declaration = StartupAXDeclaration(path:path,nonce:String(repeating:"a",count:64),helper_path:helper.executable,
+            helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
+        let configuration = String(repeating:"d",count:64)
+        func producer() throws -> Data {
+            if postPublished, let completed = post {
+                let pendingPath = try StartupAXFiles.requestPath(path)
+                if !drained && !FileManager.default.fileExists(atPath:pendingPath) {
+                    // F2: the exact completed child claim must survive through the ACK.
+                    try StartupAXFiles.need(try StartupAXActionHandoff.read(try StartupAXFiles.requestPath(path)+".handoff") == completed)
+                    try StartupAXFiles.publish(completed,to:path + ".handoff")
+                    drained = true
+                }
+                if !ordinaryRequested { return held }
+                heldPostLoads += 1
+                if heldPostLoads <= 2 && mode != "boundary_foreign_baseline" { return held } // F1 return boundary, exact outgoing marked bytes.
+                postPublished = false; post = nil; lease = nil
+                // Publish a new ordinary sample below; same retained panel remains visible.
+            }
+            if var current = lease {
+                do {
+                    var claim = try StartupAXActionHandoff.read(try StartupAXFiles.requestPath(path) + ".handoff")
+                    if claim.completed_ns == nil {
+                        if current.armed == nil {
+                            if mode == "ack_absent" { clock += 1_100_000_000; return held }
+                            try current.arm(claim, now: clock)
+                            if mode == "ack_foreign" { claim.completed_ns = claim.input_ns }
+                            try StartupAXFiles.publish(claim, to: path + ".handoff")
+                        }
+                    } else if current.completed == nil {
+                        try current.complete(claim, now: clock)
+                        post = claim; completedAt = claim.completed_ns
+                    }
+                    lease = current
+                } catch StartupAXReceiptError.missing { }
+                if post == nil { return held }
+            }
+            if post != nil && !postPublished && mode.hasPrefix("boundary_") && heldPreLoads < 2 {
+                heldPreLoads += 1; return held // F1 outgoing pre-action bytes, never after proof.
+            }
+            sequence += 1
+            let began = clock + 1_000_000, ended = began + 1_000_000
+            clock = ended + 1_000_000
+            var observed = StartupAXSurface(surface:inputs == 0 ? "form" : "panel",root_id:rootID,
+                panel_id:inputs == 0 ? nil : panelID,go_to_id:nil,root_frame:[10,20,100,30],focus:nil)
+            if lease == nil, let request = try? StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(path)) {
+                observed.interaction = StartupAXInteraction(request_id:request.id,target_id:targetID,point:request.point,
+                    anchor_frame:request.anchor_frame,keyboard:request.keyboard,focus_checked:request.keyboard)
+                lease = StartupAXActionLease(request:request,target:targetID)
+            }
+            var receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,
+                configuration_sha256:configuration,helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,
+                trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),
+                refusal_generation:post != nil && ["post_generation", "boundary_generation"].contains(mode) ? "1" : "0",
+                began_ns:String(post != nil && mode == "post_preentry" ? UInt64(post!.completed_ns!)! : began),
+                ended_ns:String(ended),status:post != nil && ["post_refused", "boundary_refused"].contains(mode) ? "refused" : "ready",
+                case_deadline_ns:"50000000000",observation:observed,refusal_stage:nil,refusal:nil)
+            receipt.action_handoff = ["post_old_phase", "boundary_wrong_marker"].contains(mode) ? nil : post
+            if post != nil && mode == "boundary_malformed" { return Data("{".utf8) }
+            if ["boundary_foreign_ordinary", "boundary_foreign_baseline"].contains(mode) && ordinaryRequested {
+                receipt.action_handoff = lease?.completed // Replaced below with a fresh unrelated marker.
+                var foreign = StartupAXActionHandoff(schema:"nac342-action-handoff-v1",request_id:UUID().uuidString,target_id:targetID,nonce:declaration.nonce,configuration_sha256:configuration,deadline_ns:"33001000000",input_ns:"1")
+                foreign.completed_ns = "2"; receipt.action_handoff = foreign
+            }
+            held = try JSONEncoder().encode(receipt)
+            if post != nil { postPublished = true }
+            if post != nil && ["post_stale", "boundary_stale"].contains(mode) { clock = ended + 31_000_000_000 }
+            return held
+        }
+        let client = StartupAXClient(declaration,configurationSHA:configuration,pid:400,launch:10,window:7,
+            executable:target.executable,now:{clock += 100_000;return clock},pause:{clock += 10_000_000; _ = try? producer()},load:{try producer()})
+        var denial = false, originalDeadline: UInt64 = 0
+        do {
+            let ticket = try client.begin(); originalDeadline = ticket.deadline
+            _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+            let request = try client.prepareInteraction(ticket,point:CGPoint(x:20,y:25),anchor:CGRect(x:10,y:20,width:100,height:30),
+                kind:"button",label:"Intended",keyboard:false,value:nil,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+            try client.finishInteraction(request, recheck: {
+                if mode == "recheck_changed" { throw StartupAXReceiptError.invalid }
+            })
+            if mode == "duplicate_arm" { try client.finishInteraction(request) }
+            let axClient: StartupAXClient? = client
+            let actionRequest: StartupAXInteractionRequest? = request
+            let coordinate: Int? = 1
+            var operations: [String] = [], folderSurface: StartupNativeFolderPolicy.Surface = .form
+            let name = "one-declared-action", after: StartupNativeFolderPolicy.Surface? = .panel
+            let failureEvidence = StartupFailureEvidence(nil, configurationSHA: configuration)
+            func action(_ coordinate: Int?) throws {
+                inputs += 1
+                if mode == "action_throw" { throw InertOriginalFailure() }
+                if mode == "actor_timeout" { clock = originalDeadline }
+                if mode == "next_input" {
+                    _ = try client.prepareInteraction(ticket,point:CGPoint(x:20,y:25),anchor:CGRect(x:10,y:20,width:100,height:30),kind:"button",label:"Other",keyboard:false,value:nil,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+                }
+                postconditions += 1
+                if mode == "postcondition_throw" { throw InertOriginalFailure() }
+            }
+            func guardTarget() throws {
+                afterGuards += 1
+                if mode == "duplicate_complete" { try client.completeInteraction(request) }
+                let fresh = try client.begin()
+                try StartupAXFiles.need(fresh.deadline == originalDeadline)
+                _ = try client.consume(fresh,surface:folderSurface,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+            }
+__JOURNEY_ACTION_HANDOFF__
+            if mode.hasPrefix("boundary_") {
+                ordinaryRequested = true
+                let next = try client.begin()
+                _ = try client.consume(next,surface:.panel,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+                try StartupAXFiles.need(drained && heldPreLoads >= 1 && heldPostLoads >= 2)
+            }
+            return ["accepted":true,"inputs":inputs,"postconditions":postconditions,"after_guards":afterGuards,
+                "original_deadline":String(originalDeadline),"post_completed":completedAt as Any,
+                "new_began":client.evidence.last!.began_ns,"request_cleared":!FileManager.default.fileExists(atPath:try StartupAXFiles.requestPath(path)),
+                "operations":operations.count,"held_pre_loads":heldPreLoads,"held_post_loads":heldPostLoads]
+        } catch {
+            do { _ = try client.begin() } catch { denial = true }
+            return ["accepted":false,"inputs":inputs,"postconditions":postconditions,"after_guards":afterGuards,"next_denied":denial]
+        }
+    } catch { return ["accepted":false,"inputs":inputs,"fixture_failure":true] }
+}
+
+func leaseRun(_ mode: String) -> [String: Any] {
+    let request = StartupAXInteractionRequest(schema:"nac342-ax-interaction-v1",nonce:"nonce",configuration_sha256:"config",
+        id:UUID().uuidString,root_id:UUID().uuidString,entered_ns:"10",deadline_ns:"100",baseline_sequence:"1",refusal_generation:"0",
+        surface:"form",kind:"button",label:"Intended",keyboard:false,point:[20,25],anchor_frame:[10,20,100,30],root_frame:[10,20,100,30],value:nil)
+    let target = UUID().uuidString
+    var lease = StartupAXActionLease(request:request,target:target)
+    var claim = StartupAXActionHandoff(schema:"nac342-action-handoff-v1",request_id:mode == "foreign_id" ? UUID().uuidString : request.id,
+        target_id:mode == "foreign_target" ? UUID().uuidString : target,nonce:request.nonce,configuration_sha256:request.configuration_sha256,
+        deadline_ns:mode == "renewed" ? "101" : "100",input_ns:"20")
+    do {
+        if mode == "complete_first" { claim.completed_ns = "30"; try lease.complete(claim,now:40) }
+        try lease.arm(claim,now:mode == "expired" ? 100 : 25)
+        if mode == "duplicate_arm" { try lease.arm(claim,now:26) }
+        claim.completed_ns = mode == "backwards" ? "19" : "30"
+        try lease.complete(claim,now:40)
+        if mode == "duplicate_complete" { try lease.complete(claim,now:41) }
+        return ["accepted":true]
+    } catch { return ["accepted":false] }
+}
+
 func interactionRun(_ name: String) -> [String: Any] {
     let raw = String(name.dropFirst("interaction_".count)), diagnosing = raw.hasPrefix("diag_")
     let mode = diagnosing ? String(raw.dropFirst(5)) : raw
@@ -528,7 +770,10 @@ func interactionRun(_ name: String) -> [String: Any] {
         }
         let request = try client.prepareInteraction(usedTicket,point:CGPoint(x:mode == "containment" ? 500 : 20,y:25),anchor:mode == "anchor" ? .zero : CGRect(x:10,y:20,width:100,height:30),
             kind:mode == "shape" ? "foreign" : "button",label:"Intended",keyboard:false,value:nil,rootFrame:mode == "root" ? .zero : CGRect(x:10,y:20,width:100,height:30),publish:publisher,diagnostic:diagnosing ? diagnostic : nil)
-        try client.finishInteraction(request,clear:{if mode == "clear_loss" { throw StartupAXReceiptError.invalid };clears += 1})
+        var armed: StartupAXActionHandoff?
+        try client.finishInteraction(request,arm:{ claim in
+            if mode == "clear_loss" { throw StartupAXReceiptError.invalid }; clears += 1; armed = claim
+        }, acknowledgment:{ armed! })
         inputs += 1
         if mode.hasPrefix("held_") {
             return ["accepted":true,"inputs":inputs,"loads":loads,"clears":clears,"proofs":client.interactions.count,
@@ -979,7 +1224,7 @@ func requestChildRun(_ mode: String) -> [String: Any] {
     } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
 }
 
-let rows = modes.map { $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -999,7 +1244,11 @@ class ReceiptControls(unittest.TestCase):
         request_name = re.search(r'client\.prepareInteraction\(ticket, point: point, anchor: anchor, kind: kind, label: ([^,\n]+),', journey).group(1)
         recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
         guard_catch = '            } catch {' + journey.split('        func guardTarget() throws {', 1)[1].split('        func dispatch(', 1)[0].split('            } catch {', 1)[1].rsplit('\n        }', 1)[0]
-        driver.write_text(DRIVER.replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
+        producer = Path(os.environ.get('NAC342_ACTION_PRODUCER_SOURCE', str(Path(__file__).resolve().parents[1] / 'CIStartupAXWitness.swift'))).read_text()
+        producer_hold = '                    var lease = StartupAXActionLease' + producer.split('                    var lease = StartupAXActionLease', 1)[1].split('                } else if let completed', 1)[0]
+        producer_post = producer.split('                } else if let completed = postAction, let original = postRequest {', 1)[1].split('                RunLoop.current.run(until: Date().addingTimeInterval(0.05))', 1)[0].rsplit('                }', 1)[0]
+        action_handoff = '            failureEvidence.step = .input' + journey.split('            failureEvidence.step = .input', 1)[1].split('            failureEvidence.step = .after_record', 1)[0]
+        driver.write_text(DRIVER.replace('__PRODUCER_POST_HOLD__', producer_post).replace('__PRODUCER_ACTION_HOLD__', producer_hold).replace('__JOURNEY_ACTION_HANDOFF__', action_handoff).replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
                           .replace('__JOURNEY_REQUEST_NAME__', request_name)
                           .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
@@ -1016,6 +1265,62 @@ class ReceiptControls(unittest.TestCase):
     def rows(self, modes, timeout=10):
         return json.loads(subprocess.check_output([str(self.binary)], input=json.dumps(modes), text=True, timeout=timeout,
                          env=dict(os.environ,NAC342_INERT_FILE_ROOT=self.temporary.name)))
+
+    def test_actual_producer_hold_loop_keeps_custody_and_requires_arm_ack_before_completion(self):
+        modes = ['positive', 'complete_first', 'parent_lost', 'resource', 'frame', 'foreign_completion', 'request_loss']
+        rows = self.rows(['producer_hold_' + mode for mode in modes])
+        self.assertTrue(rows[0]['accepted'], rows[0])
+        self.assertEqual(rows[0]['actions'], 1)
+        self.assertGreaterEqual(rows[0]['custody_checks'], 4)
+        for mode, row in zip(modes[1:], rows[1:]):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'], row)
+                self.assertNotIn('fixture_failure', row)
+                self.assertLessEqual(row['actions'], 1)
+
+    def test_actual_post_hold_loop_retains_claim_across_request_read_drain_interleaving(self):
+        rows = self.rows(['producer_hold_' + mode for mode in ['post_positive', 'post_claim_lost', 'post_claim_changed', 'post_parent_lost']])
+        self.assertTrue(rows[0]['accepted'], rows[0])
+        self.assertTrue(rows[0]['drain_ack'])
+        self.assertTrue(rows[0]['claim_retained'])
+        self.assertGreaterEqual(rows[0]['custody_checks'], 2)
+        self.assertTrue(all(not row['accepted'] for row in rows[1:]), rows)
+        self.assertTrue(all(row['actions'] == 0 for row in rows), rows)
+
+    def test_both_outgoing_phase_boundaries_wait_only_exact_ready_bytes(self):
+        row = self.rows(['handoff_boundary_positive'])[0]
+        self.assertTrue(row['accepted'], row)
+        self.assertEqual((row['inputs'], row['postconditions'], row['operations']), (1, 1, 1))
+        self.assertGreaterEqual(row['held_pre_loads'], 1)
+        self.assertGreaterEqual(row['held_post_loads'], 2)
+        modes = ['boundary_generation', 'boundary_refused', 'boundary_malformed', 'boundary_wrong_marker', 'boundary_stale', 'boundary_foreign_ordinary', 'boundary_foreign_baseline']
+        for mode, row in zip(modes, self.rows(['handoff_' + mode for mode in modes])):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'], row)
+                self.assertEqual(row['inputs'], 1)
+                self.assertTrue(row['next_denied'], row)
+
+    def test_action_handoff_executes_exact_journey_action_and_requires_new_after_proof(self):
+        row = self.rows(['handoff_positive'])[0]
+        self.assertTrue(row['accepted'], row)
+        self.assertEqual((row['inputs'], row['postconditions'], row['after_guards'], row['operations']), (1, 1, 1, 1))
+        self.assertTrue(row['request_cleared'])
+        self.assertGreater(int(row['new_began']), int(row['post_completed']))
+
+    def test_action_handoff_never_replays_or_credits_wrong_phase_stale_refused_after_samples(self):
+        modes = ['ack_absent', 'ack_foreign', 'duplicate_arm', 'recheck_changed', 'action_throw', 'actor_timeout', 'next_input',
+                 'postcondition_throw', 'duplicate_complete', 'post_generation', 'post_refused', 'post_preentry', 'post_old_phase', 'post_stale']
+        for mode, row in zip(modes, self.rows(['handoff_' + mode for mode in modes])):
+            with self.subTest(mode=mode):
+                self.assertFalse(row['accepted'], row)
+                self.assertEqual(row['inputs'], 0 if mode in ('ack_absent', 'ack_foreign', 'duplicate_arm', 'recheck_changed') else 1, row)
+                self.assertNotIn('fixture_failure', row)
+                if mode not in ('action_throw', 'postcondition_throw'):
+                    self.assertTrue(row['next_denied'], row)
+
+    def test_canonical_producer_lease_rejects_out_of_order_duplicate_foreign_and_renewed_claims(self):
+        modes = ['positive', 'complete_first', 'foreign_id', 'foreign_target', 'renewed', 'expired', 'duplicate_arm', 'backwards', 'duplicate_complete']
+        self.assertEqual(self.rows(['lease_' + mode for mode in modes]), [{'accepted': True}] + [{'accepted': False}] * (len(modes) - 1))
 
     def test_float_selection_constructs_and_reads_back_the_same_representable_public_coordinate(self):
         modes = ['integer', 'fractional', 'lower', 'upper', 'tie_even', 'tie_next',
@@ -1183,7 +1488,7 @@ class ReceiptControls(unittest.TestCase):
     def test_selected_point_proof_and_final_consumption_authorize_exactly_one_inert_input(self):
         row = self.rows(['interaction_positive'])[0]
         self.assertTrue(row['accepted'])
-        self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs']), (1, 4, 1, 1))
+        self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs']), (1, 5, 1, 1))
         self.assertEqual(row['deadline'], '33001000000')
         self.assertGreater(int(row['finalized']), 0)
 
@@ -1206,7 +1511,7 @@ class ReceiptControls(unittest.TestCase):
             with self.subTest(mode=mode):
                 row = self.rows(['interaction_' + mode])[0]
                 self.assertTrue(row['accepted'])
-                self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs'], row['pauses']), (1, 4, 1, 1, 0))
+                self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs'], row['pauses']), (1, 5, 1, 1, 0))
                 self.assertEqual(int(row['now']) - int(row['ended']), age)
                 self.assertEqual(row['deadline'], '33001000000')
         held, invalid = self.rows(['interaction_diag_held_stale', 'interaction_diag_held_stale_wrong_request'])

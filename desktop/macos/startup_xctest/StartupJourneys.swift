@@ -716,6 +716,7 @@ final class StartupJourneys: XCTestCase {
             try retain("before")
             failureEvidence.step = .public_target
             var coordinate: XCUICoordinate?
+            var actionRequest: StartupAXInteractionRequest?
             if let client = axClient {
                 let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
                 let anchor = target.frame, root = rootWindow.frame
@@ -751,21 +752,24 @@ final class StartupJourneys: XCTestCase {
                 // Same public coordinate and anchor after AX proof, immediately
                 // before final freshness consumption and dispatch. This fence is
                 // bounded, not atomic with the eventual delivered OS event.
-                failureEvidence.step = .final_recheck
-                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
-                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
-                    && target.exists && target.isEnabled && target.isHittable
-                    && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
-                    && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
-                        anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
-                    && (!keyboard || value == nil || target.value as? String == value),
-                    "Interaction point, anchor, focus value or frozen resource changed")
                 failureEvidence.step = .finish_interaction
-                try client.finishInteraction(request)
+                try client.finishInteraction(request, recheck: {
+                    failureEvidence.step = .final_recheck
+                    try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
+                    try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
+                        && target.exists && target.isEnabled && target.isHittable
+                        && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
+                        && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
+                            anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
+                        && (!keyboard || value == nil || target.value as? String == value),
+                        "Interaction point, anchor, focus value or frozen resource changed")
+                })
+                actionRequest = request
                 coordinate = selected
             }
             failureEvidence.step = .input
             try action(coordinate)
+            if let request = actionRequest { try axClient!.completeInteraction(request) }
             operations.append(name)
             if let after { folderSurface = after }
             failureEvidence.step = .after_guard
