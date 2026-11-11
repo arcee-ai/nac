@@ -1,3 +1,9 @@
+//! Native process tools and their prepared authorization adapters.
+
+#[cfg(test)]
+#[path = "command_timing_tests.rs"]
+mod timing_tests;
+
 use serde_json::Value;
 use std::time::Duration;
 
