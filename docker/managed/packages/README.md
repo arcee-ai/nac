@@ -30,6 +30,14 @@ builder's `/work` directory and are not installed. These controls exercise
 the corrected parser paths; they do not by themselves validate the
 whole final image, every advisory record, or an applicability disposition.
 
+The curl stage checks the exact 8.23.0 `multi_done` source SHA and the official
+cleanup-order patch SHA. It requires request cleanup before connection filter
+notification and detach, with pending scheduling after connection return and
+guarded by `data->multi`. The exact upstream patch reversal must fail this
+ordering check. This is patch-presence evidence, not a runtime use-after-free
+regression or an advisory clearance. The patch and checker are retained as
+package-build recipe evidence; no test binary is installed.
+
 The GCC package changes the one affected template header in the exact checksum-pinned
 supplier development payload. Curl restores supported SSH/LDAP/NTLM/zstd options;
 Allison accepted upstream RTMP, SMB/SMBS and TLS-SRP removals on October 22, 2026.
