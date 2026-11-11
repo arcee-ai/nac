@@ -35,7 +35,9 @@ METHOD
 }
 @main struct Main {
     @MainActor static func main() async throws {
-        func require(_ value: Bool) { precondition(value) }
+        func require(_ value: Bool, _ message: String = "Native path startup control failed") {
+            precondition(value, message)
+        }
         func publish(_ app: PreviewApp, _ bridge: NativePathBridge, launch: String = "current") {
             app.nativePaths = bridge; app.baseURL = URL(string: "http://127.0.0.1:1234")
             app.engine.pid = 42; app.engine.receipt = Receipt(incarnation: "current")
@@ -44,30 +46,55 @@ METHOD
         }
         // start() runs before provider/receipt/bootstrap publishes any bridge.
         let delayed = PreviewApp(), expected = NativePathBridge()
-        Task { @MainActor in
-            try await Task.sleep(nanoseconds: 20_000_000)
-            publish(delayed, expected)
+        require(delayed.nativePaths == nil, "publication: initial bridge must be missing")
+        var publicationProgress = 0
+        let publicationStarted = ProcessInfo.processInfo.systemUptime
+        do {
+            let acquired = try await NativePathSmoke.awaitBridge(app: delayed, timeout: 5) {
+                publicationProgress += 1
+                if publicationProgress == 2 { publish(delayed, expected) }
+            }
+            require(publicationProgress == 2 && ProcessInfo.processInfo.systemUptime - publicationStarted >= 0.05,
+                    "publication: must cross the original polling suspension")
+            require(acquired === expected, "publication: must acquire the current bridge")
+        } catch {
+            preconditionFailure("publication: \(error)")
         }
-        let acquired = try await NativePathSmoke.awaitBridge(app: delayed, timeout: 0.3)
-        require(acquired === expected)
         // An installed stale launch is not sufficient; acquire its current replacement.
         let replacement = PreviewApp(), stale = NativePathBridge(), current = NativePathBridge()
         publish(replacement, stale, launch: "retired")
-        Task { @MainActor in
-            try await Task.sleep(nanoseconds: 20_000_000)
-            publish(replacement, current)
+        require(replacement.nativePaths === stale && stale.smokeSnapshot["launch"] as? String == "retired",
+                "replacement: initial bridge must be stale")
+        var replacementProgress = 0
+        let replacementStarted = ProcessInfo.processInfo.systemUptime
+        do {
+            let replaced = try await NativePathSmoke.awaitBridge(app: replacement, timeout: 5) {
+                replacementProgress += 1
+                if replacementProgress == 2 { publish(replacement, current) }
+            }
+            require(replacementProgress == 2 && ProcessInfo.processInfo.systemUptime - replacementStarted >= 0.05,
+                    "replacement: must cross the original polling suspension")
+            require(replaced === current, "replacement: must acquire the current bridge")
+        } catch {
+            preconditionFailure("replacement: \(error)")
         }
-        let replaced = try await NativePathSmoke.awaitBridge(app: replacement, timeout: 0.3)
-        require(replaced === current)
         // A published bridge still waits for current-document activation.
         let unpublished = PreviewApp(), pending = NativePathBridge()
         publish(unpublished, pending); pending.smokeSnapshot["ready"] = false
-        Task { @MainActor in
-            try await Task.sleep(nanoseconds: 20_000_000)
-            pending.smokeSnapshot["ready"] = true
+        require(pending.smokeSnapshot["ready"] as? Bool == false, "readiness: initial bridge must not be ready")
+        var readinessProgress = 0
+        let readinessStarted = ProcessInfo.processInfo.systemUptime
+        do {
+            let ready = try await NativePathSmoke.awaitBridge(app: unpublished, timeout: 5) {
+                readinessProgress += 1
+                if readinessProgress == 2 { pending.smokeSnapshot["ready"] = true }
+            }
+            require(readinessProgress == 2 && ProcessInfo.processInfo.systemUptime - readinessStarted >= 0.05,
+                    "readiness: must cross the original polling suspension")
+            require(ready === pending, "readiness: must acquire the current bridge")
+        } catch {
+            preconditionFailure("readiness: \(error)")
         }
-        let ready = try await NativePathSmoke.awaitBridge(app: unpublished, timeout: 0.3)
-        require(ready === pending)
         for kind in ["missing", "stale", "retired", "document", "stopping", "failure", "cancel"] {
             let app = PreviewApp(), bridge = NativePathBridge()
             if kind != "missing" { publish(app, bridge) }
