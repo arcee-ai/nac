@@ -198,8 +198,8 @@ port=$(wait_until_ready)
     done
     rustc --version | grep -F "rustc 1.98.0" >/dev/null || assertion_failed "rust-version"
     node --version | grep -F "v24.22.1" >/dev/null || assertion_failed "node-version"
-    go version | grep -F "go1.27.3" >/dev/null || {
-        echo "managed image smoke: expected Go 1.27.3" >&2
+    go version | grep -F "go1.27.4" >/dev/null || {
+        echo "managed image smoke: expected Go 1.27.4" >&2
         exit 1
     }
     uv --version | grep -F "uv 0.13.4" >/dev/null || {
