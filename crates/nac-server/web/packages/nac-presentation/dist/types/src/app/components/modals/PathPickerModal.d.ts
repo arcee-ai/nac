@@ -12,6 +12,8 @@ import type { SshTarget } from "../../types/api";
 interface PathPickerProps {
     kind: BrowseKind;
     initialPath: string;
+    /** Explicit opt-in from the normal create-project Local backend only. */
+    nativeLocalDirectory?: boolean;
     /** Browses this host instead of the local filesystem. */
     ssh?: SshTarget | null;
     /** Overrides the title derived from `kind`. */
@@ -24,7 +26,7 @@ interface PathPickerProps {
     onClose: () => void;
     onSelect: (path: string) => void;
 }
-export declare function PathPickerModal({ open, ssh, ...props }: PathPickerProps & {
+export declare function PathPickerModal({ open, ssh, nativeLocalDirectory, ...props }: PathPickerProps & {
     open: boolean;
 }): import("react").JSX.Element | null;
 export {};

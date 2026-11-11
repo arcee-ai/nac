@@ -117,8 +117,10 @@ impl<'a> ProjectApplication<'a> {
         &self,
         command: CreateProject,
     ) -> Result<ProjectRecord, ProjectApplicationError> {
-        let requested_cwd = command.cwd.as_os_str().to_string_lossy().trim().to_string();
-        if requested_cwd.is_empty() {
+        // Nonblank local paths name literal filesystem entries, including
+        // leading/trailing whitespace. Only blank detection may trim them.
+        let requested_cwd = command.cwd.as_os_str().to_string_lossy().into_owned();
+        if requested_cwd.trim().is_empty() {
             return Err(ProjectApplicationError::InvalidInput(
                 "project cwd must not be empty or whitespace-only".to_string(),
             ));
@@ -134,7 +136,7 @@ impl<'a> ProjectApplication<'a> {
         let (cwd, ssh_host, ssh_port, ssh_identity_file) = if host.is_some() {
             let listing = runtime::browse_ssh_directory(
                 &ssh,
-                Some(&requested_cwd),
+                Some(requested_cwd.trim()),
                 false,
                 &self.manager.inner.root_cwd,
             )

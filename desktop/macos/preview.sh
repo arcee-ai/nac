@@ -86,6 +86,8 @@ sources=(desktop/macos/main.swift desktop/macos/PreviewApp.swift desktop/macos/P
           desktop/macos/WorkspaceCheckpoint.swift desktop/macos/WorkspaceStorage.swift
           desktop/macos/WorkspaceStorageBridge.swift desktop/macos/WorkspaceStorageScript.swift
          desktop/macos/ExternalNavigation.swift
+         desktop/macos/NativeFolderSelection.swift desktop/macos/NativeFolderPanel.swift
+         desktop/macos/NativePathRequest.swift desktop/macos/NativePathScript.swift desktop/macos/NativePathBridge.swift
          desktop/macos/CommandEnvironment.swift desktop/macos/DesktopStartup.swift)
 flags=(-swift-version 5 -target arm64-apple-macosx14.0 -O -framework AppKit -framework WebKit)
 if [[ "$local_app" == 1 ]]; then
@@ -97,7 +99,7 @@ else
     flags+=(-framework Network)
 fi
 if [[ "$mode" == smoke || "$mode" == smoke-build ]]; then
-    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift)
+    sources+=(desktop/macos/PreviewSmoke.swift desktop/macos/CITerminal.swift desktop/macos/NativeCommandSmoke.swift desktop/macos/NativeCommandInput.swift desktop/macos/RecoverySmoke.swift desktop/macos/ExternalNavigationSmoke.swift desktop/macos/ExternalAuthSmoke.swift desktop/macos/NativePathSmoke.swift)
     sources+=(desktop/macos/OfflineProviderPolicy.swift desktop/macos/OfflineNetworkFence.swift
               desktop/macos/OfflineWebProbe.swift desktop/macos/OfflineProviderSmoke.swift desktop/macos/OfflineHTTPControlTarget.swift)
     flags+=(-D PREVIEW_SMOKE -framework IOKit)

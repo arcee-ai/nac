@@ -68,6 +68,12 @@ final class PreviewSmoke {
                 } else if ["commands", "commands-input"].contains(scenario) {
                     evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
                         trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
+                } else if ["paths-xctest", "paths-failure-xctest"].contains(scenario) {
+                    let paths = try await NativePathSmoke.awaitBridge(app: app) { self.recordOwnership() }
+                    evidence["native_paths"] = try await NativePathSmoke(app: app, paths: paths).run(failure: scenario == "paths-failure-xctest") { record in
+                        record.forEach { self.evidence[$0] = $1 }
+                        self.write()
+                    }
                 } else if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }

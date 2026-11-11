@@ -9,7 +9,18 @@ final class Navigation: NSObject {}
     func removeFromSuperview() {}
     func load(_ request: URLRequest) -> Navigation? { Navigation() }
 }
-@MainActor final class Commands { func bind() {}; func retire() {} }
+struct NativeDocumentBinding {}
+@MainActor final class Commands {
+    func bind() {}; func retire() {}
+    func currentDocument(in view: View) -> NativeDocumentBinding? { nil }
+}
+// Inert construction adapter required by the verbatim folder-joined load().
+// It never displays a panel or invokes a source callback.
+@MainActor final class NativePathBridge {
+    init(webView: View, receipt: @escaping () -> EngineReceipt?,
+         source: @escaping () -> NativeDocumentBinding?) {}
+    func retire() {}
+}
 struct Profile { let digest = "owned-profile" }
 @MainActor final class Storage { let profile = Profile() }
 @MainActor final class Barrier {
@@ -39,6 +50,7 @@ struct Profile { let digest = "owned-profile" }
     lazy var recovery = Recovery(self)
     var webView: View! = View()
     var commands: Commands! = Commands()
+    var nativePaths: NativePathBridge?
     var stopping = false
     var failure: String?
     var baseURL: URL? = URL(string: "http://127.0.0.1:1234")

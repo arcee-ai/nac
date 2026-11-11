@@ -314,6 +314,28 @@ impl GitTarget {
     /// read differently and are fixed differently.
     pub fn repo_root(&self) -> Result<PathBuf> {
         let output = self.output(self.root(), &["rev-parse", "--show-toplevel"])?;
+        self.repo_root_from_output(output)
+    }
+
+    /// Reveal's Local path adapter also serves ordinary directories. Only a
+    /// definite nonrepository response selects cwd-relative coordinates.
+    pub fn local_repo_root_if_present(&self) -> Result<Option<PathBuf>> {
+        if self.local_path().is_none() {
+            bail!("optional local repository discovery requires a Local target");
+        }
+        let output = self.output_with_env(
+            self.root(),
+            &[("LC_ALL", "C")],
+            &["rev-parse", "--show-toplevel"],
+        )?;
+        if ordinary_nonrepository(&output) {
+            return Ok(None);
+        }
+        self.repo_root_from_output(output).map(Some)
+    }
+
+    // Strict and optional discovery share failure diagnostics and path framing.
+    fn repo_root_from_output(&self, output: Output) -> Result<PathBuf> {
         if !output.status.success() {
             if let Some(reason) = self.unavailable_reason(&output) {
                 bail!("{reason}");
@@ -327,7 +349,9 @@ impl GitTarget {
 
         let raw = String::from_utf8(output.stdout)
             .map_err(|_| anyhow!("git repository path is not valid UTF-8"))?;
-        let path = raw.trim_end();
+        // Git appends one LF; all preceding bytes belong to the path, including
+        // a literal trailing CR or LF on Unix. Do not trim path whitespace.
+        let path = raw.strip_suffix('\n').unwrap_or(&raw);
         if path.is_empty() {
             bail!("git repository not found in '{}'", self.describe());
         }
@@ -687,6 +711,18 @@ pub(crate) fn first_stderr_line(stderr: &[u8]) -> String {
         .unwrap_or("no details reported")
         .to_string()
 }
+
+// Matches the LC_ALL=C discovery classification already used by retained
+// worktree probes. Broken gitdir pointers use a colon, not the parenthesized
+// ordinary-discovery explanation; operational failures must remain errors.
+fn ordinary_nonrepository(output: &Output) -> bool {
+    output.status.code() == Some(128)
+        && String::from_utf8_lossy(&output.stderr).starts_with("fatal: not a git repository (")
+}
+
+#[cfg(all(test, unix))]
+#[path = "git_repository_discovery_tests.rs"]
+mod repository_discovery_tests;
 
 #[cfg(all(test, unix))]
 #[path = "git_qualification_tests.rs"]

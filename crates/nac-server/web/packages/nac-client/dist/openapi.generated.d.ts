@@ -1204,6 +1204,11 @@ export interface components {
             token_usages?: (components["schemas"]["TokenUsage"] | null)[] | null;
             unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
         };
+        RevealWorkspacePathRequest: {
+            expected_path_root: string;
+            expected_workspace_root: string;
+            path: string;
+        };
         RevertSessionRequest: {
             message_idx: number;
         };
@@ -1985,6 +1990,7 @@ export interface components {
         };
         WorkspaceFileList: {
             files: string[];
+            path_root?: string | null;
             truncated: boolean;
         };
         WorkspaceRevisionChanges: {
