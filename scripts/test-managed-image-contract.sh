@@ -98,8 +98,11 @@ require_literal "$dockerfile" 'go install -trimpath'
 require_literal "$dockerfile" 'install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh'
 require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS'
 require_literal "$dockerfile" 'missing gh module notice:'
+# Assert the literal smoke expressions without expanding them here.
 # shellcheck disable=SC2016
-require_literal "$repo_root/scripts/smoke-managed-image.sh" 'gh_build_info=$(go version -m "$(command -v gh)")'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'gh_build_info=$(go version -m "$gh_binary")'
+# shellcheck disable=SC2016
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'sed -n '\''1p'\'')" = "$gh_binary: go1.27.4"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-go-toolchain"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-source-module"'
 require_literal "$dockerfile" 'NPM_VERSION=11.21.1'
