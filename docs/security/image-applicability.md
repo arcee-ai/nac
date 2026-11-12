@@ -77,9 +77,31 @@ other coordinates or aliases to inherit that observation.
 Version 1 rejects a rule for a scanner coordinate observed on multiple installed
 APKs. `upstream:haxx/curl` and `upstream-wolfi:curl` represent both `apk:curl`
 and `apk:libcurl-openssl4`; proving only one payload cannot clear their shared
-raw row. Those rows remain blocking until a separately reviewed aggregate
-binding can verify both installed payloads. Each distinct APK coordinate can
-still be evaluated on its own evidence.
+raw row. Each distinct APK coordinate can still be evaluated on its own evidence.
+
+## Aggregate post-build policy, version 2
+
+Version 2 is an opt-in post-build policy shape for a scanner coordinate shared
+by two or more installed APKs. It keeps the exact top-level `schema_version`
+and `rules` fields and permits existing single-binding rules alongside aggregate
+rules. An aggregate rule replaces `binding` with `bindings`, a sorted list of
+two to sixteen complete bindings with unique `installed_package` names. Every
+binding must have the same scanner
+coordinate and truthful finding version, and must match the selected image,
+source revision and platform. The evidence JSON uses `schema_version: 2` and
+the same `bindings` list in place of its singular `binding`. The verifier
+requires the rule to equal the **complete** independently observed binding
+set for that coordinate. A missing, extra, changed or duplicate installed
+payload fails the rule before any raw finding is dispositioned. Single-binding
+rules use version-1 evidence even inside a version-2 policy; existing version-1
+policies and evidence remain accepted as before.
+
+The version-2 evidence still requires the same reviewed regression or
+application-absence claim and digest-bound artifacts. A reviewer must assess
+whether those controls actually cover every listed payload. This mechanical
+shape supplies aggregate installed-byte binding; it supplies no curl
+regression, no per-image human decision and no automatic approval for the
+currently blocked images.
 
 An observation is exactly `{binding, observed_at}`. Its binding must equal the
 rule and reviewed evidence binding and share the caller's exact scan identity.
@@ -91,8 +113,9 @@ the verifier never refreshes or reapproves an old rule automatically.
 
 ## Reviewed evidence and artifacts
 
-Evidence JSON has exactly `schema_version: 1`, `rule_id`, `binding`,
-`collected_at`, `artifacts`, and `proof`. Its complete raw bytes must match the
+Version-1 evidence JSON has exactly `schema_version: 1`, `rule_id`, `binding`,
+`collected_at`, `artifacts`, and `proof`; version 2 replaces `binding` with
+`bindings` and uses `schema_version: 2`. Its complete raw bytes must match the
 rule's `evidence_sha256`. Collection cannot postdate its recorded human review.
 `artifacts` maps exact descriptive roles to SHA-256 values; every referenced
 artifact must be supplied as matching immutable bytes. The verifier accepts
