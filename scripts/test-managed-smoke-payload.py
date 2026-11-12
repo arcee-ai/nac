@@ -49,7 +49,8 @@ class PayloadTests(unittest.TestCase):
             self.assertIn(predicate, self.payload)
         self.assertIn("overwritten > /run/secrets/nac/bootstrap.json", self.payload)
 
-    def run_bootstrap_assertions(self, *, wrong_identity=False, writable=False, payload=None):
+    def run_bootstrap_assertions(self, *, wrong_identity=False, writable=False, payload=None,
+                                 stale_gh_toolchain=False):
         actual_jq = shutil.which("jq")
         if actual_jq is None:
             self.skipTest("bootstrap predicate execution requires jq; literal payload capture remains covered")
@@ -77,12 +78,21 @@ class PayloadTests(unittest.TestCase):
         binary.mkdir()
         tools = re.search(r"for tool in ([^;]+); do", self.payload)[1].split()
         versions = {"id": "10001", "rustc": "rustc 1.98.0", "node": "v24.22.1",
-                    "go": "go version go1.27.4 linux/amd64", "uv": "uv 0.13.4"}
+                    "gh": "gh version 2.103.0 (2026-10-21)", "uv": "uv 0.13.4"}
         for tool in [*tools, "id"]:
             self.assertRegex(tool, r"^[a-z0-9-]+$")
             target = binary / tool
             target.write_text('#!/bin/sh\nprintf "%s\\n" ' + shlex.quote(versions.get(tool, "")) + "\n")
             target.chmod(0o755)
+        (binary / "go").write_text(
+            '#!/bin/sh\n'
+            'if [ "${2-}" = -m ]; then\n'
+            '    printf "%s\\n" "  path github.com/cli/cli/v2/cmd/gh" '
+            '"  mod github.com/cli/cli/v2 v2.103.0" '
+            + shlex.quote("  build go1.27.3" if stale_gh_toolchain else "  build go1.27.4") + '\n'
+            'else\n'
+            '    printf "%s\\n" "go version go1.27.4 linux/amd64"\n'
+            'fi\n')
         for tool in ("jq", "grep", "cat", "wc"):
             target = binary / tool
             target.unlink(missing_ok=True)
@@ -106,6 +116,13 @@ class PayloadTests(unittest.TestCase):
         result, contents = self.run_bootstrap_assertions(wrong_identity=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bootstrap-auth-identity", result.stderr)
+        self.assertNotIn("assertions-finished", result.stdout)
+        self.assertEqual(contents, "fixture-only\n")
+
+    def test_stale_gh_toolchain_fails_before_bootstrap_assertions(self):
+        result, contents = self.run_bootstrap_assertions(stale_gh_toolchain=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gh-go-toolchain", result.stderr)
         self.assertNotIn("assertions-finished", result.stdout)
         self.assertEqual(contents, "fixture-only\n")
 

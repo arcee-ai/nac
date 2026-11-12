@@ -88,9 +88,14 @@ directories, tools, readiness and signal/persistence contracts.
 - Pin Go 1.27.4 (BSD-3-Clause) and uv 0.13.4 (MIT OR Apache-2.0), including
   upstream archive checksums. Go 1.27.4 fixes the newly reported Go toolchain
   and standard-library advisories; uv removes a compromised CA root.
-- Use checksum-pinned upstream gh 2.103.0 (MIT), whose actual Linux binary
-  embeds Go 1.27.3. Rebuild the existing Git LFS 3.8.0 release (MIT) using
-  Go 1.27.4: the official Linux LFS binary still embeds Go 1.27.0. Verify the
+- Keep gh 2.103.0 (MIT) and its checksum-pinned upstream release archive for
+  help files and license. Its Linux binary embeds Go 1.27.3, so build the same
+  tagged application source with Go 1.27.4 instead of installing that binary.
+  Verify the module checksum and tag revision, retain dependency notices, and
+  check the installed executable's embedded Go and module versions in the
+  exact-image smoke. This is runtime-content remediation, not scanner clearance.
+  Rebuild the existing Git LFS 3.8.0 release (MIT) using Go 1.27.4: the
+  official Linux LFS binary still embeds Go 1.27.0. Verify the
   module checksum through Go's checksum database and the explicit pinned sum;
   retain its license, remove build caches, and keep system LFS filters outside
   the persistent HOME. The approved dependency-only build overlay in

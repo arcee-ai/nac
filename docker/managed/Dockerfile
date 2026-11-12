@@ -93,6 +93,9 @@ ARG GO_VERSION=1.27.4
 ARG GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 ARG GH_VERSION=2.103.0
 ARG GH_SHA256=fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786
+ARG GH_MODULE_SUM=h1:iSwyy7dCdv8AUMi+myP8XrMgo4ZalGUX47i8vBih+zg=
+ARG GH_SOURCE_REVISION=7948e8056e45ac3c729b829e0eafe2d0797a95c6
+ARG GH_BUILD_DATE=2026-10-21
 ARG GIT_LFS_VERSION=3.8.0
 ARG GIT_LFS_MODULE_SUM=h1:D0WiUyq5J3ZOv/9bvCcPToHqHF+WIQQKF5BK8bxlc5o=
 ARG GIT_LFS_REVISION=aece9221f8c09221a14395d964806b956289bc07
@@ -153,7 +156,6 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
     && mkdir /tmp/nac-gh \
     && tar -xzf /tmp/gh.tar.gz -C /tmp/nac-gh --strip-components=1 \
-    && install -m 0755 /tmp/nac-gh/bin/gh /usr/local/bin/gh \
     && cp -R /tmp/nac-gh/share/. /usr/local/share/ \
     && install -d /usr/local/share/licenses/gh \
     && cp /tmp/nac-gh/LICENSE /usr/local/share/licenses/gh/LICENSE \
@@ -163,6 +165,33 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz \
+    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
+        /usr/local/go/bin/go mod download -json "github.com/cli/cli/v2@v${GH_VERSION}" > /tmp/nac-gh-module.json \
+    && jq -e --arg sum "$GH_MODULE_SUM" --arg revision "$GH_SOURCE_REVISION" \
+        '.Sum == $sum and .Origin.Hash == $revision' /tmp/nac-gh-module.json > /dev/null \
+    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local CGO_ENABLED=0 \
+        GOPATH=/tmp/nac-gh-build GOCACHE=/tmp/nac-gh-cache \
+        /usr/local/go/bin/go install -trimpath \
+        -ldflags "-s -w -X github.com/cli/cli/v2/internal/build.Version=${GH_VERSION} -X github.com/cli/cli/v2/internal/build.Date=${GH_BUILD_DATE}" \
+        "github.com/cli/cli/v2/cmd/gh@v${GH_VERSION}" \
+    && install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | grep -F "go${GO_VERSION}" \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | grep -F "github.com/cli/cli/v2" | grep -F "v${GH_VERSION}" \
+    && gh version | grep -F "gh version ${GH_VERSION}" \
+    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
+        /usr/local/go/bin/go -C "/tmp/nac-gh-build/pkg/mod/github.com/cli/cli/v2@v${GH_VERSION}" \
+        list -m -json all > /tmp/nac-gh-modules.json \
+    && jq -r 'select(.Dir != null) | [.Path, .Dir] | @tsv' /tmp/nac-gh-modules.json > /tmp/nac-gh-notices \
+    && test -s /tmp/nac-gh-notices \
+    && while IFS="$(printf '\t')" read -r module module_dir; do \
+        notice_dir="/usr/local/share/licenses/gh/modules/$module"; \
+        mkdir -p "$notice_dir"; \
+        for notice in LICENSE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS; do \
+            if [ -f "$module_dir/$notice" ]; then cp "$module_dir/$notice" "$notice_dir/$notice"; fi; \
+        done; \
+    done < /tmp/nac-gh-notices \
+    && rm /tmp/nac-gh-module.json /tmp/nac-gh-modules.json /tmp/nac-gh-notices \
+    && rm -rf /tmp/nac-gh-build /tmp/nac-gh-cache /tmp/nac-gh-config \
     && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go telemetry off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go env GOTELEMETRY)" = off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \
