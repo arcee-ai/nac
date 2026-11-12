@@ -350,7 +350,7 @@ impl SessionManager {
                 },
             };
             let gate = self.lifecycle_gate(orchestrator_session_id);
-            let _lifecycle = gate.lock().await;
+            let lifecycle = gate.lock().await;
             let service = self
                 .attach_current_operation_service_locked(orchestrator_session_id, &operation_lease)
                 .await?;
@@ -516,22 +516,59 @@ impl SessionManager {
                     anyhow::Ok(settlement)
                 })
                 .await??;
-            if settlement.newly_settled && settlement.orchestrator.completion_inbox_id.is_some() {
-                let parent_session_id = settlement.orchestrator.parent_session_id.clone();
-                let cached = {
-                    let active = self.inner.active_sessions.read().await;
-                    active.get(&parent_session_id).cloned()
-                };
-                let parent = match cached {
-                    Some(service) => service,
-                    None => self.attach_session(&parent_session_id).await?,
-                };
-                parent.start_next_direct_inbox_item().await?;
-            }
             // Release operation ownership while the lifecycle gate still
             // excludes a continuation observing this terminal relationship.
             drop(operation_lease);
+            // Lifecycle gates are taken parent before orchestrator (parent
+            // deletion cascades into its orchestrators). Waking an uncached
+            // parent takes the parent's gate, so release this orchestrator's
+            // gate first; settlement already made the completion durable in
+            // the parent's inbox.
+            drop(lifecycle);
+            if settlement.newly_settled && settlement.orchestrator.completion_inbox_id.is_some() {
+                self.wake_managed_orchestrator_parent(&settlement.orchestrator.parent_session_id)
+                    .await?;
+            }
             return Ok(settlement.orchestrator);
+        }
+    }
+
+    /// Starts the parent's next inbox item after a settled orchestrator
+    /// delivered its completion. A parent deleted in the meantime took that
+    /// durable completion with it, so there is nothing left to wake. With the
+    /// orchestrator's gate already released, the deletion can land anywhere in
+    /// here: before the parent is attached, or after a cached or freshly
+    /// attached parent has already seen its pending work.
+    pub(crate) async fn wake_managed_orchestrator_parent(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<()> {
+        let cached = {
+            let active = self.inner.active_sessions.read().await;
+            active.get(parent_session_id).cloned()
+        };
+        let parent = match cached {
+            Some(service) => Ok(service),
+            None => self.attach_session(parent_session_id).await,
+        };
+        let woken = match parent {
+            Ok(parent) => parent.start_next_direct_inbox_item().await.map(drop),
+            Err(error) => Err(error),
+        };
+        let Err(error) = woken else {
+            return Ok(());
+        };
+        let path = self.inner.store_path.clone();
+        let session_id = parent_session_id.to_owned();
+        let exists = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || sessions::session_exists(&path, &session_id))
+            .await??;
+        if exists {
+            Err(error)
+        } else {
+            Ok(())
         }
     }
 
