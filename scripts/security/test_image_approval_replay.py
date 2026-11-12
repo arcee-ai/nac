@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 import image_approval_intake as intake
@@ -125,7 +126,7 @@ class ReplayTests(unittest.TestCase):
             "decision_sha256": replay.sha256(output / "decision.json")})
         return mock.Mock(returncode=0)
 
-    def invoke(self):
+    def invoke(self, *, clock=lambda: NOW):
         with mock.patch.object(replay.candidate, "extract_candidate", side_effect=self.extract):
             return replay.replay(self.record["pull_request"], MERGE, IMAGE,
                 self.archive, self.workspace,
@@ -133,7 +134,7 @@ class ReplayTests(unittest.TestCase):
                 candidate_policy=self.source["candidate_policy"],
                 source_applicability=self.source["source_applicability"],
                 candidate_applicability=self.source["candidate_applicability"],
-                clock=lambda: NOW, api=self.api, scan=self.scan, load=self.load,
+                clock=clock, api=self.api, scan=self.scan, load=self.load,
                 verify=self.verify, recollect=self.recollect)
 
     def test_proposes_only_after_exact_replay_and_current_recheck(self):
@@ -153,6 +154,14 @@ class ReplayTests(unittest.TestCase):
         self.collected_at = "2026-11-11T12:00:01Z"
         with self.assertRaisesRegex(ValueError, "future frozen observation"):
             self.invoke()
+        self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
+
+    def test_observation_expiring_during_load_recollects(self):
+        self.collected_at = "2026-11-10T12:00:01Z"
+        ticks = iter((NOW, NOW + replay.dt.timedelta(seconds=2),
+                      NOW + replay.dt.timedelta(seconds=2),
+                      NOW + replay.dt.timedelta(seconds=2)))
+        self.assertEqual(self.invoke(clock=lambda: next(ticks))["state"], "success")
         self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
 
     def test_stale_recollection_error_or_changed_evidence_fails(self):
@@ -221,6 +230,13 @@ class ReplayTests(unittest.TestCase):
         self.source["source_policy"] = linked
         with self.assertRaisesRegex(ValueError, "replay input path"):
             self.invoke()
+        self.assertEqual((self.loads, self.scans), (0, 0))
+
+    def test_workspace_inside_repository_denied_before_review_staging(self):
+        self.workspace = replay.ROOT / f".approval-replay-test-{uuid.uuid4().hex}"
+        with self.assertRaisesRegex(ValueError, "outside repository"):
+            self.invoke()
+        self.assertFalse(self.workspace.exists())
         self.assertEqual((self.loads, self.scans), (0, 0))
 
     def test_no_live_workflow_invokes_replay(self):
