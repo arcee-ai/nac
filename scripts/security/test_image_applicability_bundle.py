@@ -360,6 +360,45 @@ class ApplicabilityBundleTests(unittest.TestCase):
         self.assertEqual(reporter.report(retained, 1)["blocking"], 1)
         self.assertEqual((retained / "findings.json").read_bytes(), raw_bytes)
         self.assertEqual(json.loads((retained / "policy-result.json").read_bytes()), source)
+        # The same complete retained rescan can bind a shared curl coordinate
+        # only when both independently observed APK payloads are reviewed.
+        from test_image_applicability import aggregate_fixture
+        shared = aggregate_fixture()
+        curl_bindings = sorted((copy.deepcopy(item["binding"]) for item in observations
+                                if item["binding"]["package"] == "upstream-wolfi:curl"),
+                               key=lambda item: item["installed_package"])
+        self.assertEqual([item["installed_package"] for item in curl_bindings],
+                         ["apk:curl", "apk:libcurl-openssl4"])
+        aggregate_rule = shared["rules"][0]
+        aggregate_rule["bindings"] = curl_bindings
+        aggregate_rule["finding"]["version"] = curl_bindings[0]["upstream_version"]
+        aggregate_rule["review"].update(reviewed_at="2026-11-10T12:01:00Z",
+                                        expires_at="2026-11-11T12:01:00Z")
+        shared["record"].update(bindings=copy.deepcopy(curl_bindings),
+                                collected_at="2026-11-10T12:00:00Z")
+        aggregate_record = encode(shared["record"])
+        aggregate_rule["evidence_sha256"] = hashlib.sha256(aggregate_record).hexdigest()
+        shared_finding = {**finding, "package": "upstream-wolfi:curl",
+                          "version": curl_bindings[0]["upstream_version"]}
+        aggregate_evidence = {**shared["evidence"], aggregate_rule["evidence_sha256"]: aggregate_record}
+        aggregate_policy = encode({"schema_version": 2, "rules": [aggregate_rule]})
+        aggregate_receipt = verify_applicability([shared_finding],
+            trusted_policy=trusted.read_bytes(), candidate_policy=candidate.read_bytes(),
+            reviewed_image_approval=aggregate_policy, evidence=aggregate_evidence,
+            observations=observations, scan_identity={"image": IMAGE, "source_revision": SOURCE,
+                                                       "platform": "linux/amd64"},
+            now=NOW + dt.timedelta(minutes=2))
+        self.assertEqual(aggregate_receipt["unresolved_indexes"], [])
+        changed = copy.deepcopy(observations)
+        next(item for item in changed if item["binding"]["installed_package"] ==
+             "apk:libcurl-openssl4" and item["binding"]["package"] ==
+             "upstream-wolfi:curl")["binding"]["payload_sha256"] = "d" * 64
+        with self.assertRaisesRegex(ValueError, "independently verified observation"):
+            verify_applicability([shared_finding], trusted_policy=trusted.read_bytes(),
+                candidate_policy=candidate.read_bytes(), reviewed_image_approval=aggregate_policy,
+                evidence=aggregate_evidence, observations=changed,
+                scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"},
+                now=NOW + dt.timedelta(minutes=2))
         (self.output / bundle.ARCHIVE).write_bytes(b"tampered")
         corrupt = self.root / "corrupt-rescan"
         corrupt.mkdir()
