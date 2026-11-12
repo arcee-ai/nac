@@ -97,11 +97,11 @@ rules use version-1 evidence even inside a version-2 policy; existing version-1
 policies and evidence remain accepted as before.
 
 The version-2 evidence still requires the same reviewed regression or
-application-absence claim and digest-bound artifacts. A reviewer must assess
-whether those controls actually cover every listed payload. This mechanical
-shape supplies aggregate installed-byte binding; it supplies no curl
-regression, no per-image human decision and no automatic approval for the
-currently blocked images.
+application-absence claim and digest-bound artifacts, except for the narrow
+curl official-release proof below. A reviewer must assess whether those
+controls actually cover every listed payload. This mechanical shape supplies
+aggregate installed-byte binding; it supplies no per-image human decision and
+no automatic approval for the currently blocked images.
 
 An observation is exactly `{binding, observed_at}`. Its binding must equal the
 rule and reviewed evidence binding and share the caller's exact scan identity.
@@ -121,7 +121,7 @@ rule's `evidence_sha256`. Collection cannot postdate its recorded human review.
 artifact must be supplied as matching immutable bytes. The verifier accepts
 bytes, not filesystem paths, and does not follow or open candidate paths.
 
-For `fixed`, `proof` is exactly:
+The established `fixed` regression `proof` is exactly:
 
 ```json
 {"kind":"regression","vulnerable_control":"failed-as-expected","fixed_control":"passed"}
@@ -130,6 +130,54 @@ For `fixed`, `proof` is exactly:
 Artifacts must include `vulnerable_control`, `fixed_control`, and `provenance`.
 These fields record claims already bound to reviewed artifacts; their presence
 alone is not a proof that a real vulnerability was reproduced or corrected.
+
+### Narrow curl official-release proof
+
+For the exact `(upstream-wolfi:curl, 8.23.0, grype-upstream)` scanner
+coordinate with the explicit `CVE-2026-92392` and
+`GHSA-7jvw-75gf-2h34` aliases, a version-2 aggregate `fixed` rule may
+instead use this exact proof:
+
+```json
+{"kind":"official-curl-fixed-release","fixed_version":"8.23.0","fixed_commit":"8b0744af5b1b631da5b938ca31c3f9895ad5a321"}
+```
+
+The aggregate must contain exactly `apk:curl` and `apk:libcurl-openssl4`,
+each at `8.23.0-r2`, with distinct, independently observed installed payload
+hashes. Both must match the pinned 8.23.0 release archive, empty package patch
+set, application profile, exact image/source/platform, and retained per-package
+provenance. The package recipe's `source_commit` is
+`3163ec065643ba20709f190111f42c3e1fe95273`; it is distinct from the
+upstream fix commit in the proof. The upstream fix is already in the release
+source and is **not** claimed as a separately applied package patch.
+
+The evidence record must contain exactly five artifact roles:
+`official_advisory` (the pinned [curl security metadata](https://curl.se/docs/CVE-2026-92392.json)),
+`official_alias` (the pinned [GitHub advisory alias](https://github.com/advisories/GHSA-7jvw-75gf-2h34)),
+`official_fix` (the pinned [upstream fix patch](https://github.com/curl/curl/commit/8b0744af5b1b631da5b938ca31c3f9895ad5a321.patch)),
+`release_archive` (the pinned
+[curl 8.23.0 release](https://curl.se/download/curl-8.23.0.tar.xz)), and
+`provenance`. The verifier compares exact artifact digests embedded in the
+reviewed source code, checks the advisory's fixed version and commit, and
+checks the GitHub alias-to-CVE bridge. It extracts exactly
+`curl-8.23.0/lib/multi.c`, checks its fixed SHA-256 and cleanup order, then
+reverses the exact upstream patch with zero fuzz and checks the old source hash
+and ordering. It parses retained provenance to compare both APK payload,
+source, patch-set, profile, image, source revision and platform commitments.
+Any changed upstream artifact requires a source-code pin update and review;
+changed image evidence requires a new independent post-build review.
+
+This is fixed-release and source-order evidence. The loopback HTTP/2 reset
+attempts did not produce a behavioral fixed-versus-reversed differential, so
+this path does **not** claim a reproduced use-after-free regression. Matching
+installed payload hashes establishes the identity of the reviewed APK bytes;
+it does **not** establish a reproducible source-to-binary build on its own.
+The independent reviewer must assess whether the official fixed release,
+source control, package provenance and exact-image payload evidence suffice
+for these two findings. The empty source policy grants no disposition.
+Admission still requires a separately authenticated, currently active,
+independently reviewed post-build approval for the exact image; no version-only
+or source-order-only candidate assertion can approve it.
 
 For `not_affected`, `proof` has exactly `kind: "application-absence"` and a
 nonempty unique `affected_applications` list. Artifacts must include
