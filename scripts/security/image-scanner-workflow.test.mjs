@@ -9,7 +9,7 @@ const workflow = () => YAML.parse(readFileSync('.github/workflows/managed-image-
 test('live scanner qualification overlaps construction and remains a mandatory result dependency', () => {
   const config = workflow();
   const qualification = config.jobs['scanner-qualification'];
-  const build = config.jobs['build-smoke'];
+  const build = config.jobs['build-candidate'];
   assert.deepEqual(qualification.needs, ['prepare', 'contract']);
   assert.deepEqual(build.needs, qualification.needs);
   assert.equal(qualification.if, undefined);
@@ -32,14 +32,18 @@ test('live scanner qualification overlaps construction and remains a mandatory r
   assert.ok(!qualification.steps.some(s => s.uses?.startsWith('actions/download-artifact@')));
 });
 
-test('candidate inventory and scan still use the loaded image and live independent tools/database', () => {
-  const steps = workflow().jobs['build-smoke'].steps;
-  for (const step of steps.filter(s => s.run?.includes('image_scan.py'))) {
+test('candidate inventory and frozen-image scan use live independent tools/database', () => {
+  const jobs = workflow().jobs;
+  for (const [job, expectedImage] of [
+    [jobs['build-candidate'], '${{ steps.image.outputs.id }}'],
+    [jobs['strict-scan'], '${{ needs.build-candidate.outputs.image_id }}'],
+  ]) for (const step of job.steps.filter(s => s.run?.includes('image_scan.py'))) {
     assert.ok(step.run.includes('--tool-cache "$RUNNER_TEMP/image-security-tools"'));
     assert.ok(step.run.includes('--db-cache "$RUNNER_TEMP/image-security-db"'));
-    assert.equal(step.env.IMAGE_ID, '${{ steps.image.outputs.id }}');
+    assert.equal(step.env.IMAGE_ID, expectedImage);
     assert.equal(step.env.SOURCE_SHA, '${{ needs.prepare.outputs.sha }}');
   }
-  assert.equal(steps.filter(s => s.run?.includes('image_scan.py')).length, 2);
-  assert.ok(!steps.some(s => s.uses?.startsWith('actions/download-artifact@')));
+  assert.equal(jobs['build-candidate'].steps.filter(s => s.run?.includes('image_scan.py')).length, 1);
+  assert.equal(jobs['strict-scan'].steps.filter(s => s.run?.includes('image_scan.py')).length, 1);
+  assert.ok(!jobs['build-candidate'].steps.some(s => s.uses?.startsWith('actions/download-artifact@')));
 });

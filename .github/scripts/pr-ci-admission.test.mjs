@@ -20,7 +20,8 @@ const sealedPins={
   ".github/scripts/ci-admission-contract.json": "d3f4dfffe12024b54ad5ade8023ee9ec3b4cf9867dec01c442b58b19a1593cb9",
   ".github/scripts/ci-admission-applicability.json": "7dea3225509631c4dc6dc2947ab9fcf75b8dbd62ff0172bd394815c3a99f56e7",
   ".github/scripts/cold-caches.py": "2b2ea35fd7fa77f036ab6d7e9e1d7fbf974f5c33a070c13b55356664d626f07b",
-  ".github/scripts/pr-checks.mjs": "1c12e1ed2fa2aa78707ae46da445edf2f774eab689721771ff52069122667127",
+  // The image aggregate now requires both successful candidate custody and strict scan.
+  ".github/scripts/pr-checks.mjs": "6e49e1e824b2144818d370b224d24324836d6ab9fd933b42636792ce0edbffba",
   ".github/scripts/publication-policy.mjs": "c62bba4c71700fc57c48605b5b7209415513b8a7b2bce33b391595e8952a8018",
   ".github/workflows/ci-admission.yml": "d6979c9db4619f87a1321ff3f1e18d30a0004eb6e03035752b08997c16c25c27"
 };
@@ -43,7 +44,7 @@ function state(mode='full'){
 }
 function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
 
-test('FULL split projection preserves the landed graph; six authority pins unchanged and two explicitly rebound',()=>{
+test('FULL split projection preserves the landed graph and sealed authority pins',()=>{
  const normalized=structuredClone(stable);reverseAssetTokens(normalized);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
  for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
 });

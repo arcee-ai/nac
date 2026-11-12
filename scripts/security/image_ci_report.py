@@ -8,6 +8,8 @@ import sys
 
 from image_inventory import require, sha256, write_json
 from image_rust import RUST_FILES
+import image_applicability_bundle as applicability_bundle
+from image_applicability_gate import validated_decision
 
 
 def report(directory, scanner_exit, *, image=None, source_revision=None):
@@ -23,9 +25,14 @@ def report(directory, scanner_exit, *, image=None, source_revision=None):
             (image is None or image == identity["image"]) and
             (source_revision is None or source_revision == identity["source_revision"]),
             "CI report differs from the scanned image/source")
-    bundle = json.loads((directory / "bundle.json").read_text())
-    require(bundle.get("schema_version") == 2 and bundle.get("image") == identity["image"] and
-            set(bundle.get("files", {})) == {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES},
+    bundle = applicability_bundle.read_json(directory, "bundle.json", maximum=4 * 1024 ** 2)
+    expected_files = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
+    if bundle.get("schema_version") in {3, 4}:
+        expected_files |= applicability_bundle.files(identity, bundle["schema_version"])
+        require(applicability_bundle.version(directory) == bundle["schema_version"],
+                "CI report applicability capability differs from bundle version")
+    require(bundle.get("schema_version") in {2, 3, 4} and bundle.get("image") == identity["image"] and
+            set(bundle.get("files", {})) == expected_files,
             "incomplete image inventory bundle")
     require(all(sha256(directory / name) == digest for name, digest in bundle["files"].items()),
             "CI report inventory was altered")
@@ -36,15 +43,27 @@ def report(directory, scanner_exit, *, image=None, source_revision=None):
     findings = json.loads((directory / "findings.json").read_text())
     require(isinstance(findings, list) and len(findings) == count and
             type(result.get("findings")) is int and result["findings"] == count and
-            type(result.get("blocking")) is int and result["blocking"] == len(policy["blocking"]),
+            type(result.get("blocking")) is int,
             "CI report finding counts differ")
-    expected = "blocked" if policy["blocking"] else "passed"
-    require(result.get("status") == expected and scanner_exit == (1 if policy["blocking"] else 0),
+    blocking = len(policy["blocking"])
+    has_applicability = "applicability" in result
+    require(has_applicability == (directory / "decision.json").is_file() ==
+            (directory / "applicability-result.json").is_file(), "incomplete applicability decision")
+    if has_applicability:
+        decision = validated_decision(directory, findings, policy, identity)
+        require(result.get("decision_sha256") == sha256(directory / "decision.json"),
+                "scanner applicability decision changed")
+        receipt = json.loads((directory / "applicability-result.json").read_text())
+        require(result["applicability"] == receipt["status"], "scanner applicability status changed")
+        blocking = len(decision["blocking_indexes"])
+    require(result["blocking"] == blocking, "CI report effective blocking count differs")
+    expected = "blocked" if blocking else "passed"
+    require(result.get("status") == expected and scanner_exit == (1 if blocking else 0),
             "scanner exit and security verdict disagree")
     require((directory / "report.md").is_file(), "completed image report missing")
     receipt = {"schema_version": 1, "enforcement": "deferred", "security_verdict": expected,
                "image": identity["image"], "source_revision": identity["source_revision"],
-               "blocking": len(policy["blocking"]), "findings": count,
+               "blocking": blocking, "findings": count,
                "result_sha256": sha256(directory / "result.json"),
                "notice": "CI reports image findings; success does not establish image security clearance."}
     write_json(directory / "ci-report.json", receipt)

@@ -1,3 +1,4 @@
+import { reverseImageApplicability } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -15,7 +16,8 @@ const digest = value => createHash('sha256').update(JSON.stringify(sort(value)))
 
 function verify(value) {
   const config = structuredClone(value); reverseAssetTokens(config);
-  const steps = config.jobs['build-smoke'].steps;
+  reverseImageApplicability(config);
+  const steps = config.jobs['build-candidate'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {
     name: 'Select supported image build driver', id: 'image-driver',
@@ -30,12 +32,12 @@ function verify(value) {
   assert.equal(build.with.builder, '${{ steps.buildx.outputs.name }}');
   assert.equal(steps.indexOf(selector) + 1, steps.indexOf(setup));
   assert.equal(steps.indexOf(setup) + 1, steps.indexOf(build));
-  config.jobs['build-smoke'].steps = steps.filter(s => s !== selector);
+  config.jobs['build-candidate'].steps = steps.filter(s => s !== selector);
   delete setup.id;
   delete setup.with;
   delete build.with.builder;
-  // EXACT 62db workflow, including all cold/cache/security/receipt/identity fields.
-  assert.equal(digest(config), 'ad745396dfc6813101518ec3c40e7b2a86c8fb368f5380436cb7eb2fb8b11ba5');
+  // Exact post-split graph, including cold/cache/security/receipt/identity fields.
+  assert.equal(digest(config), 'c635d13d3ea02b0c5c234ad6f8ca1ff77fbc43095c24a206ed21ff84febe49f4');
 }
 
 test('driver selection and explicit builder binding reverse to the exact prior image workflow', () => verify(source()));
@@ -65,18 +67,33 @@ test('selection cannot bypass cold/cache trust, immutable image, security or qua
     s => { s.find(v => v.id === 'image').env.BUILT_IMAGE_ID = 'mutable:tag'; },
     s => { s.find(v => v.id === 'smoke').if = 'false'; },
     s => { s.find(v => v.id === 'inventory').if = 'false'; },
-    s => { s.find(v => v.run?.includes('image_ci_report.py'))['continue-on-error'] = true; },
   ];
   for (const change of changes) {
     const value = source();
-    change(value.jobs['build-smoke'].steps);
+    change(value.jobs['build-candidate'].steps);
     assert.throws(() => verify(value));
   }
   for (const change of [
     v => { v.jobs['scanner-qualification'].if = 'false'; },
     v => { v.jobs.result.needs = ['prepare', 'build-smoke']; },
     v => { v.permissions.contents = 'write'; },
+    v => { v.jobs['strict-scan'].steps.find(s => s.run?.includes('image_ci_report.py'))['continue-on-error'] = true; },
   ]) {
     const value = source(); change(value); assert.throws(() => verify(value));
   }
+});
+
+const imageEvidenceMutations = [
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ' --collect-applicability --collect-applicability'); },
+];
+
+test('image evidence and reporting deltas cannot weaken the original driver contract', () => {
+  for (const mutate of imageEvidenceMutations) {
+    const value = source(); mutate(value.jobs['build-candidate'].steps);
+    assert.throws(() => verify(value));
+  }
+  const moved = source();
+  moved.jobs['strict-scan'].steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability';
+  assert.throws(() => verify(moved));
 });

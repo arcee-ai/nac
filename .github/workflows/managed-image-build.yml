@@ -116,10 +116,13 @@ jobs:
           if-no-files-found: error
 
 
-  build-smoke:
+  build-candidate:
     # Image construction/smoke is unprivileged; result still requires full fault quality.
     needs: [prepare, contract]
     runs-on: ubuntu-latest
+    outputs:
+      image_id: ${{ steps.image.outputs.id }}
+      policy_sha: ${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -197,13 +200,90 @@ jobs:
         run: |
           python3 scripts/security/image_scan.py --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
             --trusted-policy trusted-image-policy/.github/security/exceptions.json \
-            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only --collect-applicability \
             --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
+      - name: Freeze the exact inventoried image without publication
+        if: steps.inventory.outcome == 'success'
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          python3 scripts/security/image_candidate_pack.py --bundle image-security-evidence/inventory \
+            --destination frozen-candidate --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"
+          docker image save --output frozen-candidate/image.tar "$IMAGE_ID"
+          PYTHONPATH=scripts/security python3 -c 'import os; import image_candidate_archive as c; c._check_image_config("frozen-candidate/image.tar", os.environ["IMAGE_ID"])'
+      - name: Retain frozen candidate before strict scan
+        if: steps.inventory.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frozen-candidate/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Retain nonauthoritative inventory diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: managed-image-inventory-diagnostics-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            image-security-evidence/inventory/result.json
+            image-security-evidence/inventory/runtime.json.stderr
+            image-security-evidence/inventory/syft.txt
+            image-security-evidence/inventory/syft.txt.stderr
+            image-security-evidence/inventory/syft.yaml
+            image-security-evidence/inventory/tools.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  strict-scan:
+    needs: [prepare, build-candidate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - name: Retrieve only the frozen candidate from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: image-security-evidence
+      - name: Load and bind the frozen image in a clean runner
+        env:
+          IMAGE_ID: ${{ needs.build-candidate.outputs.image_id }}
+        run: |
+          PYTHONPATH=scripts/security python3 -c 'import os; import image_candidate_archive as c; c.load_exact_image("image-security-evidence/image.tar", os.environ["IMAGE_ID"])'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Pin canonical reviewed-dev image policy for publication
+        id: publication-policy
+        if: needs.prepare.outputs.policy_mode == 'publication'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+          REQUESTED_POLICY_SHA: ${{ needs.prepare.outputs.policy_sha }}
+        run: |
+          node .github/scripts/publication-policy.mjs resolve "$CANDIDATE_SHA" \
+            "$GITHUB_WORKSPACE/image-security-evidence/policy" >> "$GITHUB_OUTPUT"
+      - name: Reject policy changes between inventory and scan
+        env:
+          INVENTORY_POLICY_SHA: ${{ needs.build-candidate.outputs.policy_sha }}
+          SCAN_POLICY_SHA: ${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}
+        run: |
+          [[ "$INVENTORY_POLICY_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$INVENTORY_POLICY_SHA" == "$SCAN_POLICY_SHA" ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}
+          path: trusted-image-policy
+          fetch-depth: 0
+          persist-credentials: false
       - name: Scan the same tested image with reviewed policy
-        if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.inventory.outcome == 'success' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          IMAGE_ID: ${{ steps.image.outputs.id }}
+          IMAGE_ID: ${{ needs.build-candidate.outputs.image_id }}
           SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
           POLICY_MODE: ${{ needs.prepare.outputs.policy_mode }}
           NAC_PUBLICATION_POLICY_SHA: ${{ steps.publication-policy.outputs.sha }}
@@ -234,14 +314,16 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: managed-image-security-${{ needs.prepare.outputs.sha }}
-          path: image-security-evidence/
+          path: |
+            image-security-evidence/
+            !image-security-evidence/image.tar
           retention-days: 14
           if-no-files-found: error
 
   result:
     name: Managed image checks complete
     if: ${{ always() }}
-    needs: [prepare, contract, scanner-qualification, build-smoke]
+    needs: [prepare, contract, scanner-qualification, build-candidate, strict-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
