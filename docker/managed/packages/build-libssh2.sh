@@ -74,16 +74,42 @@ jq -r '.libssh2.reviewed_source_files | to_entries[] | [.value, .key] | join("  
 # configure/Makefile inputs; regeneration needlessly imports host gettext data.
 ./configure --prefix=/usr --libdir=/usr/lib --with-crypto=openssl --disable-docker-tests
 make -j2
-# Seam-level malformed-input regressions for the six corrections applied above.
+# Seam-level malformed-input regressions for the six newer corrections and
+# the inherited SFTP symlink correction applied above. AddressSanitizer makes
+# the exact patch reversal's out-of-bounds read observable in the control.
 # Compiled against the patched tree and run here; never installed or shipped.
 # Each case drives the corrected seam with the input shape the correction
 # rejects, so a dropped or reverted patch fails the build instead of silently
 # restoring the pre-patch behaviour.
-gcc -DHAVE_CONFIG_H -I. -Isrc -Iinclude -Wl,--allow-multiple-definition \
+gcc -g -fsanitize=address -fno-omit-frame-pointer \
+    -DHAVE_CONFIG_H -I. -Isrc -Iinclude -Wl,--allow-multiple-definition \
     -o /tmp/libssh2-regressions /recipe/libssh2-regressions.c \
     src/publickey.c src/misc.c src/sftp.c src/.libs/libssh2.a -lcrypto -lz
 /tmp/libssh2-regressions
-# Ordinary upstream standalone and local OpenSSH tests. No new attack fixtures.
+# Reverse only the SFTP supplier fix in a disposable source copy. All other
+# source and linked package code remains the same. The malformed NAME packet
+# must then trigger ASan in sftp_symlink, not merely a generic test failure.
+reversed_dir=$(mktemp -d)
+trap 'rm -rf "$reversed_dir"' 0
+mkdir -p "$reversed_dir/src"
+cp src/sftp.c "$reversed_dir/src/sftp.c"
+(cd "$reversed_dir" && patch -p1 --batch --fuzz=0 -R \
+    -i /work/downloads/libssh2-supplier-sftp.patch)
+gcc -g -fsanitize=address -fno-omit-frame-pointer \
+    -DHAVE_CONFIG_H -I. -Isrc -Iinclude -Wl,--allow-multiple-definition \
+    -o "$reversed_dir/libssh2-regressions" /recipe/libssh2-regressions.c \
+    src/publickey.c src/misc.c "$reversed_dir/src/sftp.c" \
+    src/.libs/libssh2.a -lcrypto -lz
+if "$reversed_dir/libssh2-regressions" --sftp-15661-only \
+        > "$reversed_dir/output" 2>&1; then
+    echo 'CVE-2025-15661: patch-reversed malformed NAME unexpectedly passed' >&2
+    exit 1
+fi
+grep -F 'ERROR: AddressSanitizer: heap-buffer-overflow' "$reversed_dir/output"
+grep -F 'in sftp_symlink' "$reversed_dir/output"
+grep -F 'FAIL CVE-2025-15661 SFTP truncated NAME' "$reversed_dir/output"
+echo 'CVE-2025-15661: fixed-pass / exact-patch-reversed ASan failure passed'
+# Ordinary upstream standalone and local OpenSSH tests use no extra servers.
 mkdir -p /run/sshd
 # Public upstream fixture keys authenticate only the disposable build account.
 # The runtime is a separate FROM and inherits none of this test configuration.
