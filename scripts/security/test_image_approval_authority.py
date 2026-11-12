@@ -58,13 +58,14 @@ class AuthorityTests(unittest.TestCase):
                        "state": "APPROVED", "commit_id": HEAD,
                        "submitted_at": "2026-11-11T11:00:00Z"}
         self.reviews = [self.review]
-        self.pr = {"number": 456, "state": "closed", "merged": True,
+        self.pr = {"id": 789, "number": 456, "state": "closed", "merged": True,
                    "merge_commit_sha": COMMIT, "merged_at": "2026-11-11T11:30:00Z",
                    "base": {"ref": readback.BRANCH,
                             "repo": {"id": readback.REPOSITORY_ID}},
                    "head": {"sha": HEAD, "user": {"id": 42}},
                    "user": {"id": 42}}
         self.path_commits = {}
+        self.associated_pr_override = None
         self.merged_owners_sha = readback_tests.git_sha(self.owners)
         self.environment = {"GITHUB_REPOSITORY": intake.REPOSITORY,
             "GITHUB_REPOSITORY_ID": str(readback.REPOSITORY_ID),
@@ -100,6 +101,8 @@ class AuthorityTests(unittest.TestCase):
                     "content": base64.b64encode(WORKFLOW_BYTES).decode()}
         if endpoint.startswith(f"{prefix}/rulesets/"):
             return copy.deepcopy(self.rules[int(endpoint.rsplit("/", 1)[-1])])
+        if endpoint == f"{prefix}/pulls/{self.pr['number']}":
+            return copy.deepcopy(self.pr)
         return self.fixture.api(endpoint)
 
     def list_api(self, endpoint):
@@ -108,7 +111,9 @@ class AuthorityTests(unittest.TestCase):
             path = endpoint.split("&path=", 1)[1].removesuffix("&per_page=1")
             return [{"sha": self.path_commits.get(path, COMMIT)}]
         if endpoint == f"{prefix}/commits/{COMMIT}/pulls?per_page=2":
-            return [copy.deepcopy(self.pr)]
+            associated = copy.deepcopy(self.associated_pr_override or self.pr)
+            associated.pop("merged", None)
+            return [associated]
         if endpoint == f"{prefix}/pulls/{self.pr['number']}/reviews?per_page=100":
             return copy.deepcopy(self.reviews)
         raise ValueError(f"unexpected list API request: {endpoint}")
@@ -190,6 +195,17 @@ class AuthorityTests(unittest.TestCase):
         self.assertIsNone(self.verify())
         comment["state"] = "CHANGES_REQUESTED"
         with self.assertRaisesRegex(ValueError, "stale, dismissed"):
+            self.verify()
+
+    def test_associated_pr_requires_full_merged_object_and_matching_identity(self):
+        self.assertIsNone(self.verify())  # associated-PR list omits merged
+        self.pr["merged"] = False
+        with self.assertRaisesRegex(ValueError, "squash-merged"):
+            self.verify()
+        self.pr["merged"] = True
+        self.associated_pr_override = copy.deepcopy(self.pr)
+        self.associated_pr_override["merge_commit_sha"] = "f" * 40
+        with self.assertRaisesRegex(ValueError, "differs from full"):
             self.verify()
 
     def test_39_character_reviewer_login_can_be_pinned(self):
