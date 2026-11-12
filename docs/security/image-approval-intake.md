@@ -54,6 +54,21 @@ review approval or this record's presence is not a technical qualification.
 The branch needs PR-only updates, non-author CODEOWNER review, last-push approval,
 stale-review dismissal, and no bypass. These settings and records do not exist.
 
+`image_approval_readback.py` is an inactive source-only reader for a proposed
+branch layout: `images/<PR>/<merge SHA>/<image hex>/record.json`, `policy.json`,
+and `evidence/<SHA-256>` files. It compares the fixed repository ID, branch and
+current ref, requires the branch's protection bit, pins the commit's complete
+Git tree, rejects symlinks and other nonregular modes, and fetches selected
+files by Git blob ID. It checks the Git blob hashes, policy digest, exact
+image/source binding, and the complete digest-named evidence closure. A second
+current-ref check rejects movement during the read; a later readback compares
+the current revision and every byte before a future write. It does not fetch
+the candidate artifact, recollect stale V4 observations, run a scan, or publish
+a status. The branch does not exist yet. GitHub's `protected` bit alone does
+not establish the required reviewer identity, PR-only updates, last-push
+approval, no-bypass rules, or App authority; those require separate live
+configuration and qualification.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
