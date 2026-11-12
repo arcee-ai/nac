@@ -7,53 +7,138 @@ const require = createRequire(new URL('../../.github/scripts/package.json', impo
 const YAML = require('yaml'); // Existing locked release-tooling dependency.
 const workflow = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 
-test('one loaded build binds the same immutable ID to smoke and scanning', () => {
+test('one unprivileged build freezes the tested image before a separate strict scan', () => {
   const jobs = workflow('managed-image-build').jobs;
   assert.equal(jobs.result.name, 'Managed image checks complete');
-  const steps = jobs['build-smoke'].steps;
-  const builds = steps.filter(s => s.uses?.startsWith('docker/build-push-action@'));
+  const producer = jobs['build-candidate'].steps;
+  const scanSteps = jobs['strict-scan'].steps;
+  const builds = producer.filter(s => s.uses?.startsWith('docker/build-push-action@'));
   assert.equal(builds.length, 1);
   assert.equal(builds[0].with.load, true);
   assert.equal(builds[0].with.push, false);
-  const image = steps.find(s => s.id === 'image');
+  assert.equal(scanSteps.filter(s => s.uses?.startsWith('docker/build-push-action@')).length, 0);
+  const image = producer.find(s => s.id === 'image');
   assert.equal(image.env.BUILT_IMAGE_ID, '${{ steps.build-image.outputs.imageid }}');
-  const smoke = steps.find(s => s.id === 'smoke');
+  const smoke = producer.find(s => s.id === 'smoke');
   assert.equal(smoke.env.MANAGED_IMAGE, '${{ steps.image.outputs.id }}');
   assert.equal(smoke.env.MANAGED_IMAGE_SKIP_BUILD, '1');
-  const scan = steps.find(s => s.name === 'Scan the same tested image with reviewed policy');
-  assert.equal(scan.env.IMAGE_ID, smoke.env.MANAGED_IMAGE);
+  const inventory = producer.find(s => s.id === 'inventory');
+  assert.equal(inventory.env.IMAGE_ID, smoke.env.MANAGED_IMAGE);
+  assert.equal(inventory.env.SOURCE_SHA, '${{ needs.prepare.outputs.sha }}');
+  assert.equal(inventory.name, 'Inventory the exact tested image');
+  assert.ok(inventory.run.includes('--inventory-only --collect-applicability'));
+  assert.ok(inventory.run.includes('--output image-security-evidence/inventory'));
+  const freeze = producer.find(s => s.name === 'Freeze the exact inventoried image without publication');
+  const retained = producer.find(s => s.name === 'Retain frozen candidate before strict scan');
+  assert.equal(freeze.if, "steps.inventory.outcome == 'success'");
+  assert.equal(freeze.env.IMAGE_ID, smoke.env.MANAGED_IMAGE);
+  assert.ok(freeze.run.includes('image_candidate_pack.py --bundle image-security-evidence/inventory'));
+  assert.ok(freeze.run.includes('--destination frozen-candidate --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"'));
+  assert.ok(freeze.run.includes('docker image save --output frozen-candidate/image.tar "$IMAGE_ID"'));
+  assert.ok(freeze.run.includes('image_candidate_archive'));
+  assert.equal(retained.if, freeze.if);
+  assert.equal(retained.with.name, 'managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+  assert.equal(retained.with.path, 'frozen-candidate/');
+  assert.equal(retained.with['retention-days'], 14);
+  assert.equal(retained.with['if-no-files-found'], 'error');
+  const diagnostics = producer.find(s => s.name === 'Retain nonauthoritative inventory diagnostics');
+  assert.equal(diagnostics.if, 'always()');
+  assert.equal(diagnostics.with['retention-days'], 14);
+  for (const name of ['result.json', 'runtime.json.stderr', 'syft.txt', 'syft.txt.stderr', 'syft.yaml', 'tools.json']) {
+    assert.ok(diagnostics.with.path.includes(`image-security-evidence/inventory/${name}`));
+  }
+  assert.ok(producer.indexOf(retained) > producer.indexOf(freeze));
+  assert.deepEqual(jobs['strict-scan'].needs, ['prepare', 'build-candidate']);
+  const downloaded = scanSteps.find(s => s.uses?.startsWith('actions/download-artifact@'));
+  assert.equal(downloaded.with.name, retained.with.name);
+  assert.equal(downloaded.with.path, 'image-security-evidence');
+  const loaded = scanSteps.find(s => s.name === 'Load and bind the frozen image in a clean runner');
+  assert.equal(loaded.env.IMAGE_ID, '${{ needs.build-candidate.outputs.image_id }}');
+  assert.ok(loaded.run.includes('image_candidate_archive'));
+  assert.ok(scanSteps.indexOf(loaded) > scanSteps.indexOf(downloaded));
+  const scan = scanSteps.find(s => s.name === 'Scan the same tested image with reviewed policy');
+  assert.equal(scan.env.IMAGE_ID, loaded.env.IMAGE_ID);
   assert.ok(scan.run.includes('--image "$IMAGE_ID"'));
   assert.ok(scan.run.includes('--source-revision "$SOURCE_SHA"'));
-  const inventory = steps.find(s => s.id === 'inventory');
-  assert.equal(inventory.env.IMAGE_ID, scan.env.IMAGE_ID);
   assert.equal(inventory.env.SOURCE_SHA, scan.env.SOURCE_SHA);
-  assert.equal(inventory.name, 'Inventory the exact tested image');
-  assert.ok(inventory.run.includes('--inventory-only'));
-  assert.ok(inventory.run.includes('--output image-security-evidence/inventory'));
   assert.ok(scan.run.includes('--bundle image-security-evidence/inventory'));
   assert.ok(scan.run.includes('--output image-security-evidence/security'));
   assert.ok(scan.run.includes('|| scan_status=$?'));
   assert.ok(scan.run.includes('image_ci_report.py --scan-output image-security-evidence/security'));
   assert.ok(scan.run.includes('--scanner-exit "$scan_status" --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"'));
   assert.ok(!scan.run.includes('--inventory-only'));
-  assert.ok(scan.if.includes("steps.inventory.outcome == 'success'"));
-  assert.ok(steps.indexOf(inventory) > steps.indexOf(smoke));
-  assert.ok(steps.indexOf(scan) > steps.indexOf(inventory));
-  assert.ok(!steps.some(s => s['continue-on-error']));
-  const artifact = steps.find(s => s.with?.name === 'managed-image-security-${{ needs.prepare.outputs.sha }}');
+  assert.equal(scan.if, undefined);
+  assert.ok(producer.indexOf(inventory) > producer.indexOf(smoke));
+  assert.ok(scanSteps.indexOf(scan) > scanSteps.indexOf(loaded));
+  assert.ok(![...producer, ...scanSteps].some(s => s['continue-on-error']));
+  const artifact = scanSteps.find(s => s.with?.name === 'managed-image-security-${{ needs.prepare.outputs.sha }}');
   assert.equal(artifact.if, 'always()');
-  assert.equal(artifact.with.path, 'image-security-evidence/');
+  assert.ok(artifact.with.path.includes('image-security-evidence/'));
+  assert.ok(artifact.with.path.includes('!image-security-evidence/image.tar'));
   assert.equal(artifact.with['retention-days'], 14);
 });
 
-test('image policy checkout uses the trusted base and occurs after the image build', () => {
-  const steps = workflow('managed-image-build').jobs['build-smoke'].steps;
-  const trusted = steps.find(s => s.with?.path === 'trusted-image-policy');
-  assert.equal(trusted.with.ref,
-    '${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}');
-  assert.equal(trusted.with['persist-credentials'], false);
-  assert.equal(trusted.with['fetch-depth'], 0);
-  assert.ok(steps.indexOf(trusted) > steps.findIndex(s => s.id === 'build-image'));
+function requireFrozenGraph(config) {
+  const jobs = config.jobs;
+  const producer = jobs['build-candidate'];
+  const scanner = jobs['strict-scan'];
+  const upload = producer.steps.find(step => step.name === 'Retain frozen candidate before strict scan');
+  const download = scanner.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+  const load = scanner.steps.find(step => step.name === 'Load and bind the frozen image in a clean runner');
+  const policy = scanner.steps.find(step => step.name === 'Reject policy changes between inventory and scan');
+  assert.deepEqual(producer.needs, ['prepare', 'contract']);
+  assert.deepEqual(scanner.needs, ['prepare', 'build-candidate']);
+  assert.deepEqual(jobs.result.needs, ['prepare', 'contract', 'scanner-qualification', 'build-candidate', 'strict-scan']);
+  assert.equal(config.permissions.contents, 'read');
+  assert.equal(producer.permissions, undefined);
+  assert.equal(scanner.permissions, undefined);
+  assert.equal(upload.if, "steps.inventory.outcome == 'success'");
+  assert.equal(upload.with.name, 'managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+  assert.equal(upload.with.path, 'frozen-candidate/');
+  assert.equal(download.with.name, upload.with.name);
+  assert.equal(download.with.path, 'image-security-evidence');
+  assert.equal(load.env.IMAGE_ID, '${{ needs.build-candidate.outputs.image_id }}');
+  assert.ok(load.run.includes('load_exact_image'));
+  assert.equal(policy.env.INVENTORY_POLICY_SHA, '${{ needs.build-candidate.outputs.policy_sha }}');
+  assert.ok(policy.run.includes('"$INVENTORY_POLICY_SHA" == "$SCAN_POLICY_SHA"'));
+  assert.ok(scanner.steps.indexOf(download) < scanner.steps.indexOf(load));
+  assert.ok(scanner.steps.indexOf(load) < scanner.steps.indexOf(policy));
+  assert.ok(scanner.steps.indexOf(policy) < scanner.steps.findIndex(step => step.run?.includes('image_ci_report.py')));
+}
+
+test('candidate custody and strict-scan gate reject identity, policy and privilege mutations', () => {
+  const source = workflow('managed-image-build');
+  requireFrozenGraph(source);
+  for (const change of [
+    value => { value.jobs['strict-scan'].needs = ['prepare']; },
+    value => { value.jobs.result.needs = ['prepare', 'contract', 'scanner-qualification', 'build-candidate']; },
+    value => { value.jobs['build-candidate'].steps.find(step => step.name === 'Retain frozen candidate before strict scan').if = 'always()'; },
+    value => { value.jobs['build-candidate'].steps.find(step => step.name === 'Retain frozen candidate before strict scan').with.path = 'image-security-evidence/inventory/'; },
+    value => { value.jobs['strict-scan'].steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with.name = 'previous-attempt'; },
+    value => { value.jobs['strict-scan'].steps.find(step => step.name === 'Load and bind the frozen image in a clean runner').run = 'true'; },
+    value => { value.jobs['strict-scan'].steps.find(step => step.name === 'Reject policy changes between inventory and scan').run = 'true'; },
+    value => { value.jobs['strict-scan'].permissions = { statuses: 'write' }; },
+  ]) {
+    const mutated = structuredClone(source);
+    change(mutated);
+    assert.throws(() => requireFrozenGraph(mutated));
+  }
+});
+
+test('image policy checkout uses the same trusted SHA across inventory and scan', () => {
+  const jobs = workflow('managed-image-build').jobs;
+  for (const name of ['build-candidate', 'strict-scan']) {
+    const steps = jobs[name].steps;
+    const trusted = steps.find(s => s.with?.path === 'trusted-image-policy');
+    assert.equal(trusted.with.ref,
+      '${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}');
+    assert.equal(trusted.with['persist-credentials'], false);
+    assert.equal(trusted.with['fetch-depth'], 0);
+  }
+  const check = jobs['strict-scan'].steps.find(s => s.name === 'Reject policy changes between inventory and scan');
+  assert.equal(check.env.INVENTORY_POLICY_SHA, '${{ needs.build-candidate.outputs.policy_sha }}');
+  assert.equal(check.env.SCAN_POLICY_SHA, '${{ steps.publication-policy.outputs.sha || needs.prepare.outputs.policy_sha }}');
+  assert.ok(check.run.includes('"$INVENTORY_POLICY_SHA" == "$SCAN_POLICY_SHA"'));
 });
 
 test('publication uses the source-owned canonical receipt while ordinary events keep their selected pin', () => {
@@ -67,7 +152,7 @@ test('publication uses the source-owned canonical receipt while ordinary events 
   assert.equal(select.env.REQUESTED_POLICY_MODE, '${{ inputs.policy_mode }}');
   assert.equal(select.env.REQUESTED_POLICY_SHA, '${{ inputs.trusted_policy_sha }}');
   assert.equal(prepare.outputs.policy_mode, '${{ steps.policy.outputs.mode }}');
-  const steps = managed.jobs['build-smoke'].steps;
+  const steps = managed.jobs['strict-scan'].steps;
   assert.equal(steps[0].with['fetch-depth'], 0);
   const pin = steps.find(s => s.id === 'publication-policy');
   assert.equal(pin.if, "needs.prepare.outputs.policy_mode == 'publication'");
@@ -77,7 +162,7 @@ test('publication uses the source-owned canonical receipt while ordinary events 
   assert.equal(scan.env.NAC_PUBLICATION_POLICY_SHA, '${{ steps.publication-policy.outputs.sha }}');
   assert.ok(scan.run.includes('--publication-policy'));
   assert.ok(scan.run.includes('"${extra[@]}"'));
-  assert.ok(!steps.find(s => s.id === 'inventory').run.includes('--publication-policy'));
+  assert.ok(!managed.jobs['build-candidate'].steps.find(s => s.id === 'inventory').run.includes('--publication-policy'));
 });
 
 test('failed image work cannot make the managed or overall aggregate green', () => {
@@ -136,8 +221,9 @@ test('image reusable requires contracts and retains an unconditional fail-closed
   assert.equal(image.on.workflow_dispatch, undefined, 'image-only unit is not a standalone acceptance entrypoint');
   assert.equal(image.on.workflow_call.inputs.source_sha.required, true);
   assert.equal(image.on.workflow_call.outputs.sha.value, '${{ jobs.prepare.outputs.sha }}');
-  assert.deepEqual(image.jobs['build-smoke'].needs, ['prepare', 'contract']);
-  assert.deepEqual(image.jobs.result.needs, ['prepare', 'contract', 'scanner-qualification', 'build-smoke']);
+  assert.deepEqual(image.jobs['build-candidate'].needs, ['prepare', 'contract']);
+  assert.deepEqual(image.jobs['strict-scan'].needs, ['prepare', 'build-candidate']);
+  assert.deepEqual(image.jobs.result.needs, ['prepare', 'contract', 'scanner-qualification', 'build-candidate', 'strict-scan']);
   assert.equal(image.jobs.result.if, '${{ always() }}');
   assert.ok(image.jobs.result.steps.at(-1).run.includes('pr-checks.mjs managed-image-aggregate'));
   for (const job of Object.values(image.jobs)) {
