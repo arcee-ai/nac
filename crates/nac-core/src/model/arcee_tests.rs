@@ -1153,28 +1153,87 @@ fn refresh_without_rotated_token_keeps_current_refresh_token() {
 }
 
 #[tokio::test]
-async fn token_refresh_reports_revoked_for_invalid_grant_and_invalid_client() {
-    for error in ["invalid_grant", "invalid_client"] {
-        let server = ScriptedServer::start(vec![ScriptedResponse::json(
-            "400 Bad Request",
-            json!({ "error": error }).to_string(),
-        )]);
+async fn unknown_refresh_client_preserves_durable_credentials() {
+    for client_id in [LEGACY_CLIENT_ID, MANAGED_CLIENT_ID] {
+        let dir = TestDir::new("unknown-refresh-client");
+        let (_, auth_path) = dir.paths();
+        let lock_path = dir.0.join("arcee_auth.json.lock");
+        let mut auth = stored_auth("stale-access");
+        auth.client_id = client_id.to_string();
+        write_json(&auth_path, &auth);
+        let original = fs::read(&auth_path).unwrap();
+        let server = ScriptedServer::start(vec![
+            ScriptedResponse::json(
+                "400 Bad Request",
+                json!({ "error": "invalid_client" }).to_string(),
+            ),
+            ScriptedResponse::json(
+                "200 OK",
+                json!({
+                    "access_token": "fresh-access",
+                    "refresh_token": "fresh-refresh",
+                    "expires_in": 3600
+                })
+                .to_string(),
+            ),
+        ]);
 
-        let outcome = request_token_refresh(
+        let error = refresh_locked_with(
             &no_redirect_client().unwrap(),
-            &ArceeAuthService::for_test(&server.base_url),
-            "opaque-refresh",
-            LEGACY_CLIENT_ID,
+            &auth.base_url,
+            |_| true,
+            &auth_path,
+            &lock_path,
+            |_| Ok(ArceeAuthService::for_test(&server.base_url)),
         )
         .await
-        .expect("revoked refresh should not be an error");
-        server.finish();
+        .expect_err("an unrecognized client cannot refresh");
+        assert_eq!(fs::read(&auth_path).unwrap(), original);
+        assert!(error.to_string().contains("invalid_client"));
 
-        assert!(
-            matches!(outcome, RefreshOutcome::Revoked),
-            "{error} should map to revoked"
-        );
+        let token = refresh_locked_with(
+            &no_redirect_client().unwrap(),
+            &auth.base_url,
+            |_| true,
+            &auth_path,
+            &lock_path,
+            |_| Ok(ArceeAuthService::for_test(&server.base_url)),
+        )
+        .await
+        .expect("retry after client registration is repaired should succeed");
+        let requests = server.finish();
+        assert_eq!(token, "fresh-access");
+        let reopened = read_stored_auth_optional_at(&auth_path).unwrap().unwrap();
+        assert_eq!(reopened.refresh_token, "fresh-refresh");
+        assert_eq!(reopened.client_id, client_id);
+        assert_eq!(requests.len(), 2);
+        for request in requests {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&request.body).unwrap(),
+                json!({ "refresh_token": "refresh-1", "client_id": client_id })
+            );
+        }
     }
+}
+
+#[tokio::test]
+async fn token_refresh_reports_revoked_for_invalid_grant() {
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "400 Bad Request",
+        json!({ "error": "invalid_grant" }).to_string(),
+    )]);
+
+    let outcome = request_token_refresh(
+        &no_redirect_client().unwrap(),
+        &ArceeAuthService::for_test(&server.base_url),
+        "opaque-refresh",
+        LEGACY_CLIENT_ID,
+    )
+    .await
+    .expect("revoked refresh should not be an error");
+    server.finish();
+
+    assert!(matches!(outcome, RefreshOutcome::Revoked));
 }
 
 #[tokio::test]
@@ -1277,6 +1336,7 @@ fn run_failure_of(error: anyhow::Error) -> RunFailure {
 async fn revoked_refresh_asks_for_a_sign_in_again() {
     let dir = TestDir::new("revoked-run-failure");
     let (_, arcee_path) = dir.paths();
+    write_json(&arcee_path, &stored_auth("jwt-access-1"));
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "400 Bad Request",
         json!({ "error": "invalid_grant" }).to_string(),
@@ -1292,6 +1352,7 @@ async fn revoked_refresh_asks_for_a_sign_in_again() {
     .expect_err("a revoked refresh fails");
     server.finish();
 
+    assert!(!arcee_path.exists());
     let failure = run_failure_of(error);
     assert_eq!(failure.kind, RunFailureKind::Authentication);
     assert!(!failure.transient);

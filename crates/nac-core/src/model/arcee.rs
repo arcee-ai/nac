@@ -1051,7 +1051,7 @@ pub(super) async fn request_token_refresh(
     });
 
     match error_code.as_deref() {
-        Some("invalid_grant") | Some("invalid_client") => Ok(RefreshOutcome::Revoked),
+        Some("invalid_grant") => Ok(RefreshOutcome::Revoked),
         _ => Err(anyhow!(ArceeRefreshHttpError {
             status: status.as_u16(),
             message: format!(
