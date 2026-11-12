@@ -152,6 +152,38 @@ merge, run, job and artifact provenance and the complete ZIP digest. No
 workflow calls this composition, it has no status writer, and its `dev` pin
 does not by itself establish protected code or policy authority.
 
+`image_approval_authority.py` is a separate, inactive authority validator for
+that missing boundary. Every ruleset, reviewer, CODEOWNERS, protected workflow
+and `dev` revision anchor is intentionally unset by default, so calling it
+without a reviewed configuration fails before any GitHub request. With a
+synthetic configured fixture it requires the exact current protected `dev`
+and approval refs; two active repository rulesets with exact branch targets,
+explicitly empty bypass lists, deletion/non-fast-forward protection, squash
+only, stale-review dismissal, CODEOWNER and last-push approval, and resolved
+threads. The approval branch must contain the separately pinned regular
+`.github/CODEOWNERS` blob with one designated owner for all paths; the current
+protected `dev` tree must contain the separately pinned regular workflow blob.
+For **each** exact record, policy and digest-named evidence path, GitHub's
+current branch history must identify the same most recent commit. That commit
+must belong to one squash-merged approval-branch PR with a final-head approval
+from the pinned non-author security reviewer. This path-specific check allows
+later unrelated image records on the branch without treating their PRs as
+reviews of this image's closure. A renewal or revocation needs a new complete
+closure review. The pinned CODEOWNERS blob must also have existed at that
+merge commit, and the approval ruleset's last update must predate the merge;
+later policy tightening cannot retroactively authorize an older record. The
+event's workflow ref/SHA and a clean local checkout must
+match the independently fetched current protected `dev` SHA. The read-only
+validator returns only an authority receipt, never a finding disposition or
+status. It is not called by the replay workflow; protected execution, pin
+selection and merge-time enforcement still require separate qualification.
+
+In the observed live repository, `security-image-approvals` is absent. The
+current `dev` review ruleset `26484091` has a pull-request bypass actor and
+`dismiss_stale_reviews_on_push: false`; it cannot satisfy this validator. No
+anchors, reviewer roster, CODEOWNERS blob or protected replay workflow have
+been selected here. The branch's GitHub `protected` boolean is insufficient.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
