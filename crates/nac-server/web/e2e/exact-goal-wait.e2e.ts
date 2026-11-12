@@ -60,6 +60,7 @@ async function step(harness: EmbeddedHarness, id: string) {
   await expect
     .poll(() => harness.provider.requests.some((entry) => entry.matchedStep === id), {
       timeout: 10_000,
+      intervals: [25, 50, 100, 250],
     })
     .toBe(true);
   return harness.provider.requests.find((entry) => entry.matchedStep === id)!;
