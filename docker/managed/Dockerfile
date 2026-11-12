@@ -179,24 +179,33 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && /usr/local/go/bin/go version -m /usr/local/bin/gh | \
         awk -v version="v${GH_VERSION}" '$1 == "mod" && $2 == "github.com/cli/cli/v2" && $3 == version { found = 1 } END { exit !found }' \
     && gh version | grep -F "gh version ${GH_VERSION}" \
-    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
-        /usr/local/go/bin/go -C "/tmp/nac-gh-build/pkg/mod/github.com/cli/cli/v2@v${GH_VERSION}" \
-        list -m -json all > /tmp/nac-gh-modules.json \
-    && jq -r 'select(.Dir != null) | [.Path, .Dir] | @tsv' /tmp/nac-gh-modules.json > /tmp/nac-gh-notices \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | \
+        awk '$1 == "=>" { exit 1 } $1 == "mod" || $1 == "dep" { \
+            if ($3 !~ /^v/ || $4 !~ /^h1:/) exit 1; \
+            print $2 "\t" $3 "\t" $4; count++ \
+        } END { if (count != 161) exit 1 }' > /tmp/nac-gh-notices \
     && test -s /tmp/nac-gh-notices \
-    && while IFS="$(printf '\t')" read -r module module_dir; do \
+    && while IFS="$(printf '\t')" read -r module version module_sum; do \
+        module_metadata=$(XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
+            /usr/local/go/bin/go mod download -json "$module@$version") || exit 1; \
+        module_dir=$(printf '%s\n' "$module_metadata" | jq -er \
+            --arg module "$module" --arg version "$version" --arg sum "$module_sum" \
+            'select(.Path == $module and .Version == $version and .Sum == $sum and .Dir != null) | .Dir') || { \
+                echo "missing gh module source: $module@$version" >&2; exit 1; \
+            }; \
+        test -d "$module_dir" || { echo "missing gh module source: $module@$version" >&2; exit 1; }; \
         notice_dir="/usr/local/share/licenses/gh/modules/$module"; \
         mkdir -p "$notice_dir"; \
         found_notice=0; \
-        for notice in LICENSE LICENCE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS; do \
+        for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS; do \
             if [ -f "$module_dir/$notice" ]; then \
                 cp "$module_dir/$notice" "$notice_dir/$notice"; \
-                case "$notice" in LICENSE|LICENCE|LICENSE.md|LICENSE.txt|COPYING|NOTICE) found_notice=1;; esac; \
+                case "$notice" in LICENSE|LICENCE|LICENSE.md|LICENSE.txt|LICENSE-BSD|LICENSE-MIT|license|COPYING|NOTICE) found_notice=1;; esac; \
             fi; \
         done; \
         test "$found_notice" = 1 || { echo "missing gh module notice: $module" >&2; exit 1; }; \
     done < /tmp/nac-gh-notices \
-    && rm /tmp/nac-gh-module.json /tmp/nac-gh-modules.json /tmp/nac-gh-notices \
+    && rm /tmp/nac-gh-module.json /tmp/nac-gh-notices \
     && rm -rf /tmp/nac-gh-build /tmp/nac-gh-cache /tmp/nac-gh-config \
     && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go telemetry off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go env GOTELEMETRY)" = off \

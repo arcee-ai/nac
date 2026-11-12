@@ -96,8 +96,51 @@ require_literal "$dockerfile" 'GH_SOURCE_REVISION=7948e8056e45ac3c729b829e0eafe2
 require_literal "$dockerfile" 'go mod download -json "github.com/cli/cli/v2@v${GH_VERSION}"'
 require_literal "$dockerfile" 'go install -trimpath'
 require_literal "$dockerfile" 'install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh'
-require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS'
+# The notice inventory must follow the installed binary's exact linked versions.
+require_literal "$dockerfile" 'go version -m /usr/local/bin/gh |'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" '$1 == "=>" { exit 1 }'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'END { if (count != 161) exit 1 }'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'go mod download -json "$module@$version"'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" '.Path == $module and .Version == $version and .Sum == $sum'
+require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS'
 require_literal "$dockerfile" 'missing gh module notice:'
+python3 - "$dockerfile" <<'PY_GH_NOTICES'
+import pathlib
+import re
+import subprocess
+import sys
+
+dockerfile = pathlib.Path(sys.argv[1]).read_text()
+match = re.search(r"awk '(.*?)' > /tmp/nac-gh-notices", dockerfile, re.S)
+if match is None:
+    sys.exit("managed image contract: gh notice inventory parser is missing")
+parser = re.sub(r"\\\n\s*", " ", match.group(1))
+modules = "mod\tgithub.com/cli/cli/v2\tv2.103.0\th1:main\n" + "".join(
+    f"dep\texample.com/mod{index}\tv1.0.0\th1:sum{index}\n"
+    for index in range(160)
+)
+
+def parse(raw):
+    return subprocess.run(["awk", parser], input=raw, text=True, capture_output=True)
+
+accepted = parse(modules)
+if accepted.returncode or len(accepted.stdout.splitlines()) != 161:
+    sys.exit("managed image contract: gh linked-module inventory rejects valid metadata")
+for invalid in (
+    modules.replace("v1.0.0", "(devel)", 1),
+    modules.replace("h1:sum0", "missing", 1),
+    modules + "\t=>\texample.com/replacement\tv1.0.0\th1:sum\n",
+    modules.splitlines(keepends=True)[1:],
+):
+    if isinstance(invalid, list):
+        invalid = "".join(invalid)
+    if parse(invalid).returncode == 0:
+        sys.exit("managed image contract: gh linked-module inventory accepted invalid metadata")
+PY_GH_NOTICES
 # Assert the literal smoke expressions without expanding them here.
 # shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'gh_build_info=$(go version -m "$gh_binary")'
