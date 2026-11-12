@@ -1,125 +1,79 @@
-name: Focused native terminal browser
+name: Prepared single native command fixture90
 
 on:
-  workflow_call:
-    inputs:
-      candidate:
-        required: true
-        type: string
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/terminal-browser.yml'
-      - '.github/workflows/nightly-portability.yml'
-      - '.github/scripts/terminal-browser*'
-      - '.github/scripts/nightly-portability.py'
-      - 'Makefile'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'crates/nac-process/**'
-      - 'crates/nac-core/src/terminal/**'
-      - 'crates/nac-core/src/tools/*terminal*'
-      - 'crates/nac-core/src/session_service/*terminal*'
-      - 'crates/nac-core/src/sandbox/**'
-      - 'crates/nac-core/src/runtime/**'
-      - 'crates/nac-server/src/application/*terminal*'
-      - 'crates/nac-server/src/delivery/*terminal*'
-      - 'crates/nac-server/src/delivery/executions.rs'
-      - 'crates/nac-server/src/delivery/server.rs'
-      - 'crates/nac-server/src/lib.rs'
-      - 'crates/nac-server/web/src/app/features/terminal/**'
-      - 'crates/nac-server/web/src/app/features/terminal-selection/**'
-      - 'crates/nac-server/web/src/app/components/inspector/SessionSideBox.tsx'
-      - 'crates/nac-server/web/src/app/services/**'
-      - 'crates/nac-server/web/src/app/runtime/**'
-      - 'crates/nac-server/web/e2e/**'
-      - 'crates/nac-server/web/playwright.config.ts'
-      - 'crates/nac-server/web/package*.json'
-      - 'crates/nac-server/web/packages/nac-client/**'
-      - 'docs/ci/nightly-portability.md'
 
 permissions:
   contents: read
 
 concurrency:
-  group: terminal-browser-${{ github.run_id }}-${{ github.run_attempt }}
+  group: native346-command-runtime90-a93b1fb836ecc587b3cc4696b9e66838e7e5753d
   cancel-in-progress: false
 
 jobs:
-  terminal-browser:
-    name: ${{ matrix.profile }} real shell, pager and trusted clipboard
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            profile: ARM macOS
-          - runner: ubuntu-latest
-            profile: Linux
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+  command:
+    if: github.repository == 'arcee-ai/nac' && github.actor == 'allisoneer' && github.event_name == 'workflow_dispatch' && github.run_attempt == 1
+    runs-on: macos-26
+    timeout-minutes: 40
     env:
-      CARGO_PROFILE_TEST_DEBUG: '0'
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      SOURCE_SHA: a93b1fb836ecc587b3cc4696b9e66838e7e5753d
+      CONTROLLER_SHA256: d9dd34ba7a5ae9866674f1986070917fd2bb14fb21871995e63c06ba2af61c0f
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Check out frozen clean Source89
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.candidate || github.sha }}
+          ref: a93b1fb836ecc587b3cc4696b9e66838e7e5753d
+          path: source89
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
         with:
           toolchain: 1.98.0
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          prefix-key: nac-ci-v1
-          # Match stable-release browser: prefix + key(browser) + job(browser).
-          shared-key: browser-browser
-          key: browser
-          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.22.1
-      - name: Provision Linux pager
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes less
-      - name: Prepare locked development dependencies
-        run: make setup
-      - name: Install Linux Chromium system dependencies
-        if: runner.os == 'Linux'
-        working-directory: crates/nac-server/web
-        run: npx playwright install-deps chromium
-      - name: Verify native Rust supervisor controls
-        if: runner.os == 'macOS'
-        run: python3 .github/scripts/nightly-portability.test.py
-      - name: Verify browser result selection controls
-        run: python3 .github/scripts/terminal-browser.test.py
-      - name: Run native journey and deterministic byte negative control
+      - name: Restore canonical Rust cache without writing it
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: source89 -> target
+          shared-key: native-exact-qualification
+          prefix-key: nac-ci-v1
+          save-if: false
+      - name: Materialize and verify literal controller
+        shell: bash
         env:
-          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+          CONTROLLER_B64: IyEvdXNyL2Jpbi9lbnYgcHl0aG9uMwoiIiJQUkVQQVJFRCBvbmx5OiBvbmUgZXhhY3Qtc291cmNlIHB1YmxpYyBjb21tYW5kIFhDVGVzdCBvbiBhIGhvc3RlZCBNYWMuCgpEbyBub3QgcnVuIHdpdGhvdXQgc2VwYXJhdGUgYWRtaXNzaW9uLiBJbXBvcnRpbmcgdGhpcyBmaWxlIGRvZXMgbm90IGltcG9ydCBDSQpvciBhY3F1aXJlIGEgcHJvY2VzcywgYXBwLCBTREssIHBlcm1pc3Npb24sIHNvY2tldCBvciBpbnB1dCBhY3Rvci4KIiIiCmltcG9ydCBhcmdwYXJzZQppbXBvcnQgaGFzaGxpYgppbXBvcnQganNvbgppbXBvcnQgb3MKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBwbGF0Zm9ybQppbXBvcnQgc2lnbmFsCmltcG9ydCBzdGF0CmltcG9ydCBzeXMKaW1wb3J0IHRpbWUKZnJvbSB0eXBlcyBpbXBvcnQgU2ltcGxlTmFtZXNwYWNlCgpTT1VSQ0UgPSAnYTkzYjFmYjgzNmVjYzU4N2IzY2M0Njk2YjllNjY4MzhlN2U1NzUzZCcKVFJFRSA9ICcxN2QwMmVlM2Q4OWExY2FhZTc3MjhlZTYwODdhYTAzYzk0ZDUzMGNjJwpCQVNFID0gJ2I1NWRiZDFiNmZlMTNlMmFjZGE0ZjcxNTAzOTU1NTViZjY5MGZkYzQnClNDRU5BUklPID0gJ2NvbW1hbmRzLWlucHV0JwpURVNUID0gJ3Rlc3RUcnVzdGVkQ29tbWFuZHMnCgoKZGVmIG5lZWQoY29uZGl0aW9uLCBtZXNzYWdlKToKICAgIGlmIG5vdCBjb25kaXRpb246CiAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKG1lc3NhZ2UpCgoKZGVmIGRpZ2VzdChwYXRoKToKICAgIHdpdGggUGF0aChwYXRoKS5vcGVuKCdyYicpIGFzIHN0cmVhbToKICAgICAgICByZXR1cm4gaGFzaGxpYi5maWxlX2RpZ2VzdChzdHJlYW0sICdzaGEyNTYnKS5oZXhkaWdlc3QoKQoKCmRlZiBvd25lZF9qc29uKHBhdGgsIGxpbWl0PTI1NiAqIDEwMjQpOgogICAgZmQgPSBvcy5vcGVuKHBhdGgsIG9zLk9fUkRPTkxZIHwgb3MuT19OT0ZPTExPVyB8IG9zLk9fTk9OQkxPQ0spCiAgICB0cnk6CiAgICAgICAgYmVmb3JlID0gb3MuZnN0YXQoZmQpCiAgICAgICAgbmVlZChzdGF0LlNfSVNSRUcoYmVmb3JlLnN0X21vZGUpIGFuZCBiZWZvcmUuc3RfdWlkID09IG9zLmdldHVpZCgpCiAgICAgICAgICAgICBhbmQgYmVmb3JlLnN0X25saW5rID09IDEgYW5kIDAgPCBiZWZvcmUuc3Rfc2l6ZSA8PSBsaW1pdCwKICAgICAgICAgICAgICdSZXF1aXJlZCBib3VuZGVkIG93bmVkIGV2aWRlbmNlIGZpbGUgdW5hdmFpbGFibGUnKQogICAgICAgIHdpdGggb3MuZmRvcGVuKG9zLmR1cChmZCksICdyYicpIGFzIHN0cmVhbToKICAgICAgICAgICAgZGF0YSA9IHN0cmVhbS5yZWFkKGxpbWl0ICsgMSkKICAgICAgICBhZnRlciA9IG9zLmZzdGF0KGZkKQogICAgICAgIG5lZWQobGVuKGRhdGEpID09IGJlZm9yZS5zdF9zaXplIGFuZCBiZWZvcmUuc3Rfc2l6ZSA9PSBhZnRlci5zdF9zaXplCiAgICAgICAgICAgICBhbmQgYmVmb3JlLnN0X210aW1lX25zID09IGFmdGVyLnN0X210aW1lX25zCiAgICAgICAgICAgICBhbmQgYmVmb3JlLnN0X2N0aW1lX25zID09IGFmdGVyLnN0X2N0aW1lX25zLCAnRXZpZGVuY2UgY2hhbmdlZCBkdXJpbmcgcmVhZCcpCiAgICAgICAgcmV0dXJuIGpzb24ubG9hZHMoZGF0YSkKICAgIGZpbmFsbHk6CiAgICAgICAgb3MuY2xvc2UoZmQpCgoKZGVmIG1haW4oKToKICAgIHN0YXJ0ZWQgPSB0aW1lLm1vbm90b25pYygpCiAgICBwYXJzZXIgPSBhcmdwYXJzZS5Bcmd1bWVudFBhcnNlcihkZXNjcmlwdGlvbj1fX2RvY19fKQogICAgcGFyc2VyLmFkZF9hcmd1bWVudCgnLS1zb3VyY2Utcm9vdCcsIHJlcXVpcmVkPVRydWUsIHR5cGU9UGF0aCkKICAgIHBhcnNlci5hZGRfYXJndW1lbnQoJy0tb3V0cHV0JywgcmVxdWlyZWQ9VHJ1ZSwgdHlwZT1QYXRoKQogICAgcGFyc2VyLmFkZF9hcmd1bWVudCgnLS1jb250cm9sbGVyLXNoYTI1NicsIHJlcXVpcmVkPVRydWUpCiAgICBhcmdzID0gcGFyc2VyLnBhcnNlX2FyZ3MoKQogICAgbmVlZChkaWdlc3QoX19maWxlX18pID09IGFyZ3MuY29udHJvbGxlcl9zaGEyNTYsICdDb250cm9sbGVyIGRpZ2VzdCBkaWZmZXJzJykKICAgIG5lZWQob3MuZW52aXJvbi5nZXQoJ0dJVEhVQl9FVkVOVF9OQU1FJykgPT0gJ3dvcmtmbG93X2Rpc3BhdGNoJwogICAgICAgICBhbmQgb3MuZW52aXJvbi5nZXQoJ0dJVEhVQl9SRVBPU0lUT1JZJykgPT0gJ2FyY2VlLWFpL25hYycKICAgICAgICAgYW5kIG9zLmVudmlyb24uZ2V0KCdHSVRIVUJfQUNUT1InKSA9PSAnYWxsaXNvbmVlcicKICAgICAgICAgYW5kIG9zLmVudmlyb24uZ2V0KCdHSVRIVUJfUlVOX0FUVEVNUFQnKSA9PSAnMScsICdFeGFjdCByZXBvc2l0b3J5L2FjdG9yL21hbnVhbCBhdHRlbXB0MSBvbmx5JykKICAgIHJvb3QgPSBhcmdzLnNvdXJjZV9yb290CiAgICBuZWVkKHJvb3QuaXNfYWJzb2x1dGUoKSBhbmQgcm9vdC5yZXNvbHZlKCkgPT0gcm9vdCBhbmQgbm90IHJvb3QuaXNfc3ltbGluaygpLAogICAgICAgICAnQ2Fub25pY2FsIGV4YWN0IHNvdXJjZSByb290IHJlcXVpcmVkJykKICAgIG5lZWQocGxhdGZvcm0uc3lzdGVtKCkgPT0gJ0RhcndpbicgYW5kIHBsYXRmb3JtLm1hY2hpbmUoKSA9PSAnYXJtNjQnLCAnRGFyd2luIEFSTTY0IHJlcXVpcmVkJykKICAgIG9zLmNoZGlyKHJvb3QpCiAgICBzeXMucGF0aC5pbnNlcnQoMCwgc3RyKHJvb3QgLyAnZGVza3RvcC9tYWNvcycpKQogICAgaW1wb3J0IGNpICAjIFJldXNlIG93bmVycyBvbmx5OyBuZXZlciBjYWxsIGNpLm1haW4gb3IgY2lfY29tbWFuZHMucXVhbGlmeS4KICAgIGZyb20gY2lfY29tbWFuZHMgaW1wb3J0IHJlcXVpcmVfY29tbWFuZF9ldmlkZW5jZQogICAgZnJvbSBjaV9zdXBwb3J0IGltcG9ydCBleHBvcnRfZXZpZGVuY2UsIHF1YWxpZnlfdG9vbGNoYWluLCByZWRhY3RfdmFsdWVzCiAgICBmcm9tIGNpX3hjdGVzdCBpbXBvcnQgcnVuX3Rlcm1pbmFsCiAgICBmcm9tIGNpX3BhdGhzX2J1ZGdldCBpbXBvcnQgQm91bmQsIHVzaW5nCgogICAgIyBOYXJyb3cgdGhlIGV4aXN0aW5nIG93bmVyJ3MgY2xvY2s7IGltcG9ydGluZyBpdCBjYW5ub3QgcmVuZXcgdGhpcyB1bml0LgogICAgY2kuUlVOX0RFQURMSU5FID0gbWluKGNpLlJVTl9ERUFETElORSwgc3RhcnRlZCArIDMwICogNjApCiAgICB3b3JrX2RlYWRsaW5lID0gY2kuUlVOX0RFQURMSU5FIC0gMTIwCiAgICAjIEV4aXN0aW5nIEJvdW5kL3VzaW5nIGFsc28gY2xhbXBzIHRoZSBvd25lcidzIGRpcmVjdCBtZXRhZGF0YS9jbGVhbnVwCiAgICAjIHN1YnByb2Nlc3NlcyAodGltZW91dF9vcHRpb25zKSwgbm90IGp1c3QgdGhlIGRlbGVnYXRlZCBydW4vY29tbWFuZCBjYWxscy4KICAgICMgVGhpcyBpcyB0aGUgc2FtZSBhYnNvbHV0ZSBwYXJlbnQ7IG5vIFBhdGhCdWRnZXQgYWxsb2NhdGlvbiBvciBvbGQgY291bnRlci4KICAgIGNsb2NrID0gU2ltcGxlTmFtZXNwYWNlKG1vbm90b25pYz10aW1lLm1vbm90b25pYywgZmFpbGVkPVtdKQoKICAgIGRlZiBmYWlsX2Nsb2NrKHJlYXNvbik6CiAgICAgICAgaWYgcmVhc29uIG5vdCBpbiBjbG9jay5mYWlsZWQ6CiAgICAgICAgICAgIGNsb2NrLmZhaWxlZC5hcHBlbmQocmVhc29uKQoKICAgIGNsb2NrLmZhaWwgPSBmYWlsX2Nsb2NrCiAgICBjbG9jay5yZXRlbnRpb24gPSBCb3VuZChjbG9jaywgY2kuUlVOX0RFQURMSU5FLCAncmV0ZW50aW9uJykKICAgIHBhcmVudF9ib3VuZCA9IEJvdW5kKGNsb2NrLCBjaS5SVU5fREVBRExJTkUsICdwYXJlbnQnKQogICAgb3V0cHV0ID0gYXJncy5vdXRwdXQKICAgIG5lZWQob3V0cHV0LmlzX2Fic29sdXRlKCkgYW5kIG91dHB1dC5yZXNvbHZlKCkgPT0gb3V0cHV0IGFuZCBub3Qgb3V0cHV0LmV4aXN0cygpLAogICAgICAgICAnRnJlc2ggY2Fub25pY2FsIGV4dGVybmFsIG91dHB1dCByZXF1aXJlZCcpCiAgICBwcml2YXRlID0gb3V0cHV0LndpdGhfbmFtZShvdXRwdXQubmFtZSArICctcHJpdmF0ZScpCiAgICBidWlsZCA9IG91dHB1dC53aXRoX25hbWUob3V0cHV0Lm5hbWUgKyAnLWJ1aWxkLXByaXZhdGUnKQogICAgbmVlZChub3QgYW55KHAgPT0gcm9vdCBvciByb290IGluIHAucGFyZW50cyBvciBwIGluIHJvb3QucGFyZW50cwogICAgICAgICAgICAgICAgIGZvciBwIGluIChvdXRwdXQsIHByaXZhdGUsIGJ1aWxkKSksICdFdmlkZW5jZSBtdXN0IGJlIG91dHNpZGUgY2hlY2tvdXQnKQogICAgbmVlZChub3QgcHJpdmF0ZS5leGlzdHMoKSBhbmQgbm90IGJ1aWxkLmV4aXN0cygpLCAnUHJpdmF0ZSBvdXRwdXRzIGFscmVhZHkgZXhpc3QnKQogICAgcHJpdmF0ZS5ta2Rpcihtb2RlPTBvNzAwKQogICAgYnVpbGQubWtkaXIobW9kZT0wbzcwMCkKICAgIG91dHB1dC5ta2Rpcihtb2RlPTBvNzAwKQogICAgY2FzZSA9IHByaXZhdGUgLyAnY29tbWFuZHMteGN0ZXN0JwogICAgY2FzZS5ta2Rpcihtb2RlPTBvNzAwKQogICAgKGNhc2UgLyAnZXZpZGVuY2UnKS5ta2Rpcihtb2RlPTBvNzAwKQogICAgcmVwb3J0ID0gZGljdChyZXN1bHQ9J2ZhaWxlZCcsIHNvdXJjZT1TT1VSQ0UsIHRyZWU9VFJFRSwgYmFzZT1CQVNFLAogICAgICAgICAgICAgICAgICBjb250cm9sbGVyX3NoYTI1Nj1hcmdzLmNvbnRyb2xsZXJfc2hhMjU2LCBzY2VuYXJpbz1TQ0VOQVJJTywgdGVzdD1URVNULAogICAgICAgICAgICAgICAgICBldmVudD1vcy5lbnZpcm9uWydHSVRIVUJfRVZFTlRfTkFNRSddLCBydW5fYXR0ZW1wdD0xLAogICAgICAgICAgICAgICAgICByZXBvc2l0b3J5PW9zLmVudmlyb25bJ0dJVEhVQl9SRVBPU0lUT1JZJ10sIGFjdG9yPW9zLmVudmlyb25bJ0dJVEhVQl9BQ1RPUiddLAogICAgICAgICAgICAgICAgICBydW5faWQ9b3MuZW52aXJvbi5nZXQoJ0dJVEhVQl9SVU5fSUQnKSwgd29ya2Zsb3dfc2hhPW9zLmVudmlyb24uZ2V0KCdHSVRIVUJfU0hBJyksCiAgICAgICAgICAgICAgICAgIGFjY2VwdGFuY2U9J09uZSBuYW1lZCBjb21tYW5kIGZpeHR1cmUgb25seTsgZnVsbCBuYXRpdmUgYWNjZXB0YW5jZSByZW1haW5zIG9wZW4nLAogICAgICAgICAgICAgICAgICBjbGVhbnVwX293bmVyPSdVbmNoYW5nZWQgY2lfeGN0ZXN0LnJ1bl90ZXJtaW5hbCBmaW5hbGx5L3JlbG9jYXRpb24gY3VzdG9keScsCiAgICAgICAgICAgICAgICAgIHN0YW5kYWxvbmVfU0RLX2J1aWxkcz0wLCBydW5fdGVybWluYWxfY2FsbHM9MCkKICAgIGVudl9rZXlzID0gKCdOQUNfTUFDX09VVFBVVCcsICdDQVJHT19UQVJHRVRfRElSJywgJ05BQ19NQUNfRU5HSU5FJywgJ05BQ19NQUNfU0tJUF9FTkdJTkVfQlVJTEQnLAogICAgICAgICAgICAgICAgJ05BQ19NQUNfU01PS0VfU0NFTkFSSU9TJywgJ05BQ19NQUNfQ0lfVEVSTUlOQUwnKQogICAgcHJpb3JfZW52ID0ge2tleTogb3MuZW52aXJvbi5nZXQoa2V5KSBmb3Iga2V5IGluIGVudl9rZXlzfQoKICAgIGRlZiByZW1haW5pbmcoZGVhZGxpbmUpOgogICAgICAgIHZhbHVlID0gZGVhZGxpbmUgLSB0aW1lLm1vbm90b25pYygpCiAgICAgICAgbmVlZCh2YWx1ZSA+PSAxLCAnT3JpZ2luYWwgcGFyZW50L3dvcmsgZGVhZGxpbmUgZXhoYXVzdGVkJykKICAgICAgICByZXR1cm4gdmFsdWUKCiAgICBkZWYgY29tbWFuZChhcmd2KToKICAgICAgICByZW1haW5pbmcoY2kuUlVOX0RFQURMSU5FKQogICAgICAgIHZhbHVlID0gY2kuY29tbWFuZChhcmd2LCBjd2Q9cm9vdCkKICAgICAgICByZW1haW5pbmcoY2kuUlVOX0RFQURMSU5FKQogICAgICAgIHJldHVybiB2YWx1ZQoKICAgIGRlZiBydW4oYXJndiwgbG9nLCB0aW1lb3V0LCAqKmt3YXJncyk6CiAgICAgICAgIyBjaS5ydW4gcmV0YWlucyBpdHMgZXhpc3RpbmcgcHJvY2Vzcy1ncm91cCwgZHJhaW4sIHRpbWVvdXQgYW5kIGNsZWFudXAKICAgICAgICAjIG93bmVyLiBJdCBhbHNvIGNsYW1wcyBhZ2FpbnN0IHRoZSBzYW1lIGFic29sdXRlIHBhcmVudCBSVU5fREVBRExJTkUuCiAgICAgICAgY2FwID0gbWluKHRpbWVvdXQsIHJlbWFpbmluZyh3b3JrX2RlYWRsaW5lKSkKICAgICAgICBjaS5ydW4oYXJndiwgbG9nLCBjYXAsIGN3ZD1yb290LCByZXRhaW5fb3duZXJzaGlwPVRydWUsICoqa3dhcmdzKQogICAgICAgIHJlbWFpbmluZyh3b3JrX2RlYWRsaW5lKQoKICAgIGRlZiBjaGVja291dCgpOgogICAgICAgIG5lZWQoY29tbWFuZChbJ2dpdCcsICdyZXYtcGFyc2UnLCAnSEVBRCddKSA9PSBTT1VSQ0UKICAgICAgICAgICAgIGFuZCBjb21tYW5kKFsnZ2l0JywgJ3Jldi1wYXJzZScsICdIRUFEXnt0cmVlfSddKSA9PSBUUkVFCiAgICAgICAgICAgICBhbmQgY29tbWFuZChbJ2dpdCcsICdzdGF0dXMnLCAnLS1wb3JjZWxhaW4nXSkgPT0gJycKICAgICAgICAgICAgIGFuZCBQYXRoKGNvbW1hbmQoWydnaXQnLCAncmV2LXBhcnNlJywgJy0tc2hvdy10b3BsZXZlbCddKSkucmVzb2x2ZSgpID09IHJvb3QsCiAgICAgICAgICAgICAnRnJvemVuIGNsZWFuIFNvdXJjZTg5IGNoZWNrb3V0IHJlcXVpcmVkJykKCiAgICBkZWYgaW50ZXJydXB0KHNpZ251bSwgX2ZyYW1lKToKICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoJ0hvc3RlZCBjb250cm9sbGVyIGludGVycnVwdGVkOiAnICsgc3RyKHNpZ251bSkpCgogICAgZm9yIHNpZ251bSBpbiAoc2lnbmFsLlNJR1RFUk0sIHNpZ25hbC5TSUdJTlQpOgogICAgICAgIHNpZ25hbC5zaWduYWwoc2lnbnVtLCBpbnRlcnJ1cHQpCiAgICB0cnk6CiAgICAgICAgd2l0aCB1c2luZyhwYXJlbnRfYm91bmQpOgogICAgICAgICAgICBjaGVja291dCgpCiAgICAgICAgICAgIHJ1bihbJ21ha2UnLCAnc2V0dXAnXSwgcHJpdmF0ZSAvICdzZXR1cC5sb2cnLCA2MDApCiAgICAgICAgICAgIGNoZWNrb3V0KCkKICAgICAgICAgICAgZXhwZWN0ZWQgPSBvd25lZF9qc29uKHJvb3QgLyAnZGVza3RvcC9tYWNvcy9jaS10b29sY2hhaW4uanNvbicpCiAgICAgICAgICAgIGFjdHVhbCA9IGRpY3QoZGV2ZWxvcGVyX2RpcmVjdG9yeT1vcy5lbnZpcm9uLmdldCgnREVWRUxPUEVSX0RJUicpLAogICAgICAgICAgICAgICAgICAgICAgICAgIHhjb2RlPWNvbW1hbmQoWyd4Y29kZWJ1aWxkJywgJy12ZXJzaW9uJ10pLAogICAgICAgICAgICAgICAgICAgICAgICAgIHNkaz1jb21tYW5kKFsneGNydW4nLCAnLS1zZGsnLCAnbWFjb3N4JywgJy0tc2hvdy1zZGstdmVyc2lvbiddKSwKICAgICAgICAgICAgICAgICAgICAgICAgICBzd2lmdD1jb21tYW5kKFsneGNydW4nLCAnc3dpZnRjJywgJy0tdmVyc2lvbiddKSwKICAgICAgICAgICAgICAgICAgICAgICAgICBpbWFnZT1vcy5lbnZpcm9uLmdldCgnSW1hZ2VWZXJzaW9uJyksCiAgICAgICAgICAgICAgICAgICAgICAgICAgb3NfdmVyc2lvbj1jb21tYW5kKFsnc3dfdmVycycsICctcHJvZHVjdFZlcnNpb24nXSksCiAgICAgICAgICAgICAgICAgICAgICAgICAgb3NfYnVpbGQ9Y29tbWFuZChbJ3N3X3ZlcnMnLCAnLWJ1aWxkVmVyc2lvbiddKSkKICAgICAgICAgICAgcmVwb3J0Wyd0b29sY2hhaW4nXSA9IGFjdHVhbAogICAgICAgICAgICBuZWVkKHF1YWxpZnlfdG9vbGNoYWluKGFjdHVhbCwgZXhwZWN0ZWQpLCAnUGlubmVkIFN3aWZ0IGlkZW50aXR5IHJlcXVpcmVkJykKICAgICAgICAgICAgcmVwb3J0WydydXN0YyddID0gY29tbWFuZChbJ3J1c3RjJywgJy0tdmVyc2lvbiddKQogICAgICAgICAgICByZXBvcnRbJ25vZGUnXSA9IGNvbW1hbmQoWydub2RlJywgJy0tdmVyc2lvbiddKQogICAgICAgICAgICBuZWVkKHJlcG9ydFsncnVzdGMnXS5zdGFydHN3aXRoKCdydXN0YyAxLjk4LjAgJykKICAgICAgICAgICAgICAgICBhbmQgcmVwb3J0Wydub2RlJ10gPT0gJ3YyNC4yMi4xJywgJ1Bpbm5lZCBSdXN0L05vZGUgaWRlbnRpdHkgZGlmZmVycycpCiAgICAgICAgICAgIGZvciBrZXkgaW4gZW52X2tleXM6CiAgICAgICAgICAgICAgICBvcy5lbnZpcm9uLnBvcChrZXksIE5vbmUpCiAgICAgICAgICAgIG9zLmVudmlyb25bJ05BQ19NQUNfT1VUUFVUJ10gPSBzdHIoYnVpbGQpCiAgICAgICAgICAgICMgTWF0Y2ggdGhlIGNhbm9uaWNhbCByZWFkLW9ubHktcmVzdG9yZWQgUnVzdCBjYWNoZTsgYXBwL3JhdyBldmlkZW5jZQogICAgICAgICAgICAjIHN0YXkgZXh0ZXJuYWwgYW5kIHByaXZhdGUuIElnbm9yZWQgY29tcGlsZXIgb3V0cHV0IGlzIG5vdCBzb3VyY2UgZGlydC4KICAgICAgICAgICAgb3MuZW52aXJvblsnQ0FSR09fVEFSR0VUX0RJUiddID0gc3RyKHJvb3QgLyAndGFyZ2V0JykKICAgICAgICAgICAgIyBDYW5vbmljYWwgYnVpbGQtb25seSBicmFuY2g6IG9uZSBSdXN0K1N3aWZ0IFNtb2tlLmFwcCBwcmVwYXJhdGlvbjsKICAgICAgICAgICAgIyBubyBvcmRpbmFyeS9jb21wb25lbnQgc3VpdGVzLCBDSUdVSSBoZWxwZXIsIHNtb2tlLnB5IG9yIGFwcCBsYXVuY2guCiAgICAgICAgICAgIHJ1bihbJ2Jhc2gnLCAnZGVza3RvcC9tYWNvcy9wcmV2aWV3LnNoJywgJ3Ntb2tlLWJ1aWxkJ10sIHByaXZhdGUgLyAnYXBwLWJ1aWxkLmxvZycsIDkwMCkKICAgICAgICAgICAgY2hlY2tvdXQoKQogICAgICAgICAgICBhcHAgPSBidWlsZCAvICdOQUMgRGV2ZWxvcG1lbnQgUHJldmlldyBTbW9rZS5hcHAnCiAgICAgICAgICAgIHJlY2VpcHQgPSBvd25lZF9qc29uKGFwcCAvICdDb250ZW50cy9SZXNvdXJjZXMvYnVpbGQtcmVjZWlwdC5qc29uJykKICAgICAgICAgICAgYmluZGluZyA9IGRpY3Qoc291cmNlPVNPVVJDRSwgbmF0aXZlX3NoYTI1Nj1kaWdlc3QoYXBwIC8gJ0NvbnRlbnRzL01hY09TL05BQ1ByZXZpZXcnKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgZW5naW5lX3NoYTI1Nj1kaWdlc3QoYXBwIC8gJ0NvbnRlbnRzL1Jlc291cmNlcy9uYWMtd2ViJykpCiAgICAgICAgICAgIG5lZWQocmVjZWlwdC5nZXQoJ3NvdXJjZV9oZWFkJykgPT0gU09VUkNFIGFuZCByZWNlaXB0LmdldCgnc291cmNlX2RpcnR5JykgaXMgRmFsc2UKICAgICAgICAgICAgICAgICBhbmQgcmVjZWlwdC5nZXQoJ21vZGUnKSA9PSAnc21va2UtYnVpbGQnIGFuZCByZWNlaXB0LmdldCgnc21va2VfaW5zdHJ1bWVudGF0aW9uJykgaXMgVHJ1ZQogICAgICAgICAgICAgICAgIGFuZCByZWNlaXB0LmdldCgnbmF0aXZlX3NoYTI1NicpID09IGJpbmRpbmdbJ25hdGl2ZV9zaGEyNTYnXQogICAgICAgICAgICAgICAgIGFuZCByZWNlaXB0LmdldCgnZW5naW5lX3NoYTI1NicpID09IGJpbmRpbmdbJ2VuZ2luZV9zaGEyNTYnXSwgJ1Ntb2tlIGJ1aWxkIHJlY2VpcHQgZGlmZmVycycpCiAgICAgICAgICAgIG5lZWQob3duZWRfanNvbihhcHAgLyAnQ29udGVudHMvUmVzb3VyY2VzL2VuZ2luZS1pZGVudGl0eS5qc29uJylbJ3NvdXJjZV9yZXZpc2lvbiddID09IFNPVVJDRSwKICAgICAgICAgICAgICAgICAnQnVuZGxlZCBlbmdpbmUgc291cmNlIGRpZmZlcnMnKQogICAgICAgICAgICByZXBvcnRbJ2JpbmRpbmcnXSA9IGJpbmRpbmcKICAgICAgICAgICAgKHByaXZhdGUgLyAnYnVpbGQtcmVjZWlwdC5qc29uJykud3JpdGVfdGV4dChqc29uLmR1bXBzKHJlY2VpcHQsIGluZGVudD0yKSArICdcbicpCiAgICAgICAgICAgIGNhbGxzID0gW10KCiAgICAgICAgICAgIGRlZiB2YWxpZGF0ZShyZWNvcmQpOgogICAgICAgICAgICAgICAgIyBHMSBSMTogdGhlIGV4YWN0IGV4aXN0aW5nIGNvbW1hbmQgZ2F0ZSwgYWxsIGZpdmUgaW5wdXRzLiBUaGlzIGlzCiAgICAgICAgICAgICAgICAjIG5vdCB0ZXJtaW5hbCB2YWxpZGF0aW9uIGFuZCBuZXZlciBhbiBpZGVudGl0eS9wYXNzLXRocm91Z2ggZ2F0ZS4KICAgICAgICAgICAgICAgIGNhbGxzLmFwcGVuZCgxKQogICAgICAgICAgICAgICAgbmVlZChsZW4oY2FsbHMpID09IDEsICdDb21tYW5kIHZhbGlkYXRpb24gcmVwZWF0ZWQnKQogICAgICAgICAgICAgICAgcmV0dXJuIHJlcXVpcmVfY29tbWFuZF9ldmlkZW5jZShyZWNvcmQsCiAgICAgICAgICAgICAgICAgICAgb3duZWRfanNvbihjYXNlIC8gJ2V2aWRlbmNlL2NvbW1hbmRzLWlucHV0LXBoYXNlLmpzb24nLCA0MDk2KSwKICAgICAgICAgICAgICAgICAgICBvd25lZF9qc29uKGNhc2UgLyAnZXZpZGVuY2UvY29tbWFuZHMteGN0ZXN0LWRyaXZlci5qc29uJywgMzIgKiAxMDI0KSwKICAgICAgICAgICAgICAgICAgICBiaW5kaW5nLCBkaWdlc3QoY2FzZSAvICd4Y3Rlc3QtZml4dHVyZS5qc29uJykpCgogICAgICAgICAgICByZXBvcnRbJ3J1bl90ZXJtaW5hbF9jYWxscyddID0gMQogICAgICAgICAgICAjIFRoaXMgb3duZXIgaW50ZXJuYWxseSBidWlsZHMtZm9yLXRlc3Rpbmcgb25jZSAoMTgwcyksIHRoZW4gY29uZGl0aW9uYWxseQogICAgICAgICAgICAjIHRlc3RzLXdpdGhvdXQtYnVpbGRpbmcgb25jZSAoMjQwcyk7IGFjdG9yIGFsbG93YW5jZSByZW1haW5zIDE4MHMuCiAgICAgICAgICAgIHJlcG9ydFsneGN0ZXN0J10gPSBydW5fdGVybWluYWwoY2FzZSwgcnVuLCBjb21tYW5kLCBhcHBfcGF0aD1hcHAsCiAgICAgICAgICAgICAgICBzY2VuYXJpbz1TQ0VOQVJJTywgdGVzdF9uYW1lPVRFU1QsIGZpeHR1cmVfYmluZGluZz1iaW5kaW5nLCB2YWxpZGF0ZT12YWxpZGF0ZSkKICAgICAgICAgICAgbmVlZChjYWxscyA9PSBbMV0sICdOYW1lZCBjb21tYW5kIGFjY2VwdGFuY2UgbWlzc2luZycpCiAgICAgICAgICAgIG5lZWQob3duZWRfanNvbihjYXNlIC8gJ3hjdGVzdC1wb2xpY3ktY29tcGFyaXNvbi5qc29uJykKICAgICAgICAgICAgICAgICBbJ3BlcnNpc3RlbnRfYXV0aG9yaXphdGlvbl9wb2xpY3lfdW5jaGFuZ2VkJ10gaXMgVHJ1ZSwgJ1BlcnNpc3RlbnQgcG9saWN5IGNoYW5nZWQnKQogICAgICAgICAgICBjaGVja291dCgpCiAgICAgICAgICAgIG5lZWQobm90IGNsb2NrLmZhaWxlZCwgJ09yaWdpbmFsIHBhcmVudCBmYWlsdXJlIHJlbWFpbnMgbGF0Y2hlZCcpCiAgICAgICAgICAgIHJlcG9ydFsncmVzdWx0J10gPSAncGFzc2VkLW5hbWVkLWNvbW1hbmQtZml4dHVyZScKICAgIGV4Y2VwdCBCYXNlRXhjZXB0aW9uIGFzIGVycm9yOgogICAgICAgIHJlcG9ydFsnZXJyb3InXSA9IHR5cGUoZXJyb3IpLl9fbmFtZV9fICsgJzogJyArIHN0cihlcnJvcikKICAgICAgICByYWlzZQogICAgZmluYWxseToKICAgICAgICAjIE5ldmVyIHN1cGVyc2VkZSB0aGUgb3duZXIncyBjbGVhbnVwIG9yIHJlbW92ZSBhbiB1bnJlc29sdmVkIHJlbG9jYXRlZAogICAgICAgICMgYnVuZGxlL3Byb2ZpbGUuIE9yaWdpbmFscy9idWlsZCBhcnRpZmFjdHMgcmVtYWluIHByaXZhdGUgdW50aWwgVk0gdGVhcmRvd24uCiAgICAgICAgcmVwb3J0WydlbGFwc2VkX3NlY29uZHMnXSA9IHJvdW5kKHRpbWUubW9ub3RvbmljKCkgLSBzdGFydGVkLCAzKQogICAgICAgIChwcml2YXRlIC8gJ2NpLXJlcG9ydC5qc29uJykud3JpdGVfdGV4dChqc29uLmR1bXBzKHJlcG9ydCwgaW5kZW50PTIpICsgJ1xuJykKICAgICAgICB0cnk6CiAgICAgICAgICAgIHJlbWFpbmluZyhjaS5SVU5fREVBRExJTkUpCiAgICAgICAgICAgIHdpdGggdXNpbmcoY2xvY2sucmV0ZW50aW9uKToKICAgICAgICAgICAgICAgIGV4cG9ydF9ldmlkZW5jZShwcml2YXRlLCBvdXRwdXQsIFsoc3RyKHJvb3QpLCAnPGNoZWNrb3V0PicpLAogICAgICAgICAgICAgICAgICAgIChzdHIoYnVpbGQpLCAnPHByaXZhdGUtYnVpbGQ+JyksIChzdHIocHJpdmF0ZSksICc8cHJpdmF0ZS1ldmlkZW5jZT4nKSwKICAgICAgICAgICAgICAgICAgICAqcmVkYWN0X3ZhbHVlcygpXSwgaW5jbHVkZV9oYXNoZXM9VHJ1ZSkKICAgICAgICAgICAgcmVtYWluaW5nKGNpLlJVTl9ERUFETElORSkKICAgICAgICBleGNlcHQgQmFzZUV4Y2VwdGlvbiBhcyBlcnJvcjoKICAgICAgICAgICAgIyBBIGZhaWxlZCBleHBvcnQgY2Fubm90IGxlYXZlIGEgcGFzc2luZyBwdWJsaWMgc3VtbWFyeS4KICAgICAgICAgICAgcmVwb3J0WydyZXN1bHQnXSA9ICdmYWlsZWQnCiAgICAgICAgICAgIHJlcG9ydFsncmV0ZW50aW9uX2Vycm9yJ10gPSB0eXBlKGVycm9yKS5fX25hbWVfXyArICc6ICcgKyBzdHIoZXJyb3IpCiAgICAgICAgICAgIChwcml2YXRlIC8gJ2NpLXJlcG9ydC5qc29uJykud3JpdGVfdGV4dChqc29uLmR1bXBzKHJlcG9ydCwgaW5kZW50PTIpICsgJ1xuJykKICAgICAgICAgICAgKG91dHB1dCAvICdjaS1yZXBvcnQuanNvbicpLndyaXRlX3RleHQoanNvbi5kdW1wcyhkaWN0KAogICAgICAgICAgICAgICAgcmVzdWx0PSdmYWlsZWQnLCByZXRlbnRpb25fY29tcGxldGU9RmFsc2UsIHNvdXJjZT1TT1VSQ0UpKSArICdcbicpCiAgICAgICAgICAgIHJhaXNlCiAgICAgICAgZmluYWxseToKICAgICAgICAgICAgZm9yIGtleSwgdmFsdWUgaW4gcHJpb3JfZW52Lml0ZW1zKCk6CiAgICAgICAgICAgICAgICBpZiB2YWx1ZSBpcyBOb25lOgogICAgICAgICAgICAgICAgICAgIG9zLmVudmlyb24ucG9wKGtleSwgTm9uZSkKICAgICAgICAgICAgICAgIGVsc2U6CiAgICAgICAgICAgICAgICAgICAgb3MuZW52aXJvbltrZXldID0gdmFsdWUKCgppZiBfX25hbWVfXyA9PSAnX19tYWluX18nOgogICAgbWFpbigpCg==
         run: |
-          exec python3 .github/scripts/terminal-browser.py \
-            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser"
-      - name: Prove cancellation settles the actual detached server and shell
-        env:
-          EXPECTED_SHA: ${{ inputs.candidate || github.sha }}
+          python3 -B - <<'PYCONTROLLER'
+          import base64, hashlib, os
+          from pathlib import Path
+          data = base64.b64decode(os.environ['CONTROLLER_B64'], validate=True)
+          assert hashlib.sha256(data).hexdigest() == os.environ['CONTROLLER_SHA256']
+          path = Path(os.environ['RUNNER_TEMP']) / 'native346-command-runtime90.py'
+          with path.open('xb') as stream:
+              stream.write(data)
+          path.chmod(0o700)
+          PYCONTROLLER
+      - name: One owner call with internal SDK build and conditional one command actor
+        shell: bash
         run: |
-          exec python3 .github/scripts/terminal-browser-cancel.py \
-            --expected-sha "$EXPECTED_SHA" --output "$RUNNER_TEMP/terminal-browser/cancellation-control"
-      - name: Summarize exact candidate and attempts
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/terminal-browser/summary.md" ]; then
-            cat "$RUNNER_TEMP/terminal-browser/summary.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Focused browser setup did not complete; no journey pass is claimed.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -f "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" ]; then
-            cat "$RUNNER_TEMP/terminal-browser/cancellation-control/cancellation.json" >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Retain native journey and negative-control evidence
+          test "$GITHUB_REPOSITORY" = arcee-ai/nac
+          test "$GITHUB_ACTOR" = allisoneer
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          python3 -B "$RUNNER_TEMP/native346-command-runtime90.py" \
+            --source-root "$GITHUB_WORKSPACE/source89" \
+            --controller-sha256 "$CONTROLLER_SHA256" \
+            --output "$RUNNER_TEMP/native346-command-runtime90-evidence"
+      - name: Retain only bounded redacted evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: terminal-browser-${{ runner.os }}-${{ inputs.candidate || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/terminal-browser
-          retention-days: 14
+          name: native346-runtime90-a93b1fb836ecc587b3cc4696b9e66838e7e5753d-${{ github.run_id }}
+          path: ${{ runner.temp }}/native346-command-runtime90-evidence
           if-no-files-found: error
+          retention-days: 7
