@@ -164,6 +164,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(self.invoke(clock=lambda: next(ticks))["state"], "success")
         self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
 
+    def test_initially_stale_observation_survives_clock_rollback(self):
+        self.collected_at = "2026-11-10T11:59:59Z"
+        earlier = NOW - replay.dt.timedelta(seconds=2)
+        ticks = iter((NOW, earlier, earlier, earlier))
+        self.assertEqual(self.invoke(clock=lambda: next(ticks))["state"], "success")
+        self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
+
     def test_stale_recollection_error_or_changed_evidence_fails(self):
         self.collected_at = "2026-11-10T11:59:59Z"
         self.fail_recollection = True
