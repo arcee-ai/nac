@@ -144,13 +144,14 @@ def policy(raw, now):
     schema = value["schema_version"]
     ids, selectors = set(), set()
     for rule in value["rules"]:
-        exact(rule, RULE_FIELDS if schema == 1 else AGGREGATE_RULE_FIELDS, "rule")
+        aggregate = schema == 2 and isinstance(rule, dict) and "bindings" in rule
+        exact(rule, AGGREGATE_RULE_FIELDS if aggregate else RULE_FIELDS, "rule")
         identity(rule["id"], "rule id")
         require(rule["id"] not in ids, "duplicate rule id")
         ids.add(rule["id"])
         finding_selector(rule["finding"])
         bindings = rule_bindings(rule)
-        if schema == 2:
+        if aggregate:
             require(isinstance(bindings, list) and 2 <= len(bindings) <= 16,
                     "aggregate rule needs two to sixteen installed payloads")
         for item in bindings:
@@ -160,7 +161,7 @@ def policy(raw, now):
             require(rule["finding"]["version"] in {item["package_version"],
                                                     item["upstream_version"]},
                     "finding version differs from truthful installed versions")
-        if schema == 2:
+        if aggregate:
             names = [item["installed_package"] for item in bindings]
             require(names == sorted(set(names)),
                     "aggregate installed payloads must be unique and sorted")
