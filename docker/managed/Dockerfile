@@ -89,10 +89,13 @@ FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb
 
 ARG NODE_VERSION=24.22.1
 ARG NODE_SHA256=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
-ARG GO_VERSION=1.27.3
-ARG GO_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_VERSION=1.27.4
+ARG GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 ARG GH_VERSION=2.103.0
 ARG GH_SHA256=fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786
+ARG GH_MODULE_SUM=h1:iSwyy7dCdv8AUMi+myP8XrMgo4ZalGUX47i8vBih+zg=
+ARG GH_SOURCE_REVISION=7948e8056e45ac3c729b829e0eafe2d0797a95c6
+ARG GH_BUILD_DATE=2026-10-21
 ARG GIT_LFS_VERSION=3.8.0
 ARG GIT_LFS_MODULE_SUM=h1:D0WiUyq5J3ZOv/9bvCcPToHqHF+WIQQKF5BK8bxlc5o=
 ARG GIT_LFS_REVISION=aece9221f8c09221a14395d964806b956289bc07
@@ -120,11 +123,12 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && apk upgrade --no-cache \
     && apk add --no-cache \
         bash binutils build-base ca-certificates-bundle cmake coreutils \
+        glibc-2.44=2.44-r16 glibc-2.44-locale-posix=2.44-r16 ld-linux-2.44=2.44-r16 libcrypt1-2.44=2.44-r16 \
         gcc=16.2.0-r1 libgcc=16.2.0-r1 libstdc++=16.2.0-r1 libstdc++-dev=16.2.0-r1 \
         krb5-libs=1.22.2-r5 cyrus-sasl-heimdal-libs=2.1.28-r58 \
         curl=8.23.0-r1 libcurl-openssl4=8.23.0-r1 fd findutils git gzip jq libssh2=1.11.1-r11 openssl-dev=3.6.5-r5 make \
-        openssh-client pkgconf procps python-3.13=3.13.16_git20261016-r1 \
-        py3-pip=26.2.2-r0 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
+        openssh-client pkgconf procps python-3.13=3.13.18_git20261030-r0 \
+        py3-pip=26.2.2-r2 ripgrep rsync gnutar tini unzip xz zip shadow perl util-linux libxml2 py3-setuptools \
         zlib=1.3.2.1_rc20260921-r0 \
         libbrotlicommon1=1.2.1-r2 libbrotlidec1=1.2.1-r2 libbrotlienc1=1.2.1-r2 \
     && cd /usr/share/nac/runtime-package-build \
@@ -152,7 +156,6 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
     && mkdir /tmp/nac-gh \
     && tar -xzf /tmp/gh.tar.gz -C /tmp/nac-gh --strip-components=1 \
-    && install -m 0755 /tmp/nac-gh/bin/gh /usr/local/bin/gh \
     && cp -R /tmp/nac-gh/share/. /usr/local/share/ \
     && install -d /usr/local/share/licenses/gh \
     && cp /tmp/nac-gh/LICENSE /usr/local/share/licenses/gh/LICENSE \
@@ -162,6 +165,48 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz \
+    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
+        /usr/local/go/bin/go mod download -json "github.com/cli/cli/v2@v${GH_VERSION}" > /tmp/nac-gh-module.json \
+    && jq -e --arg sum "$GH_MODULE_SUM" --arg revision "$GH_SOURCE_REVISION" \
+        '.Sum == $sum and .Origin.Hash == $revision' /tmp/nac-gh-module.json > /dev/null \
+    && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local CGO_ENABLED=0 \
+        GOPATH=/tmp/nac-gh-build GOCACHE=/tmp/nac-gh-cache \
+        /usr/local/go/bin/go install -trimpath \
+        -ldflags "-s -w -X github.com/cli/cli/v2/internal/build.Version=${GH_VERSION} -X github.com/cli/cli/v2/internal/build.Date=${GH_BUILD_DATE}" \
+        "github.com/cli/cli/v2/cmd/gh@v${GH_VERSION}" \
+    && install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh \
+    && test "$(/usr/local/go/bin/go version -m /usr/local/bin/gh | sed -n '1p')" = "/usr/local/bin/gh: go${GO_VERSION}" \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | \
+        awk -v version="v${GH_VERSION}" '$1 == "mod" && $2 == "github.com/cli/cli/v2" && $3 == version { found = 1 } END { exit !found }' \
+    && gh version | grep -F "gh version ${GH_VERSION}" \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | \
+        awk '$1 == "=>" { exit 1 } $1 == "mod" || $1 == "dep" { \
+            if ($3 !~ /^v/ || $4 !~ /^h1:/) exit 1; \
+            print $2 "\t" $3 "\t" $4; count++ \
+        } END { if (count != 161) exit 1 }' > /tmp/nac-gh-notices \
+    && test -s /tmp/nac-gh-notices \
+    && while IFS="$(printf '\t')" read -r module version module_sum; do \
+        module_metadata=$(XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
+            /usr/local/go/bin/go mod download -json "$module@$version") || exit 1; \
+        module_dir=$(printf '%s\n' "$module_metadata" | jq -er \
+            --arg module "$module" --arg version "$version" --arg sum "$module_sum" \
+            'select(.Path == $module and .Version == $version and .Sum == $sum and .Dir != null) | .Dir') || { \
+                echo "missing gh module source: $module@$version" >&2; exit 1; \
+            }; \
+        test -d "$module_dir" || { echo "missing gh module source: $module@$version" >&2; exit 1; }; \
+        notice_dir="/usr/local/share/licenses/gh/modules/$module"; \
+        mkdir -p "$notice_dir" || exit 1; \
+        found_notice=0; \
+        for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS; do \
+            if [ -f "$module_dir/$notice" ]; then \
+                cp "$module_dir/$notice" "$notice_dir/$notice" || exit 1; \
+                case "$notice" in LICENSE|LICENCE|LICENSE.md|LICENSE.txt|LICENSE-BSD|LICENSE-MIT|license|COPYING|NOTICE) found_notice=1;; esac; \
+            fi; \
+        done; \
+        test "$found_notice" = 1 || { echo "missing gh module notice: $module" >&2; exit 1; }; \
+    done < /tmp/nac-gh-notices \
+    && rm /tmp/nac-gh-module.json /tmp/nac-gh-notices \
+    && rm -rf /tmp/nac-gh-build /tmp/nac-gh-cache /tmp/nac-gh-config \
     && XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go telemetry off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local /usr/local/go/bin/go env GOTELEMETRY)" = off \
     && test "$(XDG_CONFIG_HOME=/tmp/nac-lfs-config GOTOOLCHAIN=local GOPATH=/tmp/nac-lfs-build /usr/local/go/bin/go mod download -json \

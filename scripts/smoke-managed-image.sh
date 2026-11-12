@@ -198,10 +198,16 @@ port=$(wait_until_ready)
     done
     rustc --version | grep -F "rustc 1.98.0" >/dev/null || assertion_failed "rust-version"
     node --version | grep -F "v24.22.1" >/dev/null || assertion_failed "node-version"
-    go version | grep -F "go1.27.3" >/dev/null || {
-        echo "managed image smoke: expected Go 1.27.3" >&2
+    go version | grep -F "go1.27.4" >/dev/null || {
+        echo "managed image smoke: expected Go 1.27.4" >&2
         exit 1
     }
+    gh version | grep -F "gh version 2.103.0" >/dev/null || assertion_failed "gh-version"
+    gh_binary=$(command -v gh)
+    gh_build_info=$(go version -m "$gh_binary")
+    test "$(printf '%s\n' "$gh_build_info" | sed -n '1p')" = "$gh_binary: go1.27.4" || assertion_failed "gh-go-toolchain"
+    printf '%s\n' "$gh_build_info" | \
+        awk '$1 == "mod" && $2 == "github.com/cli/cli/v2" && $3 == "v2.103.0" { found = 1 } END { exit !found }' || assertion_failed "gh-source-module"
     uv --version | grep -F "uv 0.13.4" >/dev/null || {
         echo "managed image smoke: expected uv 0.13.4" >&2
         exit 1
@@ -226,6 +232,10 @@ NAC_MANAGED_RUNTIME_ASSERTIONS
 # Exercise clean/smudge and an actual LFS transfer as the managed user with the
 # read-only root and mounted HOME; binary presence alone misses setup failures.
 "$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/smoke-managed-runtime.py"
+
+# Exercise the installed glibc gettext path rule in the exact running image.
+# A normal catalog must first load, so missing locale data cannot fake a pass.
+"$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/security/glibc_gettext_runtime_probe.py"
 
 "$container_runtime" exec -i "$container_name" /bin/sh < "$repo_root/scripts/smoke-managed-git-lfs.sh"
 
