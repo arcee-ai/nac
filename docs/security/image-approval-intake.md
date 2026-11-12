@@ -181,6 +181,23 @@ current `dev` review ruleset `26484091` has a pull-request bypass actor and
 anchors, reviewer roster, CODEOWNERS blob or protected replay workflow have
 been selected here. The branch's GitHub `protected` boolean is insufficient.
 
+`image_approval_entrypoint.py` is an inactive composition of those source-only
+pieces. It checks that authority anchors are configured **before** any GitHub
+API or token access, reads one exact protected record/policy/evidence snapshot,
+validates its branch/ruleset/reviewer/code origin, and only then passes an
+Actions-read token to the artifact-ID downloader and strict same-image replay.
+After replay it freshly reads and compares the complete protected snapshot
+and repeats the authority check. It accepts only an exact same-merge success
+proposal and returns no reusable result or status credential. The checked-in
+`image-approval-replay.yml` exposes a `workflow_dispatch` form but its only
+job requires an empty `github.repository` value (which an Actions run never
+has), repository permissions default to none, and
+it supplies no token or status secret. The workflow cannot check out candidate
+code or execute this entrypoint in its current form. Removing the guard or
+setting the unset pins would be a separate reviewed activation change.
+Workflow visibility does not establish approval, App attribution, or
+merge-time freshness of an eventual green status.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
