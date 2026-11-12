@@ -258,9 +258,11 @@ def main():
         environment = clean_environment(os.environ)
         environment.update(NAC_MAC_OUTPUT=str(output / 'bundles'), CARGO_PROFILE_DEV_DEBUG='0',
                            CARGO_PROFILE_DEV_OPT_LEVEL='1', CARGO_INCREMENTAL='0', PYTHONDONTWRITEBYTECODE='1')
+        # A cold smoke build spent 13m06s in Cargo before native compilation.
+        # Construction may use 1200s; run still clamps it to the same work cutoff.
         for mode, name, driver in [('smoke-build', 'NAC Development Preview Smoke.app', 'external_auth_smoke.py'),
                                    ('auth-build', 'NAC Auth Fixture.app', 'device_auth_smoke.py')]:
-            run(mode, ['bash', 'desktop/macos/preview.sh', mode], environment=environment, limit=900)
+            run(mode, ['bash', 'desktop/macos/preview.sh', mode], environment=environment, limit=1200)
             app = output / 'bundles' / name
             receipt = json.loads((app / 'Contents/Resources/build-receipt.json').read_text())
             require(receipt['source_head'] == source and not receipt['source_dirty'], 'Producer source drift')
