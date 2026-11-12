@@ -57,6 +57,7 @@ class AuthorityTests(unittest.TestCase):
         self.review = {"id": 99, "user": {"id": REVIEWER_ID, "login": LOGIN},
                        "state": "APPROVED", "commit_id": HEAD,
                        "submitted_at": "2026-11-11T11:00:00Z"}
+        self.reviews = [self.review]
         self.pr = {"number": 456, "state": "closed", "merged": True,
                    "merge_commit_sha": COMMIT, "merged_at": "2026-11-11T11:30:00Z",
                    "base": {"ref": readback.BRANCH,
@@ -109,7 +110,7 @@ class AuthorityTests(unittest.TestCase):
         if endpoint == f"{prefix}/commits/{COMMIT}/pulls?per_page=2":
             return [copy.deepcopy(self.pr)]
         if endpoint == f"{prefix}/pulls/{self.pr['number']}/reviews?per_page=100":
-            return [copy.deepcopy(self.review)]
+            return copy.deepcopy(self.reviews)
         raise ValueError(f"unexpected list API request: {endpoint}")
 
     def git(self, root, *args):
@@ -181,6 +182,20 @@ class AuthorityTests(unittest.TestCase):
         self.pr["user"]["id"] = REVIEWER_ID
         with self.assertRaisesRegex(ValueError, "separate author"):
             self.verify()
+
+    def test_later_comment_does_not_hide_final_head_approval(self):
+        comment = {**self.review, "id": 100, "state": "COMMENTED",
+                   "submitted_at": "2026-11-11T11:15:00Z"}
+        self.reviews.append(comment)
+        self.assertIsNone(self.verify())
+        comment["state"] = "CHANGES_REQUESTED"
+        with self.assertRaisesRegex(ValueError, "stale, dismissed"):
+            self.verify()
+
+    def test_39_character_reviewer_login_can_be_pinned(self):
+        pins = authority.AuthorityPins(**{
+            **self.pins.__dict__, "reviewer_login": "a" * 39})
+        self.assertIs(authority.configured(pins), pins)
 
     def test_codeowners_pin_or_workflow_checkout_change_fails(self):
         pins = authority.AuthorityPins(**{**self.pins.__dict__, "codeowners_blob": "f" * 40})
