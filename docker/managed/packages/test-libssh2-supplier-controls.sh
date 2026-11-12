@@ -10,7 +10,8 @@ case "$mode" in
         flags='-g -fsanitize=address -fno-omit-frame-pointer'
         ;;
     i386)
-        test "$(uname -m)" = i686
+        # The 55200 probe checks sizeof(size_t) after compilation; uname may
+        # report the host kernel's architecture under emulation.
         cases='55200'
         flags='-g'
         ;;
