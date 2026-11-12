@@ -1,4 +1,4 @@
-"""Characterize the actual clipboard helper without AppKit or clipboard access."""
+"""Actual clipboard helpers, Copy caller and wait with inert deterministic doubles."""
 
 from pathlib import Path
 import platform
@@ -14,11 +14,21 @@ OWNER = Path(__file__).parent
 
 class NativeClipboardOwnershipTests(unittest.TestCase):
     @unittest.skipUnless(platform.system() == 'Darwin', 'Swift compiler on macOS is required')
-    def test_failure_reasons_and_short_circuit_reads(self):
+    def test_ownership_settlement_and_caller_controls(self):
         source = (OWNER / 'NativeCommandInput.swift').read_text()
         fixture = (OWNER / 'ClipboardOwnershipFixture.swift').read_text()
-        self.assertEqual(fixture.count('// OWNERSHIP_HELPER'), 1)
-        fixture = fixture.replace('// OWNERSHIP_HELPER', member(source, 'private func ownedClipboardChange('))
+        for marker, declaration in [
+            ('// OWNERSHIP_HELPER', 'private func ownedClipboardChange('),
+            ('// COPY_READY_HELPER', 'private func copyClipboardReady('),
+            ('// WAIT_OWNER', 'private func wait('),
+        ]:
+            self.assertEqual(fixture.count(marker), 1)
+            fixture = fixture.replace(marker, member(source, declaration))
+        start = source.index('        let beforeCopy = board.changeCount\n')
+        end = source.index('        try external?.verified("copy")\n', start)
+        end += len('        try external?.verified("copy")\n')
+        self.assertEqual(fixture.count('// COPY_CALLER'), 1)
+        fixture = fixture.replace('// COPY_CALLER', source[start:end])
         with tempfile.TemporaryDirectory(prefix='nac-clipboard-inert-') as directory:
             root = Path(directory)
             swift = root / 'ClipboardOwnership.swift'

@@ -67,8 +67,15 @@ final class NativeCommandInput {
         try external?.verified("select")
         let beforeCopy = board.changeCount
         try await drive("copy", external: external) { try await self.key(8, flags: .maskCommand) }
-        try await wait("fixture-owned native copy") { board.changeCount != beforeCopy }
-        ownedChange = try ownedClipboardChange(board, expected: text)
+        var copyGeneration: Int?
+        try await wait("fixture-owned native copy") {
+            try self.copyClipboardReady(board, beforeCopy: beforeCopy, generation: &copyGeneration, expected: text)
+        }
+        let copiedChange = try ownedClipboardChange(board, expected: text)
+        guard copiedChange == copyGeneration else {
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (copy-generation-changed)")
+        }
+        ownedChange = copiedChange
         try external?.verified("copy")
         try await drive("cut", external: external) { try await self.key(7, flags: .maskCommand) }
         try await value("")
@@ -117,6 +124,29 @@ final class NativeCommandInput {
                 "trusted_events": events, "copy_cut_paste_select_undo_redo": true,
                 "keyboard_settings_once": true, "keyboard_new_session_once": true,
                 "keyboard_focus_restored": true]
+    }
+
+    private func copyClipboardReady(_ board: NSPasteboard, beforeCopy: Int,
+                                    generation: inout Int?, expected: String) throws -> Bool {
+        let count = board.changeCount
+        if generation == nil {
+            guard count != beforeCopy else { return false }
+            generation = count
+        }
+        guard count == generation else {
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (copy-generation-changed)")
+        }
+        // Query advertised representations before the read, as AppKit recommends.
+        _ = board.availableType(from: [.string])
+        let value = board.string(forType: .string)
+        guard board.changeCount == generation else {
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (copy-generation-changed)")
+        }
+        guard let value else { return false }
+        guard value == expected else {
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (fixture-value-mismatch)")
+        }
+        return true
     }
 
     private func ownedClipboardChange(_ board: NSPasteboard, expected: String) throws -> Int {
