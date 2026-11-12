@@ -32,14 +32,21 @@ test('one unprivileged build freezes the tested image before a separate strict s
   const retained = producer.find(s => s.name === 'Retain frozen candidate before strict scan');
   assert.equal(freeze.if, "steps.inventory.outcome == 'success'");
   assert.equal(freeze.env.IMAGE_ID, smoke.env.MANAGED_IMAGE);
-  assert.ok(freeze.run.includes('docker image save --output image-security-evidence/image.tar "$IMAGE_ID"'));
+  assert.ok(freeze.run.includes('image_candidate_pack.py --bundle image-security-evidence/inventory'));
+  assert.ok(freeze.run.includes('--destination frozen-candidate --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"'));
+  assert.ok(freeze.run.includes('docker image save --output frozen-candidate/image.tar "$IMAGE_ID"'));
   assert.ok(freeze.run.includes('image_candidate_archive'));
   assert.equal(retained.if, freeze.if);
   assert.equal(retained.with.name, 'managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
-  assert.ok(retained.with.path.includes('image-security-evidence/image.tar'));
-  assert.ok(retained.with.path.includes('image-security-evidence/inventory/'));
+  assert.equal(retained.with.path, 'frozen-candidate/');
   assert.equal(retained.with['retention-days'], 14);
   assert.equal(retained.with['if-no-files-found'], 'error');
+  const diagnostics = producer.find(s => s.name === 'Retain nonauthoritative inventory diagnostics');
+  assert.equal(diagnostics.if, 'always()');
+  assert.equal(diagnostics.with['retention-days'], 14);
+  for (const name of ['result.json', 'runtime.json.stderr', 'syft.txt', 'syft.txt.stderr', 'syft.yaml', 'tools.json']) {
+    assert.ok(diagnostics.with.path.includes(`image-security-evidence/inventory/${name}`));
+  }
   assert.ok(producer.indexOf(retained) > producer.indexOf(freeze));
   assert.deepEqual(jobs['strict-scan'].needs, ['prepare', 'build-candidate']);
   const downloaded = scanSteps.find(s => s.uses?.startsWith('actions/download-artifact@'));
@@ -87,6 +94,7 @@ function requireFrozenGraph(config) {
   assert.equal(scanner.permissions, undefined);
   assert.equal(upload.if, "steps.inventory.outcome == 'success'");
   assert.equal(upload.with.name, 'managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+  assert.equal(upload.with.path, 'frozen-candidate/');
   assert.equal(download.with.name, upload.with.name);
   assert.equal(download.with.path, 'image-security-evidence');
   assert.equal(load.env.IMAGE_ID, '${{ needs.build-candidate.outputs.image_id }}');
@@ -105,6 +113,7 @@ test('candidate custody and strict-scan gate reject identity, policy and privile
     value => { value.jobs['strict-scan'].needs = ['prepare']; },
     value => { value.jobs.result.needs = ['prepare', 'contract', 'scanner-qualification', 'build-candidate']; },
     value => { value.jobs['build-candidate'].steps.find(step => step.name === 'Retain frozen candidate before strict scan').if = 'always()'; },
+    value => { value.jobs['build-candidate'].steps.find(step => step.name === 'Retain frozen candidate before strict scan').with.path = 'image-security-evidence/inventory/'; },
     value => { value.jobs['strict-scan'].steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with.name = 'previous-attempt'; },
     value => { value.jobs['strict-scan'].steps.find(step => step.name === 'Load and bind the frozen image in a clean runner').run = 'true'; },
     value => { value.jobs['strict-scan'].steps.find(step => step.name === 'Reject policy changes between inventory and scan').run = 'true'; },

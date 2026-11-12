@@ -11,6 +11,11 @@ workflow still supplies the empty source policy and blocks unresolved findings.
 The unprivileged `build-candidate` job builds, smoke-tests, inventories and
 saves the same image before uploading a complete V4 bundle and OCI-compatible
 saved image as `managed-image-candidate-<source-sha>-<run-id>-<attempt>`.
+The upload contains exactly `image.tar`, `inventory/bundle.json`, and the
+inventory files hashed by that bundle. Unhashed Syft/probe output and tool
+diagnostics are retained in a separate nonauthoritative artifact. The first
+hosted candidate artifact included six such extra files and failed the strict
+reader's member-set check; it is historical custody and cannot be approved.
 The separate `strict-scan` job downloads that artifact, loads its exact image
 ID and reports a fresh strict scan. A blocked finding remains in the deferred
 security report. Inventory, upload, download, load, tool and database failures
