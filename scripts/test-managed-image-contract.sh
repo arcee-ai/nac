@@ -107,12 +107,18 @@ require_literal "$dockerfile" 'go mod download -json "$module@$version"'
 # shellcheck disable=SC2016
 require_literal "$dockerfile" '.Path == $module and .Version == $version and .Sum == $sum'
 require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'mkdir -p "$notice_dir" || exit 1'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'cp "$module_dir/$notice" "$notice_dir/$notice" || exit 1'
 require_literal "$dockerfile" 'missing gh module notice:'
 python3 - "$dockerfile" <<'PY_GH_NOTICES'
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 dockerfile = pathlib.Path(sys.argv[1]).read_text()
 match = re.search(r"awk '(.*?)' > /tmp/nac-gh-notices", dockerfile, re.S)
@@ -140,6 +146,38 @@ for invalid in (
         invalid = "".join(invalid)
     if parse(invalid).returncode == 0:
         sys.exit("managed image contract: gh linked-module inventory accepted invalid metadata")
+
+# Exercise the Dockerfile's actual notice-copy shell fragment through success,
+# mkdir failure, and cp failure; a later found_notice assignment must not mask I/O.
+start = dockerfile.index('notice_dir="/usr/local/share/licenses/gh/modules/$module";')
+end = dockerfile.index('done < /tmp/nac-gh-notices', start)
+copy_fragment = re.sub(r"\\\n\s*", " ", dockerfile[start:end])
+copy_fragment = copy_fragment.replace(
+    '"/usr/local/share/licenses/gh/modules/$module"',
+    '"$GH_NOTICE_TEST_ROOT/$module"',
+)
+with tempfile.TemporaryDirectory() as directory:
+    temp = pathlib.Path(directory)
+    source = temp / "source"
+    source.mkdir()
+    (source / "LICENSE").write_text("test notice\n")
+    module = "example.com/module"
+
+    def copy_to(root):
+        env = dict(os.environ, module=module, module_dir=str(source), GH_NOTICE_TEST_ROOT=str(root))
+        return subprocess.run(["sh", "-c", copy_fragment], env=env, capture_output=True)
+
+    success = temp / "success"
+    if copy_to(success).returncode or (success / module / "LICENSE").read_text() != "test notice\n":
+        sys.exit("managed image contract: gh notice copy rejected a valid source")
+    blocked = temp / "blocked"
+    blocked.write_text("not a directory")
+    if copy_to(blocked).returncode == 0:
+        sys.exit("managed image contract: gh notice copy masked a mkdir failure")
+    failed_copy = temp / "failed-copy"
+    (failed_copy / module / "LICENSE" / "LICENSE").mkdir(parents=True)
+    if copy_to(failed_copy).returncode == 0:
+        sys.exit("managed image contract: gh notice copy masked a cp failure")
 PY_GH_NOTICES
 # Assert the literal smoke expressions without expanding them here.
 # shellcheck disable=SC2016

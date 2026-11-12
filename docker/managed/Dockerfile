@@ -195,11 +195,11 @@ RUN test "$(apk --print-arch)" = x86_64 \
             }; \
         test -d "$module_dir" || { echo "missing gh module source: $module@$version" >&2; exit 1; }; \
         notice_dir="/usr/local/share/licenses/gh/modules/$module"; \
-        mkdir -p "$notice_dir"; \
+        mkdir -p "$notice_dir" || exit 1; \
         found_notice=0; \
         for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS; do \
             if [ -f "$module_dir/$notice" ]; then \
-                cp "$module_dir/$notice" "$notice_dir/$notice"; \
+                cp "$module_dir/$notice" "$notice_dir/$notice" || exit 1; \
                 case "$notice" in LICENSE|LICENCE|LICENSE.md|LICENSE.txt|LICENSE-BSD|LICENSE-MIT|license|COPYING|NOTICE) found_notice=1;; esac; \
             fi; \
         done; \
