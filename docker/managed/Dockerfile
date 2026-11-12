@@ -186,9 +186,14 @@ RUN test "$(apk --print-arch)" = x86_64 \
     && while IFS="$(printf '\t')" read -r module module_dir; do \
         notice_dir="/usr/local/share/licenses/gh/modules/$module"; \
         mkdir -p "$notice_dir"; \
-        for notice in LICENSE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS; do \
-            if [ -f "$module_dir/$notice" ]; then cp "$module_dir/$notice" "$notice_dir/$notice"; fi; \
+        found_notice=0; \
+        for notice in LICENSE LICENCE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS; do \
+            if [ -f "$module_dir/$notice" ]; then \
+                cp "$module_dir/$notice" "$notice_dir/$notice"; \
+                case "$notice" in LICENSE|LICENCE|LICENSE.md|LICENSE.txt|COPYING|NOTICE) found_notice=1;; esac; \
+            fi; \
         done; \
+        test "$found_notice" = 1 || { echo "missing gh module notice: $module" >&2; exit 1; }; \
     done < /tmp/nac-gh-notices \
     && rm /tmp/nac-gh-module.json /tmp/nac-gh-modules.json /tmp/nac-gh-notices \
     && rm -rf /tmp/nac-gh-build /tmp/nac-gh-cache /tmp/nac-gh-config \
