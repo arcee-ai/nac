@@ -170,6 +170,15 @@ def main():
         try:
             relocated = Path(temporary) / 'Moved folder with spaces' / app.name
             shutil.copytree(app, relocated)
+            command_driver = None
+            if 'commands-input' in scenarios:
+                command_driver = Path(temporary) / 'CommandInputDriver'
+                with (output / 'command-driver-build.log').open('w') as log:
+                    subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5',
+                                    '-framework', 'AppKit', '-framework', 'CoreGraphics',
+                                    '-framework', 'IOKit', '-framework', 'CryptoKit',
+                                    'desktop/macos/CommandInputDriver.swift', '-o', str(command_driver)],
+                                   check=True, timeout=90, stdout=log, stderr=subprocess.STDOUT)
             engine = relocated / 'Contents/Resources/nac-web'
             saved = engine.with_name('saved-engine')
             engine.rename(saved)
@@ -195,6 +204,7 @@ def main():
                         engine.chmod(0o755)
                     evidence = output / f'{scenario}.json'
                     evidence.unlink(missing_ok=True)
+                    driver = None
                     control = LifecycleControl(scenario, evidence, relocated)
                     control.start()
                     started = time.monotonic()
@@ -202,18 +212,32 @@ def main():
                     with (output / f'{scenario}.log').open('w') as log:
                         actors_settled = False
                         process = None
-                        process = subprocess.Popen(['/usr/bin/open', '-n', '-W', '-a', str(relocated),
+                        launch = ['/usr/bin/open', '-n', '-W', '-a', str(relocated),
                             '--stdout', str(output / f'{scenario}-app.log'),
                             '--stderr', str(output / f'{scenario}-app.log'),
                             '--env', 'NAC_HOME=/DO-NOT-USE-PERSONAL-NAC',
                             '--env', 'NAC_MANAGED_CONFIG=/DO-NOT-INHERIT',
                             '--env', 'OPENAI_API_KEY=must-not-reach-engine', '--args',
-                            '--smoke-output', str(evidence), '--smoke-scenario', scenario],
+                            '--smoke-output', str(evidence), '--smoke-scenario', scenario]
+                        if scenario == 'commands-input':
+                            launch.append('--commands-external')
+                        process = subprocess.Popen(launch,
                             cwd='/', stdout=log, stderr=log, start_new_session=True,
                             env={**os.environ, 'NAC_HOME': '/DO-NOT-USE-PERSONAL-NAC',
                                  'NAC_MANAGED_CONFIG': '/DO-NOT-INHERIT',
                                  'OPENAI_API_KEY': 'must-not-reach-engine'})
-                        code = process.wait(timeout=115)
+                        if scenario == 'commands-input':
+                            with (output / 'command-driver.log').open('w') as driver_log:
+                                driver = subprocess.Popen([str(command_driver), str(output),
+                                                           str(relocated), metadata['source_head']],
+                                                          cwd='/', stdout=driver_log,
+                                                          stderr=subprocess.STDOUT, start_new_session=True)
+                                code = process.wait(timeout=115)
+                                driver_code = driver.wait(timeout=5)
+                            if driver_code != 0:
+                                raise RuntimeError('External OS command driver failed; see command-driver.log')
+                        else:
+                            code = process.wait(timeout=115)
                     control_result = control.finish()
                     result = json.loads(evidence.read_text())
                     result['session_before'] = session_before
@@ -231,6 +255,8 @@ def main():
                     result['relocated_app'] = str(relocated)
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
                     assert (code == 0 or scenario.startswith('parent-loss')) and result.get('passed'), f'{scenario} failed: {result}'
+                    if scenario == 'commands-input':
+                        assert result['commands']['input']['source'] == 'external-public-OS-driver', result
                     assert result['engine_reaped'] and result['profile_removed'], result
                     if not scenario.startswith('parent-loss'):
                         assert result['identity_retired'], result
@@ -268,6 +294,13 @@ def main():
             finally:
                 failure = sys.exception()
                 try:
+                    if driver is not None and driver.poll() is None:
+                        driver.terminate()
+                        try:
+                            driver.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            driver.kill()
+                            driver.wait(timeout=5)
                     # This handle is ours even when app/engine authority is unknown.
                     if process is not None and process.poll() is None:
                         process.terminate()
