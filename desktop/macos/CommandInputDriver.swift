@@ -74,9 +74,9 @@ struct CommandInputDriver {
     }
 
     static func fileDigest(_ url: URL) throws -> String {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        guard attributes[.type] as? FileAttributeType == .typeRegular,
-              url.standardizedFileURL == url.resolvingSymlinksInPath() else {
+        var info = stat()
+        guard lstat(url.path, &info) == 0,
+              (info.st_mode & 0o170000) == 0o100000 else {
             throw Failure("App input is not a regular nonlinked file")
         }
         let bytes = try Data(contentsOf: url)
@@ -170,7 +170,7 @@ struct CommandInputDriver {
     static func requireLiveOwner(_ owner: Binding, app: URL) throws {
         guard CGPreflightPostEventAccess(),
               let running = NSRunningApplication(processIdentifier: owner.pid),
-              running.bundleURL?.standardizedFileURL == app,
+              running.bundleURL?.resolvingSymlinksInPath() == app.resolvingSymlinksInPath(),
               NSWorkspace.shared.frontmostApplication?.processIdentifier == owner.pid,
               let session = CGSessionCopyCurrentDictionary() as? [String: Any],
               session[kCGSessionOnConsoleKey as String] as? Bool == true,

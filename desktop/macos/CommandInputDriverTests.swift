@@ -61,11 +61,21 @@ struct CommandInputDriverTests {
         try FileManager.default.removeItem(at: root.appendingPathComponent("commands-input-phase.json"))
         let sentinel = root.appendingPathComponent("sentinel")
         try Data("untouched".utf8).write(to: sentinel)
+        let actualDigest = try Driver.fileDigest(sentinel)
+        precondition(actualDigest.count == 64)
+        let alias = root.appendingPathComponent("directory-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+        let aliasDigest = try Driver.fileDigest(alias.appendingPathComponent("sentinel"))
+        precondition(aliasDigest == actualDigest)
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("commands-input-phase.json"),
                                                     withDestinationURL: sentinel)
         do {
             _ = try Driver.read(descriptor, name: "commands-input-phase.json")
             preconditionFailure("Symlink phase accepted")
+        } catch {}
+        do {
+            _ = try Driver.fileDigest(root.appendingPathComponent("commands-input-phase.json"))
+            preconditionFailure("Symlink app input accepted")
         } catch {}
         let preserved = try Data(contentsOf: sentinel)
         precondition(preserved == Data("untouched".utf8))
