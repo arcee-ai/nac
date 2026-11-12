@@ -156,6 +156,12 @@ jobs:
             NAC_SOURCE_REVISION=${{ needs.prepare.outputs.sha }}
           provenance: false
           sbom: false
+      - name: Check libssh2 supplier overflow on i386 source
+        run: |
+          docker buildx build --builder '${{ steps.buildx.outputs.name }}' \
+            --platform linux/386 \
+            --target libssh2-i386-supplier-control \
+            --file docker/managed/Dockerfile .
       - name: Bind the loaded immutable image identity once
         id: image
         env:
