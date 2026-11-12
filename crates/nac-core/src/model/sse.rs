@@ -366,17 +366,30 @@ pub(super) struct SseReader {
     /// Incomplete UTF-8 sequence waiting for the rest of a multi-byte character
     /// that was split across network reads.
     pending_bytes: Vec<u8>,
-    /// Text read but not yet terminated by a newline.
+    /// Decoded text; lines before `line_start` were already taken. Taken
+    /// lines are dropped once per network read rather than once per line, so
+    /// a read carrying many events is not shifted again for every line.
     pending_line: String,
+    /// Byte offset of the first line not yet taken.
+    line_start: usize,
+    /// `pending_line[line_start..scanned]` holds no newline, so a long line
+    /// arriving over many reads is scanned only once.
+    scanned: usize,
     data_lines: Vec<String>,
 }
 
 impl SseReader {
     pub fn new(response: Response) -> Self {
+        Self::from_body(Box::pin(response.bytes_stream()))
+    }
+
+    fn from_body(body: ByteStream) -> Self {
         Self {
-            body: Box::pin(response.bytes_stream()),
+            body,
             pending_bytes: Vec::new(),
             pending_line: String::new(),
+            line_start: 0,
+            scanned: 0,
             data_lines: Vec::new(),
         }
     }
@@ -429,6 +442,11 @@ impl SseReader {
     /// Decode `chunk` into `pending_line`, carrying any incomplete trailing
     /// multi-byte sequence into `pending_bytes` for the next read.
     fn push_chunk(&mut self, chunk: &[u8]) {
+        if self.line_start > 0 {
+            self.pending_line.drain(..self.line_start);
+            self.scanned -= self.line_start;
+            self.line_start = 0;
+        }
         if self.pending_bytes.is_empty() {
             self.decode_bytes(chunk);
             return;
@@ -481,9 +499,16 @@ impl SseReader {
     }
 
     fn take_line(&mut self) -> Option<String> {
-        let end = self.pending_line.find('\n')?;
-        let line = self.pending_line[..end].trim_end_matches('\r').to_string();
-        self.pending_line.drain(..=end);
+        let Some(offset) = self.pending_line[self.scanned..].find('\n') else {
+            self.scanned = self.pending_line.len();
+            return None;
+        };
+        let end = self.scanned + offset;
+        let line = self.pending_line[self.line_start..end]
+            .trim_end_matches('\r')
+            .to_string();
+        self.line_start = end + 1;
+        self.scanned = self.line_start;
         Some(line)
     }
 
@@ -518,6 +543,10 @@ impl SseReader {
 }
 
 #[cfg(test)]
+#[path = "sse_line_tests.rs"]
+mod line_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::responses_stream::ResponsesStreamFold;
@@ -531,12 +560,7 @@ mod tests {
     /// Drive the line machine directly: it is the part that has to survive
     /// frames split across reads, and it is independent of the transport.
     fn frames(chunks: &[&str]) -> Vec<String> {
-        let mut reader = SseReader {
-            body: Box::pin(futures_util::stream::empty()),
-            pending_bytes: Vec::new(),
-            pending_line: String::new(),
-            data_lines: Vec::new(),
-        };
+        let mut reader = SseReader::from_body(Box::pin(futures_util::stream::empty()));
         let mut out = Vec::new();
         for chunk in chunks {
             reader.pending_line.push_str(chunk);
