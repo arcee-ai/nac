@@ -196,6 +196,27 @@ class ApplicabilityTests(unittest.TestCase):
         self.assertEqual([item["finding_index"] for item in result["dispositions"]], [0, 1])
         self.assertEqual(result["unresolved_indexes"], [2])
 
+    def test_aggregate_and_single_payload_rules_share_one_reviewed_policy(self):
+        aggregate = aggregate_fixture()
+        single = fixture()
+        single["rules"][0]["id"] = "single-rule"
+        single["record"]["rule_id"] = "single-rule"
+        single_record = encode(single["record"])
+        single["rules"][0]["evidence_sha256"] = app.digest(single_record)
+        aggregate_record = encode(aggregate["record"])
+        evidence = {**aggregate["evidence"], **single["evidence"],
+                    app.digest(aggregate_record): aggregate_record,
+                    app.digest(single_record): single_record}
+        baseline = encode({"schema_version": 1, "rules": []})
+        reviewed = encode({"schema_version": 2,
+                           "rules": aggregate["rules"] + single["rules"]})
+        result = app.verify_applicability(
+            aggregate["findings"] + single["findings"], trusted_policy=baseline,
+            candidate_policy=baseline, reviewed_image_approval=reviewed,
+            evidence=evidence, observations=aggregate["observations"] + single["observations"],
+            scan_identity=aggregate["scan_identity"], now=NOW)
+        self.assertEqual([item["finding_index"] for item in result["dispositions"]], [0, 1])
+
     def test_aggregate_rule_requires_complete_unique_sorted_payloads(self):
         for change in ("missing rule", "duplicate rule", "unsorted rule", "missing observation",
                        "extra observation", "changed payload", "changed evidence", "wrong evidence version"):
