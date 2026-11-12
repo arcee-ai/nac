@@ -121,8 +121,13 @@ final class NativeCommandInput {
 
     private func ownedClipboardChange(_ board: NSPasteboard, expected: String) throws -> Int {
         let count = board.changeCount
-        guard board.string(forType: .string) == expected, board.changeCount == count else {
-            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned")
+        let value = board.string(forType: .string)
+        guard value == expected else {
+            let reason = value == nil ? "value-unavailable" : "fixture-value-mismatch"
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (\(reason))")
+        }
+        guard board.changeCount == count else {
+            throw PreviewError.message("Clipboard changed outside the fixture copy; restoration is not owned (change-count-moved-during-read)")
         }
         return count
     }

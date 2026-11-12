@@ -152,7 +152,7 @@ class ConstructionAllocationControls(unittest.TestCase):
         exec(compile(ast.Module(body=[nested], type_ignores=[]), '<actual-run>', 'exec'), self.scope)
         return patch.object(self.auth.subprocess, 'Popen', return_value=child)
 
-    def test_finite_original_allocation_and_unchanged_role_caps(self):
+    def test_finite_allocation_and_unchanged_journey_caps(self):
         self.assertEqual((self.scope['action_end'], self.scope['cleanup_end']), (2200, 2320))
         self.assertEqual(self.scope['cleanup_end'] - self.scope['action_end'], 120)
         run = next(n for n in self.main.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
@@ -161,14 +161,17 @@ class ConstructionAllocationControls(unittest.TestCase):
                  and isinstance(n.func, ast.Name) and n.func.id == 'run']
         self.assertEqual({ast.unparse(n.args[0]):
             ast.literal_eval(next(k.value for k in n.keywords if k.arg == 'limit')) for n in calls},
-            {"'device-owner-contract'": 180, "'compile-' + name": 60, 'mode': 900,
+            {"'device-owner-contract'": 180, "'compile-' + name": 60, 'mode': 1200,
              'driver': 600, "'native-bootstrap-contract'": 90})
         workflow = Path(__file__).resolve().parents[2] / '.github/workflows/native-auth-browser.yml'
         self.assertIn('timeout-minutes: 45', workflow.read_text())
         self.assertLess(self.scope['cleanup_end'] - self.scope['started'], 45 * 60)
 
     def test_api_time_consumes_remaining_work_and_never_renews_command_cap(self):
-        for now, limit, api_seconds, expected in [(1500, 60, 7, 53), (2180, 900, 5, 15)]:
+        for now, limit, api_seconds, expected in [
+            (1500, 60, 7, 53), (100, 1200, 7, 1193),
+            (1700, 1200, 5, 495), (2180, 900, 5, 15), (2180, 1200, 5, 15),
+        ]:
             with self.subTest(now=now), tempfile.TemporaryDirectory() as directory:
                 self.clock.monotonic.return_value = now
                 child = Mock(returncode=0); child.poll.return_value = 0; child.wait.return_value = 0
