@@ -38,7 +38,7 @@ def fixture():
                 "head_sha": HEAD, "run_attempt": 3,
                 "pull_requests": [{"number": 440, "head": {"sha": HEAD},
                                    "base": {"sha": BASE}}]},
-        "build_job": {"id": 456, "run_attempt": 2,
+        "build_job": {"id": 456, "run_id": 123, "run_attempt": 2,
                       "name": intake.BUILD_JOB_NAME, "conclusion": "success",
                       "started_at": "2026-11-11T10:00:00Z",
                       "completed_at": "2026-11-11T10:30:00Z"},
@@ -98,6 +98,7 @@ class IntakeTests(unittest.TestCase):
             ("merge_ref", "object", "sha", "0" * 40),
             ("run", "pull_requests", 0, {"number": 441}),
             ("build_job", "run_attempt", None, 1),
+            ("build_job", "run_id", None, 999),
             ("build_job", "conclusion", None, "failure"),
             ("artifact", "digest", None, "sha256:" + "0" * 64),
             ("artifact", "created_at", None, "2026-11-11T10:31:00Z"),
@@ -166,6 +167,17 @@ class IntakeTests(unittest.TestCase):
             intake.publish_status(status, app_token="synthetic",
                                   expected_app_bot="image-approval[bot]",
                                   opener=lambda *_args, **_kwargs: Response())
+
+        class WrongTarget(Response):
+            def read(self):
+                return json.dumps({"state": "success", "context": intake.STATUS_CONTEXT,
+                    "creator": {"login": "image-approval[bot]"},
+                    "url": "https://api.github.com/repos/arcee-ai/nac/statuses/" + HEAD}).encode()
+
+        with self.assertRaisesRegex(intake.ApprovalError, "does not confirm"):
+            intake.publish_status(status, app_token="synthetic",
+                                  expected_app_bot="image-approval[bot]",
+                                  opener=lambda *_args, **_kwargs: WrongTarget())
 
     def test_status_publication_uses_exact_target_and_app_identity(self):
         status = {"state": "success", "context": intake.STATUS_CONTEXT,

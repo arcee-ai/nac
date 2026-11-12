@@ -143,6 +143,7 @@ def validate_provenance(record, *, pr, merge_ref, run, build_job, artifact,
         item.get("base", {}).get("sha") == record["base_sha"] for item in linked),
         "run is not linked to approved PR head/base")
     require(build_job.get("id") == record["build_job_id"] and
+            build_job.get("run_id") == record["run_id"] and
             build_job.get("run_attempt") == record["run_attempt"] and
             build_job.get("name") == BUILD_JOB_NAME and
             build_job.get("conclusion") == "success", "build job/attempt not successful")
@@ -225,6 +226,6 @@ def publish_status(status, *, app_token, expected_app_bot,
     require(created.get("state") == status["state"] and
             created.get("context") == STATUS_CONTEXT and
             created.get("creator", {}).get("login") == expected_app_bot and
-            created.get("url", "").startswith(f"https://api.github.com/repos/{REPOSITORY}/statuses/"),
+            created.get("url") == url,
             "status API response does not confirm publication")
     return created
