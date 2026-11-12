@@ -54,11 +54,32 @@ def run(f, *, now=NOW, candidate=None):
     record_bytes = encode(f["record"])
     evidence = {**f["evidence"], app.digest(record_bytes): record_bytes}
     baseline = encode({"schema_version": 1, "rules": []})
-    reviewed = encode({"schema_version": 1, "rules": f["rules"]})
+    reviewed = encode({"schema_version": 2 if f["rules"] and
+                       "bindings" in f["rules"][0] else 1, "rules": f["rules"]})
     return app.verify_applicability(f["findings"], trusted_policy=baseline,
                                     candidate_policy=candidate if candidate is not None else baseline,
                                     reviewed_image_approval=reviewed, evidence=evidence,
                                     observations=f["observations"], scan_identity=f["scan_identity"], now=now)
+
+
+def aggregate_fixture():
+    f = fixture()
+    coordinate = "upstream-wolfi:curl"
+    f["findings"][0]["package"] = coordinate
+    f["rules"][0]["finding"]["package"] = coordinate
+    first = f["rules"][0].pop("binding")
+    first["package"] = coordinate
+    second = copy.deepcopy(first)
+    second["installed_package"] = "apk:libcurl-openssl4"
+    second["payload_sha256"] = "d" * 64
+    bindings = [first, second]
+    f["rules"][0]["bindings"] = bindings
+    f["record"].pop("binding")
+    f["record"].update(schema_version=2, bindings=copy.deepcopy(bindings))
+    f["observations"] = [{"binding": copy.deepcopy(bound),
+                           "observed_at": "2026-11-10T19:45:00Z"} for bound in bindings]
+    f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
+    return f
 
 
 class ApplicabilityTests(unittest.TestCase):
@@ -164,6 +185,43 @@ class ApplicabilityTests(unittest.TestCase):
                 f["observations"][1]["binding"]["package"] = "apk:libcurl-openssl4"
                 f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
                 self.assertEqual(run(f)["dispositions"][0]["rule_id"], "synthetic-rule")
+
+    def test_aggregate_rule_covers_both_installed_payloads_and_exact_alias(self):
+        f = aggregate_fixture()
+        f["findings"].append({**f["findings"][0], "advisory": "GHSA-synthetic-alias"})
+        f["findings"].append({**f["findings"][0], "advisory": "CVE-OTHER"})
+        before = copy.deepcopy(f)
+        result = run(f)
+        self.assertEqual(f, before)
+        self.assertEqual([item["finding_index"] for item in result["dispositions"]], [0, 1])
+        self.assertEqual(result["unresolved_indexes"], [2])
+
+    def test_aggregate_rule_requires_complete_unique_sorted_payloads(self):
+        for change in ("missing rule", "duplicate rule", "unsorted rule", "missing observation",
+                       "extra observation", "changed payload", "changed evidence", "wrong evidence version"):
+            f = aggregate_fixture()
+            if change == "missing rule":
+                f["rules"][0]["bindings"].pop()
+            elif change == "duplicate rule":
+                f["rules"][0]["bindings"][1] = copy.deepcopy(f["rules"][0]["bindings"][0])
+            elif change == "unsorted rule":
+                f["rules"][0]["bindings"].reverse()
+            elif change == "missing observation":
+                f["observations"].pop()
+            elif change == "extra observation":
+                extra = copy.deepcopy(f["observations"][1])
+                extra["binding"]["installed_package"] = "apk:other-libcurl"
+                f["observations"].append(extra)
+            elif change == "changed payload":
+                f["observations"][1]["binding"]["payload_sha256"] = "e" * 64
+            elif change == "changed evidence":
+                f["record"]["bindings"][1]["payload_sha256"] = "e" * 64
+            else:
+                f["record"]["schema_version"] = 1
+            if change in {"changed evidence", "wrong evidence version"}:
+                f["rules"][0]["evidence_sha256"] = app.digest(encode(f["record"]))
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                run(f)
 
     def test_absence_evidence_cannot_survive_introduced_consumer_or_executable(self):
         for role in ("complete_filesystem", "complete_consumers"):
