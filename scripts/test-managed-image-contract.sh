@@ -91,9 +91,14 @@ require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'
 require_literal "$dockerfile" 'GH_VERSION=2.103.0'
 require_literal "$dockerfile" 'GH_MODULE_SUM=h1:iSwyy7dCdv8AUMi+myP8XrMgo4ZalGUX47i8vBih+zg='
 require_literal "$dockerfile" 'GH_SOURCE_REVISION=7948e8056e45ac3c729b829e0eafe2d0797a95c6'
+# Assert the literal Dockerfile expression without expanding it in this script.
+# shellcheck disable=SC2016
 require_literal "$dockerfile" 'go mod download -json "github.com/cli/cli/v2@v${GH_VERSION}"'
 require_literal "$dockerfile" 'go install -trimpath'
 require_literal "$dockerfile" 'install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh'
+require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt COPYING NOTICE PATENTS AUTHORS'
+require_literal "$dockerfile" 'missing gh module notice:'
+# shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'gh_build_info=$(go version -m "$(command -v gh)")'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-go-toolchain"'
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-source-module"'
