@@ -313,6 +313,23 @@ def run(args):
                 "use an immutable loaded image ID (sha256:...), never a tag")
         inventory_only = getattr(args, "inventory_only", False)
         require(not (inventory_only and args.bundle), "inventory-only requires the actual loaded image")
+        reviewed_path = getattr(args, "reviewed_image_approval", None)
+        reviewed_sha = getattr(args, "reviewed_image_approval_sha256", None)
+        reviewed_evidence = getattr(args, "reviewed_image_evidence", None)
+        require((reviewed_path is None) == (reviewed_sha is None),
+                "post-build approval and independent digest pin are required together")
+        require((reviewed_path is None) == (reviewed_evidence is None),
+                "post-build approval and separate evidence directory are required together")
+        require(reviewed_path is None or (args.bundle and reviewed_evidence),
+                "post-build approval requires a retained bundle and separate evidence directory")
+        if reviewed_path is not None:
+            # These paths are a caller-supplied trusted-plane capability. They
+            # must not resolve into either candidate source or retained inputs.
+            excluded = (ROOT.resolve(), args.bundle.resolve())
+            for path in (reviewed_path, reviewed_evidence):
+                actual = path.resolve()
+                require(not any(actual == root or actual.is_relative_to(root) for root in excluded),
+                        "post-build approval cannot come from candidate source or retained bundle")
         if args.bundle:
             identity = load_bundle(args.bundle.resolve(), output)
             require(identity["image"] == args.image, "rescan image differs from retained candidate")
@@ -387,6 +404,8 @@ def run(args):
                          args.trusted_policy.with_name("image-applicability.json"),
             candidate_path=getattr(args, "candidate_applicability_policy", None) or
                            args.candidate_policy.with_name("image-applicability.json"),
+            reviewed_path=reviewed_path, reviewed_sha256=reviewed_sha,
+            evidence_directory=reviewed_evidence,
             observations=observations,
             scan_identity={"image": args.image, "source_revision": args.source_revision,
                            "platform": "linux/amd64"})
@@ -420,6 +439,12 @@ def main():
                         help="eligible publication's canonical reviewed-dev policy receipt")
     parser.add_argument("--trusted-applicability-policy", type=Path)
     parser.add_argument("--candidate-applicability-policy", type=Path)
+    parser.add_argument("--reviewed-image-approval", type=Path,
+                        help="post-build per-image policy from an independently trusted approval plane")
+    parser.add_argument("--reviewed-image-approval-sha256",
+                        help="independently pinned SHA-256 of the reviewed per-image policy bytes")
+    parser.add_argument("--reviewed-image-evidence", type=Path,
+                        help="digest-named evidence files supplied by that same trusted plane")
     parser.add_argument("--collect-applicability", action="store_true",
                         help="retain V4 exact-image passive filesystem/source evidence including owned libssh2")
     parser.add_argument("--inventory-only", action="store_true",

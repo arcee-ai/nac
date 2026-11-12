@@ -610,6 +610,28 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(scan.run(args), 0)
         retained = json.loads((args.output / "identity.json").read_text())
         self.assertEqual(retained["go_application_pins"], PINS)
+        approved = self.root / "reviewed-image.json"
+        approved.write_text('{"schema_version":1,"rules":[]}')
+        proofs = self.root / "reviewed-proofs"
+        proofs.mkdir()
+        args.reviewed_image_approval = approved
+        args.reviewed_image_approval_sha256 = inv.sha256(approved)
+        args.reviewed_image_evidence = proofs
+        args.output = self.root / "post-build-rescan"
+        no_admissions = {"schema_version": 1, "status": "verified", "policy_sha256": "a" * 64,
+                         "candidate_policy_sha256": "b" * 64, "approval_mode": "post-build",
+                         "raw_findings": [], "dispositions": [], "unresolved_indexes": []}
+        with patch.object(scan, "install_tools", return_value=({}, {})), patch.object(
+                scan, "scan_sbom", return_value={}), patch.object(
+                scan, "grype_findings", return_value=[]), patch.object(
+                scan, "query_runtimes", return_value=[]), patch.object(
+                scan, "query_rust", return_value=[]), patch.object(
+                scan, "evaluate", side_effect=evaluated), patch.object(
+                scan.applicability_gate, "evaluate", return_value=no_admissions) as verifier:
+            self.assertEqual(scan.run(args), 0)
+        self.assertEqual(verifier.call_args.kwargs["reviewed_path"], approved)
+        self.assertEqual(verifier.call_args.kwargs["reviewed_sha256"], args.reviewed_image_approval_sha256)
+        self.assertEqual(verifier.call_args.kwargs["evidence_directory"], proofs)
         with self.assertRaises(ValueError):
             inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=upgraded)
         for pins in (None, {}, dict(PINS, GIT_LFS_REVISION="short")):
@@ -657,6 +679,34 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(scan.run(args), 2)
         command.assert_not_called()
         self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
+
+    def test_post_build_approval_requires_retained_bundle_and_external_inputs(self):
+        external = self.root / "reviewed.json"
+        external.write_text('{"schema_version":1,"rules":[]}')
+        proofs = self.root / "proofs"
+        proofs.mkdir()
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        inside_bundle = bundle / "reviewed.json"
+        inside_bundle.write_bytes(external.read_bytes())
+        cases = (
+            (None, external, proofs, "requires a retained bundle"),
+            (bundle, scan.ROOT / ".github/security/image-applicability.json", proofs,
+             "cannot come from candidate source"),
+            (bundle, inside_bundle, proofs, "cannot come from candidate source"),
+            (bundle, external, bundle, "cannot come from candidate source"),
+            (bundle, external, None, "separate evidence directory"),
+        )
+        with patch.object(scan, "install_tools") as install:
+            for index, (retained, approval, evidence, message) in enumerate(cases):
+                args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
+                    output=self.root / f"invalid-approval-{index}", bundle=retained,
+                    reviewed_image_approval=approval, reviewed_image_approval_sha256="a" * 64,
+                    reviewed_image_evidence=evidence)
+                with self.subTest(index=index):
+                    self.assertEqual(scan.run(args), 2)
+                    self.assertIn(message, json.loads((args.output / "result.json").read_text())["error"])
+        install.assert_not_called()
 
 
 if __name__ == "__main__":

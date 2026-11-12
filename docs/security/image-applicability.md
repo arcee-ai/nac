@@ -9,15 +9,16 @@ curl, Kerberos, or libssh2 regression receipts.
 
 ## Trust and caller responsibilities
 
-`verify_applicability` takes normalized findings, immutable trusted and candidate
-policy bytes, retained evidence/artifact bytes keyed by SHA-256, independently
-verified observations, the exact scan identity, and an explicit UTC clock. The
-trusted bytes must come from the caller's separately selected trusted checkout.
-The caller must never use a candidate-controlled path as the trusted policy.
-Candidate/trusted bytes must be identical, including formatting. A policy PR can
-be prepared for human review, but its proposed rules deliberately fail this
-check until separately reviewed and landed through the existing policy process.
-Matching strings in review metadata do not constitute actual review approval.
+`verify_applicability` takes normalized findings, immutable trusted-base and
+candidate policy bytes, retained evidence/artifact bytes keyed by SHA-256,
+independently verified observations, the exact scan identity, and a UTC clock.
+The trusted base comes from a separately selected checkout. Candidate/base bytes
+must be identical, including formatting, and both must contain **zero rules**.
+Putting a nonempty rule in source changes the next image/source identity and
+cannot approve that future image. A separately reviewed post-build policy can
+be supplied only after the image and retained bundle are frozen. The caller must
+authenticate that approval independently of candidate code and supply its exact
+SHA-256 pin. Review metadata strings alone do not authenticate an approval.
 
 The caller obtains observations by independently verifying the exact scanned
 image and its source/package/payload/application-profile evidence. Copying a
@@ -117,7 +118,8 @@ it from complete final-image data.
 
 ## Results and integration boundary
 
-The result contains `schema_version`, `policy_sha256`, a deep copy of
+The result contains `schema_version`, the effective `policy_sha256`,
+`candidate_policy_sha256`, `approval_mode` (`none` or `post-build`), a deep copy of
 `raw_findings`, separate `dispositions`, and `unresolved_indexes`. Each
 disposition records the raw finding index, rule ID, `fixed`/`not_affected`,
 canonical rule digest, and exact evidence digest. Duplicate raw rows keep their
@@ -169,8 +171,8 @@ This passive support creates no production disposition: all raw libssh2 findings
 remain unresolved. Unsupported rules or missing qualified inputs fail closed.
 Actual native V4 image qualification, the
 separately reviewed private-publisher scanner pin and beta/recovery acceptance
-remain incomplete. Production rules require a separate human-reviewed policy
-PR after accepted ALL-501/ALL-502 evidence.
+remain incomplete. Production dispositions require independent per-image
+review after accepted ALL-501/ALL-502 evidence.
 
 The standalone mechanics can be reviewed before the trusted checkout contains
 the new empty policy file. Calling the verifier still requires real trusted
@@ -181,10 +183,65 @@ contains the new empty policy, it records `inactive/trusted-policy-unavailable`.
 Both states retain the original raw blocking verdict and grant zero dispositions;
 neither is successful applicability verification. Candidate rules cannot
 bootstrap missing trust. Missing candidate policy when trust exists, malformed
-policy, candidate/trusted differences or invalid active-rule evidence fail the
+policy, candidate/trusted differences, source-embedded nonempty rules or invalid
+active-rule evidence fail the
 scan. Empty trusted policy needs no observations and admits no records, so old
 passive collection timestamps do not prevent a fresh raw vulnerability scan.
 With active rules, original observation and evidence freshness stay mandatory.
+
+## Post-build per-image approval and activation
+
+The initial native PR or dev-push scan retains an immutable image ID and a
+complete versioned inventory bundle. It uses only the empty source policy and
+therefore cannot admit a finding. An independent trusted reviewer may later
+approve a policy bound to **that exact image and source revision**, storing its
+bytes and digest-named evidence outside the candidate repository and retained
+bundle. The subsequent scan uses `--bundle` with the same image ID and source
+revision; it does not rebuild or change the synthetic merge revision:
+
+```sh
+python3 scripts/security/image_scan.py \
+  --bundle /trusted/retained/inventory --image "sha256:..." \
+  --source-revision "<40-character source SHA>" \
+  --trusted-policy /trusted/base/.github/security/exceptions.json \
+  --candidate-policy .github/security/exceptions.json \
+  --trusted-applicability-policy /trusted/base/.github/security/image-applicability.json \
+  --candidate-applicability-policy .github/security/image-applicability.json \
+  --reviewed-image-approval /trusted/approvals/exact-image.json \
+  --reviewed-image-approval-sha256 "<independently pinned SHA-256>" \
+  --reviewed-image-evidence /trusted/approvals/image-applicability-evidence \
+  --output /trusted/retained/rescan
+```
+
+All three `--reviewed-image-*` arguments are required together. The approval
+and evidence paths must resolve outside the candidate source and retained
+bundle. The approval must have at least one rule, its bytes must match the
+independent digest pin, and every rule must pass the existing exact binding and
+review/evidence validation. The scanner keeps raw findings and the existing
+source-policy result byte-identical; `decision.json` remains schema 1. The
+applicability receipt records the effective approval digest separately from the
+empty candidate-policy digest. Missing approval leaves all findings unresolved;
+invalid approval fails closed. The source review can land without accepting any
+vulnerability claim.
+Older schema-1 receipts without the new provenance fields remain readable only
+when they admit zero findings; a legacy admission cannot prove post-build review.
+
+The caller-supplied digest pin proves byte equality, **not approval authority**.
+This CLI validates approved bytes but cannot establish who reviewed them. The
+production caller must retrieve a **currently active** approval from a
+separately protected store, verify actor/review authority and its digest, and
+deny a revoked or missing approval. A retained approval alone cannot prove it
+is still active. A trusted post-build job must re-evaluate the retained bundle
+with a fresh vulnerability database and publish a status on the exact PR/image
+identity that repository protections can require. Neither a protected approval
+store nor such a status publisher is configured in this repository today; the
+current source-owned PR workflow intentionally supplies no approval. Until
+those external trust and check-publication contracts are provisioned and beta
+recovery uses the same frozen bytes, a blocked native result stays blocked.
+The 24-hour observation/evidence limit remains in force; rescan never relabels
+old collection timestamps as fresh. If the frozen OCI image is still available,
+it may be loaded by immutable ID and independently re-inventoried to obtain
+new evidence without rebuilding; new evidence bytes need a new human review.
 
 ## Focused verification
 

@@ -329,8 +329,10 @@ class ApplicabilityBundleTests(unittest.TestCase):
         rule["evidence_sha256"] = hashlib.sha256(record).hexdigest()
         policy = encode({"schema_version": 1, "rules": [rule]})
         trusted, candidate = self.root / "trusted-policy.json", self.root / "candidate-policy.json"
-        trusted.write_bytes(policy)
-        candidate.write_bytes(policy)
+        reviewed = self.root / "external-reviewed-image.json"
+        trusted.write_bytes(encode({"schema_version": 1, "rules": []}))
+        candidate.write_bytes(trusted.read_bytes())
+        reviewed.write_bytes(policy)
         proofs = self.root / "proofs"
         proofs.mkdir()
         for digest, raw in {**f["evidence"], rule["evidence_sha256"]: record}.items():
@@ -342,9 +344,13 @@ class ApplicabilityBundleTests(unittest.TestCase):
         source = {"blocking": findings, "excepted": [], "reporting": []}
         write_json(retained / "policy-result.json", source)
         receipt = gate.evaluate(findings, trusted_path=trusted, candidate_path=candidate,
+            reviewed_path=reviewed, reviewed_sha256=hashlib.sha256(policy).hexdigest(),
             evidence_directory=proofs, observations=observations,
             scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"},
             now=NOW + dt.timedelta(minutes=2))
+        self.assertEqual(receipt["approval_mode"], "post-build")
+        self.assertEqual(receipt["policy_sha256"], hashlib.sha256(policy).hexdigest())
+        self.assertEqual(receipt["candidate_policy_sha256"], hashlib.sha256(candidate.read_bytes()).hexdigest())
         decision = gate.retain_decision(retained, source, receipt, self.identity)
         self.assertEqual(decision["blocking_indexes"], [1])
         write_json(retained / "result.json", {"status": "blocked", "image": IMAGE,
@@ -534,6 +540,53 @@ class ApplicabilityBundleTests(unittest.TestCase):
         self.assertEqual(reporter.report(retained, 1)["blocking"], 3)
         self.assertEqual((retained / "findings.json").read_bytes(), raw)
         self.assertEqual(json.loads((retained / "policy-result.json").read_text()), source)
+        # A separate review of this frozen V4 image can admit only the named
+        # synthetic coordinate on a later unchanged-image rescan.
+        from test_image_applicability import fixture, encode
+        approved = self.root / "v4-post-build"
+        approved.mkdir()
+        self.assertEqual(scan.load_bundle(self.output, approved), self.identity)
+        scan.bundle_manifest(approved, IMAGE)
+        approved_observations = bundle.validate(approved, self.identity)
+        selected = next(item for item in approved_observations
+                        if item["binding"]["package"] == findings[0]["package"])
+        f = fixture()
+        f["record"].update(binding=selected["binding"], collected_at="2026-11-10T12:00:00Z")
+        rule = f["rules"][0]
+        rule["binding"] = selected["binding"]
+        rule["finding"] = {"package": findings[0]["package"], "version": findings[0]["version"],
+                           "source": findings[0]["source"], "advisories": [findings[0]["advisory"]]}
+        rule["review"].update(reviewed_at="2026-11-10T12:00:00Z",
+                              expires_at="2026-11-11T12:00:00Z")
+        record = encode(f["record"])
+        rule["evidence_sha256"] = hashlib.sha256(record).hexdigest()
+        external_policy = self.root / "v4-external-reviewed.json"
+        external_policy.write_bytes(encode({"schema_version": 1, "rules": [rule]}))
+        proofs = self.root / "v4-external-proofs"
+        proofs.mkdir()
+        for digest, data in {**f["evidence"], rule["evidence_sha256"]: record}.items():
+            (proofs / digest).write_bytes(data)
+        approved_receipt = gate.evaluate(findings, trusted_path=policy, candidate_path=policy,
+            reviewed_path=external_policy, reviewed_sha256=sha256(external_policy),
+            evidence_directory=proofs, observations=approved_observations,
+            scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"},
+            now=NOW + dt.timedelta(minutes=2))
+        write_json(approved / "findings.json", findings)
+        write_json(approved / "policy-result.json", source)
+        approved_decision = gate.retain_decision(approved, source, approved_receipt, self.identity)
+        self.assertEqual(approved_decision["blocking_indexes"], [1, 2])
+        self.assertEqual((approved / "findings.json").read_bytes(), raw)
+        self.assertEqual(approved_receipt["approval_mode"], "post-build")
+        changed = copy.deepcopy(approved_observations)
+        selected_index = next(index for index, item in enumerate(changed)
+                              if item["binding"]["package"] == findings[0]["package"])
+        changed[selected_index]["binding"]["payload_sha256"] = "d" * 64
+        with self.assertRaises(ValueError):
+            gate.evaluate(findings, trusted_path=policy, candidate_path=policy,
+                reviewed_path=external_policy, reviewed_sha256=sha256(external_policy),
+                evidence_directory=proofs, observations=changed,
+                scan_identity={"image": IMAGE, "source_revision": SOURCE, "platform": "linux/amd64"},
+                now=NOW + dt.timedelta(minutes=2))
         manifest = json.loads((self.output / "bundle.json").read_text())
         manifest["schema_version"] = 3
         write_json(self.output / "bundle.json", manifest)
