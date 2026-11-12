@@ -83,6 +83,21 @@
     "sections": []
   },
   {
+    "document_id": "terminal-output",
+    "source_path": "docs/usage/terminal-output.md",
+    "title": "Command deadlines, PTY polls and terminal output",
+    "sections": [
+      {
+        "section_id": "command-deadlines-and-pty-polls",
+        "heading": "Command deadlines and PTY polls"
+      },
+      {
+        "section_id": "inspect-existing-output",
+        "heading": "Inspect existing output"
+      }
+    ]
+  },
+  {
     "document_id": "workspace-backends",
     "source_path": "docs/usage/sandbox.md",
     "title": "Workspace and sandbox backends",
