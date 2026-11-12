@@ -132,8 +132,8 @@ def read_current(pull_request, merge_sha, image, *, now, api=fetch_json):
                    "approval record differs from selected image/PR")
     policy = applicability.policy(policy_bytes, now)
     intake.require(bool(policy["rules"]) and all(
-        rule["binding"]["image"] == image and
-        rule["binding"]["source_revision"] == merge_sha for rule in policy["rules"]),
+        bound["image"] == image and bound["source_revision"] == merge_sha
+        for rule in policy["rules"] for bound in applicability.rule_bindings(rule)),
         "reviewed policy differs from selected image/source")
     evidence = {}
     total = 0
