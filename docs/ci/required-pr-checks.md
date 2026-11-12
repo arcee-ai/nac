@@ -1,8 +1,31 @@
 # Required PR checks and current dev protection
 
-[ALL-506](https://linear.app/arcee/issue/ALL-506) prepares an additive update to
-NAC's **observed** ruleset 25983949. Live activation requires separate human
-authorization. No settings are changed by the tooling or this PR.
+> **Live `dev` readback, November 11, 2026.** Ordinary PRs require strict
+> `Required PR checks` from GitHub Actions integration **15368** and one
+> code-owner approval, last-push approval and resolved review threads. Those
+> requirements are now together in [ruleset **26484091**](https://github.com/arcee-ai/nac/settings/rules/26484091),
+> which gives only Allison (User **20910163**) a `pull_request`-only bypass.
+> [Ruleset **25983949**](https://github.com/arcee-ai/nac/settings/rules/25983949)
+> still requires a PR and prohibits deletion/non-fast-forward updates, but has
+> **no** required-status-check rule or bypass actor. Allison moved the status
+> rule between the two rulesets on November 4 at 23:43 UTC. Her technical
+> bypass includes the checks in 26484091; using it requires separate explicit
+> human authorization. The real ordinary-actor/two-layer matrix and ALL-505
+> strict-image qualification remain unperformed.
+>
+> **The ALL-506 proposal below is historical.** Its snapshots, plan, fixture
+> matrix and administrator `PUT`/rollback instructions assume a different
+> no-bypass ruleset placement. The planner rejects the current live state.
+> Do not run or apply that handoff against today's settings. Any future policy
+> change needs a newly reviewed design, live rebaseline, qualification and
+> separate human authorization. See [manual stack override](../manual-stack-override.md)
+> for the current PR-only bypass procedure.
+
+## Historical ALL-506 no-bypass proposal
+
+[ALL-506](https://linear.app/arcee/issue/ALL-506) prepared an additive update to
+NAC's **then-observed** ruleset 25983949. Its proposed live activation required
+separate human authorization. The tooling and PR did not change settings.
 
 On November 3, 2026, Allison authorized a native GitHub review-approval
 exception for only `allisoneer` (User **20910163**). The
@@ -22,18 +45,19 @@ was independently verified at **20:33:38 UTC**:
   performed. Configured approval bypass does not establish that conflicts,
   drafts, requested changes or every other GitHub merge condition permit merging.
 
-This is Allison's human approval exception. It grants agents no merge authority,
-no authority to exercise bypass credentials, and no scanner-policy trust. Review
+This was Allison's human approval exception at the November 3 readback. It
+grants agents no merge authority, no authority to exercise bypass credentials,
+and no scanner-policy trust. Review
 requests and the nine-owner CODEOWNERS roster remain unchanged. All other users
-still require the preserved review policy. Universal PR/thread requirements and
-future required checks apply to Allison as well.
+required the preserved review policy. Under this proposal, universal PR/thread
+requirements and future no-bypass checks would have applied to Allison as well.
 
-**Live required-status-check activation remains separate and unperformed.**
-The planner validates both rulesets, then appends exactly one required-status-check
+**At the November 3 snapshot, required-status-check activation was unperformed.**
+The historical planner validated both rulesets, then proposed one required-status-check
 rule only to no-bypass **25983949**: `Required PR checks`, GitHub Actions
 integration **15368**, strict current-base checks, enforced on creation. It never
-changes review-only **26484091** or any bypass list. This source update changes
-no live settings, CI/scanner policy, publisher trust or automation authority.
+changed then-review-only **26484091** or any bypass list. This source update
+changed no live settings, CI/scanner policy, publisher trust or automation authority.
 
 The October 30 [nine-owner snapshot](evidence/2026-10-30-required-check-before-nine-owners.json)
 and [plan](evidence/2026-10-30-required-check-plan-nine-owners.json) describe the
@@ -103,17 +127,19 @@ repository write access on October 30, 2026.
 Crystalcareai (immutable account ID `162942000`) was verified with repository
 admin access on October 30, 2026.
 
-Run from the intended repository with authenticated read access:
+The historical read-only commands were run from the intended repository with
+authenticated read access:
 
 ```sh
 node .github/scripts/pr-ruleset.mjs snapshot arcee-ai/nac /tmp/nac-before.json
 node .github/scripts/pr-ruleset.mjs plan /tmp/nac-before.json > /tmp/nac-plan.json
 ```
 
-The snapshot captures repository merge methods, every repository/inherited
-ruleset, effective dev rules, classic protection, owner permissions, current dev
-revision, CODEOWNERS and check runs. `plan` preserves the existing writable
-universal ruleset fields and appends only the required-check rule. Both exact
+The historical snapshot captured repository merge methods, every
+repository/inherited ruleset, effective dev rules, classic protection, owner
+permissions, current dev revision, CODEOWNERS and check runs. Under this
+proposal, `plan` preserved the writable universal ruleset fields and appended
+only the required-check rule. Both exact
 ruleset identities, branch conditions, the sole Allison User/PR-only bypass and
 complete review parameters are validated. Missing/moved rules, changed review
 parameters or bypass actors/modes fail closed. An already-present status rule
@@ -163,8 +189,8 @@ PR-only review exception; do not add fixture actors to any bypass list.
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |
 | Two-layer gh-stack | Both immediate bases contain intended CODEOWNERS; each PR emits complete candidate-bound checks; record the intermediate-base protection gap, then qualify strict/review enforcement after retarget to dev |
 | Ordinary other-user/automation bypass and direct push | No bypass; inherited deletion/force-push/transfer restrictions remain effective |
-| Allison review-approval bypass | Only User 20910163 can bypass reviewer/CODEOWNERS approval via a PR; record actual behavior without claiming every merge condition succeeds |
-| Allison checks, unresolved threads and direct push | Universal checks/thread requirements and PR requirement remain effective; review exception cannot bypass them |
+| Allison review-approval bypass in this proposed fixture | Only User 20910163 could bypass reviewer/CODEOWNERS approval via a PR under the modeled split; record actual behavior without claiming every merge condition succeeds |
+| Allison checks, unresolved threads and direct push in this proposed fixture | The modeled no-bypass checks/thread requirements and PR requirement would have remained effective; this row does not describe today's placement |
 
 For the two-layer fixture, use the installed extension in the safe checkout:
 
@@ -207,12 +233,14 @@ All `allisoneer-` cases require actor ID 20910163; `ordinary-` and automation
 bypass cases reject that ID. A human must inspect underlying actor/results
 evidence: schema checks cannot verify that a linked claim actually occurred.
 
-## Administrator application, readback and rollback
+## Historical administrator application, readback and rollback — do not execute
 
-Only proceed after ALL-505 qualification, the real matrix, landed nine-owner CODEOWNERS,
-current-head/current-base aggregate success, and separate human activation
-authorization. Confirm the current aggregate actually uses strict image logic.
-Generate a fresh read-only activation handoff:
+This procedure targeted the earlier no-bypass placement in 25983949. It is
+invalid against the current live rulesets and must not be used as an activation
+or rollback procedure. At the time it required ALL-505 qualification, the real
+matrix, landed nine-owner CODEOWNERS, current-head/current-base aggregate
+success and separate human activation authorization. The historical read-only
+handoff command was:
 
 ```sh
 node .github/scripts/pr-ruleset.mjs activation-plan /tmp/nac-before.json /tmp/fixture-qualified.json > /tmp/nac-activation-plan.json
@@ -221,39 +249,36 @@ node .github/scripts/pr-ruleset.mjs activation-plan /tmp/nac-before.json /tmp/fi
 This recaptures full settings and refuses drift, a snapshot older than one hour,
 wrong CODEOWNERS, or absent/non-success/wrong-App/old-head checks. The newest
 exact-App check-run wins; an older success cannot mask a queued/failed rerun.
-Do not apply the older checked-in plan directly. Rebaseline and repeat affected
-qualification on any policy drift.
+Even under the former design, the checked-in plan was not an activation payload.
+Today's ruleset placement requires a newly reviewed design; rerunning this
+historical activation command cannot repair that drift.
 
-An authorized administrator should arrange exclusive settings ownership for the
-operation, refresh/compare immediately before writing, and use GitHub's ruleset
-UI or `PUT /repos/arcee-ai/nac/rulesets/25983949` with **only** the reviewed
-`proposed_ruleset` from that fresh handoff. GitHub does not offer an atomic
-compare-and-swap across these settings; the read-only tool cannot eliminate a
-concurrent administrator race. Abort if exclusive ownership or exact baseline
-cannot be confirmed. Do not create/delete rulesets or change review/bypass policy.
+The earlier proposal would have used GitHub's ruleset UI or
+`PUT /repos/arcee-ai/nac/rulesets/25983949` with only its reviewed
+`proposed_ruleset`, after exclusive settings ownership and an immediate baseline
+comparison. **That payload is stale and must not be applied.** GitHub does not
+offer an atomic compare-and-swap across these settings; the read-only tool
+cannot eliminate a concurrent administrator race.
 
-After application, capture actual server state and verify it:
+The proposed post-application readback would have captured server state with:
 
 ```sh
 node .github/scripts/pr-ruleset.mjs snapshot arcee-ai/nac /tmp/nac-after.json
 node .github/scripts/pr-ruleset.mjs verify-readback /tmp/nac-before.json /tmp/nac-after.json > /tmp/nac-readback.json
 ```
 
-Readback requires exactly the one rule addition in both the target and effective
+That historical readback required exactly the one rule addition in both the target and effective
 rules, preserving every other ruleset, branch condition, owner, merge method,
 classic protection and CODEOWNERS. Server-generated update timestamps and rule ordering may change; every rule's
 parameters and multiplicity must remain identical. Readback older than one hour,
 future or invalid capture times are rejected before a rollback payload is returned.
-Repeat representative fresh success and failed/pending/wrong-App ordinary-actor
-cases, plus last-push/thread rejection and a two-layer base check. Record actual
-observed after state and receipts separately from the intended plan.
+The proposed qualification also required representative fresh success and
+failed/pending/wrong-App ordinary-actor cases, plus last-push/thread rejection
+and a two-layer base check. Those cases have not been completed for the current
+live placement.
 
-Rollback also needs separate human authorization. Refresh and rerun readback
-first; if anything else drifted, stop for a reviewed plan rather than overwriting
-it. A matching readback returns the original `rollback_ruleset`, which removes
-only this added status rule and retains the universal no-bypass policy; the
-separate exact review policy and Allison-only exception remain unchanged.
-This is emergency protection rollback, not a report-only image mode or authority
-to merge vulnerable candidates. Keep strict scanner/report failures in place,
-preserve evidence, and repair the failed lane. Re-read/verify restored rules and
-inherited/classic protection after any authorized rollback.
+The historical rollback would also have required separate human authorization
+and a matching readback. Its `rollback_ruleset` targeted only the proposed
+status rule in 25983949. It is not a rollback payload for the current live
+policy. A new reviewed plan must account for the actual placement and preserve
+strict scanner/report failures, evidence and inherited/classic protection.
