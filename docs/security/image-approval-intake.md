@@ -69,6 +69,27 @@ not establish the required reviewer identity, PR-only updates, last-push
 approval, no-bypass rules, or App authority; those require separate live
 configuration and qualification.
 
+`image_approval_replay.py` is the next inactive source-only caller. Given an
+archive already downloaded by approved artifact ID, it reads the current
+protected-branch bytes, independently fetches the live PR/merge/run/job/artifact
+objects, checks the downloaded ZIP digest and provenance, extracts the bounded
+candidate, and loads its exact saved image. It stages the same reviewed policy
+and evidence bytes outside the candidate bundle, invokes `image_scan.py
+--bundle` with a fresh database update, and validates the raw finding,
+source-policy, applicability, decision and result receipts before checking the
+current branch and PR/merge identities again. It returns only an in-memory
+status proposal; no workflow invokes it and it never publishes a status. The
+caller still must authenticate source-policy paths and download the artifact by
+the approved ID in an isolated read-only job without a status-writing token.
+Those job and App controls
+are not present.
+
+This slice deliberately fails closed when the frozen V4 observation clock is
+older than 24 hours or in the future. It does not recollect V4 on the loaded
+image, relabel timestamps, reuse a prior disposition, or treat the original
+blocked scan as an approval. Recollection, changed-evidence human review, and
+current merge-time authority remain future work.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
