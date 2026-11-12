@@ -12,7 +12,7 @@ import IOKit
 @main
 #endif
 struct CommandInputDriver {
-    static let phases = ["type-fixture", "copy", "cut", "paste", "undo", "redo",
+    static let phases = ["type-fixture", "select", "copy", "cut", "paste", "undo", "redo",
                          "settings", "close-settings", "new-session", "close-new-session"]
     static let limit = 4096
 
@@ -231,7 +231,8 @@ struct CommandInputDriver {
                 try key(0, text: String(character))
                 Thread.sleep(forTimeInterval: 0.02)
             }
-        case "copy": try key(0, .maskCommand); try key(8, .maskCommand)
+        case "select": try key(0, .maskCommand)
+        case "copy": try key(8, .maskCommand)
         case "cut": try key(7, .maskCommand)
         case "paste": try key(9, .maskCommand)
         case "undo": try key(6, .maskCommand)

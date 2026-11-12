@@ -42,6 +42,11 @@ struct NativeCommandInputTests {
         let duplicate = try driver.acknowledged(); precondition(!duplicate)
         try driver.verified("type-fixture")
         rejects { try driver.verified("type-fixture") }
+        try driver.ready("select")
+        var selection = try published(); selection["kind"] = "attempted"
+        try acknowledge(selection)
+        precondition(try driver.acknowledged())
+        try driver.verified("select")
         try driver.ready("copy")
         let old = try driver.acknowledged(); precondition(!old)
         try Data(repeating: 120, count: 4097).write(to: ack)
@@ -63,7 +68,7 @@ struct NativeCommandInputTests {
         try driver.finish(accepted: false)
         let final = try published()
         precondition(final["kind"] as? String == "finished" && final["accepted"] as? Bool == false)
-        precondition(final["verified_phases"] as? [String] == ["type-fixture", "copy"])
+        precondition(final["verified_phases"] as? [String] == ["type-fixture", "select", "copy"])
         print("External command driver correlation/bounds/no-follow fixtures passed; no GUI/input qualification")
     }
 }

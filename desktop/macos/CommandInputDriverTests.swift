@@ -9,6 +9,7 @@ struct CommandInputDriverTests {
                                        native: String(repeating: "b", count: 64),
                                        engine: String(repeating: "c", count: 64))
         let episode = UUID().uuidString
+        precondition(Array(Driver.phases.prefix(3)) == ["type-fixture", "select", "copy"])
         func row(_ index: Int) -> [String: Any] {
             ["version": 1, "episode": episode, "pid": 123, "window": 456,
              "launch": "launch", "view": "view", "document": "document",
