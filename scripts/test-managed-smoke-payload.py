@@ -77,7 +77,7 @@ class PayloadTests(unittest.TestCase):
         binary.mkdir()
         tools = re.search(r"for tool in ([^;]+); do", self.payload)[1].split()
         versions = {"id": "10001", "rustc": "rustc 1.98.0", "node": "v24.22.1",
-                    "go": "go version go1.27.3 linux/amd64", "uv": "uv 0.13.4"}
+                    "go": "go version go1.27.4 linux/amd64", "uv": "uv 0.13.4"}
         for tool in [*tools, "id"]:
             self.assertRegex(tool, r"^[a-z0-9-]+$")
             target = binary / tool
