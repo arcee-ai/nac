@@ -89,6 +89,103 @@ require_literal "$dockerfile" 'corepack enable'
 require_literal "$dockerfile" 'test -x /usr/bin/fd'
 require_literal "$dockerfile" 'GIT_LFS_VERSION=3.8.0'
 require_literal "$dockerfile" 'GH_VERSION=2.103.0'
+require_literal "$dockerfile" 'GH_MODULE_SUM=h1:iSwyy7dCdv8AUMi+myP8XrMgo4ZalGUX47i8vBih+zg='
+require_literal "$dockerfile" 'GH_SOURCE_REVISION=7948e8056e45ac3c729b829e0eafe2d0797a95c6'
+# Assert the literal Dockerfile expression without expanding it in this script.
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'go mod download -json "github.com/cli/cli/v2@v${GH_VERSION}"'
+require_literal "$dockerfile" 'go install -trimpath'
+require_literal "$dockerfile" 'install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh'
+# The notice inventory must follow the installed binary's exact linked versions.
+require_literal "$dockerfile" 'go version -m /usr/local/bin/gh |'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" '$1 == "=>" { exit 1 }'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'END { if (count != 161) exit 1 }'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'go mod download -json "$module@$version"'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" '.Path == $module and .Version == $version and .Sum == $sum'
+require_literal "$dockerfile" 'for notice in LICENSE LICENCE LICENSE.md LICENSE.txt LICENSE-BSD LICENSE-MIT license COPYING NOTICE PATENTS AUTHORS'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'mkdir -p "$notice_dir" || exit 1'
+# shellcheck disable=SC2016
+require_literal "$dockerfile" 'cp "$module_dir/$notice" "$notice_dir/$notice" || exit 1'
+require_literal "$dockerfile" 'missing gh module notice:'
+python3 - "$dockerfile" <<'PY_GH_NOTICES'
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+
+dockerfile = pathlib.Path(sys.argv[1]).read_text()
+match = re.search(r"awk '(.*?)' > /tmp/nac-gh-notices", dockerfile, re.S)
+if match is None:
+    sys.exit("managed image contract: gh notice inventory parser is missing")
+parser = re.sub(r"\\\n\s*", " ", match.group(1))
+modules = "mod\tgithub.com/cli/cli/v2\tv2.103.0\th1:main\n" + "".join(
+    f"dep\texample.com/mod{index}\tv1.0.0\th1:sum{index}\n"
+    for index in range(160)
+)
+
+def parse(raw):
+    return subprocess.run(["awk", parser], input=raw, text=True, capture_output=True)
+
+accepted = parse(modules)
+if accepted.returncode or len(accepted.stdout.splitlines()) != 161:
+    sys.exit("managed image contract: gh linked-module inventory rejects valid metadata")
+for invalid in (
+    modules.replace("v1.0.0", "(devel)", 1),
+    modules.replace("h1:sum0", "missing", 1),
+    modules + "\t=>\texample.com/replacement\tv1.0.0\th1:sum\n",
+    modules.splitlines(keepends=True)[1:],
+):
+    if isinstance(invalid, list):
+        invalid = "".join(invalid)
+    if parse(invalid).returncode == 0:
+        sys.exit("managed image contract: gh linked-module inventory accepted invalid metadata")
+
+# Exercise the Dockerfile's actual notice-copy shell fragment through success,
+# mkdir failure, and cp failure; a later found_notice assignment must not mask I/O.
+start = dockerfile.index('notice_dir="/usr/local/share/licenses/gh/modules/$module";')
+end = dockerfile.index('done < /tmp/nac-gh-notices', start)
+copy_fragment = re.sub(r"\\\n\s*", " ", dockerfile[start:end])
+copy_fragment = copy_fragment.replace(
+    '"/usr/local/share/licenses/gh/modules/$module"',
+    '"$GH_NOTICE_TEST_ROOT/$module"',
+)
+with tempfile.TemporaryDirectory() as directory:
+    temp = pathlib.Path(directory)
+    source = temp / "source"
+    source.mkdir()
+    (source / "LICENSE").write_text("test notice\n")
+    module = "example.com/module"
+
+    def copy_to(root):
+        env = dict(os.environ, module=module, module_dir=str(source), GH_NOTICE_TEST_ROOT=str(root))
+        return subprocess.run(["sh", "-c", copy_fragment], env=env, capture_output=True)
+
+    success = temp / "success"
+    if copy_to(success).returncode or (success / module / "LICENSE").read_text() != "test notice\n":
+        sys.exit("managed image contract: gh notice copy rejected a valid source")
+    blocked = temp / "blocked"
+    blocked.write_text("not a directory")
+    if copy_to(blocked).returncode == 0:
+        sys.exit("managed image contract: gh notice copy masked a mkdir failure")
+    failed_copy = temp / "failed-copy"
+    (failed_copy / module / "LICENSE" / "LICENSE").mkdir(parents=True)
+    if copy_to(failed_copy).returncode == 0:
+        sys.exit("managed image contract: gh notice copy masked a cp failure")
+PY_GH_NOTICES
+# Assert the literal smoke expressions without expanding them here.
+# shellcheck disable=SC2016
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'gh_build_info=$(go version -m "$gh_binary")'
+# shellcheck disable=SC2016
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'sed -n '\''1p'\'')" = "$gh_binary: go1.27.4"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-go-toolchain"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'assertion_failed "gh-source-module"'
 require_literal "$dockerfile" 'NPM_VERSION=11.21.1'
 require_literal "$dockerfile" 'GOTOOLCHAIN=local CGO_ENABLED=0'
 require_literal "$dockerfile" 'build -mod=readonly -modfile=/tmp/nac-lfs-dependencies/go.mod'

@@ -49,7 +49,8 @@ class PayloadTests(unittest.TestCase):
             self.assertIn(predicate, self.payload)
         self.assertIn("overwritten > /run/secrets/nac/bootstrap.json", self.payload)
 
-    def run_bootstrap_assertions(self, *, wrong_identity=False, writable=False, payload=None):
+    def run_bootstrap_assertions(self, *, wrong_identity=False, writable=False, payload=None,
+                                 stale_gh_toolchain=False):
         actual_jq = shutil.which("jq")
         if actual_jq is None:
             self.skipTest("bootstrap predicate execution requires jq; literal payload capture remains covered")
@@ -77,13 +78,24 @@ class PayloadTests(unittest.TestCase):
         binary.mkdir()
         tools = re.search(r"for tool in ([^;]+); do", self.payload)[1].split()
         versions = {"id": "10001", "rustc": "rustc 1.98.0", "node": "v24.22.1",
-                    "go": "go version go1.27.4 linux/amd64", "uv": "uv 0.13.4"}
+                    "gh": "gh version 2.103.0 (2026-10-21)", "uv": "uv 0.13.4"}
         for tool in [*tools, "id"]:
             self.assertRegex(tool, r"^[a-z0-9-]+$")
             target = binary / tool
             target.write_text('#!/bin/sh\nprintf "%s\\n" ' + shlex.quote(versions.get(tool, "")) + "\n")
             target.chmod(0o755)
-        for tool in ("jq", "grep", "cat", "wc"):
+        (binary / "go").write_text(
+            '#!/bin/sh\n'
+            'if [ "${2-}" = -m ]; then\n'
+            '    printf "%s\\n" "$3: '
+            + ("go1.27.3" if stale_gh_toolchain else "go1.27.4") + '" '
+            '"  path github.com/cli/cli/v2/cmd/gh" '
+            '"  mod github.com/cli/cli/v2 v2.103.0" '
+            '"  build decoy=go1.27.4"\n'
+            'else\n'
+            '    printf "%s\\n" "go version go1.27.4 linux/amd64"\n'
+            'fi\n')
+        for tool in ("jq", "grep", "cat", "wc", "sed", "awk"):
             target = binary / tool
             target.unlink(missing_ok=True)
             target.symlink_to(actual_jq if tool == "jq" else shutil.which(tool))
@@ -109,6 +121,13 @@ class PayloadTests(unittest.TestCase):
         self.assertNotIn("assertions-finished", result.stdout)
         self.assertEqual(contents, "fixture-only\n")
 
+    def test_stale_gh_toolchain_fails_before_bootstrap_assertions(self):
+        result, contents = self.run_bootstrap_assertions(stale_gh_toolchain=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gh-go-toolchain", result.stderr)
+        self.assertNotIn("assertions-finished", result.stdout)
+        self.assertEqual(contents, "fixture-only\n")
+
     def test_writable_bootstrap_fails_the_existing_write_assertion(self):
         result, contents = self.run_bootstrap_assertions(writable=True)
         self.assertNotEqual(result.returncode, 0)
@@ -117,7 +136,9 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(contents, "overwritten\n")
 
     def test_split_quoted_command_reproduces_no_input_jq_exit_four(self):
-        broken = ("\"$container_runtime\" exec \"$container_name\" /bin/sh -ceu '" + self.payload +
+        prefix, suffix = self.payload.split("    jq -e '", 1)
+        broken_payload = prefix.replace("'", "'\\''") + "    jq -e '" + suffix
+        broken = ("\"$container_runtime\" exec \"$container_name\" /bin/sh -ceu '" + broken_payload +
                   "'\n# Exercise clean/smudge")
         captured = capture(broken, self.directory)
         self.assertGreater(len(captured["argv"]), 5)
