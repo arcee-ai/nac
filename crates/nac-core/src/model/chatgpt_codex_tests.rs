@@ -1,5 +1,65 @@
 use super::*;
 
+#[tokio::test]
+async fn codex_wire_preserves_native_and_imported_mcp_schemas_without_strict_normalization() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    let mut definitions = crate::tools::direct_tool_definitions(false);
+    definitions.push(ToolDefinition {
+        def_type: "function".into(),
+        function: crate::types::FunctionDef {
+            name: "mcp__example__lookup".into(),
+            description: "Imported lookup".into(),
+            parameters: json!({
+                "type":"object", "required":["key"],
+                "$defs":{"key":{"oneOf":[{"type":"string"},{"type":"integer"}]}},
+                "properties":{
+                    "key":{"$ref":"#/$defs/key"},
+                    "options":{"type":"object","additionalProperties":{"type":"string"}},
+                    "page":{"anyOf":[{"type":"integer","minimum":1},{"type":"null"}],"default":null}
+                }
+            }),
+        },
+    });
+    let levels = catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.5").thinking_level_map;
+    let request = codex_responses_request(
+        "gpt-5.5",
+        None,
+        &[Message::User {
+            content: "Find tasks".into(),
+        }],
+        &definitions,
+        &levels,
+        None,
+    );
+    let server = ScriptedServer::start(vec![ScriptedResponse::json(
+        "200 OK",
+        completed_codex_sse(),
+    )
+    .with_header("Content-Type", "text/event-stream")]);
+    // Use the real Codex HTTP writer with synthetic credentials and a local
+    // scripted endpoint; canonical production endpoint admission is unchanged.
+    post_codex_json_with_retry(
+        &super::client::no_redirect_model_client().unwrap(),
+        &server.base_url,
+        &request,
+        &stored_codex_auth("test-access"),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let requests = server.finish();
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let tools = body["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), definitions.len());
+    for (wire, native) in tools.iter().zip(&definitions) {
+        assert_eq!(wire["name"], native.function.name);
+        assert_eq!(wire["description"], native.function.description);
+        assert_eq!(wire["parameters"], native.function.parameters);
+        assert_eq!(wire["strict"], false);
+    }
+}
+
 #[test]
 fn simulated_product_version_bump_updates_chatgpt_codex_header_exactly() {
     assert_eq!(codex_user_agent_for_version("9.8.7"), "nac/9.8.7");
@@ -524,7 +584,7 @@ fn codex_goal_creation_wire_schema_preserves_no_budget() {
     );
     assert_eq!(parameters["properties"]["token_budget"]["minimum"], 1);
     assert_eq!(parameters["additionalProperties"], false);
-    assert!(tool.get("strict").is_none());
+    assert_eq!(tool["strict"], false);
 }
 
 #[test]
@@ -610,7 +670,7 @@ fn codex_task_followup_wire_schema_keeps_idle_bindings_nullable_and_optional() {
             json!(["string", "null"])
         );
     }
-    assert!(tool.get("strict").is_none());
+    assert_eq!(tool["strict"], false);
 }
 
 #[test]
@@ -1276,8 +1336,8 @@ fn codex_native_task_launch_wire_schema_preserves_the_native_decoder_contract() 
         .iter()
         .find(|tool| tool["name"] == "list_projects")
         .unwrap();
-    // Strict Responses normalization may require every property. Null must
-    // remain an advertised unfiltered value, without inventing a search term.
+    // Null remains an advertised unfiltered value, without inventing a search
+    // term; strict:false also preserves omission on the Responses wire.
     assert_eq!(
         discovery["parameters"]["properties"]["query"]["type"],
         json!(["string", "null"])
@@ -1306,9 +1366,9 @@ fn codex_wait_wire_schema_keeps_discriminated_nullable_targets() {
         openai_responses_tool_to_value(definition)["parameters"],
         tool["parameters"]
     );
-    assert!(
-        tool.get("strict").is_none(),
-        "keep provider-default strictness unchanged"
+    assert_eq!(
+        tool["strict"], false,
+        "preserve ordinary optionality instead of provider-default normalization"
     );
     let parameters = &tool["parameters"];
     let required: std::collections::HashSet<_> = parameters["required"]

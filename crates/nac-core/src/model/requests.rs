@@ -137,11 +137,15 @@ pub(super) fn arcee_message_to_value(message: &Message) -> Value {
 }
 
 pub(super) fn openai_responses_tool_to_value(tool: &ToolDefinition) -> Value {
+    // Native and imported MCP schemas use ordinary JSON Schema optionality,
+    // not the Responses strict subset. Opt out explicitly so the provider does
+    // not normalize omitted fields into required arguments. Preserve the schema.
     json!({
         "type": "function",
         "name": tool.function.name,
         "description": tool.function.description,
         "parameters": tool.function.parameters,
+        "strict": false,
     })
 }
 
