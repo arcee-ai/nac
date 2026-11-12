@@ -242,6 +242,9 @@ The 24-hour observation/evidence limit remains in force; rescan never relabels
 old collection timestamps as fresh. If the frozen OCI image is still available,
 it may be loaded by immutable ID and independently re-inventoried to obtain
 new evidence without rebuilding; new evidence bytes need a new human review.
+The source-only [approval intake prototype](image-approval-intake.md) specifies
+the additional protected-branch, artifact and dedicated App status contract;
+it is not an activated production approval path.
 
 ## Focused verification
 
