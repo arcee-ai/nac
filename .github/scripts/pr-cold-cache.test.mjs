@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { reverseBrowserApt } from "./browser-apt-wiring.mjs";
+import { reverseManagedSupplierControl } from "./managed-supplier-wiring.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
@@ -67,6 +68,7 @@ function verify(values) {
   const normalized = structuredClone(values);
   reverseAssetTokens(normalized["stable-release"]);
   reverseAssetTokens(normalized["managed-image-build"]);
+  reverseManagedSupplierControl(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
   // and all prior source/provenance/profile/quality fingerprints remain fixed.
   reverseBrowserApt(normalized["stable-release"]);
