@@ -110,6 +110,18 @@ signed origin from the loaded inspection or replace the independently checked
 Actions run/job/artifact provenance. Any other inspection difference fails
 closed. No live workflow or App status writer invokes this path yet.
 
+`image_approval_artifact.py` is an inactive artifact-ID downloader for the
+read-only replay caller. It requests only
+`/repos/arcee-ai/nac/actions/artifacts/<approved ID>/zip` with an Actions-read
+token, inspects GitHub's single 302, and makes a separate token-free request
+only to the observed `productionresultssa<digits>.blob.core.windows.net`
+Actions-results ZIP path with a short-lived signed read URL. It refuses any
+other origin, path, second redirect, malformed signature, expired URL, output
+link or oversized stream. The complete downloaded ZIP SHA-256 must equal the
+protected record before the bounded extractor can use it. If GitHub changes
+storage delivery, the caller fails closed until the new origin is reviewed;
+this module does not grant artifact metadata or status authority by itself.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
