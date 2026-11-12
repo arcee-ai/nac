@@ -766,7 +766,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     ];
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
-    agent.messages = seeded;
+    agent.messages = seeded.into();
     // The seeded log rows stand in for this process's own commits.
     agent.committed_log_len = agent.messages.len() as u64;
 
@@ -792,7 +792,8 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
         },
         user_message("prompt"),
         plain_assistant("answer"),
-    ];
+    ]
+    .into();
     // The seeded log rows stand in for this process's own commits.
     clean.committed_log_len = clean.messages.len() as u64;
     clean.append_cancellation_marker().await.unwrap();
@@ -828,7 +829,7 @@ async fn direct_failure_marks_streamed_partial_output_as_failed_in_the_log() {
         .unwrap()
         .append_batch("session", 0, &seeded)
         .unwrap();
-    agent.messages = seeded;
+    agent.messages = seeded.into();
     agent.committed_log_len = agent.messages.len() as u64;
     *agent.partial_stream.lock().unwrap() = ModelStreamDelta {
         text: "work in progress".to_string(),
@@ -1141,7 +1142,8 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
             content: "system".to_string(),
         },
         user_message("prompt"),
-    ];
+    ]
+    .into();
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer
         .append_batch(
@@ -1209,7 +1211,7 @@ async fn cancellation_adopts_a_committed_single_direct_steer_after_async_abort()
         Some("session"),
         AgentMode::Direct,
     );
-    agent.messages = seeded;
+    agent.messages = seeded.into();
     agent.committed_log_len = 3;
     agent.direct_inbox_append_start = Some(2);
 
@@ -1257,7 +1259,8 @@ async fn normalize_dangling_tail_trims_a_straggler_row_the_vec_never_saw() {
             content: "system".to_string(),
         },
         user_message("prompt"),
-    ];
+    ]
+    .into();
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer
         .append_batch(
@@ -1309,7 +1312,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     ];
     let writer = crate::store::TranscriptLogWriter::new(&store_path).unwrap();
     writer.append_batch("session", 0, &seeded).unwrap();
-    agent.messages = seeded;
+    agent.messages = seeded.into();
     // The seeded log rows stand in for this process's own commits.
     agent.committed_log_len = agent.messages.len() as u64;
 
@@ -1333,7 +1336,8 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
         },
         user_message("prompt"),
         plain_assistant("answer"),
-    ];
+    ]
+    .into();
     // The seeded log rows stand in for this process's own commits.
     clean.committed_log_len = clean.messages.len() as u64;
     clean.normalize_dangling_tail().await.unwrap();

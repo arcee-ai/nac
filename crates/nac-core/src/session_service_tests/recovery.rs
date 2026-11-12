@@ -141,7 +141,7 @@ async fn shared_store_recovery_after_peer_crash_preserves_committed_transcript()
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -418,7 +418,7 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -509,7 +509,7 @@ async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -569,7 +569,7 @@ async fn subscribe_agent_events_filters_agent_envelopes() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -678,7 +678,7 @@ async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -1021,7 +1021,7 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
@@ -1205,7 +1205,7 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );

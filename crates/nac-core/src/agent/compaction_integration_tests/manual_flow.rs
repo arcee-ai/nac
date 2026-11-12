@@ -36,7 +36,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
             threshold,
             EventSink::channel(events_tx),
         );
-        agent.messages = compactable_messages();
+        agent.messages = compactable_messages().into();
         agent.last_usage = Some(TokenUsage {
             input_tokens: 91,
             output_tokens: 7,
@@ -178,7 +178,7 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
             None,
             EventSink::channel(events_tx),
         );
-        agent.messages = messages;
+        agent.messages = messages.into();
         let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
 
         let result = agent.compact().await.unwrap();
@@ -274,7 +274,8 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
         Message::User {
             content: format!("turn 4 {}", "x".repeat(1_000)),
         },
-    ];
+    ]
+    .into();
 
     assert!(matches!(
         agent.compact().await.unwrap(),

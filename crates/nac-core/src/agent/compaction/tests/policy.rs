@@ -9,6 +9,10 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{FunctionCall, Message, ToolCall};
 
+fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
+    messages.to_vec().into()
+}
+
 #[test]
 fn nac_prompt_matches_approved_bytes_hash_and_text() {
     const EXPECTED_SHA256: [u8; 32] = [
@@ -119,7 +123,8 @@ fn direct_and_orchestrator_checkpoints_use_distinct_compatible_policies() {
         direct.id
     );
 
-    let direct_candidate = candidate(direct_state.plan(&messages, &[], CompactionReason::Manual));
+    let direct_candidate =
+        candidate(direct_state.plan(&as_transcript(&messages), &[], CompactionReason::Manual));
     assert!(matches!(
         direct_candidate.summary_messages.last(),
         Some(Message::User { content }) if content == NAC_DIRECT_COMPACTION_PROMPT
@@ -175,7 +180,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     cs.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(cs.active_checkpoint_for_test().unwrap().id, first.id);
 
-    let cand = candidate(cs.plan(&messages, &[], CompactionReason::Auto));
+    let cand = candidate(cs.plan(&as_transcript(&messages), &[], CompactionReason::Auto));
     assert_eq!(cand.previous_checkpoint_id, Some(first.id));
     assert_eq!(cand.boundary, 4);
     assert_eq!(
@@ -220,7 +225,8 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     end_state
         .restore_newest_valid_checkpoint(&end_messages)
         .unwrap();
-    let end_candidate = candidate(end_state.plan(&end_messages, &[], CompactionReason::Auto));
+    let end_candidate =
+        candidate(end_state.plan(&as_transcript(&end_messages), &[], CompactionReason::Auto));
     assert_eq!(end_candidate.previous_checkpoint_id, Some(end_parent.id));
     assert_eq!(end_candidate.boundary, 2);
     let end_encoded = serde_json::to_string(&end_candidate.summary_messages).unwrap();
@@ -294,7 +300,10 @@ fn version_one_checkpoint_is_invalidated() {
     let mut state = state(path.clone(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert!(state.active_checkpoint_for_test().is_none());
-    assert_eq!(state.prepare(&messages, &[]).messages.len(), messages.len());
+    assert_eq!(
+        state.prepare(&as_transcript(&messages), &[]).messages.len(),
+        messages.len()
+    );
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

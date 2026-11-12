@@ -123,7 +123,7 @@ fn fixture_with_policy(
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );

@@ -94,7 +94,7 @@ fn test_direct_active_service_at(
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );

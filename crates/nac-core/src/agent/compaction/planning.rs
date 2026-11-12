@@ -3,11 +3,13 @@ use std::path::PathBuf;
 
 #[path = "selection_planning.rs"]
 mod selection;
+use selection::VerifiedPrefix;
 
 use anyhow::Result;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::agent::TranscriptMessages;
 use crate::events::{CompactionReason, CompactionSkipReason};
 use crate::store::orchestrator_compaction::{
     append_orchestrator_compaction_checkpoint, load_orchestrator_compaction_checkpoints,
@@ -107,6 +109,7 @@ pub(in crate::agent) struct CompactionState {
     active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
     context_sample: Option<ContextSample>,
     selection_sources: BTreeMap<usize, crate::store::TerminalSelectionProvenance>,
+    verified_prefix: Option<VerifiedPrefix>,
 }
 
 impl CompactionState {
@@ -124,6 +127,7 @@ impl CompactionState {
             active_checkpoint: None,
             context_sample: None,
             selection_sources: BTreeMap::new(),
+            verified_prefix: None,
         }
     }
 
@@ -184,6 +188,7 @@ impl CompactionState {
         });
 
         self.active_checkpoint = restored_checkpoint;
+        self.verified_prefix = None;
         // Persisted estimates are audit data, not authoritative samples. Keep
         // the in-process provider sample only when refresh resolves to the same
         // checkpoint and the projection it sampled is still byte-for-byte the
@@ -198,24 +203,26 @@ impl CompactionState {
         self.selection_sources.clear();
         self.active_checkpoint = None;
         self.context_sample = None;
+        self.verified_prefix = None;
     }
 
     pub fn invalidate_context_sample(&mut self) {
         self.context_sample = None;
     }
 
-    pub fn is_passthrough(&mut self, messages: &[Message]) -> bool {
-        self.clear_invalid_checkpoint(messages);
+    pub fn is_passthrough(&mut self, transcript: &TranscriptMessages) -> bool {
+        self.clear_invalid_checkpoint(transcript, transcript.generation());
         self.threshold_tokens.is_none() && self.active_checkpoint.is_none()
     }
 
     pub fn plan(
         &mut self,
-        messages: &[Message],
+        transcript: &TranscriptMessages,
         tools: &[ToolDefinition],
         reason: CompactionReason,
     ) -> CompactionPlan {
-        let prepared = self.prepare(messages, tools);
+        let messages: &[Message] = transcript;
+        let prepared = self.prepare(transcript, tools);
         let triggered = reason == CompactionReason::Manual
             || self
                 .threshold_tokens
@@ -230,10 +237,11 @@ impl CompactionState {
 
     pub fn prepare(
         &mut self,
-        messages: &[Message],
+        transcript: &TranscriptMessages,
         tools: &[ToolDefinition],
     ) -> PreparedProviderView {
-        self.clear_invalid_checkpoint(messages);
+        let messages: &[Message] = transcript;
+        self.clear_invalid_checkpoint(messages, transcript.generation());
         let provider_messages = self.provider_view(messages);
         PreparedProviderView {
             context_estimate: self.current_context_estimate(messages, &provider_messages, tools),
@@ -395,12 +403,13 @@ impl CompactionState {
 
     pub fn record_ordinary_context(
         &mut self,
-        messages: &[Message],
+        transcript: &TranscriptMessages,
         reported_context_tokens: u64,
         canonical_message_len: usize,
         checkpoint_id: Option<i64>,
     ) {
-        self.clear_invalid_checkpoint(messages);
+        let messages: &[Message] = transcript;
+        self.clear_invalid_checkpoint(messages, transcript.generation());
         if reported_context_tokens == 0
             || checkpoint_id
                 != self
@@ -431,17 +440,11 @@ impl CompactionState {
         });
     }
 
-    fn clear_invalid_checkpoint(&mut self, messages: &[Message]) {
-        if self.active_checkpoint.as_ref().is_some_and(|checkpoint| {
-            !self.selection_checkpoint_valid(
-                checkpoint,
-                messages,
-                self.selection_sources
-                    .get(&checkpoint.tail_start_message_index),
-            )
-        }) {
+    fn clear_invalid_checkpoint(&mut self, messages: &[Message], generation: u64) {
+        if !self.active_checkpoint_still_valid(messages, generation) {
             self.active_checkpoint = None;
             self.context_sample = None;
+            self.verified_prefix = None;
         }
     }
 
@@ -499,7 +502,7 @@ impl CompactionState {
     #[cfg(test)]
     pub fn selection_budget_for_test(
         &mut self,
-        messages: &[Message],
+        messages: &TranscriptMessages,
         tools: &[ToolDefinition],
     ) -> Result<Option<usize>, ()> {
         let plan = self.plan(messages, tools, CompactionReason::Manual);
@@ -657,23 +660,6 @@ pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize
         )
 }
 
-fn checkpoint_is_valid(
-    checkpoint: &OrchestratorCompactionCheckpoint,
-    messages: &[Message],
-    policy: CompactionPolicy,
-) -> bool {
-    checkpoint.prompt_policy_version == policy.version()
-        && checkpoint_boundary_is_valid(messages, checkpoint.tail_start_message_index)
-        && checkpoint
-            .summary
-            .strip_prefix(HISTORICAL_CONTEXT_PREFIX)
-            .is_some_and(|summary| !summary.trim().is_empty())
-        && summarized_prefix_has_complete_tools(messages, checkpoint.tail_start_message_index)
-        && checkpoint.source_prefix_sha256
-            == source_prefix_digest(messages, checkpoint.tail_start_message_index)
-        && checkpoint.system_policy_sha256 == system_policy_digest(messages, policy)
-}
-
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
     checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Orchestrator)
@@ -691,7 +677,16 @@ pub(crate) fn checkpoint_digests_for_policy(
     )
 }
 
+#[cfg(test)]
+std::thread_local! {
+    /// Summarized-prefix digests computed on this thread, so tests can tell a
+    /// reused validation from a recomputed one.
+    pub(super) static PREFIX_DIGESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
+    #[cfg(test)]
+    PREFIX_DIGESTS.with(|count| count.set(count.get() + 1));
     let mut hasher = Sha256::new();
     hasher.update(b"nac-orchestrator-compaction-source-v1\0");
     hasher.update((boundary as u64).to_be_bytes());

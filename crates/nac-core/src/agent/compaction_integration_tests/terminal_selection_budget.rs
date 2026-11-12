@@ -5,6 +5,10 @@ use crate::store::{
     TerminalSelectionDelivery, TerminalSelectionIntent, TerminalSelectionSourceKind,
 };
 use uuid::Uuid;
+
+fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
+    messages.to_vec().into()
+}
 fn intent() -> TerminalSelectionIntent {
     TerminalSelectionIntent {
         protocol_version: 1,
@@ -49,7 +53,7 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         EventSink::none(),
         AgentMode::Direct,
     );
-    agent.messages = messages.clone();
+    agent.messages = messages.clone().into();
     store_agent_snapshot(&path, &agent);
     agent
         .compaction
@@ -92,12 +96,12 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         EventSink::none(),
         AgentMode::Direct,
     );
-    rejected.messages = messages.clone();
+    rejected.messages = messages.clone().into();
     rejected
         .compaction
         .as_mut()
         .unwrap()
-        .refresh_provenance_async(&messages)
+        .refresh_provenance_async(&as_transcript(&messages))
         .await
         .unwrap();
     record(&mut rejected, tight_context);
@@ -109,12 +113,12 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         EventSink::none(),
         AgentMode::Direct,
     );
-    insufficient.messages = messages.clone();
+    insufficient.messages = messages.clone().into();
     insufficient
         .compaction
         .as_mut()
         .unwrap()
-        .refresh_provenance_async(&messages)
+        .refresh_provenance_async(&as_transcript(&messages))
         .await
         .unwrap();
     record(&mut insufficient, 1);

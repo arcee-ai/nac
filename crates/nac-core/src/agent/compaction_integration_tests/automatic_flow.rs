@@ -80,7 +80,7 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
         AgentMode::Direct,
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages = compactable_messages();
+    agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("current").await.unwrap(), "ordinary answer");
@@ -133,7 +133,7 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
             EventSink::channel(events_tx),
         );
         agent.set_steering_dispatch_id(Some("run".to_string()));
-        agent.messages = compactable_messages();
+        agent.messages = compactable_messages().into();
         store_agent_snapshot(&store_path, &agent);
 
         assert_eq!(agent.send("current").await.unwrap(), "ordinary");
@@ -212,7 +212,8 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
         Message::User {
             content: "recent".to_string(),
         },
-    ];
+    ]
+    .into();
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("current").await.unwrap(), "fallback answer");
@@ -338,7 +339,8 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
         Message::User {
             content: "recent".to_string(),
         },
-    ];
+    ]
+    .into();
     store_agent_snapshot(&store_path, &agent);
     // Establish verified plain metadata just as real provider preparation does.
     agent
@@ -515,7 +517,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
         EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages = compactable_messages();
+    agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("next user").await.unwrap(), "ordinary fallback");
@@ -613,7 +615,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
         EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages = compactable_messages();
+    agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("retry after tool").await.unwrap(), "done");

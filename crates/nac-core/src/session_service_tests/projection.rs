@@ -529,7 +529,7 @@ async fn store_backed_snapshot_is_live_during_a_real_run() {
         client.reasoning_effort(),
         None,
         None,
-        agent.messages.clone(),
+        agent.messages.to_vec(),
         None,
         BTreeMap::new(),
     );
