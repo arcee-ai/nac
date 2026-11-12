@@ -4,6 +4,7 @@ import base64
 import tempfile
 from pathlib import Path
 import unittest
+import uuid
 from unittest import mock
 
 import image_approval_caller as caller
@@ -154,13 +155,14 @@ class CallerTests(unittest.TestCase):
         self.assertFalse(workspace.exists())
         return {"state": "success", "sha": merge}
 
-    def invoke(self):
+    def invoke(self, *, workspace=None):
         with (mock.patch.object(caller.source, "read_policies", return_value=self.policies),
               mock.patch.object(caller.source, "recheck_current", return_value=self.policies),
               mock.patch.object(caller.readback, "read_current", return_value=self.snapshot),
               mock.patch.object(caller.readback, "recheck_current", return_value=self.snapshot)):
             return caller.run_from_github(self.record["pull_request"], MERGE, IMAGE,
-                self.root / "caller", trusted_revision=TRUSTED, read_token="read-only",
+                workspace or self.root / "caller", trusted_revision=TRUSTED,
+                read_token="read-only",
                 api=self.api, download=self.download, run_replay=self.replay,
                 clock=lambda: NOW)
 
@@ -169,6 +171,14 @@ class CallerTests(unittest.TestCase):
         self.assertEqual(self.downloads, [(self.record["artifact_id"],
                          self.record["artifact_digest"], "read-only")])
         self.assertEqual(self.replays, [(self.record["pull_request"], MERGE, IMAGE)])
+
+    def test_workspace_inside_repository_denied_before_download_or_write(self):
+        workspace = caller.replay.ROOT / f".approval-caller-test-{uuid.uuid4().hex}"
+        with self.assertRaisesRegex(ValueError, "outside repository"):
+            self.invoke(workspace=workspace)
+        self.assertFalse(workspace.exists())
+        self.assertFalse(self.downloads)
+        self.assertFalse(self.replays)
 
     def test_bad_artifact_metadata_fails_before_download(self):
         self.metadata["digest"] = "sha256:" + "0" * 64
