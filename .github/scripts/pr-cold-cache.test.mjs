@@ -1,4 +1,4 @@
-import { reverseImageApplicability } from './image-security-wiring.mjs';
+import { reverseImageApplicability, reverseStrictImageSummary } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
@@ -67,6 +67,7 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 function verify(values) {
   const normalized = structuredClone(values);
   reverseImageApplicability(normalized["managed-image-build"]);
+  reverseStrictImageSummary(normalized["managed-image-build"]);
   reverseAssetTokens(normalized["stable-release"]);
   reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
@@ -198,6 +199,33 @@ function evaluate(expression, event, flag, run = "101", attempt = "1", ref = "re
     format: (template, ...args) => template.replace(/\{(\d+)\}/g, (_, index) => String(args[Number(index)])),
   }, { timeout: 100 });
 }
+
+test('strict summary reversal follows the report into the split scan job', () => {
+  const reports = value => Object.entries(value.jobs).flatMap(([job, config]) =>
+    (config.steps ?? []).filter(step => step.name === 'Report exact-image security findings')
+      .map(step => ({ job, step })));
+  const config = read('managed-image-build');
+  assert.equal(reports(config).length, 1);
+  const { job, step: summary } = reports(config)[0];
+  if (job === 'build-smoke') {
+    config.jobs['build-candidate'] = config.jobs['build-smoke'];
+    delete config.jobs['build-smoke'];
+    config.jobs['build-candidate'].steps = config.jobs['build-candidate'].steps.filter(step => step !== summary);
+    config.jobs['strict-scan'] = { steps: [summary] };
+  } else {
+    assert.equal(job, 'strict-scan');
+  }
+  reverseStrictImageSummary(config);
+  assert.match(summary.run, /Image findings are advisory; enforcement is deferred/);
+
+  const duplicate = read('managed-image-build');
+  assert.equal(reports(duplicate).length, 1);
+  const original = reports(duplicate)[0];
+  const otherJob = original.job === 'strict-scan' ? 'build-smoke' : 'strict-scan';
+  const target = duplicate.jobs[otherJob] ??= { steps: [] };
+  target.steps.push(structuredClone(original.step));
+  assert.throws(() => reverseStrictImageSummary(duplicate));
+});
 
 test("all reachable required caches isolate cold dispatch while every other parsed field stays identical", () => verify(graph()));
 
@@ -365,8 +393,16 @@ const imageEvidenceMutations = [
   steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
 ];
 
+const strictImageMutations = [
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('### Strict exact-image security result', '### Image findings are advisory; enforcement is deferred'); },
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('Blocking findings and incomplete scans fail this job.', 'Findings are advisory.'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('|| scan_status=$?', '|| true'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scanner-exit "$scan_status"', '--scanner-exit 0'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scan-output image-security-evidence/security', '--scan-output stale-evidence'); },
+];
+
 test('image evidence and reporting deltas cannot weaken the original cold-cache contract', () => {
-  for (const mutate of imageEvidenceMutations) {
+  for (const mutate of [...imageEvidenceMutations, ...strictImageMutations]) {
     const value = graph(); mutate(value['managed-image-build'].jobs['build-smoke'].steps);
     assert.throws(() => verify(value));
   }
