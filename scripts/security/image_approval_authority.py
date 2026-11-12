@@ -147,6 +147,18 @@ def _pinned_files(snapshot, pins, api):
     readback.pinned_blob(api, dev_tree, pins.workflow_path, 1024 * 1024)
 
 
+def _pull_identity(value):
+    base = value.get("base") if type(value.get("base")) is dict else {}
+    head = value.get("head") if type(value.get("head")) is dict else {}
+    base_repo = base.get("repo") if type(base.get("repo")) is dict else {}
+    head_user = head.get("user") if type(head.get("user")) is dict else {}
+    author = value.get("user") if type(value.get("user")) is dict else {}
+    return (value.get("id"), value.get("number"), value.get("state"),
+            value.get("merge_commit_sha"), value.get("merged_at"),
+            base.get("ref"), base_repo.get("id"), head.get("sha"),
+            head_user.get("id"), author.get("id"))
+
+
 def _reviewed_commit(snapshot, record, pins, approval_ruleset, api, list_api):
     root = readback.directory(record["pull_request"], record["merge_sha"], record["image"])
     paths = [f"{root}/record.json", f"{root}/policy.json"]
@@ -166,7 +178,12 @@ def _reviewed_commit(snapshot, record, pins, approval_ruleset, api, list_api):
     pull_requests = list_api(f"repos/{intake.REPOSITORY}/commits/{commit_sha}/pulls?per_page=2")
     intake.require(len(pull_requests) == 1 and type(pull_requests[0]) is dict,
                    "approval commit has no unique merged pull request")
-    pr = pull_requests[0]
+    associated = pull_requests[0]
+    number = intake.positive_int(associated.get("number"), "associated approval PR number")
+    pr = api(f"repos/{intake.REPOSITORY}/pulls/{number}")
+    intake.require(type(pr) is dict and type(associated.get("id")) is int and
+                   associated["id"] > 0 and _pull_identity(pr) == _pull_identity(associated),
+                   "associated approval PR differs from full pull request")
     base = pr.get("base") if type(pr.get("base")) is dict else {}
     author = pr.get("user") if type(pr.get("user")) is dict else {}
     head = pr.get("head") if type(pr.get("head")) is dict else {}
