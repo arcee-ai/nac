@@ -47,6 +47,45 @@ The app follows the server's UI policy (`GET /ui-config`, see
 `direct` session, and only direct sessions are listed. When the server runs with
 `NAC_ORCHESTRATION=1`, the model menu gains a session-type submenu and every session is listed.
 
+## Working in a session
+
+- **Messages during a run.** In a direct session the send arrow steers the running turn and
+  **Queue next** holds the message for the next one. Undelivered messages are listed above the
+  composer, where each can be switched between the two or withdrawn. Stop cancels the run.
+- **Questions.** A question the agent asks is a card at the end of the transcript, with its
+  suggested answers, a field for another answer, and Cancel question.
+- **Permissions.** A request is a card with Deny, Always allow and Approve. A running subagent's
+  requests are shown in its parent, named by the subagent. The server refuses a subagent's request
+  after five seconds unless a client holds that subagent's event stream, so the app holds one for
+  each running subagent of the open session.
+- **Approval mode.** The chip in the composer switches a direct session between Manual, Full
+  access and Approve for me. Orchestrator sessions have no approval mode.
+- **Subagents.** The sessions a session started are listed above its composer and are left out of
+  the sidebar. A subagent's header links back to its parent.
+- **Model and effort.** Their chips change the open session between runs.
+- **Projects and sessions.** The sidebar's and Overview's Add project open the system folder
+  sheet. A secondary click on a project or session row offers Rename and Delete. Deleting a
+  project keeps its sessions and its folder.
+
+### Full access
+
+Full access is the server's `auto_approve` mode, which the web client calls Approve all. The
+server then answers ordinary permission requests for the session and its subagents without
+asking. It creates no remembered grants, and hard denials and configured `deny` rules still
+apply. Settings has a switch that starts new direct sessions in Full access.
+
+### Menus
+
+The model, effort, approval mode and row menus are native pop-up menus, which Rune has on macOS
+and Windows. Elsewhere those controls show "Menus need macOS or Windows.", and New session uses
+the first listed model.
+
+### Saved settings
+
+The theme, the last model, collapsed projects and the Full access switch are kept in
+`ai.arcee.nac.rune/prefs.json` under the user's settings directory. A headless run keeps them in
+memory unless `RUNE_PREFS_DIR` names a directory.
+
 ## Headless snapshots
 
 Rune renders without a display or a GPU. Fixture scenes need no server:
@@ -57,7 +96,8 @@ target/debug/nac-desktop --snap out.png --scene overview --size 1280x800 --scale
 target/debug/nac-desktop --tree tree.json --scene session-running
 ```
 
-Scenes: `overview`, `session`, `session-running`, `session-permission`, `empty`, `settings`.
+Scenes: `overview`, `session`, `session-running`, `session-permission`, `session-question`,
+`session-queue`, `session-child`, `rename`, `delete`, `empty`, `settings`.
 
 With `--server` (or `--nac-web`) a headless run loads the real project and session lists before
 it draws, and stops a child it started:
@@ -94,8 +134,10 @@ License 1.1; the license text is `assets/fonts/OFL.txt`.
 | `src/api.rs` | The blocking HTTP client and the response types. |
 | `src/stream.rs` | The session event stream: replay cursor, gaps, reconnect. |
 | `src/state.rs` | The app model, its actions, worker threads and the event reducer. |
+| `src/controls.rs` | What the open session is told: messages, answers, permission replies, approval mode, model and effort. |
+| `src/manage.rs` | Adding, renaming and deleting projects and sessions, and the saved settings. |
 | `src/transcript.rs` | Snapshot messages to transcript items. |
 | `src/theme.rs` | The kit themes built from dogfood's tokens. |
 | `src/icons.rs` | Icons. |
 | `src/fixtures.rs` | Canned scenes for snapshots. |
-| `src/views/` | Sidebar, Overview, session and settings pages. |
+| `src/views/` | Sidebar, Overview, session and settings pages, the composer, the permission and question cards, and the rename and delete dialog. |

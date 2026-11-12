@@ -1,11 +1,10 @@
-//! A session: the header with its project and title, the transcript, pending permission
-//! requests, and the composer.
+//! A session: the header with its project and title, the transcript with what the agent is
+//! asking at its end, and the composer.
 
-use rune::{El, ScrollSpec, TextStyle, auto_grow, col, icon, row, spacer, text, text_input};
+use rune::{El, ScrollSpec, TextStyle, col, icon, row, text};
 use rune_kit::{Markdown, Spinner};
 
-use super::{Pill, Screen, mono, pill};
-use crate::api::PermissionRequest;
+use super::{Screen, asks, composer, mono};
 use crate::icons;
 use crate::state::{self, App, OpenSession};
 use crate::stream::Link;
@@ -32,6 +31,24 @@ pub fn screen(s: &App, l: &Look) -> Screen {
         .child(text("/").font(l.k.ty.ui).color(c.text_faint).a11y_hidden())
         .child(text(title).role("heading").level(1).font(l.k.ty.ui_medium).color(c.text_base).truncate().shrink());
     let mut actions = Vec::new();
+    // A subagent's way back to the session that started it.
+    if let Some(parent) = listed.and_then(|m| m.lineage.as_ref()).map(|x| x.parent_session_id.clone()).filter(|id| !id.is_empty()) {
+        let name = s.sessions.iter().find(|m| m.summary.session_id == parent).map(state::title).unwrap_or_else(|| "Parent session".to_owned());
+        actions.push(
+            l.k.interactive(row().role("button").label(format!("Open parent session: {name}")).focusable(true))
+                .key("parent")
+                .h(26.0)
+                .px(10.0)
+                .gap(6.0)
+                .center_y()
+                .radius(13.0)
+                .max_w(260.0)
+                .border(1.0, l.border)
+                .on_press(move |s: &mut App| s.open_session(&parent))
+                .child(icon(&icons::CHEVRON, 12.0).color(c.text_muted).icon_rotation(std::f32::consts::PI).a11y_hidden())
+                .child(text(name).font(l.k.ty.small_medium).color(c.text_base).truncate().shrink().a11y_hidden()),
+        );
+    }
     if o.link == Link::Reconnecting {
         actions.push(text("Reconnecting…").key("link").font(l.k.ty.small).color(l.attention));
     }
@@ -60,7 +77,7 @@ pub fn screen(s: &App, l: &Look) -> Screen {
         .scroll(ScrollSpec { stick_bottom: true })
         // Rows land at once: a default fade would overlap a live row with the stored row that replaces it.
         .child(column(col().key("transcript").px(24.0).pt(32.0).pb(40.0).gap(16.0).instant_changes().children(rows(s, o, l))));
-    let body = col().key("session").w_full().child(transcript).child(column(composer(s, o, l)));
+    let body = col().key("session").w_full().child(transcript).child(column(composer::composer(s, o, l)));
     Screen { lead, actions, body }
 }
 
@@ -108,9 +125,12 @@ fn rows(s: &App, o: &OpenSession, l: &Look) -> Vec<El> {
         out.push(Markdown::new(o.stream_text.clone()).style(l.markdown()).streaming(o.running).build(&l.k).key("text-live"));
     }
     for request in &o.permissions {
-        out.push(permission(request, l));
+        out.push(asks::permission(request, o, l));
     }
-    if o.running && o.permissions.is_empty() {
+    let question = asks::question(s, o, l);
+    let asking = !o.permissions.is_empty() || question.is_some();
+    out.extend(question);
+    if o.running && !asking {
         let since = o.run_started_ms.map(|ms| state::elapsed(s.now_ms, ms)).unwrap_or_default();
         out.push(
             row()
@@ -229,75 +249,4 @@ fn reasoning(key: &str, words: &str, live: bool, o: &OpenSession, l: &Look) -> E
         e = e.fill(l.subtle).child(col().key("detail").w_full().pl(36.0).pr(14.0).pb(12.0).child(text(words.to_owned()).font(TextStyle::new(13.0, 400.0).lh(21.0)).color(c.text_muted).wrap().selectable(true)));
     }
     e
-}
-
-/// A pending permission request: what the agent wants to do, with Deny and Approve.
-fn permission(request: &PermissionRequest, l: &Look) -> El {
-    let c = &l.k.c;
-    let (approve, deny) = (request.id.clone(), request.id.clone());
-    let mut what = col().grow(1.0).shrink().gap(4.0).child(
-        row()
-            .gap(6.0)
-            .child(text("Permission needed").font(l.k.ty.ui_medium).color(c.text_base))
-            .child(text(request.tool.clone()).font(mono(12.5)).color(c.text_muted)),
-    );
-    // One write outside the project carries the same path as two resources; show it once.
-    let unique = request.resources.iter().enumerate().filter(|(i, r)| !r.display.is_empty() && !request.resources[..*i].iter().any(|e| e.display == r.display));
-    for (_, resource) in unique.take(6) {
-        what = what.child(text(resource.display.clone()).font(mono(12.0)).color(c.text_muted).wrap_anywhere().selectable(true));
-    }
-    col()
-        .key(format!("permission-{}", request.id))
-        .role("group")
-        .label("Permission request")
-        .w_full()
-        .padding(14.0)
-        .gap(12.0)
-        .radius(l.k.radius.xl)
-        .border(1.0, l.attention.alpha(0.55))
-        .fill(l.attention.alpha(0.06))
-        .child(row().w_full().gap(10.0).items_start().child(icon(&icons::SHIELD, 16.0).color(l.attention).mt(2.0)).child(what))
-        .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .justify_end()
-                .child(pill("Deny", None, Pill::Outline, 32.0, l).on_press(move |s: &mut App| s.reply_permission(&deny, false)).key("deny"))
-                .child(pill("Approve", None, Pill::Primary, 32.0, l).on_press(move |s: &mut App| s.reply_permission(&approve, true)).key("approve")),
-        )
-}
-
-fn composer(s: &App, o: &OpenSession, l: &Look) -> El {
-    let c = &l.k.c;
-    let field = text_input(&s.composer, l.k.ty.body)
-        .key("composer-input")
-        .label("Message")
-        .w_full()
-        .color(c.text_base)
-        .placeholder(if o.running { "Working… Stop the run to send another message" } else { "Message the agent" }, c.text_faint)
-        .caret(c.text_base, l.k.selection())
-        .on_edit(rune::edit_access(|s: &mut App| &mut s.composer))
-        .on_submit(|s: &mut App, _| s.send());
-    let round = |fill, ink, glyph, label: &str| {
-        l.k.interactive_with(row().role("button").label(label.to_owned()).size(30.0, 30.0).radius(15.0).center().fill(fill).focusable(true), l.primary_fg.alpha(0.12), l.primary_fg.alpha(0.2))
-            .child(icon(glyph, 16.0).color(ink).a11y_hidden())
-    };
-    let action = if o.running {
-        round(l.primary, l.primary_fg, &icons::STOP, "Stop").on_press(|s: &mut App| s.stop_run()).key("stop")
-    } else {
-        let sendable = !s.composer.text.trim().is_empty() && !o.loading;
-        round(l.primary, l.primary_fg, &icons::ARROW_UP, "Send").opacity(if sendable { 1.0 } else { 0.4 }).disabled(!sendable).on_press(|s: &mut App| s.send()).key("send")
-    };
-    let hint = if o.model.is_empty() { String::new() } else { o.model.rsplit('/').next().unwrap_or_default().to_owned() };
-    let shell = col()
-        .key("composer")
-        .w_full()
-        .radius(20.0)
-        .border(1.0, l.input)
-        .fill(l.card)
-        .shadow(1.0, 4.0, c.text_base.alpha(if l.dark { 0.0 } else { 0.05 }))
-        .focus_within_ring(2.0, 0.0, c.text_faint.alpha(0.45))
-        .child(col().w_full().px(16.0).pt(12.0).pb(4.0).child(auto_grow(field, 1, 8)))
-        .child(row().w_full().px(10.0).pb(10.0).pl(16.0).gap(8.0).center_y().child(text(hint).font(TextStyle::new(11.5, 400.0).lh(16.0)).color(c.text_muted).truncate().shrink()).child(spacer()).child(action));
-    col().w_full().px(24.0).pt(4.0).pb(20.0).child(shell)
 }

@@ -3,7 +3,8 @@
 
 use serde_json::json;
 
-use crate::api::{ActiveRun, ManagedSession, PermissionRequest, PermissionResource, Project, SessionSummary};
+use crate::api::{ActiveRun, Child, InboxItem, Lineage, ManagedSession, PermissionRequest, PermissionResource, Project, Question, QuestionRequest, SessionSummary};
+use crate::manage::Prompt;
 use crate::state::{App, OpenSession, Route, parse_utc};
 use crate::stream::Link;
 use crate::transcript::{self, Tool, ToolStatus};
@@ -15,6 +16,11 @@ pub const SCENES: &[Scene] = &[
     ("session", session),
     ("session-running", session_running),
     ("session-permission", session_permission),
+    ("session-question", session_question),
+    ("session-queue", session_queue),
+    ("session-child", session_child),
+    ("rename", rename),
+    ("delete", delete),
     ("empty", empty),
     ("settings", settings),
 ];
@@ -37,6 +43,7 @@ fn listed(id: &str, project: &str, title: &str, updated_at: &str, running_for_s:
             title: Some(title.into()),
             last_user_prompt: None,
             updated_at: updated_at.into(),
+            ..Default::default()
         },
         active_run: running_for_s.map(|s| ActiveRun { started_at_epoch_ms: now - s * 1_000, submitted_user_message: None }),
         lineage: None,
@@ -136,6 +143,10 @@ fn open(s: &mut App) -> &mut OpenSession {
     let mut o = OpenSession::new(OPEN);
     o.loading = false;
     o.model = "anthropic/claude-sonnet-4-5".into();
+    o.backend = "anthropic".into();
+    o.behavior = "direct".into();
+    o.effort = Some("high".into());
+    o.approval_mode = "manual".into();
     o.project_id = Some("p-nac".into());
     o.items = transcript::items(&transcript());
     o.link = Link::Live;
@@ -180,12 +191,75 @@ fn session_running(s: &mut App) {
     s.composer.focused = false;
 }
 
+const CHILD: &str = "fixture-child-1";
+
+fn children() -> Vec<Child> {
+    let child = |id: &str, description: &str, profile: &str, status: &str| Child { child_session_id: id.into(), description: description.into(), profile: profile.into(), status: status.into() };
+    vec![
+        child(CHILD, "Port the gap check to desktop/rune/src/stream.rs", "coder", "running"),
+        child("fixture-child-2", "Find every caller of openEventStream", "explorer", "completed"),
+    ]
+}
+
 fn session_permission(s: &mut App) {
     let o = running(s);
     o.live_tools.truncate(1);
+    o.children = children();
     o.permissions = vec![PermissionRequest {
         id: "perm-1".into(),
+        session_id: CHILD.into(),
         tool: "run_command".into(),
-        resources: vec![PermissionResource { display: "git push origin fix/event-stream-gap".into() }],
+        resources: vec![PermissionResource { display: "git push origin fix/event-stream-gap".into(), save_resource: Some("git push *".into()) }],
     }];
+}
+
+fn session_question(s: &mut App) {
+    let o = running(s);
+    o.live_tools.truncate(1);
+    o.questions = vec![Question {
+        request: QuestionRequest {
+            request_id: "q-1".into(),
+            run_id: "run-1".into(),
+            generation: "1".into(),
+            text: "The Rust client has no test for an epoch change. Should the new test replay a recorded stream, or build the envelopes by hand?".into(),
+            choices: vec!["Replay a recorded stream".into(), "Build the envelopes by hand".into()],
+            responder_class: "human_decision".into(),
+        },
+        revision: 1,
+        status: "pending".into(),
+    }];
+    s.answer = rune::TextEdit::new("Build the envelopes by hand");
+}
+
+/// A run in Full access with two messages waiting and its subagents listed.
+fn session_queue(s: &mut App) {
+    let o = running(s);
+    o.approval_mode = "auto_approve".into();
+    o.children = children();
+    o.expanded.insert("subagents".into());
+    let item = |id, delivery: &str, prompt: &str| InboxItem { id, delivery: delivery.into(), status: "pending".into(), prompt: prompt.into(), ..Default::default() };
+    o.inbox = vec![item(1, "steer", "Keep the public Cursor type as it is."), item(2, "queue", "When that passes, update the README's stream section.")];
+    s.composer = rune::TextEdit::new("Also run clippy before you finish");
+}
+
+/// A subagent's own page, with the way back to the session that started it.
+fn session_child(s: &mut App) {
+    let o = running(s);
+    o.id = CHILD.into();
+    o.pending_user = None;
+    let mut m = listed(CHILD, "p-nac", "", NOW, Some(42));
+    m.summary.title = None;
+    m.lineage = Some(Lineage { kind: "traditional-child".into(), parent_session_id: OPEN.into(), description: "Port the gap check to desktop/rune/src/stream.rs".into() });
+    s.sessions.push(m);
+    s.route = Route::Session(CHILD.into());
+}
+
+fn rename(s: &mut App) {
+    open(s);
+    s.ask(Prompt::RenameSession(OPEN.into()));
+}
+
+fn delete(s: &mut App) {
+    open(s);
+    s.ask(Prompt::DeleteProject("p-nac".into()));
 }

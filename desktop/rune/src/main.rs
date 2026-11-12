@@ -7,9 +7,11 @@
 //! Rune's own flags (`--snap`, `--tree`, `--scene`, `--list-scenes`, `--script`) render headless.
 
 mod api;
+mod controls;
 mod engine;
 mod fixtures;
 mod icons;
+mod manage;
 mod state;
 mod stream;
 mod theme;
@@ -23,7 +25,7 @@ use rune::{AppSpec, Chrome, KeyEvent, PopupAnchor, Tx};
 use rune_kit::shell;
 
 use crate::api::Client;
-use crate::state::{App, Conn, OpenSession, Route};
+use crate::state::{App, Conn};
 
 /// Geist and Geist Mono (SIL Open Font License 1.1, `assets/fonts/OFL.txt`).
 static FONTS: &[&[u8]] = &[include_bytes!("../assets/fonts/Geist[wght].ttf"), include_bytes!("../assets/fonts/GeistMono[wght].ttf")];
@@ -56,39 +58,28 @@ fn args() -> Args {
     out
 }
 
-/// A headless run against `--server` (or a child named by `--nac-web`): there is no event loop to deliver answers to, so the
-/// lists (and `--session`'s transcript) are requested here, before the one frame is drawn.
+/// A headless run against `--server` (or a child named by `--nac-web`): there is no event loop to
+/// deliver answers to, so every request runs before it returns (`App::spawn`) and the lists (and
+/// `--session`'s transcript) are in place before the first frame.
 fn load_now(s: &mut App, args: &Args) {
     let started = engine::start(&args.engine).and_then(|url| Client::new(&url).ready().map(|ready| (url, ready.version)));
     let (url, version) = match started {
         Ok(found) => found,
         Err(why) => return s.conn = Conn::Failed(why),
     };
-    let client = Client::new(&url);
-    s.orchestration = client.orchestration_enabled();
-    match client.projects().and_then(|p| client.sessions().map(|m| (p, m))) {
-        Ok((projects, sessions)) => s.set_lists(projects, sessions),
-        Err(why) => s.notice = Some(why),
-    }
+    s.connected(&url, version);
     if let Some(id) = &args.session {
-        s.open = Some(OpenSession::new(id));
-        s.route = Route::Session(id.clone());
-        match client.snapshot(id) {
-            Ok(snapshot) => s.apply_snapshot(snapshot),
-            Err(why) => {
-                if let Some(o) = &mut s.open {
-                    (o.loading, o.error) = (false, Some(why));
-                }
-            }
-        }
+        s.open_session(id);
     }
-    (s.server, s.version, s.conn) = (url, version, Conn::Ready);
-    // The one frame draws from what was just fetched, and `on_quit` does not run headless, so a
-    // child started here is stopped here. Attached servers are not touched.
+    // `on_quit` does not run headless, so a child started here is stopped here and asked nothing
+    // more. An attached server is not touched and stays reachable for a `--script`.
     engine::stop();
+    if args.engine.server.is_none() {
+        s.client = None;
+    }
 }
 
-fn on_key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
+fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if shell::is_sidebar_toggle(ev) {
         s.sidebar.toggle();
     } else if ev.is_command('k') {
@@ -96,7 +87,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
     } else if ev.is_command('n') {
         // With the sidebar closed its button is gone, so the menu opens under the title bar.
         let anchor: PopupAnchor = if s.sidebar.is_open() { "new-session".into() } else { (16.0, 52.0).into() };
-        s.new_session(None, anchor);
+        s.new_session(None, anchor, tx);
     } else {
         return false;
     }

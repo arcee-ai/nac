@@ -1,12 +1,13 @@
 //! The sidebar: New session, Search, Overview, the projects with their sessions, and the
 //! footer with Settings and the light/dark toggle.
 
-use rune::{El, TextCase, TextStyle, col, row, spacer, text};
+use rune::{El, PointerPress, TextCase, TextStyle, Tx, col, row, spacer, text};
 use rune_kit::shell::{Sidebar, SidebarRow};
 
 use super::{Pill, field, icon_button, pill, status_dot, status_of};
 use crate::api::ManagedSession;
 use crate::icons;
+use crate::manage::Prompt;
 use crate::state::{self, App, Route};
 use crate::theme::{Look, ROW};
 
@@ -28,12 +29,16 @@ fn session_row(s: &App, m: &ManagedSession, l: &Look) -> El {
             move |s: &mut App, _| s.open_session(&id)
         })
         .build(&l.rows)
+        .on_secondary_press({
+            let id = id.clone();
+            move |s: &mut App, at: PointerPress, tx: &mut Tx| s.row_menu(Prompt::RenameSession(id.clone()), Prompt::DeleteSession(id.clone()), at, tx)
+        })
         .key(format!("session-{id}"))
 }
 
 pub fn sidebar(s: &App, l: &Look) -> El {
     let c = &l.k.c;
-    let new = pill("New session", Some(&icons::PLUS), Pill::Outline, ROW, l).w_full().on_press(|s: &mut App| s.new_session(None, "new-session")).key("new-session");
+    let new = pill("New session", Some(&icons::PLUS), Pill::Outline, ROW, l).w_full().on_press_tx(|s: &mut App, tx: &mut Tx| s.new_session(None, "new-session", tx)).key("new-session");
     let search = SidebarRow::new("Search")
         .icon(&icons::SEARCH)
         .detail(SEARCH_KEYS)
@@ -57,7 +62,8 @@ pub fn sidebar(s: &App, l: &Look) -> El {
 
     let label = |title: &str| row().w_full().h(28.0).px(12.0).center_y().child(text(title.to_owned()).font(l.eyebrow()).text_case(TextCase::Uppercase).color(c.text_muted));
     let note = |words: &str| row().w_full().px(12.0).py(6.0).child(text(words.to_owned()).font(l.k.ty.small).color(c.text_muted).wrap());
-    sb = sb.child(label("Projects").key("projects-label"));
+    let add_project = icon_button(&icons::PLUS, "Add project", l).size(24.0, 24.0).on_press_tx(|s: &mut App, tx: &mut Tx| s.add_project(tx)).key("add-project");
+    sb = sb.child(label("Projects").pr(4.0).child(spacer()).child(add_project).key("projects-label"));
     let sessions = s.visible_sessions();
     let searching = s.search_open && !s.search.text.trim().is_empty();
     if s.projects.is_empty() {
@@ -70,9 +76,9 @@ pub fn sidebar(s: &App, l: &Look) -> El {
         }
         let closed = s.collapsed.contains(&p.project_id);
         let id = p.project_id.clone();
-        let add = icon_button(&icons::PLUS, "New session in this project", l).size(24.0, 24.0).on_press({
+        let add = icon_button(&icons::PLUS, "New session in this project", l).size(24.0, 24.0).on_press_tx({
             let id = id.clone();
-            move |s: &mut App| s.new_session(Some(&id), format!("add-{id}"))
+            move |s: &mut App, tx: &mut Tx| s.new_session(Some(&id), format!("add-{id}"), tx)
         });
         sb = sb.child(
             SidebarRow::new(p.name.clone())
@@ -86,6 +92,10 @@ pub fn sidebar(s: &App, l: &Look) -> El {
                 })
                 .build(&l.rows)
                 .expanded(!closed)
+                .on_secondary_press({
+                    let id = id.clone();
+                    move |s: &mut App, at: PointerPress, tx: &mut Tx| s.row_menu(Prompt::RenameProject(id.clone()), Prompt::DeleteProject(id.clone()), at, tx)
+                })
                 .key(format!("project-{id}")),
         );
         if closed {
@@ -120,7 +130,7 @@ pub fn sidebar(s: &App, l: &Look) -> El {
         .child(icon_button(&icons::GEAR, "Settings", l).on_press(|s: &mut App| s.route = Route::Settings).key("settings"))
         .child(
             icon_button(if dark { &icons::SUN } else { &icons::MOON }, if dark { "Use the light theme" } else { "Use the dark theme" }, l)
-                .on_press(move |s: &mut App| s.theme = Some(!dark))
+                .on_press(move |s: &mut App| s.set_theme(Some(!dark)))
                 .key("theme-toggle"),
         );
     sb.footer(footer).build(&l.rows)

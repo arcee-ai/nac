@@ -1,7 +1,7 @@
 //! Overview: project tiles, the sessions that are running, and the recent ones. With no project
 //! yet, the form that creates the first one.
 
-use rune::{El, ScrollSpec, col, icon, row, spacer, text};
+use rune::{El, ScrollSpec, Tx, col, icon, row, spacer, text};
 use rune_kit::Spinner;
 
 use super::{Pill, Screen, Status, field, heading, pill, status_dot, status_of};
@@ -15,7 +15,8 @@ pub fn screen(s: &App, l: &Look) -> Screen {
     let lead = text("Overview").role("heading").level(1).font(l.k.ty.ui_medium).color(c.text_base);
     let mut actions = Vec::new();
     if !s.projects.is_empty() {
-        actions.push(pill("New session", Some(&icons::PLUS), Pill::Primary, 32.0, l).on_press(|s: &mut App| s.new_session(None, "header-new-session")).key("header-new-session"));
+        actions.push(pill("Add project", Some(&icons::FOLDER), Pill::Outline, 32.0, l).on_press_tx(|s: &mut App, tx: &mut Tx| s.add_project(tx)).key("header-add-project"));
+        actions.push(pill("New session", Some(&icons::PLUS), Pill::Primary, 32.0, l).on_press_tx(|s: &mut App, tx: &mut Tx| s.new_session(None, "header-new-session", tx)).key("header-new-session"));
     }
     let content = match &s.conn {
         Conn::Starting => centred(
@@ -64,7 +65,7 @@ fn start_project(s: &App, l: &Look) -> El {
         .child(field("project-name", &s.project_name, "my-project", |s| &mut s.project_name, l))
         .child(label("Directory").mt(8.0))
         .child(field("project-dir", &s.project_dir, "/path/to/the/project", |s| &mut s.project_dir, l))
-        .child(row().w_full().mt(12.0).child(spacer()).child(create));
+        .child(row().w_full().mt(12.0).gap(8.0).child(pill("Choose folder…", Some(&icons::FOLDER), Pill::Outline, 36.0, l).on_press_tx(|s: &mut App, tx: &mut Tx| s.choose_dir(tx)).key("choose-dir")).child(spacer()).child(create));
     col().w_full().max_w(576.0).gap(24.0).items_center().child(text("Start a project").role("heading").level(1).font(l.title()).color(c.text_base)).child(card)
 }
 
@@ -92,7 +93,7 @@ fn dashboard(s: &App, l: &Look) -> El {
 
 fn project_tile(s: &App, p: &Project, l: &Look) -> El {
     let c = &l.k.c;
-    let mine: Vec<&ManagedSession> = s.sessions.iter().filter(|m| m.summary.project_id.as_deref() == Some(p.project_id.as_str())).collect();
+    let mine: Vec<&ManagedSession> = s.sessions.iter().filter(|m| !state::is_child(m) && m.summary.project_id.as_deref() == Some(p.project_id.as_str())).collect();
     let running = mine.iter().filter(|m| m.active_run.is_some()).count();
     let count = match mine.len() {
         0 => "No sessions".to_owned(),
@@ -114,7 +115,7 @@ fn project_tile(s: &App, p: &Project, l: &Look) -> El {
         .border(1.0, l.border)
         .fill(l.card)
         .justify_between()
-        .on_press(move |s: &mut App| s.new_session(Some(&id), format!("tile-{id}")))
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| s.new_session(Some(&id), format!("tile-{id}"), tx))
         .child(top)
         .child(
             row()

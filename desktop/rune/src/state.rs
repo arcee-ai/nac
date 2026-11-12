@@ -4,15 +4,17 @@
 //! request goes through [`App::spawn`], which runs it on a worker thread and lands the answer
 //! with `AppHandle::update`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rune::prefs::Prefs;
 use rune::{AppHandle, PopupAnchor, PopupItem, PopupMenu, TextEdit, Tx, popup_menu_supported};
 use rune_kit::shell::PaneState;
 use serde_json::Value;
 
-use crate::api::{Boundary, Client, ManagedSession, PermissionRequest, Project, Provider, Snapshot};
+use crate::api::{Boundary, Child, Client, InboxItem, ManagedSession, PermissionRequest, Project, Provider, Question, Snapshot};
+use crate::manage::{self, Prompt};
 use crate::stream::{self, Link, Msg};
 use crate::transcript::{self, Item, Tool, ToolStatus};
 
@@ -43,7 +45,21 @@ pub struct OpenSession {
     pub loading: bool,
     pub error: Option<String>,
     pub model: String,
+    pub backend: String,
+    pub behavior: String,
+    /// None is the model's default effort.
+    pub effort: Option<String>,
     pub project_id: Option<String>,
+    /// `manual`, `auto_approve` (Full access) or `review`; empty until the server says.
+    pub approval_mode: String,
+    /// Questions the agent is waiting on, oldest first.
+    pub questions: Vec<Question>,
+    /// Messages sent during the run and not delivered yet.
+    pub inbox: Vec<InboxItem>,
+    /// The subagents this session started.
+    pub children: Vec<Child>,
+    pub(crate) polling: bool,
+    pub(crate) repoll: bool,
     /// The stored transcript, from the last snapshot.
     pub items: Vec<Item>,
     /// This run's tool calls as events report them, until the snapshot stores them.
@@ -61,6 +77,8 @@ pub struct OpenSession {
     /// Keys of expanded tool and reasoning rows.
     pub expanded: HashSet<String>,
     stream_stop: Option<Arc<AtomicBool>>,
+    /// The stop flag of the event stream held for each running subagent.
+    pub(crate) child_streams: HashMap<String, Arc<AtomicBool>>,
     fetching: bool,
     refetch: bool,
 }
@@ -72,7 +90,16 @@ impl OpenSession {
             loading: true,
             error: None,
             model: String::new(),
+            backend: String::new(),
+            behavior: String::new(),
+            effort: None,
             project_id: None,
+            approval_mode: String::new(),
+            questions: Vec::new(),
+            inbox: Vec::new(),
+            children: Vec::new(),
+            polling: false,
+            repoll: false,
             items: Vec::new(),
             live_tools: Vec::new(),
             stream_text: String::new(),
@@ -85,9 +112,15 @@ impl OpenSession {
             link: Link::Connecting,
             expanded: HashSet::new(),
             stream_stop: None,
+            child_streams: HashMap::new(),
             fetching: false,
             refetch: false,
         }
+    }
+
+    /// A direct behavior: it has an inbox and an approval mode. Orchestrator sessions have neither.
+    pub fn direct(&self) -> bool {
+        matches!(self.behavior.as_str(), "direct" | "direct-with-orchestrator")
     }
 
     fn clear_live(&mut self) {
@@ -99,7 +132,7 @@ impl OpenSession {
 
 impl Drop for OpenSession {
     fn drop(&mut self) {
-        if let Some(stop) = &self.stream_stop {
+        for stop in self.stream_stop.iter().chain(self.child_streams.values()) {
             stop.store(true, Ordering::Relaxed);
         }
     }
@@ -119,6 +152,14 @@ pub struct App {
     pub loaded: bool,
     pub open: Option<OpenSession>,
     pub composer: TextEdit,
+    /// The answer to the open session's first pending question.
+    pub answer: TextEdit,
+    /// The rename or delete being confirmed in a dialog, and the name typed into it.
+    pub prompt: Option<Prompt>,
+    pub rename: TextEdit,
+    /// New sessions start in Full access (`auto_approve`). Saved.
+    pub full_access: bool,
+    pub prefs: Prefs,
     pub search_open: bool,
     pub search: TextEdit,
     /// Projects whose sessions the sidebar hides.
@@ -129,7 +170,7 @@ pub struct App {
     pub notice: Option<String>,
     /// A session or project is being created.
     pub busy: bool,
-    /// The backend and model of the last session created here, checked in the model menu.
+    /// The backend and model last chosen here, checked in the model menu. Saved.
     pub model: Option<(String, String)>,
     /// The server enables orchestration. Without it every new session is `direct` and only direct
     /// sessions are listed, as in the web client.
@@ -148,9 +189,10 @@ pub fn now_ms() -> i64 {
 
 impl App {
     pub fn new(handle: Option<AppHandle<App>>) -> App {
+        let prefs = manage::open_prefs();
         App {
             sidebar: PaneState::new(272.0).range(220.0, 480.0),
-            theme: None,
+            theme: prefs.get("theme").unwrap_or_default(),
             route: Route::Overview,
             conn: Conn::Offline,
             server: String::new(),
@@ -160,14 +202,19 @@ impl App {
             loaded: false,
             open: None,
             composer: TextEdit::new(""),
+            answer: TextEdit::new(""),
+            prompt: None,
+            rename: TextEdit::new(""),
+            full_access: prefs.get("full_access").unwrap_or_default(),
             search_open: false,
             search: TextEdit::new(""),
-            collapsed: HashSet::new(),
+            collapsed: prefs.get("collapsed").unwrap_or_default(),
             project_name: TextEdit::new(""),
             project_dir: TextEdit::new(""),
             notice: None,
             busy: false,
-            model: None,
+            model: prefs.get("model"),
+            prefs,
             orchestration: false,
             behavior: "direct".to_owned(),
             now_ms: now_ms(),
@@ -177,12 +224,24 @@ impl App {
         }
     }
 
-    /// Runs `work` on a worker thread and `done` with its answer on the UI thread.
-    fn spawn<T: Send + 'static>(&self, work: impl FnOnce(&Client) -> T + Send + 'static, done: impl FnOnce(&mut App, T) + Send + 'static) {
-        let (Some(client), Some(handle)) = (self.client.clone(), self.handle.clone()) else { return };
+    /// Runs `work` on a worker thread and `done` with its answer on the UI thread. A headless
+    /// run has no event loop to land an answer on, so there both run here, in order.
+    pub(crate) fn spawn<T: Send + 'static>(&mut self, work: impl FnOnce(&Client) -> T + Send + 'static, done: impl FnOnce(&mut App, T) + Send + 'static) {
+        let Some(client) = self.client.clone() else { return };
+        let Some(handle) = self.handle.clone() else { return done(self, work(&client)) };
         std::thread::spawn(move || {
             let out = work(&client);
             handle.update(move |s, _| done(s, out));
+        });
+    }
+
+    /// [`App::spawn`] for an answer that opens a menu, which needs the update's `Tx`.
+    pub(crate) fn spawn_tx<T: Send + 'static>(&mut self, tx: &mut Tx, work: impl FnOnce(&Client) -> T + Send + 'static, done: impl FnOnce(&mut App, T, &mut Tx) + Send + 'static) {
+        let Some(client) = self.client.clone() else { return };
+        let Some(handle) = self.handle.clone() else { return done(self, work(&client), tx) };
+        std::thread::spawn(move || {
+            let out = work(&client);
+            handle.update(move |s, tx| done(s, out, tx));
         });
     }
 
@@ -223,8 +282,15 @@ impl App {
     /// Once a second from the ticker thread. Returns whether anything on screen changed.
     pub fn tick(&mut self) -> bool {
         self.ticks = self.ticks.wrapping_add(1);
-        if self.conn == Conn::Ready && self.ticks.is_multiple_of(5) {
-            self.refresh();
+        let slow = self.ticks.is_multiple_of(5);
+        if self.conn == Conn::Ready {
+            if slow {
+                self.refresh();
+            }
+            // Questions and subagents have no events, so a running session is asked each second.
+            if self.open.as_ref().is_some_and(|o| !o.loading && !o.polling && (o.running || slow)) {
+                self.poll();
+            }
         }
         let running = self.open.as_ref().is_some_and(|o| o.running) || self.sessions.iter().any(|m| m.active_run.is_some());
         // Elapsed timers tick each second; relative times only need the minute.
@@ -245,20 +311,16 @@ impl App {
             self.open = Some(OpenSession::new(id));
             self.composer = TextEdit::new("");
             self.composer.focused = true;
+            self.answer = TextEdit::new("");
+            // The first snapshot says the behavior, then `poll` asks what the session waits on.
             self.load_snapshot();
-            let id = id.to_owned();
-            self.spawn(move |c| c.permissions(&id), |s, requests| {
-                if let Some(o) = &mut s.open {
-                    o.permissions = requests;
-                }
-            });
         }
         self.route = Route::Session(id.to_owned());
     }
 
     /// `GET /sessions/{id}` for the open session. Requests made while one is in flight collapse
     /// into one more after it lands.
-    fn load_snapshot(&mut self) {
+    pub(crate) fn load_snapshot(&mut self) {
         let Some(o) = &mut self.open else { return };
         if o.fetching {
             o.refetch = true;
@@ -289,9 +351,12 @@ impl App {
     pub fn apply_snapshot(&mut self, snapshot: Snapshot) {
         let now = self.now_ms;
         let Some(o) = &mut self.open else { return };
-        o.loading = false;
+        let first = std::mem::take(&mut o.loading);
         o.error = None;
         o.model = snapshot.metadata.model;
+        o.backend = snapshot.metadata.backend;
+        o.behavior = snapshot.metadata.behavior;
+        o.effort = snapshot.metadata.reasoning_effort;
         o.project_id = snapshot.metadata.project_id;
         o.items = transcript::items(&snapshot.messages);
         match &snapshot.active_run {
@@ -331,6 +396,9 @@ impl App {
         o.live_tools.retain(|t| !finished.iter().any(|f| f.0 == t.call_id));
         if o.stream_stop.is_none() {
             self.start_stream(snapshot.thread_event_boundary);
+        }
+        if first {
+            self.poll();
         }
     }
 
@@ -418,12 +486,18 @@ impl App {
             "transcript_reverted" => o.clear_live(),
             "snapshot_saved" => {}
             "permission_asked" => {
-                if let Ok(request) = serde_json::from_value::<PermissionRequest>(event["request"].clone())
+                if let Ok(mut request) = serde_json::from_value::<PermissionRequest>(event["request"].clone())
                     && !o.permissions.iter().any(|p| p.id == request.id)
                 {
+                    request.session_id = o.id.clone();
                     o.permissions.push(request);
                 }
-                return;
+                // A poll in flight predates this request; asking again discards its answer.
+                return self.poll();
+            }
+            "permission_approval_mode_changed" => {
+                o.approval_mode = event["mode"].as_str().unwrap_or_default().to_owned();
+                return self.poll();
             }
             "permission_replied" | "permission_dismissed" => {
                 let id = event["request_id"].as_str().unwrap_or_default();
@@ -465,66 +539,15 @@ impl App {
         }
         self.load_snapshot();
         if lists {
+            // A run starting or ending changes the inbox, the questions and the subagents.
             self.refresh();
+            self.poll();
         }
-    }
-
-    /// `POST /sessions/{id}/runs` with the composer's text.
-    pub fn send(&mut self) {
-        let Some(o) = &mut self.open else { return };
-        let prompt = self.composer.text.trim().to_owned();
-        if prompt.is_empty() || o.running || o.loading {
-            return;
-        }
-        self.composer.clear();
-        o.pending_user = Some(prompt.clone());
-        o.failure = None;
-        let id = o.id.clone();
-        self.spawn(
-            move |c| c.submit(&id, &prompt).map_err(|e| (e, prompt)),
-            |s, sent| {
-                if let Err((e, prompt)) = sent {
-                    s.notice = Some(format!("The message was not sent. {e}"));
-                    if let Some(o) = &mut s.open {
-                        o.pending_user = None;
-                    }
-                    // Hand the text back rather than lose it.
-                    if s.composer.text.is_empty() {
-                        s.composer.replace_text(prompt);
-                    }
-                }
-            },
-        );
-    }
-
-    /// `POST /sessions/{id}/cancel-active-run`.
-    pub fn stop_run(&mut self) {
-        let Some(id) = self.open.as_ref().map(|o| o.id.clone()) else { return };
-        self.spawn(move |c| c.cancel(&id), |s, r| {
-            if let Err(e) = r {
-                s.notice = Some(format!("The run was not stopped. {e}"));
-            }
-        });
-    }
-
-    /// `POST /sessions/{id}/permissions/{request_id}`.
-    pub fn reply_permission(&mut self, request: &str, approve: bool) {
-        let Some(id) = self.open.as_ref().map(|o| o.id.clone()) else { return };
-        let request = request.to_owned();
-        let replied = request.clone();
-        self.spawn(move |c| c.reply_permission(&id, &request, approve), move |s, r| match r {
-            Ok(()) => {
-                if let Some(o) = &mut s.open {
-                    o.permissions.retain(|p| p.id != replied);
-                }
-            }
-            Err(e) => s.notice = Some(format!("The reply was not delivered. {e}")),
-        });
     }
 
     /// A new session in `project`, or in the open session's project, or in the first one. Asks
     /// for its behavior and model in a menu at `anchor`.
-    pub fn new_session(&mut self, project: Option<&str>, anchor: impl Into<PopupAnchor>) {
+    pub fn new_session(&mut self, project: Option<&str>, anchor: impl Into<PopupAnchor>, tx: &mut Tx) {
         let project = project
             .map(str::to_owned)
             .or_else(|| self.open.as_ref().and_then(|o| o.project_id.clone()))
@@ -534,17 +557,12 @@ impl App {
             self.go_overview();
             return;
         };
-        let (Some(client), Some(handle)) = (self.client.clone(), self.handle.clone()) else { return };
-        if self.busy {
+        if self.busy || self.client.is_none() {
             return;
         }
         self.busy = true;
         let anchor = anchor.into();
-        // Not `spawn`: opening the menu needs the update's `Tx`.
-        std::thread::spawn(move || {
-            let providers = client.models();
-            handle.update(move |s, tx| s.pick_model(project, providers, anchor, tx));
-        });
+        self.spawn_tx(tx, Client::models, move |s, providers, tx| s.pick_model(project, providers, anchor, tx));
     }
 
     /// The model menu: each provider that has a credential and its models, under a submenu for
@@ -559,7 +577,7 @@ impl App {
             }
         };
         // One model, or a platform without native menus: there is nothing to ask.
-        if !popup_menu_supported() || matches!(providers.as_slice(), [only] if only.models.len() == 1) {
+        if !menus() || matches!(providers.as_slice(), [only] if only.models.len() == 1) {
             return self.create_session(project, providers[0].id.clone(), providers[0].models[0].id.clone());
         }
         let mut menu = PopupMenu::new();
@@ -600,40 +618,21 @@ impl App {
 
     fn create_session(&mut self, project: String, backend: String, model: String) {
         self.busy = true;
-        self.model = Some((backend.clone(), model.clone()));
+        self.set_model(&backend, &model);
         let behavior = if self.orchestration { self.behavior.clone() } else { "direct".to_owned() };
-        self.spawn(move |c| c.create_session(&project, &behavior, &backend, &model), |s, created| {
+        // Orchestrator sessions have no approval mode to set.
+        let full_access = self.full_access && behavior != "orchestrator";
+        self.spawn(move |c| c.create_session(&project, &behavior, &backend, &model), move |s, created| {
             s.busy = false;
             match created {
                 Ok(id) => {
                     s.refresh();
                     s.open_session(&id);
+                    if full_access {
+                        s.set_mode("auto_approve");
+                    }
                 }
                 Err(e) => s.notice = Some(format!("The session was not created. {e}")),
-            }
-        });
-    }
-
-    /// `POST /projects` from the empty state's form.
-    pub fn create_project(&mut self) {
-        let cwd = self.project_dir.text.trim().to_owned();
-        let mut name = self.project_name.text.trim().to_owned();
-        if cwd.is_empty() || self.busy {
-            return;
-        }
-        if name.is_empty() {
-            name = cwd.trim_end_matches('/').rsplit('/').next().unwrap_or("project").to_owned();
-        }
-        self.busy = true;
-        self.spawn(move |c| c.create_project(&name, &cwd), |s, created| {
-            s.busy = false;
-            match created {
-                Ok(_) => {
-                    s.project_name.clear();
-                    s.project_dir.clear();
-                    s.refresh();
-                }
-                Err(e) => s.notice = Some(format!("The project was not created. {e}")),
             }
         });
     }
@@ -642,12 +641,6 @@ impl App {
         self.search_open = !self.search_open;
         self.search = TextEdit::new("");
         self.search.focused = self.search_open;
-    }
-
-    pub fn toggle_project(&mut self, id: &str) {
-        if !self.collapsed.remove(id) {
-            self.collapsed.insert(id.to_owned());
-        }
     }
 
     pub fn toggle_expanded(&mut self, key: &str) {
@@ -662,21 +655,33 @@ impl App {
         id.and_then(|id| self.projects.iter().find(|p| p.project_id == id)).map_or("No project", |p| p.name.as_str())
     }
 
-    /// The sessions the sidebar and Overview list: all of them, newest first, narrowed by the
-    /// search field when it is open.
+    /// The sessions the sidebar and Overview list: all but subagents, newest first, narrowed by
+    /// the search field when it is open. A subagent is reached from its parent's Subagents list.
     pub fn visible_sessions(&self) -> Vec<&ManagedSession> {
         let query = if self.search_open { self.search.text.trim().to_lowercase() } else { String::new() };
-        let mut out: Vec<&ManagedSession> = self.sessions.iter().filter(|m| query.is_empty() || title(m).to_lowercase().contains(&query)).collect();
+        let mut out: Vec<&ManagedSession> = self.sessions.iter().filter(|m| !is_child(m) && (query.is_empty() || title(m).to_lowercase().contains(&query))).collect();
         out.sort_by(|a, b| b.summary.updated_at.cmp(&a.summary.updated_at));
         out
     }
 }
 
-/// A session's title: the stored one, else the first line of its last prompt.
+/// Native pop-up menus exist on macOS and Windows; a headless script answers them anywhere.
+pub fn menus() -> bool {
+    popup_menu_supported() || rune::is_headless()
+}
+
+/// A subagent: a session another session started and owns.
+pub fn is_child(m: &ManagedSession) -> bool {
+    m.lineage.as_ref().is_some_and(|l| l.kind == "traditional-child")
+}
+
+/// A session's title: the stored one, else what its parent asked of it, else the first line of
+/// its last prompt.
 pub fn title(m: &ManagedSession) -> String {
     let s = &m.summary;
     s.title
         .as_deref()
+        .or(m.lineage.as_ref().map(|l| l.description.as_str()).filter(|d| !d.trim().is_empty()))
         .or(s.last_user_prompt.as_deref())
         .map(|t| t.trim().lines().next().unwrap_or_default().to_owned())
         .filter(|t| !t.is_empty())

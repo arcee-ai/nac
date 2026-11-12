@@ -1,6 +1,8 @@
-//! Settings: the appearance, and which server this window talks to.
+//! Settings: the appearance, how new sessions ask for permission, and which server this window
+//! talks to.
 
 use rune::{El, ScrollSpec, col, row, spacer, text};
+use rune_kit::Switch;
 
 use super::{Pill, Screen, mono, pill};
 use crate::state::{App, Conn};
@@ -16,7 +18,7 @@ pub fn screen(s: &App, l: &Look) -> Screen {
     let value = |words: String| text(words).font(mono(12.5)).color(c.text_muted).selectable(true);
     let choice = |label: &str, theme: Option<bool>| {
         let kind = if s.theme == theme { Pill::Primary } else { Pill::Outline };
-        pill(label, None, kind, 30.0, l).on_press(move |s: &mut App| s.theme = theme).key(format!("theme-{label}"))
+        pill(label, None, kind, 30.0, l).on_press(move |s: &mut App| s.set_theme(theme)).key(format!("theme-{label}"))
     };
     let appearance = row().gap(6.0).child(choice("System", None)).child(choice("Light", Some(false))).child(choice("Dark", Some(true)));
     let connection = match &s.conn {
@@ -37,6 +39,35 @@ pub fn screen(s: &App, l: &Look) -> Screen {
         .pb(40.0)
         .gap(24.0)
         .child(col().w_full().gap(10.0).child(text("Appearance").font(l.k.ty.ui_medium).color(c.text_base)).child(card(vec![line("Theme", appearance, false)])))
+        .child(
+            col()
+                .w_full()
+                .gap(10.0)
+                .child(text("Permissions").font(l.k.ty.ui_medium).color(c.text_base))
+                .child(card(vec![
+                    row()
+                        .key("full-access")
+                        .w_full()
+                        .px(16.0)
+                        .py(12.0)
+                        .gap(16.0)
+                        .center_y()
+                        .child(
+                            col()
+                                .grow(1.0)
+                                .shrink()
+                                .gap(2.0)
+                                .child(text("Full access for new sessions").font(l.k.ty.ui_medium).color(c.text_base))
+                                .child(
+                                    text("The agent runs commands and edits files without asking. Rules that deny an action still apply. Each session can change this from its composer.")
+                                        .font(l.k.ty.small)
+                                        .color(c.text_muted)
+                                        .wrap(),
+                                ),
+                        )
+                        .child(Switch::new(s.full_access).label("Full access for new sessions").hide_label().on_toggle(|s: &mut App| s.set_full_access(!s.full_access)).build(&l.k).key("full-access-switch")),
+                ])),
+        )
         .child(col().w_full().gap(10.0).child(text("Server").font(l.k.ty.ui_medium).color(c.text_base)).child(card(vec![
             line("Address", value(server), true),
             line("Version", value(version), true),

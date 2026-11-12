@@ -45,6 +45,11 @@ pub struct SessionSummary {
     pub last_user_prompt: Option<String>,
     #[serde(default)]
     pub updated_at: String,
+    /// The revision `PUT /sessions/{id}/presentation` checks.
+    #[serde(default)]
+    pub presentation_version: i64,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -76,6 +81,10 @@ pub struct ManagedSession {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Lineage {
     pub kind: String,
+    #[serde(default)]
+    pub parent_session_id: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +102,12 @@ pub struct Boundary {
 pub struct Metadata {
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub backend: String,
+    #[serde(default)]
+    pub behavior: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
 }
@@ -122,37 +137,115 @@ pub struct Snapshot {
 pub struct PermissionResource {
     #[serde(default)]
     pub display: String,
+    /// Set when the server can remember an approval of this resource ("Always allow").
+    #[serde(default)]
+    pub save_resource: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct PermissionRequest {
     pub id: String,
+    /// The session that asked and that the reply goes to: the open one or one of its children.
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default)]
     pub tool: String,
     #[serde(default)]
     pub resources: Vec<PermissionResource>,
 }
 
-#[derive(Deserialize)]
-struct PermissionState {
+/// `GET /sessions/{id}/permissions`. `approval_mode` is `manual`, `auto_approve` or `review`.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct PermissionState {
     #[serde(default)]
-    requests: Vec<PermissionRequest>,
+    pub approval_mode: String,
+    #[serde(default)]
+    pub requests: Vec<PermissionRequest>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct QuestionRequest {
+    pub request_id: String,
+    pub run_id: String,
+    pub generation: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub choices: Vec<String>,
+    /// `information` or `human_decision`.
+    #[serde(default)]
+    pub responder_class: String,
+}
+
+/// One entry of `GET /sessions/{id}/questions`; the app shows the `pending` ones.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Question {
+    pub request: QuestionRequest,
+    #[serde(default)]
+    pub revision: i64,
+    #[serde(default)]
+    pub status: String,
+}
+
+/// One entry of `GET /sessions/{id}/inbox`: a message waiting for the running direct session.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct InboxItem {
+    pub id: i64,
+    /// `steer` (delivered at the run's next step) or `queue` (the next run).
+    #[serde(default)]
+    pub delivery: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub version: i64,
+}
+
+/// One entry of `GET /sessions/{id}/children`: a subagent this session started.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Child {
+    pub child_session_id: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub profile: String,
+    /// `idle`, `running`, `completed`, `failed`, `cancelled` or `interrupted`.
+    #[serde(default)]
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Connection {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Provider {
     pub id: String,
     #[serde(default)]
     auth_status: String,
     #[serde(default)]
+    pub connection: Option<Connection>,
+    #[serde(default)]
+    pub managed_base_url: Option<String>,
+    #[serde(default)]
+    pub default_base_url: Option<String>,
+    #[serde(default)]
     pub models: Vec<ProviderModel>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ProviderModel {
     pub id: String,
     #[serde(default)]
     pub display_name: Option<String>,
+    /// The reasoning efforts the model takes; empty when the catalog does not say.
+    #[serde(default)]
+    pub supported_efforts: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -220,7 +313,17 @@ impl Client {
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<String, String> {
-        Self::finish(self.agent.post(format!("{}{path}", self.base)).content_type("application/json").send(body.to_string()))
+        self.send("POST", path, Some(body))
+    }
+
+    /// Any method, with a JSON body when there is one (`DELETE` takes one for the inbox).
+    fn send(&self, method: &str, path: &str, body: Option<&Value>) -> Result<String, String> {
+        let request = ureq::http::Request::builder().method(method).uri(format!("{}{path}", self.base));
+        let request = match body {
+            Some(body) => request.header("content-type", "application/json").body(body.to_string()),
+            None => request.body(String::new()),
+        };
+        Self::finish(self.agent.run(request.map_err(|e| e.to_string())?))
     }
 
     /// `GET /readyz`
@@ -273,15 +376,99 @@ impl Client {
     }
 
     /// `GET /sessions/{id}/permissions`. Orchestrator-behavior sessions answer 400 here; their
-    /// requests still arrive as `permission_asked` events, so a failure is an empty list.
-    pub fn permissions(&self, id: &str) -> Vec<PermissionRequest> {
-        self.get::<PermissionState>(&format!("/sessions/{}/permissions", encode(id))).map(|s| s.requests).unwrap_or_default()
+    /// requests still arrive as `permission_asked` events.
+    pub fn permissions(&self, id: &str) -> Result<PermissionState, String> {
+        let mut state: PermissionState = self.get(&format!("/sessions/{}/permissions", encode(id)))?;
+        for request in &mut state.requests {
+            request.session_id = id.to_owned();
+        }
+        Ok(state)
     }
 
-    /// `POST /sessions/{id}/permissions/{request_id}` with `once` or `reject`.
-    pub fn reply_permission(&self, id: &str, request: &str, approve: bool) -> Result<(), String> {
-        let reply = if approve { "once" } else { "reject" };
+    /// `POST /sessions/{id}/permissions/{request_id}` with `once`, `always` or `reject`.
+    pub fn reply_permission(&self, id: &str, request: &str, reply: &str) -> Result<(), String> {
         self.post(&format!("/sessions/{}/permissions/{}", encode(id), encode(request)), &json!({ "reply": reply })).map(drop)
+    }
+
+    /// `PUT /sessions/{id}/permissions/mode`: `manual`, `auto_approve` or `review`. Direct sessions only.
+    pub fn set_approval_mode(&self, id: &str, mode: &str) -> Result<(), String> {
+        self.send("PUT", &format!("/sessions/{}/permissions/mode", encode(id)), Some(&json!({ "mode": mode }))).map(drop)
+    }
+
+    /// `GET /sessions/{id}/questions`: the ones still waiting for an answer.
+    pub fn questions(&self, id: &str) -> Result<Vec<Question>, String> {
+        let all: Vec<Question> = self.get(&format!("/sessions/{}/questions", encode(id)))?;
+        Ok(all.into_iter().filter(|q| q.status == "pending").collect())
+    }
+
+    /// `POST /sessions/{id}/questions/{request_id}/answer`
+    pub fn answer_question(&self, id: &str, q: &Question, answer: &str) -> Result<(), String> {
+        let r = &q.request;
+        let body = json!({ "request_id": r.request_id, "run_id": r.run_id, "generation": r.generation, "expected_revision": q.revision, "answer": answer });
+        self.post(&format!("/sessions/{}/questions/{}/answer", encode(id), encode(&r.request_id)), &body).map(drop)
+    }
+
+    /// `POST /sessions/{id}/questions/{request_id}/cancel`
+    pub fn cancel_question(&self, id: &str, q: &Question) -> Result<(), String> {
+        self.post(&format!("/sessions/{}/questions/{}/cancel", encode(id), encode(&q.request.request_id)), &json!({ "expected_revision": q.revision })).map(drop)
+    }
+
+    /// `GET /sessions/{id}/inbox`: the messages not yet delivered. Direct sessions only.
+    pub fn inbox(&self, id: &str) -> Result<Vec<InboxItem>, String> {
+        let all: Vec<InboxItem> = self.get(&format!("/sessions/{}/inbox", encode(id)))?;
+        Ok(all.into_iter().filter(|i| i.status == "pending").collect())
+    }
+
+    /// `POST /sessions/{id}/inbox` with `steer` or `queue`.
+    pub fn add_inbox(&self, id: &str, delivery: &str, prompt: &str) -> Result<(), String> {
+        self.post(&format!("/sessions/{}/inbox", encode(id)), &json!({ "delivery": delivery, "prompt": prompt })).map(drop)
+    }
+
+    /// `PATCH /sessions/{id}/inbox/{item}`: changes how a waiting message is delivered.
+    pub fn set_inbox_delivery(&self, id: &str, item: &InboxItem, delivery: &str) -> Result<(), String> {
+        let body = json!({ "expected_version": item.version, "delivery": delivery });
+        self.send("PATCH", &format!("/sessions/{}/inbox/{}", encode(id), item.id), Some(&body)).map(drop)
+    }
+
+    /// `DELETE /sessions/{id}/inbox/{item}`
+    pub fn cancel_inbox(&self, id: &str, item: &InboxItem) -> Result<(), String> {
+        self.send("DELETE", &format!("/sessions/{}/inbox/{}", encode(id), item.id), Some(&json!({ "expected_version": item.version }))).map(drop)
+    }
+
+    /// `POST /sessions/{id}/steering`: a message for a running orchestrator-behavior session.
+    pub fn steer(&self, id: &str, instruction: &str) -> Result<(), String> {
+        self.post(&format!("/sessions/{}/steering", encode(id)), &json!({ "instruction": instruction })).map(drop)
+    }
+
+    /// `GET /sessions/{id}/children`
+    pub fn children(&self, id: &str) -> Result<Vec<Child>, String> {
+        self.get(&format!("/sessions/{}/children", encode(id)))
+    }
+
+    /// `PATCH /sessions/{id}/config`. The server refuses it during a run.
+    pub fn patch_config(&self, id: &str, patch: &Value) -> Result<(), String> {
+        self.send("PATCH", &format!("/sessions/{}/config", encode(id)), Some(patch)).map(drop)
+    }
+
+    /// `PUT /sessions/{id}/presentation`: the title, checked against the revision last listed.
+    pub fn rename_session(&self, s: &SessionSummary, title: &str) -> Result<(), String> {
+        let body = json!({ "title": title, "pinned": s.pinned, "expected_version": s.presentation_version });
+        self.send("PUT", &format!("/sessions/{}/presentation", encode(&s.session_id)), Some(&body)).map(drop)
+    }
+
+    /// `DELETE /sessions/{id}`
+    pub fn delete_session(&self, id: &str) -> Result<(), String> {
+        self.send("DELETE", &format!("/sessions/{}", encode(id)), None).map(drop)
+    }
+
+    /// `PATCH /projects/{id}`
+    pub fn rename_project(&self, id: &str, name: &str) -> Result<(), String> {
+        self.send("PATCH", &format!("/projects/{}", encode(id)), Some(&json!({ "name": name }))).map(drop)
+    }
+
+    /// `DELETE /projects/{id}`: the project's sessions stay, without a project.
+    pub fn delete_project(&self, id: &str) -> Result<(), String> {
+        self.send("DELETE", &format!("/projects/{}", encode(id)), None).map(drop)
     }
 
     /// `POST /sessions/{id}/runs`

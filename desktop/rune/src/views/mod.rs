@@ -1,6 +1,9 @@
 //! The window: `rune_kit::shell`'s `SplitView` with the sidebar and one screen in its main pane,
 //! and the small pieces the screens share.
 
+mod asks;
+mod composer;
+mod dialogs;
 mod overview;
 mod session;
 mod settings;
@@ -46,7 +49,7 @@ pub fn root(s: &App, cx: &mut Cx<App>) -> El {
     main = main.child(screen.body.grow(1.0).min_h(0.0));
     // The main pane's leading hairline, over the toolbar too.
     main = main.child(el().key("pane-rule").pin(Some(0.0), Some(-TOOLBAR_HEIGHT), None, Some(0.0)).w(1.0).fill(look.border).a11y_hidden());
-    SplitView::new(main)
+    let window = SplitView::new(main)
         .sidebar(&s.sidebar, |s: &mut App| &mut s.sidebar, sidebar::sidebar(s, &look))
         .toolbar(toolbar)
         .titlebar_inset(cx.titlebar_inset())
@@ -55,7 +58,8 @@ pub fn root(s: &App, cx: &mut Cx<App>) -> El {
         .sidebar_padding(8.0, 8.0)
         .sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(12.0).edge(12.0).gap(4.0).in_header())
         .reduced_motion(cx.is_reduced_motion())
-        .build(&look.shell)
+        .build(&look.shell);
+    rune_kit::root(window, dialogs::overlays(s, &look))
 }
 
 /// The last failed request, across the top of the body until dismissed.
@@ -85,7 +89,7 @@ pub enum Status {
 
 pub fn status_of(s: &App, m: &ManagedSession) -> Status {
     let open = s.open.as_ref().filter(|o| o.id == m.summary.session_id);
-    if open.is_some_and(|o| !o.permissions.is_empty()) {
+    if open.is_some_and(|o| !o.permissions.is_empty() || !o.questions.is_empty()) {
         Status::Attention
     } else if m.active_run.is_some() || open.is_some_and(|o| o.running) {
         Status::Running
