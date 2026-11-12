@@ -55,7 +55,7 @@ def configured(pins):
                    "dev and approval rulesets must be separate")
     intake.positive_int(pins.reviewer_id, "security reviewer ID")
     intake.require(isinstance(pins.reviewer_login, str) and
-                   re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})", pins.reviewer_login),
+                   re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", pins.reviewer_login),
                    "security reviewer login is unset or invalid")
     intake.hex_sha(pins.codeowners_blob, "CODEOWNERS blob")
     intake.require(isinstance(pins.workflow_path, str) and
@@ -201,8 +201,11 @@ def _reviewed_commit(snapshot, record, pins, approval_ruleset, api, list_api):
     for review in selected:
         intake.positive_int(review.get("id"), "security review ID")
         _github_time(review.get("submitted_at"))
-    selected.sort(key=lambda review: (_github_time(review["submitted_at"]), review["id"]))
-    latest = selected[-1]
+    decisions = [review for review in selected if review.get("state") in
+                 {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}]
+    intake.require(bool(decisions), "designated security reviewer has no decision")
+    decisions.sort(key=lambda review: (_github_time(review["submitted_at"]), review["id"]))
+    latest = decisions[-1]
     intake.require(latest["user"].get("login") == pins.reviewer_login and
                    latest.get("state") == "APPROVED" and
                    latest.get("commit_id") == head["sha"] and
