@@ -1,6 +1,7 @@
 /*
  * Seam-level malformed-input regressions for the six ALL-501 libssh2
- * corrections (CVE-2026-66032/66033/66034/66035/58050/58051).
+ * corrections (CVE-2026-66032/66033/66034/66035/58050/58051) and
+ * the inherited CVE-2025-15661 SFTP symlink correction.
  *
  * This harness is compiled inside the libssh2 build tree against the patched
  * sources and is never part of the shipped runtime. It drives each corrected
@@ -31,9 +32,10 @@
 #define LIBSSH2_PUBLICKEY_RESPONSE_VERSION   1
 #define LIBSSH2_PUBLICKEY_RESPONSE_PUBLICKEY 2
 
-/* SFTP packet types are private to src/sftp.c; mirror the two used here. */
+/* SFTP packet types are private to src/sftp.c; mirror those used here. */
 #define SSH_FXP_STATUS 101
 #define SSH_FXP_HANDLE 102
+#define SSH_FXP_NAME   104
 
 /* ------------------------------------------------------------------ */
 /* Deterministic allocator.                                            */
@@ -597,22 +599,72 @@ static int case_66035_etm_short_packet(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* CVE-2025-15661: truncated SFTP symlink NAME response                 */
+/*                                                                     */
+/* The server claims one name and a four-byte filename, but stops      */
+/* before the filename. The fixed parser rejects the incomplete       */
+/* string; the exact supplier-patch reversal reads past the allocated */
+/* response when copying the claimed filename.                         */
+/* ------------------------------------------------------------------ */
 
-int main(void)
+static int case_15661_sftp_short_name(void)
 {
+    fixture f;
+    LIBSSH2_SFTP sftp;
+    unsigned char rx[17];
+    char target[32];
+    int rc;
+
+    fixture_init(&f, 0);
+    f.session.socket_state = LIBSSH2_SOCKET_CONNECTED;
+    memset(&sftp, 0, sizeof(sftp));
+    sftp.channel = &f.channel;
+    sftp.version = 3;
+    sftp.packet_state = libssh2_NB_state_idle;
+    sftp.symlink_state = libssh2_NB_state_idle;
+
+    put_u32(rx, 13);
+    rx[4] = SSH_FXP_NAME;
+    put_u32(rx + 5, 0);  /* request id */
+    put_u32(rx + 9, 1);  /* one name */
+    put_u32(rx + 13, 4); /* four filename bytes claimed, none present */
+    script_rx(rx, sizeof(rx));
+    rc = libssh2_sftp_readlink(&sftp, "x", target, sizeof(target));
+    if(rc != LIBSSH2_ERROR_SFTP_PROTOCOL ||
+       f.session.err_code != LIBSSH2_ERROR_SFTP_PROTOCOL) {
+        printf("     expected SFTP_PROTOCOL, got rc=%d session=%d\n",
+               rc, f.session.err_code);
+        return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+
+int main(int argc, char **argv)
+{
+    int sftp_only = argc == 2 && strcmp(argv[1], "--sftp-15661-only") == 0;
+    if(argc > 1 && !sftp_only) {
+        fprintf(stderr, "usage: %s [--sftp-15661-only]\n", argv[0]);
+        return 2;
+    }
     printf("libssh2 corrected-seam malformed-input regressions\n");
-    run_case("CVE-2026-66034 publickey comment overrun",
-             case_66034_comment_overrun);
-    run_case("CVE-2026-58050 publickey attribute count overflow",
-             case_58050_attribute_count_overflow);
-    run_case("CVE-2026-58051 uninitialised list entry",
-             case_58051_uninitialised_entry);
-    run_case("CVE-2026-66033 AES-GCM block bounds",
-             case_66033_aesgcm_bounds);
-    run_case("CVE-2026-66032 SFTP open dangling handle",
-             case_66032_sftp_dangling_handle);
-    run_case("CVE-2026-66035 ETM short packet",
-             case_66035_etm_short_packet);
+    if(!sftp_only) {
+        run_case("CVE-2026-66034 publickey comment overrun",
+                 case_66034_comment_overrun);
+        run_case("CVE-2026-58050 publickey attribute count overflow",
+                 case_58050_attribute_count_overflow);
+        run_case("CVE-2026-58051 uninitialised list entry",
+                 case_58051_uninitialised_entry);
+        run_case("CVE-2026-66033 AES-GCM block bounds",
+                 case_66033_aesgcm_bounds);
+        run_case("CVE-2026-66032 SFTP open dangling handle",
+                 case_66032_sftp_dangling_handle);
+        run_case("CVE-2026-66035 ETM short packet",
+                 case_66035_etm_short_packet);
+    }
+    run_case("CVE-2025-15661 SFTP truncated NAME",
+             case_15661_sftp_short_name);
 
     if(g_failures) {
         printf("%d regression case(s) failed\n", g_failures);

@@ -153,6 +153,12 @@ The build preserves the supplier's CVE-2026-7598/55199 fixes using Debian's
 1.11.1 adaptations of the same accepted upstream changes, followed by the
 supplier's CVE-2026-55200/2025-15661 patches. Those latter files are checksum-bound
 to a public Wolfi revision; their contents were compared with the supplier recipe.
+Before the six newer patches, the builder checks the corrected guards in all four
+source seams and reverses each supplier patch in a disposable copy of its source
+file. The reversed copy must lose exactly the guards added by that patch. The
+55200 transport source already has one packet-length cap in another branch, so
+its fixed and reversed copies must contain two and one matching caps respectively.
+These source controls do not exercise hostile packets or clear scanner findings.
 The six selected CVE-2026-66032/66033/66034/66035/58050/58051 corrections come from
 the checksum-bound Debian 1.11.1-1+deb13u2 patch archive. Each upstream commit and
 exact archive member is retained separately. The 58051 Debian header names
