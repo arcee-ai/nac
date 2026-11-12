@@ -180,6 +180,42 @@ class CallerTests(unittest.TestCase):
         self.assertFalse(self.downloads)
         self.assertFalse(self.replays)
 
+    def test_workspace_parent_must_be_private_and_owned(self):
+        public = self.root / "public"
+        public.mkdir()
+        public.chmod(0o755)
+        with self.assertRaisesRegex(ValueError, "parent must be private and owned"):
+            self.invoke(workspace=public / "caller")
+        self.assertFalse((public / "caller").exists())
+        self.assertFalse(self.downloads)
+
+    def test_writable_ancestor_is_rejected_even_with_private_parent(self):
+        unsafe = self.root / "unsafe"
+        unsafe.mkdir()
+        unsafe.chmod(0o777)
+        private = unsafe / "private"
+        private.mkdir(mode=0o700)
+        with self.assertRaisesRegex(ValueError, "ancestor is writable or unowned"):
+            self.invoke(workspace=private / "caller")
+        self.assertFalse((private / "caller").exists())
+        self.assertFalse(self.downloads)
+
+    def test_workspace_symlink_inserted_after_readback_is_not_followed(self):
+        workspace = self.root / "caller"
+        api = self.api
+
+        def race(endpoint):
+            if endpoint.endswith(f"/actions/artifacts/{self.record['artifact_id']}"):
+                workspace.symlink_to(self.root)
+            return api(endpoint)
+
+        with mock.patch.object(self, "api", side_effect=race):
+            with self.assertRaisesRegex(ValueError, "workspace already exists"):
+                self.invoke(workspace=workspace)
+        self.assertTrue(workspace.is_symlink())
+        self.assertFalse(self.downloads)
+        self.assertFalse(self.replays)
+
     def test_bad_artifact_metadata_fails_before_download(self):
         self.metadata["digest"] = "sha256:" + "0" * 64
         with self.assertRaisesRegex(ValueError, "artifact metadata"):
