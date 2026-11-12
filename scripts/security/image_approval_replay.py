@@ -133,13 +133,16 @@ def replay(pull_request, merge_sha, image, archive, workspace, *,
         image=image, source_revision=merge_sha)
     identity = verify(inventory, workspace / "verified-frozen",
                       image=image, source_revision=merge_sha)
-    stale = observations_stale(inventory, now)
+    observations_stale(inventory, now)
     load(image_tar, image)
-    if stale:
+    post_load_now = clock()
+    if observations_stale(inventory, post_load_now):
         inventory = recollect(inventory, workspace / "verified-frozen",
                               workspace / "derivative", identity,
                               image=image, source_revision=merge_sha)
-    current_observations(inventory, clock())
+        current_observations(inventory, clock())
+    else:
+        current_observations(inventory, post_load_now)
     policy, evidence = _stage_review(snapshot, workspace / "review")
     output = workspace / "strict-scan"
     code = _scan(inventory, record, output, policy, evidence, source_policy,
