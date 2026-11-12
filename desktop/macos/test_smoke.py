@@ -52,7 +52,8 @@ class CleanupTests(unittest.TestCase):
 
 class MainCustodyTests(unittest.TestCase):
     def exercise(self, *, receipt='complete', actor_error=None, launch_error='timeout',
-                 wrapper_error=False, wrapper_timeout=False, passed=True, stderr_error=None):
+                 wrapper_error=False, wrapper_timeout=False, passed=True, stderr_error=None,
+                 prepare_error=False):
         with tempfile.TemporaryDirectory(prefix='nac-smoke-main-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -146,6 +147,8 @@ class MainCustodyTests(unittest.TestCase):
                 ]:
                     stack.enter_context(patch.object(smoke, target, replacement) if '.' not in target
                                         else patch('smoke.' + target, replacement))
+                if prepare_error:
+                    stack.enter_context(patch('smoke.os.link', side_effect=primary))
                 stack.enter_context(patch.dict('os.environ', {'NAC_MAC_SMOKE_SCENARIOS': 'normal'}))
                 sink = Mock(write=Mock(side_effect=stderr_error)) if stderr_error else io.StringIO()
                 stack.enter_context(patch('sys.stderr', sink))
@@ -176,6 +179,12 @@ class MainCustodyTests(unittest.TestCase):
         result['launcher'].terminate.assert_called_once()
         self.assertEqual(result['teardown_waits'], [5])
         self.assertIn('mismatched actor ownership', '\n'.join(result['failure'].__notes__))
+
+    def test_prelaunch_failure_keeps_primary_without_unbound_driver(self):
+        result = self.exercise(prepare_error=True)
+        self.assertIs(result['failure'], result['primary'])
+        self.assertFalse(result['retained'])
+        result['launcher'].terminate.assert_not_called()
 
     def test_incomplete_actor_receipts_never_establish_cleanup(self):
         for receipt in ('missing', 'malformed', 'partial', 'bool-pid', 'zero-engine'):

@@ -446,6 +446,12 @@ to the fixture process for Cmd-N, Settings and native Edit. It requires existing
 event-post access and fresh unlocked console/window/DOM ownership; it never
 requests privacy changes. Prior clipboard representations stay only in memory
 and are restored only if the change count is still owned by the fixture.
+The smoke controller runs a separate, source-bound public Quartz driver for
+this scenario. It checks existing event-post access before each exact-PID key
+pair, the relocated app's build hashes and foreground window, then echoes the
+app's bounded phase receipt. The app still checks the resulting trusted WK
+events and UI state. Missing driver access or any ownership mismatch fails the
+scenario; no access request or privacy-setting change is attempted.
 
 Select either with `NAC_MAC_SMOKE_SCENARIOS=commands` or
 `NAC_MAC_SMOKE_SCENARIOS=commands-input` before `preview.sh smoke`.

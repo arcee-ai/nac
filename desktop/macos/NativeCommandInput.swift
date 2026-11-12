@@ -60,11 +60,13 @@ final class NativeCommandInput {
         }
         try await value(text)
         try external?.verified("type-fixture")
-        let beforeCopy = board.changeCount
-        try await drive("copy", external: external) {
-            try await self.key(0, flags: .maskCommand)
-            try await self.key(8, flags: .maskCommand)
+        try await drive("select", external: external) { try await self.key(0, flags: .maskCommand) }
+        try await wait("fixture selection") {
+            try await self.js("let input = document.querySelector('[role=combobox][aria-label=Message]'); return input?.value === value && input.selectionStart === 0 && input.selectionEnd === value.length", arguments: ["value": text]) as? Bool == true
         }
+        try external?.verified("select")
+        let beforeCopy = board.changeCount
+        try await drive("copy", external: external) { try await self.key(8, flags: .maskCommand) }
         try await wait("fixture-owned native copy") { board.changeCount != beforeCopy }
         ownedChange = try ownedClipboardChange(board, expected: text)
         try external?.verified("copy")
@@ -271,7 +273,7 @@ final class ExternalCommandFixture {
     deinit { close(directory) }
 
     func ready(_ phase: String) throws {
-        let expected = ["type-fixture", "copy", "cut", "paste", "undo", "redo", "settings", "close-settings", "new-session", "close-new-session"]
+        let expected = ["type-fixture", "select", "copy", "cut", "paste", "undo", "redo", "settings", "close-settings", "new-session", "close-new-session"]
         guard sequence < expected.count, expected[sequence] == phase else {
             throw PreviewError.message("External command fixture phase out of order")
         }
