@@ -19,13 +19,12 @@ historical. Its retained 20 blockers/27 total/zero exceptions and earlier green
 infrastructure checks do not clear a new image. Final qualification waits for
 ALL-500/501 content, ALL-502 evidence, ALL-503 separately reviewed trusted
 applicability and ALL-504 installed Rust coverage on one coordinator-provided
-combined candidate. This layer consumes ALL-504's v2 seven-file Rust inventory
-contract; that schema integration does not establish native qualification.
-Applicability currently has an external platform restriction;
-its acceptance is unmet. This lane does not retry or reimplement that work.
-The reporter retains the accepted `blocking`/`excepted`/`reporting` accounting;
-any future applicability result/bundle contract requires explicit integration
-and affected tests rather than speculative disposition keys.
+combined candidate. This layer consumes ALL-504's v2 Rust inventory and the
+current #672 V3/V4 applicability receipt contract; neither establishes native
+qualification. Protected `dev` still lacks a separately reviewed applicability
+policy, and no exact-image finding has an accepted disposition. The reporter
+retains `blocking`/`excepted`/`reporting` accounting; a future bundle schema
+change needs explicit integration and affected tests.
 
 Before calling the baseline clean or enforcement production-ready, retain a fresh
 native linux/amd64 build/smoke/full inventory/scan and unchanged-image rescan with

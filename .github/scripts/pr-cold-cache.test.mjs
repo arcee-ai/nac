@@ -200,6 +200,23 @@ function evaluate(expression, event, flag, run = "101", attempt = "1", ref = "re
   }, { timeout: 100 });
 }
 
+test('strict summary reversal follows the report into the split scan job', () => {
+  const config = read('managed-image-build');
+  const steps = config.jobs['build-smoke'].steps;
+  const summary = steps.find(step => step.name === 'Report exact-image security findings');
+  assert.ok(summary);
+  config.jobs['build-candidate'] = config.jobs['build-smoke'];
+  delete config.jobs['build-smoke'];
+  config.jobs['build-candidate'].steps = steps.filter(step => step !== summary);
+  config.jobs['strict-scan'] = { steps: [summary] };
+  reverseStrictImageSummary(config);
+  assert.match(summary.run, /Image findings are advisory; enforcement is deferred/);
+
+  const duplicate = read('managed-image-build');
+  duplicate.jobs['strict-scan'] = { steps: [structuredClone(summary)] };
+  assert.throws(() => reverseStrictImageSummary(duplicate));
+});
+
 test("all reachable required caches isolate cold dispatch while every other parsed field stays identical", () => verify(graph()));
 
 test("prepare records original event fields and a canonical boolean without changing execution", () => {
