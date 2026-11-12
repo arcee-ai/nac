@@ -246,7 +246,7 @@ test("compiler caches preserve independent roles and one trusted server/browser 
       }
     }
   }
-  const build = workflow("managed-image-build").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
+  const build = workflow("managed-image-build").jobs["build-candidate"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
   assert.equal(build.with["cache-from"], "${{ !((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true) && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}");
   assert.equal(build.with["no-cache"], "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true }}");
   assert.equal(build.with["cache-to"], "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}");
@@ -306,11 +306,13 @@ test("failed-job reruns repeat full quality for a valid earlier attempt without 
 
 test("unprivileged image verification overlaps fault compilation but final managed and publication gates require both", () => {
   const managed = workflow("managed-image-build");
-  assert.deepEqual(managed.jobs["build-smoke"].needs, ["prepare", "contract"]);
+  assert.deepEqual(managed.jobs["build-candidate"].needs, ["prepare", "contract"]);
+  assert.deepEqual(managed.jobs["strict-scan"].needs, ["prepare", "build-candidate"]);
   assert.deepEqual(managed.jobs.result.needs, imageJobs);
   assert.deepEqual(workflow("managed-image").jobs.result.needs, managedJobs);
   assert.equal(managed.permissions.contents, "read");
-  assert.equal(managed.jobs["build-smoke"].permissions, undefined);
+  assert.equal(managed.jobs["build-candidate"].permissions, undefined);
+  assert.equal(managed.jobs["strict-scan"].permissions, undefined);
   const stable = workflow("stable-release");
   assert.ok(stable.jobs["required-pr-checks"].needs.includes("managed"));
   assert.ok(stable.jobs.publish.needs.includes("required-pr-checks"));

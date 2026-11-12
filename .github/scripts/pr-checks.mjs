@@ -80,7 +80,7 @@ export function qualityMode(receipt, sha, context) {
 }
 
 export const managedJobs = ["prepare", "quality", "build-smoke"];
-export const imageJobs = ["prepare", "contract", "scanner-qualification", "build-smoke"];
+export const imageJobs = ["prepare", "contract", "scanner-qualification", "build-candidate", "strict-scan"];
 export const managedCallerJobs = ["managed-image", "managed-fault", "managed-quality", "managed"];
 
 function requireCandidateJobs(needs, expectedSha, jobs, label) {

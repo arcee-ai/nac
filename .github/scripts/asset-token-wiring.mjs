@@ -11,8 +11,8 @@ export function reverseAssetTokens(workflow) {
     "Source dependency security": [["scan", "Install pinned scanner"]],
     "Managed NAC image construction": [
       ["scanner-qualification", "Qualify real OS/Node advisory matching and runtime/DB negatives"],
-      ["build-smoke", "Inventory the exact tested image"],
-      ["build-smoke", "Scan the same tested image with reviewed policy"],
+      ["build-candidate", "Inventory the exact tested image"],
+      ["strict-scan", "Scan the same tested image with reviewed policy"],
     ],
     "Daily managed image security": [["rescan", "Rescan retained unchanged managed image inventory"]],
   }[workflow.name];

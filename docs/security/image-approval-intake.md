@@ -8,13 +8,14 @@ workflow still supplies the empty source policy and blocks unresolved findings.
 
 ## Frozen candidate and approval record
 
-The proposed unprivileged build job must finish before review and retain an
-immutable OCI candidate plus the complete V4 inventory bundle in an Actions
-artifact named
-`managed-image-candidate-<synthetic-merge-sha>-<run-id>-<attempt>`. It must
-record its image ID and `GITHUB_SHA` in the bundle. The present `build-smoke` job
-combines build and strict scan, and its artifact lacks the frozen OCI image;
-that job does **not** satisfy this contract. A targeted rerun of it rebuilds.
+The unprivileged `build-candidate` job builds, smoke-tests, inventories and
+saves the same image before uploading a complete V4 bundle and OCI-compatible
+saved image as `managed-image-candidate-<source-sha>-<run-id>-<attempt>`.
+The separate `strict-scan` job downloads that artifact, loads its exact image
+ID and reports a fresh strict scan. A blocked finding remains in the deferred
+security report. Inventory, upload, download, load, tool and database failures
+keep the terminal managed check red. A strict-scan-only rerun cannot substitute
+an artifact from an older attempt; the producer must run in the new attempt.
 
 `scripts/security/image_candidate_archive.py` is a bounded, source-only reader
 for that future artifact. The artifact must be one ZIP containing exactly
@@ -33,8 +34,8 @@ isolated job; its output is still untrusted until `image_scan.py --bundle`
 validates every retained file hash and performs a fresh strict rescan. The
 synthetic tests also exercise wrong ZIP digest, source/image, archive config,
 path, link, member set and Docker identity/platform negatives. A test builds
-and saves a real `linux/amd64` Docker image when a daemon is available. The current CI producer
-does not yet emit this format, so this module is **not** a live approval path.
+and saves a real `linux/amd64` Docker image when a daemon is available.
+Candidate retention is custody, **not** a live approval path.
 
 A human-reviewed record would be merged to a dedicated
 `security-image-approvals` branch, separate from the candidate source. Each
@@ -90,20 +91,17 @@ readback from the pinned App and an actual ruleset fixture before activation.
 
 Source code cannot grant these authorities. Activation requires the protected
 branch/ruleset, a dedicated installed App with narrowly scoped status write,
-an App token available only to protected jobs, an artifact-producing build job,
-trusted safe download/extraction and strict replay workflow, and a fixture PR
+an App token available only to protected jobs, trusted safe download/extraction
+and strict replay workflow, and a fixture PR
 showing positive status attribution plus wrong-run/attempt/head/digest, expired
 and revoked negatives. No live approval branch, credential, App source rule or
 merge-time fixture has been configured here.
 
-The pending DAG change must let a successful unprivileged `build-candidate`
-retain the exact tested OCI image and V4 bundle before a separate strict scan
-can block. It must keep the terminal managed/Required checks red for scanner,
-inventory, tool or DB errors. The protected replay workflow must then fetch
+The protected replay workflow must fetch
 the artifact by approved ID, use the reader above, recollect stale V4 evidence
 on the same loaded image when needed, and pass independently authenticated
 policy/evidence into the verifier. None of these workflow transitions is
-implemented by this source-only slice; in particular it creates no status.
+activated by candidate custody; in particular it creates no status.
 
 GitHub status publication is append-only. If a revocation workflow fails after
 an earlier success, the old green status may remain until GitHub's required

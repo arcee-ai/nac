@@ -38,7 +38,7 @@ const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "brows
 const baseline = {
   "stable-release": "43b11c4b1cccae666a6f5fe71f1359c6aaca1662f38876c98cd284e918cd70e5",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
-  "managed-image-build": "c82a05b0089599969dc17e4d0bf0e57aee293dcf8439b3cb4c325a3b2ec0bcb8",
+  "managed-image-build": "4098f76703ecde04fc04ca0eaa7c088a208c00c95368d543c239968b75029676",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
   "managed-quality": "b77ca20017fcce1fef054e779b42b852dac053dcf53648cbeb41940d5cdc14e0",
 };
@@ -74,7 +74,7 @@ function verify(values) {
   reverseBrowserApt(normalized["stable-release"]);
   // Reverse only S19's guarded selection and explicit selected-builder binding.
   // Every prior cold/cache/security field remains covered by the original hashes.
-  const imageSteps = normalized['managed-image-build'].jobs['build-smoke'].steps;
+  const imageSteps = normalized['managed-image-build'].jobs['build-candidate'].steps;
   const driver = imageSteps.find(s => s.id === 'image-driver');
   assert.deepEqual(driver, {
     name: 'Select supported image build driver', id: 'image-driver',
@@ -87,7 +87,7 @@ function verify(values) {
   });
   const imageBuild = imageSteps.find(image);
   assert.equal(imageBuild.with.builder, '${{ steps.buildx.outputs.name }}');
-  normalized['managed-image-build'].jobs['build-smoke'].steps = imageSteps.filter(s => s !== driver);
+  normalized['managed-image-build'].jobs['build-candidate'].steps = imageSteps.filter(s => s !== driver);
   delete setup.id;
   delete setup.with;
   delete imageBuild.with.builder;
@@ -284,7 +284,7 @@ test("real selector rejects malformed events/typed inputs before producing an ou
 
 test("parsed expressions consume real selector outputs; defaults, trust and cold retries stay isolated", () => {
   const values = graph();
-  const build = values["managed-image-build"].jobs["build-smoke"].steps.find(image);
+  const build = values["managed-image-build"].jobs["build-candidate"].steps.find(image);
   const stage = values["stable-release"].jobs.build.steps.find(step => step.run?.includes("ci-incremental.py stage"));
   for (const event of ["workflow_dispatch", "pull_request", "push"]) for (const requested of [false, true]) {
     const result = selector(event, event === "pull_request" ? { pull_request: { body: requested ? marker : "body" } } : {}, String(requested));
@@ -347,9 +347,9 @@ test("mutations cannot miss a cache role or change setup, quality, identity, pri
     v => { v["stable-release"].jobs.build.steps.find(s => s.name === "Verify full release-local Guide identity").run = "true"; },
     v => { v["stable-release"].jobs.build.steps.find(s => s.name === "Build nac-web binary").if = "!inputs.cold_caches"; },
     v => { v["stable-release"].jobs.build.steps.find(s => s.name === "Install Rust").if = "!inputs.cold_caches"; },
-    v => { v["managed-image-build"].jobs["build-smoke"].steps.find(image).with["cache-from"] = normalImport; },
-    v => { v["managed-image-build"].jobs["build-smoke"].steps.find(image).with["no-cache"] = false; },
-    v => { v["managed-image-build"].jobs["build-smoke"].steps.find(image).with["cache-to"] = "type=gha,scope=bad"; },
+    v => { v["managed-image-build"].jobs["build-candidate"].steps.find(image).with["cache-from"] = normalImport; },
+    v => { v["managed-image-build"].jobs["build-candidate"].steps.find(image).with["no-cache"] = false; },
+    v => { v["managed-image-build"].jobs["build-candidate"].steps.find(image).with["cache-to"] = "type=gha,scope=bad"; },
     v => { v["stable-release"].permissions.contents = "write"; },
     v => { v["stable-release"].jobs["required-pr-checks"].needs = ["prepare"]; },
     v => { v["stable-release"].jobs["browser-shards"].steps.push({ uses: "actions/cache@bad" }); },
@@ -362,12 +362,14 @@ test("mutations cannot miss a cache role or change setup, quality, identity, pri
 const imageEvidenceMutations = [
   steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); },
   steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ' --collect-applicability --collect-applicability'); },
-  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability'; },
 ];
 
 test('image evidence and reporting deltas cannot weaken the original cold-cache contract', () => {
   for (const mutate of imageEvidenceMutations) {
-    const value = graph(); mutate(value['managed-image-build'].jobs['build-smoke'].steps);
+    const value = graph(); mutate(value['managed-image-build'].jobs['build-candidate'].steps);
     assert.throws(() => verify(value));
   }
+  const moved = graph();
+  moved['managed-image-build'].jobs['strict-scan'].steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability';
+  assert.throws(() => verify(moved));
 });

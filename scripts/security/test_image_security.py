@@ -418,15 +418,17 @@ class DriverTests(unittest.TestCase):
         current = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
             {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
         legacy = dict(current, name=rescan.LEGACY_INVENTORY_JOB)
+        older = dict(current, name=rescan.OLDER_INVENTORY_JOB)
         jobs = {2: [current], 1: [legacy]}
         artifacts = {2: [{"name": "managed-image-security-" + "a" * 40, "expired": False}],
                      1: [{"name": "managed-image-security-" + "b" * 40, "expired": False}]}
         self.assertEqual(rescan.select_run([newest, old], artifacts, jobs, NOW)[0]["id"], 2)
         self.assertEqual(rescan.select_run([old], artifacts, jobs, NOW)[0]["id"], 1)
+        self.assertEqual(rescan.select_run([old], artifacts, {1: [older]}, NOW)[0]["id"], 1)
         for invalid in ([], [dict(artifacts[2][0], expired=True)]):
             with self.assertRaises(ValueError):
                 rescan.select_run([newest, old], artifacts | {2: invalid}, jobs, NOW)
-        for ambiguous in ([current, current], [current, legacy]):
+        for ambiguous in ([current, current], [current, legacy], [current, older]):
             with self.assertRaisesRegex(ValueError, "ambiguous"):
                 rescan.select_run([newest, old], artifacts, jobs | {2: ambiguous}, NOW)
 
