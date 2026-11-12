@@ -37,6 +37,7 @@ require_literal "$dockerfile" 'python3 /usr/share/nac/npm-runtime-build/correct-
 # Assert the literal shell/Actions template, without expanding it here.
 # shellcheck disable=SC2016
 require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/smoke-managed-runtime.py"'
+require_literal "$repo_root/scripts/smoke-managed-image.sh" 'python3 - < "$repo_root/scripts/security/glibc_gettext_runtime_probe.py"'
 require_literal "$dockerfile" 'useradd --uid 10001 --gid 10001'
 require_literal "$dockerfile" 'USER 10001:10001'
 require_literal "$dockerfile" '/usr/local/bin/nac-web guide skills discovery'

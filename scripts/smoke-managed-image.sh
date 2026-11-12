@@ -227,6 +227,10 @@ NAC_MANAGED_RUNTIME_ASSERTIONS
 # read-only root and mounted HOME; binary presence alone misses setup failures.
 "$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/smoke-managed-runtime.py"
 
+# Exercise the installed glibc gettext path rule in the exact running image.
+# A normal catalog must first load, so missing locale data cannot fake a pass.
+"$container_runtime" exec -i "$container_name" python3 - < "$repo_root/scripts/security/glibc_gettext_runtime_probe.py"
+
 "$container_runtime" exec -i "$container_name" /bin/sh < "$repo_root/scripts/smoke-managed-git-lfs.sh"
 
 # Use the same ready NAC runtime and managed UID for actual human PTY HTTP
