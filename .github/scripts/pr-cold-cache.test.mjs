@@ -38,7 +38,7 @@ const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "brows
 const baseline = {
   "stable-release": "43b11c4b1cccae666a6f5fe71f1359c6aaca1662f38876c98cd284e918cd70e5",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
-  "managed-image-build": "4098f76703ecde04fc04ca0eaa7c088a208c00c95368d543c239968b75029676",
+  "managed-image-build": "d16867e85d8959cc561a33e288f09466f3d3d63096807e172f9857ac5edfe30f",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
   "managed-quality": "b77ca20017fcce1fef054e779b42b852dac053dcf53648cbeb41940d5cdc14e0",
 };

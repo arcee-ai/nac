@@ -206,19 +206,34 @@ jobs:
         if: steps.inventory.outcome == 'success'
         env:
           IMAGE_ID: ${{ steps.image.outputs.id }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          docker image save --output image-security-evidence/image.tar "$IMAGE_ID"
-          PYTHONPATH=scripts/security python3 -c 'import os; import image_candidate_archive as c; c._check_image_config("image-security-evidence/image.tar", os.environ["IMAGE_ID"])'
+          python3 scripts/security/image_candidate_pack.py --bundle image-security-evidence/inventory \
+            --destination frozen-candidate --image "$IMAGE_ID" --source-revision "$SOURCE_SHA"
+          docker image save --output frozen-candidate/image.tar "$IMAGE_ID"
+          PYTHONPATH=scripts/security python3 -c 'import os; import image_candidate_archive as c; c._check_image_config("frozen-candidate/image.tar", os.environ["IMAGE_ID"])'
       - name: Retain frozen candidate before strict scan
         if: steps.inventory.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: managed-image-candidate-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            image-security-evidence/image.tar
-            image-security-evidence/inventory/
+          path: frozen-candidate/
           retention-days: 14
           if-no-files-found: error
+      - name: Retain nonauthoritative inventory diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: managed-image-inventory-diagnostics-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            image-security-evidence/inventory/result.json
+            image-security-evidence/inventory/runtime.json.stderr
+            image-security-evidence/inventory/syft.txt
+            image-security-evidence/inventory/syft.txt.stderr
+            image-security-evidence/inventory/syft.yaml
+            image-security-evidence/inventory/tools.json
+          retention-days: 14
+          if-no-files-found: warn
 
   strict-scan:
     needs: [prepare, build-candidate]

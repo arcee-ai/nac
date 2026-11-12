@@ -251,7 +251,9 @@ The unprivileged `build-candidate` job also retains a separate 14-day
 saved exact image and V4 inventory. The following `strict-scan` job loads that
 image on a clean runner, validates its ID and platform, and scans the retained
 bundle with a fresh database. Its ordinary security artifact excludes the saved
-image tar and keeps the daily rescan layout. Candidate retention is neither a
+image tar and keeps the daily rescan layout. The candidate ZIP includes only the
+V4 bundle's hashed inputs; unhashed inventory logs and tool diagnostics remain
+available in a separate nonauthoritative artifact. Candidate retention is neither a
 security pass nor post-build human approval.
 
 Daily selection uses only trusted `dev` push runs from

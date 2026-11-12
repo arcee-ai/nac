@@ -37,7 +37,7 @@ function verify(value) {
   delete setup.with;
   delete build.with.builder;
   // Exact post-split graph, including cold/cache/security/receipt/identity fields.
-  assert.equal(digest(config), 'b740706241b56767edc54c930b1ee20e8b665e1c1665e8743f05b11eb85e2e12');
+  assert.equal(digest(config), 'c635d13d3ea02b0c5c234ad6f8ca1ff77fbc43095c24a206ed21ff84febe49f4');
 }
 
 test('driver selection and explicit builder binding reverse to the exact prior image workflow', () => verify(source()));
