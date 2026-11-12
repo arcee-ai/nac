@@ -175,8 +175,9 @@ RUN test "$(apk --print-arch)" = x86_64 \
         -ldflags "-s -w -X github.com/cli/cli/v2/internal/build.Version=${GH_VERSION} -X github.com/cli/cli/v2/internal/build.Date=${GH_BUILD_DATE}" \
         "github.com/cli/cli/v2/cmd/gh@v${GH_VERSION}" \
     && install -m 0755 /tmp/nac-gh-build/bin/gh /usr/local/bin/gh \
-    && /usr/local/go/bin/go version -m /usr/local/bin/gh | grep -F "go${GO_VERSION}" \
-    && /usr/local/go/bin/go version -m /usr/local/bin/gh | grep -F "github.com/cli/cli/v2" | grep -F "v${GH_VERSION}" \
+    && test "$(/usr/local/go/bin/go version -m /usr/local/bin/gh | sed -n '1p')" = "/usr/local/bin/gh: go${GO_VERSION}" \
+    && /usr/local/go/bin/go version -m /usr/local/bin/gh | \
+        awk -v version="v${GH_VERSION}" '$1 == "mod" && $2 == "github.com/cli/cli/v2" && $3 == version { found = 1 } END { exit !found }' \
     && gh version | grep -F "gh version ${GH_VERSION}" \
     && XDG_CONFIG_HOME=/tmp/nac-gh-config GOTOOLCHAIN=local GOPATH=/tmp/nac-gh-build \
         /usr/local/go/bin/go -C "/tmp/nac-gh-build/pkg/mod/github.com/cli/cli/v2@v${GH_VERSION}" \

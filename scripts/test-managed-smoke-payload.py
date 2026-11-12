@@ -87,13 +87,15 @@ class PayloadTests(unittest.TestCase):
         (binary / "go").write_text(
             '#!/bin/sh\n'
             'if [ "${2-}" = -m ]; then\n'
-            '    printf "%s\\n" "  path github.com/cli/cli/v2/cmd/gh" '
+            '    printf "%s\\n" "$3: '
+            + ("go1.27.3" if stale_gh_toolchain else "go1.27.4") + '" '
+            '"  path github.com/cli/cli/v2/cmd/gh" '
             '"  mod github.com/cli/cli/v2 v2.103.0" '
-            + shlex.quote("  build go1.27.3" if stale_gh_toolchain else "  build go1.27.4") + '\n'
+            '"  build decoy=go1.27.4"\n'
             'else\n'
             '    printf "%s\\n" "go version go1.27.4 linux/amd64"\n'
             'fi\n')
-        for tool in ("jq", "grep", "cat", "wc"):
+        for tool in ("jq", "grep", "cat", "wc", "sed", "awk"):
             target = binary / tool
             target.unlink(missing_ok=True)
             target.symlink_to(actual_jq if tool == "jq" else shutil.which(tool))
@@ -134,7 +136,9 @@ class PayloadTests(unittest.TestCase):
         self.assertEqual(contents, "overwritten\n")
 
     def test_split_quoted_command_reproduces_no_input_jq_exit_four(self):
-        broken = ("\"$container_runtime\" exec \"$container_name\" /bin/sh -ceu '" + self.payload +
+        prefix, suffix = self.payload.split("    jq -e '", 1)
+        broken_payload = prefix.replace("'", "'\\''") + "    jq -e '" + suffix
+        broken = ("\"$container_runtime\" exec \"$container_name\" /bin/sh -ceu '" + broken_payload +
                   "'\n# Exercise clean/smudge")
         captured = capture(broken, self.directory)
         self.assertGreater(len(captured["argv"]), 5)
