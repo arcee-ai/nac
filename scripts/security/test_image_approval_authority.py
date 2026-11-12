@@ -130,10 +130,12 @@ class AuthorityTests(unittest.TestCase):
                 api=lambda _: self.fail("API called before authority pins"))
 
     def test_exact_rules_reviewed_closure_and_protected_code(self):
-        result = self.verify()
-        self.assertEqual(result, {"approval_revision": self.snapshot.branch_revision,
-                                  "reviewed_commit": COMMIT,
-                                  "trusted_dev_revision": DEV})
+        self.assertIsNone(self.verify())
+        # No result can be carried to another image as an authority receipt.
+        with self.assertRaisesRegex(ValueError, "protected readback required"):
+            authority.verify(None, pins=self.pins, now=NOW, api=self.api,
+                list_api=self.list_api, root=self.root,
+                environment=self.environment, git=self.git)
 
     def test_bypass_absent_is_not_explicit_empty_and_stale_review_denied(self):
         self.rules[12]["bypass_actors"] = None
