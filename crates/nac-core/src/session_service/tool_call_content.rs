@@ -19,16 +19,30 @@ impl SessionService {
     /// Each field is redacted in full before it is bounded, so a cut never
     /// leaves part of a secret behind.
     pub async fn tool_call_content(&self, call_id: &str) -> Result<Option<ToolCallContent>> {
-        let messages = self.store_backed_transcript().await?;
+        let found = match self.indexed_tool_call(call_id).await? {
+            IndexedToolCall::Found(found) => Some(found),
+            IndexedToolCall::Absent => None,
+            IndexedToolCall::Unindexed => {
+                let messages = self.store_backed_transcript().await?;
+                let call_id = call_id.to_owned();
+                tokio::task::spawn_blocking(move || {
+                    find_tool_call(&messages, &call_id).map(|(arguments, output)| FoundToolCall {
+                        arguments: arguments.to_owned(),
+                        output: output.cloned(),
+                    })
+                })
+                .await?
+            }
+        };
+        let Some(FoundToolCall { arguments, output }) = found else {
+            return Ok(None);
+        };
         let provider = self
             .shell_runtime
             .as_ref()
             .and_then(|runtime| runtime.command_environment.clone());
         let call_id = call_id.to_owned();
         tokio::task::spawn_blocking(move || {
-            let Some((arguments, output)) = find_tool_call(&messages, &call_id) else {
-                return Ok(None);
-            };
             let secrets = exact_secrets(provider.as_deref())?;
             let redact_text =
                 |text: &str| crate::model::redact_credentials(&secrets.redact(text), &[]);
@@ -41,9 +55,9 @@ impl SessionService {
                     .join("\n")
             };
             let redact = |text: &str| redact_document(text, &redact_text, &redact_string);
-            let (arguments, arguments_truncated) = bounded(redact(arguments));
+            let (arguments, arguments_truncated) = bounded(redact(&arguments));
             let (output, output_truncated) =
-                match output.map(|content| bounded(redact(&result_text(content)))) {
+                match output.map(|content| bounded(redact(&result_text(&content)))) {
                     Some((output, truncated)) => (Some(output), truncated),
                     None => (None, false),
                 };
@@ -57,6 +71,185 @@ impl SessionService {
         })
         .await?
     }
+
+    /// Find a call through the index instead of decoding the whole transcript.
+    /// `Unindexed` sends the caller to the full scan: no log, tool calls in the
+    /// snapshot blob (forks and legacy sessions), or a log that changed under
+    /// the index while it was being read.
+    async fn indexed_tool_call(&self, call_id: &str) -> Result<IndexedToolCall> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(IndexedToolCall::Unindexed);
+        };
+        let blob_has_calls = self
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.messages.iter().any(has_tool_calls));
+        if blob_has_calls {
+            return Ok(IndexedToolCall::Unindexed);
+        }
+
+        let row_id = {
+            let mut index = self.tool_call_index.lock().await;
+            let mut restarts = 0;
+            loop {
+                let (retained, rows) = read_rows_after(
+                    &writer,
+                    &session_id,
+                    index.last_row_id,
+                    TOOL_CALL_INDEX_PAGE,
+                )
+                .await?;
+                if retained != index.rows {
+                    // Rows the index holds were deleted (a trim or revert).
+                    restarts += 1;
+                    if restarts > 2 {
+                        return Ok(IndexedToolCall::Unindexed);
+                    }
+                    *index = ToolCallIndex::default();
+                    continue;
+                }
+                let complete = rows.len() < TOOL_CALL_INDEX_PAGE;
+                for (row_id, _, message) in &rows {
+                    index.record(*row_id, message);
+                }
+                if complete {
+                    break;
+                }
+            }
+            match index.calls.get(call_id).map(Vec::as_slice) {
+                Some([row_id]) => *row_id,
+                // Absent, or held twice: either way it names no call.
+                _ => return Ok(IndexedToolCall::Absent),
+            }
+        };
+
+        // The call's row, then the results that follow it up to the next
+        // assistant or user message.
+        let mut after = row_id - 1;
+        let mut arguments = None;
+        let mut output = None;
+        'rows: loop {
+            let (_, rows) =
+                read_rows_after(&writer, &session_id, after, TOOL_CALL_RESULT_PAGE).await?;
+            let complete = rows.len() < TOOL_CALL_RESULT_PAGE;
+            for (id, _, message) in rows {
+                after = id;
+                if arguments.is_none() {
+                    let Some(found) = (id == row_id)
+                        .then(|| call_arguments(&message, call_id))
+                        .flatten()
+                    else {
+                        return Ok(IndexedToolCall::Unindexed);
+                    };
+                    arguments = Some(found);
+                    continue;
+                }
+                match message {
+                    Message::Assistant { .. } | Message::User { .. } => break 'rows,
+                    Message::Tool {
+                        tool_call_id,
+                        content,
+                    } if tool_call_id == call_id => output = Some(content),
+                    _ => {}
+                }
+            }
+            if complete {
+                break;
+            }
+        }
+        Ok(match arguments {
+            Some(arguments) => IndexedToolCall::Found(FoundToolCall { arguments, output }),
+            None => IndexedToolCall::Unindexed,
+        })
+    }
+}
+
+/// Rows decoded per store command while the index catches up.
+const TOOL_CALL_INDEX_PAGE: usize = 1024;
+/// Rows decoded per store command while reading one call's results, which
+/// usually end within a few rows.
+const TOOL_CALL_RESULT_PAGE: usize = 32;
+
+/// Where each tool call sits in the session's transcript log, by row id. Row
+/// ids are never reused, so the index catches up by reading only rows newer
+/// than the last one it holds, and fewer rows at or below that one prove some
+/// were deleted; the index then starts over.
+#[derive(Default)]
+pub(super) struct ToolCallIndex {
+    last_row_id: i64,
+    rows: u64,
+    calls: HashMap<String, Vec<i64>>,
+}
+
+impl ToolCallIndex {
+    fn record(&mut self, row_id: i64, message: &Message) {
+        if let Message::Assistant {
+            tool_calls: Some(calls),
+            ..
+        } = message
+        {
+            for call in calls {
+                self.calls.entry(call.id.clone()).or_default().push(row_id);
+            }
+        }
+        self.last_row_id = row_id;
+        self.rows += 1;
+    }
+}
+
+struct FoundToolCall {
+    arguments: String,
+    output: Option<ToolContent>,
+}
+
+enum IndexedToolCall {
+    Found(FoundToolCall),
+    Absent,
+    Unindexed,
+}
+
+async fn read_rows_after(
+    writer: &Arc<crate::store::TranscriptLogWriter>,
+    session_id: &str,
+    after_row_id: i64,
+    limit: usize,
+) -> Result<(u64, Vec<crate::store::TranscriptLogRow>)> {
+    let writer = Arc::clone(writer);
+    let session_id = session_id.to_owned();
+    crate::store::spawn_blocking_store_caller(move || {
+        writer.read_rows_after(&session_id, after_row_id, limit)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("transcript log row read task failed: {error}"))?
+}
+
+fn has_tool_calls(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Assistant {
+            tool_calls: Some(calls),
+            ..
+        } if !calls.is_empty()
+    )
+}
+
+fn call_arguments(message: &Message, call_id: &str) -> Option<String> {
+    let Message::Assistant {
+        tool_calls: Some(calls),
+        ..
+    } = message
+    else {
+        return None;
+    };
+    calls
+        .iter()
+        .find(|call| call.id == call_id)
+        .map(|call| call.function.arguments.clone())
 }
 
 /// A JSON object or array is redacted through its decoded strings, so it still
