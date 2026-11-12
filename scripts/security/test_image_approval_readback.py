@@ -10,7 +10,7 @@ import unittest
 
 import image_applicability as applicability
 import image_approval_readback as readback
-from test_image_applicability import fixture as applicability_fixture
+from test_image_applicability import aggregate_fixture, fixture as applicability_fixture
 from test_image_approval_intake import fixture as intake_fixture, IMAGE, MERGE, NOW
 
 
@@ -96,6 +96,33 @@ class ReadbackTests(unittest.TestCase):
         self.assertEqual(self.ref_calls, 2)
         self.assertEqual(readback.recheck_current(snapshot, self.record["pull_request"],
                          MERGE, IMAGE, now=NOW, api=self.api), snapshot)
+
+    def test_aggregate_policy_readback_binds_every_payload_to_selected_image(self):
+        model = aggregate_fixture()
+        rule = model["rules"][0]
+        for bound in rule["bindings"]:
+            bound["image"] = IMAGE
+            bound["source_revision"] = MERGE
+        proof = model["record"]
+        proof["bindings"] = copy.deepcopy(rule["bindings"])
+        proof_raw = encode(proof)
+        rule["evidence_sha256"] = applicability.digest(proof_raw)
+        policy = encode({"schema_version": 2, "rules": [rule]})
+        self.record["approval_sha256"] = applicability.digest(policy)
+        self.files = {
+            f"{self.root}/record.json": encode(self.record),
+            f"{self.root}/policy.json": policy,
+            f"{self.root}/evidence/{rule['evidence_sha256']}": proof_raw,
+        }
+        for name, raw in model["evidence"].items():
+            self.files[f"{self.root}/evidence/{name}"] = raw
+        self.assertEqual(self.read().policy, policy)
+        rule["bindings"][1]["image"] = "sha256:" + "f" * 64
+        self.files[f"{self.root}/policy.json"] = encode({"schema_version": 2, "rules": [rule]})
+        self.record["approval_sha256"] = applicability.digest(self.files[f"{self.root}/policy.json"])
+        self.files[f"{self.root}/record.json"] = encode(self.record)
+        with self.assertRaisesRegex(ValueError, "selected image/source"):
+            self.read()
 
     def test_missing_protection_moving_ref_and_truncated_tree_fail(self):
         self.protected = False
