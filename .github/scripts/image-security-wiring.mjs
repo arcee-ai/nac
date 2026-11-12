@@ -13,7 +13,12 @@ export function reverseImageApplicability(config) {
 // are exercised by image-workflow and image_ci_report tests. Preserve all other
 // summary commands, output paths, conditionals and workflow fields in the hash.
 export function reverseStrictImageSummary(config) {
-  const summary = config.jobs['build-smoke'].steps.find(step => step.name === 'Report exact-image security findings');
+  const summaries = Object.entries(config.jobs).flatMap(([job, value]) =>
+    (value.steps ?? []).filter(step => step.name === 'Report exact-image security findings')
+      .map(step => ({ job, step })));
+  assert.equal(summaries.length, 1);
+  assert.ok(['build-smoke', 'strict-scan'].includes(summaries[0].job));
+  const summary = summaries[0].step;
   for (const [current, previous] of [
     ["echo '### Strict exact-image security result'", "echo '### Image findings are advisory; enforcement is deferred'"],
     ["echo 'Blocking findings and incomplete scans fail this job. Full findings remain below.'",
