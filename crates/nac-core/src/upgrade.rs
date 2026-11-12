@@ -8,14 +8,35 @@ const DEFAULT_REPO: &str = "arcee-ai/nac";
 const DEFAULT_BRANCH: &str = "main";
 const RAW_GITHUB_BASE: &str = "https://raw.githubusercontent.com";
 
+pub const WHOLE_APPLICATION_UPGRADE_GUIDANCE: &str = "This engine belongs to a Mac app and cannot self-upgrade. Download a complete newer NAC .app, safely quit the running app, replace the whole application, then relaunch it. Keep your NAC configuration and data; do not run installer or uninstaller scripts inside the app bundle.";
+
+/// Installation ownership is supplied by executable composition, independently
+/// of build track, command name, and the requested installation directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpgradeOwnership {
+    Standalone,
+    WholeApplication,
+}
+
+impl UpgradeOwnership {
+    pub fn ensure_self_upgrade_allowed(self) -> Result<()> {
+        match self {
+            Self::Standalone => Ok(()),
+            Self::WholeApplication => Err(anyhow!(WHOLE_APPLICATION_UPGRADE_GUIDANCE)),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UpgradeRequest {
+    pub ownership: UpgradeOwnership,
     pub install_dir: Option<PathBuf>,
     pub executable_path: Option<PathBuf>,
     pub package_version: String,
 }
 
 pub async fn run_upgrade(request: UpgradeRequest) -> Result<()> {
+    request.ownership.ensure_self_upgrade_allowed()?;
     let install_dir = upgrade_install_dir(request.install_dir, request.executable_path.as_deref())?;
     let uninstall_url = script_url("uninstall.sh");
     let install_url = script_url("install.sh");
@@ -156,6 +177,45 @@ mod tests {
             Some(value) => unsafe { std::env::set_var(name, value) },
             None => unsafe { std::env::remove_var(name) },
         }
+    }
+
+    #[test]
+    fn standalone_install_directory_preserves_override_environment_and_executable_precedence() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let original = std::env::var_os("INSTALL_DIR");
+        unsafe { std::env::set_var("INSTALL_DIR", "/environment/install") };
+        let executable = Path::new("/running executable/nac-web");
+        assert_eq!(
+            upgrade_install_dir(Some("/explicit/install".into()), Some(executable)).unwrap(),
+            PathBuf::from("/explicit/install")
+        );
+        assert_eq!(
+            upgrade_install_dir(None, Some(executable)).unwrap(),
+            PathBuf::from("/environment/install")
+        );
+        unsafe { std::env::remove_var("INSTALL_DIR") };
+        assert_eq!(
+            upgrade_install_dir(None, Some(executable)).unwrap(),
+            PathBuf::from("/running executable")
+        );
+        assert!(upgrade_install_dir(None, None).is_err());
+        restore_env("INSTALL_DIR", original);
+    }
+
+    #[tokio::test]
+    async fn whole_application_refuses_before_install_directory_resolution() {
+        let error = run_upgrade(UpgradeRequest {
+            ownership: UpgradeOwnership::WholeApplication,
+            install_dir: None,
+            executable_path: None,
+            package_version: "guard-fixture".into(),
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), WHOLE_APPLICATION_UPGRADE_GUIDANCE);
+        assert!(UpgradeOwnership::Standalone
+            .ensure_self_upgrade_allowed()
+            .is_ok());
     }
 
     #[test]
