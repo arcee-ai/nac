@@ -10,6 +10,8 @@ import hashlib
 import json
 import re
 
+import image_applicability_curl_release
+
 
 POLICY_PATH = ".github/security/image-applicability.json"
 MAX_POLICY_AGE = dt.timedelta(days=30)
@@ -209,11 +211,14 @@ def evidence_for(rule, evidence, observations, now):
         require(value in evidence and digest(evidence[value]) == value, "missing/tampered proof artifact")
     proof = record["proof"]
     if rule["disposition"] == "fixed":
-        exact(proof, {"kind", "vulnerable_control", "fixed_control"}, "fixed proof")
-        require(proof == {"kind": "regression", "vulnerable_control": "failed-as-expected",
-                          "fixed_control": "passed"}, "unqualified regression controls")
-        require({"vulnerable_control", "fixed_control", "provenance"} <= set(artifacts),
-                "missing regression artifacts")
+        if isinstance(proof, dict) and proof.get("kind") == "official-curl-fixed-release":
+            image_applicability_curl_release.validate(rule, record, evidence)
+        else:
+            exact(proof, {"kind", "vulnerable_control", "fixed_control"}, "fixed proof")
+            require(proof == {"kind": "regression", "vulnerable_control": "failed-as-expected",
+                              "fixed_control": "passed"}, "unqualified regression controls")
+            require({"vulnerable_control", "fixed_control", "provenance"} <= set(artifacts),
+                    "missing regression artifacts")
     else:
         exact(proof, {"kind", "affected_applications"}, "absence proof")
         require(proof["kind"] == "application-absence" and
