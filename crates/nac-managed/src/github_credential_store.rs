@@ -1,15 +1,45 @@
 //! Owner-only persistence adapter for managed GitHub authorization.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use nac_credential_store::{
-    acquire_credential_lock, read_auth_string_from_path, remove_auth_file_from_path,
-    try_acquire_credential_lock, write_auth_string_to_path, FileLock,
+    read_auth_string_from_path, remove_auth_file_from_path, try_acquire_credential_lock,
+    write_auth_string_to_path, FileLock,
 };
 use serde::{Deserialize, Serialize};
 
 pub(crate) const AUTH_STORE_VERSION: u32 = 1;
+const LOCK_RETRY: Duration = Duration::from_millis(25);
+
+/// In-process async gates keyed by credential lock path. Waiting on a gate
+/// yields the executor; only the admitted task then polls the cross-process
+/// file lock, so concurrent callers never park Tokio workers in flock(2).
+type CredentialGates = HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>;
+static CREDENTIAL_GATES: LazyLock<Mutex<CredentialGates>> = LazyLock::new(Mutex::default);
+
+fn credential_gate(lock_path: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    let mut gates = CREDENTIAL_GATES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(gate) = gates.get(lock_path).and_then(Weak::upgrade) {
+        return gate;
+    }
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    let gate = Arc::new(tokio::sync::Mutex::new(()));
+    gates.insert(lock_path.to_path_buf(), Arc::downgrade(&gate));
+    gate
+}
+
+/// Exclusive access to the stored authorization. The file lock is released
+/// before the in-process gate admits the next waiter.
+pub(crate) struct CredentialGuard {
+    _lock: FileLock,
+    _gate: tokio::sync::OwnedMutexGuard<()>,
+}
 
 #[derive(Clone)]
 pub(crate) struct GitHubCredentialStore {
@@ -48,12 +78,27 @@ impl GitHubCredentialStore {
         &self.path
     }
 
-    pub(crate) fn acquire(&self) -> Result<FileLock> {
-        acquire_credential_lock(&self.lock_path)
-    }
-
-    pub(crate) fn try_acquire(&self) -> Result<Option<FileLock>> {
-        try_acquire_credential_lock(&self.lock_path)
+    /// Serializes a credential read-modify-write within this process (async
+    /// gate) and across processes (non-blocking file lock polled until
+    /// `timeout`). Refreshes hold the guard across their token request.
+    pub(crate) async fn lock(&self, timeout: Duration) -> Result<CredentialGuard> {
+        let gate = credential_gate(&self.lock_path).lock_owned().await;
+        let started = Instant::now();
+        loop {
+            let attempt = try_acquire_credential_lock(&self.lock_path)?;
+            if let Some(lock) = attempt {
+                return Ok(CredentialGuard {
+                    _lock: lock,
+                    _gate: gate,
+                });
+            }
+            if started.elapsed() >= timeout {
+                bail!(
+                    "timed out waiting for the managed GitHub credential lock; another nac process may be refreshing it"
+                );
+            }
+            tokio::time::sleep(LOCK_RETRY).await;
+        }
     }
 
     pub(crate) fn load(&self, expected_organization: &str) -> Result<Option<StoredGitHubAuth>> {

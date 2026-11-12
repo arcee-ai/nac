@@ -17,7 +17,9 @@ use crate::github_credential_store::{
 
 const ORGANIZATION: &str = "arcee-ai";
 const REFRESH_SKEW_MS: u64 = 5 * 60 * 1_000;
-const LOCK_RETRY: Duration = Duration::from_millis(25);
+/// Outlasts one bounded refresh (the client's 30 s request timeout) by another
+/// process holding the credential lock.
+const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_PAGES: u32 = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +120,7 @@ pub struct ManagedGitHubAuth {
     client_id: String,
     endpoints: GitHubEndpoints,
     http: reqwest::Client,
+    lock_timeout: Duration,
 }
 
 impl std::fmt::Debug for ManagedGitHubAuth {
@@ -153,6 +156,7 @@ impl ManagedGitHubAuth {
             client_id,
             endpoints,
             http,
+            lock_timeout: CREDENTIAL_LOCK_TIMEOUT,
         })
     }
 
@@ -229,8 +233,10 @@ impl ManagedGitHubAuth {
         })
     }
 
-    pub fn disconnect(&self) -> Result<bool> {
-        let _lock = self.store.acquire()?;
+    /// Removes the stored authorization after any in-flight refresh settles,
+    /// waiting without blocking the executor.
+    pub async fn disconnect(&self) -> Result<bool> {
+        let _guard = self.store.lock(self.lock_timeout).await?;
         self.store.remove()
     }
 
@@ -241,47 +247,45 @@ impl ManagedGitHubAuth {
             .map(|stored| GitHubAccessToken(stored.access_token)))
     }
 
+    /// The refresh holds the credential lock across its token request; other
+    /// callers queue on the in-process gate, and another process holding the
+    /// lock fails a waiter at the deadline instead of stalling it.
     pub async fn current_token(&self) -> Result<Option<GitHubAccessToken>> {
-        loop {
-            let Some(_lock) = self.store.try_acquire()? else {
-                tokio::time::sleep(LOCK_RETRY).await;
-                continue;
-            };
-            let Some(mut stored) = self.store.load(ORGANIZATION)? else {
-                return Ok(None);
-            };
-            let now = now_ms()?;
-            if stored.access_expires_at_ms > now.saturating_add(REFRESH_SKEW_MS) {
-                return Ok(Some(GitHubAccessToken(stored.access_token)));
-            }
-            if stored.refresh_expires_at_ms <= now {
-                self.store.remove()?;
-                return Err(GitHubAuthError::new(
-                    GitHubAuthFailureKind::Reconnect,
-                    "GitHub authorization expired; reconnect GitHub",
-                )
-                .into());
-            }
-            let refreshed = match self.refresh(&stored.refresh_token).await {
-                Ok(refreshed) => refreshed,
-                Err(error)
-                    if error
-                        .downcast_ref::<GitHubAuthError>()
-                        .is_some_and(|error| error.kind() == GitHubAuthFailureKind::Reconnect) =>
-                {
-                    self.store.remove()?;
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
-            };
-            stored.access_token = refreshed.access_token;
-            stored.refresh_token = refreshed.refresh_token;
-            stored.access_expires_at_ms = now.saturating_add(refreshed.expires_in * 1_000);
-            stored.refresh_expires_at_ms =
-                now.saturating_add(refreshed.refresh_token_expires_in * 1_000);
-            self.store.save(&stored)?;
+        let _guard = self.store.lock(self.lock_timeout).await?;
+        let Some(mut stored) = self.store.load(ORGANIZATION)? else {
+            return Ok(None);
+        };
+        let now = now_ms()?;
+        if stored.access_expires_at_ms > now.saturating_add(REFRESH_SKEW_MS) {
             return Ok(Some(GitHubAccessToken(stored.access_token)));
         }
+        if stored.refresh_expires_at_ms <= now {
+            self.store.remove()?;
+            return Err(GitHubAuthError::new(
+                GitHubAuthFailureKind::Reconnect,
+                "GitHub authorization expired; reconnect GitHub",
+            )
+            .into());
+        }
+        let refreshed = match self.refresh(&stored.refresh_token).await {
+            Ok(refreshed) => refreshed,
+            Err(error)
+                if error
+                    .downcast_ref::<GitHubAuthError>()
+                    .is_some_and(|error| error.kind() == GitHubAuthFailureKind::Reconnect) =>
+            {
+                self.store.remove()?;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
+        stored.access_token = refreshed.access_token;
+        stored.refresh_token = refreshed.refresh_token;
+        stored.access_expires_at_ms = now.saturating_add(refreshed.expires_in * 1_000);
+        stored.refresh_expires_at_ms =
+            now.saturating_add(refreshed.refresh_token_expires_in * 1_000);
+        self.store.save(&stored)?;
+        Ok(Some(GitHubAccessToken(stored.access_token)))
     }
 
     pub async fn repositories(&self) -> Result<Vec<GitHubRepository>> {
@@ -366,11 +370,11 @@ impl ManagedGitHubAuth {
                 .await
                 .context("GitHub API request failed")?;
             if response.status() == StatusCode::UNAUTHORIZED && attempt == 0 {
-                self.force_access_expiry()?;
+                self.force_access_expiry().await?;
                 continue;
             }
             if response.status() == StatusCode::UNAUTHORIZED {
-                self.disconnect()?;
+                self.disconnect().await?;
                 return Err(GitHubAuthError::new(
                     GitHubAuthFailureKind::Reconnect,
                     "GitHub authorization was revoked; reconnect GitHub",
@@ -494,7 +498,7 @@ impl ManagedGitHubAuth {
                 identity: GitHubIdentity::from(identity),
                 organization: ORGANIZATION.to_string(),
             };
-            let _lock = self.store.acquire()?;
+            let _guard = self.store.lock(self.lock_timeout).await?;
             self.store.save(&stored)?;
             return self.status();
         }
@@ -558,8 +562,8 @@ impl ManagedGitHubAuth {
         token.into_tokens()
     }
 
-    fn force_access_expiry(&self) -> Result<()> {
-        let _lock = self.store.acquire()?;
+    async fn force_access_expiry(&self) -> Result<()> {
+        let _guard = self.store.lock(self.lock_timeout).await?;
         if let Some(mut auth) = self.store.load(ORGANIZATION)? {
             auth.access_expires_at_ms = 0;
             self.store.save(&auth)?;
@@ -860,3 +864,7 @@ fn now_ms() -> Result<u64> {
 #[cfg(test)]
 #[path = "github_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "github_credential_gate_tests.rs"]
+mod credential_gate_tests;
