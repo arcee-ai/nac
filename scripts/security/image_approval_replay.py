@@ -17,6 +17,7 @@ import image_applicability_bundle as bundle
 import image_applicability_gate as gate
 import image_approval_intake as intake
 import image_approval_readback as readback
+import image_approval_refresh as refresh
 import image_candidate_archive as candidate
 from image_inventory import sha256
 
@@ -44,6 +45,15 @@ def current_observations(inventory, now):
                    "fresh V4 applicability context required")
     applicability.fresh(context.get("collected_at"), now,
                         applicability.MAX_EVIDENCE_AGE, "frozen observation")
+
+
+def observations_stale(inventory, now):
+    context = bundle.read_json(inventory, bundle.CONTEXT, maximum=4 * 1024 ** 2)
+    intake.require(type(context) is dict and context.get("schema_version") == 2,
+                   "complete V4 applicability context required")
+    age = now - applicability.timestamp(context.get("collected_at"))
+    intake.require(age >= dt.timedelta(), "future frozen observation")
+    return age >= applicability.MAX_EVIDENCE_AGE
 
 
 def _stage_review(snapshot, directory):
@@ -82,6 +92,7 @@ def replay(pull_request, merge_sha, image, archive, workspace, *,
            source_policy, candidate_policy, source_applicability,
            candidate_applicability, api=readback.fetch_json,
            scan=subprocess.run, load=candidate.load_exact_image,
+           verify=refresh.verify_frozen, recollect=refresh.recollect,
            clock=lambda: dt.datetime.now(dt.timezone.utc)):
     """Return only an unpublishable status proposal after same-byte replay.
 
@@ -120,8 +131,19 @@ def replay(pull_request, merge_sha, image, archive, workspace, *,
     image_tar, inventory = candidate.extract_candidate(
         archive, workspace / "candidate", artifact_digest=record["artifact_digest"],
         image=image, source_revision=merge_sha)
-    current_observations(inventory, now)
+    identity = verify(inventory, workspace / "verified-frozen",
+                      image=image, source_revision=merge_sha)
+    stale_at_start = observations_stale(inventory, now)
     load(image_tar, image)
+    post_load_now = clock()
+    stale_after_load = observations_stale(inventory, post_load_now)
+    if stale_at_start or stale_after_load:
+        inventory = recollect(inventory, workspace / "verified-frozen",
+                              workspace / "derivative", identity,
+                              image=image, source_revision=merge_sha)
+        current_observations(inventory, clock())
+    else:
+        current_observations(inventory, post_load_now)
     policy, evidence = _stage_review(snapshot, workspace / "review")
     output = workspace / "strict-scan"
     code = _scan(inventory, record, output, policy, evidence, source_policy,
