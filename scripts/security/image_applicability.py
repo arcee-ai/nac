@@ -19,6 +19,7 @@ BINDING_FIELDS = {"image", "source_revision", "platform", "package", "installed_
                   "application_profile_sha256"}
 FINDING_FIELDS = {"package", "version", "source", "advisories"}
 RULE_FIELDS = {"id", "finding", "binding", "disposition", "evidence_sha256", "review"}
+AGGREGATE_RULE_FIELDS = (RULE_FIELDS - {"binding"}) | {"bindings"}
 REVIEW_FIELDS = {"owner", "reviewer", "issue", "review", "reviewed_at", "expires_at"}
 
 
@@ -96,6 +97,11 @@ def binding(value):
         sha(value[field], field)
 
 
+def rule_bindings(rule):
+    """Return the complete installed-payload set for either policy version."""
+    return rule["bindings"] if "bindings" in rule else [rule["binding"]]
+
+
 def scan_subject(value):
     exact(value, {"image", "source_revision", "platform"}, "scan identity")
     require(isinstance(value["image"], str) and
@@ -133,21 +139,31 @@ def review(value, now):
 def policy(raw, now):
     value = document(raw, "policy")
     exact(value, {"schema_version", "rules"}, "policy")
-    require(type(value["schema_version"]) is int and value["schema_version"] == 1 and
+    require(type(value["schema_version"]) is int and value["schema_version"] in {1, 2} and
             isinstance(value["rules"], list), "unsupported policy")
+    schema = value["schema_version"]
     ids, selectors = set(), set()
     for rule in value["rules"]:
-        exact(rule, RULE_FIELDS, "rule")
+        exact(rule, RULE_FIELDS if schema == 1 else AGGREGATE_RULE_FIELDS, "rule")
         identity(rule["id"], "rule id")
         require(rule["id"] not in ids, "duplicate rule id")
         ids.add(rule["id"])
         finding_selector(rule["finding"])
-        binding(rule["binding"])
-        require(rule["finding"]["package"] == rule["binding"]["package"],
-                "finding and installed package differ")
-        require(rule["finding"]["version"] in {rule["binding"]["package_version"],
-                                                 rule["binding"]["upstream_version"]},
-                "finding version differs from both truthful installed versions")
+        bindings = rule_bindings(rule)
+        if schema == 2:
+            require(isinstance(bindings, list) and 2 <= len(bindings) <= 16,
+                    "aggregate rule needs two to sixteen installed payloads")
+        for item in bindings:
+            binding(item)
+            require(rule["finding"]["package"] == item["package"],
+                    "finding and installed package differ")
+            require(rule["finding"]["version"] in {item["package_version"],
+                                                    item["upstream_version"]},
+                    "finding version differs from truthful installed versions")
+        if schema == 2:
+            names = [item["installed_package"] for item in bindings]
+            require(names == sorted(set(names)),
+                    "aggregate installed payloads must be unique and sorted")
         require(rule["disposition"] in {"fixed", "not_affected"}, "unsupported disposition")
         sha(rule["evidence_sha256"], "evidence")
         review(rule["review"], now)
@@ -159,29 +175,31 @@ def policy(raw, now):
 
 
 def evidence_for(rule, evidence, observations, now):
-    # One upstream scanner row can represent multiple installed APKs. A v1 rule
-    # proves one payload, so it cannot safely admit a shared coordinate.
+    # A shared scanner coordinate must cover its complete independently
+    # observed installed-payload set, with no missing, duplicate or extra APK.
+    bindings = rule_bindings(rule)
     coordinate_observations = [item for item in observations
                                if item["binding"]["package"] == rule["finding"]["package"]]
-    require(len(coordinate_observations) == 1,
+    require(len(coordinate_observations) == len(bindings),
             "shared/missing scanner coordinate requires aggregate installed-payload proof")
+    require(all(sum(item["binding"] == bound for item in coordinate_observations) == 1
+                for bound in bindings),
+            "missing/mismatched independently verified observation")
     evidence_sha = rule["evidence_sha256"]
     require(evidence_sha in evidence, "missing reviewed evidence")
     raw = evidence[evidence_sha]
     require(digest(raw) == evidence_sha, "reviewed evidence hash mismatch")
     record = document(raw, "evidence")
-    exact(record, {"schema_version", "rule_id", "binding", "collected_at", "artifacts", "proof"},
-          "evidence")
-    require(type(record["schema_version"]) is int and record["schema_version"] == 1 and
+    schema = 2 if "bindings" in rule else 1
+    evidence_fields = {"schema_version", "rule_id", "collected_at", "artifacts", "proof"}
+    evidence_fields.add("bindings" if schema == 2 else "binding")
+    exact(record, evidence_fields, "evidence")
+    require(type(record["schema_version"]) is int and record["schema_version"] == schema and
             record["rule_id"] == rule["id"], "evidence identity mismatch")
-    binding(record["binding"])
-    require(record["binding"] == rule["binding"], "evidence binding mismatch")
+    require(rule_bindings(record) == bindings, "evidence binding mismatch")
     fresh(record["collected_at"], now, MAX_EVIDENCE_AGE, "evidence")
     require(timestamp(record["collected_at"]) <= timestamp(rule["review"]["reviewed_at"]),
             "evidence collected after its review")
-    observed = [item for item in observations if item["binding"] == rule["binding"]]
-    require(len(observed) == 1, "missing/mismatched independently verified observation")
-    fresh(observed[0]["observed_at"], now, MAX_EVIDENCE_AGE, "observation")
     artifacts = record["artifacts"]
     require(isinstance(artifacts, dict) and artifacts, "missing reviewed proof artifacts")
     for name, value in artifacts.items():
@@ -246,7 +264,8 @@ def verify_applicability(findings, *, trusted_policy, candidate_policy, evidence
     # Validate every rule, including currently unmatched rules: stale or tampered
     # policy evidence cannot disappear merely because today's scanner has no row.
     for rule in admitted["rules"]:
-        require(all(rule["binding"][key] == value for key, value in scan_identity.items()),
+        require(all(bound[key] == value for bound in rule_bindings(rule)
+                    for key, value in scan_identity.items()),
                 "rule differs from scanned image/source/platform")
         evidence_for(rule, evidence, observations, now)
     dispositions, unresolved = [], []
