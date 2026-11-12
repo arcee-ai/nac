@@ -170,7 +170,8 @@ merge commit, and the approval ruleset's last update must predate the merge;
 later policy tightening cannot retroactively authorize an older record. The
 event's workflow ref/SHA and a clean local checkout must
 match the independently fetched current protected `dev` SHA. The read-only
-validator returns only an authority receipt, never a finding disposition or
+validator returns no transferable authority receipt; a different image must
+repeat the complete same-call check. It never returns a finding disposition or
 status. It is not called by the replay workflow; protected execution, pin
 selection and merge-time enforcement still require separate qualification.
 
