@@ -4,7 +4,7 @@ import { Button, ButtonContent, ButtonSize } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /**
- * The ground fades in under a 656px column of controls, so the transcript
+ * The ground fades in under a 976px column of controls, so the transcript
  * scrolls out beneath the composer instead of stopping at a card edge. Only
  * the controls take the pointer; the faded margin lets it through.
  */
@@ -18,7 +18,7 @@ export function ComposerFrame({
   return (
     <form
       className={cn(
-        "pointer-events-none flex flex-col items-center gap-4 py-4 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[656px]",
+        "pointer-events-none flex flex-col items-center gap-4 py-4 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[976px]",
         compact ? "px-2" : "px-4",
         faded && "fade-from-bottom",
         className,
@@ -32,28 +32,25 @@ export function ComposerFrame({
 
 /**
  * The level-1 card both composers share: the field row over the session
- * controls. A focused field draws a hairline inside the edge, in the border
- * token `outline` names, and the goal editor washes the whole card in accent.
+ * controls. A focused field brightens the card's hairline edge, and the goal editor washes the whole card in accent.
  * Rows that should paint over the wash are `relative`.
  */
 export function ComposerCard({
   compact,
   surface,
-  outline = "muted",
   className,
   children,
 }: {
   compact: boolean;
   surface?: "focus" | "goal";
-  outline?: "muted" | "tertiary";
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "relative flex flex-col gap-4 bg-elevation-level-1 pb-4 shadow-xl",
-        compact ? "rounded-[24px] px-1 pt-1" : "rounded-[32px] px-2 pt-2",
+        "relative flex flex-col gap-4 rounded-[24px] border border-muted bg-elevation-level-1 pb-4 shadow-sm",
+        compact ? "px-1 pt-1" : "px-2 pt-2",
         className,
       )}
     >
@@ -61,12 +58,8 @@ export function ComposerCard({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-[inherit]",
-            surface === "goal"
-              ? "bg-accent-primary"
-              : outline === "tertiary"
-                ? "border border-tertiary"
-                : "border border-muted",
+            "pointer-events-none absolute -inset-px rounded-[inherit]",
+            surface === "goal" ? "bg-accent-primary" : "border border-tertiary",
           )}
         />
       ) : null}

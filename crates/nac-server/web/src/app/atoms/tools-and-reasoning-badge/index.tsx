@@ -83,7 +83,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "group relative inline-flex min-h-11 max-w-full items-center gap-2 border-l border-tertiary pl-3 transition-colors motion-reduce:transition-none",
+        "group relative inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-tertiary px-3.5 text-left transition-colors motion-reduce:transition-none",
         "focus-visible:outline-none disabled:cursor-not-allowed",
         labelTone,
         className,
@@ -91,7 +91,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
     >
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute -inset-1 hidden rounded-[4px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
+        className="pointer-events-none absolute -inset-1 hidden rounded-[16px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
       />
       {inProgress ? (
         <ModelLoader
@@ -99,7 +99,10 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
           variant={selected ? ModelLoaderVariant.Accent : ModelLoaderVariant.Default}
         />
       ) : null}
-      <span ref={labelRef} className={cn("label-small min-w-0 truncate", shimmering && SHIMMER)}>
+      <span
+        ref={labelRef}
+        className={cn("label-small min-w-0 flex-1 truncate", shimmering && SHIMMER)}
+      >
         {label}
       </span>
       {avatarUrl || leadingIcon ? (
@@ -117,10 +120,10 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
       {inProgress ? null : (
         <Icon
           iconName={IconName.Right}
-          size={20}
+          size={16}
           aria-hidden
           className={cn(
-            "shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none",
+            "shrink-0 opacity-60 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none",
             iconTone,
           )}
         />

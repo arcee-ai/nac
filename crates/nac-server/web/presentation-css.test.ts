@@ -23,12 +23,13 @@ describe("packed presentation stylesheet boundary", () => {
 
   it("namespaces document-wide font, animation and property registrations", () => {
     const output = scopePresentationCss(`
-      @font-face { font-family: Inter; src: url(inter.woff2); }
+      @font-face { font-family: "Geist Variable"; src: url(geist.woff2); }
       @property --tw-opacity { syntax: "<number>"; initial-value: 1; inherits: false; }
       @keyframes fade { to { opacity: 0; } }
-      .btn { font-family: Inter, sans-serif; animation: fade 1s; opacity: var(--tw-opacity); }
+      .btn { font-family: "Geist Variable", sans-serif; animation: fade 1s; opacity: var(--tw-opacity); }
     `);
-    expect(output).toContain("font-family: NACPresentationInter");
+    expect(output).toContain('font-family: "NACPresentationSans"');
+    expect(output).not.toContain("Geist");
     expect(output).toContain("@property --nac-presentation-tw-opacity");
     expect(output).toContain("@keyframes nac-presentation-fade");
     expect(output).toContain("animation: nac-presentation-fade 1s");

@@ -327,7 +327,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                     size,
                     chromeless
                       ? "shadow-none"
-                      : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl",
+                      : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-3xl border border-tertiary bg-elevation-level-2 shadow-xl",
                     isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
                   ),
               className,

@@ -114,7 +114,7 @@ export function ExecutionLog({
             role="region"
             aria-label="Execution log"
             className={cn(
-              "flex-1 min-h-32 overflow-auto whitespace-pre-wrap break-words px-4 pb-4 font-[family-name:IBMPlexMono] text-sm font-medium text-basic-primary -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
+              "flex-1 min-h-32 overflow-auto whitespace-pre-wrap break-words px-4 pb-4 font-[family-name:Geist_Mono_Variable] text-sm font-medium text-basic-primary -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
               top,
             )}
           />

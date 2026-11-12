@@ -73,7 +73,7 @@
 .chat-response h1 {
   margin-bottom: 1.75rem;
   margin-top: 2.5rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 20px;
   font-weight: 600;
   font-stretch: normal;
@@ -92,7 +92,7 @@
 .chat-response h2 {
   margin-bottom: 1.25rem;
   margin-top: 2.25rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 18px;
   font-weight: 600;
   font-stretch: normal;
@@ -111,7 +111,7 @@
 .chat-response h3 {
   margin-bottom: 1rem;
   margin-top: 1.5rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 16px;
   font-weight: 600;
   font-stretch: normal;
@@ -130,7 +130,7 @@
 .chat-response h4 {
   margin-bottom: 0.75rem;
   margin-top: 1.25rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 14px;
   font-weight: 600;
   font-stretch: normal;
@@ -149,7 +149,7 @@
 .chat-response h5 {
   margin-bottom: 0.5rem;
   margin-top: 1rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 14px;
   font-weight: 600;
   font-stretch: normal;
@@ -168,7 +168,7 @@
 .chat-response h6 {
   margin-bottom: 0.5rem;
   margin-top: 1rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 12px;
   font-weight: 600;
   font-stretch: normal;
@@ -187,7 +187,7 @@
 .chat-response p {
   margin-bottom: 0.5rem;
   margin-top: 0.75rem;
-  font-family: Inter, sans-serif;
+  font-family: "Geist Variable", sans-serif;
   font-size: 14px;
   font-weight: normal;
   font-stretch: normal;

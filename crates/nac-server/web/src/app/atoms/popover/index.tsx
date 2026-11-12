@@ -19,7 +19,7 @@ export enum PopoverSize {
 }
 
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0";
+  "flex flex-col gap-1 p-1.5 rounded-xl border border-tertiary bg-elevation-level-3 shadow-md fade motion-reduce:!animate-none [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;

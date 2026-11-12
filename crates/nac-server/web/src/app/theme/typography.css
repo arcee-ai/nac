@@ -1,9 +1,9 @@
 /* Typography from ArceeFM index.css, with @apply resolved to concrete values
    (text-xs .75/1rem, text-sm .875/1.25, text-base 1/1.5, text-lg 1.125/1.75,
-   text-xl 1.25/1.75; medium 500, semibold 600, bold 700). Font: Inter. */
+   text-xl 1.25/1.75; medium 500, semibold 600, bold 700). Font: Geist. */
 
 .title {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-weight: 500;
   font-size: 28px;
   line-height: 2rem;
@@ -15,7 +15,7 @@
   }
 }
 .subtitle {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-weight: 500;
   font-size: 22px;
   line-height: 1.75rem;
@@ -29,134 +29,134 @@
 
 /* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
 .header-md {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1rem;
   line-height: 1.5rem;
   font-weight: 600;
 }
 /* Figma "Header/Header-sm": semibold 14/20, unlike .header-micro which is bold. */
 .header-sm {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 600;
 }
 /* Figma "Header/Header-2xs": semibold 11/14, the size of a git status letter. */
 .header-2xs {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.6875rem;
   line-height: 0.875rem;
   font-weight: 600;
 }
 /* Figma "Header/Header-2xl": semibold 24/32, unlike .subtitle which is medium. */
 .header-2xl {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.5rem;
   line-height: 2rem;
   font-weight: 600;
 }
 
 .header-big {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.25rem;
   line-height: 1.75rem;
   font-weight: 700;
 }
 .header-medium {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.125rem;
   line-height: 1.5rem;
   font-weight: 700;
 }
 .header-small {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1rem;
   line-height: 1.5rem;
   font-weight: 700;
 }
 .header-micro {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 700;
 }
 
 .label-big {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.125rem;
   line-height: 1.5rem;
   font-weight: 500;
 }
 .label-medium {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1rem;
   line-height: 1.5rem;
   font-weight: 500;
 }
 .label-small {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 500;
 }
 .label-micro {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.75rem;
   line-height: 1rem;
   font-weight: 500;
 }
 /* Figma "Label/Label-2xs": medium 11/14, the date over a message. */
 .label-2xs {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.6875rem;
   line-height: 0.875rem;
   font-weight: 500;
 }
 
 .text-big {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.125rem;
   line-height: 1.5rem;
 }
 .text-medium {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1rem;
   line-height: 1.5rem;
 }
 .text-small {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.875rem;
   line-height: 1.25rem;
 }
 .text-micro {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.75rem;
   line-height: 1rem;
 }
 
 .paragraph-big {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1.125rem;
   line-height: 1.75rem;
 }
 .paragraph-medium {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 1rem;
   line-height: 1.75rem;
 }
 .paragraph-small {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.875rem;
   line-height: 1.25rem;
 }
 .paragraph-micro {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 0.75rem;
   line-height: 1rem;
 }
 
 .tag-label {
-  font-family: Inter;
+  font-family: "Geist Variable", sans-serif;
   font-size: 10px;
   line-height: 0.75rem;
   font-weight: 600;
@@ -166,7 +166,8 @@
 
 .code,
 code {
-  font-family: "IBMPlexMono", source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-family:
+    "Geist Mono Variable", source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
   line-height: 1.5;
   letter-spacing: -0.01em;
 }

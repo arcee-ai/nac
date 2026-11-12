@@ -126,7 +126,11 @@ const ChatSessionButton: React.FC<ChatSessionButtonProps> = ({
               size={isMobile ? SessionBehaviorIconSize.Large : SessionBehaviorIconSize.Medium}
               className={GLYPH_TONE}
             />
-          ) : null}
+          ) : (
+            <span className="flex w-4 shrink-0 justify-center" aria-hidden="true">
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />
+            </span>
+          )}
           <span
             className={cn(
               "min-w-0 flex-1 truncate",

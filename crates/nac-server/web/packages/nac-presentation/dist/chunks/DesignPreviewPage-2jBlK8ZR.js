@@ -1,5 +1,5 @@
-import { B as e, F as t, I as n, L as r, S as i, V as a, _ as o, b as ee, c as te, f as ne, g as s, h as c, m as l, o as re, r as ie, y as ae, z as u } from "./Toast-y4mFgUIo.js";
-import { $ as oe, A as se, At as ce, B as le, Bt as ue, Ct as d, D as de, Dt as f, E as fe, Et as p, F as pe, Ft as me, Gt as m, H as h, Ht as g, I as he, It as _, J as ge, Jt as v, Kt as y, L as _e, Lt as ve, M as ye, O as be, Ot as xe, P as Se, Qt as b, R as x, St as Ce, T as we, Tt as Te, U as Ee, Ut as S, V as De, Vt as C, W as Oe, Wt as w, X as ke, Xt as Ae, Y as je, Yt as T, Zt as Me, _ as Ne, _t as Pe, at as E, b as D, bt as Fe, dt as Ie, et as O, f as Le, ft as k, gt as Re, it as ze, j as Be, jt as Ve, k as He, kt as Ue, l as We, lt as Ge, m as A, mt as Ke, nt as qe, ot as j, pt as Je, qt as Ye, rt as Xe, st as Ze, t as Qe, tt as M, ut as $e, v as et, w as tt, wt as nt, x as N, xt as rt, yt as it, z as P } from "./ReasoningItem-7sCZI0Se.js";
+import { B as e, F as t, I as n, L as r, S as i, V as a, _ as o, b as ee, c as te, f as ne, g as s, h as c, m as l, o as re, r as ie, y as ae, z as u } from "./Toast-B7_2n5HZ.js";
+import { $ as oe, A as se, At as ce, B as le, Bt as ue, Ct as d, D as de, Dt as f, E as fe, Et as p, F as pe, Ft as me, Gt as m, H as h, Ht as g, I as he, It as _, J as ge, Jt as v, Kt as y, L as _e, Lt as ve, M as ye, O as be, Ot as xe, P as Se, Qt as b, R as x, St as Ce, T as we, Tt as Te, U as Ee, Ut as S, V as De, Vt as C, W as Oe, Wt as w, X as ke, Xt as Ae, Y as je, Yt as T, Zt as Me, _ as Ne, _t as Pe, at as E, b as D, bt as Fe, dt as Ie, et as O, f as Le, ft as k, gt as Re, it as ze, j as Be, jt as Ve, k as He, kt as Ue, l as We, lt as Ge, m as A, mt as Ke, nt as qe, ot as j, pt as Je, qt as Ye, rt as Xe, st as Ze, t as Qe, tt as M, ut as $e, v as et, w as tt, wt as nt, x as N, xt as rt, yt as it, z as P } from "./ReasoningItem-brS52YsB.js";
 import { Fragment as F, useEffect as at, useState as I } from "react";
 import { Fragment as L, jsx as R, jsxs as z } from "react/jsx-runtime";
 // src/app/components/pages/design-preview/AvatarsSection.tsx
@@ -518,12 +518,12 @@ function wt() {
 				}),
 				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-2",
-					children: [/* @__PURE__ */ R(fe, {
+					children: [/* @__PURE__ */ R(de, {
 						name: "preview-choice",
 						checked: n === "first",
 						onChange: () => r("first"),
 						children: "Working tree"
-					}), /* @__PURE__ */ R(fe, {
+					}), /* @__PURE__ */ R(de, {
 						name: "preview-choice",
 						checked: n === "second",
 						onChange: () => r("second"),
@@ -786,7 +786,7 @@ var H = [
 		title: "Ignored",
 		status: j.Ignored
 	}
-], Pt = [
+], U = [
 	{
 		title: "File",
 		variant: E.File
@@ -810,13 +810,13 @@ var H = [
 		variant: E.Folder,
 		active: !0
 	}
-], Ft = "src/app/lib/parser.ts", U = (e, t, n, r, i = !0) => ({
+], Pt = "src/app/lib/parser.ts", W = (e, t, n, r, i = !0) => ({
 	kind: e,
 	old_lineno: t,
 	new_lineno: n,
 	content: r,
 	has_trailing_newline: i
-}), It = {
+}), Ft = {
 	stage: "unstaged",
 	status: "modified",
 	additions: 3,
@@ -832,10 +832,10 @@ var H = [
 		new_start: 1,
 		new_lines: 3,
 		lines: [
-			U("context", 1, 1, "import { tokenize } from \"./lexer\";"),
-			U("delete", 2, null, "import type { Token } from \"./lexer\";"),
-			U("insert", null, 2, "import { type Token, TokenKind } from \"./lexer\";"),
-			U("context", 3, 3, "")
+			W("context", 1, 1, "import { tokenize } from \"./lexer\";"),
+			W("delete", 2, null, "import type { Token } from \"./lexer\";"),
+			W("insert", null, 2, "import { type Token, TokenKind } from \"./lexer\";"),
+			W("context", 3, 3, "")
 		]
 	}, {
 		function_context: null,
@@ -844,15 +844,15 @@ var H = [
 		new_start: 24,
 		new_lines: 4,
 		lines: [
-			U("context", 24, 24, "export function parse(source: string): Token[] {"),
-			U("delete", 25, null, "  return tokenize(source);"),
-			U("insert", null, 25, "  const tokens = tokenize(source);"),
-			U("insert", null, 26, "  return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment);"),
-			U("context", 26, 27, "}", !1)
+			W("context", 24, 24, "export function parse(source: string): Token[] {"),
+			W("delete", 25, null, "  return tokenize(source);"),
+			W("insert", null, 25, "  const tokens = tokenize(source);"),
+			W("insert", null, 26, "  return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment);"),
+			W("context", 26, 27, "}", !1)
 		]
 	}]
-}, W = "bg-elevation-ground p-2", G = () => {};
-function Lt() {
+}, G = "bg-elevation-ground p-2", K = () => {};
+function It() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -870,7 +870,7 @@ function Lt() {
 					className: "label-micro text-basic-tertiary",
 					children: e.title
 				}), H.map(({ size: t }) => /* @__PURE__ */ R("div", {
-					className: W,
+					className: G,
 					children: /* @__PURE__ */ R(Ie, {
 						path: Ot,
 						size: t,
@@ -878,14 +878,14 @@ function Lt() {
 						disabled: e.disabled,
 						additions: e.additions,
 						deletions: e.deletions,
-						onClick: G
+						onClick: K
 					})
 				}, t))] }, e.title))
 			]
 		})]
 	});
 }
-function Rt() {
+function Lt() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -894,19 +894,19 @@ function Rt() {
 		}), /* @__PURE__ */ R("div", {
 			className: "flex flex-wrap items-start gap-4",
 			children: H.map(({ size: e }) => /* @__PURE__ */ R("div", {
-				className: `w-[200px] ${W}`,
+				className: `w-[200px] ${G}`,
 				children: /* @__PURE__ */ R(Ie, {
 					path: kt,
 					size: e,
 					additions: 1204,
 					deletions: 377,
-					onClick: G
+					onClick: K
 				})
 			}, e))
 		})]
 	});
 }
-function zt() {
+function Rt() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -932,7 +932,7 @@ function zt() {
 		})]
 	});
 }
-function Bt({ files: e, size: t, caption: n }) {
+function zt({ files: e, size: t, caption: n }) {
 	let [r, i] = I(e[1]?.path ?? null);
 	return /* @__PURE__ */ z("div", {
 		className: "flex w-[280px] flex-col gap-2",
@@ -942,7 +942,7 @@ function Bt({ files: e, size: t, caption: n }) {
 				children: n
 			}),
 			/* @__PURE__ */ R("div", {
-				className: W,
+				className: G,
 				children: /* @__PURE__ */ R($e, {
 					"aria-label": "Changed files",
 					size: t,
@@ -960,34 +960,34 @@ function Bt({ files: e, size: t, caption: n }) {
 		]
 	});
 }
-function Vt() {
+function Bt() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-wrap items-start gap-6",
-		children: [H.map(({ size: e, title: t }) => /* @__PURE__ */ R(Bt, {
+		children: [H.map(({ size: e, title: t }) => /* @__PURE__ */ R(zt, {
 			size: e,
 			files: Mt.slice(0, 5),
 			caption: `List, 5 files, ${t}`
-		}, e)), /* @__PURE__ */ R(Bt, {
+		}, e)), /* @__PURE__ */ R(zt, {
 			size: k.Small,
 			files: Mt,
 			caption: "List, 17 files, Small"
 		})]
 	});
 }
-function Ht() {
+function Vt() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
 			className: "label-micro text-basic-muted",
 			children: "Git status labels"
 		}), /* @__PURE__ */ R("div", {
-			className: `flex w-fit gap-3 ${W}`,
+			className: `flex w-fit gap-3 ${G}`,
 			children: Object.values(j).map((e) => /* @__PURE__ */ R(Ze, { status: e }, e))
 		})]
 	});
 }
-var Ut = (e) => e === E.Folder ? "components" : "index.tsx";
-function Wt() {
+var Ht = (e) => e === E.Folder ? "components" : "index.tsx";
+function Ut() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [
@@ -999,22 +999,22 @@ function Wt() {
 				className: "grid w-fit grid-cols-[auto_repeat(5,160px)] items-center gap-x-3 gap-y-1",
 				children: [
 					/* @__PURE__ */ R("span", {}),
-					Pt.map(({ title: e }) => /* @__PURE__ */ R("span", {
+					U.map(({ title: e }) => /* @__PURE__ */ R("span", {
 						className: "label-micro text-basic-muted",
 						children: e
 					}, e)),
 					Nt.map(({ title: e, status: t }) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 						className: "label-micro text-basic-tertiary",
 						children: e
-					}), Pt.map((e) => /* @__PURE__ */ R("div", {
-						className: W,
+					}), U.map((e) => /* @__PURE__ */ R("div", {
+						className: G,
 						children: /* @__PURE__ */ R(Xe, {
-							name: Ut(e.variant),
+							name: Ht(e.variant),
 							variant: e.variant,
 							status: t,
 							active: e.active,
 							disabled: e.disabled,
-							onClick: G
+							onClick: K
 						})
 					}, e.title))] }, e))
 				]
@@ -1025,22 +1025,22 @@ function Wt() {
 			}),
 			/* @__PURE__ */ R("div", {
 				className: "flex flex-wrap items-start gap-4",
-				children: Pt.filter((e) => !e.disabled).map((e) => /* @__PURE__ */ R("div", {
-					className: `w-[280px] ${W}`,
+				children: U.filter((e) => !e.disabled).map((e) => /* @__PURE__ */ R("div", {
+					className: `w-[280px] ${G}`,
 					children: /* @__PURE__ */ R(Xe, {
-						name: Ut(e.variant),
+						name: Ht(e.variant),
 						variant: e.variant,
 						size: ze.Large,
 						status: j.Changed,
 						active: e.active,
-						onClick: G
+						onClick: K
 					})
 				}, e.title))
 			})
 		]
 	});
 }
-var Gt = (e, t) => ({
+var Wt = (e, t) => ({
 	kind: e.kind === "insert" || e.kind === "delete" ? e.kind : "context",
 	number: e.kind === "delete" ? e.old_lineno : e.new_lineno ?? e.old_lineno,
 	content: e.content,
@@ -1050,11 +1050,11 @@ var Gt = (e, t) => ({
 		children: " No newline at end of file"
 	})
 });
-function Kt() {
+function Gt() {
 	let [e, t] = I(() => /* @__PURE__ */ new Map());
 	return at(() => {
 		let e = !0;
-		return re(Ft, [It]).then((n) => {
+		return re(Pt, [Ft]).then((n) => {
 			e && t(n);
 		}), () => {
 			e = !1;
@@ -1073,34 +1073,34 @@ function Kt() {
 				className: "label-micro text-basic-muted",
 				children: e
 			}), /* @__PURE__ */ R("div", {
-				className: W,
+				className: G,
 				children: /* @__PURE__ */ R(rt, {
-					"aria-label": `Changes to ${Ft}`,
-					hunks: It.hunks.map((e) => e.lines.map((e) => Gt(e, t?.get(e))))
+					"aria-label": `Changes to ${Pt}`,
+					hunks: Ft.hunks.map((e) => e.lines.map((e) => Wt(e, t?.get(e))))
 				})
 			})]
 		}, e))
 	});
 }
-function qt() {
+function Kt() {
 	return /* @__PURE__ */ R(C, {
 		title: "Files",
 		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6",
 			children: [
+				/* @__PURE__ */ R(It, {}),
 				/* @__PURE__ */ R(Lt, {}),
 				/* @__PURE__ */ R(Rt, {}),
-				/* @__PURE__ */ R(zt, {}),
+				/* @__PURE__ */ R(Bt, {}),
 				/* @__PURE__ */ R(Vt, {}),
-				/* @__PURE__ */ R(Ht, {}),
-				/* @__PURE__ */ R(Wt, {}),
-				/* @__PURE__ */ R(Kt, {})
+				/* @__PURE__ */ R(Ut, {}),
+				/* @__PURE__ */ R(Gt, {})
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/InputsSection.tsx
-var Jt = [
+var qt = [
 	{
 		id: "sonnet",
 		label: "Claude Sonnet",
@@ -1117,7 +1117,7 @@ var Jt = [
 		icon: e.Ai
 	}
 ];
-function Yt({ onOpenModal: t }) {
+function Jt({ onOpenModal: t }) {
 	let [n, r] = I("sonnet");
 	return /* @__PURE__ */ R(C, {
 		title: "Inputs",
@@ -1139,8 +1139,8 @@ function Yt({ onOpenModal: t }) {
 					hintText: "Matches name and cwd",
 					className: "w-[280px]"
 				}),
-				/* @__PURE__ */ R(tt, {
-					items: Jt,
+				/* @__PURE__ */ R(we, {
+					items: qt,
 					value: n,
 					onValueChange: r,
 					placeholder: "Pick a model"
@@ -1155,15 +1155,15 @@ function Yt({ onOpenModal: t }) {
 	});
 }
 // src/app/components/pages/design-preview/InsightItemsPreview.tsx
-var Xt = "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset.", Zt = "npm run typecheck", Qt = JSON.stringify({
-	cmd: Zt,
+var Yt = "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset.", Xt = "npm run typecheck", Zt = JSON.stringify({
+	cmd: Xt,
 	workdir: "/workspace/demo-project",
 	yield_time_ms: 1e4
-}, null, 2), $t = "> nac-web@0.0.0 typecheck\n> tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b\n\nChecked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors.", en = `${$t}\nChecked 412 files in 6.1 s.\nFound 0 errors.`, tn = "Pause after the staging deploy and wait for my review before touching production.", nn = "resetIndent\\(", rn = JSON.stringify({
-	pattern: nn,
+}, null, 2), Qt = "> nac-web@0.0.0 typecheck\n> tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b\n\nChecked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors.", $t = `${Qt}\nChecked 412 files in 6.1 s.\nFound 0 errors.`, en = "Pause after the staging deploy and wait for my review before touching production.", tn = "resetIndent\\(", nn = JSON.stringify({
+	pattern: tn,
 	path: "src/app/lib",
 	output_mode: "content"
-}, null, 2), an = "src/app/lib/lexer.ts:42\nsrc/app/lib/lexer.ts:118\nsrc/app/lib/parser/table.ts:7", on = `${an}\nsrc/app/lib/parser/list.ts:63\nsrc/app/lib/parser/list.ts:91`, sn = [
+}, null, 2), rn = "src/app/lib/lexer.ts:42\nsrc/app/lib/lexer.ts:118\nsrc/app/lib/parser/table.ts:7", an = `${rn}\nsrc/app/lib/parser/list.ts:63\nsrc/app/lib/parser/list.ts:91`, on = [
 	"resetIndent",
 	"clearIndentStack",
 	"popIndent",
@@ -1174,16 +1174,16 @@ var Xt = "The parser drops nested tables because the lexer resets its indent sta
 	"tableRowIndent",
 	"listItemIndent",
 	"nestedTableDepth"
-], K = `${sn.join("|").slice(0, 110)}…`, cn = JSON.stringify({
-	pattern: sn.join("|"),
+], q = `${on.join("|").slice(0, 110)}…`, sn = JSON.stringify({
+	pattern: on.join("|"),
 	path: "src/app/lib",
 	regex: !0
-}, null, 2), ln = "The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the old text no longer matches line 42.", un = `${ln.slice(0, 160).trimEnd()}...`, dn = 1200;
-function fn() {
+}, null, 2), cn = "The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the old text no longer matches line 42.", ln = `${cn.slice(0, 160).trimEnd()}...`, un = 1200;
+function dn() {
 	let [e, t] = I(h.Default);
 	return at(() => {
 		if (e !== h.Loading) return;
-		let n = window.setTimeout(() => t(h.Expanded), dn);
+		let n = window.setTimeout(() => t(h.Expanded), un);
 		return () => window.clearTimeout(n);
 	}, [e]), {
 		state: e,
@@ -1191,8 +1191,8 @@ function fn() {
 		hide: () => t(h.Default)
 	};
 }
-function q({ title: e, shortContent: t, fullContent: n }) {
-	let r = fn();
+function J({ title: e, shortContent: t, fullContent: n }) {
+	let r = dn();
 	return /* @__PURE__ */ R(De, {
 		title: e,
 		state: r.state,
@@ -1202,8 +1202,8 @@ function q({ title: e, shortContent: t, fullContent: n }) {
 		onHide: r.hide
 	});
 }
-function pn() {
-	let t = fn(), n = t.state === h.Expanded;
+function fn() {
+	let t = dn(), n = t.state === h.Expanded;
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -1216,7 +1216,7 @@ function pn() {
 				icon: e.Edit,
 				title: "Edit lexer.ts",
 				state: P.Error,
-				errorMessage: n ? ln : un,
+				errorMessage: n ? cn : ln,
 				errorAction: /* @__PURE__ */ R(Ee, {
 					expanded: n,
 					loading: t.state === h.Loading,
@@ -1226,64 +1226,64 @@ function pn() {
 		})]
 	});
 }
-var J = () => {}, mn = [
+var Y = () => {}, pn = [
 	{
 		label: "Default, with Show full",
 		title: "Input",
-		shortContent: K,
-		onShowFull: J
+		shortContent: q,
+		onShowFull: Y
 	},
 	{
 		label: "Default, without Show full",
 		title: "Input",
-		shortContent: K
+		shortContent: q
 	},
 	{
 		label: "Default, without a preview",
 		title: "Input",
 		shortContent: "",
-		onShowFull: J
+		onShowFull: Y
 	},
 	{
 		label: "Default, the load failed (Show full retries)",
 		title: "Input",
-		shortContent: K,
-		onShowFull: J,
+		shortContent: q,
+		onShowFull: Y,
 		error: "Could not load the full input."
 	},
 	{
 		label: "Loading",
 		title: "Input",
 		state: h.Loading,
-		shortContent: K,
-		onShowFull: J
+		shortContent: q,
+		onShowFull: Y
 	},
 	{
 		label: "Expanded",
 		title: "Input",
 		state: h.Expanded,
-		shortContent: K,
-		fullContent: cn,
-		onHide: J
+		shortContent: q,
+		fullContent: sn,
+		onHide: Y
 	},
 	{
 		label: "Expanded, cut by the server",
 		title: "Input",
 		state: h.Expanded,
-		shortContent: K,
-		fullContent: cn,
-		onHide: J,
+		shortContent: q,
+		fullContent: sn,
+		onHide: Y,
 		note: "The server cut this input at its size limit."
 	},
 	{
 		label: "Without heading",
 		title: "Input",
 		showHeading: !1,
-		shortContent: K,
-		onShowFull: J
+		shortContent: q,
+		onShowFull: Y
 	}
 ];
-function hn() {
+function mn() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -1291,7 +1291,7 @@ function hn() {
 			children: "Code displayer"
 		}), /* @__PURE__ */ z("div", {
 			className: "grid grid-cols-3 items-start gap-4",
-			children: [mn.map(({ label: e, ...t }) => /* @__PURE__ */ z("div", {
+			children: [pn.map(({ label: e, ...t }) => /* @__PURE__ */ z("div", {
 				className: "flex min-w-0 flex-col gap-2",
 				children: [/* @__PURE__ */ R("span", {
 					className: "label-micro text-basic-tertiary",
@@ -1307,44 +1307,44 @@ function hn() {
 					children: "Interactive"
 				}), /* @__PURE__ */ R("div", {
 					className: "bg-elevation-ground p-4",
-					children: /* @__PURE__ */ R(q, {
+					children: /* @__PURE__ */ R(J, {
 						title: "Input",
-						shortContent: K,
-						fullContent: cn
+						shortContent: q,
+						fullContent: sn
 					})
 				})]
 			})]
 		})]
 	});
 }
-var gn = [
+var hn = [
 	{
 		type: "Reasoning",
 		icon: e.Brain,
 		title: "Thoughts, 2.3 s",
 		loadingTitle: "Thinking",
-		copyText: Xt,
+		copyText: Yt,
 		errorMessage: "The model stopped before it finished reasoning.",
-		body: (e) => e === P.Default ? /* @__PURE__ */ R("p", { children: Xt }) : null
+		body: (e) => e === P.Default ? /* @__PURE__ */ R("p", { children: Yt }) : null
 	},
 	{
 		type: "Run Command (Error keeps the input)",
 		icon: e.Terminal,
 		title: "Run command",
 		loadingTitle: "Running command",
-		copyText: Zt,
+		copyText: Xt,
 		errorMessage: "Command exited with code 2.",
 		body: (e) => {
 			if (e === P.Loading) return null;
-			let t = /* @__PURE__ */ R(q, {
+			let t = /* @__PURE__ */ R(J, {
 				title: "Input",
-				shortContent: Zt,
-				fullContent: Qt
+				shortContent: Xt,
+				fullContent: Zt
 			});
-			return e === P.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(q, {
+			return e === P.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(J, {
 				title: "Output",
-				shortContent: $t,
-				fullContent: en
+				shortContent: Qt,
+				fullContent: $t
 			})] });
 		}
 	},
@@ -1353,9 +1353,9 @@ var gn = [
 		icon: e.AddChat,
 		title: "Steer session",
 		loadingTitle: "Steer session",
-		copyText: tn,
+		copyText: en,
 		errorMessage: "The session is no longer running.",
-		body: (e) => e === P.Default ? /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R("p", { children: tn }), /* @__PURE__ */ R(le, {
+		body: (e) => e === P.Default ? /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R("p", { children: en }), /* @__PURE__ */ R(le, {
 			label: "Calendar rollout",
 			href: "#/design"
 		})] }) : /* @__PURE__ */ R(le, {
@@ -1368,23 +1368,23 @@ var gn = [
 		icon: e.SearchFile,
 		title: "Search files",
 		loadingTitle: "Search files",
-		copyText: nn,
+		copyText: tn,
 		errorMessage: "The pattern is not a valid regular expression.",
 		body: (e) => {
 			if (e === P.Loading) return null;
-			let t = /* @__PURE__ */ R(q, {
+			let t = /* @__PURE__ */ R(J, {
 				title: "Input",
-				shortContent: nn,
-				fullContent: rn
+				shortContent: tn,
+				fullContent: nn
 			});
-			return e === P.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(q, {
+			return e === P.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(J, {
 				title: "Output",
-				shortContent: an,
-				fullContent: on
+				shortContent: rn,
+				fullContent: an
 			})] });
 		}
 	}
-], _n = [
+], gn = [
 	{
 		state: P.Default,
 		title: "Default"
@@ -1398,7 +1398,7 @@ var gn = [
 		title: "Error"
 	}
 ];
-function vn() {
+function _n() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [/* @__PURE__ */ R("span", {
@@ -1406,7 +1406,7 @@ function vn() {
 			children: "Stacked, the first one active"
 		}), /* @__PURE__ */ R("div", {
 			className: "flex w-[542px] max-w-full flex-col bg-elevation-ground",
-			children: gn.map((e, t) => /* @__PURE__ */ R(x, {
+			children: hn.map((e, t) => /* @__PURE__ */ R(x, {
 				id: `preview-stacked-${e.icon}`,
 				icon: e.icon,
 				title: e.title,
@@ -1417,22 +1417,22 @@ function vn() {
 		})]
 	});
 }
-function yn() {
+function vn() {
 	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			/* @__PURE__ */ R(hn, {}),
-			/* @__PURE__ */ R(vn, {}),
-			/* @__PURE__ */ R(pn, {}),
+			/* @__PURE__ */ R(mn, {}),
+			/* @__PURE__ */ R(_n, {}),
+			/* @__PURE__ */ R(fn, {}),
 			/* @__PURE__ */ z("div", {
 				className: "grid grid-cols-3 items-start gap-x-4 gap-y-2",
-				children: [_n.map(({ state: e, title: t }) => /* @__PURE__ */ R("span", {
+				children: [gn.map(({ state: e, title: t }) => /* @__PURE__ */ R("span", {
 					className: "label-micro text-basic-muted",
 					children: t
-				}, e)), gn.flatMap((e) => [!1, !0].map((t) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
+				}, e)), hn.flatMap((e) => [!1, !0].map((t) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 					className: "col-span-3 pt-2 label-micro text-basic-tertiary",
 					children: t ? `${e.type}, active` : e.type
-				}), _n.map(({ state: n }) => /* @__PURE__ */ R("div", {
+				}), gn.map(({ state: n }) => /* @__PURE__ */ R("div", {
 					className: "min-w-0 bg-elevation-ground",
 					children: /* @__PURE__ */ R(x, {
 						id: `preview-${e.icon}-${n}-${t}`,
@@ -1450,7 +1450,7 @@ function yn() {
 	});
 }
 // src/app/components/pages/design-preview/InsightsAtomsSection.tsx
-var bn = [
+var yn = [
 	{
 		type: "Thread",
 		icon: e.Chat,
@@ -1644,7 +1644,7 @@ var bn = [
 		meta: "Tool",
 		runningLabel: "Running list_issues…"
 	}
-], xn = [
+], bn = [
 	{
 		status: v.Ready,
 		title: "Ready"
@@ -1661,11 +1661,11 @@ var bn = [
 		status: v.Failed,
 		title: "Failed or canceled"
 	}
-], Sn = [
+], xn = [
 	"Thread",
 	"Read File",
 	"ToolsSegment"
-], Y = [
+], X = [
 	{
 		key: "thoughts",
 		icon: e.Brain,
@@ -1684,23 +1684,23 @@ var bn = [
 		label: "index.tsx",
 		meta: "Write"
 	}
-], Cn = [
+], Sn = [
 	"impl/calendar",
 	"impl/recurring-events",
 	"review/calendar",
 	"docs/calendar"
-], X = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2", wn = "flex w-[380px] flex-col gap-1 bg-elevation-ground p-2";
-function Tn(e, t) {
+], Z = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2", Cn = "flex w-[380px] flex-col gap-1 bg-elevation-ground p-2";
+function wn(e, t) {
 	return t === v.Running ? e.runningLabel ?? e.label : t === v.Failed ? e.failedLabel ?? e.label : e.label;
 }
-function En(e, t) {
+function Tn(e, t) {
 	return (t === v.Running || t === v.Failed) && e.type !== "Thread" ? void 0 : e.meta;
 }
-function Dn() {
-	let e = [...bn.map((e) => ({
+function En() {
+	let e = [...yn.map((e) => ({
 		sample: e,
 		active: !1
-	})), ...bn.filter((e) => Sn.includes(e.type)).map((e) => ({
+	})), ...yn.filter((e) => xn.includes(e.type)).map((e) => ({
 		sample: e,
 		active: !0
 	}))];
@@ -1711,17 +1711,17 @@ function Dn() {
 				className: "label-micro text-basic-muted",
 				children: "Type"
 			}),
-			xn.map(({ status: e, title: t }) => /* @__PURE__ */ R("span", {
+			bn.map(({ status: e, title: t }) => /* @__PURE__ */ R("span", {
 				className: "px-2 label-micro text-basic-muted",
 				children: t
 			}, e)),
 			e.map(({ sample: e, active: t }) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 				className: "truncate label-micro text-basic-tertiary",
 				children: t ? `${e.type}, active` : e.type
-			}), xn.map(({ status: n }) => /* @__PURE__ */ R(y, {
+			}), bn.map(({ status: n }) => /* @__PURE__ */ R(y, {
 				icon: e.icon,
-				label: Tn(e, n),
-				meta: En(e, n),
+				label: wn(e, n),
+				meta: Tn(e, n),
 				status: n,
 				selected: t || void 0,
 				expanded: e.group ? t : void 0
@@ -1729,22 +1729,22 @@ function Dn() {
 		]
 	});
 }
-function On() {
-	let [t, n] = I(!0), [r, i] = I("thoughts"), a = r === "group" || Y.some(({ key: e }) => e === r);
+function Dn() {
+	let [t, n] = I(!0), [r, i] = I("thoughts"), a = r === "group" || X.some(({ key: e }) => e === r);
 	return /* @__PURE__ */ z("div", {
-		className: X,
+		className: Z,
 		children: [
 			/* @__PURE__ */ R(y, {
 				icon: e.Right,
 				label: "Total activity: 13.3s",
-				meta: String(Y.length),
+				meta: String(X.length),
 				expanded: t,
 				selected: a,
 				onClick: () => {
 					n((e) => !e), i("group");
 				}
 			}),
-			t ? /* @__PURE__ */ R(T, { children: Y.map((e) => /* @__PURE__ */ R(y, {
+			t ? /* @__PURE__ */ R(T, { children: X.map((e) => /* @__PURE__ */ R(y, {
 				icon: e.icon,
 				label: e.label,
 				meta: e.meta,
@@ -1779,8 +1779,8 @@ function On() {
 		]
 	});
 }
-function kn() {
-	let [t, n] = I(Cn[0]), r = (r) => /* @__PURE__ */ R(y, {
+function On() {
+	let [t, n] = I(Sn[0]), r = (r) => /* @__PURE__ */ R(y, {
 		icon: e.Chat,
 		label: r,
 		meta: "Thread, 3",
@@ -1788,14 +1788,14 @@ function kn() {
 		onClick: () => n(r)
 	}, r);
 	return /* @__PURE__ */ z("div", {
-		className: X,
+		className: Z,
 		children: [
 			/* @__PURE__ */ R(y, {
 				icon: e.Brain,
 				label: "Thoughts",
 				meta: "13.8 s"
 			}),
-			/* @__PURE__ */ R(T, { children: Cn.map(r) }),
+			/* @__PURE__ */ R(T, { children: Sn.map(r) }),
 			/* @__PURE__ */ R(y, {
 				icon: e.Right,
 				label: "Total activity: 13.3s",
@@ -1811,9 +1811,9 @@ function kn() {
 		]
 	});
 }
-function An() {
+function kn() {
 	return /* @__PURE__ */ z("div", {
-		className: X,
+		className: Z,
 		children: [
 			/* @__PURE__ */ R(y, {
 				icon: e.Chat,
@@ -1835,10 +1835,10 @@ function An() {
 		]
 	});
 }
-function jn() {
+function An() {
 	let [t, n] = I(!0), [r, i] = I("review/calendar"), a = Ye.Large;
 	return /* @__PURE__ */ z("div", {
-		className: wn,
+		className: Cn,
 		children: [
 			/* @__PURE__ */ R(y, {
 				size: a,
@@ -1884,11 +1884,11 @@ function jn() {
 				size: a,
 				icon: e.Right,
 				label: "Worked for 13.3s",
-				meta: String(Y.length),
+				meta: String(X.length),
 				expanded: t,
 				onClick: () => n((e) => !e)
 			}),
-			t ? /* @__PURE__ */ R(T, { children: Y.map((e) => /* @__PURE__ */ R(y, {
+			t ? /* @__PURE__ */ R(T, { children: X.map((e) => /* @__PURE__ */ R(y, {
 				size: a,
 				icon: e.icon,
 				label: e.label,
@@ -1899,35 +1899,35 @@ function jn() {
 		]
 	});
 }
-function Mn() {
+function jn() {
 	return /* @__PURE__ */ R(C, {
 		title: "Insights",
 		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6",
 			children: [
-				/* @__PURE__ */ R(Dn, {}),
+				/* @__PURE__ */ R(En, {}),
 				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-start gap-6",
 					children: [
+						/* @__PURE__ */ R(Dn, {}),
 						/* @__PURE__ */ R(On, {}),
 						/* @__PURE__ */ R(kn, {}),
-						/* @__PURE__ */ R(An, {}),
-						/* @__PURE__ */ R(jn, {})
+						/* @__PURE__ */ R(An, {})
 					]
 				}),
-				/* @__PURE__ */ R(yn, {})
+				/* @__PURE__ */ R(vn, {})
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/ModelLoaderSection.tsx
-var Nn = [{
+var Mn = [{
 	variant: ve.Default,
 	label: "Default"
 }, {
 	variant: ve.Accent,
 	label: "Accent"
-}], Pn = [
+}], Nn = [
 	{
 		size: _.Small,
 		label: "Small 16px"
@@ -1940,12 +1940,12 @@ var Nn = [{
 		size: _.Large,
 		label: "Large 24px"
 	}
-], Fn = [
+], Pn = [
 	1,
 	2,
 	3
 ];
-function In() {
+function Fn() {
 	return /* @__PURE__ */ R(C, {
 		title: "Model loader",
 		children: /* @__PURE__ */ z("div", {
@@ -1956,11 +1956,11 @@ function In() {
 					className: "label-micro text-basic-muted",
 					children: "Animated"
 				}),
-				Fn.map((e) => /* @__PURE__ */ z("span", {
+				Pn.map((e) => /* @__PURE__ */ z("span", {
 					className: "label-micro text-basic-muted",
 					children: ["Frame ", e]
 				}, e)),
-				Nn.flatMap(({ variant: e, label: t }) => Pn.map(({ size: n, label: r }) => /* @__PURE__ */ z(F, { children: [
+				Mn.flatMap(({ variant: e, label: t }) => Nn.map(({ size: n, label: r }) => /* @__PURE__ */ z(F, { children: [
 					/* @__PURE__ */ z("span", {
 						className: "label-small text-basic-secondary",
 						children: [
@@ -1973,7 +1973,7 @@ function In() {
 						size: n,
 						variant: e
 					}),
-					Fn.map((t) => /* @__PURE__ */ R(me, {
+					Pn.map((t) => /* @__PURE__ */ R(me, {
 						size: n,
 						variant: e,
 						frame: t
@@ -1984,7 +1984,7 @@ function In() {
 	});
 }
 // src/app/components/pages/design-preview/NoticesSection.tsx
-function Ln() {
+function In() {
 	return /* @__PURE__ */ R(C, {
 		title: "Notices and loaders",
 		children: /* @__PURE__ */ z("div", {
@@ -2072,7 +2072,7 @@ function Ln() {
 	});
 }
 // src/app/components/pages/design-preview/NumericInputsSection.tsx
-function Rn() {
+function Ln() {
 	let [e, t] = I(4), [n, r] = I(.7), [i, a] = I(["local"]), [o, ee] = I(1);
 	return /* @__PURE__ */ R(C, {
 		title: "Numeric inputs, tags and pagination",
@@ -2089,7 +2089,7 @@ function Rn() {
 						"aria-label": "Parallel threads"
 					}), /* @__PURE__ */ z("div", {
 						className: "flex items-center gap-4 w-[320px]",
-						children: [/* @__PURE__ */ R(we, {
+						children: [/* @__PURE__ */ R(fe, {
 							min: 0,
 							max: 2,
 							step: .1,
@@ -2125,7 +2125,7 @@ function Rn() {
 	});
 }
 // src/app/components/pages/design-preview/PopoverSection.tsx
-function zn() {
+function Rn() {
 	let [e, n] = I(!1);
 	return /* @__PURE__ */ R(C, {
 		title: "Popover, copy, shortcuts",
@@ -2161,8 +2161,8 @@ function zn() {
 	});
 }
 // src/app/components/pages/design-preview/ReasoningSection.tsx
-var Bn = "The build spends most of its time preparing images. I’ll check the cache key before changing the build steps.\n\nA stable key should include the lockfile and image directory so unchanged inputs can reuse the cache.";
-function Vn() {
+var zn = "The build spends most of its time preparing images. I’ll check the cache key before changing the build steps.\n\nA stable key should include the lockfile and image directory so unchanged inputs can reuse the cache.";
+function Bn() {
 	let [e, t] = I(!0);
 	return /* @__PURE__ */ R(C, {
 		title: "Conversation: reasoning and answer",
@@ -2182,7 +2182,7 @@ function Vn() {
 					segment: {
 						kind: "reasoning",
 						key: "preview",
-						text: Bn,
+						text: zn,
 						streaming: e,
 						durationMs: e ? null : 2300
 					},
@@ -2194,7 +2194,7 @@ function Vn() {
 	});
 }
 // src/app/components/pages/design-preview/QualificationSection.tsx
-function Hn() {
+function Vn() {
 	return /* @__PURE__ */ R(C, {
 		title: "Selected presentation journeys",
 		children: /* @__PURE__ */ z("div", {
@@ -2208,7 +2208,7 @@ function Hn() {
 	});
 }
 // src/app/components/pages/design-preview/samples.ts
-var Z = [
+var Hn = [
 	"9f2c1ab4",
 	"3de77c01",
 	"b81004ff",
@@ -2222,9 +2222,9 @@ function Un() {
 		title: "Session avatars",
 		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-wrap items-center gap-4",
-			children: [Z.map((e) => /* @__PURE__ */ z("div", {
+			children: [Hn.map((e) => /* @__PURE__ */ z("div", {
 				className: "flex items-center gap-2",
-				children: [/* @__PURE__ */ R(He, {
+				children: [/* @__PURE__ */ R(tt, {
 					id: e,
 					size: 40
 				}), /* @__PURE__ */ R("span", {
@@ -2438,22 +2438,19 @@ function Zn() {
 				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-1 max-w-[320px]",
 					children: [
-						/* @__PURE__ */ R(de, {
-							entityId: Z[3],
+						/* @__PURE__ */ R(be, {
 							name: "arcee-ai/nac",
 							trailing: "4",
 							active: !0
 						}),
-						/* @__PURE__ */ R(de, {
-							entityId: Z[4],
+						/* @__PURE__ */ R(be, {
 							name: "arcee-ai/telos",
 							trailing: "1",
 							running: !0
 						}),
-						/* @__PURE__ */ R(de, {
-							entityId: Z[5],
+						/* @__PURE__ */ R(be, {
 							name: "Unassigned session",
-							variant: be.Orphan
+							variant: He.Orphan
 						})
 					]
 				})
@@ -2740,23 +2737,23 @@ function or() {
 		}), /* @__PURE__ */ z("main", {
 			className: "p-6 flex flex-col gap-6 max-w-[1100px]",
 			children: [
+				/* @__PURE__ */ R(Bn, {}),
 				/* @__PURE__ */ R(Vn, {}),
-				/* @__PURE__ */ R(Hn, {}),
 				/* @__PURE__ */ R(xt, {}),
 				/* @__PURE__ */ R(st, {}),
 				/* @__PURE__ */ R(sr, {}),
-				/* @__PURE__ */ R(zn, {}),
+				/* @__PURE__ */ R(Rn, {}),
 				/* @__PURE__ */ R(wt, {}),
-				/* @__PURE__ */ R(Ln, {}),
+				/* @__PURE__ */ R(In, {}),
 				/* @__PURE__ */ R(Un, {}),
 				/* @__PURE__ */ R(Zn, {}),
-				/* @__PURE__ */ R(In, {}),
+				/* @__PURE__ */ R(Fn, {}),
 				/* @__PURE__ */ R(ir, {}),
-				/* @__PURE__ */ R(Mn, {}),
-				/* @__PURE__ */ R(qt, {}),
+				/* @__PURE__ */ R(jn, {}),
+				/* @__PURE__ */ R(Kt, {}),
 				/* @__PURE__ */ R(tr, {}),
 				/* @__PURE__ */ R(ot, {}),
-				/* @__PURE__ */ R(Rn, {}),
+				/* @__PURE__ */ R(Ln, {}),
 				/* @__PURE__ */ R(Dt, {}),
 				/* @__PURE__ */ R(Et, {}),
 				/* @__PURE__ */ R(ar, {})
@@ -2766,7 +2763,7 @@ function or() {
 }
 function sr() {
 	let [e, t] = I(!1);
-	return /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(Yt, { onOpenModal: () => t(!0) }), /* @__PURE__ */ R(te, {
+	return /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(Jt, { onOpenModal: () => t(!0) }), /* @__PURE__ */ R(te, {
 		open: e,
 		onClose: () => t(!1),
 		title: "Delete session",

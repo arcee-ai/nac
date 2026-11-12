@@ -92,7 +92,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(
-          "fade z-[120] flex min-w-[160px] max-h-(--radix-dropdown-menu-content-available-height) flex-col gap-1 overflow-y-auto rounded-[8px] bg-popover p-2 text-popover-foreground shadow-2xl outline-none motion-reduce:!animate-none [&>*]:shrink-0",
+          "fade z-[120] flex min-w-[160px] max-h-(--radix-dropdown-menu-content-available-height) flex-col gap-1 overflow-y-auto rounded-xl border border-tertiary bg-popover p-1.5 text-popover-foreground shadow-md outline-none motion-reduce:!animate-none [&>*]:shrink-0",
           className,
         )}
         {...props}
@@ -128,7 +128,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-variant={variant}
       className={cn(
-        "label-small flex h-8 cursor-default items-center gap-2 rounded-[6px] px-2 outline-none select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive",
+        "label-small flex h-8 cursor-default items-center gap-2 rounded-full px-2.5 outline-none select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive",
         className,
       )}
       {...props}

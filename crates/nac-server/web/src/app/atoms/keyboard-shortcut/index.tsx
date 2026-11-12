@@ -23,19 +23,17 @@ const KeyboardShortcut: React.FC<KeyboardShortcutProps> = ({
 }) => {
   if (keys.length === 0) return null;
   return (
-    <div className={cn("flex gap-[3px]", className)}>
+    <div
+      className={cn(
+        "inline-flex h-5 min-w-5 items-center justify-center gap-0.5 rounded-full px-1.5 tag-label",
+        inversed
+          ? "border border-tertiary-inversed text-secondary-inverse"
+          : "bg-elevation-level-2 text-basic-tertiary",
+        className,
+      )}
+    >
       {keys.map((key, index) => (
-        <kbd
-          key={index}
-          className={cn(
-            "inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label",
-            inversed
-              ? "text-secondary-inverse border-tertiary-inversed"
-              : "text-basic-secondary border-secondary bg-input",
-          )}
-        >
-          {spelled ? key : keyGlyph(key)}
-        </kbd>
+        <kbd key={index}>{spelled ? key : keyGlyph(key)}</kbd>
       ))}
     </div>
   );

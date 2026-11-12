@@ -102,9 +102,9 @@ for (const mobile of [false, true]) {
           brand: style.getPropertyValue("--brand-500").trim(),
         };
       });
-      expect(nativeStyles.font).toContain("NACPresentationInter");
-      expect(nativeStyles.background).toBe("rgb(5, 5, 5)");
-      expect(nativeStyles.brand).toBe("#008c8c");
+      expect(nativeStyles.font).toContain("NACPresentationSans");
+      expect(nativeStyles.background).toBe("rgb(8, 8, 8)");
+      expect(nativeStyles.brand).toBe("#6f6f6f");
       const nativeIcons = await page.locator("[data-nac-runtime]").evaluate((node) => {
         const runtime = node as unknown as {
           querySelectorAll: (selector: string) => ArrayLike<unknown>;

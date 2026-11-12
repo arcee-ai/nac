@@ -136,7 +136,6 @@ export function SidebarProjectList({
             : entry.sessions;
         const button = (
           <ProjectButton
-            entityId={projectId}
             name={entry.project.name}
             running={entry.running > 0}
             isMobile={mobile}
@@ -186,7 +185,6 @@ export function SidebarProjectList({
             {visibleOrphans.map((entry) => (
               <ProjectButton
                 key={entry.summary.session_id}
-                entityId={entry.summary.session_id}
                 name={sessionTitle(entry.summary)}
                 variant={ProjectButtonVariant.Orphan}
                 active={entry.summary.session_id === activeSessionId}

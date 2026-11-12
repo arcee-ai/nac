@@ -9,7 +9,7 @@ const FONT_SIZE = 12;
 const FONT_WEIGHT = 500;
 const ROW_HEIGHT = 16;
 const LINE_HEIGHT = 1;
-const FONT = '"IBMPlexMono", Menlo, monospace';
+const FONT = '"Geist Mono Variable", Menlo, monospace';
 
 /** xterm draws literal colours, so the tokens are resolved where it is mounted. */
 function tokenTheme(element: HTMLElement) {

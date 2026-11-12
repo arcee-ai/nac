@@ -13,10 +13,11 @@ import { useSidebarCommands } from "./useSidebarCommands.tsx";
 
 /** Collapsed icon column, matching the Figma rail. */
 export const SIDEBAR_RAIL_WIDTH = 52;
-/** Expanded panel, matching the Figma sidebar. */
+/** Expanded panel. */
 export const SIDEBAR_PANEL_WIDTH = 280;
 
 const TOGGLE_KEYS = [MOD, "h"];
+const SEARCH_KEYS = [MOD, "k"];
 
 /**
  * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays
@@ -51,7 +52,10 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
     return () => setSidebarOffset(0);
   }, [setSidebarOffset]);
 
-  useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
+  useKeyboardShortcuts([
+    { keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile },
+    { keys: SEARCH_KEYS, onTrigger: () => setSearching(true), enabled: !isMobile },
+  ]);
 
   // A phone has no room for the rail: the chat takes the screen.
   if (isMobile) return null;
@@ -89,6 +93,7 @@ export function LeftSidebar({ variant = "session" }: { variant?: "session" | "pr
           onToggle={toggle}
           onSearch={() => setSearching(true)}
           toggleKeys={TOGGLE_KEYS}
+          searchKeys={SEARCH_KEYS}
           variant={variant}
         />
       </div>

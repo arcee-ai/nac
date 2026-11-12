@@ -6,7 +6,7 @@
   --color-bg-accent-inverse: var(--brand-450);
 
   /* Background / Buttons */
-  --color-bg-btn-primary: var(--white);
+  --color-bg-btn-primary: var(--gray-75);
   --color-bg-btn-primary-hovered: var(--gray-100);
   --color-bg-btn-primary-pressed: var(--gray-300);
   --color-bg-btn-primary-disabled: var(--gray-650);
@@ -71,10 +71,10 @@
   --color-bg-divider-primary: var(--white);
   --color-bg-divider-secondary: var(--white-trans-500);
   --color-bg-divider-tertiary: var(--white-trans-200);
-  --color-bg-divider-muted: var(--white-trans-100);
+  --color-bg-divider-muted: var(--white-trans-50);
 
   /* Background / Elevation */
-  --color-bg-elevation-ground: var(--black);
+  --color-bg-elevation-ground: var(--gray-975);
   --color-bg-elevation-ground-transparent: var(--transparent-dark-mode);
   --color-bg-elevation-ground-inverse: var(--white);
   --color-bg-elevation-level-0-5: var(--gray-950);
@@ -127,11 +127,11 @@
   /* Border / Basic */
   --color-border-primary: var(--white);
   --color-border-secondary: var(--white-trans-500);
-  --color-border-tertiary: var(--white-trans-200);
-  --color-border-muted: var(--white-trans-100);
+  --color-border-tertiary: var(--white-trans-50);
+  --color-border-muted: var(--white-trans-25);
   --color-border-card: var(--white-trans-25);
   --color-border-btn-destructive: var(--red-600);
-  --color-border-focus-outline: var(--blue-500);
+  --color-border-focus-outline: var(--gray-500);
 
   /* Border / Danger */
   --color-border-danger-primary: var(--yellow-400);
@@ -238,9 +238,9 @@
   --color-text-accent-muted: var(--brand-trans-500);
 
   /* Text / Basic */
-  --color-text-basic-primary: var(--white);
+  --color-text-basic-primary: var(--gray-50);
   --color-text-basic-secondary: var(--gray-200);
-  --color-text-basic-tertiary: var(--gray-300);
+  --color-text-basic-tertiary: var(--gray-400);
   --color-text-basic-muted: var(--white-trans-500);
 
   /* Text / Buttons */

@@ -66,7 +66,6 @@ export function ProjectsList({
               return item.kind === "project" ? (
                 <ProjectButton
                   key={id}
-                  entityId={id}
                   name={item.entry.project.name}
                   active={id === activeId}
                   running={item.entry.running > 0}
@@ -78,7 +77,6 @@ export function ProjectsList({
               ) : (
                 <ProjectButton
                   key={id}
-                  entityId={id}
                   name={sessionTitle(item.session.summary)}
                   variant={ProjectButtonVariant.Orphan}
                   active={id === activeId}

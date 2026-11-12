@@ -1,11 +1,11 @@
-/* Dense navigation uses the conversation recipe's quiet surfaces and 4px rhythm.
+/* Dense navigation: 32px pill rows with 13px titles, selected by fill alone.
    Scope these values to real navigation consumers, leaving inspector atoms alone. */
-.nac-navigation .group:has(> button[aria-current="page"]) {
-  box-shadow: inset 2px 0 0 var(--color-border-focus-outline);
+.nac-navigation:not(.nac-navigation-mobile) .group {
+  height: 32px;
 }
 
 .nac-navigation .group > button > .truncate {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 20px;
 }
 

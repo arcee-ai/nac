@@ -1,6 +1,4 @@
 import {
-  Badge,
-  BadgeColor,
   Button,
   ButtonContent,
   ButtonSize,
@@ -8,6 +6,7 @@ import {
   CopyButton,
   Icon,
   IconName,
+  KeyboardShortcut,
   Logo,
   TabButton,
   Tooltip,
@@ -20,12 +19,13 @@ import { NewSessionPopover } from "./NewSessionPopover";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarCommands } from "./useSidebarCommands.tsx";
 
-/** Expanded navigation: projects, sessions, and the header's old destinations. */
+/** Expanded navigation: the three primary rows, the project tree, and the settings footer. */
 export function LeftSidebarPanel({
   isOpen,
   onToggle,
   onSearch,
   toggleKeys,
+  searchKeys,
   commands,
   variant,
 }: {
@@ -33,6 +33,7 @@ export function LeftSidebarPanel({
   onToggle: () => void;
   onSearch: () => void;
   toggleKeys: string[];
+  searchKeys: string[];
   commands: SidebarCommands;
   /** All Projects filters the card grid instead of listing sessions. */
   variant: "session" | "projects";
@@ -46,12 +47,8 @@ export function LeftSidebarPanel({
   const projects = projectList?.projects ?? [];
 
   return (
-    <div
-      className="flex h-full flex-col bg-elevation-ground border-r border-tertiary"
-      style={{ boxShadow: "var(--left-sidebar-open)" }}
-    >
-      <div className="flex items-center justify-between pl-4 pr-2 py-2 border-b border-muted shrink-0">
-        <Logo height={28} className="text-basic-primary" />
+    <div className="flex h-full flex-col bg-elevation-level-0-5 border-r border-tertiary">
+      <div className="flex h-14 items-center justify-end px-2 shrink-0">
         <Tooltip
           title="Hide sidebar"
           keyboardShortcuts={toggleKeys}
@@ -70,85 +67,33 @@ export function LeftSidebarPanel({
         </Tooltip>
       </div>
 
-      <div className="flex flex-col gap-0.5 p-2 border-b border-muted shrink-0">
-        <div className="flex items-center gap-2">
-          {projectsPage ? (
-            <TabButton className="flex-1 !w-auto" onClick={commands.newProject}>
-              <Icon iconName={IconName.Add} />
-              <span className="text-left flex-grow truncate">{commands.createLabel}</span>
-            </TabButton>
-          ) : (
-            <NewSessionPopover
-              projectId={commands.projectId}
-              onUnavailable={commands.newSession}
-              className="flex-1 min-w-0"
-            >
-              {(openMenu) => (
-                <TabButton onClick={openMenu}>
-                  <Icon iconName={IconName.Add} />
-                  <span className="text-left flex-grow truncate">New Session</span>
-                </TabButton>
-              )}
-            </NewSessionPopover>
-          )}
-          <Tooltip title={searchLabel} position={TooltipPosition.CenterRight} sticky>
-            <Button
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label={searchLabel}
-              onClick={onSearch}
-            >
-              <Icon iconName={IconName.Search} />
-            </Button>
-          </Tooltip>
-        </div>
-        {projectsPage ? null : (
-          <div className="flex items-center gap-2">
-            <TabButton className="flex-1 !w-auto" onClick={commands.openProjects}>
-              <Icon iconName={IconName.Folders} />
-              <span className="text-left flex-grow truncate">All projects</span>
-            </TabButton>
-            <Tooltip title="Create a new project" position={TooltipPosition.CenterRight} sticky>
-              <Button
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="New project"
-                onClick={commands.newProject}
-              >
-                <Icon iconName={IconName.AddCircle} />
-              </Button>
-            </Tooltip>
-          </div>
+      <div className="flex flex-col gap-1 px-2 pb-2 shrink-0">
+        {projectsPage ? (
+          <TabButton className="border border-tertiary" onClick={commands.newProject}>
+            <Icon iconName={IconName.Add} />
+            <span className="text-left flex-grow truncate">{commands.createLabel}</span>
+          </TabButton>
+        ) : (
+          <NewSessionPopover projectId={commands.projectId} onUnavailable={commands.newSession}>
+            {(openMenu) => (
+              <TabButton className="border border-tertiary" onClick={openMenu}>
+                <Icon iconName={IconName.Add} />
+                <span className="text-left flex-grow truncate">New Session</span>
+              </TabButton>
+            )}
+          </NewSessionPopover>
         )}
-        <TabButton onClick={commands.openMcp} aria-label={commands.mcpLabel}>
-          <Icon iconName={IconName.Toolbox} />
-          <span className="text-left flex-grow">MCP</span>
-          {commands.activeMcp > 0 ? (
-            <Badge
-              text={`${commands.activeMcp} ACTIVE`}
-              color={BadgeColor.Blue}
-              background={false}
-            />
-          ) : null}
+        <TabButton
+          aria-label={searchLabel}
+          onClick={onSearch}
+          trailing={<KeyboardShortcut keys={searchKeys} />}
+        >
+          <Icon iconName={IconName.Search} />
+          <span className="text-left flex-grow">Search</span>
         </TabButton>
-        <TabButton onClick={commands.openSsh}>
-          <Icon iconName={IconName.Globe} />
-          <span className="text-left flex-grow">SSH</span>
-          {commands.sshCount > 0 ? (
-            <Badge text={String(commands.sshCount)} color={BadgeColor.Gray} background={false} />
-          ) : null}
-        </TabButton>
-        <TabButton onClick={commands.inspectProduct}>
-          <Icon iconName={IconName.Info} />
-          <span className="text-left flex-grow">NAC capabilities</span>
-        </TabButton>
-        <TabButton onClick={commands.openConfigurations}>
-          <Icon iconName={IconName.Gear} />
-          <span className="text-left flex-grow">Configurations</span>
-        </TabButton>
-        <TabButton onClick={commands.openManaged}>
-          <Icon iconName={IconName.Controls} />
-          <span className="text-left flex-grow">Managed host</span>
+        <TabButton active={projectsPage} onClick={commands.openProjects}>
+          <Icon iconName={IconName.Grid} />
+          <span className="text-left flex-grow truncate">All projects</span>
         </TabButton>
       </div>
 
@@ -157,7 +102,23 @@ export function LeftSidebarPanel({
           <SessionFilters sessions={sessions} />
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <nav className="flex-1 min-h-0 overflow-y-auto" aria-label="Projects">
+          <div className="flex items-center pt-3 pr-2.5 pb-1 pl-[18px]">
+            <h2 className="flex-1 text-[11px] font-medium tracking-wide uppercase text-basic-tertiary">
+              Projects
+            </h2>
+            <Tooltip title="Create a new project" position={TooltipPosition.CenterRight} sticky>
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Small}
+                content={ButtonContent.Icon}
+                aria-label="New project"
+                onClick={commands.newProject}
+              >
+                <Icon iconName={IconName.Add} />
+              </Button>
+            </Tooltip>
+          </div>
           <SidebarProjectList
             projects={projects}
             sessions={sessions}
@@ -165,10 +126,10 @@ export function LeftSidebarPanel({
             activeSessionId={commands.sessionId}
             activeProjectId={commands.projectId}
           />
-        </div>
+        </nav>
       )}
 
-      <div className="flex items-center gap-2 px-4 py-2 border-t border-muted shrink-0">
+      <div className="flex items-center gap-2 px-[18px] pt-2 shrink-0">
         <span className="label-micro text-basic-muted shrink-0">Store:</span>
         <span
           className="code code-small font-medium text-basic-muted flex-1 min-w-0 truncate"
@@ -186,6 +147,54 @@ export function LeftSidebarPanel({
           className="opacity-50"
         />
       </div>
+      <div className="flex items-center gap-0.5 py-2 pr-2.5 pl-[18px] shrink-0">
+        <Logo height={14} className="mr-auto text-basic-primary" />
+        <FooterButton
+          label={commands.mcpLabel}
+          icon={IconName.Toolbox}
+          onClick={commands.openMcp}
+        />
+        <FooterButton label="SSH" icon={IconName.Globe} onClick={commands.openSsh} />
+        <FooterButton
+          label="Managed host"
+          icon={IconName.Controls}
+          onClick={commands.openManaged}
+        />
+        <FooterButton
+          label="NAC capabilities"
+          icon={IconName.Info}
+          onClick={commands.inspectProduct}
+        />
+        <FooterButton
+          label="Configurations"
+          icon={IconName.Gear}
+          onClick={commands.openConfigurations}
+        />
+      </div>
     </div>
+  );
+}
+
+function FooterButton({
+  label,
+  icon,
+  onClick,
+}: {
+  label: string;
+  icon: IconName;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip title={label} position={TooltipPosition.TopCenter} sticky>
+      <Button
+        variant={ButtonVariant.Ghost}
+        size={ButtonSize.Small}
+        content={ButtonContent.Icon}
+        aria-label={label}
+        onClick={onClick}
+      >
+        <Icon iconName={icon} />
+      </Button>
+    </Tooltip>
   );
 }

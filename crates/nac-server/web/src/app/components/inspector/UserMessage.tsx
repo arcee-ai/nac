@@ -71,10 +71,10 @@ export const UserMessage = memo(function UserMessage({
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
   return (
-    <div className="flex flex-col items-end w-full max-w-full py-6">
+    <div className="flex flex-col items-end w-full max-w-full py-4">
       <div
         className={cn(
-          "w-full p-5 overflow-hidden rounded-[16px] bg-elevation-level-2",
+          "max-w-[88%] px-4 py-2.5 overflow-hidden rounded-2xl rounded-br-md bg-elevation-level-2 md:max-w-[80%]",
           "label-small text-basic-primary whitespace-pre-wrap break-words",
           "transition-opacity duration-150",
           pending && "opacity-60",

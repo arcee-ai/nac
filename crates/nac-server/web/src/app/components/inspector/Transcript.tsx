@@ -439,7 +439,7 @@ export function Transcript({
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
-        <div className="mx-auto w-full max-w-[640px]">
+        <div className="mx-auto w-full max-w-[960px]">
           <ShimmerLoader rows={3} rowClassName="h-[48px]" />
         </div>
       </div>
@@ -454,7 +454,7 @@ export function Transcript({
             fade,
           )}
         >
-          <div className="m-auto w-full max-w-[640px]">
+          <div className="m-auto w-full max-w-[960px]">
             <InitialPrompts />
           </div>
         </div>
@@ -470,11 +470,11 @@ export function Transcript({
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it. A long
             // draft, the goal editor or queued messages make the composer
-            // taller, and the run-out still clears it. The 640px column keeps
+            // taller, and the run-out still clears it. The 960px column keeps
             // 32px off the edges of a chat narrower than it.
             isMobile
               ? "pb-[max(180px,calc(var(--composer-height,0px)_+_40px))]"
-              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto max-w-[704px]",
+              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto max-w-[1024px]",
           )}
         >
           {snapshot?.message_page?.has_older ? (

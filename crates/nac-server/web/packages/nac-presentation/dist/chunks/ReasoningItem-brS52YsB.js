@@ -1,5 +1,5 @@
 import { f as e } from "./PresentationBoundary-DgJz1GXw.js";
-import { A as t, B as n, F as r, I as i, L as a, N as o, O as s, R as c, V as l, _ as u, b as d, c as f, d as p, f as m, g as h, h as g, j as _, k as v, m as y, s as b, v as x, x as S, y as C, z as w } from "./Toast-y4mFgUIo.js";
+import { A as t, B as n, F as r, I as i, L as a, N as o, O as s, R as c, V as l, _ as u, b as d, c as f, d as p, f as m, g as h, h as g, j as _, k as v, m as y, s as b, v as x, x as S, y as C, z as w } from "./Toast-B7_2n5HZ.js";
 import * as T from "react";
 import E, { Fragment as D, Suspense as O, lazy as k, memo as A, useCallback as j, useEffect as M, useId as N, useLayoutEffect as P, useMemo as ee, useRef as F, useState as I, useSyncExternalStore as te } from "react";
 import { Fragment as L, jsx as R, jsxs as z } from "react/jsx-runtime";
@@ -258,7 +258,7 @@ function De({ name: e, description: n, disabled: r, children: i }) {
 			side: "bottom",
 			align: "start",
 			collisionPadding: 8,
-			className: "pointer-events-none label-micro w-max max-w-[min(360px,calc(100vw-16px))] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-interaction bg-elevation-ground-inverse p-2 text-primary-inverse shadow-xl whitespace-pre-wrap [overflow-wrap:anywhere]",
+			className: "pointer-events-none label-micro w-max max-w-[min(360px,calc(100vw-16px))] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-xl bg-elevation-ground-inverse p-2 text-primary-inverse shadow-xl whitespace-pre-wrap [overflow-wrap:anywhere]",
 			children: [e, n ? /* @__PURE__ */ R("div", {
 				className: "mt-1 text-secondary-inverse",
 				children: n
@@ -666,7 +666,11 @@ var G = /* @__PURE__ */ function(e) {
 						lineage: i,
 						size: f ? G.Large : G.Medium,
 						className: st
-					}) : null,
+					}) : /* @__PURE__ */ R("span", {
+						className: "flex w-4 shrink-0 justify-center",
+						"aria-hidden": "true",
+						children: /* @__PURE__ */ R("span", { className: "h-1.5 w-1.5 rounded-full bg-current opacity-40" })
+					}),
 					/* @__PURE__ */ R("span", {
 						className: l("min-w-0 flex-1 truncate", f ? "label-medium" : p ? "label-micro" : "label-small", n && "text-shimmer-primary"),
 						children: e
@@ -3506,7 +3510,7 @@ var ga = /* @__PURE__ */ function(e) {
 	className: s,
 	children: /* @__PURE__ */ R("textarea", {
 		ref: u,
-		className: l("w-full input font-normal rounded-interaction", e, r && "input-disabled", i && "input-validation", c),
+		className: l("w-full input font-normal rounded-xl", e, r && "input-disabled", i && "input-validation", c),
 		disabled: r,
 		...d
 	})
@@ -3899,93 +3903,28 @@ var Va = {
 			]
 		})]
 	});
-}, $ = 6, Ga = 36;
-function Ka(e) {
-	let t = String(e ?? ""), n = 2166136261;
-	for (let e = 0; e < t.length; e += 1) n ^= t.charCodeAt(e), n = Math.imul(n, 16777619) >>> 0;
-	return n >>> 0;
-}
-function qa(e) {
-	let t = e >>> 0 || 2654435769;
-	return () => (t = (t ^ t << 13) >>> 0, t = (t ^ t >>> 17) >>> 0, t = (t ^ t << 5) >>> 0, t);
-}
-function Ja(e) {
-	return `hsl(${Ka(e) % 360} 75% 50%)`;
-}
-function Ya(e) {
-	let t = e % $, n = (e - t) / $, r = [];
-	return n > 0 && r.push(e - $), n < 5 && r.push(e + $), t > 0 && r.push(e - 1), t < 5 && r.push(e + 1), r;
-}
-function Xa(e) {
-	let t = Array.from({ length: Ga }, () => !1), n = [];
-	for (let e = 0; e < Ga; e += 1) {
-		let t = e % $, r = (e - t) / $;
-		(r === 0 || t === 0 || r === 5 || t === 5) && n.push(e);
-	}
-	let r = 4 + e() % 5, i = 0;
-	for (; i < r && n.length > 0;) {
-		let r = e() % 2 == 0 ? n.length - 1 : e() % n.length, a = n.splice(r, 1)[0];
-		if (!t[a]) {
-			t[a] = !0, i += 1;
-			for (let e of Ya(a)) !t[e] && !n.includes(e) && n.push(e);
-		}
-	}
-	return t;
-}
-function Za(e) {
-	let t = qa(Ka(e)), n = Xa(t), r = [];
-	for (let e = 0; e < Ga; e += 1) r.push(n[e] ? 0 : t() % 7 < 4 ? 1 : 2);
-	return r;
-}
-var Qa = 40, $a = 1.5;
-function eo(e) {
-	let t = Math.max(1, $a * e / Qa);
-	return t * $ / (e - t);
-}
-var to = ({ id: e, size: t = 40, isRunning: n = !1, className: r = "", ...i }) => {
-	let a = Ja(e), o = Za(e), s = eo(t), c = s / 2;
-	return /* @__PURE__ */ R("svg", {
-		className: l("block shrink-0", n && "pulse-dim", r),
-		width: t,
-		height: t,
-		viewBox: `${-c} ${-c} ${$ + s} ${$ + s}`,
-		fill: "none",
-		xmlns: "http://www.w3.org/2000/svg",
-		"aria-hidden": "true",
-		...i,
-		children: o.map((e, t) => e === 0 ? null : /* @__PURE__ */ R("rect", {
-			x: t % $,
-			y: Math.floor(t / $),
-			width: "1",
-			height: "1",
-			fill: e === 2 ? a : "none",
-			stroke: a,
-			strokeWidth: s
-		}, t))
-	});
-}, no = /* @__PURE__ */ function(e) {
+}, Ga = /* @__PURE__ */ function(e) {
 	return e.Project = "project", e.Orphan = "orphan", e;
-}({}), ro = ({ entityId: e, name: t, variant: n = "project", active: r = !1, running: i = !1, trailing: a, isMobile: o = !1, actions: s, className: c = "", type: u = "button", ...d }) => {
-	let f = H(t), p = n === "orphan";
+}({}), Ka = ({ name: e, variant: t = "project", active: r = !1, running: i = !1, trailing: a, isMobile: o = !1, actions: s, className: c = "", type: u = "button", ...d }) => {
+	let f = H(e), p = t === "orphan";
 	return /* @__PURE__ */ z("div", {
 		className: l("group flex items-center min-w-0 rounded-interaction", "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2", o ? "h-12 gap-3 px-3 py-2" : "h-9 gap-1.5 px-2 py-1", r ? "bg-btn-ghost-highlighted hover:bg-btn-ghost-highlighted-hovered has-[>button:active]:bg-btn-ghost-highlighted-pressed has-[>button:disabled]:bg-btn-ghost-highlighted-disabled" : "hover:bg-btn-ghost-hovered has-[>button:active]:bg-btn-ghost-pressed has-[>button:disabled]:bg-btn-ghost-disabled", c),
 		children: [
 			f.hint(/* @__PURE__ */ z("button", {
 				type: u,
 				className: l("flex flex-1 items-center min-w-0 text-left outline-none", r ? "text-btn-secondary-pressed" : "text-btn-secondary group-hover:text-btn-secondary-hovered active:text-btn-secondary-pressed", "disabled:cursor-not-allowed disabled:text-btn-secondary-disabled", o ? "gap-3" : "gap-1.5"),
-				"aria-label": t,
+				"aria-label": e,
 				...d,
-				children: [n === "orphan" ? /* @__PURE__ */ R(gt, {
+				children: [t === "orphan" ? /* @__PURE__ */ R(gt, {
 					size: 24,
 					isRunning: i
-				}) : /* @__PURE__ */ R(to, {
-					id: e,
-					size: 20,
-					isRunning: i,
-					className: "rounded-[2px]"
+				}) : /* @__PURE__ */ R(w, {
+					iconName: d["aria-expanded"] ? n.FolderOpen : n.Folder,
+					size: 16,
+					className: "shrink-0 text-basic-tertiary"
 				}), /* @__PURE__ */ R("span", {
 					className: l("flex-1 truncate", o ? "label-medium" : "label-small", i && "text-shimmer-primary"),
-					children: t
+					children: e
 				})]
 			}), !p),
 			a ? /* @__PURE__ */ R("span", {
@@ -4000,9 +3939,9 @@ var to = ({ id: e, size: t = 40, isRunning: n = !1, className: r = "", ...i }) =
 		]
 	});
 };
-ro.Variant = no;
+Ka.Variant = Ga;
 // src/app/atoms/radio/index.tsx
-var io = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i = "", ...a }) => /* @__PURE__ */ z("label", {
+var qa = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i = "", ...a }) => /* @__PURE__ */ z("label", {
 	className: l("group flex w-fit items-center gap-2", n ? "cursor-not-allowed" : "cursor-pointer", i),
 	children: [/* @__PURE__ */ z("span", {
 		className: "relative flex size-4 shrink-0 items-center justify-center",
@@ -4032,9 +3971,9 @@ var io = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i
 		className: l("label-small", n ? "text-basic-muted" : "text-basic-primary"),
 		children: r
 	}) : null]
-}), ao = (e, t, n) => Math.min(Math.max(e, t), n), oo = ({ min: e, max: t, value: n, onChange: r, step: i = 1, disabled: a = !1, label: o, smallKnob: s = !1, className: c = "" }) => {
+}), Ja = (e, t, n) => Math.min(Math.max(e, t), n), Ya = ({ min: e, max: t, value: n, onChange: r, step: i = 1, disabled: a = !1, label: o, smallKnob: s = !1, className: c = "" }) => {
 	let u = F(null), [d, f] = I(!1), [p, m] = I(!1), h = !a && (d || p), g = j((a) => {
-		let o = ao(Math.round(a / i) * i, e, t), s = Number(o.toFixed(4));
+		let o = Ja(Math.round(a / i) * i, e, t), s = Number(o.toFixed(4));
 		s !== n && r(s);
 	}, [
 		i,
@@ -4047,7 +3986,7 @@ var io = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i
 		if (!r) return;
 		let i = r.getBoundingClientRect();
 		if (i.width === 0) return;
-		let a = ao((n - i.left) / i.width, 0, 1);
+		let a = Ja((n - i.left) / i.width, 0, 1);
 		g(e + a * (t - e));
 	}, [
 		g,
@@ -4099,12 +4038,12 @@ var io = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i
 			})
 		]
 	});
-}, so = {
+}, Xa = {
 	[h.Small]: B.Small,
 	[h.Medium]: B.Medium,
 	[h.Large]: B.Large
-}, co = ({ items: e = [], value: t, onValueChange: i, size: a = h.Medium, itemSize: o, variant: s = u.Secondary, placement: c = r.BottomRight, placeholder: f = "Select...", disabled: m = !1, sticky: _ = !1, floating: v = !1, triggerLabel: b, className: x = "", trailingIcon: C = n.Down, triggerClassName: T = "", panelClassName: E = "", onOpenChange: D, "aria-invalid": O, "aria-describedby": k }) => {
-	let [A, j] = I(!1), M = e.find((e) => e.id === t), N = o ?? so[a], P = (e) => {
+}, Za = ({ items: e = [], value: t, onValueChange: i, size: a = h.Medium, itemSize: o, variant: s = u.Secondary, placement: c = r.BottomRight, placeholder: f = "Select...", disabled: m = !1, sticky: _ = !1, floating: v = !1, triggerLabel: b, className: x = "", trailingIcon: C = n.Down, triggerClassName: T = "", panelClassName: E = "", onOpenChange: D, "aria-invalid": O, "aria-describedby": k }) => {
+	let [A, j] = I(!1), M = e.find((e) => e.id === t), N = o ?? Xa[a], P = (e) => {
 		j(e), D?.(e);
 	}, ee = (e) => {
 		i?.(e), P(!1);
@@ -4159,6 +4098,70 @@ var io = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i
 			className: te,
 			children: ne
 		})
+	});
+}, $ = 6, Qa = 36;
+function $a(e) {
+	let t = String(e ?? ""), n = 2166136261;
+	for (let e = 0; e < t.length; e += 1) n ^= t.charCodeAt(e), n = Math.imul(n, 16777619) >>> 0;
+	return n >>> 0;
+}
+function eo(e) {
+	let t = e >>> 0 || 2654435769;
+	return () => (t = (t ^ t << 13) >>> 0, t = (t ^ t >>> 17) >>> 0, t = (t ^ t << 5) >>> 0, t);
+}
+function to(e) {
+	return `hsl(${$a(e) % 360} 75% 50%)`;
+}
+function no(e) {
+	let t = e % $, n = (e - t) / $, r = [];
+	return n > 0 && r.push(e - $), n < 5 && r.push(e + $), t > 0 && r.push(e - 1), t < 5 && r.push(e + 1), r;
+}
+function ro(e) {
+	let t = Array.from({ length: Qa }, () => !1), n = [];
+	for (let e = 0; e < Qa; e += 1) {
+		let t = e % $, r = (e - t) / $;
+		(r === 0 || t === 0 || r === 5 || t === 5) && n.push(e);
+	}
+	let r = 4 + e() % 5, i = 0;
+	for (; i < r && n.length > 0;) {
+		let r = e() % 2 == 0 ? n.length - 1 : e() % n.length, a = n.splice(r, 1)[0];
+		if (!t[a]) {
+			t[a] = !0, i += 1;
+			for (let e of no(a)) !t[e] && !n.includes(e) && n.push(e);
+		}
+	}
+	return t;
+}
+function io(e) {
+	let t = eo($a(e)), n = ro(t), r = [];
+	for (let e = 0; e < Qa; e += 1) r.push(n[e] ? 0 : t() % 7 < 4 ? 1 : 2);
+	return r;
+}
+var ao = 40, oo = 1.5;
+function so(e) {
+	let t = Math.max(1, oo * e / ao);
+	return t * $ / (e - t);
+}
+var co = ({ id: e, size: t = 40, isRunning: n = !1, className: r = "", ...i }) => {
+	let a = to(e), o = io(e), s = so(t), c = s / 2;
+	return /* @__PURE__ */ R("svg", {
+		className: l("block shrink-0", n && "pulse-dim", r),
+		width: t,
+		height: t,
+		viewBox: `${-c} ${-c} ${$ + s} ${$ + s}`,
+		fill: "none",
+		xmlns: "http://www.w3.org/2000/svg",
+		"aria-hidden": "true",
+		...i,
+		children: o.map((e, t) => e === 0 ? null : /* @__PURE__ */ R("rect", {
+			x: t % $,
+			y: Math.floor(t / $),
+			width: "1",
+			height: "1",
+			fill: e === 2 ? a : "none",
+			stroke: a,
+			strokeWidth: s
+		}, t))
 	});
 }, lo = "M95 64.7797H79.5544V78.0484H95V96H0V31.2203H61.7894V0H95V64.7797ZM33.2129 93.6586H46.3415V80.3898H33.2129V93.6586ZM48.6585 93.6586H61.7894V80.3898H48.6585V93.6586ZM79.5544 93.6586H92.6829V80.3898H79.5544V93.6586ZM2.31707 78.0484H15.4479V64.7797H2.31707V78.0484ZM17.765 78.0484H30.8936V49.1718H17.765V78.0484ZM33.2106 78.0484H46.3415V64.7797H33.2106V78.0484ZM2.31707 62.4383H15.4479V49.1718H2.31707V62.4383ZM48.6585 62.4383H61.7894V49.1718H48.6585V62.4383ZM64.1064 62.4383H77.235V49.1718H64.1064V62.4383ZM79.5544 62.4383H92.6829V49.1718H79.5544V62.4383ZM17.765 46.8304H30.8936V33.5617H17.765V46.8304ZM33.2129 46.8282H46.3415V33.5617H33.2129V46.8282ZM79.5544 46.8282H92.6829V33.5617H79.5544V46.8282ZM64.1064 31.2203H77.235V17.9516H64.1064V31.2203ZM64.1064 15.6101H77.235V2.34141H64.1064V15.6101ZM79.5544 15.6101H92.6829V2.34141H79.5544V15.6101Z", uo = "M48.6585 17.9516H0V0H48.6585V17.9516ZM2.31707 15.6101H15.4479V2.34141H2.31707V15.6101ZM17.765 15.6101H30.8936V2.34141H17.765V15.6101Z", fo = ({ className: e = "" }) => /* @__PURE__ */ z("svg", {
 	width: 95,
@@ -4446,11 +4449,11 @@ var xo = ({ title: e, status: t, statusLabel: r, error: i, behavior: a, lineage:
 		"aria-controls": c,
 		disabled: o,
 		onClick: s,
-		className: l("group relative inline-flex min-h-11 max-w-full items-center gap-2 border-l border-tertiary pl-3 transition-colors motion-reduce:transition-none", "focus-visible:outline-none disabled:cursor-not-allowed", d, u),
+		className: l("group relative inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-tertiary px-3.5 text-left transition-colors motion-reduce:transition-none", "focus-visible:outline-none disabled:cursor-not-allowed", d, u),
 		children: [
 			/* @__PURE__ */ R("span", {
 				"aria-hidden": "true",
-				className: "pointer-events-none absolute -inset-1 hidden rounded-[4px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
+				className: "pointer-events-none absolute -inset-1 hidden rounded-[16px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
 			}),
 			t ? /* @__PURE__ */ R(W, {
 				size: U.Medium,
@@ -4458,7 +4461,7 @@ var xo = ({ title: e, status: t, statusLabel: r, error: i, behavior: a, lineage:
 			}) : null,
 			/* @__PURE__ */ R("span", {
 				ref: m,
-				className: l("label-small min-w-0 truncate", p && Fo),
+				className: l("label-small min-w-0 flex-1 truncate", p && Fo),
 				children: e
 			}),
 			i || a ? /* @__PURE__ */ R("span", {
@@ -4476,9 +4479,9 @@ var xo = ({ title: e, status: t, statusLabel: r, error: i, behavior: a, lineage:
 			}) : null,
 			t ? null : /* @__PURE__ */ R(w, {
 				iconName: n.Right,
-				size: 20,
+				size: 16,
 				"aria-hidden": !0,
-				className: l("shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none", f)
+				className: l("shrink-0 opacity-60 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none", f)
 			})
 		]
 	});
@@ -4532,7 +4535,7 @@ function Ro({ title: e, pinned: t = !1, isMobile: r = !1, onPin: i, onRename: a,
 // src/app/lib/markdownChunk.ts
 var zo = null, Bo = !1;
 function Vo() {
-	return zo ??= import("./markdown-renderer-nvtq3u0L.js").then((e) => e.t).then((e) => (Bo = !0, e)), zo;
+	return zo ??= import("./markdown-renderer-BD_KjR03.js").then((e) => e.t).then((e) => (Bo = !0, e)), zo;
 }
 function Ho() {
 	return Bo;
@@ -4651,4 +4654,4 @@ function $o({ segment: e, active: t }) {
 		})]
 	});
 }
-export { na as $, oe as $t, Wa as A, G as At, Sa as B, Ee as Bt, fo as C, vt as Ct, ro as D, lt as Dt, io as E, pt as Et, Aa as F, W as Ft, ga as G, ve as Gt, ya as H, Ce as Ht, Da as I, U as It, pa as J, le as Jt, ha as K, ge as Kt, Ea as L, Me as Lt, Ba as M, Ze as Mt, Ma as N, Xe as Nt, no as O, ct as Ot, ja as P, it as Pt, ra as Q, se as Qt, wa as R, Oe as Rt, ho as S, yt as St, oo as T, gt as Tt, va as U, xe as Ut, xa as V, we as Vt, _a as W, be as Wt, X, V as Xt, Z as Y, _e as Yt, Q as Z, B as Zt, Do as _, $t as _t, Go as a, Ki as at, go as b, Ht as bt, Jo as c, Ui as ct, Ho as d, Ii as dt, ta as et, Ro as f, Y as ft, Oo as g, en as gt, Mo as h, Ti as ht, Xo as i, Gi as it, Ua as j, Ye as jt, to as k, ot as kt, Wo as l, zi as lt, Io as m, Ei as mt, Yo as n, $i as nt, Ko as o, Bi as ot, Lo as p, ji as pt, ma as q, ue as qt, Zo as r, Zi as rt, qo as s, Wi as st, $o as t, ea as tt, Vo as u, Ri as ut, Eo as v, Qt as vt, co as w, _t as wt, xo as x, Tt as xt, So as y, Zt as yt, Ca as z, H as zt };
+export { na as $, oe as $t, Wa as A, G as At, Sa as B, Ee as Bt, fo as C, vt as Ct, qa as D, lt as Dt, Ya as E, pt as Et, Aa as F, W as Ft, ga as G, ve as Gt, ya as H, Ce as Ht, Da as I, U as It, pa as J, le as Jt, ha as K, ge as Kt, Ea as L, Me as Lt, Ba as M, Ze as Mt, Ma as N, Xe as Nt, Ka as O, ct as Ot, ja as P, it as Pt, ra as Q, se as Qt, wa as R, Oe as Rt, ho as S, yt as St, Za as T, gt as Tt, va as U, xe as Ut, xa as V, we as Vt, _a as W, be as Wt, X, V as Xt, Z as Y, _e as Yt, Q as Z, B as Zt, Do as _, $t as _t, Go as a, Ki as at, go as b, Ht as bt, Jo as c, Ui as ct, Ho as d, Ii as dt, ta as et, Ro as f, Y as ft, Oo as g, en as gt, Mo as h, Ti as ht, Xo as i, Gi as it, Ua as j, Ye as jt, Ga as k, ot as kt, Wo as l, zi as lt, Io as m, Ei as mt, Yo as n, $i as nt, Ko as o, Bi as ot, Lo as p, ji as pt, ma as q, ue as qt, Zo as r, Zi as rt, qo as s, Wi as st, $o as t, ea as tt, Vo as u, Ri as ut, Eo as v, Qt as vt, co as w, _t as wt, xo as x, Tt as xt, So as y, Zt as yt, Ca as z, H as zt };

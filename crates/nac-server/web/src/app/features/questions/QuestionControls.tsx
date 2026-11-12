@@ -111,7 +111,7 @@ export function QuestionControls({ sessionId, enabled }: { sessionId: string; en
     ? pending.find((question) => question.request.request_id === selected)
     : undefined;
   return (
-    <div className="pointer-events-auto mx-auto w-full max-w-[656px] space-y-2 px-2">
+    <div className="pointer-events-auto mx-auto w-full max-w-[976px] space-y-2 px-2">
       {selected && questions.isLoading && (
         <p role="status" className="text-sm text-basic-secondary">
           Loading the exact task question…

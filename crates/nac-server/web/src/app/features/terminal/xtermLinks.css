@@ -11,7 +11,7 @@
   background: var(--color-bg-elevation-ground, #171a20);
   color: var(--color-text-basic-primary, #f1f2f5);
   font:
-    12px/1.5 "IBMPlexMono",
+    12px/1.5 "Geist Mono Variable",
     Menlo,
     monospace;
 }

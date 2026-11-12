@@ -127,11 +127,11 @@
   /* Border / Basic */
   --color-border-primary: var(--black);
   --color-border-secondary: var(--dark-trans-500);
-  --color-border-tertiary: var(--dark-trans-100);
-  --color-border-muted: var(--dark-trans-50);
+  --color-border-tertiary: var(--dark-trans-50);
+  --color-border-muted: var(--dark-trans-25);
   --color-border-card: var(--transparent);
   --color-border-btn-destructive: var(--red-300);
-  --color-border-focus-outline: var(--blue-600);
+  --color-border-focus-outline: var(--gray-300);
 
   /* Border / Danger */
   --color-border-danger-primary: var(--yellow-500);

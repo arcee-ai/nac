@@ -5,8 +5,6 @@ export declare enum ProjectButtonVariant {
     Orphan = "orphan"
 }
 interface ProjectButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    /** Seeds the identicon: a project id, or the session id for an orphan. */
-    entityId: string;
     name: string;
     variant?: ProjectButtonVariant;
     active?: boolean;

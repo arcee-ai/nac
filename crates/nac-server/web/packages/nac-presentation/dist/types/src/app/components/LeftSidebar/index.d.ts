@@ -1,6 +1,6 @@
 /** Collapsed icon column, matching the Figma rail. */
 export declare const SIDEBAR_RAIL_WIDTH = 52;
-/** Expanded panel, matching the Figma sidebar. */
+/** Expanded panel. */
 export declare const SIDEBAR_PANEL_WIDTH = 280;
 /**
  * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays

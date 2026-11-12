@@ -284,7 +284,7 @@ export function ProjectCard({
       data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
       className={cn(
-        "group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default",
+        "group fade relative flex flex-col gap-4 rounded-2xl border border-tertiary overflow-hidden cursor-default",
         isDesktop ? "px-5 pt-4 pb-3" : "p-4",
         "bg-elevation-level-1",
         dragging && "shadow-lg",

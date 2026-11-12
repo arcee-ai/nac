@@ -3,7 +3,7 @@ import type React from "react";
 import { cn } from "../../lib/cn";
 import ChatSessionOrphanAvatar from "../chat-session-orphan-avatar";
 import { useSessionNameDisclosure } from "../session-name-disclosure";
-import SessionAvatar from "../session-avatar";
+import Icon, { IconName } from "../icon";
 
 export enum ProjectButtonVariant {
   Project = "project",
@@ -12,8 +12,6 @@ export enum ProjectButtonVariant {
 }
 
 interface ProjectButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  /** Seeds the identicon: a project id, or the session id for an orphan. */
-  entityId: string;
   name: string;
   variant?: ProjectButtonVariant;
   active?: boolean;
@@ -36,7 +34,6 @@ interface ProjectButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 const ProjectButton: React.FC<ProjectButtonProps> & {
   Variant: typeof ProjectButtonVariant;
 } = ({
-  entityId,
   name,
   variant = ProjectButtonVariant.Project,
   active = false,
@@ -79,7 +76,11 @@ const ProjectButton: React.FC<ProjectButtonProps> & {
           {variant === ProjectButtonVariant.Orphan ? (
             <ChatSessionOrphanAvatar size={24} isRunning={running} />
           ) : (
-            <SessionAvatar id={entityId} size={20} isRunning={running} className="rounded-[2px]" />
+            <Icon
+              iconName={props["aria-expanded"] ? IconName.FolderOpen : IconName.Folder}
+              size={16}
+              className="shrink-0 text-basic-tertiary"
+            />
           )}
           <span
             className={cn(

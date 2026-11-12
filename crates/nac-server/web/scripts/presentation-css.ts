@@ -3,8 +3,8 @@ import selectorParser from "postcss-selector-parser";
 
 const boundary = "[data-nac-runtime]";
 const fonts = new Map([
-  ["Inter", "NACPresentationInter"],
-  ["IBMPlexMono", "NACPresentationMono"],
+  ["Geist Variable", "NACPresentationSans"],
+  ["Geist Mono Variable", "NACPresentationMono"],
   ["Asap", "NACPresentationAsap"],
 ]);
 

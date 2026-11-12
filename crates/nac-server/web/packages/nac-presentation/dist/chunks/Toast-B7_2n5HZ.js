@@ -7789,11 +7789,8 @@ var mp = [
 	"shift",
 	"o"
 ], hp = mp, gp = ({ keys: e, inversed: t = !1, spelled: n = !1, className: r = "" }) => e.length === 0 ? null : /* @__PURE__ */ y("div", {
-	className: U("flex gap-[3px]", r),
-	children: e.map((e, r) => /* @__PURE__ */ y("kbd", {
-		className: U("inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label", t ? "text-secondary-inverse border-tertiary-inversed" : "text-basic-secondary border-secondary bg-input"),
-		children: n ? e : lp(e)
-	}, r))
+	className: U("inline-flex h-5 min-w-5 items-center justify-center gap-0.5 rounded-full px-1.5 tag-label", t ? "border border-tertiary-inversed text-secondary-inverse" : "bg-elevation-level-2 text-basic-tertiary", r),
+	children: e.map((e, t) => /* @__PURE__ */ y("kbd", { children: n ? e : lp(e) }, t))
 }), _p = a.createContext(null);
 function vp(e) {
 	let t = a.useContext(_p);
@@ -8081,7 +8078,7 @@ function Bp({ open: e, label: t, children: n }) {
 // src/app/atoms/popover/index.tsx
 var Vp = /* @__PURE__ */ function(e) {
 	return e.Small = "w-[240px]", e.Medium = "w-[320px]", e.Large = "w-[400px]", e.Fit = "w-max", e.TriggerWidth = "min-w-[var(--radix-popover-trigger-width)]", e;
-}({}), Hp = "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0", Up = ({ open: e, onClose: t, content: n, children: r, placement: i = Mo.BottomRight, size: a = "w-[320px]", sticky: o = !1, closeOnOutsideClick: s = !0, closeOnEscape: c = !0, sheetOnMobile: l = !0, className: u = "", panelClassName: d = "", sheetClassName: f = "", focusScope: p }) => {
+}({}), Hp = "flex flex-col gap-1 p-1.5 rounded-xl border border-tertiary bg-elevation-level-3 shadow-md fade motion-reduce:!animate-none [&>*]:shrink-0", Up = ({ open: e, onClose: t, content: n, children: r, placement: i = Mo.BottomRight, size: a = "w-[320px]", sticky: o = !1, closeOnOutsideClick: s = !0, closeOnEscape: c = !0, sheetOnMobile: l = !0, className: u = "", panelClassName: d = "", sheetClassName: f = "", focusScope: p }) => {
 	let h = Lo() && l, _ = e && !h, v = p ? /* @__PURE__ */ y(Bp, {
 		open: e,
 		label: p,
@@ -8128,7 +8125,7 @@ var Vp = /* @__PURE__ */ function(e) {
 };
 Up.Placement = Mo, Up.Size = Vp;
 // src/app/atoms/tooltip/index.tsx
-var Wp = "tooltip-box text-left w-max h-fit max-w-[240px] flex flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade motion-reduce:!animate-none", Gp = ({ title: e, description: t, keyboardShortcuts: n = [], inverted: r = !0, isMobile: i = !1 }) => /* @__PURE__ */ b(v, { children: [/* @__PURE__ */ b("div", {
+var Wp = "tooltip-box text-left w-max h-fit max-w-[240px] flex flex-col gap-1 shadow-xl bg-elevation-ground-inverse px-3 py-1.5 rounded-2xl fade motion-reduce:!animate-none", Gp = ({ title: e, description: t, keyboardShortcuts: n = [], inverted: r = !0, isMobile: i = !1 }) => /* @__PURE__ */ b(v, { children: [/* @__PURE__ */ b("div", {
 	className: "flex gap-2 items-center",
 	children: [/* @__PURE__ */ y("div", {
 		className: U(i ? "label-medium" : "label-micro", "flex-grow", r ? "text-primary-inverse" : "text-basic-primary"),
@@ -8524,7 +8521,7 @@ var fm = 300, pm = "pt-14", mm = "pb-20", hm = /* @__PURE__ */ function(e) {
 					tabIndex: -1,
 					"data-modal-open": e ? "true" : void 0,
 					onOpenAutoFocus: (e) => e.preventDefault(),
-					className: U("pointer-events-auto relative flex flex-col outline-none", E ? U("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", le, !f && "bg-elevation-ground") : U("fade w-full motion-reduce:!animate-none", o, f ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl", L && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), S, E && "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full"),
+					className: U("pointer-events-auto relative flex flex-col outline-none", E ? U("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", le, !f && "bg-elevation-ground") : U("fade w-full motion-reduce:!animate-none", o, f ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-3xl border border-tertiary bg-elevation-level-2 shadow-xl", L && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), S, E && "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full"),
 					children: [
 						oe ? /* @__PURE__ */ y("div", {
 							className: "absolute top-1 right-2 z-10",

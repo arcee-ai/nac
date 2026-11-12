@@ -1,29 +1,30 @@
 :root {
-  /* Brand */
-  --brand-50: #eafafa;
-  --brand-100: #d5f6f6;
-  --brand-200: #c0f2f2;
-  --brand-250: #abeded;
-  --brand-300: #86eaea;
-  --brand-400: #17cfcf;
-  --brand-450: #09b3b3;
-  --brand-500: #008c8c;
-  --brand-550: #037c7c;
-  --brand-600: #066f6f;
-  --brand-700: #094e4e;
-  --brand-800: #093434;
-  --brand-900: #0a1f1f;
-  --brand-950: #0b1818;
-  --brand-trans-50: #008c8c1a;
-  --brand-trans-100: #008c8c26;
-  --brand-trans-200: #008c8c33;
-  --brand-trans-300: #008c8c40;
-  --brand-trans-400: #008c8c4d;
-  --brand-trans-500: #008c8c66;
-  --brand-trans-600: #008c8c80;
-  --brand-trans-700: #008c8c99;
-  --brand-trans-800: #008c8cbf;
-  --brand-trans-900: #008c8ce5;
+  /* Brand: neutral, as the rest of the palette. Attention (yellow) and
+     destructive (red) are the only signal colours. */
+  --brand-50: var(--gray-50);
+  --brand-100: var(--gray-100);
+  --brand-200: var(--gray-200);
+  --brand-250: var(--gray-200);
+  --brand-300: var(--gray-300);
+  --brand-400: var(--gray-400);
+  --brand-450: var(--gray-400);
+  --brand-500: var(--gray-500);
+  --brand-550: var(--gray-500);
+  --brand-600: var(--gray-600);
+  --brand-700: var(--gray-700);
+  --brand-800: var(--gray-800);
+  --brand-900: var(--gray-900);
+  --brand-950: var(--gray-950);
+  --brand-trans-50: #8080801a;
+  --brand-trans-100: #80808026;
+  --brand-trans-200: #80808033;
+  --brand-trans-300: #80808040;
+  --brand-trans-400: #8080804d;
+  --brand-trans-500: #80808066;
+  --brand-trans-600: #80808080;
+  --brand-trans-700: #80808099;
+  --brand-trans-800: #808080bf;
+  --brand-trans-900: #808080e5;
 
   /* Complementary / Blue */
   --blue-50: #f3fcff;
@@ -77,42 +78,42 @@
   --yellow-900: #33241a;
   --yellow-950: #1f1813;
 
-  /* Neutral */
-  --gray-975: #101212;
-  --gray-950: #111313;
-  --gray-900: #161818;
-  --gray-850: #1b1d1d;
-  --gray-800: #1f2323;
-  --gray-750: #242828;
-  --gray-700: #2c3030;
-  --gray-650: #333838;
-  --gray-600: #3a4141;
-  --gray-500: #5c6565;
-  --gray-400: #7b8888;
-  --gray-300: #a6afaf;
-  --gray-200: #c1c7c7;
-  --gray-150: #d0d4d4;
-  --gray-100: #dee1e1;
-  --gray-75: #e7eaea;
-  --gray-50: #f1f2f2;
-  --gray-25: #fafafa;
+  /* Neutral: achromatic steps on the OKLCH lightness scale. */
+  --gray-975: #080808;
+  --gray-950: #0b0b0b;
+  --gray-900: #0d0d0d;
+  --gray-850: #121212;
+  --gray-800: #171717;
+  --gray-750: #1c1c1c;
+  --gray-700: #262626;
+  --gray-650: #303030;
+  --gray-600: #404040;
+  --gray-500: #6f6f6f;
+  --gray-400: #929292;
+  --gray-300: #aeaeae;
+  --gray-200: #c4c4c4;
+  --gray-150: #d4d4d4;
+  --gray-100: #e3e3e3;
+  --gray-75: #ebebeb;
+  --gray-50: #f3f3f3;
+  --gray-25: #f9f9f9;
   --white: #fff;
-  --black: #050505;
+  --black: #0a0a0a;
   --transparent: #fff0;
-  --transparent-dark-mode: #16161700;
+  --transparent-dark-mode: #08080800;
 
   /* Trans */
-  --dark-trans-25: #10191e0d;
-  --dark-trans-50: #0e171b1a;
-  --dark-trans-100: #0e171b26;
-  --dark-trans-200: #10191e33;
-  --dark-trans-300: #10191e40;
-  --dark-trans-400: #10191e4d;
-  --dark-trans-500: #10191e66;
-  --dark-trans-600: #10191e80;
-  --dark-trans-700: #10191e99;
-  --dark-trans-800: #0e161bbf;
-  --dark-trans-900: #090f11e5;
+  --dark-trans-25: #0a0a0a0d;
+  --dark-trans-50: #0a0a0a1a;
+  --dark-trans-100: #0a0a0a26;
+  --dark-trans-200: #0a0a0a33;
+  --dark-trans-300: #0a0a0a40;
+  --dark-trans-400: #0a0a0a4d;
+  --dark-trans-500: #0a0a0a66;
+  --dark-trans-600: #0a0a0a80;
+  --dark-trans-700: #0a0a0a99;
+  --dark-trans-800: #0a0a0abf;
+  --dark-trans-900: #0a0a0ae5;
 
   --blue-trans-50: #0591b514;
   --blue-trans-100: #0591b526;

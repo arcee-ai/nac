@@ -11,7 +11,6 @@ import {
   SessionBehaviorIcon,
   SessionBehaviorIconSize,
 } from "@/app/atoms";
-import { SAMPLE_IDS } from "@/app/components/pages/design-preview/samples";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { cn } from "@/app/lib/cn";
 import { SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
@@ -147,13 +146,9 @@ export function SessionIdentitySection() {
           <ForkSessionItem sessionId="14231vsd7897-aaaa" title="Fork: Session title" deleted />
         </div>
         <div className="flex flex-col gap-1 max-w-[320px]">
-          <ProjectButton entityId={SAMPLE_IDS[3]} name="arcee-ai/nac" trailing="4" active />
-          <ProjectButton entityId={SAMPLE_IDS[4]} name="arcee-ai/telos" trailing="1" running />
-          <ProjectButton
-            entityId={SAMPLE_IDS[5]}
-            name="Unassigned session"
-            variant={ProjectButtonVariant.Orphan}
-          />
+          <ProjectButton name="arcee-ai/nac" trailing="4" active />
+          <ProjectButton name="arcee-ai/telos" trailing="1" running />
+          <ProjectButton name="Unassigned session" variant={ProjectButtonVariant.Orphan} />
         </div>
       </div>
     </BoxSurface>

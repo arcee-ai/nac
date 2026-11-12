@@ -131,7 +131,7 @@ export function HistoryDetail({
         <article
           aria-label="Recorded terminal activity"
           className={cn(
-            "flex flex-col flex-1 min-h-0 gap-4 overflow-auto px-4 pb-4 font-[family-name:IBMPlexMono] text-sm font-medium [&>*]:shrink-0",
+            "flex flex-col flex-1 min-h-0 gap-4 overflow-auto px-4 pb-4 font-[family-name:Geist_Mono_Variable] text-sm font-medium [&>*]:shrink-0",
             top,
           )}
         >

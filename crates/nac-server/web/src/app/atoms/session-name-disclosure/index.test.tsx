@@ -40,12 +40,7 @@ describe("session name disclosure", () => {
     [
       "orphan",
       (name: string, navigate: () => void) => (
-        <ProjectButton
-          entityId="a"
-          name={name}
-          variant={ProjectButtonVariant.Orphan}
-          onClick={navigate}
-        />
+        <ProjectButton name={name} variant={ProjectButtonVariant.Orphan} onClick={navigate} />
       ),
     ],
   ] as const)(

@@ -115,7 +115,6 @@ export function SubagentChatInputBox({
       <ComposerCard
         compact={isMobile}
         surface={focused ? "focus" : undefined}
-        outline="tertiary"
         className={isMobile ? "gap-6" : undefined}
       >
         <div className="flex items-end">

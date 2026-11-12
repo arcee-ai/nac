@@ -199,7 +199,6 @@ function ProjectResults({
   return rows.map((entry) => (
     <ProjectButton
       key={entry.project.project_id}
-      entityId={entry.project.project_id}
       name={entry.project.name}
       active={entry.project.project_id === activeProjectId}
       running={entry.running > 0}
