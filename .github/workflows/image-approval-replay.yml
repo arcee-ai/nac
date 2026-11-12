@@ -1,0 +1,44 @@
+# Inactive source-only sketch. The job cannot run until a separately reviewed
+# activation removes the impossible repository guard and supplies protected pins.
+name: Protected image approval replay (inactive)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Exact PR number from a protected image approval record
+        required: true
+        type: number
+      merge_sha:
+        description: Exact synthetic merge SHA from that record
+        required: true
+        type: string
+      image:
+        description: Exact sha256 image ID from that record
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  replay:
+    if: ${{ github.repository == '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Fail closed before any approval API or artifact download
+        env:
+          APPROVAL_PR: ${{ inputs.pull_request }}
+          APPROVAL_MERGE: ${{ inputs.merge_sha }}
+          APPROVAL_IMAGE: ${{ inputs.image }}
+        run: |
+          python3 scripts/security/image_approval_entrypoint.py \
+            "$APPROVAL_PR" "$APPROVAL_MERGE" "$APPROVAL_IMAGE" \
+            "$RUNNER_TEMP/nac-image-approval-replay"
