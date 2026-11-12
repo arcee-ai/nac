@@ -16,6 +16,26 @@ record its image ID and `GITHUB_SHA` in the bundle. The present `build-smoke` jo
 combines build and strict scan, and its artifact lacks the frozen OCI image;
 that job does **not** satisfy this contract. A targeted rerun of it rebuilds.
 
+`scripts/security/image_candidate_archive.py` is a bounded, source-only reader
+for that future artifact. The artifact must be one ZIP containing exactly
+`image.tar` (a single-image Docker save archive compatible with OCI) and flat
+`inventory/` files, including `bundle.json` and `identity.json`. Its caller
+must first authenticate the artifact ID, run, attempt and ZIP SHA-256 using
+the protected approval record and GitHub API. The reader checks that digest,
+rejects traversal, links, duplicates and oversized members, binds the V4
+inventory to the reviewed image/source, and verifies the saved image config
+digest or traverses the approved OCI index to exactly one `linux/amd64`
+manifest whose config digest and size match the saved Docker manifest before
+`docker load`. Unknown extra platforms and unverifiable descriptor chains fail
+closed. It checks the loaded image ID and
+`linux/amd64` platform afterwards. This intake belongs in a credential-free,
+isolated job; its output is still untrusted until `image_scan.py --bundle`
+validates every retained file hash and performs a fresh strict rescan. The
+synthetic tests also exercise wrong ZIP digest, source/image, archive config,
+path, link, member set and Docker identity/platform negatives. A test builds
+and saves a real `linux/amd64` Docker image when a daemon is available. The current CI producer
+does not yet emit this format, so this module is **not** a live approval path.
+
 A human-reviewed record would be merged to a dedicated
 `security-image-approvals` branch, separate from the candidate source. Each
 schema-1 record names the repository, PR number, current head/base and
@@ -75,6 +95,15 @@ trusted safe download/extraction and strict replay workflow, and a fixture PR
 showing positive status attribution plus wrong-run/attempt/head/digest, expired
 and revoked negatives. No live approval branch, credential, App source rule or
 merge-time fixture has been configured here.
+
+The pending DAG change must let a successful unprivileged `build-candidate`
+retain the exact tested OCI image and V4 bundle before a separate strict scan
+can block. It must keep the terminal managed/Required checks red for scanner,
+inventory, tool or DB errors. The protected replay workflow must then fetch
+the artifact by approved ID, use the reader above, recollect stale V4 evidence
+on the same loaded image when needed, and pass independently authenticated
+policy/evidence into the verifier. None of these workflow transitions is
+implemented by this source-only slice; in particular it creates no status.
 
 GitHub status publication is append-only. If a revocation workflow fails after
 an earlier success, the old green status may remain until GitHub's required
