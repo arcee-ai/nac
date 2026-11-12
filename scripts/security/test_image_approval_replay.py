@@ -40,6 +40,10 @@ class ReplayTests(unittest.TestCase):
         self.collected_at = "2026-11-11T11:30:00Z"
         self.loads = 0
         self.scans = 0
+        self.verifies = 0
+        self.recollections = 0
+        self.fail_recollection = False
+        self.changed_evidence = False
         self.change_pr_on_recheck = False
 
     def api(self, endpoint):
@@ -73,12 +77,33 @@ class ReplayTests(unittest.TestCase):
         self.assertTrue(image_tar.is_file())
         self.loads += 1
 
+    def verify(self, inventory, destination, *, image, source_revision):
+        self.assertTrue(inventory.is_dir())
+        self.assertEqual((image, source_revision), (IMAGE, MERGE))
+        self.verifies += 1
+        destination.mkdir()
+        return {"image": image, "source_revision": source_revision}
+
+    def recollect(self, inventory, verified, destination, identity, *, image, source_revision):
+        self.assertTrue(inventory.is_dir())
+        self.assertTrue(verified.is_dir())
+        self.assertEqual(identity, {"image": image, "source_revision": source_revision})
+        self.recollections += 1
+        if self.fail_recollection:
+            raise ValueError("synthetic collection failed")
+        destination.mkdir()
+        write(destination / "applicability-context.json", {
+            "schema_version": 2, "collected_at": "2026-11-11T11:59:00Z"})
+        return destination
+
     def scan(self, command, *, check):
         self.assertFalse(check)
         self.assertIn("--reviewed-image-approval-sha256", command)
         self.assertEqual(command[command.index("--reviewed-image-approval-sha256") + 1],
                          self.record["approval_sha256"])
         self.scans += 1
+        if self.changed_evidence:
+            return mock.Mock(returncode=2)
         output = Path(command[command.index("--output") + 1])
         output.mkdir()
         write(output / "findings.json", [])
@@ -109,24 +134,40 @@ class ReplayTests(unittest.TestCase):
                 candidate_policy=self.source["candidate_policy"],
                 source_applicability=self.source["source_applicability"],
                 candidate_applicability=self.source["candidate_applicability"],
-                clock=lambda: NOW, api=self.api, scan=self.scan, load=self.load)
+                clock=lambda: NOW, api=self.api, scan=self.scan, load=self.load,
+                verify=self.verify, recollect=self.recollect)
 
     def test_proposes_only_after_exact_replay_and_current_recheck(self):
         status = self.invoke()
         self.assertEqual(status["state"], "success")
         self.assertEqual(status["sha"], MERGE)
-        self.assertEqual((self.loads, self.scans), (1, 1))
+        self.assertEqual((self.loads, self.scans, self.verifies, self.recollections),
+                         (1, 1, 1, 0))
         self.assertTrue((self.workspace / "review/policy.json").read_bytes() ==
                         self.readback.files[f"{self.readback.root}/policy.json"])
 
-    def test_stale_or_future_v4_context_never_loads_or_scans(self):
-        for collected_at in ("2026-11-10T11:59:59Z", "2026-11-11T12:00:01Z"):
-            with self.subTest(collected_at=collected_at):
-                self.collected_at = collected_at
-                with self.assertRaisesRegex(ValueError, "stale/future frozen observation"):
-                    self.invoke()
-                self.assertEqual((self.loads, self.scans), (0, 0))
-                self.workspace.rename(self.root / ("failed-" + collected_at[:10] + collected_at[11:13]))
+    def test_stale_v4_recollects_and_future_context_fails(self):
+        self.collected_at = "2026-11-10T11:59:59Z"
+        self.assertEqual(self.invoke()["state"], "success")
+        self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
+        self.workspace.rename(self.root / "prior-replay")
+        self.collected_at = "2026-11-11T12:00:01Z"
+        with self.assertRaisesRegex(ValueError, "future frozen observation"):
+            self.invoke()
+        self.assertEqual((self.loads, self.scans, self.recollections), (1, 1, 1))
+
+    def test_stale_recollection_error_or_changed_evidence_fails(self):
+        self.collected_at = "2026-11-10T11:59:59Z"
+        self.fail_recollection = True
+        with self.assertRaisesRegex(ValueError, "synthetic collection failed"):
+            self.invoke()
+        self.assertEqual((self.loads, self.scans), (1, 0))
+        self.workspace.rename(self.root / "failed-replay")
+        self.fail_recollection = False
+        self.changed_evidence = True
+        with self.assertRaisesRegex(ValueError, "did not exit successfully"):
+            self.invoke()
+        self.assertEqual((self.loads, self.scans), (2, 1))
 
     def test_wrong_archive_provenance_and_changed_live_pr_fail(self):
         self.objects["artifact"]["digest"] = "sha256:" + "0" * 64

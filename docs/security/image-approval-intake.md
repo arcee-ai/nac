@@ -84,11 +84,31 @@ the approved ID in an isolated read-only job without a status-writing token.
 Those job and App controls
 are not present.
 
-This slice deliberately fails closed when the frozen V4 observation clock is
-older than 24 hours or in the future. It does not recollect V4 on the loaded
-image, relabel timestamps, reuse a prior disposition, or treat the original
-blocked scan as an approval. Recollection, changed-evidence human review, and
-current merge-time authority remain future work.
+The preceding replay layer fails closed when the frozen V4 observation clock
+is older than 24 hours or in the future. It never relabels timestamps, reuses
+a prior disposition, or treats the original blocked scan as an approval.
+
+The next source-only derivative path, `image_approval_refresh.py`, verifies
+every byte and passive observation in the original V4 bundle before loading
+the exact saved image. When the original clock is stale, it keeps that frozen
+bundle untouched and builds a separately hashed derivative: the base
+SBOM/runtime/coverage/Rust bytes stay identical, while a fresh never-started
+container export and pinned source downloads recollect V4 observations from
+the loaded image. Replay passes only that derivative to the strict scanner;
+the current protected policy and evidence bytes remain the sole disposition
+inputs. A changed observation must satisfy those same reviewed bindings and
+proofs or the scan fails; new evidence requires a new human-reviewed record.
+The derivative receipt records both frozen and new manifest/identity hashes.
+
+Docker's local `Identity.Build` ref appears in the frozen build inspection but
+is omitted after a clean `docker load`; RepoTags, RepoDigests and
+Metadata.LastTagTime can also change. This path requires the original verified
+one-entry build ref and time, the exact loaded ID, config, RootFS, platform and
+every other inspect field, and allows only that specific build-identity
+serialization loss plus the named tag/location changes. It does not infer a
+signed origin from the loaded inspection or replace the independently checked
+Actions run/job/artifact provenance. Any other inspection difference fails
+closed. No live workflow or App status writer invokes this path yet.
 
 ## Trusted replay and status
 
