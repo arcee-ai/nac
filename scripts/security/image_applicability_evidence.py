@@ -1,17 +1,22 @@
-"""Passive exact-image curl/Kerberos evidence; never supplies a security verdict."""
+"""Versioned passive exact-image package evidence; never supplies a security verdict."""
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
 import struct
+import stat
 import tarfile
 
 from image_inventory import require, sha256
 
 PACKAGES = {"krb5-libs": "krb5", "curl": "curl", "libcurl-openssl4": "curl"}
 PROFILE = "nac-curl-krb5-filesystem-v1"
+LIBSSH2_PROFILE = "nac-curl-krb5-libssh2-filesystem-v2"
+LIBSSH2_LOCAL_PATCHES = {"libssh2-list-followups.patch", "libssh2-pointer-followup.patch"}
+MAX_SOURCE_BYTES = 150 * 1024 ** 2
 FILESYSTEM_SCOPE = "final-underlying-image-filesystem"
 LIMITATIONS = [
     "Named-path absence does not prove absence of renamed or embedded applications.",
@@ -28,6 +33,36 @@ def canonical_json(value):
 
 def digest(value):
     return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def packages_for_profile(profile):
+    require(profile in {PROFILE, LIBSSH2_PROFILE}, "unsupported passive applicability profile")
+    return {**PACKAGES, **({"libssh2": "libssh2"} if profile == LIBSSH2_PROFILE else {})}
+
+
+def source_digest(path):
+    """Hash bounded original source bytes from one non-following regular FD."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        metadata = os.fstat(source.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= MAX_SOURCE_BYTES,
+                "nonregular/oversized applicability source")
+        checksum, length = hashlib.sha256(), 0
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            length += len(chunk)
+            require(length <= metadata.st_size, "applicability source grew while hashing")
+            checksum.update(chunk)
+        require(length == metadata.st_size, "applicability source changed size while hashing")
+        return checksum.hexdigest()
+
+
+def local_patches(pins):
+    patches = pins["libssh2"].get("downstream_fixes")
+    require(isinstance(patches, list) and len(patches) == len(LIBSSH2_LOCAL_PATCHES) and
+            all(isinstance(item, dict) and isinstance(item.get("patch"), str) and item["patch"] in LIBSSH2_LOCAL_PATCHES and
+                isinstance(item.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", item["sha256"])
+                for item in patches) and {item["patch"] for item in patches} == LIBSSH2_LOCAL_PATCHES,
+            "missing/invalid libssh2 local patch pins")
+    return {item["patch"]: item["sha256"] for item in patches}
 
 
 def safe_path(value):
@@ -283,21 +318,28 @@ def export_container(image, inspected, container_inspected):
     return declared
 
 
-def collect_evidence(filesystem_archive, *, image, source_revision, inspected, container_inspected, pins, downloads):
+def collect_evidence(filesystem_archive, *, image, source_revision, inspected, container_inspected, pins, downloads,
+                     profile=PROFILE):
+    package_owners = packages_for_profile(profile)
     subject = subject_identity(image, source_revision, inspected)
     declared = export_container(image, inspected, container_inspected)
     filesystem, consumers, retained = filesystem_profile(Path(filesystem_archive))
     require(retained.get("/usr/share/nac/runtime-package-build/sources.lock.json") == pins,
             "installed source lock differs from reviewed image source")
     source_files, packages = {}, {}
-    names = {value for owner in set(PACKAGES.values()) for value in [pins[owner]["archive"], *pins[owner]["patches"]]}
+    names = {value for owner in set(package_owners.values()) for value in [pins[owner]["archive"], *pins[owner]["patches"]]}
     require(set(downloads) == names, "missing/unknown source archive or patch evidence")
     for name in sorted(names):
         path, spec = Path(downloads[name]), pins["downloads"][name]
-        require(path.is_file() and not path.is_symlink() and sha256(path) == spec["sha256"],
+        require(path.is_file() and not path.is_symlink() and source_digest(path) == spec["sha256"],
                 "source archive/patch digest differs from reviewed lock")
         source_files[name] = spec
-    for name, owner in PACKAGES.items():
+    local = local_patches(pins) if profile == LIBSSH2_PROFILE else {}
+    for name, expected_hash in local.items():
+        item = filesystem["entries"].get("/usr/share/nac/runtime-package-build/" + name, {})
+        require(item.get("type") == "file" and item.get("size", 0) <= 16 * 1024 ** 2 and
+                item.get("sha256") == expected_hash, "libssh2 local patch bytes differ from reviewed lock")
+    for name, owner in package_owners.items():
         spec = pins[owner]
         record = retained.get(f"/usr/share/nac/package-provenance/{name}.json")
         expected = {"schema_version": 1, "supplier": "NAC", "package": name, **spec, "downloads": pins["downloads"]}
@@ -308,10 +350,13 @@ def collect_evidence(filesystem_archive, *, image, source_revision, inspected, c
                 all(payload_signature(path, filesystem["entries"]) == signature for path, signature in payload.items()),
                 "installed package payload differs from retained source record")
         patches = {patch: source_files[patch]["sha256"] for patch in spec["patches"]}
+        if owner == "libssh2":
+            require(not set(patches) & set(local), "duplicate libssh2 remote/local patch")
+            patches.update(local)
         packages[name] = {"upstream_version": spec["version"], "package_version": spec["package_version"],
                           "source_commit": spec["source_commit"], "source_sha256": source_files[spec["archive"]]["sha256"],
                           "patches_sha256": digest(patches), "payload_sha256": digest(payload)}
-    provenance = {"schema_version": 1, "profile": PROFILE, "subject": subject,
+    provenance = {"schema_version": 1, "profile": profile, "subject": subject,
                   "filesystem_scope": FILESYSTEM_SCOPE, "declared_volume_paths": declared,
                   "container_inspection_sha256": digest(container_inspected),
                   "filesystem_archive_sha256": sha256(Path(filesystem_archive)), "source_lock_sha256": digest(pins),
@@ -320,6 +365,8 @@ def collect_evidence(filesystem_archive, *, image, source_revision, inspected, c
                   "application_profile_sha256": digest({"filesystem": digest(filesystem), "consumers": digest(consumers),
                                                         "filesystem_scope": FILESYSTEM_SCOPE, "declared_volume_paths": declared}),
                   "limitations": LIMITATIONS}
+    if profile == LIBSSH2_PROFILE:
+        provenance["local_patches"] = local
     return {"provenance": provenance, "filesystem": filesystem, "consumers": consumers}
 
 
@@ -338,13 +385,15 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--profile", choices=[PROFILE, LIBSSH2_PROFILE], default=PROFILE)
     args = parser.parse_args()
     pins = json.loads(args.pins.read_text())
-    names = {name for owner in set(PACKAGES.values()) for name in [pins[owner]["archive"], *pins[owner]["patches"]]}
+    names = {name for owner in set(packages_for_profile(args.profile).values())
+             for name in [pins[owner]["archive"], *pins[owner]["patches"]]}
     result = collect_evidence(args.filesystem, image=args.image, source_revision=args.source_revision,
                               inspected=json.loads(args.inspect.read_text()),
                               container_inspected=json.loads(args.container_inspect.read_text()), pins=pins,
-                              downloads={name: args.downloads / name for name in names})
+                              downloads={name: args.downloads / name for name in names}, profile=args.profile)
     args.output.mkdir(parents=True, exist_ok=False)
     for name, value in result.items():
         (args.output / (name + ".json")).write_bytes(canonical_json(value))

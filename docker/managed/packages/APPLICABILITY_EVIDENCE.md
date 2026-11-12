@@ -1,4 +1,4 @@
-# Passive curl and Kerberos evidence (ALL-502)
+# Passive owned-package evidence (ALL-502)
 
 `scripts/security/image_applicability_evidence.py` adds a bounded evidence
 producer and retained-export validator. It does not change the image, scanner,
@@ -91,6 +91,45 @@ selected names to local paths. It returns a mapping with `provenance`,
 reconstructs and compares every artifact. There is deliberately no JSON-only
 completeness-validation path. A retained export must independently remain bound
 to the exact image; its hashes alone cannot authenticate that association.
+
+## Versioned libssh2 evidence capability
+
+New `image_scan.py --collect-applicability` collections emit inventory bundle V4
+with collection context schema 2 and provenance profile
+`nac-curl-krb5-libssh2-filesystem-v2`. V2 base bundles and V3/context-1 bundles
+remain readable; V3 selects the original curl/Kerberos source set and nine
+observations. The collector API still defaults to that legacy profile. Select
+the new standalone capability explicitly with
+`--profile nac-curl-krb5-libssh2-filesystem-v2` or the matching API `profile=`.
+The bundle and context versions must agree; changing a manifest version cannot
+silently reinterpret the retained profile or omit required libssh2 inputs.
+
+V4 additionally retains the locked libssh2 source archive, Debian patch archive
+and both supplier patch files. The two local downstream corrections,
+`libssh2-list-followups.patch` and `libssh2-pointer-followup.patch`, are already
+included as original files under `/usr/share/nac/runtime-package-build/` in the
+complete export. Each must be a regular file, at most 16 MiB, with bytes matching
+its independently retained source-lock SHA256. Symlink or hardlink substitutes
+are rejected. The libssh2 `patches_sha256` commits to the canonical mapping of all
+three remote patch inputs and both local corrections; `local_patches` exposes
+the latter mapping in provenance. The installed libssh2 record, truthful
+upstream/APK versions and every recorded payload signature receive the same
+full-export validation as the original packages.
+
+V4 adds only these explicit scanner-coordinate observations, all bound to
+`installed_package: apk:libssh2` and the original collection clock:
+`apk:libssh2`, `upstream:libssh2/libssh2`, `upstream-wolfi:libssh2`.
+The existing filesystem/consumer artifact format and curl/Kerberos observations
+remain unchanged for identical inputs. Remote source reads remain limited to
+150 MiB each and hash one non-following regular file descriptor in 1 MiB chunks;
+JSON input reads and retained-bundle copies are bounded and reject source links.
+
+This capability records provenance, patch commitments and installed bytes. It
+does not establish applied-patch semantics, native regression acceptance,
+advisory applicability or a security disposition. Production admission rules
+remain empty and every libssh2 raw finding remains unresolved. Current private
+publisher scanner pins/schema acceptance and actual V4 image qualification are
+separate integration requirements.
 
 ## Trust and acceptance limits
 

@@ -162,7 +162,7 @@ def qualify(output, cache, db):
     rust_summary = qualify_rust(output / "rust-official-controls", download)
     runtime_summary = {}
     for label, versions in [("vulnerable", {"go": "1.27.0", "uv": "0.12.1", "git_lfs": "3.6.0"}),
-                            ("safe", {"go": "1.27.3", "uv": "0.13.4", "git_lfs": "3.8.0"})]:
+                            ("safe", {"go": "1.27.4", "uv": "0.13.4", "git_lfs": "3.8.0"})]:
         versions["gh"] = "2.0.0" if label == "vulnerable" else "2.103.0"
         runtime_output = output / f"{label}-runtime-queries"
         runtime_output.mkdir()

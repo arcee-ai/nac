@@ -1,4 +1,6 @@
+import { reverseImageApplicability, reverseStrictImageSummary } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
+import { reverseManagedSupplierControl } from "./managed-supplier-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -15,7 +17,10 @@ const digest = value => createHash('sha256').update(JSON.stringify(sort(value)))
 
 function verify(value) {
   const config = structuredClone(value); reverseAssetTokens(config);
-  const steps = config.jobs['build-smoke'].steps;
+  reverseImageApplicability(config);
+  reverseStrictImageSummary(config);
+  reverseManagedSupplierControl(config, "build-candidate");
+  const steps = config.jobs['build-candidate'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {
     name: 'Select supported image build driver', id: 'image-driver',
@@ -30,12 +35,12 @@ function verify(value) {
   assert.equal(build.with.builder, '${{ steps.buildx.outputs.name }}');
   assert.equal(steps.indexOf(selector) + 1, steps.indexOf(setup));
   assert.equal(steps.indexOf(setup) + 1, steps.indexOf(build));
-  config.jobs['build-smoke'].steps = steps.filter(s => s !== selector);
+  config.jobs['build-candidate'].steps = steps.filter(s => s !== selector);
   delete setup.id;
   delete setup.with;
   delete build.with.builder;
-  // EXACT 62db workflow, including all cold/cache/security/receipt/identity fields.
-  assert.equal(digest(config), 'ad745396dfc6813101518ec3c40e7b2a86c8fb368f5380436cb7eb2fb8b11ba5');
+  // Exact post-split graph, including cold/cache/security/receipt/identity fields.
+  assert.equal(digest(config), 'c635d13d3ea02b0c5c234ad6f8ca1ff77fbc43095c24a206ed21ff84febe49f4');
 }
 
 test('driver selection and explicit builder binding reverse to the exact prior image workflow', () => verify(source()));
@@ -49,6 +54,10 @@ test('real selector rejects malformed/unsupported capabilities and emits only kn
 
 test('selection cannot bypass cold/cache trust, immutable image, security or quality requirements', () => {
   const changes = [
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source').run = 'true'; },
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source').if = 'false'; },
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source')['continue-on-error'] = true; },
+    s => { s.splice(s.findIndex(v => v.name === 'Check libssh2 supplier overflow on i386 source'), 1); },
     s => { s.find(v => v.id === 'image-driver').if = '!inputs.cold_caches'; },
     s => { s.find(v => v.id === 'image-driver')['continue-on-error'] = true; },
     s => { s.find(v => v.id === 'image-driver').env = { DRIVER: '${{ inputs.driver }}' }; },
@@ -65,18 +74,45 @@ test('selection cannot bypass cold/cache trust, immutable image, security or qua
     s => { s.find(v => v.id === 'image').env.BUILT_IMAGE_ID = 'mutable:tag'; },
     s => { s.find(v => v.id === 'smoke').if = 'false'; },
     s => { s.find(v => v.id === 'inventory').if = 'false'; },
-    s => { s.find(v => v.run?.includes('image_ci_report.py'))['continue-on-error'] = true; },
   ];
   for (const change of changes) {
     const value = source();
-    change(value.jobs['build-smoke'].steps);
+    change(value.jobs['build-candidate'].steps);
     assert.throws(() => verify(value));
   }
   for (const change of [
     v => { v.jobs['scanner-qualification'].if = 'false'; },
     v => { v.jobs.result.needs = ['prepare', 'build-smoke']; },
     v => { v.permissions.contents = 'write'; },
+    v => { v.jobs['strict-scan'].steps.find(s => s.run?.includes('image_ci_report.py'))['continue-on-error'] = true; },
   ]) {
     const value = source(); change(value); assert.throws(() => verify(value));
   }
+});
+
+const imageEvidenceMutations = [
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ''); },
+  steps => { const item = steps.find(step => step.id === 'inventory'); item.run = item.run.replace(' --collect-applicability', ' --collect-applicability --collect-applicability'); },
+];
+
+const strictImageMutations = [
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('### Strict exact-image security result', '### Image findings are advisory; enforcement is deferred'); },
+  steps => { const item = steps.find(step => step.name === 'Report exact-image security findings'); item.run = item.run.replace('Blocking findings and incomplete scans fail this job.', 'Findings are advisory.'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('|| scan_status=$?', '|| true'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scanner-exit "$scan_status"', '--scanner-exit 0'); },
+  steps => { const item = steps.find(step => step.name === 'Scan the same tested image with reviewed policy'); item.run = item.run.replace('--scan-output image-security-evidence/security', '--scan-output stale-evidence'); },
+];
+
+test('image evidence and reporting deltas cannot weaken the original driver contract', () => {
+  for (const mutate of imageEvidenceMutations) {
+    const value = source(); mutate(value.jobs['build-candidate'].steps);
+    assert.throws(() => verify(value));
+  }
+  for (const mutate of strictImageMutations) {
+    const value = source(); mutate(value.jobs['strict-scan'].steps);
+    assert.throws(() => verify(value));
+  }
+  const moved = source();
+  moved.jobs['strict-scan'].steps.find(step => step.name === 'Scan the same tested image with reviewed policy').run += ' --collect-applicability';
+  assert.throws(() => verify(moved));
 });

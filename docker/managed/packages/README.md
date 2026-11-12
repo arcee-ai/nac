@@ -90,6 +90,14 @@ additional benign runtime smoke checks compiler execution, GNU/OpenSSL ABI,
 Python venv/SSL, Node/UTF-8, plugin loading and recorded installed-file hashes.
 It does not perform malformed-protocol or exploit validation.
 
+The image smoke also compiles a small gettext probe in the running candidate
+against its installed glibc. It first requires a normal catalog translation,
+then rejects a `LANGUAGE=../outside` catalog that an older glibc payload loads.
+The probe prints the tested `libc.so.6` SHA256. This is a behavioral check of
+the current image's gettext path handling; it does not prove the supplier's
+build-time test ran, authenticate the image by itself, or clear the scanner
+finding without exact-image custody and independent review.
+
 Retire each backport when a maintained supplier package demonstrably contains
 the correction and preserves the required runtime profile. Retire the custom curl
 build when the supplier enables the supported options NAC retains. A version
@@ -145,6 +153,26 @@ The build preserves the supplier's CVE-2026-7598/55199 fixes using Debian's
 1.11.1 adaptations of the same accepted upstream changes, followed by the
 supplier's CVE-2026-55200/2025-15661 patches. Those latter files are checksum-bound
 to a public Wolfi revision; their contents were compared with the supplier recipe.
+Before the six newer patches, the builder checks the corrected guards in all four
+source seams and reverses each supplier patch in a disposable copy of its source
+file. The reversed copy must lose exactly the guards added by that patch. The
+55200 transport source already has one packet-length cap in another branch, so
+its fixed and reversed copies must contain two and one matching caps respectively.
+After the final corrected tree is built, `test-libssh2-supplier-controls.sh`
+compiles the corrected `userauth.c` and `packet.c` objects alongside exact
+single-patch-reversed copies. Bounded malformed-input probes require the fixed
+7598 username length and 55199 EXT_INFO parser paths to pass, and their
+reversed paths to make the specific allocation attempt or state mutation.
+Their allocator and packet fixtures stop before oversized input can be copied.
+The separate `libssh2-i386-supplier-control` Docker build target recompiles the
+same hash-checked corrected `transport.c` tree for 32-bit `size_t` and requires
+the 55200 full-packet callback's fixed early rejection and reversed nine-byte
+wrapped allocation attempt. It runs in managed-image CI after the amd64 build;
+it is never inherited by the runtime image. This i386 control proves the source
+guard under 32-bit arithmetic, not execution of the installed amd64 ELF. Run it
+locally with `docker buildx build --platform linux/386 --target
+libssh2-i386-supplier-control -f docker/managed/Dockerfile .`. These source
+controls do not clear scanner findings or establish applicability.
 The six selected CVE-2026-66032/66033/66034/66035/58050/58051 corrections come from
 the checksum-bound Debian 1.11.1-1+deb13u2 patch archive. Each upstream commit and
 exact archive member is retained separately. The 58051 Debian header names

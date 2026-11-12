@@ -21,9 +21,9 @@ import image_qualify as qualification
 
 IMAGE = "sha256:" + "1" * 64
 NOW = dt.datetime(2026, 10, 21, 12, tzinfo=dt.timezone.utc)
-RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.3 linux/amd64",
+RUNTIME = {"os_release": 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n', "nac": "nac-web 0.1.0 (abcdef123456)", "node": "v24.22.1", "go": "go version go1.27.4 linux/amd64",
            "gh": "gh version 2.103.0 (2026-10-21)\nhttps://github.com/cli/cli/releases/tag/v2.103.0",
-           "git_lfs": "git-lfs/3.8.0 (GitHub; linux amd64; go 1.27.3; git aece9221f8c09221a14395d964806b956289bc07)",
+           "git_lfs": "git-lfs/3.8.0 (GitHub; linux amd64; go 1.27.4; git aece9221f8c09221a14395d964806b956289bc07)",
            "uv": "uv 0.13.4 (abc 2026-10-20)", "dpkg": "base-files\t12.4+deb12u12"}
 SBOM = {"descriptor": {"name": "syft"}, "source": {"type": "image", "metadata": {"imageID": IMAGE}},
         "distro": {"id": "debian", "versionID": "12", "versionCodename": "bookworm"}, "artifacts": [
@@ -286,6 +286,8 @@ class DriverTests(unittest.TestCase):
         output.mkdir()
         self.assertEqual(scan.load_bundle(self.root, output)["image"], IMAGE)
         (self.root / "runtime.json").write_text("{}")
+        output = self.root / "corrupt-rescan"
+        output.mkdir()
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             scan.load_bundle(self.root, output)
 
@@ -416,15 +418,17 @@ class DriverTests(unittest.TestCase):
         current = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
             {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
         legacy = dict(current, name=rescan.LEGACY_INVENTORY_JOB)
+        older = dict(current, name=rescan.OLDER_INVENTORY_JOB)
         jobs = {2: [current], 1: [legacy]}
         artifacts = {2: [{"name": "managed-image-security-" + "a" * 40, "expired": False}],
                      1: [{"name": "managed-image-security-" + "b" * 40, "expired": False}]}
         self.assertEqual(rescan.select_run([newest, old], artifacts, jobs, NOW)[0]["id"], 2)
         self.assertEqual(rescan.select_run([old], artifacts, jobs, NOW)[0]["id"], 1)
+        self.assertEqual(rescan.select_run([old], artifacts, {1: [older]}, NOW)[0]["id"], 1)
         for invalid in ([], [dict(artifacts[2][0], expired=True)]):
             with self.assertRaises(ValueError):
                 rescan.select_run([newest, old], artifacts | {2: invalid}, jobs, NOW)
-        for ambiguous in ([current, current], [current, legacy]):
+        for ambiguous in ([current, current], [current, legacy], [current, older]):
             with self.assertRaisesRegex(ValueError, "ambiguous"):
                 rescan.select_run([newest, old], artifacts, jobs | {2: ambiguous}, NOW)
 
@@ -594,15 +598,42 @@ class DriverTests(unittest.TestCase):
         # A rescan must not read current checkout pins or require the old source
         # commit to exist in today's shallow checkout.
         upgraded = dict(PINS, GH_VERSION="3.0.0", GIT_LFS_VERSION="4.0.0", GIT_LFS_REVISION="b" * 40)
+        def evaluated(findings, trusted, candidate, output, **kwargs):
+            result = {"blocking": [], "excepted": [], "reporting": []}
+            inv.write_json(output / "findings.json", findings)
+            inv.write_json(output / "policy-result.json", result)
+            return result
         with patch.object(inv, "managed_go_pins", return_value=upgraded), patch.object(
                 scan, "managed_go_pins", side_effect=AssertionError("current checkout read")), patch.object(
                 scan, "install_tools", return_value=({}, {})), patch.object(scan, "scan_sbom", return_value={}), patch.object(
                 scan, "grype_findings", return_value=[]), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
                 scan, "query_rust", return_value=[]), patch.object(
-                scan, "evaluate", return_value={"blocking": [], "excepted": [], "reporting": []}):
+                scan, "evaluate", side_effect=evaluated):
             self.assertEqual(scan.run(args), 0)
         retained = json.loads((args.output / "identity.json").read_text())
         self.assertEqual(retained["go_application_pins"], PINS)
+        approved = self.root / "reviewed-image.json"
+        approved.write_text('{"schema_version":1,"rules":[]}')
+        proofs = self.root / "reviewed-proofs"
+        proofs.mkdir()
+        args.reviewed_image_approval = approved
+        args.reviewed_image_approval_sha256 = inv.sha256(approved)
+        args.reviewed_image_evidence = proofs
+        args.output = self.root / "post-build-rescan"
+        no_admissions = {"schema_version": 1, "status": "verified", "policy_sha256": "a" * 64,
+                         "candidate_policy_sha256": "b" * 64, "approval_mode": "post-build",
+                         "raw_findings": [], "dispositions": [], "unresolved_indexes": []}
+        with patch.object(scan, "install_tools", return_value=({}, {})), patch.object(
+                scan, "scan_sbom", return_value={}), patch.object(
+                scan, "grype_findings", return_value=[]), patch.object(
+                scan, "query_runtimes", return_value=[]), patch.object(
+                scan, "query_rust", return_value=[]), patch.object(
+                scan, "evaluate", side_effect=evaluated), patch.object(
+                scan.applicability_gate, "evaluate", return_value=no_admissions) as verifier:
+            self.assertEqual(scan.run(args), 0)
+        self.assertEqual(verifier.call_args.kwargs["reviewed_path"], approved)
+        self.assertEqual(verifier.call_args.kwargs["reviewed_sha256"], args.reviewed_image_approval_sha256)
+        self.assertEqual(verifier.call_args.kwargs["evidence_directory"], proofs)
         with self.assertRaises(ValueError):
             inv.inventory(SBOM, RUNTIME, IMAGE, expected_pins=upgraded)
         for pins in (None, {}, dict(PINS, GIT_LFS_REVISION="short")):
@@ -650,6 +681,34 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(scan.run(args), 2)
         command.assert_not_called()
         self.assertEqual(json.loads((args.output / "result.json").read_text())["status"], "error")
+
+    def test_post_build_approval_requires_retained_bundle_and_external_inputs(self):
+        external = self.root / "reviewed.json"
+        external.write_text('{"schema_version":1,"rules":[]}')
+        proofs = self.root / "proofs"
+        proofs.mkdir()
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        inside_bundle = bundle / "reviewed.json"
+        inside_bundle.write_bytes(external.read_bytes())
+        cases = (
+            (None, external, proofs, "requires a retained bundle"),
+            (bundle, scan.ROOT / ".github/security/image-applicability.json", proofs,
+             "cannot come from candidate source"),
+            (bundle, inside_bundle, proofs, "cannot come from candidate source"),
+            (bundle, external, bundle, "cannot come from candidate source"),
+            (bundle, external, None, "separate evidence directory"),
+        )
+        with patch.object(scan, "install_tools") as install:
+            for index, (retained, approval, evidence, message) in enumerate(cases):
+                args = argparse.Namespace(image=IMAGE, source_revision="a" * 40,
+                    output=self.root / f"invalid-approval-{index}", bundle=retained,
+                    reviewed_image_approval=approval, reviewed_image_approval_sha256="a" * 64,
+                    reviewed_image_evidence=evidence)
+                with self.subTest(index=index):
+                    self.assertEqual(scan.run(args), 2)
+                    self.assertIn(message, json.loads((args.output / "result.json").read_text())["error"])
+        install.assert_not_called()
 
 
 if __name__ == "__main__":
