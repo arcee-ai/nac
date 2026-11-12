@@ -43,6 +43,8 @@ def run_from_github(pull_request, merge_sha, image, workspace, *,
     """
     original = Path(workspace)
     root = original.resolve()
+    intake.require(not root.is_relative_to(replay.ROOT),
+                   "approval caller workspace must be outside repository")
     intake.require(not original.exists() and not original.is_symlink() and
                    not root.exists(), "approval caller workspace already exists")
     now = clock()
