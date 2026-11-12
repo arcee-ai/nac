@@ -122,6 +122,32 @@ protected record before the bounded extractor can use it. If GitHub changes
 storage delivery, the caller fails closed until the new origin is reviewed;
 this module does not grant artifact metadata or status authority by itself.
 
+`image_approval_source.py` reads the source exception and image-applicability
+policies as regular Git blobs at pinned commits. A future protected caller
+supplies the separately selected **current protected `dev` SHA** and the exact
+synthetic merge SHA. The reader checks repository ID, branch/ref identity,
+complete Git trees, regular file modes and Git blob hashes; candidate policy
+bytes must equal the current `dev` bytes. It rechecks the trusted ref before
+and after the read. Ordinary PR CI selects a PR base policy, but an unmerged
+stacked base can be author controlled and is not this approval caller's policy
+authority. A policy change in a candidate must first land through its own
+reviewed path. The GitHub `protected` bit still does not authenticate the
+ruleset or reviewer settings; activation must verify those independently.
+At the observed `dev` SHA `b55dbd1b6fe13e2acda4f7150395555bf690fdc4`,
+`.github/security/image-applicability.json` is absent, while #687's exact
+synthetic merge contains it. The current source read therefore fails closed;
+the reviewed policy must land on protected `dev` before live replay can pass.
+
+`image_approval_caller.py` is an inactive, read-only composition of the
+protected record readback, pinned source inputs, approved artifact-ID download
+and strict replay. It stages the exact source bytes in a new private workspace,
+passes only the recorded artifact ID and digest to the bounded downloader,
+and rechecks both protected record and source snapshots before returning an
+in-memory status proposal. Replay independently validates live PR, synthetic
+merge, run, job and artifact provenance and the complete ZIP digest. No
+workflow calls this composition, it has no status writer, and its `dev` pin
+does not by itself establish protected code or policy authority.
+
 ## Trusted replay and status
 
 The future publisher must run **only protected branch code**. A read-only job
@@ -170,11 +196,12 @@ showing positive status attribution plus wrong-run/attempt/head/digest, expired
 and revoked negatives. No live approval branch, credential, App source rule or
 merge-time fixture has been configured here.
 
-The protected replay workflow must fetch
-the artifact by approved ID, use the reader above, recollect stale V4 evidence
-on the same loaded image when needed, and pass independently authenticated
-policy/evidence into the verifier. None of these workflow transitions is
-activated by candidate custody; in particular it creates no status.
+The protected replay workflow must verify its own code and protected `dev`
+policy ruleset, use the read-only caller with a fresh pinned `dev` revision,
+recollect stale V4 evidence on the same loaded image when needed, and pass
+independently authenticated policy/evidence into the verifier. None of these
+workflow transitions is activated by candidate custody; in particular it
+creates no status.
 
 GitHub status publication is append-only. If a revocation workflow fails after
 an earlier success, the old green status may remain until GitHub's required
