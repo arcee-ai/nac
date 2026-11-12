@@ -284,7 +284,7 @@ test('PR and daily shell blocks preserve strict exits and evidence through both 
   const image = `sha256:${'a'.repeat(64)}`;
   const sha = 'b'.repeat(40);
   for (const name of ['managed-image-build', 'image-security-rescan']) {
-    const steps = name === 'managed-image-build' ? workflow(name).jobs['build-smoke'].steps : workflow(name).jobs.rescan.steps;
+    const steps = name === 'managed-image-build' ? workflow(name).jobs['strict-scan'].steps : workflow(name).jobs.rescan.steps;
     const scan = steps.find(step => step.run?.includes('image_ci_report.py --scan-output'));
     assert.ok(scan, 'strict reporting must run after capturing the scanner status');
     assert.ok(!scan.run.includes('|| true'));
@@ -340,10 +340,10 @@ process.exit(result.status ?? 2);
         needs['build-smoke'].result = result.status === 0 ? 'success' : 'failure';
         const imageNeeds = Object.fromEntries(imageJobs.map(job => [job, { result: 'success' }]));
         imageNeeds.prepare.outputs = { sha };
-        imageNeeds['build-smoke'].result = needs['build-smoke'].result;
+        imageNeeds['strict-scan'].result = needs['build-smoke'].result;
         const stable = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map(job => [job, { result: 'success' }]));
         stable.prepare.outputs = { sha, run: 'true' };
-        stable['managed-image'] = { result: imageNeeds['build-smoke'].result, outputs: { sha } };
+        stable['managed-image'] = { result: imageNeeds['strict-scan'].result, outputs: { sha } };
         if (result.status === 0) {
           requireImageComplete(imageNeeds, sha);
           requireManagedComplete(needs, sha);
