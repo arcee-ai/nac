@@ -2,12 +2,14 @@
 """Gate/rescan a loaded immutable managed image. Never builds or publishes images."""
 import argparse
 import datetime as dt
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import platform
 import re
+import stat
 import subprocess
 import sys
 import tarfile
@@ -21,6 +23,8 @@ from image_upstreams import upstream_findings, upstream_targets, wolfi_upstream_
 from image_rust import (RUST_PROBE, RUST_FILES, source_rust_pins,
                         collect_distribution, rust_inventory)
 from image_rust_advisories import query_rust
+import image_applicability_gate as applicability_gate
+import image_applicability_bundle as applicability_bundle
 
 ROOT = Path(__file__).resolve().parents[2]
 PINS = Path(__file__).with_name("image-tools.json")
@@ -246,21 +250,56 @@ def evaluate(findings, trusted_policy, candidate_policy, output, *, publication_
 def bundle_manifest(output, identity):
     # All evidence is bound to one image. Daily rescans verify these retained bytes.
     files = ["sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *sorted(RUST_FILES)]
-    write_json(output / "bundle.json", {"schema_version": 2, "image": identity,
+    extended = (output / "applicability-context.json").is_file()
+    schema_version = applicability_bundle.version(output) if extended else 2
+    if extended:
+        subject = json.loads((output / "identity.json").read_text())
+        files += sorted(applicability_bundle.files(subject, schema_version))
+    write_json(output / "bundle.json", {"schema_version": schema_version, "image": identity,
                "files": {name: sha256(output / name) for name in files}})
 
 
 def load_bundle(bundle, output):
-    manifest = json.loads((bundle / "bundle.json").read_text())
-    require(manifest.get("schema_version") == 2,
+    manifest = applicability_bundle.read_json(bundle, "bundle.json", maximum=4 * 1024 ** 2)
+    require(manifest.get("schema_version") in {2, 3, 4},
             "unsupported evidence bundle; reinventory exact image for Rust coverage")
-    require(set(manifest.get("files", {})) ==
-            {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}, "incomplete bundle")
+    expected = {"sbom.syft.json", "runtime.json", "identity.json", "coverage.json", *RUST_FILES}
+    retained_sources = set()
+    if manifest["schema_version"] in {3, 4}:
+        with os.fdopen(os.open(bundle / "identity.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+            metadata = os.fstat(source.fileno())
+            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 4 * 1024 * 1024,
+                    "nonregular/oversized retained identity")
+            raw_subject = source.read(4 * 1024 * 1024 + 1)
+        require(len(raw_subject) == metadata.st_size and
+                hashlib.sha256(raw_subject).hexdigest() == manifest.get("files", {}).get("identity.json"),
+                "retained evidence hash mismatch: identity.json")
+        subject = json.loads(raw_subject)
+        expected |= applicability_bundle.files(subject, manifest["schema_version"])
+        retained_sources = set(applicability_bundle.source_files(subject, manifest["schema_version"]).values())
+    require(set(manifest.get("files", {})) == expected, "incomplete bundle")
     for name, digest in manifest["files"].items():
-        require(sha256(bundle / name) == digest, f"retained evidence hash mismatch: {name}")
-        (output / name).write_bytes((bundle / name).read_bytes())
+        # V3/V4 include a complete image tar: never allocate its full size, follow
+        # a source symlink, or accept bytes different from those actually copied.
+        with os.fdopen(os.open(bundle / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+            metadata = os.fstat(source.fileno())
+            maximum = applicability_bundle.MAX_SOURCE_BYTES if name in retained_sources else 32 * 1024 ** 3
+            require(stat.S_ISREG(metadata.st_mode) and metadata.st_size <= maximum,
+                    f"nonregular/oversized retained evidence: {name}")
+            checksum, count = hashlib.sha256(), 0
+            with (output / name).open("xb") as destination:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    count += len(chunk)
+                    require(count <= metadata.st_size, f"retained evidence grew while copying: {name}")
+                    checksum.update(chunk)
+                    destination.write(chunk)
+            require(count == metadata.st_size and checksum.hexdigest() == digest,
+                    f"retained evidence hash mismatch: {name}")
     identity = json.loads((output / "identity.json").read_text())
     require(identity["image"] == manifest["image"], "retained identity mismatch")
+    if manifest["schema_version"] in {3, 4}:
+        require(applicability_bundle.version(output) == manifest["schema_version"],
+                "retained applicability capability differs from bundle version")
     return identity
 
 
@@ -274,6 +313,23 @@ def run(args):
                 "use an immutable loaded image ID (sha256:...), never a tag")
         inventory_only = getattr(args, "inventory_only", False)
         require(not (inventory_only and args.bundle), "inventory-only requires the actual loaded image")
+        reviewed_path = getattr(args, "reviewed_image_approval", None)
+        reviewed_sha = getattr(args, "reviewed_image_approval_sha256", None)
+        reviewed_evidence = getattr(args, "reviewed_image_evidence", None)
+        require((reviewed_path is None) == (reviewed_sha is None),
+                "post-build approval and independent digest pin are required together")
+        require((reviewed_path is None) == (reviewed_evidence is None),
+                "post-build approval and separate evidence directory are required together")
+        require(reviewed_path is None or (args.bundle and reviewed_evidence),
+                "post-build approval requires a retained bundle and separate evidence directory")
+        if reviewed_path is not None:
+            # These paths are a caller-supplied trusted-plane capability. They
+            # must not resolve into either candidate source or retained inputs.
+            excluded = (ROOT.resolve(), args.bundle.resolve())
+            for path in (reviewed_path, reviewed_evidence):
+                actual = path.resolve()
+                require(not any(actual == root or actual.is_relative_to(root) for root in excluded),
+                        "post-build approval cannot come from candidate source or retained bundle")
         if args.bundle:
             identity = load_bundle(args.bundle.resolve(), output)
             require(identity["image"] == args.image, "rescan image differs from retained candidate")
@@ -324,6 +380,10 @@ def run(args):
             coverage["owned_runtime_packages"] = package_integrity(
                 raw_runtime.get("owned_packages"), identity.get("runtime_package_pins"), sbom["artifacts"])
         write_json(output / "coverage.json", coverage)
+        if not args.bundle and getattr(args, "collect_applicability", False):
+            applicability_bundle.capture(identity, output, command, download)
+        observations = (applicability_bundle.validate(output, identity)
+                        if (output / "applicability-context.json").is_file() else [])
         bundle_manifest(output, args.image)
         if inventory_only:
             write_json(output / "result.json", {"status": "inventoried", "image": args.image,
@@ -339,11 +399,29 @@ def run(args):
         result = evaluate(findings, args.trusted_policy, args.candidate_policy, output,
                           publication_policy=getattr(args, "publication_policy", None),
                           source_revision=args.source_revision)
+        receipt = applicability_gate.evaluate(findings,
+            trusted_path=getattr(args, "trusted_applicability_policy", None) or
+                         args.trusted_policy.with_name("image-applicability.json"),
+            candidate_path=getattr(args, "candidate_applicability_policy", None) or
+                           args.candidate_policy.with_name("image-applicability.json"),
+            reviewed_path=reviewed_path, reviewed_sha256=reviewed_sha,
+            evidence_directory=reviewed_evidence,
+            observations=observations,
+            scan_identity={"image": args.image, "source_revision": args.source_revision,
+                           "platform": "linux/amd64"})
+        decision = applicability_gate.retain_decision(output, result, receipt, identity)
         write_report(output / "report.md", result, args.image)
-        write_json(output / "result.json", {"status": "blocked" if result["blocking"] else "passed",
+        effective = len(decision["blocking_indexes"])
+        with (output / "report.md").open("a") as report_file:
+            report_file.write(f"\nApplicability: {receipt['status']}; reviewed dispositions: "
+                              f"{len(receipt['dispositions'])}; unresolved blocking records: {effective}.\n"
+                              "Raw findings and source-policy classifications remain unchanged; "
+                              "see applicability-result.json and decision.json.\n")
+        write_json(output / "result.json", {"status": "blocked" if effective else "passed",
                    "image": args.image, "scanned_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                   "blocking": len(result["blocking"]), "findings": len(findings)})
-        return 1 if result["blocking"] else 0
+                   "blocking": effective, "findings": len(findings),
+                   "applicability": receipt["status"], "decision_sha256": sha256(output / "decision.json")})
+        return 1 if effective else 0
     except Exception as error:
         write_json(output / "result.json", {"status": "error", "image": args.image, "error": str(error)})
         print(f"image security failed closed: {error}", file=sys.stderr)
@@ -359,6 +437,16 @@ def main():
     parser.add_argument("--candidate-policy", required=True, type=Path)
     parser.add_argument("--publication-policy", type=Path,
                         help="eligible publication's canonical reviewed-dev policy receipt")
+    parser.add_argument("--trusted-applicability-policy", type=Path)
+    parser.add_argument("--candidate-applicability-policy", type=Path)
+    parser.add_argument("--reviewed-image-approval", type=Path,
+                        help="post-build per-image policy from an independently trusted approval plane")
+    parser.add_argument("--reviewed-image-approval-sha256",
+                        help="independently pinned SHA-256 of the reviewed per-image policy bytes")
+    parser.add_argument("--reviewed-image-evidence", type=Path,
+                        help="digest-named evidence files supplied by that same trusted plane")
+    parser.add_argument("--collect-applicability", action="store_true",
+                        help="retain V4 exact-image passive filesystem/source evidence including owned libssh2")
     parser.add_argument("--inventory-only", action="store_true",
                         help="produce validated inputs only; never a security verdict")
     parser.add_argument("--bundle", type=Path, help="rescan retained SBOM/probes without rebuilding")

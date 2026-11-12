@@ -197,7 +197,7 @@ jobs:
         run: |
           python3 scripts/security/image_scan.py --image "$IMAGE_ID" --source-revision "$SOURCE_SHA" \
             --trusted-policy trusted-image-policy/.github/security/exceptions.json \
-            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only \
+            --candidate-policy .github/security/exceptions.json --output image-security-evidence/inventory --inventory-only --collect-applicability \
             --tool-cache "$RUNNER_TEMP/image-security-tools" --db-cache "$RUNNER_TEMP/image-security-db"
       - name: Scan the same tested image with reviewed policy
         if: ${{ !cancelled() && steps.image.outputs.id != '' && steps.inventory.outcome == 'success' }}
