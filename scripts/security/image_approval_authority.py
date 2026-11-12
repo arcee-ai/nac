@@ -243,7 +243,7 @@ def _code_origin(pins, *, root, environment, git):
 
 def verify(snapshot, *, pins=AuthorityPins(), now, api=readback.fetch_json,
            list_api=fetch_list, root=ROOT, environment=None, git=_git):
-    """Validate independent branch/review/code authority; return no clearance."""
+    """Validate this exact snapshot in this call; return no reusable authority."""
     configured(pins)
     intake.require(isinstance(snapshot, readback.Snapshot), "protected readback required")
     if environment is None:
@@ -253,11 +253,11 @@ def verify(snapshot, *, pins=AuthorityPins(), now, api=readback.fetch_json,
     approval_ruleset = _ruleset(api, pins.approval_ruleset_id, readback.BRANCH)
     _pinned_files(snapshot, pins, api)
     record = intake.validate_record(snapshot.record, snapshot.policy, now=now)
-    commit = _reviewed_commit(snapshot, record, pins, approval_ruleset, api, list_api)
+    _reviewed_commit(snapshot, record, pins, approval_ruleset, api, list_api)
     _code_origin(pins, root=root, environment=environment, git=git)
     _current_branches(snapshot, pins, api)
     intake.require(_ruleset(api, pins.dev_ruleset_id, source.TRUSTED_BRANCH) == dev_ruleset and
                    _ruleset(api, pins.approval_ruleset_id, readback.BRANCH) == approval_ruleset,
                    "protected rulesets changed during authority read")
-    return {"approval_revision": snapshot.branch_revision,
-            "reviewed_commit": commit, "trusted_dev_revision": pins.trusted_dev_revision}
+    # The reviewed commit is intentionally not returned as a transferable
+    # receipt: another image must repeat the whole per-path authority check.
