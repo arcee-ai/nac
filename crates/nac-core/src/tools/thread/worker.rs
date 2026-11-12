@@ -626,6 +626,17 @@ pub(super) async fn run_worker(
                 cleanup_error = Some(format!("worker cleanup incomplete: {error}"));
             }
         }
+    } else if cooperatively_cancelled {
+        // The reaped worker's survivors (such as a stdio MCP server) can hold
+        // its stdio open. Kill them now, not in the guard's Drop after the
+        // drain, and bound the drain like the other cancellation paths.
+        match process_tree.finish_checked().await {
+            Ok(()) => force_reader_shutdown = true,
+            Err(error) => {
+                reader_shutdown.cancel();
+                cleanup_error = Some(format!("worker cleanup incomplete: {error}"));
+            }
+        }
     }
 
     let readers = async {
@@ -1972,3 +1983,7 @@ exit 0
         );
     }
 }
+
+#[cfg(test)]
+#[path = "worker_cancel_tests.rs"]
+mod cancel_tests;
