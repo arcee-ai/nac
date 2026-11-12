@@ -143,7 +143,11 @@ protected record readback, pinned source inputs, approved artifact-ID download
 and strict replay. It stages the exact source bytes in a new private workspace,
 passes only the recorded artifact ID and digest to the bounded downloader,
 and rechecks both protected record and source snapshots before returning an
-in-memory status proposal. Replay independently validates live PR, synthetic
+in-memory status proposal. The workspace's immediate parent must already
+exist, be owned by the job UID and have mode `0700`. The caller walks its
+ancestors without following links and creates the workspace exclusively beneath
+the pinned parent directory. The future protected job must run no untrusted
+code under the same UID. Replay independently validates live PR, synthetic
 merge, run, job and artifact provenance and the complete ZIP digest. No
 workflow calls this composition, it has no status writer, and its `dev` pin
 does not by itself establish protected code or policy authority.
