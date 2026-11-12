@@ -202,6 +202,10 @@ port=$(wait_until_ready)
         echo "managed image smoke: expected Go 1.27.4" >&2
         exit 1
     }
+    gh version | grep -F "gh version 2.103.0" >/dev/null || assertion_failed "gh-version"
+    gh_build_info=$(go version -m "$(command -v gh)")
+    printf '%s\n' "$gh_build_info" | grep -F "go1.27.4" >/dev/null || assertion_failed "gh-go-toolchain"
+    printf '%s\n' "$gh_build_info" | grep -F "github.com/cli/cli/v2" | grep -F "v2.103.0" >/dev/null || assertion_failed "gh-source-module"
     uv --version | grep -F "uv 0.13.4" >/dev/null || {
         echo "managed image smoke: expected uv 0.13.4" >&2
         exit 1
