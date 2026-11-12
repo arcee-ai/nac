@@ -133,10 +133,11 @@ def replay(pull_request, merge_sha, image, archive, workspace, *,
         image=image, source_revision=merge_sha)
     identity = verify(inventory, workspace / "verified-frozen",
                       image=image, source_revision=merge_sha)
-    observations_stale(inventory, now)
+    stale_at_start = observations_stale(inventory, now)
     load(image_tar, image)
     post_load_now = clock()
-    if observations_stale(inventory, post_load_now):
+    stale_after_load = observations_stale(inventory, post_load_now)
+    if stale_at_start or stale_after_load:
         inventory = recollect(inventory, workspace / "verified-frozen",
                               workspace / "derivative", identity,
                               image=image, source_revision=merge_sha)
