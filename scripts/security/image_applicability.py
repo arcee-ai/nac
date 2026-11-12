@@ -210,7 +210,7 @@ def evidence_for(rule, evidence, observations, now):
 
 
 def verify_applicability(findings, *, trusted_policy, candidate_policy, evidence,
-                         observations, scan_identity, now):
+                         observations, scan_identity, now, reviewed_image_approval=None):
     """Return separate dispositions and raw indexes; raise on invalid trust/evidence.
 
     `observations` MUST come from the caller's independent exact-image integrity
@@ -221,7 +221,13 @@ def verify_applicability(findings, *, trusted_policy, candidate_policy, evidence
             "a timezone-aware UTC clock is required")
     require(digest(trusted_policy) == digest(candidate_policy) and trusted_policy == candidate_policy,
             "candidate policy differs from trusted policy; land human-reviewed policy separately")
-    admitted = policy(trusted_policy, now)
+    baseline = policy(trusted_policy, now)
+    require(not baseline["rules"], "source policy cannot approve a future image; use post-build approval")
+    if reviewed_image_approval is not None:
+        require(digest(reviewed_image_approval) != digest(candidate_policy),
+                "post-build approval must be separate from source policy")
+    admitted_bytes = reviewed_image_approval if reviewed_image_approval is not None else trusted_policy
+    admitted = policy(admitted_bytes, now)
     scan_subject(scan_identity)
     require(isinstance(evidence, dict) and isinstance(observations, list), "invalid evidence inputs")
     for item in observations:
@@ -256,5 +262,7 @@ def verify_applicability(findings, *, trusted_policy, candidate_policy, evidence
                              "disposition": rule["disposition"],
                              "rule_sha256": digest(json.dumps(rule, sort_keys=True, separators=(",", ":")).encode()),
                              "evidence_sha256": rule["evidence_sha256"]})
-    return {"schema_version": 1, "policy_sha256": digest(trusted_policy),
+    return {"schema_version": 1, "policy_sha256": digest(admitted_bytes),
+            "candidate_policy_sha256": digest(candidate_policy),
+            "approval_mode": "post-build" if reviewed_image_approval is not None else "none",
             "raw_findings": raw, "dispositions": dispositions, "unresolved_indexes": unresolved}

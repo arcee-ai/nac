@@ -22,11 +22,14 @@ class GateTests(unittest.TestCase):
         self.subject = self.f["scan_identity"]
         self.empty = encode({"schema_version": 1, "rules": []})
         self.candidate.write_bytes(self.empty)
+        self.reviewed = None
+        self.reviewed_sha = None
 
     def evaluate(self, **kwargs):
         return gate.evaluate(self.f["findings"], trusted_path=self.trusted,
             candidate_path=self.candidate, observations=self.f["observations"],
-            scan_identity=self.subject, now=NOW, **kwargs)
+            scan_identity=self.subject, now=NOW, reviewed_path=self.reviewed,
+            reviewed_sha256=self.reviewed_sha, **kwargs)
 
     def install_reviewed_fixture(self):
         raw = encode(self.f["record"])
@@ -36,8 +39,10 @@ class GateTests(unittest.TestCase):
         for digest, contents in evidence.items():
             (directory / digest).write_bytes(contents)
         policy = encode({"schema_version": 1, "rules": self.f["rules"]})
-        self.trusted.write_bytes(policy)
-        self.candidate.write_bytes(policy)
+        self.trusted.write_bytes(self.empty)
+        self.reviewed = self.root / "external-reviewed-image.json"
+        self.reviewed.write_bytes(policy)
+        self.reviewed_sha = app.digest(policy)
         return directory
 
     def source(self):
@@ -105,13 +110,28 @@ class GateTests(unittest.TestCase):
 
     def test_changed_trusted_candidate_or_proof_cannot_pass(self):
         directory = self.install_reviewed_fixture()
-        self.candidate.write_bytes(self.trusted.read_bytes() + b"\n")
+        self.candidate.write_bytes(self.empty + b"\n")
         with self.assertRaisesRegex(ValueError, "candidate changes"):
             self.evaluate(evidence_directory=directory)
         self.candidate.write_bytes(self.trusted.read_bytes())
         digest = next(iter(self.f["evidence"]))
         (directory / digest).write_bytes(b"altered")
         with self.assertRaises((ValueError, OSError)):
+            self.evaluate(evidence_directory=directory)
+
+    def test_post_build_approval_requires_separate_exact_digest_and_trusted_baseline(self):
+        directory = self.install_reviewed_fixture()
+        self.reviewed_sha = "d" * 64
+        with self.assertRaisesRegex(ValueError, "independent digest pin"):
+            self.evaluate(evidence_directory=directory)
+        self.reviewed_sha = app.digest(self.reviewed.read_bytes())
+        self.reviewed = self.candidate
+        with self.assertRaisesRegex(ValueError, "must be separate"):
+            self.evaluate(evidence_directory=directory)
+        self.reviewed = self.root / "external-reviewed-image.json"
+        self.trusted.write_bytes(encode({"schema_version": 1, "rules": self.f["rules"]}))
+        self.candidate.write_bytes(self.trusted.read_bytes())
+        with self.assertRaisesRegex(ValueError, "source policy cannot approve"):
             self.evaluate(evidence_directory=directory)
 
     def test_evidence_digest_paths_reject_symlinks_and_missing_files(self):
@@ -167,9 +187,24 @@ class GateTests(unittest.TestCase):
         receipt["dispositions"] = [{"finding_index": 0, "rule_id": "fake", "disposition": "fixed",
                                     "rule_sha256": "c" * 64, "evidence_sha256": "d" * 64}]
         receipt["unresolved_indexes"] = []
-        self.retain(receipt)
-        with self.assertRaisesRegex(ValueError, "inactive applicability cannot admit"):
-            gate.validated_decision(self.root, self.f["findings"], self.source(), self.subject)
+        with self.assertRaisesRegex(ValueError, "cannot admit findings"):
+            self.retain(receipt)
+
+    def test_legacy_schema_one_receipts_remain_readable_only_without_admissions(self):
+        self.trusted.write_bytes(self.empty)
+        source = self.source()
+        receipt = self.evaluate()
+        receipt.pop("candidate_policy_sha256")
+        receipt.pop("approval_mode")
+        self.retain(receipt, source)
+        self.assertEqual(gate.validated_decision(self.root, self.f["findings"], source,
+                         self.subject)["blocking_indexes"], [0])
+        receipt["dispositions"] = [{"finding_index": 0, "rule_id": "legacy",
+                                    "disposition": "fixed", "rule_sha256": "c" * 64,
+                                    "evidence_sha256": "d" * 64}]
+        receipt["unresolved_indexes"] = []
+        with self.assertRaisesRegex(ValueError, "legacy/source applicability receipt cannot admit"):
+            self.retain(receipt, source)
 
     def test_wrong_source_image_or_effective_blocker_fails_reporting(self):
         receipt = self.evaluate()

@@ -53,6 +53,8 @@ def reconcile(findings, source_result, receipt):
     dispositions, unresolved = receipt.get("dispositions"), receipt.get("unresolved_indexes")
     require(isinstance(dispositions, list) and isinstance(unresolved, list),
             "invalid applicability index partition")
+    require(receipt.get("approval_mode") == "post-build" or not dispositions,
+            "legacy/source applicability receipt cannot admit findings")
     indexes = []
     for item in dispositions:
         require(isinstance(item, dict) and set(item) == {
@@ -77,12 +79,17 @@ def reconcile(findings, source_result, receipt):
 
 def read_artifact(directory, digest):
     applicability.sha(digest, "artifact")
-    path = Path(directory) / digest
-    # Policy supplies a digest, never a path. Do not accept repository symlinks.
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
-        require(stat.S_ISREG(os.fstat(source.fileno()).st_mode),
-                "reviewed artifact must be a regular file")
-        raw = source.read(MAX_ARTIFACT + 1)
+    # Policy supplies a digest, never a path. Reject symlinks in both the
+    # evidence directory and selected file, including an exchanged directory.
+    parent_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with os.fdopen(os.open(digest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                               dir_fd=parent_fd), "rb") as source:
+            require(stat.S_ISREG(os.fstat(source.fileno()).st_mode),
+                    "reviewed artifact must be a regular file")
+            raw = source.read(MAX_ARTIFACT + 1)
+    finally:
+        os.close(parent_fd)
     require(len(raw) <= MAX_ARTIFACT and applicability.digest(raw) == digest,
             "reviewed artifact missing, oversized or altered")
     return raw
@@ -106,13 +113,16 @@ def reviewed_evidence(policy, directory):
 
 
 def evaluate(findings, *, trusted_path, candidate_path, observations, scan_identity,
-             evidence_directory=None, now=None):
+             evidence_directory=None, reviewed_path=None, reviewed_sha256=None, now=None):
     """Missing trusted capability admits nothing; candidate rules cannot bootstrap."""
     now = now or dt.datetime.now(dt.timezone.utc)
     applicability.scan_subject(scan_identity)
     candidate_path, trusted_path = Path(candidate_path), Path(trusted_path)
+    require((reviewed_path is None) == (reviewed_sha256 is None),
+            "post-build approval path and independent digest pin must be supplied together")
     if not (candidate_path.exists() or candidate_path.is_symlink() or
             trusted_path.exists() or trusted_path.is_symlink()):
+        require(reviewed_path is None, "post-build approval requires a trusted empty source policy")
         return {"schema_version": 1, "status": "inactive", "reason": "capability-not-configured",
                 "policy_sha256": None, "candidate_policy_sha256": None,
                 "raw_findings": copy.deepcopy(findings), "dispositions": [],
@@ -120,6 +130,7 @@ def evaluate(findings, *, trusted_path, candidate_path, observations, scan_ident
     candidate = policy_bytes(candidate_path)
     candidate_policy = applicability.policy(candidate, now)
     if not (trusted_path.exists() or trusted_path.is_symlink()):
+        require(reviewed_path is None, "post-build approval requires a trusted empty source policy")
         require(not candidate_policy["rules"],
                 "candidate applicability rules have no trusted policy; separate human landing required")
         return {"schema_version": 1, "status": "inactive", "reason": "trusted-policy-unavailable",
@@ -129,12 +140,26 @@ def evaluate(findings, *, trusted_path, candidate_path, observations, scan_ident
     require(trusted_path.is_file() and not trusted_path.is_symlink(), "invalid trusted image policy file")
     trusted = policy_bytes(trusted_path)
     require(trusted == candidate, "candidate changes image applicability policy; land reviewed policy separately")
-    admitted = applicability.policy(trusted, now)
-    directory = evidence_directory or trusted_path.parent / "image-applicability-evidence"
+    baseline = applicability.policy(trusted, now)
+    require(not baseline["rules"], "source policy cannot approve a future image; use post-build approval")
+    reviewed = None
+    if reviewed_path is not None:
+        reviewed_path = Path(reviewed_path)
+        require(reviewed_path != trusted_path and reviewed_path != candidate_path,
+                "post-build approval must be separate from source policy")
+        applicability.sha(reviewed_sha256, "independent approval pin")
+        reviewed = policy_bytes(reviewed_path)
+        require(applicability.digest(reviewed) == reviewed_sha256,
+                "post-build approval differs from independent digest pin")
+        require(applicability.policy(reviewed, now)["rules"],
+                "post-build approval must name at least one exact-image rule")
+    admitted = applicability.policy(reviewed if reviewed is not None else trusted, now)
+    directory = evidence_directory or ((reviewed_path or trusted_path).parent /
+                                       "image-applicability-evidence")
     evidence = reviewed_evidence(admitted, directory)
     result = applicability.verify_applicability(findings, trusted_policy=trusted,
         candidate_policy=candidate, evidence=evidence, observations=observations if admitted["rules"] else [],
-        scan_identity=scan_identity, now=now)
+        scan_identity=scan_identity, now=now, reviewed_image_approval=reviewed)
     return {**result, "status": "verified"}
 
 
@@ -177,6 +202,17 @@ def validated_decision(directory, findings, source_result, identity):
                 "inactive applicability cannot admit findings")
     else:
         applicability.sha(receipt.get("policy_sha256"), "trusted policy")
+        mode = receipt.get("approval_mode")
+        if mode is None:
+            # Older schema-1 receipts predate external approval. They remain
+            # readable only when they did not admit a finding.
+            require("candidate_policy_sha256" not in receipt and not receipt.get("dispositions"),
+                    "legacy applicability receipt cannot prove post-build approval")
+        else:
+            applicability.sha(receipt.get("candidate_policy_sha256"), "candidate policy")
+            require(mode in {"none", "post-build"} and
+                    (mode == "post-build" or not receipt.get("dispositions")),
+                    "source policy cannot admit applicability dispositions")
     require(decision["blocking_indexes"] == reconcile(findings, source_result, receipt),
             "effective blockers differ from verified dispositions")
     return decision

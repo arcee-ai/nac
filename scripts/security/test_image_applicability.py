@@ -53,9 +53,11 @@ def fixture(disposition="fixed"):
 def run(f, *, now=NOW, candidate=None):
     record_bytes = encode(f["record"])
     evidence = {**f["evidence"], app.digest(record_bytes): record_bytes}
-    raw = encode({"schema_version": 1, "rules": f["rules"]})
-    return app.verify_applicability(f["findings"], trusted_policy=raw,
-                                    candidate_policy=candidate or raw, evidence=evidence,
+    baseline = encode({"schema_version": 1, "rules": []})
+    reviewed = encode({"schema_version": 1, "rules": f["rules"]})
+    return app.verify_applicability(f["findings"], trusted_policy=baseline,
+                                    candidate_policy=candidate if candidate is not None else baseline,
+                                    reviewed_image_approval=reviewed, evidence=evidence,
                                     observations=f["observations"], scan_identity=f["scan_identity"], now=now)
 
 
@@ -174,9 +176,17 @@ class ApplicabilityTests(unittest.TestCase):
     def test_candidate_cannot_authorize_itself_even_with_valid_synthetic_evidence(self):
         f = fixture()
         with self.assertRaisesRegex(ValueError, "differs from trusted policy"):
-            run(f, candidate=encode({"schema_version": 1, "rules": []}))
+            run(f, candidate=encode({"schema_version": 1, "rules": f["rules"]}))
         with self.assertRaisesRegex(ValueError, "differs from trusted policy"):
-            run(f, candidate=encode({"schema_version": 1, "rules": f["rules"]}) + b"\n")
+            run(f, candidate=encode({"schema_version": 1, "rules": []}) + b"\n")
+
+    def test_source_policy_cannot_become_its_own_image_approval(self):
+        f = fixture()
+        raw = encode({"schema_version": 1, "rules": f["rules"]})
+        with self.assertRaisesRegex(ValueError, "source policy cannot approve"):
+            app.verify_applicability(f["findings"], trusted_policy=raw,
+                candidate_policy=raw, reviewed_image_approval=None, evidence={},
+                observations=f["observations"], scan_identity=f["scan_identity"], now=NOW)
 
     def test_missing_and_tampered_evidence_fail_closed(self):
         for change in ("missing", "tampered", "record"):
