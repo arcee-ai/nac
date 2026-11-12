@@ -186,6 +186,12 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
+                    driver = None
+                    if scenario == 'commands-input':
+                        # A previous failed run may have left a terminal phase or
+                        # acknowledgement in this owned evidence directory.
+                        for name in ('commands-input-phase.json', 'commands-input-ack.json'):
+                            (output / name).unlink(missing_ok=True)
                     if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal', 'commands', 'commands-input') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
@@ -204,7 +210,6 @@ def main():
                         engine.chmod(0o755)
                     evidence = output / f'{scenario}.json'
                     evidence.unlink(missing_ok=True)
-                    driver = None
                     control = LifecycleControl(scenario, evidence, relocated)
                     control.start()
                     started = time.monotonic()
@@ -233,9 +238,12 @@ def main():
                                                           cwd='/', stdout=driver_log,
                                                           stderr=subprocess.STDOUT, start_new_session=True)
                                 code = process.wait(timeout=115)
-                                driver_code = driver.wait(timeout=5)
-                            if driver_code != 0:
-                                raise RuntimeError('External OS command driver failed; see command-driver.log')
+                                try:
+                                    driver_code = driver.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    # Preserve the app's receipt as the primary
+                                    # failure; the owned driver is reaped below.
+                                    driver_code = None
                         else:
                             code = process.wait(timeout=115)
                     control_result = control.finish()
@@ -256,6 +264,8 @@ def main():
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
                     assert (code == 0 or scenario.startswith('parent-loss')) and result.get('passed'), f'{scenario} failed: {result}'
                     if scenario == 'commands-input':
+                        if driver_code != 0:
+                            raise RuntimeError('External OS command driver did not accept the app result; see command-driver.log')
                         assert result['commands']['input']['source'] == 'external-public-OS-driver', result
                     assert result['engine_reaped'] and result['profile_removed'], result
                     if not scenario.startswith('parent-loss'):
