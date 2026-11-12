@@ -4,11 +4,14 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import tarfile
 import tempfile
 import unittest
+import uuid
+import warnings
 import zipfile
 from unittest.mock import patch
 
@@ -32,6 +35,44 @@ def image_archive(config=CONFIG):
             info.size = len(payload)
             tar.addfile(info, io.BytesIO(payload))
     return output.getvalue()
+
+
+def oci_image_archive(*, docker_config=CONFIG, selected_config=CONFIG,
+                      platform="amd64", corrupt_descriptor=False, extra_platform=False):
+    """One selected OCI image with an optional malicious identity seam."""
+    def encoded(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+    docker_digest = hashlib.sha256(docker_config).hexdigest()
+    selected_digest = hashlib.sha256(selected_config).hexdigest()
+    manifest = encoded({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                        "config": {"digest": f"sha256:{selected_digest}", "size": len(selected_config)},
+                        "layers": []})
+    manifest_digest = hashlib.sha256(manifest).hexdigest()
+    children = [{"mediaType": "application/vnd.oci.image.manifest.v1+json",
+                 "digest": f"sha256:{manifest_digest}", "size": len(manifest),
+                 "platform": {"os": "linux", "architecture": platform}}]
+    if extra_platform:
+        children.append({**children[0], "platform": {"os": "linux", "architecture": "arm64"}})
+    index = encoded({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
+                     "manifests": children})
+    image = "sha256:" + hashlib.sha256(index).hexdigest()
+    top = encoded({"schemaVersion": 2, "manifests": [{
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": image, "size": len(index)}]})
+    blobs = {"manifest.json": encoded([{"Config": f"blobs/sha256/{docker_digest}",
+                                         "RepoTags": ["synthetic:local"], "Layers": []}]),
+             "index.json": top,
+             f"blobs/sha256/{docker_digest}": docker_config,
+             f"blobs/sha256/{manifest_digest}": manifest,
+             f"blobs/sha256/{image[7:]}": index[:-1] + b" " if corrupt_descriptor else index}
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as tar:
+        for name, payload in blobs.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    return output.getvalue(), image
 
 
 class CandidateArchiveTests(unittest.TestCase):
@@ -94,10 +135,12 @@ class CandidateArchiveTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ApprovalError, "member"):
                 self.extract({**self.members, bad: b"evil"})
         archive = self.root / "artifact.zip"
-        with zipfile.ZipFile(archive, "w") as zipped:
-            for name, value in self.members.items():
-                zipped.writestr(name, value)
-            zipped.writestr("image.tar", b"second image")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(archive, "w") as zipped:
+                for name, value in self.members.items():
+                    zipped.writestr(name, value)
+                zipped.writestr("image.tar", b"second image")
         with self.assertRaisesRegex(ApprovalError, "duplicate"):
             candidate.extract_candidate(archive, self.root / "out", image=IMAGE,
                 source_revision=SOURCE,
@@ -149,6 +192,50 @@ class CandidateArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ApprovalError, "config bytes differ"):
             candidate.load_exact_image(image_tar, IMAGE, run=lambda *args, **kwargs:
                 self.fail("Docker must not receive a mismatched archive"))
+
+    def test_selected_oci_descriptor_chain_binds_docker_config_and_platform(self):
+        archive, image = oci_image_archive()
+        path = self.root / "selected.tar"
+        path.write_bytes(archive)
+        candidate._check_image_config(path, image)
+        mutations = [
+            (dict(selected_config=b'{"architecture":"amd64","os":"linux","swapped":true}'),
+             "selected OCI manifest config differs"),
+            (dict(corrupt_descriptor=True), "descriptor bytes differ"),
+            (dict(platform="arm64"), "unverifiable extra platform"),
+            (dict(extra_platform=True), "unverifiable extra platform"),
+            (dict(docker_config=b'{"architecture":"arm64","os":"linux"}'),
+             "config platform differs"),
+        ]
+        for index, (options, message) in enumerate(mutations):
+            with self.subTest(options=options), self.assertRaisesRegex(ApprovalError, message):
+                payload, approved = oci_image_archive(**options)
+                path = self.root / f"mutated-{index}.tar"
+                path.write_bytes(payload)
+                candidate._check_image_config(path, approved)
+
+    def test_real_docker_save_control_when_daemon_available(self):
+        if not shutil.which("docker") or subprocess.run(
+                ["docker", "info"], capture_output=True, timeout=15).returncode != 0:
+            self.skipTest("Docker daemon unavailable")
+        context = self.root / "docker-control"
+        context.mkdir()
+        (context / "Dockerfile").write_text("FROM scratch\nCOPY payload /payload\n")
+        (context / "payload").write_text("frozen-image-archive-control\n")
+        tag = f"nac-image-archive-control:{uuid.uuid4().hex}"
+        try:
+            subprocess.run(["docker", "build", "--platform", "linux/amd64", "--quiet",
+                            "--tag", tag, str(context)], check=True, capture_output=True,
+                           timeout=120)
+            image = subprocess.check_output(["docker", "image", "inspect", "--format",
+                                             "{{.Id}}", tag], text=True, timeout=30).strip()
+            saved = self.root / "real-image.tar"
+            subprocess.run(["docker", "image", "save", "--output", str(saved), tag],
+                           check=True, capture_output=True, timeout=120)
+            candidate._check_image_config(saved, image)
+        finally:
+            subprocess.run(["docker", "image", "rm", "--force", tag],
+                           capture_output=True, timeout=30)
 
 
 if __name__ == "__main__":

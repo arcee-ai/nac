@@ -23,14 +23,17 @@ for that future artifact. The artifact must be one ZIP containing exactly
 must first authenticate the artifact ID, run, attempt and ZIP SHA-256 using
 the protected approval record and GitHub API. The reader checks that digest,
 rejects traversal, links, duplicates and oversized members, binds the V4
-inventory to the reviewed image/source, and verifies the saved image config or
-OCI descriptor digest before `docker load`. It checks the loaded image ID and
+inventory to the reviewed image/source, and verifies the saved image config
+digest or traverses the approved OCI index to exactly one `linux/amd64`
+manifest whose config digest and size match the saved Docker manifest before
+`docker load`. Unknown extra platforms and unverifiable descriptor chains fail
+closed. It checks the loaded image ID and
 `linux/amd64` platform afterwards. This intake belongs in a credential-free,
 isolated job; its output is still untrusted until `image_scan.py --bundle`
 validates every retained file hash and performs a fresh strict rescan. The
 synthetic tests also exercise wrong ZIP digest, source/image, archive config,
-path, link, member set and Docker identity/platform negatives. A local Docker
-29 `image save` sample passed the descriptor parser. The current CI producer
+path, link, member set and Docker identity/platform negatives. A test builds
+and saves a real `linux/amd64` Docker image when a daemon is available. The current CI producer
 does not yet emit this format, so this module is **not** a live approval path.
 
 A human-reviewed record would be merged to a dedicated
