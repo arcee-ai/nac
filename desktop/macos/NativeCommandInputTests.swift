@@ -45,7 +45,7 @@ struct NativeCommandInputTests {
         try driver.ready("select")
         var selection = try published(); selection["kind"] = "attempted"
         try acknowledge(selection)
-        precondition(try driver.acknowledged())
+        let selectionAccepted = try driver.acknowledged(); precondition(selectionAccepted)
         try driver.verified("select")
         try driver.ready("copy")
         let old = try driver.acknowledged(); precondition(!old)
