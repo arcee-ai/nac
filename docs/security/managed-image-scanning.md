@@ -246,9 +246,17 @@ runtime versions/advisories, image inspection/identity, tool/DB metadata, and
 result together. `bundle.json` hashes the unchanged SBOM/runtime/identity/coverage
 inputs and Rust distribution/payload files for later rescans. Artifact upload always runs, with 14-day retention.
 
+The unprivileged `build-candidate` job also retains a separate 14-day
+`managed-image-candidate-<source-sha>-<run-id>-<attempt>` artifact containing a
+saved exact image and V4 inventory. The following `strict-scan` job loads that
+image on a clean runner, validates its ID and platform, and scans the retained
+bundle with a fresh database. Its ordinary security artifact excludes the saved
+image tar and keeps the daily rescan layout. Candidate retention is neither a
+security pass nor post-build human approval.
+
 Daily selection uses only trusted `dev` push runs from
 `.github/workflows/stable-release.yml` and the exact completed
-`managed / build-smoke` job's successful `Inventory the exact tested image`
+`managed-image / build-candidate` job's successful `Inventory the exact tested image`
 step. The security verdict and unrelated workflow results can be red. Select the
 newest qualifying inventory, then require its unique expected per-SHA artifact,
 `inventory/` layout, source identity, and input hashes. Missing, expired,

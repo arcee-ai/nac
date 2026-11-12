@@ -33,8 +33,8 @@ test("every discovered scanner entry step receives the existing read-only job to
   validate(workflows);
   assert.deepEqual(scannerCallers(workflows).map(c => `${c.file}/${c.job}/${c.step.name}`).sort(), [
     "image-security-rescan.yml/rescan/Rescan retained unchanged managed image inventory",
-    "managed-image-build.yml/build-smoke/Inventory the exact tested image",
-    "managed-image-build.yml/build-smoke/Scan the same tested image with reviewed policy",
+    "managed-image-build.yml/build-candidate/Inventory the exact tested image",
+    "managed-image-build.yml/strict-scan/Scan the same tested image with reviewed policy",
     "managed-image-build.yml/scanner-qualification/Qualify real OS/Node advisory matching and runtime/DB negatives",
   ].sort());
 });
