@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 import image_approval_intake as intake
@@ -180,6 +181,13 @@ class ReplayTests(unittest.TestCase):
         self.source["source_policy"] = linked
         with self.assertRaisesRegex(ValueError, "replay input path"):
             self.invoke()
+        self.assertEqual((self.loads, self.scans), (0, 0))
+
+    def test_workspace_inside_repository_denied_before_review_staging(self):
+        self.workspace = replay.ROOT / f".approval-replay-test-{uuid.uuid4().hex}"
+        with self.assertRaisesRegex(ValueError, "outside repository"):
+            self.invoke()
+        self.assertFalse(self.workspace.exists())
         self.assertEqual((self.loads, self.scans), (0, 0))
 
     def test_no_live_workflow_invokes_replay(self):

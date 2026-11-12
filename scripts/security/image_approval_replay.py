@@ -96,6 +96,8 @@ def replay(pull_request, merge_sha, image, archive, workspace, *,
                    now.utcoffset() == dt.timedelta(), "UTC clock required")
     original_workspace = Path(workspace)
     workspace = original_workspace.resolve()
+    intake.require(not workspace.is_relative_to(ROOT),
+                   "replay workspace must be outside repository")
     intake.require(not original_workspace.exists() and
                    not original_workspace.is_symlink() and not workspace.exists(),
                    "replay workspace already exists")
