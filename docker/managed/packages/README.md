@@ -90,6 +90,14 @@ additional benign runtime smoke checks compiler execution, GNU/OpenSSL ABI,
 Python venv/SSL, Node/UTF-8, plugin loading and recorded installed-file hashes.
 It does not perform malformed-protocol or exploit validation.
 
+The image smoke also compiles a small gettext probe in the running candidate
+against its installed glibc. It first requires a normal catalog translation,
+then rejects a `LANGUAGE=../outside` catalog that an older glibc payload loads.
+The probe prints the tested `libc.so.6` SHA256. This is a behavioral check of
+the current image's gettext path handling; it does not prove the supplier's
+build-time test ran, authenticate the image by itself, or clear the scanner
+finding without exact-image custody and independent review.
+
 Retire each backport when a maintained supplier package demonstrably contains
 the correction and preserves the required runtime profile. Retire the custom curl
 build when the supplier enables the supported options NAC retains. A version
