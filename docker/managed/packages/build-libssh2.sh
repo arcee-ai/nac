@@ -74,6 +74,10 @@ jq -r '.libssh2.reviewed_source_files | to_entries[] | [.value, .key] | join("  
 # configure/Makefile inputs; regeneration needlessly imports host gettext data.
 ./configure --prefix=/usr --libdir=/usr/lib --with-crypto=openssl --disable-docker-tests
 make -j2
+# The two inherited guards with an amd64 differential must also reject their
+# malformed inputs before the exact supplier patch is reversed. The 55200
+# overflow needs i386 size_t and runs in the dedicated source-test stage.
+sh /recipe/test-libssh2-supplier-controls.sh amd64
 # Seam-level malformed-input regressions for the six newer corrections and
 # the inherited SFTP symlink correction applied above. AddressSanitizer makes
 # the exact patch reversal's out-of-bounds read observable in the control.
@@ -114,7 +118,10 @@ mkdir -p /run/sshd
 # Public upstream fixture keys authenticate only the disposable build account.
 # The runtime is a separate FROM and inherits none of this test configuration.
 passwd -d root
-USER=root LOGNAME=root make check
+if ! USER=root LOGNAME=root make check; then
+    cat tests/test-suite.log >&2
+    exit 1
+fi
 make DESTDIR=/stage/libssh2 install
 cp -a /stage/libssh2/usr/lib/libssh2.so.* /packages/libssh2/usr/lib/
 readelf -d /packages/libssh2/usr/lib/libssh2.so.1 | grep -F 'libcrypto.so.4'

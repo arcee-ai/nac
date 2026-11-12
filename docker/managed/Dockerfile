@@ -74,7 +74,7 @@ COPY docker/managed/packages/build-curl.sh /recipe/
 RUN sh /recipe/build-curl.sh
 COPY docker/managed/packages/test-curl-patch-order.py docker/managed/packages/curl-multi-done.patch /recipe/
 RUN python3 /recipe/test-curl-patch-order.py
-COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
+COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/test-libssh2-supplier-controls.sh docker/managed/packages/libssh2-supplier-7598.c docker/managed/packages/libssh2-supplier-55199.c docker/managed/packages/libssh2-supplier-55200.c docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
 RUN sh /recipe/build-libssh2.sh
 COPY docker/managed/packages/build-sasl.sh /recipe/
 RUN sh /recipe/build-sasl.sh
@@ -84,6 +84,21 @@ COPY docker/managed/packages/package-runtime-apk.py docker/managed/packages/chec
 RUN python3 /recipe/package-runtime-apk.py /recipe/sources.lock.json \
     && cp /recipe/* /out/ \
     && cd /out && sha256sum ./*.apk > packages.sha256
+
+# Source-only 32-bit differential for CVE-2026-55200. This stage is an explicit
+# test target and is not inherited by the linux/amd64 runtime image. It proves
+# the guard's 32-bit arithmetic, not execution of the installed amd64 ELF.
+FROM --platform=linux/386 alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab AS libssh2-i386-supplier-control
+RUN apk add --no-cache build-base openssl-dev zlib-dev patch jq
+COPY --from=runtime-packages /work/libssh2 /work/libssh2
+COPY --from=runtime-packages /work/downloads/libssh2-supplier-55200.patch /work/downloads/libssh2-supplier-55200.patch
+COPY docker/managed/packages/sources.lock.json docker/managed/packages/test-libssh2-supplier-controls.sh docker/managed/packages/libssh2-supplier-55200.c /recipe/
+RUN cd /work/libssh2 \
+    && jq -r '.libssh2.reviewed_source_files["src/transport.c"] + "  src/transport.c"' /recipe/sources.lock.json | sha256sum -c - \
+    && make distclean \
+    && ./configure --prefix=/usr --libdir=/usr/lib --with-crypto=openssl --disable-docker-tests \
+    && make -j2 \
+    && sh /recipe/test-libssh2-supplier-controls.sh i386
 
 FROM --platform=linux/amd64 cgr.dev/chainguard/wolfi-base@sha256:76811b6958657eb28da6f2ce79bbb97516e5818df442a086e94ab4c67303608b AS runtime
 
