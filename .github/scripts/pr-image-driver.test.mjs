@@ -1,5 +1,6 @@
 import { reverseImageApplicability, reverseStrictImageSummary } from './image-security-wiring.mjs';
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
+import { reverseManagedSupplierControl } from "./managed-supplier-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ function verify(value) {
   const config = structuredClone(value); reverseAssetTokens(config);
   reverseImageApplicability(config);
   reverseStrictImageSummary(config);
+  reverseManagedSupplierControl(config, "build-candidate");
   const steps = config.jobs['build-candidate'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {
@@ -52,6 +54,10 @@ test('real selector rejects malformed/unsupported capabilities and emits only kn
 
 test('selection cannot bypass cold/cache trust, immutable image, security or quality requirements', () => {
   const changes = [
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source').run = 'true'; },
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source').if = 'false'; },
+    s => { s.find(v => v.name === 'Check libssh2 supplier overflow on i386 source')['continue-on-error'] = true; },
+    s => { s.splice(s.findIndex(v => v.name === 'Check libssh2 supplier overflow on i386 source'), 1); },
     s => { s.find(v => v.id === 'image-driver').if = '!inputs.cold_caches'; },
     s => { s.find(v => v.id === 'image-driver')['continue-on-error'] = true; },
     s => { s.find(v => v.id === 'image-driver').env = { DRIVER: '${{ inputs.driver }}' }; },
