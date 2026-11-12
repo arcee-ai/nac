@@ -58,9 +58,60 @@ fn stored_codex_auth(access: &str) -> StoredCodexAuth {
     }
 }
 
-#[test]
-fn codex_lock_contends_until_release() {
-    super::super::auth_store::assert_lock_contention_and_release("codex", lock_file, unlock_file);
+#[tokio::test]
+async fn codex_auth_lock_wait_yields_until_release() {
+    let dir = TestDir::new("lock-contention");
+    let lock_path = dir.path("auth.auth.json.lock");
+    // A distinct open file description stands in for another nac process.
+    let held = nac_credential_store::try_acquire_credential_lock(&lock_path)
+        .unwrap()
+        .expect("uncontended auth lock");
+    let waiter = acquire_auth_lock_polling(&lock_path, Duration::from_secs(30));
+    tokio::pin!(waiter);
+    // This current-thread runtime keeps running other work while the waiter
+    // polls; a blocking flock(2) would starve the ticks below.
+    for _ in 0..5 {
+        tokio::select! {
+            _ = &mut waiter => panic!("auth lock acquired while held elsewhere"),
+            () = sleep(Duration::from_millis(20)) => {}
+        }
+    }
+    drop(held);
+
+    let lock = tokio::time::timeout(Duration::from_secs(5), waiter)
+        .await
+        .expect("waiter was not admitted after release")
+        .unwrap();
+    assert!(
+        nac_credential_store::try_acquire_credential_lock(&lock_path)
+            .unwrap()
+            .is_none(),
+        "the admitted waiter must own the auth lock"
+    );
+    drop(lock);
+}
+
+#[tokio::test]
+async fn codex_auth_lock_wait_times_out_while_held_elsewhere() {
+    let dir = TestDir::new("lock-timeout");
+    let lock_path = dir.path("auth.auth.json.lock");
+    let _held = nac_credential_store::try_acquire_credential_lock(&lock_path)
+        .unwrap()
+        .expect("uncontended auth lock");
+    let started = std::time::Instant::now();
+
+    let error = acquire_auth_lock_polling(&lock_path, Duration::from_millis(200))
+        .await
+        .err()
+        .expect("auth lock acquired while held elsewhere");
+
+    assert!(started.elapsed() >= Duration::from_millis(200));
+    assert!(
+        error
+            .to_string()
+            .contains("timed out waiting for the Codex auth lock"),
+        "{error:#}"
+    );
 }
 
 #[test]
@@ -228,7 +279,9 @@ fn codex_write_rejects_symlink_destination_without_touching_target() {
 fn codex_lock_is_private_and_rejects_symlink() {
     let dir = TestDir::new("lock");
     let lock_path = dir.path("auth.auth.json.lock");
-    let lock = FileLock::acquire(&lock_path).unwrap();
+    let lock = nac_credential_store::try_acquire_credential_lock(&lock_path)
+        .unwrap()
+        .expect("uncontended auth lock");
     assert_eq!(
         fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -239,7 +292,7 @@ fn codex_lock_is_private_and_rejects_symlink() {
     let target = dir.path("lock-target");
     fs::write(&target, "unchanged").unwrap();
     symlink(&target, &lock_path).unwrap();
-    let error = FileLock::acquire(&lock_path)
+    let error = nac_credential_store::try_acquire_credential_lock(&lock_path)
         .err()
         .expect("symlink lock accepted");
     assert!(error.to_string().contains("symlink auth lock"));

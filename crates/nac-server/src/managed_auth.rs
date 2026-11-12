@@ -501,7 +501,7 @@ pub(crate) async fn logout_handler(
     AxumPath(provider): AxumPath<String>,
 ) -> Result<Json<ManagedAuthStatusResponse>, ApiError> {
     let provider = parse_provider(&provider)?;
-    managed_auth_logout(provider)?;
+    managed_auth_logout(provider).await?;
     Ok(Json(managed_auth_snapshot(provider)?.into()))
 }
 

@@ -516,8 +516,8 @@ fn tampered_stored_arcee_url_is_rejected_before_client_creation() {
     assert!(error.to_string().contains("invalid base_url"));
 }
 
-#[test]
-fn arcee_and_codex_auth_coexist_and_logout_independently() {
+#[tokio::test]
+async fn arcee_and_codex_auth_coexist_and_logout_independently() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let codex = stored_codex_auth();
     let arcee = stored_arcee_auth("rcai-test", "https://api.arcee.ai");
@@ -536,7 +536,7 @@ fn arcee_and_codex_auth_coexist_and_logout_independently() {
     );
 
     write_test_credential(&env.home.join("arcee_auth.json"), &arcee);
-    codex_auth_logout().unwrap();
+    codex_auth_logout().await.unwrap();
     assert!(!env.home.join("auth.json").exists());
     assert_eq!(
         std::fs::read_to_string(env.home.join("arcee_auth.json")).unwrap(),
@@ -570,8 +570,8 @@ fn legacy_shaped_auth_json_is_ignored_and_unchanged_by_arcee_status_and_client_c
     assert_eq!(directory_names(&env.home), ["auth.json"]);
 }
 
-#[test]
-fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
+#[tokio::test]
+async fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let legacy = stored_arcee_auth("rcai-legacy", "https://api.arcee.ai");
     let env = IsolatedModelEnv::new("codex-foreign-arcee", Some(&legacy), None, None);
@@ -581,7 +581,7 @@ fn codex_status_and_logout_ignore_legacy_shaped_arcee_auth_json() {
 
     codex_auth_status().unwrap();
     assert_eq!(directory_names(&env.home), ["auth.json"]);
-    codex_auth_logout().unwrap();
+    codex_auth_logout().await.unwrap();
 
     assert_eq!(std::fs::read(&auth_path).unwrap(), before);
     assert!(!canonical_path.exists());

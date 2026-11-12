@@ -1,4 +1,4 @@
-use super::auth_store::ensure_open_credential_file_is_safe;
+use super::auth_store::{ensure_open_credential_file_is_safe, FileLock};
 use super::responses_stream::ResponsesStreamFold;
 use super::sse::{read_sse_response, with_source_chain, StreamFold, StreamFoldError};
 use super::*;
@@ -6,7 +6,6 @@ use crate::run_failure::{
     PartialModelOutput, RecoveryAction, RunFailure, RunFailureKind, RunFailurePhase,
 };
 use anyhow::Context;
-use fs2::FileExt;
 use reqwest::header;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -16,7 +15,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::form_urlencoded;
@@ -34,6 +33,8 @@ const ORIGINATOR: &str = "nac";
 const AUTH_TYPE: &str = "chatgpt-codex";
 const DEFAULT_EXPIRES_IN_SECS: u64 = 3600;
 const REFRESH_SKEW_MS: u64 = 60_000;
+const AUTH_LOCK_POLL_INTERVAL_MS: u64 = 50;
+const AUTH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const DEVICE_TIMEOUT_SECS: u64 = 15 * 60;
 
 /// The only loopback address OpenAI will redirect this client back to, so the
@@ -233,8 +234,13 @@ pub(super) fn stored_credential_values() -> Result<Vec<String>> {
         .unwrap_or_default())
 }
 
+/// Validates the lock destination and the stored credential without waiting
+/// for the lock: a refresh holds it across its token request, and this read
+/// needs no exclusion because credential writes are atomic renames.
 pub(super) fn preflight_stored_auth() -> Result<()> {
-    let _lock = acquire_auth_lock()?;
+    drop(nac_credential_store::try_acquire_credential_lock(
+        &auth_lock_path()?,
+    )?);
     read_auth_file().map(|_| ())
 }
 
@@ -259,7 +265,7 @@ impl CodexDeviceLogin {
     pub(super) async fn complete(self) -> Result<ManagedAuthSnapshot> {
         let code = poll_device_code(&self.client, &self.device).await?;
         let tokens = exchange_authorization_code(&self.client, &code, DEVICE_REDIRECT_URI).await?;
-        store_tokens(tokens)
+        store_tokens(tokens).await
     }
 }
 
@@ -324,7 +330,7 @@ impl CodexLoopbackLogin {
             Err(_) => LOOPBACK_FAILED_PAGE,
         };
         write_loopback_response(&mut stream, StatusCode::OK, page).await;
-        store_tokens(exchanged?)
+        store_tokens(exchanged?).await
     }
 }
 
@@ -342,9 +348,11 @@ pub(super) async fn begin_codex_loopback_login() -> Result<CodexLoopbackLogin> {
     })
 }
 
-fn store_tokens(tokens: TokenResponse) -> Result<ManagedAuthSnapshot> {
+async fn store_tokens(tokens: TokenResponse) -> Result<ManagedAuthSnapshot> {
     let auth = auth_from_token_response(tokens, None)?;
-    with_auth_lock(|| write_auth_file(&auth))?;
+    let guard = lock_auth_store().await?;
+    write_auth_file(&auth)?;
+    drop(guard);
     Ok(snapshot_from_stored(Some(auth), auth_file_path()?))
 }
 
@@ -370,14 +378,13 @@ fn snapshot_from_stored(auth: Option<StoredCodexAuth>, path: PathBuf) -> Managed
     }
 }
 
-pub(super) fn codex_auth_remove() -> Result<bool> {
+pub(super) async fn codex_auth_remove() -> Result<bool> {
     let path = auth_file_path()?;
-    with_auth_lock(|| {
-        if auth_path_is_symlink(&path)? {
-            return remove_auth_path(&path);
-        }
-        remove_codex_auth_file_for_logout(&path)
-    })
+    let _guard = lock_auth_store().await?;
+    if auth_path_is_symlink(&path)? {
+        return remove_auth_path(&path);
+    }
+    remove_codex_auth_file_for_logout(&path)
 }
 
 /// Signs in from the terminal, which always uses the device flow.
@@ -413,9 +420,9 @@ pub async fn codex_auth_login() -> Result<()> {
     Ok(())
 }
 
-pub fn codex_auth_logout() -> Result<()> {
+pub async fn codex_auth_logout() -> Result<()> {
     let path = auth_file_path()?;
-    let removed = codex_auth_remove()?;
+    let removed = codex_auth_remove().await?;
 
     if removed {
         println!("Codex auth removed.");
@@ -527,7 +534,7 @@ pub async fn send_responses(
     {
         Ok(value) => parse_openai_responses_response(&value, &url),
         Err(error) if error.status == Some(StatusCode::UNAUTHORIZED) => {
-            let refreshed = force_refresh_auth(client)
+            let refreshed = force_refresh_auth(client, &auth.access)
                 .await
                 .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
             let value = post_codex_json_with_retry(
@@ -861,13 +868,19 @@ async fn parse_token_response(
     serde_json::from_str(&body).with_context(|| format!("failed to parse {label} response"))
 }
 
+fn near_expiry(auth: &StoredCodexAuth) -> bool {
+    auth.expires_at_ms <= now_ms().saturating_add(REFRESH_SKEW_MS)
+}
+
+/// Returns the stored credential, refreshed first when it is near expiry. The
+/// pre-check read is lock-free (credential writes are atomic renames, so a
+/// reader always sees a complete record); only a refresh takes the auth lock.
 async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
-    let _lock = acquire_auth_lock()?;
     let auth = read_auth_file()?;
-    if auth.expires_at_ms > now_ms().saturating_add(REFRESH_SKEW_MS) {
+    if !near_expiry(&auth) {
         return Ok(auth);
     }
-    refresh_and_store_auth(client, auth).await
+    refresh_locked(client, near_expiry).await
 }
 
 /// Bearer token and account id for a read-only call to the Codex API, renewed
@@ -877,9 +890,25 @@ pub(super) async fn stored_auth_for_request(client: &Client) -> Result<(String, 
     Ok((auth.access, auth.account_id))
 }
 
-async fn force_refresh_auth(client: &Client) -> Result<StoredCodexAuth> {
-    let _lock = acquire_auth_lock()?;
+/// Refreshes after the provider rejected `rejected_access`. A caller queued
+/// behind another refresh reuses the token that refresh stored instead of
+/// rotating the refresh token a second time.
+async fn force_refresh_auth(client: &Client, rejected_access: &str) -> Result<StoredCodexAuth> {
+    refresh_locked(client, |auth| auth.access == rejected_access).await
+}
+
+/// Re-reads the stored credential under the auth lock and performs the network
+/// refresh only when `should_refresh` still holds, so concurrent callers share
+/// one rotation.
+async fn refresh_locked(
+    client: &Client,
+    should_refresh: impl Fn(&StoredCodexAuth) -> bool,
+) -> Result<StoredCodexAuth> {
+    let _guard = lock_auth_store().await?;
     let auth = read_auth_file()?;
+    if !should_refresh(&auth) {
+        return Ok(auth);
+    }
     refresh_and_store_auth(client, auth).await
 }
 
@@ -1330,20 +1359,52 @@ fn auth_lock_path() -> Result<PathBuf> {
     Ok(auth_file_path()?.with_extension("auth.json.lock"))
 }
 
-fn acquire_auth_lock() -> Result<FileLock> {
-    let path = auth_lock_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    FileLock::acquire(&path)
+/// Process-wide async gate that serializes Codex credential mutations within
+/// this process. Waiting on it yields the executor, unlike the cross-process
+/// file lock, so callers queued behind a refresh that holds the lock across its
+/// token request never park a Tokio worker.
+fn auth_gate() -> &'static tokio::sync::Mutex<()> {
+    static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    &GATE
 }
 
-fn with_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
-    let lock = acquire_auth_lock()?;
-    let result = operation();
-    drop(lock);
-    result
+/// Exclusive access to the stored credential: the cross-process file lock is
+/// released before the in-process gate admits the next waiter.
+struct AuthStoreGuard {
+    _lock: FileLock,
+    _gate: tokio::sync::MutexGuard<'static, ()>,
+}
+
+/// Serializes a credential read-modify-write within this process (async gate)
+/// and across processes (non-blocking file lock polled until a deadline). No
+/// caller ever waits inside flock(2) on a Tokio worker.
+async fn lock_auth_store() -> Result<AuthStoreGuard> {
+    let gate = auth_gate().lock().await;
+    let lock = acquire_auth_lock_polling(
+        &auth_lock_path()?,
+        Duration::from_millis(AUTH_LOCK_TIMEOUT_MS),
+    )
+    .await?;
+    Ok(AuthStoreGuard {
+        _lock: lock,
+        _gate: gate,
+    })
+}
+
+async fn acquire_auth_lock_polling(path: &Path, timeout: Duration) -> Result<FileLock> {
+    let started = Instant::now();
+    loop {
+        if let Some(lock) = nac_credential_store::try_acquire_credential_lock(path)? {
+            return Ok(lock);
+        }
+        if started.elapsed() >= timeout {
+            return Err(anyhow!(
+                "timed out waiting for the Codex auth lock {}; another nac process may be refreshing or replacing the credential",
+                path.display()
+            ));
+        }
+        sleep(Duration::from_millis(AUTH_LOCK_POLL_INTERVAL_MS)).await;
+    }
 }
 
 fn read_auth_file_optional() -> Result<Option<StoredCodexAuth>> {
@@ -1625,64 +1686,6 @@ impl Drop for TempFileCleanup {
     }
 }
 
-struct FileLock {
-    file: File,
-}
-
-impl FileLock {
-    fn acquire(path: &Path) -> Result<Self> {
-        validate_lock_destination(path)?;
-        let mut options = OpenOptions::new();
-        options.create(true).truncate(false).read(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-        }
-        let file = options
-            .open(path)
-            .with_context(|| format!("failed to open auth lock {}", path.display()))?;
-        ensure_open_file_is_regular(&file, path, "auth lock")?;
-        make_file_private(&file, path)?;
-        lock_file(&file).with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Self { file })
-    }
-}
-
-fn validate_lock_destination(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(anyhow!(
-            "refusing to use symlink auth lock {}",
-            path.display()
-        )),
-        Ok(_) => Err(anyhow!(
-            "refusing to use non-regular auth lock {}",
-            path.display()
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to inspect auth lock {}", path.display()))
-        }
-    }
-}
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        let _ = unlock_file(&self.file);
-    }
-}
-
-fn lock_file(file: &File) -> io::Result<()> {
-    FileExt::lock_exclusive(file)
-}
-
-fn unlock_file(file: &File) -> io::Result<()> {
-    FileExt::unlock(file)
-}
-
 fn extract_account_id(token: &str) -> Option<String> {
     let payload = decode_jwt_payload(token)?;
     payload
@@ -1782,3 +1785,7 @@ fn truncate(value: &str) -> String {
 #[cfg(test)]
 #[path = "chatgpt_codex_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "chatgpt_codex_refresh_gate_tests.rs"]
+mod refresh_gate_tests;
