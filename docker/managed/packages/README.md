@@ -150,7 +150,21 @@ source seams and reverses each supplier patch in a disposable copy of its source
 file. The reversed copy must lose exactly the guards added by that patch. The
 55200 transport source already has one packet-length cap in another branch, so
 its fixed and reversed copies must contain two and one matching caps respectively.
-These source controls do not exercise hostile packets or clear scanner findings.
+After the final corrected tree is built, `test-libssh2-supplier-controls.sh`
+compiles the corrected `userauth.c` and `packet.c` objects alongside exact
+single-patch-reversed copies. Bounded malformed-input probes require the fixed
+7598 username length and 55199 EXT_INFO parser paths to pass, and their
+reversed paths to make the specific allocation attempt or state mutation.
+Their allocator and packet fixtures stop before oversized input can be copied.
+The separate `libssh2-i386-supplier-control` Docker build target recompiles the
+same hash-checked corrected `transport.c` tree for 32-bit `size_t` and requires
+the 55200 full-packet callback's fixed early rejection and reversed nine-byte
+wrapped allocation attempt. It runs in managed-image CI after the amd64 build;
+it is never inherited by the runtime image. This i386 control proves the source
+guard under 32-bit arithmetic, not execution of the installed amd64 ELF. Run it
+locally with `docker buildx build --platform linux/386 --target
+libssh2-i386-supplier-control -f docker/managed/Dockerfile .`. These source
+controls do not clear scanner findings or establish applicability.
 The six selected CVE-2026-66032/66033/66034/66035/58050/58051 corrections come from
 the checksum-bound Debian 1.11.1-1+deb13u2 patch archive. Each upstream commit and
 exact archive member is retained separately. The 58051 Debian header names
