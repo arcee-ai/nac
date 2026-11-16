@@ -21,6 +21,9 @@ import { errorMessage } from "@/app/providers/ToastProvider";
 import { useBrowsePath, useSshBrowsePath, type BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { localDirectoryCapability } from "@/app/features/setup/localFolder";
+import { NativeFolderPicker } from "@/app/features/setup/NativeFolderPicker";
 
 /**
  * Picks a path from the machine running the server, or from an SSH host when
@@ -34,6 +37,8 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 interface PathPickerProps {
   kind: BrowseKind;
   initialPath: string;
+  /** Explicit opt-in from the normal create-project Local backend only. */
+  nativeLocalDirectory?: boolean;
   /** Browses this host instead of the local filesystem. */
   ssh?: SshTarget | null;
   /** Overrides the title derived from `kind`. */
@@ -47,9 +52,26 @@ interface PathPickerProps {
   onSelect: (path: string) => void;
 }
 
-export function PathPickerModal({ open, ssh, ...props }: PathPickerProps & { open: boolean }) {
+export function PathPickerModal({
+  open,
+  ssh,
+  nativeLocalDirectory = false,
+  ...props
+}: PathPickerProps & { open: boolean }) {
   const mounted = useExitTransition(open);
+  const { nativeDirectory } = useNativeRuntime();
+  const port = localDirectoryCapability(nativeDirectory, nativeLocalDirectory, props.kind, ssh);
   if (!mounted) return null;
+  if (port)
+    return (
+      <NativeFolderPicker
+        port={port}
+        open={open}
+        initialPath={props.initialPath}
+        onSelect={props.onSelect}
+        onClose={props.onClose}
+      />
+    );
   return <PathPicker open={open} ssh={ssh ?? null} {...props} />;
 }
 
@@ -69,8 +91,12 @@ function PathPicker({
   const isMobile = useIsMobile();
   // A directory is picked from an empty path so the server starts at its root,
   // or the host at the login home.
-  const [directory, setDirectory] = useState(initialPath.trim());
-  const [draft, setDraft] = useState(initialPath.trim());
+  // A nonblank local path identifies a literal filesystem entry. Preserve its
+  // whitespace; blank input still requests the fallback. SSH keeps its existing
+  // normalization contract.
+  const browsePath = (path: string) => (ssh || !path.trim() ? path.trim() : path);
+  const [directory, setDirectory] = useState(browsePath(initialPath));
+  const [draft, setDraft] = useState(browsePath(initialPath));
   const [file, setFile] = useState<string | null>(null);
   const [hidden, setHidden] = useState(showHidden);
   // Both hooks are called every render, as hooks must be; the one that is not
@@ -215,7 +241,7 @@ function PathPicker({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(browsePath(draft));
             }}
           />
           <Button

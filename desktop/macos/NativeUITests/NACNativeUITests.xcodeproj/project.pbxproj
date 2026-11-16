@@ -1,0 +1,112 @@
+// !$*UTF8*$!
+{
+  archiveVersion = 1;
+  classes = {};
+  objectVersion = 56;
+  objects = {
+    A10000000000000000000001 = {
+      isa = PBXProject;
+      buildConfigurationList = A10000000000000000000010;
+      compatibilityVersion = "Xcode 14.0";
+      developmentRegion = en;
+      hasScannedForEncodings = 0;
+      knownRegions = (en, Base);
+      mainGroup = A10000000000000000000002;
+      productRefGroup = A10000000000000000000003;
+      projectDirPath = "";
+      projectRoot = "";
+      targets = (A10000000000000000000004);
+    };
+    A10000000000000000000002 = {
+      isa = PBXGroup;
+      children = (A10000000000000000000005, A10000000000000000000003);
+      sourceTree = "<group>";
+    };
+    A10000000000000000000003 = {
+      isa = PBXGroup;
+      children = (A10000000000000000000006);
+      name = Products;
+      sourceTree = "<group>";
+    };
+    A10000000000000000000004 = {
+      isa = PBXNativeTarget;
+      buildConfigurationList = A10000000000000000000011;
+      buildPhases = (A10000000000000000000007, A10000000000000000000008);
+      buildRules = ();
+      dependencies = ();
+      name = NACNativeUITests;
+      productName = NACNativeUITests;
+      productReference = A10000000000000000000006;
+      productType = "com.apple.product-type.bundle.ui-testing";
+    };
+    A10000000000000000000005 = {
+      isa = PBXFileReference;
+      lastKnownFileType = sourcecode.swift;
+      path = NativeJourneys.swift;
+      sourceTree = "<group>";
+    };
+    A10000000000000000000006 = {
+      isa = PBXFileReference;
+      explicitFileType = wrapper.cfbundle;
+      path = NACNativeUITests.xctest;
+      sourceTree = BUILT_PRODUCTS_DIR;
+    };
+    A10000000000000000000007 = {
+      isa = PBXSourcesBuildPhase;
+      buildActionMask = 2147483647;
+      files = (A10000000000000000000009);
+      runOnlyForDeploymentPostprocessing = 0;
+    };
+    A10000000000000000000008 = {
+      isa = PBXFrameworksBuildPhase;
+      buildActionMask = 2147483647;
+      files = ();
+      runOnlyForDeploymentPostprocessing = 0;
+    };
+    A10000000000000000000009 = {
+      isa = PBXBuildFile;
+      fileRef = A10000000000000000000005;
+    };
+    A10000000000000000000010 = {
+      isa = XCConfigurationList;
+      buildConfigurations = (A10000000000000000000012);
+      defaultConfigurationIsVisible = 0;
+      defaultConfigurationName = Debug;
+    };
+    A10000000000000000000011 = {
+      isa = XCConfigurationList;
+      buildConfigurations = (A10000000000000000000013);
+      defaultConfigurationIsVisible = 0;
+      defaultConfigurationName = Debug;
+    };
+    A10000000000000000000012 = {
+      isa = XCBuildConfiguration;
+      buildSettings = {
+        SDKROOT = macosx;
+        MACOSX_DEPLOYMENT_TARGET = 26.0;
+        SWIFT_VERSION = 5.0;
+        CLANG_ENABLE_MODULES = YES;
+        ENABLE_USER_SCRIPT_SANDBOXING = YES;
+      };
+      name = Debug;
+    };
+    A10000000000000000000013 = {
+      isa = XCBuildConfiguration;
+      buildSettings = {
+        CODE_SIGN_IDENTITY = "-";
+        CODE_SIGN_STYLE = Manual;
+        CODE_SIGNING_REQUIRED = NO;
+        DEVELOPMENT_TEAM = "";
+        ENABLE_TESTING_SEARCH_PATHS = YES;
+        GENERATE_INFOPLIST_FILE = YES;
+        PRODUCT_BUNDLE_IDENTIFIER = "ai.arcee.nac.ci.ui-tests";
+        PRODUCT_NAME = "$(TARGET_NAME)";
+        SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+        NAC_UI_FIXTURE = "";
+      };
+      name = Debug;
+    };
+  };
+  rootObject = A10000000000000000000001;
+}

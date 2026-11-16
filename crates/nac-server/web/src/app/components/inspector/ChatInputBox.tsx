@@ -25,6 +25,8 @@ import {
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { isGoalContinuationEnvelope } from "@/app/features/goals/continuation";
+import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
+import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { GoalComposer, GoalFlag } from "@/app/components/inspector/GoalComposer";
@@ -200,8 +202,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   perfRender("ChatInputBox");
   const drafts = runtime.stores.promptDraftStore;
-  const { text: value } = drafts.useDraft(sessionId);
+  const draft = drafts.useDraft(sessionId);
+  const { text: value } = draft;
+  const retentionLimited = drafts.useRetentionLimited();
   const submissionPending = drafts.useSubmitting(sessionId);
+  const recoveries = [...drafts.useUnreviewed(sessionId), ...drafts.useRecoveries(sessionId)];
   const setValue = useCallback(
     (text: string) => {
       drafts.update(sessionId, text);
@@ -708,14 +713,25 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           return;
         }
         try {
-          const result = await runCommand(
-            deliverPrompt({
-              mode: runningDirect ? "direct-running" : runningClassic ? "classic-running" : "idle",
-              delivery: requestedDelivery,
-              inbox: (delivery) => createInboxItem.mutateAsync({ sessionId, delivery, prompt }),
-              steer: () => steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt }),
-              submit: () => submitRun.mutateAsync({ id: sessionId, prompt }),
-            }),
+          const result = await withPromptRecovery(
+            drafts,
+            sessionId,
+            fromField ? submittedDraft : undefined,
+            () =>
+              runCommand(
+                deliverPrompt({
+                  mode: runningDirect
+                    ? "direct-running"
+                    : runningClassic
+                      ? "classic-running"
+                      : "idle",
+                  delivery: requestedDelivery,
+                  inbox: (delivery) => createInboxItem.mutateAsync({ sessionId, delivery, prompt }),
+                  steer: () =>
+                    steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt }),
+                  submit: () => submitRun.mutateAsync({ id: sessionId, prompt }),
+                }),
+              ),
           );
           clearField();
           if (!current()) return;
@@ -854,6 +870,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         ) : null}
         <textarea
           ref={ref}
+          data-nac-retained-draft=""
           className={cn(
             "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]",
             textInset,
@@ -1140,6 +1157,29 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         compact={isMobile}
         surface={inlineGoal ? "goal" : focused ? "focus" : undefined}
       >
+        {retentionLimited ? (
+          <p role="status" className="px-2 text-small text-basic-secondary">
+            Text recovery storage is full or unavailable. You can keep typing and sending; new edits
+            may not restore. Review or dismiss older text to free space.
+          </p>
+        ) : null}
+        {recoveries.length ? (
+          <div
+            role="region"
+            aria-label="Message delivery"
+            className="flex max-h-48 flex-col gap-2 overflow-y-auto px-2"
+          >
+            {recoveries.map((recovery) => (
+              <PromptRecoveryMessage
+                key={recovery.id}
+                recovery={recovery}
+                hasDraft={!!value}
+                onRestore={() => drafts.restoreRecovery(sessionId, recovery)}
+                onDismiss={() => drafts.dismissRecovery(sessionId, recovery)}
+              />
+            ))}
+          </div>
+        ) : null}
         <div className="relative flex flex-col">
           {direct ? (
             <GoalComposer
