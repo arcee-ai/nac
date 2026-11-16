@@ -1,14 +1,14 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
 import { A as r, D as i, k as a, n as o } from "./RuntimeContext-BntTaIwR.js";
 import { a as s } from "./PresentationBoundary-DgJz1GXw.js";
-import { _r as c, gr as l, ir as u, n as d, o as f, r as p, t as m } from "./PerfProfiler-P9KXzCAh.js";
-import { N as h, i as g, r as _ } from "./Toast-CNyEj7yT.js";
-import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-Obj2EcpX.js";
+import { _r as c, gr as l, ir as u, n as d, o as f, r as p, t as m } from "./PerfProfiler-JXqHP7jy.js";
+import { N as h, i as g, r as _ } from "./Toast-C1R55pFn.js";
+import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
 import { Fragment as te, jsx as A, jsxs as j } from "react/jsx-runtime";
 import { useLocation as ne, useNavigate as re } from "react-router-dom";
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/hast-to-react.js
+// node_modules/property-information/lib/hast-to-react.js
 var M = {
 	classId: "classID",
 	dataType: "datatype",
@@ -71,11 +71,11 @@ function ce() {
 function le(e) {
 	return typeof e == "object" && !!e && "type" in e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/unist-util-visit-parents/lib/color.js
+// node_modules/unist-util-visit-parents/lib/color.js
 function ue(e) {
 	return e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/unist-util-visit-parents/lib/index.js
+// node_modules/unist-util-visit-parents/lib/index.js
 var de = [], fe = "skip";
 function pe(e, t, n, r) {
 	let i;
@@ -107,16 +107,16 @@ function pe(e, t, n, r) {
 function me(e) {
 	return Array.isArray(e) ? e : typeof e == "number" ? [!0, e] : e == null ? de : [e];
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/devlop/lib/default.js
+// node_modules/devlop/lib/default.js
 function he() {}
-// ../../../../pr-469/crates/nac-server/web/node_modules/longest-streak/index.js
+// node_modules/longest-streak/index.js
 function ge(e, t) {
 	let n = String(e), r = n.indexOf(t), i = r, a = 0, o = 0;
 	if (typeof t != "string") throw TypeError("Expected substring");
 	for (; r !== -1;) r === i ? ++a > o && (o = a) : a = 1, i = r + t.length, r = n.indexOf(t, i);
 	return o;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-character/index.js
+// node_modules/micromark-util-character/index.js
 var P = B(/[A-Za-z]/), F = B(/[\dA-Za-z]/), _e = B(/[#-'*+\--9=?A-Z^-~]/);
 function ve(e) {
 	return e !== null && (e < 32 || e === 127);
@@ -138,7 +138,7 @@ function B(e) {
 		return t !== null && t > -1 && e.test(String.fromCharCode(t));
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-factory-space/index.js
+// node_modules/micromark-factory-space/index.js
 function V(e, t, n, r) {
 	let i = r ? r - 1 : Infinity, a = 0;
 	return o;
@@ -149,12 +149,12 @@ function V(e, t, n, r) {
 		return R(r) && a++ < i ? (e.consume(r), s) : (e.exit(n), t(r));
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/estree-util-is-identifier-name/lib/index.js
+// node_modules/estree-util-is-identifier-name/lib/index.js
 var Ce = /^[$_\p{ID_Start}][$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, we = /^[$_\p{ID_Start}][-$_\u{200C}\u{200D}\p{ID_Continue}]*$/u, Te = {};
 function Ee(e, t) {
 	return ((t || Te).jsx ? we : Ce).test(e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/inline-style-parser/cjs/index.js
+// node_modules/inline-style-parser/cjs/index.js
 var De = /* @__PURE__ */ n(((e, t) => {
 	var n = /\/\*[^*]*\*+([^/*][^*]*\*+)*\//g, r = /\n/g, i = /^\s*/, a = /^(\*?[-#/*\\\w]+(\[[0-9a-z_-]+\])?)\s*/, o = /^:\s*/, s = /^((?:'(?:\\'|.)*?'|"(?:\\"|.)*?"|\([^)]*?\)|[^};])+)/, c = /^[;\s]*/, l = /^\s+|\s+$/g;
 	function u(e, t) {
@@ -297,7 +297,7 @@ function Pe(e) {
 		end: n
 	};
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/unist-util-stringify-position/lib/index.js
+// node_modules/unist-util-stringify-position/lib/index.js
 function Fe(e) {
 	return !e || typeof e != "object" ? "" : "position" in e || "type" in e ? Le(e.position) : "start" in e || "end" in e ? Le(e) : "line" in e || "column" in e ? Ie(e) : "";
 }
@@ -310,7 +310,7 @@ function Le(e) {
 function Re(e) {
 	return e && typeof e == "number" ? e : 1;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile-message/lib/index.js
+// node_modules/vfile-message/lib/index.js
 var H = class extends Error {
 	constructor(e, t, n) {
 		super(), typeof t == "string" && (n = t, t = void 0);
@@ -331,7 +331,7 @@ var H = class extends Error {
 	}
 };
 H.prototype.file = "", H.prototype.name = "", H.prototype.reason = "", H.prototype.message = "", H.prototype.stack = "", H.prototype.column = void 0, H.prototype.line = void 0, H.prototype.ancestors = void 0, H.prototype.cause = void 0, H.prototype.fatal = void 0, H.prototype.place = void 0, H.prototype.ruleId = void 0, H.prototype.source = void 0;
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-jsx-runtime/lib/index.js
+// node_modules/hast-util-to-jsx-runtime/lib/index.js
 var ze = /* @__PURE__ */ t(Ae(), 1), Be = {}.hasOwnProperty, Ve = /* @__PURE__ */ new Map(), He = /[A-Z]/g, Ue = /* @__PURE__ */ new Set([
 	"table",
 	"tbody",
@@ -572,7 +572,7 @@ function ft(e) {
 function pt(e) {
 	return "-" + e.toLowerCase();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/html-url-attributes/lib/index.js
+// node_modules/html-url-attributes/lib/index.js
 var mt = {
 	action: ["form"],
 	cite: [
@@ -626,7 +626,7 @@ function vt(e, t, n) {
 function yt(e) {
 	return !!(e && typeof e == "object");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/decode-named-character-reference/index.dom.js
+// node_modules/decode-named-character-reference/index.dom.js
 var bt = document.createElement("i");
 function xt(e) {
 	let t = "&" + e + ";";
@@ -634,7 +634,7 @@ function xt(e) {
 	let n = bt.textContent;
 	return n.charCodeAt(n.length - 1) === 59 && e !== "semi" ? !1 : n !== t && n;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-chunked/index.js
+// node_modules/micromark-util-chunked/index.js
 function U(e, t, n, r) {
 	let i = e.length, a = 0, o;
 	if (t = t < 0 ? -t > i ? 0 : i + t : t > i ? i : t, n = n > 0 ? n : 0, r.length < 1e4) o = Array.from(r), o.unshift(t, n), e.splice(...o);
@@ -643,7 +643,7 @@ function U(e, t, n, r) {
 function W(e, t) {
 	return e.length > 0 ? (U(e, e.length, 0, t), e) : t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-combine-extensions/index.js
+// node_modules/micromark-util-combine-extensions/index.js
 var St = {}.hasOwnProperty;
 function Ct(e) {
 	let t = {}, n = -1;
@@ -666,16 +666,16 @@ function Tt(e, t) {
 	for (; ++n < t.length;) (t[n].add === "after" ? e : r).push(t[n]);
 	U(e, 0, 0, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-decode-numeric-character-reference/index.js
+// node_modules/micromark-util-decode-numeric-character-reference/index.js
 function Et(e, t) {
 	let n = Number.parseInt(e, t);
 	return n < 9 || n === 11 || n > 13 && n < 32 || n > 126 && n < 160 || n > 55295 && n < 57344 || n > 64975 && n < 65008 || (n & 65535) == 65535 || (n & 65535) == 65534 || n > 1114111 ? "�" : String.fromCodePoint(n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-normalize-identifier/index.js
+// node_modules/micromark-util-normalize-identifier/index.js
 function G(e) {
 	return e.replace(/[\t\n\r ]+/g, " ").replace(/^ | $/g, "").toLowerCase().toUpperCase();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-sanitize-uri/index.js
+// node_modules/micromark-util-sanitize-uri/index.js
 function Dt(e) {
 	let t = [], n = -1, r = 0, i = 0;
 	for (; ++n < e.length;) {
@@ -690,7 +690,7 @@ function Dt(e) {
 	}
 	return t.join("") + e.slice(r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/initialize/content.js
+// node_modules/micromark/lib/initialize/content.js
 var Ot = { tokenize: kt };
 function kt(e) {
 	let t = e.attempt(this.parser.constructs.contentInitial, r, i), n;
@@ -714,7 +714,7 @@ function kt(e) {
 		else return I(t) ? (e.consume(t), e.exit("chunkText"), a) : (e.consume(t), o);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/initialize/document.js
+// node_modules/micromark/lib/initialize/document.js
 var At = { tokenize: Mt }, jt = { tokenize: Nt };
 function Mt(e) {
 	let t = this, n = [], r = 0, i, a, o;
@@ -805,12 +805,12 @@ function Mt(e) {
 function Nt(e, t, n) {
 	return V(e, e.attempt(this.parser.constructs.document, t, n), "linePrefix", this.parser.constructs.disable.null.includes("codeIndented") ? void 0 : 4);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-classify-character/index.js
+// node_modules/micromark-util-classify-character/index.js
 function Pt(e) {
 	if (e === null || L(e) || z(e)) return 1;
 	if (Se(e)) return 2;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-resolve-all/index.js
+// node_modules/micromark-util-resolve-all/index.js
 function Ft(e, t, n) {
 	let r = [], i = -1;
 	for (; ++i < e.length;) {
@@ -819,7 +819,7 @@ function Ft(e, t, n) {
 	}
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/attention.js
+// node_modules/micromark-core-commonmark/lib/attention.js
 var It = {
 	name: "attention",
 	resolveAll: Lt,
@@ -928,7 +928,7 @@ function Rt(e, t) {
 function zt(e, t) {
 	e.column += t, e.offset += t, e._bufferIndex += t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/autolink.js
+// node_modules/micromark-core-commonmark/lib/autolink.js
 var Bt = {
 	name: "autolink",
 	tokenize: Vt
@@ -968,7 +968,7 @@ function Vt(e, t, n) {
 		return n(t);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/blank-line.js
+// node_modules/micromark-core-commonmark/lib/blank-line.js
 var Ht = {
 	partial: !0,
 	tokenize: Ut
@@ -982,7 +982,7 @@ function Ut(e, t, n) {
 		return e === null || I(e) ? t(e) : n(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/block-quote.js
+// node_modules/micromark-core-commonmark/lib/block-quote.js
 var Wt = {
 	continuation: { tokenize: Kt },
 	exit: qt,
@@ -1016,7 +1016,7 @@ function Kt(e, t, n) {
 function qt(e) {
 	e.exit("blockQuote");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/character-escape.js
+// node_modules/micromark-core-commonmark/lib/character-escape.js
 var Jt = {
 	name: "characterEscape",
 	tokenize: Yt
@@ -1030,7 +1030,7 @@ function Yt(e, t, n) {
 		return xe(r) ? (e.enter("characterEscapeValue"), e.consume(r), e.exit("characterEscapeValue"), e.exit("characterEscape"), t) : n(r);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/character-reference.js
+// node_modules/micromark-core-commonmark/lib/character-reference.js
 var Xt = {
 	name: "characterReference",
 	tokenize: Zt
@@ -1055,7 +1055,7 @@ function Zt(e, t, n) {
 		return o(s) && i++ < a ? (e.consume(s), u) : n(s);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/code-fenced.js
+// node_modules/micromark-core-commonmark/lib/code-fenced.js
 var Qt = {
 	partial: !0,
 	tokenize: tn
@@ -1140,7 +1140,7 @@ function tn(e, t, n) {
 		return r.parser.lazy[r.now().line] ? n(e) : t(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/code-indented.js
+// node_modules/micromark-core-commonmark/lib/code-indented.js
 var nn = {
 	name: "codeIndented",
 	tokenize: an
@@ -1179,7 +1179,7 @@ function on(e, t, n) {
 		return a && a[1].type === "linePrefix" && a[2].sliceSerialize(a[1], !0).length >= 4 ? t(e) : I(e) ? i(e) : n(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/code-text.js
+// node_modules/micromark-core-commonmark/lib/code-text.js
 var sn = {
 	name: "codeText",
 	previous: ln,
@@ -1219,7 +1219,7 @@ function un(e, t, n) {
 		return n === 96 ? (e.consume(n), i++, u) : i === r ? (e.exit("codeTextSequence"), e.exit("codeText"), t(n)) : (a.type = "codeTextData", l(n));
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-subtokenize/lib/splice-buffer.js
+// node_modules/micromark-util-subtokenize/lib/splice-buffer.js
 var dn = class {
 	constructor(e) {
 		this.left = e ? [...e] : [], this.right = [];
@@ -1276,7 +1276,7 @@ function fn(e, t) {
 	if (t.length < 1e4) e.push(...t);
 	else for (; n < t.length;) e.push(...t.slice(n, n + 1e4)), n += 1e4;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-subtokenize/index.js
+// node_modules/micromark-util-subtokenize/index.js
 function pn(e) {
 	let t = {}, n = -1, r, i, a, o, s, c, l, u = new dn(e);
 	for (; ++n < u.length;) {
@@ -1307,7 +1307,7 @@ function mn(e, t) {
 	for (c.reverse(), f = -1; ++f < c.length;) l[m + c[f][0]] = m + c[f][1], m += c[f][1] - c[f][0] - 1;
 	return l;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/content.js
+// node_modules/micromark-core-commonmark/lib/content.js
 var hn = {
 	resolve: _n,
 	tokenize: vn
@@ -1349,7 +1349,7 @@ function yn(e, t, n) {
 		return !r.parser.constructs.disable.null.includes("codeIndented") && a && a[1].type === "linePrefix" && a[2].sliceSerialize(a[1], !0).length >= 4 ? t(i) : e.interrupt(r.parser.constructs.flow, n, t)(i);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-factory-destination/index.js
+// node_modules/micromark-factory-destination/index.js
 function bn(e, t, n, r, i, a, o, s, c) {
 	let l = c || Infinity, u = 0;
 	return d;
@@ -1372,7 +1372,7 @@ function bn(e, t, n, r, i, a, o, s, c) {
 		return t === 40 || t === 41 || t === 92 ? (e.consume(t), h) : h(t);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-factory-label/index.js
+// node_modules/micromark-factory-label/index.js
 function xn(e, t, n, r, i, a) {
 	let o = this, s = 0, c;
 	return l;
@@ -1391,7 +1391,7 @@ function xn(e, t, n, r, i, a) {
 		return t === 91 || t === 92 || t === 93 ? (e.consume(t), s++, d) : d(t);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-factory-title/index.js
+// node_modules/micromark-factory-title/index.js
 function Sn(e, t, n, r, i, a) {
 	let o;
 	return s;
@@ -1411,7 +1411,7 @@ function Sn(e, t, n, r, i, a) {
 		return t === o || t === 92 ? (e.consume(t), u) : u(t);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-factory-whitespace/index.js
+// node_modules/micromark-factory-whitespace/index.js
 function Cn(e, t) {
 	let n;
 	return r;
@@ -1419,7 +1419,7 @@ function Cn(e, t) {
 		return I(i) ? (e.enter("lineEnding"), e.consume(i), e.exit("lineEnding"), n = !0, r) : R(i) ? V(e, r, n ? "linePrefix" : "lineSuffix")(i) : t(i);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/definition.js
+// node_modules/micromark-core-commonmark/lib/definition.js
 var wn = {
 	name: "definition",
 	tokenize: En
@@ -1470,7 +1470,7 @@ function Dn(e, t, n) {
 		return e === null || I(e) ? t(e) : n(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/hard-break-escape.js
+// node_modules/micromark-core-commonmark/lib/hard-break-escape.js
 var On = {
 	name: "hardBreakEscape",
 	tokenize: kn
@@ -1484,7 +1484,7 @@ function kn(e, t, n) {
 		return I(r) ? (e.exit("hardBreakEscape"), t(r)) : n(r);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/heading-atx.js
+// node_modules/micromark-core-commonmark/lib/heading-atx.js
 var An = {
 	name: "headingAtx",
 	resolve: jn,
@@ -1546,7 +1546,7 @@ function Mn(e, t, n) {
 		return t === null || t === 35 || L(t) ? (e.exit("atxHeadingText"), s(t)) : (e.consume(t), l);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-html-tag-name/index.js
+// node_modules/micromark-util-html-tag-name/index.js
 var Nn = /* @__PURE__ */ "address.article.aside.base.basefont.blockquote.body.caption.center.col.colgroup.dd.details.dialog.dir.div.dl.dt.fieldset.figcaption.figure.footer.form.frame.frameset.h1.h2.h3.h4.h5.h6.head.header.hr.html.iframe.legend.li.link.main.menu.menuitem.nav.noframes.ol.optgroup.option.p.param.search.section.summary.table.tbody.td.tfoot.th.thead.title.tr.track.ul".split("."), Pn = [
 	"pre",
 	"script",
@@ -1687,7 +1687,7 @@ function Vn(e, t, n) {
 		return e.enter("lineEnding"), e.consume(r), e.exit("lineEnding"), e.attempt(Ht, t, n);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/html-text.js
+// node_modules/micromark-core-commonmark/lib/html-text.js
 var Hn = {
 	name: "htmlText",
 	tokenize: Un
@@ -1783,7 +1783,7 @@ function Un(e, t, n) {
 		return e.enter("htmlTextData"), o(t);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/label-end.js
+// node_modules/micromark-core-commonmark/lib/label-end.js
 var Wn = {
 	name: "labelEnd",
 	resolveAll: Jn,
@@ -1931,7 +1931,7 @@ function $n(e, t, n) {
 		return r === 93 ? (e.enter("referenceMarker"), e.consume(r), e.exit("referenceMarker"), e.exit("reference"), t) : n(r);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/label-start-image.js
+// node_modules/micromark-core-commonmark/lib/label-start-image.js
 var er = {
 	name: "labelStartImage",
 	resolveAll: Wn.resolveAll,
@@ -1951,7 +1951,7 @@ function tr(e, t, n) {
 		return e === 94 && "_hiddenFootnoteSupport" in r.parser.constructs ? n(e) : t(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/label-start-link.js
+// node_modules/micromark-core-commonmark/lib/label-start-link.js
 var nr = {
 	name: "labelStartLink",
 	resolveAll: Wn.resolveAll,
@@ -1968,7 +1968,7 @@ function rr(e, t, n) {
 		return e === 94 && "_hiddenFootnoteSupport" in r.parser.constructs ? n(e) : t(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/line-ending.js
+// node_modules/micromark-core-commonmark/lib/line-ending.js
 var ir = {
 	name: "lineEnding",
 	tokenize: ar
@@ -1979,7 +1979,7 @@ function ar(e, t) {
 		return e.enter("lineEnding"), e.consume(n), e.exit("lineEnding"), V(e, t, "linePrefix");
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/thematic-break.js
+// node_modules/micromark-core-commonmark/lib/thematic-break.js
 var or = {
 	name: "thematicBreak",
 	tokenize: sr
@@ -2000,7 +2000,7 @@ function sr(e, t, n) {
 		return t === i ? (e.consume(t), r++, c) : (e.exit("thematicBreakSequence"), R(t) ? V(e, s, "whitespace")(t) : s(t));
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/list.js
+// node_modules/micromark-core-commonmark/lib/list.js
 var K = {
 	continuation: { tokenize: dr },
 	exit: pr,
@@ -2072,7 +2072,7 @@ function mr(e, t, n) {
 		return !R(e) && i && i[1].type === "listItemPrefixWhitespace" ? t(e) : n(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-core-commonmark/lib/setext-underline.js
+// node_modules/micromark-core-commonmark/lib/setext-underline.js
 var hr = {
 	name: "setextUnderline",
 	resolveTo: gr,
@@ -2127,7 +2127,7 @@ function _r(e, t, n) {
 		return r === null || I(r) ? (e.exit("setextHeadingLine"), t(r)) : n(r);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/initialize/flow.js
+// node_modules/micromark/lib/initialize/flow.js
 var vr = { tokenize: yr };
 function yr(e) {
 	let t = this, n = e.attempt(Ht, r, e.attempt(this.parser.constructs.flowInitial, i, V(e, e.attempt(this.parser.constructs.flow, i, e.attempt(hn, i)), "linePrefix")));
@@ -2141,7 +2141,7 @@ function yr(e) {
 		else return e.enter("lineEnding"), e.consume(r), e.exit("lineEnding"), t.currentConstruct = void 0, n;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/initialize/text.js
+// node_modules/micromark/lib/initialize/text.js
 var br = { resolveAll: wr() }, xr = Cr("string"), Sr = Cr("text");
 function Cr(e) {
 	return {
@@ -2222,7 +2222,7 @@ function Tr(e, t) {
 	}
 	return e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/constructs.js
+// node_modules/micromark/lib/constructs.js
 var Er = /* @__PURE__ */ e({
 	attentionMarkers: () => Pr,
 	contentInitial: () => Or,
@@ -2278,7 +2278,7 @@ var Er = /* @__PURE__ */ e({
 	95: It,
 	96: sn
 }, Nr = { null: [It, br] }, Pr = { null: [42, 95] }, Fr = { null: [] };
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/create-tokenizer.js
+// node_modules/micromark/lib/create-tokenizer.js
 function Ir(e, t, n) {
 	let r = {
 		_bufferIndex: -1,
@@ -2450,7 +2450,7 @@ function Rr(e, t) {
 	}
 	return r.join("");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/parse.js
+// node_modules/micromark/lib/parse.js
 function zr(e) {
 	let t = {
 		constructs: Ct([Er, ...(e || {}).extensions || []]),
@@ -2470,12 +2470,12 @@ function zr(e) {
 		}
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/postprocess.js
+// node_modules/micromark/lib/postprocess.js
 function Br(e) {
 	for (; !pn(e););
 	return e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark/lib/preprocess.js
+// node_modules/micromark/lib/preprocess.js
 var Vr = /[\0\t\n\r]/g;
 function Hr() {
 	let e = 1, t = "", n = !0, r;
@@ -2505,7 +2505,7 @@ function Hr() {
 		return o && (r && s.push(-5), t && s.push(t), s.push(null)), s;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-util-decode-string/index.js
+// node_modules/micromark-util-decode-string/index.js
 var Ur = /\\([!-/:-@[-`{-~])|&(#(?:\d{1,7}|x[\da-f]{1,6})|[\da-z]{1,31});/gi;
 function Wr(e) {
 	return e.replace(Ur, Gr);
@@ -2518,7 +2518,7 @@ function Gr(e, t, n) {
 	}
 	return xt(n) || e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-from-markdown/lib/index.js
+// node_modules/mdast-util-from-markdown/lib/index.js
 var Kr = {}.hasOwnProperty;
 function qr(e, t, n) {
 	return t && typeof t == "object" && (n = t, t = void 0), Jr(n)(Br(zr(n).document().write(Hr()(e, t, !0))));
@@ -3062,7 +3062,7 @@ function Zr(e, t) {
 		end: t.end
 	}) + ") is still open");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/remark-parse/lib/index.js
+// node_modules/remark-parse/lib/index.js
 function Qr(e) {
 	let t = this;
 	t.parser = n;
@@ -3075,7 +3075,7 @@ function Qr(e) {
 		});
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
+// node_modules/mdast-util-to-hast/lib/handlers/blockquote.js
 function $r(e, t) {
 	let n = {
 		type: "element",
@@ -3085,7 +3085,7 @@ function $r(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/break.js
+// node_modules/mdast-util-to-hast/lib/handlers/break.js
 function ei(e, t) {
 	let n = {
 		type: "element",
@@ -3098,7 +3098,7 @@ function ei(e, t) {
 		value: "\n"
 	}];
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/code.js
+// node_modules/mdast-util-to-hast/lib/handlers/code.js
 function ti(e, t) {
 	let n = t.value ? t.value + "\n" : "", r = {}, i = t.lang ? t.lang.split(/\s+/) : [];
 	i.length > 0 && (r.className = ["language-" + i[0]]);
@@ -3118,7 +3118,7 @@ function ti(e, t) {
 		children: [a]
 	}, e.patch(t, a), a;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/delete.js
+// node_modules/mdast-util-to-hast/lib/handlers/delete.js
 function ni(e, t) {
 	let n = {
 		type: "element",
@@ -3128,7 +3128,7 @@ function ni(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
+// node_modules/mdast-util-to-hast/lib/handlers/emphasis.js
 function ri(e, t) {
 	let n = {
 		type: "element",
@@ -3138,7 +3138,7 @@ function ri(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
+// node_modules/mdast-util-to-hast/lib/handlers/footnote-reference.js
 function ii(e, t) {
 	let n = typeof e.options.clobberPrefix == "string" ? e.options.clobberPrefix : "user-content-", r = String(t.identifier).toUpperCase(), i = Dt(r.toLowerCase()), a = e.footnoteOrder.indexOf(r), o, s = e.footnoteCounts.get(r);
 	s === void 0 ? (s = 0, e.footnoteOrder.push(r), o = e.footnoteOrder.length) : o = a + 1, s += 1, e.footnoteCounts.set(r, s);
@@ -3165,7 +3165,7 @@ function ii(e, t) {
 	};
 	return e.patch(t, l), e.applyData(t, l);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/heading.js
+// node_modules/mdast-util-to-hast/lib/handlers/heading.js
 function ai(e, t) {
 	let n = {
 		type: "element",
@@ -3175,7 +3175,7 @@ function ai(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/html.js
+// node_modules/mdast-util-to-hast/lib/handlers/html.js
 function oi(e, t) {
 	if (e.options.allowDangerousHtml) {
 		let n = {
@@ -3185,7 +3185,7 @@ function oi(e, t) {
 		return e.patch(t, n), e.applyData(t, n);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/revert.js
+// node_modules/mdast-util-to-hast/lib/revert.js
 function si(e, t) {
 	let n = t.referenceType, r = "]";
 	if (n === "collapsed" ? r += "[]" : n === "full" && (r += "[" + (t.label || t.identifier) + "]"), t.type === "imageReference") return [{
@@ -3203,7 +3203,7 @@ function si(e, t) {
 		value: r
 	}), i;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
+// node_modules/mdast-util-to-hast/lib/handlers/image-reference.js
 function ci(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return si(e, t);
@@ -3220,7 +3220,7 @@ function ci(e, t) {
 	};
 	return e.patch(t, a), e.applyData(t, a);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/image.js
+// node_modules/mdast-util-to-hast/lib/handlers/image.js
 function li(e, t) {
 	let n = { src: Dt(t.url) };
 	t.alt !== null && t.alt !== void 0 && (n.alt = t.alt), t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -3232,7 +3232,7 @@ function li(e, t) {
 	};
 	return e.patch(t, r), e.applyData(t, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
+// node_modules/mdast-util-to-hast/lib/handlers/inline-code.js
 function ui(e, t) {
 	let n = {
 		type: "text",
@@ -3247,7 +3247,7 @@ function ui(e, t) {
 	};
 	return e.patch(t, r), e.applyData(t, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
+// node_modules/mdast-util-to-hast/lib/handlers/link-reference.js
 function di(e, t) {
 	let n = String(t.identifier).toUpperCase(), r = e.definitionById.get(n);
 	if (!r) return si(e, t);
@@ -3261,7 +3261,7 @@ function di(e, t) {
 	};
 	return e.patch(t, a), e.applyData(t, a);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/link.js
+// node_modules/mdast-util-to-hast/lib/handlers/link.js
 function fi(e, t) {
 	let n = { href: Dt(t.url) };
 	t.title !== null && t.title !== void 0 && (n.title = t.title);
@@ -3273,7 +3273,7 @@ function fi(e, t) {
 	};
 	return e.patch(t, r), e.applyData(t, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/list-item.js
+// node_modules/mdast-util-to-hast/lib/handlers/list-item.js
 function pi(e, t, n) {
 	let r = e.all(t), i = n ? mi(n) : hi(t), a = {}, o = [];
 	if (typeof t.checked == "boolean") {
@@ -3330,7 +3330,7 @@ function mi(e) {
 function hi(e) {
 	return e.spread ?? e.children.length > 1;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/list.js
+// node_modules/mdast-util-to-hast/lib/handlers/list.js
 function gi(e, t) {
 	let n = {}, r = e.all(t), i = -1;
 	for (typeof t.start == "number" && t.start !== 1 && (n.start = t.start); ++i < r.length;) {
@@ -3348,7 +3348,7 @@ function gi(e, t) {
 	};
 	return e.patch(t, a), e.applyData(t, a);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
+// node_modules/mdast-util-to-hast/lib/handlers/paragraph.js
 function _i(e, t) {
 	let n = {
 		type: "element",
@@ -3358,7 +3358,7 @@ function _i(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/root.js
+// node_modules/mdast-util-to-hast/lib/handlers/root.js
 function vi(e, t) {
 	let n = {
 		type: "root",
@@ -3366,7 +3366,7 @@ function vi(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/strong.js
+// node_modules/mdast-util-to-hast/lib/handlers/strong.js
 function yi(e, t) {
 	let n = {
 		type: "element",
@@ -3376,7 +3376,7 @@ function yi(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/table.js
+// node_modules/mdast-util-to-hast/lib/handlers/table.js
 function bi(e, t) {
 	let n = e.all(t), r = n.shift(), i = [];
 	if (r) {
@@ -3408,7 +3408,7 @@ function bi(e, t) {
 	};
 	return e.patch(t, a), e.applyData(t, a);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/table-row.js
+// node_modules/mdast-util-to-hast/lib/handlers/table-row.js
 function xi(e, t, n) {
 	let r = n ? n.children : void 0, i = (r ? r.indexOf(t) : 1) === 0 ? "th" : "td", a = n && n.type === "table" ? n.align : void 0, o = a ? a.length : t.children.length, s = -1, c = [];
 	for (; ++s < o;) {
@@ -3430,7 +3430,7 @@ function xi(e, t, n) {
 	};
 	return e.patch(t, l), e.applyData(t, l);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
+// node_modules/mdast-util-to-hast/lib/handlers/table-cell.js
 function Si(e, t) {
 	let n = {
 		type: "element",
@@ -3440,7 +3440,7 @@ function Si(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/trim-lines/index.js
+// node_modules/trim-lines/index.js
 var Ci = 9, wi = 32;
 function Ti(e) {
 	let t = String(e), n = /\r?\n|\r/g, r = n.exec(t), i = 0, a = [];
@@ -3459,7 +3459,7 @@ function Ei(e, t, n) {
 	}
 	return i > r ? e.slice(r, i) : "";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/text.js
+// node_modules/mdast-util-to-hast/lib/handlers/text.js
 function Di(e, t) {
 	let n = {
 		type: "text",
@@ -3467,7 +3467,7 @@ function Di(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
+// node_modules/mdast-util-to-hast/lib/handlers/thematic-break.js
 function Oi(e, t) {
 	let n = {
 		type: "element",
@@ -3477,7 +3477,7 @@ function Oi(e, t) {
 	};
 	return e.patch(t, n), e.applyData(t, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/handlers/index.js
+// node_modules/mdast-util-to-hast/lib/handlers/index.js
 var ki = {
 	blockquote: $r,
 	break: ei,
@@ -3508,7 +3508,7 @@ var ki = {
 	footnoteDefinition: Ai
 };
 function Ai() {}
-// ../../../../pr-469/crates/nac-server/web/node_modules/@ungap/structured-clone/esm/deserialize.js
+// node_modules/@ungap/structured-clone/esm/deserialize.js
 var ji = typeof self == "object" ? self : globalThis, Mi = (e, t) => {
 	switch (e) {
 		case "Function":
@@ -3656,7 +3656,7 @@ var ji = typeof self == "object" ? self : globalThis, Mi = (e, t) => {
 }, Vi = typeof structuredClone == "function" ?
 /* c8 ignore start */
 (e, t) => t && ("json" in t || "lossy" in t) ? Pi(Bi(e, t)) : structuredClone(e) : (e, t) => Pi(Bi(e, t));
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/footer.js
+// node_modules/mdast-util-to-hast/lib/footer.js
 function Hi(e, t) {
 	let n = [{
 		type: "text",
@@ -3755,7 +3755,7 @@ function Wi(e) {
 		]
 	};
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/unist-util-visit/lib/index.js
+// node_modules/unist-util-visit/lib/index.js
 function Gi(e, t, n, r) {
 	let i, a, o;
 	typeof t == "function" && typeof n != "function" ? (a = void 0, o = t, i = n) : (a = t, o = n, i = r), pe(e, a, s, i);
@@ -3764,7 +3764,7 @@ function Gi(e, t, n, r) {
 		return o(e, r, n);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/state.js
+// node_modules/mdast-util-to-hast/lib/state.js
 var Ki = {}.hasOwnProperty, qi = {};
 function Ji(e, t) {
 	let n = t || qi, r = /* @__PURE__ */ new Map(), i = /* @__PURE__ */ new Map(), a = {
@@ -3866,7 +3866,7 @@ function $i(e) {
 	for (; n === 9 || n === 32;) t++, n = e.charCodeAt(t);
 	return e.slice(t);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-hast/lib/index.js
+// node_modules/mdast-util-to-hast/lib/index.js
 function ea(e, t) {
 	let n = Ji(e, t), r = n.one(e, void 0), i = Wi(n), a = Array.isArray(r) ? {
 		type: "root",
@@ -3880,7 +3880,7 @@ function ea(e, t) {
 		value: "\n"
 	}, i)), a;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/remark-rehype/lib/index.js
+// node_modules/remark-rehype/lib/index.js
 function ta(e, t) {
 	return e && "run" in e ? async function(n, r) {
 		let i = ea(n, {
@@ -3895,11 +3895,11 @@ function ta(e, t) {
 		});
 	};
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/bail/index.js
+// node_modules/bail/index.js
 function na(e) {
 	if (e) throw e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/extend/index.js
+// node_modules/extend/index.js
 var ra = /* @__PURE__ */ n(((e, t) => {
 	var n = Object.prototype.hasOwnProperty, r = Object.prototype.toString, i = Object.defineProperty, a = Object.getOwnPropertyDescriptor, o = function(e) {
 		return typeof Array.isArray == "function" ? Array.isArray(e) : r.call(e) === "[object Array]";
@@ -3935,13 +3935,13 @@ var ra = /* @__PURE__ */ n(((e, t) => {
 		return d;
 	};
 }));
-// ../../../../pr-469/crates/nac-server/web/node_modules/is-plain-obj/index.js
+// node_modules/is-plain-obj/index.js
 function ia(e) {
 	if (typeof e != "object" || !e) return !1;
 	let t = Object.getPrototypeOf(e);
 	return (t === null || t === Object.prototype || Object.getPrototypeOf(t) === null) && !(Symbol.toStringTag in e) && !(Symbol.iterator in e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/trough/lib/index.js
+// node_modules/trough/lib/index.js
 function aa() {
 	let e = [], t = {
 		run: n,
@@ -3988,7 +3988,7 @@ function oa(e, t) {
 		i(null, e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile/lib/minpath.browser.js
+// node_modules/vfile/lib/minpath.browser.js
 var Y = {
 	basename: sa,
 	dirname: ca,
@@ -4085,16 +4085,16 @@ function fa(e, t) {
 function pa(e) {
 	if (typeof e != "string") throw TypeError("Path must be a string. Received " + JSON.stringify(e));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile/lib/minproc.browser.js
+// node_modules/vfile/lib/minproc.browser.js
 var ma = { cwd: ha };
 function ha() {
 	return "/";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile/lib/minurl.shared.js
+// node_modules/vfile/lib/minurl.shared.js
 function ga(e) {
 	return !!(typeof e == "object" && e && "href" in e && e.href && "protocol" in e && e.protocol && e.auth === void 0);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile/lib/minurl.browser.js
+// node_modules/vfile/lib/minurl.browser.js
 function _a(e) {
 	if (typeof e == "string") e = new URL(e);
 	else if (!ga(e)) {
@@ -4122,7 +4122,7 @@ function va(e) {
 	}
 	return decodeURIComponent(t);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/vfile/lib/index.js
+// node_modules/vfile/lib/index.js
 var ya = [
 	"history",
 	"path",
@@ -4204,7 +4204,7 @@ function Ca(e, t) {
 function wa(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/unified/lib/callable-instance.js
+// node_modules/unified/lib/callable-instance.js
 var Ta = (function(e) {
 	let t = this.constructor.prototype, n = t[e], r = function() {
 		return n.apply(r, arguments);
@@ -4365,7 +4365,7 @@ function Ia(e) {
 function La(e) {
 	return !!(e && typeof e == "object" && "byteLength" in e && "byteOffset" in e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/react-markdown/lib/index.js
+// node_modules/react-markdown/lib/index.js
 var Ra = [], za = { allowDangerousHtml: !0 }, Ba = /^(https?|ircs?|mailto|xmpp)$/i, Va = [
 	{
 		from: "astPlugins",
@@ -4493,12 +4493,12 @@ function Ka(e) {
 	let t = e.indexOf(":"), n = e.indexOf("?"), r = e.indexOf("#"), i = e.indexOf("/");
 	return t === -1 || i !== -1 && t > i || n !== -1 && t > n || r !== -1 && t > r || Ba.test(e.slice(0, t)) ? e : "";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp/index.js
+// node_modules/mdast-util-find-and-replace/node_modules/escape-string-regexp/index.js
 function qa(e) {
 	if (typeof e != "string") throw TypeError("Expected a string");
 	return e.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&").replace(/-/g, "\\x2d");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-find-and-replace/lib/index.js
+// node_modules/mdast-util-find-and-replace/lib/index.js
 function Ja(e, t, n) {
 	let r = N((n || {}).ignore || []), i = Ya(t), a = -1;
 	for (; ++a < i.length;) pe(e, "text", o);
@@ -4554,7 +4554,7 @@ function Za(e) {
 		return e;
 	};
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
+// node_modules/mdast-util-gfm-autolink-literal/lib/index.js
 var Qa = "phrasing", $a = [
 	"autolink",
 	"link",
@@ -4677,7 +4677,7 @@ function mo(e, t) {
 	let n = e.input.charCodeAt(e.index - 1);
 	return (e.index === 0 || z(n) || Se(n)) && (!t || n !== 47);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm-footnote/lib/index.js
+// node_modules/mdast-util-gfm-footnote/lib/index.js
 wo.peek = Co;
 function ho() {
 	this.buffer();
@@ -4770,7 +4770,7 @@ function Do(e, t, n) {
 function Oo(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm-strikethrough/lib/index.js
+// node_modules/mdast-util-gfm-strikethrough/lib/index.js
 var ko = [
 	"autolink",
 	"destinationLiteral",
@@ -4817,7 +4817,7 @@ function Po(e, t, n, r) {
 function Fo() {
 	return "~";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/markdown-table/index.js
+// node_modules/markdown-table/index.js
 function Io(e) {
 	return e.length;
 }
@@ -4874,7 +4874,7 @@ function zo(e) {
 	let t = typeof e == "string" ? e.codePointAt(0) : 0;
 	return t === 67 || t === 99 ? 99 : t === 76 || t === 108 ? 108 : t === 82 || t === 114 ? 114 : 0;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
+// node_modules/mdast-util-to-markdown/lib/handle/blockquote.js
 function Bo(e, t, n, r) {
 	let i = n.enter("blockquote"), a = n.createTracker(r);
 	a.move("> "), a.shift(2);
@@ -4884,7 +4884,7 @@ function Bo(e, t, n, r) {
 function Vo(e, t, n) {
 	return ">" + (n ? "" : " ") + e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
+// node_modules/mdast-util-to-markdown/lib/util/pattern-in-scope.js
 function Ho(e, t) {
 	return Uo(e, t.inConstruct, !0) && !Uo(e, t.notInConstruct, !1);
 }
@@ -4894,23 +4894,23 @@ function Uo(e, t, n) {
 	for (; ++r < t.length;) if (e.includes(t[r])) return !0;
 	return !1;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/break.js
+// node_modules/mdast-util-to-markdown/lib/handle/break.js
 function Wo(e, t, n, r) {
 	let i = -1;
 	for (; ++i < n.unsafe.length;) if (n.unsafe[i].character === "\n" && Ho(n.stack, n.unsafe[i])) return /[ \t]/.test(r.before) ? "" : " ";
 	return "\\\n";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
+// node_modules/mdast-util-to-markdown/lib/util/format-code-as-indented.js
 function Go(e, t) {
 	return !(t.options.fences !== !1 || !e.value || e.lang || !/[^ \r\n]/.test(e.value) || /^[\t ]*(?:[\r\n]|$)|(?:^|[\r\n])[\t ]*$/.test(e.value));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-fence.js
+// node_modules/mdast-util-to-markdown/lib/util/check-fence.js
 function Ko(e) {
 	let t = e.options.fence || "`";
 	if (t !== "`" && t !== "~") throw Error("Cannot serialize code with `" + t + "` for `options.fence`, expected `` ` `` or `~`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/code.js
+// node_modules/mdast-util-to-markdown/lib/handle/code.js
 function qo(e, t, n, r) {
 	let i = Ko(n), a = e.value || "", o = i === "`" ? "GraveAccent" : "Tilde";
 	if (Go(e, n)) {
@@ -4941,13 +4941,13 @@ function qo(e, t, n, r) {
 function Jo(e, t, n) {
 	return (n ? "" : "    ") + e;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-quote.js
+// node_modules/mdast-util-to-markdown/lib/util/check-quote.js
 function Yo(e) {
 	let t = e.options.quote || "\"";
 	if (t !== "\"" && t !== "'") throw Error("Cannot serialize title with `" + t + "` for `options.quote`, expected `\"`, or `'`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/definition.js
+// node_modules/mdast-util-to-markdown/lib/handle/definition.js
 function Xo(e, t, n, r) {
 	let i = Yo(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("definition"), s = n.enter("label"), c = n.createTracker(r), l = c.move("[");
 	return l += c.move(n.safe(n.associationId(e), {
@@ -4968,17 +4968,17 @@ function Xo(e, t, n, r) {
 		...c.current()
 	})), l += c.move(i), s()), o(), l;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
+// node_modules/mdast-util-to-markdown/lib/util/check-emphasis.js
 function Zo(e) {
 	let t = e.options.emphasis || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize emphasis with `" + t + "` for `options.emphasis`, expected `*`, or `_`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
+// node_modules/mdast-util-to-markdown/lib/util/encode-character-reference.js
 function Qo(e) {
 	return "&#x" + e.toString(16).toUpperCase() + ";";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/encode-info.js
+// node_modules/mdast-util-to-markdown/lib/util/encode-info.js
 function $o(e, t, n) {
 	let r = Pt(e), i = Pt(t);
 	return r === void 0 ? i === void 0 ? n === "_" ? {
@@ -5013,7 +5013,7 @@ function $o(e, t, n) {
 		outside: !1
 	};
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
+// node_modules/mdast-util-to-markdown/lib/handle/emphasis.js
 es.peek = ts;
 function es(e, t, n, r) {
 	let i = Zo(n), a = n.enter("emphasis"), o = n.createTracker(r), s = o.move(i), c = o.move(n.containerPhrasing(e, {
@@ -5033,14 +5033,14 @@ function es(e, t, n, r) {
 function ts(e, t, n) {
 	return n.options.emphasis || "*";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
+// node_modules/mdast-util-to-markdown/lib/util/format-heading-as-setext.js
 function ns(e, t) {
 	let n = !1;
 	return Gi(e, function(e) {
 		if ("value" in e && /\r?\n|\r/.test(e.value) || e.type === "break") return n = !0, !1;
 	}), !!((!e.depth || e.depth < 3) && gt(e) && (t.options.setext || n));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/heading.js
+// node_modules/mdast-util-to-markdown/lib/handle/heading.js
 function rs(e, t, n, r) {
 	let i = Math.max(Math.min(6, e.depth || 1), 1), a = n.createTracker(r);
 	if (ns(e, n)) {
@@ -5060,7 +5060,7 @@ function rs(e, t, n, r) {
 	});
 	return /^[\t ]/.test(l) && (l = Qo(l.charCodeAt(0)) + l.slice(1)), l = l ? o + " " + l : o, n.options.closeAtx && (l += " " + o), c(), s(), l;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/html.js
+// node_modules/mdast-util-to-markdown/lib/handle/html.js
 is.peek = as;
 function is(e) {
 	return e.value || "";
@@ -5068,7 +5068,7 @@ function is(e) {
 function as() {
 	return "<";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/image.js
+// node_modules/mdast-util-to-markdown/lib/handle/image.js
 os.peek = ss;
 function os(e, t, n, r) {
 	let i = Yo(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.enter("image"), s = n.enter("label"), c = n.createTracker(r), l = c.move("![");
@@ -5093,7 +5093,7 @@ function os(e, t, n, r) {
 function ss() {
 	return "!";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
+// node_modules/mdast-util-to-markdown/lib/handle/image-reference.js
 cs.peek = ls;
 function cs(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("imageReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("!["), l = n.safe(e.alt, {
@@ -5114,7 +5114,7 @@ function cs(e, t, n, r) {
 function ls() {
 	return "!";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
+// node_modules/mdast-util-to-markdown/lib/handle/inline-code.js
 us.peek = ds;
 function us(e, t, n) {
 	let r = e.value || "", i = "`", a = -1;
@@ -5131,12 +5131,12 @@ function us(e, t, n) {
 function ds() {
 	return "`";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
+// node_modules/mdast-util-to-markdown/lib/util/format-link-as-autolink.js
 function fs(e, t) {
 	let n = gt(e);
 	return !(t.options.resourceLink || !e.url || e.title || !e.children || e.children.length !== 1 || e.children[0].type !== "text" || n !== e.url && "mailto:" + n !== e.url || !/^[a-z][a-z+.-]+:/i.test(e.url) || /[\0- <>\u007F]/.test(e.url));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/link.js
+// node_modules/mdast-util-to-markdown/lib/handle/link.js
 ps.peek = ms;
 function ps(e, t, n, r) {
 	let i = Yo(n), a = i === "\"" ? "Quote" : "Apostrophe", o = n.createTracker(r), s, c;
@@ -5173,7 +5173,7 @@ function ps(e, t, n, r) {
 function ms(e, t, n) {
 	return fs(e, n) ? "<" : "[";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
+// node_modules/mdast-util-to-markdown/lib/handle/link-reference.js
 hs.peek = gs;
 function hs(e, t, n, r) {
 	let i = e.referenceType, a = n.enter("linkReference"), o = n.enter("label"), s = n.createTracker(r), c = s.move("["), l = n.containerPhrasing(e, {
@@ -5194,13 +5194,13 @@ function hs(e, t, n, r) {
 function gs() {
 	return "[";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
+// node_modules/mdast-util-to-markdown/lib/util/check-bullet.js
 function _s(e) {
 	let t = e.options.bullet || "*";
 	if (t !== "*" && t !== "+" && t !== "-") throw Error("Cannot serialize items with `" + t + "` for `options.bullet`, expected `*`, `+`, or `-`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
+// node_modules/mdast-util-to-markdown/lib/util/check-bullet-other.js
 function vs(e) {
 	let t = _s(e), n = e.options.bulletOther;
 	if (!n) return t === "*" ? "-" : "*";
@@ -5208,19 +5208,19 @@ function vs(e) {
 	if (n === t) throw Error("Expected `bullet` (`" + t + "`) and `bulletOther` (`" + n + "`) to be different");
 	return n;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
+// node_modules/mdast-util-to-markdown/lib/util/check-bullet-ordered.js
 function ys(e) {
 	let t = e.options.bulletOrdered || ".";
 	if (t !== "." && t !== ")") throw Error("Cannot serialize items with `" + t + "` for `options.bulletOrdered`, expected `.` or `)`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-rule.js
+// node_modules/mdast-util-to-markdown/lib/util/check-rule.js
 function bs(e) {
 	let t = e.options.rule || "*";
 	if (t !== "*" && t !== "-" && t !== "_") throw Error("Cannot serialize rules with `" + t + "` for `options.rule`, expected `*`, `-`, or `_`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/list.js
+// node_modules/mdast-util-to-markdown/lib/handle/list.js
 function xs(e, t, n, r) {
 	let i = n.enter("list"), a = n.bulletCurrent, o = e.ordered ? ys(n) : _s(n), s = e.ordered ? o === "." ? ")" : "." : vs(n), c = t && n.bulletLastUsed ? o === n.bulletLastUsed : !1;
 	if (!e.ordered) {
@@ -5240,13 +5240,13 @@ function xs(e, t, n, r) {
 	let l = n.containerFlow(e, r);
 	return n.bulletLastUsed = o, n.bulletCurrent = a, i(), l;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
+// node_modules/mdast-util-to-markdown/lib/util/check-list-item-indent.js
 function Ss(e) {
 	let t = e.options.listItemIndent || "one";
 	if (t !== "tab" && t !== "one" && t !== "mixed") throw Error("Cannot serialize items with `" + t + "` for `options.listItemIndent`, expected `tab`, `one`, or `mixed`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/list-item.js
+// node_modules/mdast-util-to-markdown/lib/handle/list-item.js
 function Cs(e, t, n, r) {
 	let i = Ss(n), a = n.bulletCurrent || _s(n);
 	t && t.type === "list" && t.ordered && (a = (typeof t.start == "number" && t.start > -1 ? t.start : 1) + (n.options.incrementListMarker === !1 ? 0 : t.children.indexOf(e)) + a);
@@ -5260,12 +5260,12 @@ function Cs(e, t, n, r) {
 		return t ? (n ? "" : " ".repeat(o)) + e : (n ? a : a + " ".repeat(o - a.length)) + e;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
+// node_modules/mdast-util-to-markdown/lib/handle/paragraph.js
 function ws(e, t, n, r) {
 	let i = n.enter("paragraph"), a = n.enter("phrasing"), o = n.containerPhrasing(e, r);
 	return a(), i(), o;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-phrasing/lib/index.js
+// node_modules/mdast-util-phrasing/lib/index.js
 var Ts = N([
 	"break",
 	"delete",
@@ -5284,19 +5284,19 @@ var Ts = N([
 	"text",
 	"textDirective"
 ]);
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/root.js
+// node_modules/mdast-util-to-markdown/lib/handle/root.js
 function Es(e, t, n, r) {
 	return (e.children.some(function(e) {
 		return Ts(e);
 	}) ? n.containerPhrasing : n.containerFlow).call(n, e, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-strong.js
+// node_modules/mdast-util-to-markdown/lib/util/check-strong.js
 function Ds(e) {
 	let t = e.options.strong || "*";
 	if (t !== "*" && t !== "_") throw Error("Cannot serialize strong with `" + t + "` for `options.strong`, expected `*`, or `_`");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/strong.js
+// node_modules/mdast-util-to-markdown/lib/handle/strong.js
 Os.peek = ks;
 function Os(e, t, n, r) {
 	let i = Ds(n), a = n.enter("strong"), o = n.createTracker(r), s = o.move(i + i), c = o.move(n.containerPhrasing(e, {
@@ -5316,22 +5316,22 @@ function Os(e, t, n, r) {
 function ks(e, t, n) {
 	return n.options.strong || "*";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/text.js
+// node_modules/mdast-util-to-markdown/lib/handle/text.js
 function As(e, t, n, r) {
 	return n.safe(e.value, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
+// node_modules/mdast-util-to-markdown/lib/util/check-rule-repetition.js
 function js(e) {
 	let t = e.options.ruleRepetition || 3;
 	if (t < 3) throw Error("Cannot serialize rules with repetition `" + t + "` for `options.ruleRepetition`, expected `3` or more");
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
+// node_modules/mdast-util-to-markdown/lib/handle/thematic-break.js
 function Ms(e, t, n) {
 	let r = (bs(n) + (n.options.ruleSpaces ? " " : "")).repeat(js(n));
 	return n.options.ruleSpaces ? r.slice(0, -1) : r;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-to-markdown/lib/handle/index.js
+// node_modules/mdast-util-to-markdown/lib/handle/index.js
 var Ns = {
 	blockquote: Bo,
 	break: Wo,
@@ -5354,7 +5354,7 @@ var Ns = {
 	text: As,
 	thematicBreak: Ms
 };
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm-table/lib/index.js
+// node_modules/mdast-util-gfm-table/lib/index.js
 function Ps() {
 	return {
 		enter: {
@@ -5486,7 +5486,7 @@ function Hs(e) {
 		return n.stack.includes("tableCell") && (r = r.replace(/\|/g, "\\$&")), r;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm-task-list-item/lib/index.js
+// node_modules/mdast-util-gfm-task-list-item/lib/index.js
 function Us() {
 	return { exit: {
 		taskListCheckValueChecked: Gs,
@@ -5540,7 +5540,7 @@ function qs(e, t, n, r) {
 		return e + o;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-gfm/lib/index.js
+// node_modules/mdast-util-gfm/lib/index.js
 function Js() {
 	return [
 		eo(),
@@ -5559,7 +5559,7 @@ function Ys(e) {
 		Ws()
 	] };
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
+// node_modules/micromark-extension-gfm-autolink-literal/lib/syntax.js
 var Xs = {
 	tokenize: cc,
 	partial: !0
@@ -5730,7 +5730,7 @@ function _c(e) {
 	}
 	return e.length > 0 && !n && (e[e.length - 1][1]._gfmAutolinkLiteralWalkedInto = !0), n;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-footnote/lib/syntax.js
+// node_modules/micromark-extension-gfm-footnote/lib/syntax.js
 var vc = {
 	tokenize: Ec,
 	partial: !0
@@ -5917,7 +5917,7 @@ function Ec(e, t, n) {
 		return i && i[1].type === "gfmFootnoteDefinitionIndent" && i[2].sliceSerialize(i[1], !0).length === 4 ? t(e) : n(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
+// node_modules/micromark-extension-gfm-strikethrough/lib/syntax.js
 function Dc(e) {
 	let t = (e || {}).singleTilde, n = {
 		name: "strikethrough",
@@ -6008,7 +6008,7 @@ function Dc(e) {
 		}
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-table/lib/edit-map.js
+// node_modules/micromark-extension-gfm-table/lib/edit-map.js
 var Oc = class {
 	constructor() {
 		this.map = [];
@@ -6050,7 +6050,7 @@ function kc(e, t, n, r) {
 		]);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-table/lib/infer.js
+// node_modules/micromark-extension-gfm-table/lib/infer.js
 function Ac(e, t) {
 	let n = !1, r = [];
 	for (; t < e.length;) {
@@ -6068,7 +6068,7 @@ function Ac(e, t) {
 	}
 	return r;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-table/lib/syntax.js
+// node_modules/micromark-extension-gfm-table/lib/syntax.js
 function jc() {
 	return { flow: { null: {
 		name: "table",
@@ -6263,7 +6263,7 @@ function Ic(e, t) {
 	let n = e[t], r = n[0] === "enter" ? "start" : "end";
 	return n[1][r];
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
+// node_modules/micromark-extension-gfm-task-list-item/lib/syntax.js
 var Lc = {
 	name: "tasklistCheck",
 	tokenize: zc
@@ -6293,7 +6293,7 @@ function Bc(e, t, n) {
 		return e === null ? n(e) : t(e);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-gfm/index.js
+// node_modules/micromark-extension-gfm/index.js
 function Vc(e) {
 	return Ct([
 		rc(),
@@ -6303,7 +6303,7 @@ function Vc(e) {
 		Rc()
 	]);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/remark-gfm/lib/index.js
+// node_modules/remark-gfm/lib/index.js
 var Hc = {};
 function Uc(e) {
 	let t = this, n = e || Hc, r = t.data(), i = r.micromarkExtensions ||= [], a = r.fromMarkdownExtensions ||= [], o = r.toMarkdownExtensions ||= [];
@@ -6524,7 +6524,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-CS6XHwdY.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-Dnwz5zxd.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
