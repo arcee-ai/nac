@@ -387,6 +387,79 @@ async fn timeout_envelope_is_advertised_stripped_and_enforced() {
 }
 
 #[tokio::test]
+async fn execution_deadline_pauses_authorization_then_bounds_remaining_work() {
+    let timing = Arc::new(Mutex::new(InvocationTiming::default()));
+    let context = ToolCallContext {
+        execution_timing: Some(timing.clone()),
+        ..Default::default()
+    };
+    let deadline = execution_deadline(Some(&timing), Instant::now(), Duration::from_millis(60));
+    tokio::pin!(deadline);
+    let authorization = context.authorize_during_execution(async {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        crate::permissions::AuthorizationOutcome::Allowed
+    });
+    tokio::select! {
+        _ = authorization => (),
+        () = &mut deadline => panic!("authorization consumed the execution deadline"),
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut deadline)
+            .await
+            .is_err()
+    );
+    tokio::time::timeout(Duration::from_secs(1), deadline)
+        .await
+        .expect("post-authorization work must remain bounded");
+    assert_eq!(timing.lock().unwrap().authorization_waits, 0);
+}
+
+#[tokio::test]
+async fn overlapping_authorization_is_counted_once_and_drop_resumes_timing() {
+    let timing = Arc::new(Mutex::new(InvocationTiming::default()));
+    let context = ToolCallContext {
+        execution_timing: Some(timing.clone()),
+        ..Default::default()
+    };
+    let started = Instant::now();
+    let authorize = |delay| {
+        context.authorize_during_execution(async move {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            crate::permissions::AuthorizationOutcome::Allowed
+        })
+    };
+    tokio::join!(authorize(60), authorize(100));
+    let elapsed = started.elapsed();
+    {
+        let timing = timing.lock().unwrap();
+        assert!(
+            timing.authorization <= elapsed,
+            "overlapping authorization was double counted"
+        );
+        assert_eq!(timing.authorization_waits, 0);
+        assert!(timing.authorization_started.is_none());
+    }
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let waiting = tokio::spawn({
+        let entered = entered.clone();
+        async move {
+            context
+                .authorize_during_execution(async move {
+                    entered.notify_one();
+                    std::future::pending().await
+                })
+                .await
+        }
+    });
+    entered.notified().await;
+    waiting.abort();
+    assert!(waiting.await.unwrap_err().is_cancelled());
+    let timing = timing.lock().unwrap();
+    assert_eq!(timing.authorization_waits, 0);
+    assert!(timing.authorization_started.is_none());
+}
+
+#[tokio::test]
 async fn invalid_timeout_envelopes_fail_before_native_work() {
     let calls = Arc::new(AtomicUsize::new(0));
     let registry = ToolRegistry::builder()

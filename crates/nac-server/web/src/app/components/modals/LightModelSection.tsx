@@ -1,15 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type AriaAttributes } from "react";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  PopoverPlacement,
-  Select,
-  type SelectItem,
-} from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, type SelectItem } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
+import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import {
@@ -95,13 +88,15 @@ export function LightModelSection({
   initial,
   onChange,
   behavior = "orchestrator",
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: {
   /** Seeds the form; a value opens the section in dual mode. */
   initial?: LightModelSettings | null;
   onChange: (selection: LightSelection) => void;
   /** Adjusts the promise without changing the stored optional field. */
   behavior?: SessionBehavior;
-}) {
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">) {
   const catalog = useModelCatalog();
   const liveByBackend = useReadyProviderModels(catalog.data);
   const [mode, setMode] = useState<LightMode>(initial ? "dual" : "single");
@@ -153,13 +148,17 @@ export function LightModelSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <FieldLabel label={copy.label} hint={copy.hint} />
+      <div className="flex flex-col items-stretch gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <FieldLabel label={copy.label} />
+          <p className="text-small !leading-[22px] text-basic-secondary">{copy.hint}</p>
+        </div>
         <div className="flex items-center gap-2">
           {(["single", "dual"] as const).map((item) => (
             <Button
               key={item}
-              variant={mode === item ? ButtonVariant.Primary : ButtonVariant.Secondary}
+              variant={mode === item ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
+              className="min-h-11 md:min-h-9"
               size={ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={() => setMode(item)}
@@ -172,14 +171,18 @@ export function LightModelSection({
       </div>
 
       {mode === "dual" ? (
-        <div className="flex flex-col gap-2 rounded-[8px] border border-muted bg-elevation-level-2 p-3">
+        <div className="flex flex-col gap-4 border-l border-muted pl-4">
           <ConfigRow
+            presentation="form"
             label="Light model"
+            invalid={ariaInvalid === true || ariaInvalid === "true"}
             required
             verticalOnMobile
             hint={copy.modelHint}
             control={
               <CatalogModelPicker
+                aria-invalid={ariaInvalid}
+                aria-describedby={ariaDescribedBy}
                 catalog={catalog.data}
                 loading={catalog.isLoading}
                 failed={catalog.isError}
@@ -201,11 +204,13 @@ export function LightModelSection({
             }
           />
           <ConfigRow
+            presentation="form"
             label="Light effort"
             secondary
             hint="Reasoning effort the light model runs with."
             control={
-              <Select
+              <SmallSelect
+                presentation="form"
                 items={efforts}
                 value={effectiveLight.effort}
                 onValueChange={(effort) =>
@@ -218,9 +223,6 @@ export function LightModelSection({
                 }
                 disabled={!effectiveLight.pick}
                 size={ButtonSize.Medium}
-                variant={ButtonVariant.Ghost}
-                placement={PopoverPlacement.BottomLeft}
-                panelClassName="max-h-64 overflow-auto"
               />
             }
           />

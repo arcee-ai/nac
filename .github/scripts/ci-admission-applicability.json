@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "pr_checks_sha256": "1c12e1ed2fa2aa78707ae46da445edf2f774eab689721771ff52069122667127",
+  "prefixes": [
+    ".github/",
+    "crates/",
+    "docker/managed/",
+    "scripts/"
+  ],
+  "exact_paths": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "Makefile",
+    ".dockerignore",
+    "version.txt"
+  ]
+}

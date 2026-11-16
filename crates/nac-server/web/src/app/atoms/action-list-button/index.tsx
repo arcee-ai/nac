@@ -56,6 +56,8 @@ interface ActionListButtonProps {
   /** Null for a row with nowhere to go, which then takes no focus. */
   onClick?: (() => void) | null;
   className?: string;
+  /** Local metadata typography/tone; other consumers keep the compact default. */
+  metaClassName?: string;
 }
 
 /** Ready and Failed labels take the tab button's own tone, so they follow its highlight and hover. */
@@ -141,6 +143,7 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
   expanded,
   onClick,
   className,
+  metaClassName,
 }) => {
   const style = SIZE_STYLE[size];
   const accessibleName = [label, meta, STATUS_NAME[status]].filter(Boolean).join(", ");
@@ -161,7 +164,12 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       <StatusGlyph icon={icon} status={status} expanded={expanded} size={size} />
       <span className={cn("flex-1 min-w-0 truncate text-left", LABEL_TONE[status])}>{label}</span>
       {meta ? (
-        <span className="shrink-0 text-[10px] leading-[12px] uppercase text-basic-muted">
+        <span
+          className={cn(
+            "shrink-0 text-[10px] leading-[12px] uppercase text-basic-muted",
+            metaClassName,
+          )}
+        >
           {meta}
         </span>
       ) : null}

@@ -6,6 +6,7 @@ import { doneLabel } from "@/app/features/insights/model/labels";
 import type { InsightGroup } from "@/app/features/insights/model/types";
 import { openOptionsFor } from "@/app/features/insights/transcript/openOptions";
 import { useLiveGroupLabel } from "@/app/features/insights/transcript/useLiveGroupLabel";
+import { NativeTaskLink } from "./NativeTaskLink";
 import {
   INSIGHTS_DETAIL_ID,
   useInsightsNavigation,
@@ -38,17 +39,26 @@ export const TranscriptGroupBadge = memo(function TranscriptGroupBadge({
   const { openGroup } = useInsightsNavigation();
   const liveLabel = useLiveGroupLabel(group, active, trailing);
   return (
-    <ToolsAndReasoningBadge
-      label={liveLabel ?? doneLabel(group)}
-      inProgress={liveLabel !== null}
-      selected={selected}
-      // Never a remote favicon: loading one tells a third party which hosts the session fetched.
-      leadingIcon={fetchesOnly(group) ? IconName.Globe : undefined}
-      disabled={!interactive}
-      controls={interactive ? INSIGHTS_DETAIL_ID : undefined}
-      onClick={
-        interactive ? (event) => openGroup(group.id, undefined, openOptionsFor(event)) : undefined
-      }
-    />
+    <div className="flex flex-col items-start gap-2">
+      <ToolsAndReasoningBadge
+        label={liveLabel ?? doneLabel(group)}
+        inProgress={liveLabel !== null}
+        selected={selected}
+        // Never a remote favicon: loading one tells a third party which hosts the session fetched.
+        leadingIcon={fetchesOnly(group) ? IconName.Globe : undefined}
+        disabled={!interactive}
+        controls={interactive ? INSIGHTS_DETAIL_ID : undefined}
+        onClick={
+          interactive ? (event) => openGroup(group.id, undefined, openOptionsFor(event)) : undefined
+        }
+      />
+      {interactive
+        ? group.segments.map((segment) =>
+            segment.kind === "tool" && segment.presentation?.launchedTask ? (
+              <NativeTaskLink key={segment.key} task={segment.presentation.launchedTask} />
+            ) : null,
+          )
+        : null}
+    </div>
   );
 });
