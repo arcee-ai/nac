@@ -94,7 +94,7 @@ it.each([literal, "/workspace/ordinary", " relative leading and trailing "])(
         expect(screen.getByText(/^Selected:/).textContent).toBe(`Selected: ${path}`),
       );
       fireEvent.click(screen.getByRole("button", { name: "Select" }));
-      expect(p.onSelect).toHaveBeenCalledWith(path);
+      await waitFor(() => expect(p.onSelect).toHaveBeenCalledWith(path));
     } finally {
       p.dispose();
     }
