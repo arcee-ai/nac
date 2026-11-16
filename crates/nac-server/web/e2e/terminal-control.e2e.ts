@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { createDirectSession, expect, showRoutePanel, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
 for (const mobile of [false, true]) {
@@ -92,12 +92,7 @@ for (const mobile of [false, true]) {
     const agentPid = await fs.readFile(path.join(workspace, "agent.pid"), "utf8");
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else {
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      await expect(show.or(pane)).toBeVisible();
-      if (await show.isVisible()) await show.click();
-    }
+    await showRoutePanel(page);
     await pane.getByRole("button", { name: /^PTY \d+, Agent, running$/ }).click();
     await expect(pane.locator(".xterm-accessibility")).toContainText("CONTROL-READY:agent");
     await expect(pane.getByLabel("Input controller")).toHaveText("Input: Agent");
@@ -186,10 +181,16 @@ for (const mobile of [false, true]) {
       await expect.poll(async () => (await api.getPermissions(session)).requests.length).toBe(1);
       const approval = (await api.getPermissions(session)).requests[0];
       expect(approval.tool).toBe("write_stdin");
-      // Dismiss the automatic Ask presentation while keeping the model paused.
-      const dialog = page.getByRole("dialog", { name: "Permission required", exact: true });
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      // The Ask is presented without covering the terminal, so the model stays
+      // paused while it is used: a non-modal attention card above the composer,
+      // or a phone's one-line "Approval needed" bar (its card waits in a sheet).
+      if (mobile) {
+        await expect(page.getByRole("button", { name: /^Approval needed\b/ })).toBeVisible();
+      } else {
+        const card = page.getByRole("dialog", { name: "Permission required", exact: true });
+        await expect(card).toBeVisible();
+        await expect(card).toHaveAttribute("aria-modal", "false");
+      }
       if (beforeAllow) await beforeAllow();
       await api.replyPermission(session, approval.id, "once");
       await waitForRunIdle(request, harness, session);

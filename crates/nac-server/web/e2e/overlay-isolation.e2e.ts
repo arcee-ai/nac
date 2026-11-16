@@ -19,14 +19,23 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
     const left = page.getByRole("region", { name: "Left presentation", exact: true });
     const right = page.getByRole("region", { name: "Right presentation", exact: true });
     const views = [left, right];
+    // Session settings lives in the header's session menu; dismissing the
+    // dialog hands focus back to that menu's trigger.
     const openers = views.map((view) =>
-      view.getByRole("button", { name: "Session settings", exact: true }),
+      view.getByRole("button", { name: "Session menu", exact: true }),
     );
+    const openSettings = async (index: number) => {
+      await openers[index].click();
+      await views[index]
+        .getByRole("dialog", { name: "Session", exact: true })
+        .getByRole("button", { name: "Session settings", exact: true })
+        .click();
+    };
     const dialogs = views.map((view) =>
       view.getByRole("dialog", { name: "Session settings", exact: true }),
     );
     for (let index = 0; index < views.length; index += 1) {
-      await openers[index].click();
+      await openSettings(index);
       await expect(dialogs[index]).toBeVisible();
       // A local unsaved draft enables the last footer control without sending a write.
       await dialogs[index]
@@ -91,14 +100,15 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
     // must not suppress the focused left view's harmless sidebar shortcut.
     const sidebar = left.locator("[data-sidebar]");
     const rightSidebar = right.locator("[data-sidebar]");
-    await expect(sidebar).toHaveCSS("width", "280px");
-    await expect(rightSidebar).toHaveCSS("width", "280px");
+    await expect(sidebar).toHaveCSS("width", "256px");
+    await expect(rightSidebar).toHaveCSS("width", "256px");
     const modifier = await page.evaluate(() =>
       /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? "Meta" : "Control",
     );
-    await page.keyboard.press(`${modifier}+h`);
-    await expect(sidebar).toHaveCSS("width", "52px");
-    await expect(rightSidebar).toHaveCSS("width", "280px");
+    await page.keyboard.press(`${modifier}+b`);
+    await expect(sidebar).toHaveCSS("width", "0px");
+    await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+    await expect(rightSidebar).toHaveCSS("width", "256px");
     await expect(dialogs[1]).toBeVisible();
     await dialogs[1].getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialogs[1]).toHaveCount(0);
@@ -195,10 +205,17 @@ test("touch-emulated phone and 200-percent layout equivalent preserve reduced-mo
       for (const action of ["Rename", "Delete"]) {
         const opener = page.getByRole("button", { name: `${action} ${title}`, exact: true });
         if (!(await opener.isVisible())) {
+          // Phones reach the session list from Home's header menu.
           const menu = page.getByRole("button", { name: "Open the menu", exact: true });
+          if (!(await menu.isVisible())) {
+            const home = page.getByRole("button", { name: "Home", exact: true });
+            if (scenario.hasTouch) await home.tap();
+            else await home.click();
+          }
           if (scenario.hasTouch) await menu.tap();
           else await menu.click();
         }
+        const location = page.url();
         await expect(opener).toBeVisible();
         if (scenario.hasTouch) await opener.tap();
         else {
@@ -237,7 +254,7 @@ test("touch-emulated phone and 200-percent layout equivalent preserve reduced-mo
         else await cancel.click();
         await expect(dialog).toHaveCount(0);
         await expect(opener).toBeFocused();
-        await expect(page).toHaveURL(`${harness.baseUrl}/#/session/${id}/files`);
+        await expect(page).toHaveURL(location);
       }
       expect(writes).toEqual([]);
       evidence.push({ name, ...environment, writes });

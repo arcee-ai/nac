@@ -142,13 +142,22 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await rightComposer.fill("Right draft — separate binding with the same session ID");
   const host = page.getByRole("textbox", { name: "Host draft", exact: true });
   await host.fill("Host draft remains independent");
+  // Session settings sits behind the header's session menu (one "Open panel"
+  // sheet on phones); dismissing the dialog returns focus to that trigger.
   const openers = [left, right].map((view) =>
-    view.getByRole("button", { name: "Session settings", exact: true }),
+    view.getByRole("button", { name: phone ? "Open panel" : "Session menu", exact: true }),
   );
+  const openSettings = async (index: number) => {
+    await openers[index].click();
+    await [left, right][index]
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
+  };
   const dialogs = [left, right].map((view) =>
     view.getByRole("dialog", { name: "Session settings", exact: true }),
   );
-  await openers[0].click();
+  await openSettings(0);
   await expect(dialogs[0]).toBeVisible();
   // ADR0007: phone panels cover the view without background inertness.
   if (phone) await expect(left.locator("[data-nac-content]")).not.toHaveAttribute("inert", "");
@@ -159,7 +168,7 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     .getByRole("textbox", { name: "Session title", exact: true })
     .fill("Left long unsaved title / preserve the complete error and action context");
   await expect(dialogs[0].getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-  await openers[1].click();
+  await openSettings(1);
   await expect(dialogs[1]).toBeVisible();
   await dialogs[1]
     .getByRole("textbox", { name: "Session title", exact: true })
@@ -326,6 +335,8 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await expect(openers[1]).toBeFocused();
   const menu = right.getByRole("dialog", { name: "Menu", exact: true });
   if (phone) {
+    // Phone navigation lives on Home's header, not the session screen.
+    await right.getByRole("button", { name: "Home", exact: true }).tap();
     await right.getByRole("button", { name: "Open the menu", exact: true }).tap();
     await expect(menu).toHaveAttribute("data-modal-open", "true");
   }
@@ -340,7 +351,7 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     // partly clipped button. Preserve that input oracle and report its center.
     expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-tap`));
   } else {
-    await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
+    await pin.locator("xpath=ancestor::*[@data-session-row][1]").hover();
     const geometry = await recordSessionAction(pin, info, `${label}-pin-after-hover`);
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);
@@ -359,6 +370,13 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   if (phone) {
     await menu.getByRole("button", { name: "Close", exact: true }).tap();
     await expect(menu).toHaveCount(0); // retained 300ms phone exit is part of the contract
+    // The menu lives on Home: reopen the session so its stream is live again.
+    await right
+      .getByRole("region", { name: "Projects", exact: true })
+      .getByRole("button", { name: "Embedded E2E project", exact: true })
+      .tap();
+    await expect(rightComposer).toBeVisible();
+    await expect.poll(async () => (await cacheState(page)).Right.openStreams).toBeGreaterThan(0);
   }
   await page.unroute(endpoint);
   await left.getByRole("button", { name: "Close packed runtime", exact: true }).click();
@@ -587,13 +605,21 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     const rightComposer = right.getByRole("combobox", { name: "Message", exact: true });
     await expect(rightComposer).toBeVisible();
     expect(oldReads).toBe(0);
-    await left.getByRole("button", { name: "Session settings", exact: true }).click();
+    await left.getByRole("button", { name: "Session menu", exact: true }).click();
+    await left
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
     await expect.poll(() => oldReads).toBe(1);
     await rightComposer.fill("Sibling draft survives retirement and timers");
     const initial = await cacheState(page);
     const host = page.getByRole("textbox", { name: "Host draft", exact: true });
     await host.fill("Caller remains independent");
-    await right.getByRole("button", { name: "Session settings", exact: true }).click();
+    await right.getByRole("button", { name: "Session menu", exact: true }).click();
+    await right
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
     const dialog = right.getByRole("dialog", { name: "Session settings", exact: true });
     await expect(dialog.getByRole("textbox", { name: "Session title" })).toBeVisible();
     await left.getByRole("button", { name: "Replace packed runtime", exact: true }).click();
@@ -613,10 +639,10 @@ test("packed retired responses, timers and shortcuts stay within their binding",
         ? "Meta"
         : "Control",
     );
-    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "280px");
-    await page.keyboard.press(`${modifier}+h`);
-    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "52px");
-    await expect(right.locator("[data-sidebar]")).toHaveCSS("width", "280px");
+    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "256px");
+    await page.keyboard.press(`${modifier}+b`);
+    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "0px");
+    await expect(right.locator("[data-sidebar]")).toHaveCSS("width", "256px");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -630,7 +656,7 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     });
     const pin = right.getByRole("button", { name: /^Pin / }).first();
     await recordSessionAction(pin, info, "lifetime-pin-before-hover");
-    await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
+    await pin.locator("xpath=ancestor::*[@data-session-row][1]").hover();
     const geometry = await recordSessionAction(pin, info, "lifetime-pin-after-hover");
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);

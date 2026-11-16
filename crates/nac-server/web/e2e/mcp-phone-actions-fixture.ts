@@ -3,6 +3,7 @@ import http from "node:http";
 import type { Duplex } from "node:stream";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test as base } from "./harness";
+import { openSettingsSection } from "./settings-focus";
 
 type Box = { x: number; y: number; width: number; height: number; right: number; bottom: number };
 type Node = {
@@ -97,10 +98,10 @@ export async function loopbackOnly(page: Page) {
   await page.route("**/mcp_library/library", (route) => route.fulfill({ json: { entries: [] } }));
 }
 
+/** Settings › MCP servers: on a phone the server list is the section's own card. */
 export async function openList(page: Page) {
-  await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-  await page.getByRole("button", { name: /^MCP servers/ }).click();
-  return page.getByRole("dialog", { name: "MCP servers", exact: true });
+  const section = await openSettingsSection(page, "MCP servers");
+  return section.getByRole("region", { name: "MCP servers", exact: true });
 }
 export async function openDraft(list: Locator, page: Page) {
   await list.getByRole("button", { name: "Add server", exact: true }).click();
@@ -117,7 +118,7 @@ export async function disabledDraft(form: Locator, name: string) {
   await expect(enabled).toHaveAttribute("aria-checked", "false");
 }
 
-/** Wait for the real modal and its controls to stop moving before measuring. */
+/** Wait for the real surface (sheet or page card) and its controls to stop moving before measuring. */
 export async function settle(dialog: Locator, info: TestInfo, state: string) {
   await expect(dialog).toBeVisible();
   const settled = await dialog.evaluate(async (element) => {

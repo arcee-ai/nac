@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { createDirectSession, expect, showRoutePanel, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
 for (const mobile of [false, true]) {
@@ -78,12 +78,7 @@ for (const mobile of [false, true]) {
     });
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else {
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      await expect(show.or(pane)).toBeVisible();
-      if (await show.isVisible()) await show.click();
-    }
+    await showRoutePanel(page);
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     // A phone shows one screen at a time, and an open row is a step past its list.

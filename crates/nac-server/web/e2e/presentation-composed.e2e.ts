@@ -26,6 +26,8 @@ import {
   composedWidths,
   installComposedFixture,
   menuAction,
+  openInsightsPanel,
+  openSessionSettings,
   primaryModelTrigger,
   type ComposedFixture,
   type Journey,
@@ -161,7 +163,12 @@ async function conversationComposed(j: Journey, id: string) {
     j.harness.provider.requests.find((entry) => entry.matchedStep === "composed-reasoning")?.body,
   ).toMatchObject({ stream: true });
   try {
-    await activate(j, j.root.getByRole("button", { name: "Thinking…", exact: true }).first());
+    // The live turn folds its work behind one "Thinking" line; expanded, it
+    // links the reasoning into Insights.
+    const fold = j.root.locator("[data-work-fold]").last();
+    const line = fold.getByRole("button", { name: /^Thinking/ }).first();
+    if ((await line.getAttribute("aria-expanded")) !== "true") await activate(j, line);
+    await activate(j, fold.getByRole("button", { name: /^(Details|Open) in Insights$/ }).first());
     const detail = j.root.getByRole("region", { name: "Insights detail", exact: true });
     const disclosure = detail.getByRole("button", { name: "Thinking…", exact: true });
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
@@ -192,10 +199,11 @@ async function conversationComposed(j: Journey, id: string) {
   } finally {
     gate.release();
   }
-  if (j.width < 768) {
-    const phone = j.root.getByRole("dialog", { name: "Insights", exact: true });
-    await activate(j, phone.getByRole("button", { name: "Open list", exact: true }));
-    await activate(j, phone.getByRole("button", { name: "Close", exact: true }));
+  // Insights opened as a drawer (sheet on phones); close it to return to the chat.
+  const insights = j.root.getByRole("dialog", { name: "Insights", exact: true });
+  if (await insights.isVisible()) {
+    await activate(j, insights.getByRole("button", { name: /^(Hide panel|Close)$/ }).first());
+    await expect(insights).toHaveCount(0);
   }
   await expect(composer).toBeVisible();
   await activate(j, j.root.getByRole("button", { name: "Copy message", exact: true }).last());
@@ -214,12 +222,12 @@ async function conversationComposed(j: Journey, id: string) {
 async function settingsComposed(j: Journey) {
   const settings = j.root.getByRole("dialog", { name: "Session settings", exact: true });
   const notifications = j.root.getByRole("region", { name: "Notifications", exact: true });
-  await activate(j, j.root.getByRole("button", { name: "Session settings", exact: true }));
+  await openSessionSettings(j);
   const title = settings.getByRole("textbox", { name: "Session title", exact: true });
   await title.fill("Discard this settings draft");
   await activate(j, settings.getByRole("button", { name: "Cancel", exact: true }));
   await expect(settings).toHaveCount(0);
-  await activate(j, j.root.getByRole("button", { name: "Session settings", exact: true }));
+  await openSessionSettings(j);
   await expect(title).not.toHaveValue("Discard this settings draft");
   await title.fill("Composed settings saved");
   await settings.getByText("Advanced execution settings", { exact: true }).click();
@@ -232,7 +240,7 @@ async function settingsComposed(j: Journey) {
   await captureComposed(j, "settings-draft");
   await activate(j, settings.getByRole("button", { name: "Save", exact: true }));
   await expect(settings).toHaveCount(0);
-  await activate(j, j.root.getByRole("button", { name: "Session settings", exact: true }));
+  await openSessionSettings(j);
   await expect(title).toHaveValue("Composed settings saved");
   await activate(j, settings.getByRole("button", { name: "Cancel", exact: true }));
   await expect(settings).toHaveCount(0);
@@ -251,11 +259,11 @@ async function settingsComposed(j: Journey) {
     }),
   );
   if (j.width < 768) await activate(j, j.root.getByRole("button", { name: "Custom", exact: true }));
-  const form = j.root.getByRole("dialog", {
-    name: j.width < 768 ? "Custom server" : "MCP servers",
-    exact: true,
-    includeHidden: true,
-  });
+  // Settings › MCP servers is a page section; phones still stack its forms.
+  const form =
+    j.width < 768
+      ? j.root.getByRole("dialog", { name: "Custom server", exact: true, includeHidden: true })
+      : j.root.getByRole("region", { name: "MCP servers", exact: true });
   await form.getByPlaceholder("my_server").fill("qualification_mcp");
   await activate(j, form.getByRole("button", { name: "Stdio", exact: true }));
   await form.getByPlaceholder("npx").fill(process.execPath);
@@ -277,11 +285,7 @@ async function settingsComposed(j: Journey) {
   await captureComposed(j, "mcp-controlled-test");
   await expect(connectionNotice).toHaveCount(0);
   await activate(j, form.getByRole("button", { name: "Save", exact: true }));
-  const servers = j.root.getByRole("dialog", {
-    name: "MCP servers",
-    exact: true,
-    includeHidden: true,
-  });
+  const servers = j.root.getByRole("region", { name: "MCP servers", exact: true });
   await expect(
     servers.getByRole("button", { name: "qualification_mcp", exact: true }),
   ).toBeVisible();
@@ -290,11 +294,10 @@ async function settingsComposed(j: Journey) {
   await expect(savedNotice).toHaveCount(0);
   if (j.width < 768)
     await activate(j, servers.getByRole("button", { name: "qualification_mcp", exact: true }));
-  const saved = j.root.getByRole("dialog", {
-    name: j.width < 768 ? "qualification_mcp" : "MCP servers",
-    exact: true,
-    includeHidden: true,
-  });
+  const saved =
+    j.width < 768
+      ? j.root.getByRole("dialog", { name: "qualification_mcp", exact: true, includeHidden: true })
+      : servers;
   await expect(saved.getByRole("textbox", { name: "Argument 1", exact: true })).toHaveValue("-e");
   if (j.width === 768) {
     await activate(j, saved.getByRole("button", { name: "Test connection", exact: true }));
@@ -335,7 +338,8 @@ async function managedComposed(j: Journey) {
   const operationsBefore = state.loginStarts + state.secretWrites + state.cloneStarts;
   state.managed = true; // The controlled host becomes available; normal status polling observes it.
   await menuAction(j, /^(Managed host|Manage Host)$/);
-  const modal = j.root.getByRole("dialog", { name: "Managed host", exact: true });
+  // Settings › Managed host is a page section.
+  const modal = j.root.getByRole("main", { name: "Managed host", exact: true }).first();
   await expect(modal.getByTestId("managed-host-status")).toContainText(
     "Controlled host readiness",
     { timeout: 25_000 },
@@ -363,7 +367,7 @@ async function managedComposed(j: Journey) {
   const githubNotice = notifications.getByText("GitHub connected", { exact: true });
   await expect(githubNotice).toBeVisible();
   await expect(githubNotice).toHaveCount(0);
-  await activate(j, modal.getByRole("button", { name: "secrets", exact: true }));
+  await activate(j, modal.getByRole("button", { name: "Secrets", exact: true }));
   const names = modal.getByLabel("Variable name", { exact: true });
   const value = modal.getByLabel("New value", { exact: true });
   await names.fill("QUALIFICATION_SUBMITTED");
@@ -397,8 +401,6 @@ async function managedComposed(j: Journey) {
   await expect(secretNotice).toBeVisible();
   await captureComposed(j, "managed-newer-draft");
   await expect(secretNotice).toHaveCount(0);
-  await activate(j, modal.getByRole("button", { name: "Close", exact: true }));
-  await expect(modal).toHaveCount(0);
   // The desktop session sidebar links to the public projects view; its creation
   // action there retains the managed Add repository label. Return through that
   // same project after cancellation so the parent draft remains part of the journey.
@@ -423,11 +425,19 @@ async function managedComposed(j: Journey) {
   expect(state.secretWrites).toBe(1);
   await activate(j, repository.getByRole("button", { name: "Cancel", exact: true }));
   await expect(repository).toHaveCount(0);
-  if (j.width >= 768)
-    await activate(
-      j,
-      j.root.getByRole("button", { name: /Composed qualification project/ }).first(),
-    );
+  // Back to the project's session from Home (phones left the session for the menu).
+  if (j.width < 768) {
+    const sheet = j.root.getByRole("dialog", { name: "Menu", exact: true });
+    if (await sheet.isVisible())
+      await activate(j, sheet.getByRole("button", { name: "Close", exact: true }));
+  }
+  await activate(
+    j,
+    j.root
+      .getByRole("region", { name: "Projects", exact: true })
+      .getByRole("button", { name: /Composed qualification project/ })
+      .first(),
+  );
 }
 
 async function inspectorComposed(j: Journey, id: string) {
@@ -473,13 +483,7 @@ async function inspectorComposed(j: Journey, id: string) {
   expect(run.status()).toBe(202);
   await waitForRunIdle(j.request, j.harness, id);
   await expect(j.root.getByText("Composed parent origin retained.", { exact: true })).toBeVisible();
-  if (j.width < 768)
-    await activate(j, j.root.getByRole("button", { name: "Open panel", exact: true }));
-  else {
-    const show = j.root.getByRole("button", { name: "Show panel", exact: true });
-    if (await show.isVisible()) await activate(j, show);
-  }
-  await activate(j, j.root.getByRole("tab", { name: "Insights", exact: true }));
+  await openInsightsPanel(j);
   // Compact inspector panes depend on their container, including two packed
   // instances in a wide viewport. Follow the public return-to-list affordance.
   const openList = j.root.getByRole("button", { name: "Open list", exact: true });

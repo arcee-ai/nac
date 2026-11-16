@@ -14,6 +14,7 @@ import {
   waitForRunIdle,
 } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
+import { escapeRegExp, openPhoneMenu, showSidebar } from "./nav-focus-helpers";
 
 const prefix = "Investigate the same long session prefix and preserve all navigation cues — ";
 const names = [prefix + "Alpha 雪🙂", prefix + "Beta λ🚀", "unbroken".repeat(15)];
@@ -184,7 +185,7 @@ test.describe("passive session-name hints", () => {
     const sidebar = page.locator("[data-sidebar]");
     const candidates = await Promise.all(
       names.slice(0, 2).map(async (name, index) => {
-        const row = sidebar.getByRole("button", { name: `${name}, Direct`, exact: true });
+        const row = sidebar.getByRole("button", { name: `${name}, Agent`, exact: true });
         await expect(row).toBeVisible();
         const box = await row.boundingBox();
         expect(box).not.toBeNull();
@@ -278,13 +279,15 @@ for (const width of [1440, 768, 390])
           await capture(page, info, `full-name-${width}-${theme}`);
           await page.keyboard.press("Escape");
         }
+        // Desktop navigation is the sidebar; phones reach the same session
+        // tree from Home's menu (the session header has no list).
+        let navigation: Locator;
+        let at = url;
         if (width >= 768) {
-          const show = page.getByRole("button", { name: "Show sidebar", exact: true });
-          if (await show.isVisible()) await show.click();
-          const sidebar = page.locator("[data-sidebar]");
+          navigation = await showSidebar(page);
           for (const name of names.slice(0, 2)) {
-            const row = sidebar.getByRole("button", {
-              name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`),
+            const row = navigation.getByRole("button", {
+              name: new RegExp(`^${escapeRegExp(name)},`),
             });
             await row.hover();
             await expect(page.getByRole("tooltip")).toContainText(name);
@@ -303,15 +306,11 @@ for (const width of [1440, 768, 390])
               name,
             );
           }
-          await page.getByRole("button", { name: "Search chats", exact: true }).click();
         } else {
-          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+          navigation = await openPhoneMenu(page);
+          at = page.url();
         }
-        // Both project history and phone navigation consume the same row atom.
-        const navigation = page.getByRole("dialog", {
-          name: width >= 768 ? "Search Chats" : "Menu",
-          exact: true,
-        });
+        // Every row in the shared session tree discloses its full name.
         const visibleRows = navigation.locator("button[aria-label]").filter({ hasText: names[1] });
         const row = visibleRows.last();
         await expect(row).toBeVisible();
@@ -337,20 +336,22 @@ for (const width of [1440, 768, 390])
           fallbackRow.locator("..").getByRole("button", { name: "View full name", exact: true }),
           "New Session",
         );
-        await page.keyboard.press("Escape");
-        expect(page.url()).toBe(url);
+        if (width < 768) {
+          await page.keyboard.press("Escape");
+          await expect(navigation).toBeHidden();
+        }
+        expect(page.url()).toBe(at);
         expect(mutations).toEqual([]);
         // Normal row activation still navigates, including touch-sized navigation.
         if (width < 768) {
-          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-          await page
-            .getByRole("button", { name: new RegExp(`^${names[2]}`) })
+          await openPhoneMenu(page);
+          await navigation
+            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}`) })
             .last()
             .click();
         } else {
-          await page
-            .locator("[data-sidebar]")
-            .getByRole("button", { name: new RegExp(`^${names[2]}`) })
+          await navigation
+            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}`) })
             .click();
         }
         await expect(page).toHaveURL(new RegExp(`/session/${ids[2]}/`));
@@ -486,12 +487,24 @@ for (const width of [1440, 390])
       await expect(page.getByRole("tooltip")).toHaveText(names[0]);
       await page.keyboard.press("Escape");
     }
-    const action = parentLink
-      .locator("..")
-      .getByRole("button", { name: "View full name", exact: true });
     const url = page.url();
-    await viewName(page, action, names[0]);
-    expect(page.url()).toBe(url);
+    if (width >= 768) {
+      const action = parentLink
+        .locator("..")
+        .getByRole("button", { name: "View full name", exact: true });
+      await viewName(page, action, names[0]);
+      expect(page.url()).toBe(url);
+    } else {
+      // The phone crumb is a 44px back arrow: it shows no truncated parent
+      // name to disclose, and its accessible name keeps the full lineage.
+      await expect(parentLink).toHaveText("");
+      const box = await parentLink.boundingBox();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      await expect(
+        parentLink.locator("..").getByRole("button", { name: "View full name", exact: true }),
+      ).toHaveCount(0);
+    }
     await parentLink.click();
     await expect(page).toHaveURL(new RegExp(`/session/${parent}/delegated$`));
   });
@@ -523,10 +536,10 @@ for (const width of [1440, 768, 390])
         await tokens(page, theme);
         for (const name of names.slice(0, 2)) {
           const tab = tabs.locator(".chat-session-tab").filter({
-            has: page.getByRole("button", { name: `${name}, Direct coding agent`, exact: true }),
+            has: page.getByRole("button", { name: `${name}, Agent`, exact: true }),
           });
           const trigger = tab.getByRole("button", {
-            name: `${name}, Direct coding agent`,
+            name: `${name}, Agent`,
             exact: true,
           });
           await trigger.scrollIntoViewIfNeeded();
@@ -568,9 +581,7 @@ for (const width of [1440, 768, 390])
       await tabs.getByRole("button", { name: `Close ${names[1]}`, exact: true }).click();
       await expect(tabs.locator(".chat-session-tab")).toHaveCount(2);
       await tabs.getByRole("button", { name: "All chats in this project", exact: true }).click();
-      const listRow = page
-        .getByRole("button", { name: `${names[1]}, Direct coding agent`, exact: true })
-        .last();
+      const listRow = page.getByRole("button", { name: `${names[1]}, Agent`, exact: true }).last();
       if (width >= 768) await listRow.hover();
       await viewName(
         page,
@@ -606,31 +617,27 @@ test("full names at real 200 percent browser zoom", async ({ harness, request },
         ).toBeInViewport({ ratio: 1 });
         await capture(page, info, `zoom200-${width}-${theme}`);
         await page.keyboard.press("Escape");
-        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-        await page
-          .getByRole("dialog", { name: "Menu", exact: true })
-          .getByRole("button", { name: "Search Chats", exact: true })
-          .click();
-        const search = page.getByRole("dialog", { name: "Search Chats", exact: true });
-        const row = search.getByRole("button", {
-          name: new RegExp(`^${names[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:,|$)`),
+        // 200% zoom makes every width a phone: Home's menu holds the session tree.
+        const menu = await openPhoneMenu(page);
+        const row = menu.getByRole("button", {
+          name: new RegExp(`^${escapeRegExp(names[0])}(?:,|$)`),
         });
         const action = row
           .locator("..")
           .getByRole("button", { name: "View full name", exact: true });
         for (const control of [
           action,
-          search.getByRole("button", { name: `Rename ${names[0]}`, exact: true }),
-          search.getByRole("button", { name: `Delete ${names[0]}`, exact: true }),
+          menu.getByRole("button", { name: `Rename ${names[0]}`, exact: true }),
+          menu.getByRole("button", { name: `Delete ${names[0]}`, exact: true }),
         ]) {
+          await control.scrollIntoViewIfNeeded();
           await expect(control).toBeInViewport({ ratio: 1 });
           await fits(page, control);
         }
         await viewName(page, action, names[0]);
         await page.keyboard.press("Escape");
-        await expect(search).toBeHidden();
-        await page.keyboard.press("Escape");
-        await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
+        await expect(menu).toBeHidden();
+        await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
       }
     }
   } finally {
@@ -709,10 +716,24 @@ for (const width of [1440, 390])
     await page.goto(harness.baseUrl);
     const url = page.url();
     for (const [at, name] of names.slice(0, 2).entries()) {
+      // The tile opens the session under its full name.
       const card = page.locator(`[data-item-id="${ids[at]}"]`);
-      const open = card.getByRole("button", { name, exact: true });
+      const open = card
+        .locator("xpath=self::*[@role='button'] | .//*[self::button or @role='button']")
+        .and(page.getByRole("button", { name, exact: true }))
+        .first();
       await expect(open).toBeVisible();
-      await expect(card.locator('button button, [role="button"] button')).toHaveCount(0);
+      // No interactive control nests inside another, the tile itself included.
+      const nested = await card.evaluate((root) => {
+        const interactive = 'button, a[href], [role="button"], input, select, textarea';
+        const controls = [root, ...root.querySelectorAll(interactive)].filter((node) =>
+          node.matches(interactive),
+        );
+        return controls
+          .filter((node) => node.querySelector(interactive))
+          .map((node) => node.getAttribute("aria-label") ?? node.tagName);
+      });
+      expect(nested).toEqual([]);
       if (width >= 768) {
         await open.hover();
         await expect(page.getByRole("tooltip")).toHaveText(name);
@@ -724,7 +745,9 @@ for (const width of [1440, 390])
     await capture(page, info, `orphan-cards-${width}`);
     const open = page
       .locator(`[data-item-id="${ids[1]}"]`)
-      .getByRole("button", { name: names[1], exact: true });
+      .locator("xpath=self::*[@role='button'] | .//*[self::button or @role='button']")
+      .and(page.getByRole("button", { name: names[1], exact: true }))
+      .first();
     if (width >= 768) {
       await open.focus();
       await page.keyboard.press("Enter");
@@ -839,12 +862,11 @@ for (const width of [768, 390])
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
     await showSubagents(page, width < 768);
-    if (width < 768) {
-      await page
-        .getByRole("dialog", { name: "Subagents", exact: true })
-        .getByRole("button", { name: new RegExp(`^${prefix}Beta`) })
-        .click();
-    }
+    // The Subagents drawer lists children; choosing one shows its detail.
+    await page
+      .getByRole("dialog", { name: "Subagents", exact: true })
+      .getByRole("button", { name: new RegExp(`^${prefix}Beta`) })
+      .click();
     const heading = page.getByRole("button", {
       name: `View full name: ${names[1]}`,
       exact: true,

@@ -1,4 +1,12 @@
-import { createProject, createSession, expect, showSidePanel, test } from "./harness";
+import {
+  createProject,
+  createSession,
+  expect,
+  showPhonePanel,
+  showRoutePanel,
+  showSidePanel,
+  test,
+} from "./harness";
 import type {
   HeartbeatCalendarPreview,
   HeartbeatInspection,
@@ -22,11 +30,7 @@ for (const viewport of [
     const project = await createProject(request, harness);
     const session = await createSession(request, harness, "direct", project);
     await page.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
-    if (viewport.width === 390) {
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    } else {
-      await showSidePanel(page);
-    }
+    await showRoutePanel(page);
     await page.getByRole("button", { name: "New heartbeat", exact: true }).click();
     await page.getByLabel("Heartbeat name", { exact: true }).fill("Weekday Local check");
     await page
@@ -94,7 +98,7 @@ for (const viewport of [
       const viewing = await other.newPage();
       await viewing.goto(`${harness.baseUrl}/#/session/${session}/heartbeats?heartbeat=${id}`);
       if (viewport.width === 390) {
-        await viewing.getByRole("button", { name: "Open panel", exact: true }).click();
+        await showPhonePanel(viewing, "Heartbeats");
         const selected = viewing.getByRole("button", { name: /^Weekday Local check\b/ });
         await expect(selected).toHaveAttribute("aria-pressed", "true");
         await selected.click();

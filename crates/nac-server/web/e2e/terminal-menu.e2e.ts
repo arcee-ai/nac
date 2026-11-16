@@ -1,4 +1,4 @@
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expandSidePanel, expect, showRoutePanel, test } from "./harness";
 import { reviewTerminalEvidence } from "./terminal-evidence";
 
 for (const mobile of [false, true]) {
@@ -10,15 +10,11 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const session = await createDirectSession(request, harness);
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else {
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      if (await show.isVisible()) await show.click();
-    }
+    await showRoutePanel(page);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-    if (!mobile) await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+    if (!mobile) await expandSidePanel(page);
     // Expanding replaces the observer along with its containing panel.
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     // Seed one painted selection with intentional keyboard input before the

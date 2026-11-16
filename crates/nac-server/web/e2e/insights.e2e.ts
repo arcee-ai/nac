@@ -1,23 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "@playwright/test";
-
-import { createDirectSession, createSession, expect, test, waitForRunIdle } from "./harness";
-
-/**
- * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
- * A saved open preference can remove the button after the first paint.
- */
-async function showSidePanel(page: Page) {
-  const show = page.getByRole("button", { name: "Show panel" });
-  const open = page.getByRole("tab", { name: "Files" });
-  await expect(show.or(open).first()).toBeVisible();
-  await expect(async () => {
-    if (await open.isVisible()) return;
-    if (await show.isVisible()) await show.click();
-    await expect(open).toBeVisible();
-  }).toPass();
-}
+import {
+  createDirectSession,
+  createSession,
+  expect,
+  showSidePanel,
+  test,
+  waitForRunIdle,
+} from "./harness";
 
 test("opens old Threads links in Insights on the stored thread", async ({
   harness,
@@ -157,32 +147,37 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
   }
   harness.provider.assertConsumed();
 
-  // Every step of both groups is measured, so their badges share a label; they
-  // keep the order of the runs.
-  const badges = page.getByRole("button", { name: /^Total activity: \d+\.\ds$/ });
-  const readBadge = badges.nth(0);
-  const searchBadge = badges.nth(1);
+  // Each turn's work folds behind one "Worked for …" line, in the order of the
+  // runs; expanded, the fold offers "Open in Insights" on its own group. Every
+  // step of both groups is measured, so their Insights rows share a label.
+  const folds = page.locator("[data-work-fold]");
+  const readFold = folds.nth(0);
+  const searchFold = folds.nth(1);
+  const foldToggle = (fold: typeof readFold) => fold.getByRole("button", { name: /^Worked for / });
+  const openInInsights = (fold: typeof readFold) =>
+    fold.getByRole("button", { name: "Open in Insights", exact: true });
   const readRow = page.getByRole("button", { name: /^Total activity: \d+\.\ds, 1$/ });
   const searchRow = page.getByRole("button", { name: /^Total activity: \d+\.\ds, 2$/ });
   const fileRead = page.getByRole("group", { name: "File Read", exact: true });
   const findFiles = page.getByRole("group", { name: "Find files", exact: true });
 
-  // A badge opens Insights from whichever panel is showing.
+  // A fold opens Insights from whichever panel is showing.
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/files`);
   await expect(page.getByText("second group answered")).toBeVisible();
-  await expect(badges).toHaveCount(2);
-  await readBadge.click();
+  await expect(folds).toHaveCount(2);
+  await foldToggle(readFold).click();
+  await expect(foldToggle(readFold)).toHaveAttribute("aria-expanded", "true");
+  await openInInsights(readFold).click();
   await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights$`));
-  await expect(readBadge).toHaveAttribute("aria-pressed", "true");
-  await expect(searchBadge).toHaveAttribute("aria-pressed", "false");
   await expect(readRow).toHaveAttribute("aria-pressed", "true");
   await expect(searchRow).toHaveAttribute("aria-pressed", "false");
   await expect(fileRead).toContainText("badge-notes.txt");
   await expect(findFiles).toHaveCount(0);
 
-  await searchBadge.click();
-  await expect(searchBadge).toHaveAttribute("aria-pressed", "true");
-  await expect(readBadge).toHaveAttribute("aria-pressed", "false");
+  // The floating drawer covers the chat; close it to reach the other turn.
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click();
+  await foldToggle(searchFold).click();
+  await openInInsights(searchFold).click();
   await expect(searchRow).toHaveAttribute("aria-pressed", "true");
   await expect(readRow).toHaveAttribute("aria-pressed", "false");
   await expect(findFiles).toContainText("*.txt");
@@ -237,7 +232,7 @@ test("opens a launched session in Subagents and on its own page from its card", 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await expect(page.getByText("parent saw the card")).toBeVisible();
   await page
-    .getByRole("button", { name: `Open ${title} in Subagents, Coding agent`, exact: true })
+    .getByRole("button", { name: `Open ${title} in Subagents, Subagent`, exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await expect(page.getByRole("tab", { name: "Subagents" })).toHaveAttribute(
@@ -246,13 +241,15 @@ test("opens a launched session in Subagents and on its own page from its card", 
   );
   await expect(page.getByRole("button", { name: title, exact: true })).toHaveAttribute(
     "aria-current",
-    "page",
+    "true",
   );
-  await expect(page.getByText("card child finished")).toBeVisible();
+  await expect(page.getByText("card child finished", { exact: true })).toBeVisible();
 
   const goToSession = page.getByRole("link", { name: `Go to session ${title}`, exact: true });
   await expect(goToSession).toHaveAttribute("href", `#/session/${childId}/insights`);
+  // The card's link sits in the chat, under the floating drawer.
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click();
   await goToSession.click();
   await expect(page).toHaveURL(new RegExp(`/session/${childId}/insights$`));
-  await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /, parent chat$/ })).toBeVisible();
 });

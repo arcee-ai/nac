@@ -431,11 +431,149 @@ export async function activate(j: Journey, control: Locator) {
   await control.click();
 }
 
-export async function menuAction(j: Journey, name: string | RegExp) {
+/** Presses a control: `activate` (44px + hit checks) or a plain capture click. */
+export type Press = (control: Locator) => Promise<void>;
+
+/** Phones keep navigation on Home's header: go Home, then open the menu sheet. */
+async function openPhoneMenu(j: Journey, press: Press) {
   const menu = j.root.getByRole("button", { name: "Open the menu", exact: true });
-  if (j.width < 768) await activate(j, menu);
-  else await revealDesktopSidebar(j.root);
-  await activate(j, j.root.getByRole("button", { name, exact: typeof name === "string" }).first());
+  if (!(await menu.isVisible()))
+    await press(j.root.getByRole("button", { name: "Home", exact: true }).first());
+  await press(menu);
+  return j.root.getByRole("dialog", { name: "Menu", exact: true });
+}
+
+/** Runs one ⌘K palette command from the sidebar's Search control. */
+async function paletteCommand(j: Journey, label: string, press: Press) {
+  await revealDesktopSidebar(j.root);
+  await press(j.root.getByRole("button", { name: "Search", exact: true }).first());
+  const palette = j.root.getByRole("dialog", { name: "Command palette", exact: true });
+  await palette.getByRole("combobox", { name: "Search commands", exact: true }).fill(label);
+  await press(palette.getByRole("option", { name: label, exact: true }).first());
+}
+
+/** Opens one Settings section (`#/settings/<section>`) by its nav label. */
+function settingsNav(j: Journey) {
+  return j.root.getByRole("navigation", { name: "Settings sections", exact: true });
+}
+
+/** Leaves the full-page Settings takeover through its own back controls. */
+async function leaveSettings(j: Journey, press: Press) {
+  for (let step = 0; step < 3; step += 1) {
+    // The section page's "‹ Settings" carries visible text; the sidebar's gear does not.
+    const sectionBack = j.root
+      .getByRole("button", { name: "Settings", exact: true })
+      .filter({ hasText: "Settings" });
+    const leave = j.root.getByRole("button", { name: "Back", exact: true });
+    const onSettings =
+      (await settingsNav(j).isVisible()) ||
+      (await j.root.getByRole("textbox", { name: "Search settings" }).isVisible());
+    if (!onSettings && (await sectionBack.first().isVisible())) {
+      // A pushed section page (below 1024px): "‹ Settings" returns to the list.
+      await press(sectionBack.first());
+      await expect(sectionBack).toHaveCount(0);
+      continue;
+    }
+    if (!onSettings) return;
+    await press(leave.first());
+    // ← Back returns to where Settings was opened from; let the takeover unmount.
+    await expect(
+      settingsNav(j).or(j.root.getByRole("textbox", { name: "Search settings" })),
+    ).toHaveCount(0);
+  }
+}
+
+/** Opens one Settings section (`#/settings/<section>`) by its nav label. */
+async function settingsSection(j: Journey, label: RegExp, press: Press) {
+  const onSettings =
+    (await settingsNav(j).isVisible()) ||
+    (await j.root.getByRole("textbox", { name: "Search settings" }).isVisible());
+  if (!onSettings) {
+    if (j.width < 768) {
+      const menu = await openPhoneMenu(j, press);
+      await press(menu.getByRole("button", { name: "Settings", exact: true }));
+    } else {
+      await revealDesktopSidebar(j.root);
+      await press(j.root.getByRole("button", { name: "Settings", exact: true }).first());
+    }
+  }
+  // Wide screens list sections in a side nav; narrower ones push from a list.
+  await press(j.root.getByRole("link", { name: label }).first());
+}
+
+/**
+ * The old sidebar/menu destinations, reached through the Focus shell: project
+ * creation from the palette (desktop) or Home's menu sheet (phone), app
+ * configuration as Settings sections, and "All projects" as Home.
+ */
+export async function menuAction(
+  j: Journey,
+  name: string | RegExp,
+  press: Press = (control) => activate(j, control),
+) {
+  const source = typeof name === "string" ? name : name.source;
+  if (/MCP servers/.test(source)) return settingsSection(j, /^MCP servers/, press);
+  if (/Managed host|Manage Host/.test(source)) return settingsSection(j, /^Managed host/, press);
+  await leaveSettings(j, press);
+  if (/All projects/.test(source)) {
+    if (j.width < 768)
+      return press(j.root.getByRole("button", { name: "Home", exact: true }).first());
+    await revealDesktopSidebar(j.root);
+    return press(
+      j.root.locator('[data-sidebar="true"]').getByRole("button", { name: "Home", exact: true }),
+    );
+  }
+  const create = /New project/i.test(source) ? "New project" : "Add repository";
+  if (j.width < 768) {
+    const menu = await openPhoneMenu(j, press);
+    return press(
+      menu.getByRole("button", {
+        name: create === "New project" ? "Add project" : create,
+        exact: true,
+      }),
+    );
+  }
+  return paletteCommand(j, create, press);
+}
+
+/** Session settings: the ⋯ session menu, or the phone header's one panel sheet. */
+export async function openSessionSettings(
+  j: Journey,
+  press: Press = (control) => activate(j, control),
+) {
+  await press(
+    j.root.getByRole("button", {
+      name: j.width < 768 ? "Open panel" : "Session menu",
+      exact: true,
+    }),
+  );
+  await press(
+    j.root
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true }),
+  );
+}
+
+/** Opens Insights as the session drawer (desktop) or sheet (phone). */
+export async function openInsightsPanel(
+  j: Journey,
+  press: Press = (control) => activate(j, control),
+) {
+  await press(
+    j.root.getByRole("button", {
+      name: j.width < 768 ? "Open panel" : "Session menu",
+      exact: true,
+    }),
+  );
+  const sheet = j.root.getByRole("dialog", { name: "Session", exact: true });
+  await press(
+    j.width < 768
+      ? sheet.getByRole("button").filter({ hasText: /^Insights/ })
+      : sheet.getByRole("button", { name: "Insights", exact: true }),
+  );
+  const panel = j.root.getByRole("dialog", { name: "Insights", exact: true });
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 function assertComposedHit(

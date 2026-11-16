@@ -3,7 +3,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, showSidePanel, test } from "./harness";
+import {
+  createDirectSession,
+  expandSidePanel,
+  expect,
+  showPhonePanel,
+  showRoutePanel,
+  showSidePanel,
+  test,
+} from "./harness";
 
 for (const mobile of [false, true]) {
   test(`embedded terminal pane ${mobile ? "mobile" : "desktop"} uses the session shell`, async ({
@@ -15,8 +23,7 @@ for (const mobile of [false, true]) {
     const session = await createDirectSession(request, harness);
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else await showSidePanel(page);
+    await showRoutePanel(page);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await expect(pane).toBeVisible();
     await pane.getByRole("button", { name: /^New shell$/i }).click();
@@ -55,17 +62,20 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("CTRL-OK");
     if (!mobile) {
-      await page.getByRole("button", { name: "Expand panel" }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      // Full width is the floating drawer's; closing it never ends the shell.
+      await expandSidePanel(page);
+      await expect(page.getByRole("dialog", { name: "Terminal", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Hide panel", exact: true }).click();
+      await expect(pane).toHaveCount(0);
       expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
     }
     await page.reload();
+    // The drawer's open state is only a per-project preference; reopen the
+    // route's panel. A phone reopens on the list, as its panel rows do.
     if (mobile) {
-      // A phone reopens on the list, as its tab bar does.
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
+      await showPhonePanel(page, "Terminal");
       await pane.getByRole("button", { name: /^Shell 1, / }).click();
-    }
+    } else await showSidePanel(page);
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     await expect(accessible).toContainText("PANE-OK");
     expect(
@@ -175,8 +185,7 @@ test("embedded pane resets and replays an actual retention gap", async ({
     replayComplete,
     (async () => {
       await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      if (await show.isVisible()) await show.click();
+      await showSidePanel(page);
       await expect(pane).toBeVisible();
       await expect(pane.getByRole("alert")).toContainText("Earlier output was discarded");
     })(),
@@ -212,8 +221,8 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     await fs.writeFile(file, "SCREEN-ONLY-FIRST\n" + "screen body\n".repeat(40));
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    const show = page.getByRole("button", { name: "Show panel", exact: true });
-    if (await show.isVisible()) await show.click();
+    // This journey resizes below the docking width; keep the floating drawer.
+    await showSidePanel(page, { dock: false });
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();

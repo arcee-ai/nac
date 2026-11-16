@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, showSidePanel, test } from "./harness";
 import { reviewTerminalEvidence } from "./terminal-evidence";
 
 test("user commands, live terminal and explicit queued selection share one session without sharing authority", async ({
@@ -13,10 +13,8 @@ test("user commands, live terminal and explicit queued selection share one sessi
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -120,10 +118,8 @@ test("trusted pointer reports retain the public renderer's literal PTY encoding"
     ].join("\n") + "\n",
   );
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -157,11 +153,9 @@ for (const replaceDocument of [false, true]) {
     const session = await createDirectSession(request, harness);
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    const show = page.getByRole("button", { name: "Show panel", exact: true });
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     // Document load can precede the session query and React's panel controls.
-    await expect(show.or(pane)).toBeVisible();
-    if (await show.isVisible()) await show.click();
+    await showSidePanel(page);
     await expect(pane).toBeVisible();
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -233,6 +227,8 @@ for (const replaceDocument of [false, true]) {
         });
       });
       await page.reload();
+      // Reopening the route's panel after a reload only attaches; it sends no bytes.
+      await showSidePanel(page);
       await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
       await expect(acknowledge).toBeVisible();
       expect(await page.locator("#nac-presentation-binding").textContent()).toBe(beforeBinding);
@@ -340,10 +336,8 @@ test("reattach observation sends no retained terminal-query replies before focus
       inputs.push(sent.postDataJSON().bytes);
   });
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(pane.locator(".xterm-accessibility")).toContainText("REPLAY-QUERY-END");

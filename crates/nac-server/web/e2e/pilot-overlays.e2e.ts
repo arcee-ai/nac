@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createProject, createSession, expect, test } from "./harness";
+import { openPhoneMenu, showSidebar } from "./nav-focus-helpers";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires isolated pilot fixtures");
 test.use({ orchestration: "0" });
@@ -53,21 +54,13 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     await page.setViewportSize(viewport);
     await page.goto(`${harness.baseUrl}/?pilotViewport=${viewport.width}#/session/${id}/files`);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    if (viewport.width < 768) {
-      const menu = page.getByRole("button", { name: "Open the menu", exact: true });
-      await expect(menu).toBeVisible();
-      await menu.click();
-      await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeVisible();
-    } else {
-      const expand = page.getByRole("button", { name: "Show sidebar", exact: true });
-      if (await expand.isVisible()) await expand.click();
-    }
+    // Phones have no sidebar: the session goes back Home, whose header opens the menu.
+    if (viewport.width < 768) await openPhoneMenu(page);
+    else await showSidebar(page);
     for (const theme of ["dark", "light"]) {
       for (const action of ["Rename", "Delete"]) {
         const opener = page.getByRole("button", { name: `${action} ${title}`, exact: true });
-        if (viewport.width < 768 && !(await opener.isVisible())) {
-          await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-        }
+        if (viewport.width < 768 && !(await opener.isVisible())) await openPhoneMenu(page);
         await expect(opener).toBeVisible();
         await opener.focus();
         await opener.click();
@@ -278,7 +271,8 @@ for (const mobile of [false, true]) {
     expect(seeded.ok()).toBe(true);
     const baseline = await seeded.json();
     await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
-    if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+    if (mobile) await openPhoneMenu(page);
+    else await showSidebar(page);
     const opener = page.getByRole("button", { name: `Rename ${title}`, exact: true });
     await opener.focus();
     await page.keyboard.press("Enter");

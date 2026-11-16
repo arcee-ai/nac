@@ -1,15 +1,13 @@
 import type { Page } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, showSidePanel, test } from "./harness";
 
 async function showHistory(page: Page, baseUrl: string, session: string) {
   await page.goto(`${baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   // Document load can precede the session query and React's panel controls.
-  await expect(page.getByRole("button", { name: /^(Show|Hide) panel$/ })).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   const recent = pane.getByRole("region", { name: "Recent terminal activity", exact: true });
   await expect(recent).toBeVisible();

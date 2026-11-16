@@ -113,12 +113,15 @@ export async function readyInspectorChild(page: Page, width: number, text: strin
 export async function readyInspectorFiles(page: Page, width: number) {
   const pane = inspectorPane(page, width, "Files");
   await expect(pane.getByRole("status", { name: "Loading Files", exact: true })).toHaveCount(0);
-  // Tablet Files initially opens its selected detail; this capture names the list.
-  if (width >= 768 && width < 1280)
-    await pane.getByRole("button", { name: "Open list", exact: true }).click();
   const file = pane
     .getByRole("button", { name: /^inspection-notes\.txt/ })
     .and(pane.locator("button[aria-pressed]"));
+  // Tablet Files may open on its selected detail; this capture names the list.
+  if (width >= 768 && width < 1280) {
+    const list = pane.getByRole("button", { name: "Open list", exact: true });
+    await expect(list.or(file).first()).toBeVisible();
+    if (await list.isVisible()) await list.click();
+  }
   await expect(file).toBeVisible();
   if (width >= 1280) {
     await expect(pane.getByText("Existing checkout notes", { exact: true })).toBeVisible();
