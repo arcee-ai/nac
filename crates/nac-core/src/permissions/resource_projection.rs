@@ -342,3 +342,7 @@ pub(super) fn lexical_normalize(path: &Path) -> PathBuf {
     }
     normalized
 }
+
+#[cfg(test)]
+#[path = "resource_projection_tests.rs"]
+mod tests;
