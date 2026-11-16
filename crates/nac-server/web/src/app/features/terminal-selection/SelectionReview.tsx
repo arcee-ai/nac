@@ -82,17 +82,21 @@ export function SelectionReview({ state, controller, availability }: Props) {
         </div>
       }
     >
-      <div className="flex flex-col gap-4 text-sm">
+      <div className="flex flex-col gap-4 type-body-chrome text-basic-secondary">
         <p>
           Only this selected text and optional accompanying text will be shared as literal,
           untrusted evidence. Reviewing does not send anything to the agent.
         </p>
         {state.source ? (
-          <details>
-            <summary>Selection source</summary>
-            <p className="break-all">Chat: {state.source.sessionId}</p>
-            <p className="break-all">Shell: {state.source.terminalId}</p>
-            <p>Client capture time: {state.source.capturedAtMs} ms</p>
+          <details className="rounded-lg border border-muted px-3 py-2 type-meta">
+            <summary className="cursor-pointer text-basic-tertiary hover:text-basic-primary">
+              Selection source
+            </summary>
+            <div className="mt-2 flex flex-col gap-1 tabular">
+              <p className="break-all">Chat: {state.source.sessionId}</p>
+              <p className="break-all">Shell: {state.source.terminalId}</p>
+              <p>Client capture time: {state.source.capturedAtMs} ms</p>
+            </div>
           </details>
         ) : null}
         {availability.sourceAlive === false ? (
@@ -104,12 +108,16 @@ export function SelectionReview({ state, controller, availability }: Props) {
           <p role="status">The shell’s running state was not confirmed at capture.</p>
         ) : null}
         {availability.sourceUnavailable ? (
-          <p role="alert">
+          <p role="alert" className="text-[var(--f-amber-text)]">
             The source is currently unavailable. A new send is disabled; an unconfirmed submission
             can still be reconciled with its original identity.
           </p>
         ) : null}
-        {state.error ? <p role="alert">{state.error}</p> : null}
+        {state.error ? (
+          <p role="alert" className="text-error-primary">
+            {state.error}
+          </p>
+        ) : null}
         {state.phase === "uncertain" ? (
           <p>
             Dismissing or clearing this review does not cancel accepted work. Check history before
@@ -121,14 +129,14 @@ export function SelectionReview({ state, controller, availability }: Props) {
         ) : null}
         {state.preview ? (
           <div className="flex flex-col gap-2">
-            <h3>Reviewed selected text</h3>
+            <h3 className="type-meta text-basic-tertiary">Reviewed selected text</h3>
             <pre
               aria-label="Reviewed selected text"
-              className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-elevation-level-1 p-3"
+              className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-tertiary bg-[var(--color-code-bg)] px-3 py-2.5 code text-[length:var(--type-mono)] !leading-5 text-basic-primary"
             >
               {state.preview.text}
             </pre>
-            <p>
+            <p className="type-meta tabular text-basic-muted">
               {state.preview.text_scalars.toLocaleString()} characters ·{" "}
               {state.preview.text_utf8_bytes.toLocaleString()} UTF-8 bytes. No truncation.
             </p>
@@ -136,15 +144,17 @@ export function SelectionReview({ state, controller, availability }: Props) {
         ) : null}
         {editing ? (
           <div className="flex flex-col gap-2">
-            <label htmlFor={`${id}-question`}>Accompanying literal text (optional)</label>
+            <label htmlFor={`${id}-question`} className="type-label text-basic-primary">
+              Accompanying literal text (optional)
+            </label>
             <textarea
               id={`${id}-question`}
               value={state.editorText}
               rows={4}
               onChange={(event) => controller.setUserText(event.target.value)}
-              className="rounded bg-bg-elevation-level-1 p-3"
+              className="input rounded-lg p-3 type-body-chrome max-md:!text-base"
             />
-            <p>
+            <p className="type-meta text-basic-tertiary">
               Update the preview before sending. Limits apply separately to selected and
               accompanying text.
             </p>
@@ -167,10 +177,10 @@ export function SelectionReview({ state, controller, availability }: Props) {
         ) : null}
         {!editing && state.preview?.user_text != null ? (
           <div>
-            <h3>Reviewed accompanying text</h3>
+            <h3 className="mb-2 type-meta text-basic-tertiary">Reviewed accompanying text</h3>
             <pre
               aria-label="Reviewed accompanying text"
-              className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-elevation-level-1 p-3"
+              className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-tertiary bg-[var(--color-code-bg)] px-3 py-2.5 code text-[length:var(--type-mono)] !leading-5 text-basic-primary"
             >
               {state.preview.user_text}
             </pre>
@@ -186,10 +196,11 @@ export function SelectionReview({ state, controller, availability }: Props) {
           </Button>
         ) : null}
         <fieldset disabled={locked} className="flex flex-col gap-2">
-          <legend className="mb-2">Delivery</legend>
-          <label>
+          <legend className="mb-2 type-label text-basic-primary">Delivery</legend>
+          <label className="flex items-center gap-2 text-basic-primary">
             <input
               type="radio"
+              className="accent-[var(--f-ink)]"
               name={`${id}-delivery`}
               checked={state.choice.delivery === "send"}
               disabled={availability.mode !== "idle"}
@@ -197,19 +208,23 @@ export function SelectionReview({ state, controller, availability }: Props) {
             />{" "}
             Send as a new turn (idle chat)
           </label>
-          <label>
+          <label className="flex items-center gap-2 text-basic-primary">
             <input
               type="radio"
+              className="accent-[var(--f-ink)]"
               name={`${id}-delivery`}
               checked={state.choice.delivery === "queue"}
               onChange={() => controller.choose({ delivery: "queue" })}
             />{" "}
             Queue after existing input
           </label>
-          <p>When idle, queued evidence may start the next turn.</p>
-          <label>
+          <p className="-mt-1 pl-6 type-meta text-basic-tertiary">
+            When idle, queued evidence may start the next turn.
+          </p>
+          <label className="flex items-center gap-2 text-basic-primary">
             <input
               type="radio"
+              className="accent-[var(--f-ink)]"
               name={`${id}-delivery`}
               checked={state.choice.delivery === "steer" && !targetChanged}
               disabled={!availability.runId || availability.mode !== "busy"}

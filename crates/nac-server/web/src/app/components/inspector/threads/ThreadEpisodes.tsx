@@ -33,7 +33,7 @@ function EpisodeTab({ episode, index }: { episode: EpisodeSnapshot; index: numbe
     <div className="flex flex-col items-start w-full">
       <button
         type="button"
-        className="group flex items-center gap-2 w-full py-3 pl-1 pr-3 md:py-2 md:pl-3 md:pr-2 rounded-[4px] btn-ghost"
+        className="group flex items-center gap-2 w-full py-3 pl-1 pr-3 md:py-2 md:pl-3 md:pr-2 rounded-md transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)]"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
@@ -52,7 +52,7 @@ function EpisodeTab({ episode, index }: { episode: EpisodeSnapshot; index: numbe
           {episode.content.trim() ? (
             <Markdown className="text-basic-primary">{episode.content}</Markdown>
           ) : (
-            <p className="label-small text-basic-muted">
+            <p className="type-meta text-basic-tertiary">
               {failure
                 ? "The dispatch ended before the thread answered."
                 : "The thread answered with nothing."}
@@ -77,7 +77,7 @@ export function Episodes({
   if (!episodes.length) {
     return (
       <div className={cn("flex flex-1 min-h-0", className)}>
-        <p className="p-4 max-w-prose label-small text-basic-muted">
+        <p className="m-auto max-w-80 p-6 text-center type-body-chrome text-basic-tertiary">
           {running
             ? "An episode records one dispatch — what the thread was asked to do and what came back. This one is written when the dispatch ends; until then Logs is the live view."
             : "This thread has not been dispatched yet, so it has no episodes."}

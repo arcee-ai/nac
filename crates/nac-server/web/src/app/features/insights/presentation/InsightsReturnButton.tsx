@@ -8,7 +8,7 @@ export function InsightsReturnButton({ sessionId }: { sessionId: string }) {
   const navigation = useInsightsNavigation();
   if (!available) return null;
   return (
-    <div className="flex shrink-0 items-center border-b border-muted px-2 py-1">
+    <div className="flex shrink-0 items-center border-b border-tertiary px-2 py-1">
       <Button
         size={ButtonSize.Medium}
         variant={ButtonVariant.Ghost}

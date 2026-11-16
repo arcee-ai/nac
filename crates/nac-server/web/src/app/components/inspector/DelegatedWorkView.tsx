@@ -1,7 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import SessionNameDisclosure from "@/app/atoms/session-name-disclosure";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -10,12 +9,16 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  ChatSessionButton,
   Icon,
   IconName,
   StickyButton,
 } from "@/app/atoms";
 import { SubagentComposer } from "@/app/components/inspector/SubagentComposer";
+import { SubagentListRow } from "@/app/features/delegation/presentation/SubagentListRow";
+import {
+  compactAge,
+  subagentStateLine,
+} from "@/app/features/delegation/presentation/subagentRowModel";
 import { SubagentRowActions } from "@/app/components/inspector/SubagentListControls";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
 import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
@@ -116,7 +119,6 @@ export function DelegatedWorkView({
   const expanded = useSidePanelExpanded();
   const supportsOrchestrators =
     useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const children = useTraditionalChildren(sessionId, true);
   const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
   const sessions = useSessions();
@@ -196,12 +198,12 @@ export function DelegatedWorkView({
     );
   }
   const loadError = (
-    <div role="alert" className="m-2 rounded-[6px] border border-error-primary p-3">
-      <div className="text-small text-error-primary">Subagents could not be loaded.</div>
+    <div role="alert" className="flex flex-col items-start gap-2 px-2.5 py-3">
+      <p className="type-body-chrome text-error-primary">Subagents could not be loaded.</p>
       <Button
-        className="mt-2 max-md:!min-h-11 max-md:!min-w-11"
+        className="max-md:!min-h-11 max-md:!min-w-11"
         size={ButtonSize.Small}
-        variant={ButtonVariant.Ghost}
+        variant={ButtonVariant.Secondary}
         onClick={() => {
           void children.refetch();
           if (supportsOrchestrators) void orchestrators.refetch();
@@ -215,44 +217,44 @@ export function DelegatedWorkView({
   const listState = failed ? (
     loadError
   ) : rows.length === 0 && !loaded ? (
-    <p role="status" className="label-small m-auto text-basic-tertiary">
+    <p role="status" className="type-body-chrome m-auto px-2.5 py-3 text-basic-tertiary">
       Loading subagents…
     </p>
   ) : null;
   const list = (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-5">
       {listState}
       {groups.map((group) => (
-        <div key={group.label} className="flex flex-col gap-2">
-          {/* `.badge` is Figma's Tag-label type; the shared `.tag-label` is
-              semibold and tracked. */}
-          <span className={cn("badge text-basic-muted", isMobile ? "px-3" : "px-2")}>
+        <div key={group.label} className="flex flex-col gap-0.5">
+          <span className={cn("type-meta text-basic-muted pb-1", isMobile ? "px-3" : "px-2.5")}>
             {group.label}
           </span>
-          <div className="flex flex-col gap-1">
-            {group.items.map((row) => {
-              const title = rowTitle(row);
-              const summary = summaries.get(row.id);
-              return (
-                <ChatSessionButton
-                  key={row.key}
-                  title={title}
-                  lineage={MODE_LINEAGE[row.mode]}
-                  showBehaviorIcon={showBehaviorIcon}
-                  running={row.status === "running"}
-                  active={marksOpen && selected?.key === row.key}
-                  isMobile={isMobile}
-                  smallTitle
-                  onClick={() => chooseRow(row.key)}
-                  actions={
-                    summary ? (
-                      <SubagentRowActions summary={summary} title={title} isMobile={isMobile} />
-                    ) : null
-                  }
-                />
-              );
-            })}
-          </div>
+          {group.items.map((row) => {
+            const title = rowTitle(row);
+            const summary = summaries.get(row.id);
+            return (
+              <SubagentListRow
+                key={row.key}
+                title={title}
+                status={row.status}
+                stateLine={subagentStateLine({
+                  status: row.status,
+                  orchestrator: row.mode === "orchestrator",
+                  background: row.background,
+                  detail: row.fallbackText,
+                })}
+                age={compactAge(row.updatedAt, now)}
+                active={marksOpen && selected?.key === row.key}
+                isMobile={isMobile}
+                onClick={() => chooseRow(row.key)}
+                actions={
+                  summary ? (
+                    <SubagentRowActions summary={summary} title={title} isMobile={isMobile} />
+                  ) : null
+                }
+              />
+            );
+          })}
         </div>
       ))}
     </div>
@@ -289,7 +291,7 @@ export function DelegatedWorkView({
       aria-description="Open this child’s own Insights and Files"
       onClick={() => openDetail(selected.id)}
     >
-      Open child
+      Open session
       <Icon iconName={IconName.External} />
     </Button>
   ) : null;
@@ -312,13 +314,13 @@ export function DelegatedWorkView({
         ) : undefined
       }
       actions={openButton}
-      listClassName="px-1 py-6"
+      listClassName="px-1.5 py-3"
       list={
         isMobile ? (
-          <div className="pt-6">{list}</div>
+          <div className="pt-3">{list}</div>
         ) : isTablet ? (
           // The desktop column's insets, out of the tablet list's own 8px.
-          <div className="-mx-1 -mt-2 py-6">{list}</div>
+          <div className="-mx-0.5 -mt-1 py-3">{list}</div>
         ) : (
           list
         )

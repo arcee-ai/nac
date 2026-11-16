@@ -114,13 +114,15 @@ export function ThreadDetail({
     <div className="flex flex-col flex-1 min-h-0 min-w-0">
       {/* The controls wrap under the name once they would squeeze it below its
           basis, as in a detail beside the list at a 1280–1440 px window. */}
-      <div className="flex flex-wrap items-center gap-2 min-h-14 pl-4 pr-2 py-3 shrink-0 border-b border-muted bg-elevation-ground">
+      <div className="flex flex-wrap items-center gap-2 min-h-12 pl-4 pr-2 py-2 shrink-0 border-b border-tertiary">
         <div className="flex grow basis-48 min-w-0 items-center gap-3">
           {/* Truncated here: clipping the shimmer's own box would stop it. */}
-          <span className="min-w-0 truncate label-small text-basic-primary">
-            <span className={cn(running && "text-shimmer-basic")}>{thread.name}</span>
+          <span className="min-w-0 truncate type-strong text-basic-primary">
+            <span className={cn(running && "focus-shimmer")}>{thread.name}</span>
           </span>
-          <span className="shrink-0 text-micro text-basic-muted">{episodes.length} ep</span>
+          <span className="shrink-0 type-meta tabular text-basic-muted">
+            {episodes.length} {episodes.length === 1 ? "episode" : "episodes"}
+          </span>
           {action ? <TaskButton action={action} /> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2 min-w-0">

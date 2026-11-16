@@ -52,7 +52,7 @@ const ToolCallView = memo(function ToolCallView({
           </>
         ) : (
           <>
-            <span className="text-info-primary">{"▸ "}</span>
+            <span className="text-basic-muted">{"▸ "}</span>
             <span className="text-basic-primary">{`${entry.toolName}: `}</span>
             {entry.keyArg}
           </>
@@ -156,8 +156,8 @@ function LogScroller({
         ))}
         {thinking ? (
           <p className="pt-1 code code-small">
-            <span className="text-info-primary">{"▸ "}</span>
-            <span className="text-shimmer-basic">Working…</span>
+            <span className="text-basic-muted">{"▸ "}</span>
+            <span className="focus-shimmer">Working…</span>
           </p>
         ) : null}
         {!entries.length && !thinking && (loading || running) ? (
@@ -166,7 +166,7 @@ function LogScroller({
           </div>
         ) : null}
         {!entries.length && !running && !loading ? (
-          <p className="pt-4 code code-small text-basic-muted">No commands recorded.</p>
+          <p className="pt-4 type-meta text-basic-tertiary">No commands recorded.</p>
         ) : null}
       </div>
     </div>
@@ -271,7 +271,7 @@ export function LogPane({
             ) : null}
             {historyError ? (
               <>
-                <span className="text-micro text-error-primary">{historyError}</span>
+                <span className="type-meta text-error-primary">{historyError}</span>
                 <Button
                   size={ButtonSize.Small}
                   variant={ButtonVariant.Ghost}

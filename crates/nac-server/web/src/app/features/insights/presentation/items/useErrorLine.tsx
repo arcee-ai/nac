@@ -56,7 +56,7 @@ export function useErrorLine(
     action: (
       <>
         {full.failed ? (
-          <p role="alert" className="break-words text-micro text-error-primary">
+          <p role="alert" className="break-words type-meta text-error-primary">
             Could not load the full error.
           </p>
         ) : null}

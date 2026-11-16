@@ -4,6 +4,7 @@ import { useRevealSelection } from "@/app/features/workspace-reveal/selection";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { DIFF_CODE_TYPE, DIFF_GUTTER, DiffLineRow } from "@/app/atoms/code-displayer";
 import {
   CodeChangesBadge,
   CodeChangesBadgeSize,
@@ -22,7 +23,8 @@ import {
   PanelFailure,
   PanelListNote,
 } from "@/app/components/inspector/PanelMessages";
-import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
+import { PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
@@ -34,7 +36,7 @@ import {
   type FileNode,
   type FileTreeDir,
 } from "@/app/lib/fileTree";
-import { highlightCode, highlightDiff, tokenStyle, type CodeToken } from "@/app/lib/highlight";
+import { highlightCode, highlightDiff, type CodeToken } from "@/app/lib/highlight";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
   queryKeys,
@@ -73,6 +75,8 @@ function FileRow({
       size={size}
       active={selected === file.path}
       status={gitStatusOf(file.status)}
+      additions={file.additions}
+      deletions={file.deletions}
       title={file.path}
       onClick={() => onSelect(file.path)}
     />
@@ -92,11 +96,16 @@ interface TreeProps {
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
   const isMobile = useIsMobile();
   return (
-    <div className={cn("flex flex-col gap-[2px]", depth > 0 && "mb-2 border-l border-muted pl-2")}>
+    <div
+      className={cn(
+        "flex flex-col gap-px",
+        depth > 0 && "ml-[15px] border-l border-tertiary pl-1.5",
+      )}
+    >
       {dir.dirs.map((child) => {
         const expanded = open.has(child.path);
         return (
-          <div key={child.path} className="flex flex-col gap-[2px] w-full">
+          <div key={child.path} className="flex flex-col gap-px w-full">
             <FileListTabButton
               name={child.name}
               variant={FileListTabButtonVariant.Folder}
@@ -146,7 +155,7 @@ function ChangedList({
   if (files.length === 0) return <PanelListNote>Nothing has changed here yet.</PanelListNote>;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-px">
       {files.map((file) => (
         <FileRow
           key={file.path}
@@ -159,14 +168,6 @@ function ChangedList({
     </div>
   );
 }
-
-/**
- * The design's Plex Mono Medium 12/16 without tracking. `.code` sets a 1.5
- * line height and tracking in unlayered CSS, which only `!` utilities outrank.
- */
-const CODE_TYPE = "code code-small font-medium !leading-4 !tracking-normal";
-
-const GUTTER = cn(CODE_TYPE, "shrink-0 w-12 text-right opacity-50 text-basic-muted select-none");
 
 function CodeLine({
   lineNo,
@@ -182,33 +183,15 @@ function CodeLine({
   trailing?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-start w-full border-l-2 border-solid",
-        tone === "add"
-          ? "bg-success-primary border-success-primary"
-          : tone === "delete"
-            ? "bg-error-primary border-error-primary"
-            : "border-transparent",
-      )}
-    >
-      <span className={GUTTER}>{lineNo ?? ""}</span>
-      <span
-        className={cn(
-          CODE_TYPE,
-          "flex-1 min-w-0 px-2 text-basic-primary whitespace-pre-wrap break-words",
-        )}
-      >
-        {tokens
-          ? tokens.map((token, index) => (
-              <span key={index} style={tokenStyle(token)}>
-                {token.text}
-              </span>
-            ))
-          : content}
-        {trailing}
-      </span>
-    </div>
+    <DiffLineRow
+      line={{
+        kind: tone === "add" ? "insert" : tone === "delete" ? "delete" : "context",
+        number: lineNo,
+        content,
+        tokens,
+        trailing,
+      }}
+    />
   );
 }
 
@@ -225,25 +208,28 @@ function DiffLine({ line, tokens }: { line: WorkspaceDiffLine; tokens: CodeToken
       tone={line.kind === "insert" ? "add" : isDel ? "delete" : undefined}
       trailing={
         line.has_trailing_newline === false ? (
-          <span className="italic text-basic-muted"> No newline at end of file</span>
+          <span className="select-none font-sans italic text-basic-muted">
+            {" "}
+            No newline at end of file
+          </span>
         ) : null
       }
     />
   );
 }
 
+/** One quiet line in the pane: a fact about the diff, or why it failed. */
 function Notice({ tone, children }: { tone?: "error"; children: React.ReactNode }) {
   return (
-    <div
+    <p
+      role={tone === "error" ? "alert" : undefined}
       className={cn(
-        "mx-4 my-2 rounded-md px-3 py-2 code code-small",
-        tone === "error"
-          ? "text-error-primary bg-error-tertiary border border-error-muted"
-          : "text-basic-muted bg-elevation-level-0-5",
+        "mx-4 my-3 type-meta",
+        tone === "error" ? "text-error-primary" : "text-basic-tertiary",
       )}
     >
       {children}
-    </div>
+    </p>
   );
 }
 
@@ -267,11 +253,20 @@ function Section({
     <>
       {section.hunks.map((hunk, index) => (
         <div key={index} className="flex flex-col w-full">
-          <div className="flex items-start w-full border-l-2 border-transparent bg-info-tertiary">
-            <span className={GUTTER}>@@</span>
-            <span className={cn(CODE_TYPE, "flex-1 min-w-0 px-2 text-info-primary truncate")}>
-              {`-${hunk.old_start},${hunk.old_lines} +${hunk.new_start},${hunk.new_lines}`}
-              {hunk.function_context ? ` ${hunk.function_context}` : ""}
+          <div
+            className={cn(
+              "flex items-start w-full bg-[var(--f-wash-1)] text-basic-tertiary",
+              index > 0 && "mt-2 border-t border-muted",
+            )}
+          >
+            <span aria-hidden className={DIFF_GUTTER}>
+              ⋯
+            </span>
+            <span className={cn(DIFF_CODE_TYPE, "flex-1 min-w-0 pl-4 pr-3 truncate")}>
+              {`@@ -${hunk.old_start},${hunk.old_lines} +${hunk.new_start},${hunk.new_lines} @@`}
+              {hunk.function_context ? (
+                <span className="text-basic-secondary"> {hunk.function_context}</span>
+              ) : null}
             </span>
           </div>
           {hunk.lines.map((line, lineIndex) => (
@@ -285,12 +280,19 @@ function Section({
 }
 
 /** The open file as the design heads it on every size: its type icon, then its name. */
-function FileTitle({ path }: { path: string }) {
+function FileTitle({ path, withFolder = false }: { path: string; withFolder?: boolean }) {
   const isMobile = useIsMobile();
+  const label = fileLabel(path);
+  const parent = withFolder
+    ? path.slice(0, Math.max(0, path.length - label.length)).replace(/\/$/, "")
+    : "";
   return (
-    <span className="flex min-w-0 items-center gap-[10px]" title={path}>
-      <FileIcon path={path} size={isMobile ? 24 : 20} />
-      <span className="min-w-0 truncate">{fileLabel(path)}</span>
+    <span className="flex min-w-0 items-center gap-2" title={path}>
+      <FileIcon path={path} size={isMobile ? 20 : 16} />
+      <span className="min-w-0 shrink-0 max-w-full truncate">{label}</span>
+      {parent ? (
+        <span className="min-w-0 truncate type-meta font-normal text-basic-muted">{parent}</span>
+      ) : null}
     </span>
   );
 }
@@ -302,8 +304,9 @@ function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNod
   if (!isDesktop) return null;
 
   return (
-    <div className="flex items-center gap-[10px] h-12 px-4 shrink-0 border-b border-muted bg-elevation-ground header-sm text-basic-primary">
-      <FileTitle path={path} />
+    <div className="flex items-center gap-3 h-11 px-4 shrink-0 border-b border-tertiary type-strong text-basic-primary">
+      <FileTitle path={path} withFolder />
+      <span className="flex-1" />
       {trailing}
     </div>
   );
@@ -315,7 +318,7 @@ function Scroller({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={cn(
-        "flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+        "flex flex-col flex-1 min-h-0 overflow-auto bg-[var(--color-code-bg)] [&>*]:shrink-0",
         isMobile ? "py-16" : "py-2",
       )}
     >
@@ -367,11 +370,14 @@ function DiffPane({
   file,
   counts,
   revision,
+  action,
 }: {
   sessionId: string;
   file: FileNode;
   counts: ChangeCounts | null;
   revision: number | null;
+  /** The file's own control at the header's end, e.g. Reveal in Finder. */
+  action?: React.ReactNode;
 }) {
   const {
     data: diff,
@@ -384,14 +390,21 @@ function DiffPane({
       <PaneHeader
         path={file.path}
         trailing={
-          counts ? (
-            <CodeChangesBadge additions={counts.additions} deletions={counts.deletions} />
-          ) : null
+          <>
+            {counts ? (
+              <CodeChangesBadge
+                additions={counts.additions}
+                deletions={counts.deletions}
+                className="tabular"
+              />
+            ) : null}
+            {action}
+          </>
         }
       />
       <Scroller>
         {isFetching && !diff ? (
-          <div className="flex items-center gap-2 px-4 py-2 code code-small text-basic-muted">
+          <div className="flex items-center gap-2 px-4 py-3 type-meta text-basic-tertiary">
             <Loader size={LoaderSize.Small} /> Loading diff…
           </div>
         ) : null}
@@ -438,10 +451,12 @@ function FilePane({
   sessionId,
   path,
   revision,
+  action,
 }: {
   sessionId: string;
   path: string;
   revision: number | null;
+  action?: React.ReactNode;
 }) {
   const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
   // Kept next to the text it describes, so a refetch that changes the file
@@ -473,16 +488,19 @@ function FilePane({
       <PaneHeader
         path={path}
         trailing={
-          data ? (
-            <span className={cn(CODE_TYPE, "shrink-0 text-basic-muted")}>
-              {formatBytes(data.size)}
-            </span>
-          ) : null
+          <>
+            {data ? (
+              <span className="shrink-0 type-meta font-normal tabular text-basic-muted">
+                {formatBytes(data.size)}
+              </span>
+            ) : null}
+            {action}
+          </>
         }
       />
       <Scroller>
         {isFetching && !data ? (
-          <div className="flex items-center gap-2 px-4 py-2 code code-small text-basic-muted">
+          <div className="flex items-center gap-2 px-4 py-3 type-meta text-basic-tertiary">
             <Loader size={LoaderSize.Small} /> Loading file…
           </div>
         ) : null}
@@ -525,6 +543,7 @@ export function FilesView({
 
   const client = useQueryClient();
   const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
   const marksOpen = usePanelListMarksOpen();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
@@ -608,6 +627,10 @@ export function FilesView({
     return <PanelLoading listTitle="Files" />;
   }
 
+  const reveal =
+    current && revision == null && !readOnly ? (
+      <RevealInFinder sessionId={sessionId} snapshot={snapshot} path={current} origin={origin} />
+    ) : null;
   const branch = workspace?.branch;
   // A phone's only branch switcher, so an empty checkout keeps it as well.
   const branchRow =
@@ -615,7 +638,14 @@ export function FilesView({
       <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
     ) : null;
   if (nodes.length === 0) {
-    return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
+    return (
+      <PanelEmptyState
+        listTitle="Files"
+        title="No files"
+        description="This checkout has no files yet."
+        phoneLead={branchRow}
+      />
+    );
   }
 
   return (
@@ -639,16 +669,8 @@ export function FilesView({
           changed={changed}
           revision={revision}
           readOnly={readOnly}
-          reveal={
-            current && revision == null && !readOnly ? (
-              <RevealInFinder
-                sessionId={sessionId}
-                snapshot={snapshot}
-                path={current}
-                origin={origin}
-              />
-            ) : null
-          }
+          // A desktop heads the open file with it instead, beside its name.
+          reveal={isDesktop ? null : reveal}
         />
       }
       list={
@@ -673,7 +695,7 @@ export function FilesView({
       }
     >
       {!current ? (
-        <PanelEmpty>Select a file to see it.</PanelEmpty>
+        <PanelQuiet>Select a file to see it.</PanelQuiet>
       ) : currentChange ? (
         <DiffPane
           key={current}
@@ -681,9 +703,16 @@ export function FilesView({
           file={currentChange}
           counts={counts}
           revision={revision}
+          action={isDesktop ? reveal : null}
         />
       ) : (
-        <FilePane key={current} sessionId={sessionId} path={current} revision={revision} />
+        <FilePane
+          key={current}
+          sessionId={sessionId}
+          path={current}
+          revision={revision}
+          action={isDesktop ? reveal : null}
+        />
       )}
     </PanelSplit>
   );

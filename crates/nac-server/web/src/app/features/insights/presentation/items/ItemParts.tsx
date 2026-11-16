@@ -10,7 +10,7 @@ export function BodyText({ children }: { children: ReactNode }) {
 }
 
 export function SuccessText({ children }: { children: ReactNode }) {
-  return <p className="text-small text-success-primary">{children}</p>;
+  return <p className="type-body-chrome text-success-primary">{children}</p>;
 }
 
 /** Rendered only for a session the delegation records confirm. */
