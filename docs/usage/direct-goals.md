@@ -29,7 +29,12 @@ The six durable statuses are `active`, `paused`, `blocked`, `usage_limited`,
 `budget_limited`, and `complete`. While active, NAC starts one continuation
 when the session becomes idle. Pending durable inbox input always goes first.
 An ordinary successful turn leaves the goal active and therefore schedules the
-next continuation. A failed run marks it blocked. An explicit user cancellation
+next continuation. A non-transient failed run marks the goal `blocked`. Transient
+stream/transport failures stay `active` and schedule an automatic retry (1s, then
+2s, exponential up to 30s; a provider `retry_after_ms` can extend that delay).
+After three consecutive transient failures the goal becomes `blocked` and the
+stored recovery action is `ResumeGoal`. A successful continuation or an explicit
+user resume clears the retry counter. An explicit user cancellation still
 accounts the partial run and pauses the goal, so cancelled work does not
 immediately restart. Resume is explicit.
 

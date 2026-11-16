@@ -111,6 +111,9 @@ url = "https://mcp.grep.app"
 # enabled = true
 # transport = "stdio"
 # command = "npx"
+# Dashboard MCP server form: one field per argument. A newline-containing paste
+# splits into separate args so a command line is not glued into one value.
+# config.toml args = [...] is unchanged.
 # args = ["-y", "some-mcp-server"]
 # env = { "API_TOKEN" = "${API_TOKEN}" }
 # env_vars = ["HTTPS_PROXY"]

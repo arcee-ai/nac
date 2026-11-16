@@ -41,18 +41,19 @@ workspace and is ready to begin authorization against
 `https://mcp.slack.com/mcp`. The internal ownership and protected-credential
 record is maintained outside the repository under ALL-125.
 
-ALL-124 owns the NAC OAuth client, localhost listener, callback handling,
-authorization-code exchange, and live loopback acceptance. Do not treat this
-fixture record as proof that the ALL-124 end-to-end flow passed.
+Dashboard OAuth, callback URLs, and connect/logout are documented in
+[MCP OAuth](../usage/mcp-oauth.md). Do not treat this fixture record as proof
+that a live loopback or managed authorization passed.
 
-No managed callback URL is registered yet. When managed OAuth is implemented,
-derive it only from a real validated `public_hostname`:
+Managed and remote callbacks are per server, derived only from a real validated
+`public_hostname` (never a placeholder):
 
 ```text
-https://<validated-public_hostname>/mcp_library/oauth/callback
+https://<validated-public_hostname>/mcp_library/servers/<server_name>/oauth/callback
 ```
 
-Never register a placeholder hostname.
+That is not the loopback path `/mcp_library/oauth/callback`. Register the
+exact URL with the identity provider.
 
 ## Repeat or rotate the fixture
 

@@ -38,6 +38,10 @@ and switch branches without touching your working tree:
   Git directory, or otherwise cannot be validated, nac refuses the launch
   instead of exposing the live checkout.
 
+Stdio MCP servers still spawn on the host in sandbox mode, not inside Podman.
+They see host paths and host credentials. SSH sessions skip stdio MCP entirely
+(HTTP MCP only).
+
 For a custom setup:
 
 - `--no-mount-cwd` disables the default current-directory mount

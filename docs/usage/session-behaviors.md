@@ -44,18 +44,19 @@ The wire values are:
   the default when an API client or legacy database row omits `behavior`.
 - `direct` — a persistent coding agent with native file and terminal tools,
   durable goals, and traditional child coding agents. Its side panel opens on
-  Insights and offers Delegated work instead of orchestrator Worksets.
+  Insights and offers **Subagents** instead of orchestrator Worksets.
 - `direct-with-orchestrator` — the same direct coding agent plus native controls
-  for separate managed NAC orchestrator sessions. Delegated work keeps
+  for separate managed NAC orchestrator sessions. **Subagents** keeps
   traditional coding agents and managed orchestrators in distinct sections.
 
 Behavior cannot be switched after creation. Start another chat to choose a
 different topology. A managed orchestrator is itself an immutable
 `orchestrator` session, while a traditional child inherits direct execution
 internals but is recognized by its durable parent relationship. Both delegated
-transcripts show their lineage and a **Back to Parent** action. They are
-read-only in the web MVP: continuation, steering, and cancellation remain owned
-by the parent workflow, and a traditional child cannot create an autonomous
+transcripts show their lineage and a **Back to Parent** action.
+Continuation, steering, and cancellation remain owned by the parent workflow.
+The child or managed-orchestrator page composer acts through the parent; the
+web UI has no manual launch. A traditional child cannot create an autonomous
 goal.
 
 While a direct run is active, the ordinary composer remains available. **Send**
@@ -64,6 +65,23 @@ durable `queue` item. Pending items show their delivery mode and can be changed
 or cancelled until delivery. If a steer reaches the run too late for its final
 model boundary, NAC durably promotes it into successor execution rather than
 dropping it.
+
+While a classic `orchestrator` session is running, **Send** posts
+`POST /sessions/{session_id}/steering` with `{ "instruction": "..." }` instead
+of starting another run. Stop stays a separate control. If the run finishes
+before the steer is accepted, the composer keeps the draft rather than dropping
+it into a new prompt. Worker steering lives on Threads and is granted only to a
+primary classic orchestrator
+(`POST /sessions/{session_id}/threads/{thread_name}/steering`). Pending,
+terminal, and read-only workers hide the control. These classic routes reject
+delegated children; direct sessions keep using the durable inbox above.
+
+Primary composer text is retained across navigation and reloads in a
+native-runtime-scoped store (owner, profile, organization, host, incarnation,
+endpoint, release). The store keeps at most 100 drafts and 1,000,000 characters
+of text. Shell intents, request bridges, and attachment payloads never enter it.
+An incomplete runtime binding never persists. In-memory submit ownership
+survives a remount of the same view, not a reload or runtime replacement.
 
 Direct-tool approval authorizes one prepared operation on the session's already
 selected execution backend; it is not a sandbox and never changes that backend.

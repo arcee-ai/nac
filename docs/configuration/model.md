@@ -2,6 +2,19 @@
 
 Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. `[model]` keeps only `model`, `reasoning_effort`, and `extra_headers`; the removed `backend`, `base_url`, and `api_key_env` keys in an older config are ignored with a one-time warning. The resulting `backend` and `model` must be present and nonblank before the session is created: the backend is explicit or resolved from the model id through the catalog. Model-only OpenAI inference remains `openai-responses` even though official OpenAI metadata is also presented under `openai-chat-completions`; selecting Chat Completions is always explicit. An unknown id therefore needs an explicit backend, but never needs catalog membership. An absent `base_url` materializes from the selected provider's endpoint default; a present value is validated rather than replaced.
 
+## Custom and self-hosted base URLs
+
+A caller-supplied `base_url` is never rewritten when invalid. Transport checks apply before NAC sends an API key:
+
+1. **Shape.** The value must be an absolute `http` or `https` URL with a host and no embedded userinfo.
+2. **Transport.** `http://` is accepted by default only for `localhost` / `*.localhost`, loopback, private (`10/8`, `172.16/12`, `192.168/16`), or link-local IP literals. Any other host requires `https://`, unless the saved configuration or session sets `allow_insecure_http = true`. That flag is intentionally dangerous: the API key, prompts, source, tool output, and responses may be read or modified in transit. It bypasses only the public-HTTP rejection; redirects stay disabled and credential headers stay protected. See [Model request security](../security/model-requests.md).
+
+There is no host allowlist. Any public HTTPS origin is accepted for API-key backends. Managed `arcee-auth` and `chatgpt-codex-responses` still enforce their own origin policies.
+
+Wire path is backend-specific. `openai-responses` posts to `{base}/responses`. Chat-completions backends (`openai-chat-completions`, `deepseek-chat`, `together-chat`, `fireworks-chat`) post to `{base}/chat/completions`, so a typical vLLM root should include the `/v1` prefix (`http://192.168.1.10:8000/v1`). vLLM usually speaks `/v1/chat/completions`, not `/responses` — pick `openai-chat-completions`, not `openai-responses`. Arcee backends are the exception: they join `/api/v1/chat/completions` themselves.
+
+Model-only OpenAI ids still resolve to `openai-responses`. Selecting Chat Completions is always explicit. Unknown endpoints omit OpenAI-only optional extensions unless a `$NAC_HOME/models.json` override enables them.
+
 Model selection is config-first, not environment-driven:
 
 - NAC never reads `OPENAI_MODEL` or `OPENAI_BASE_URL` and does not infer a backend, model, or endpoint from provider conventions.
@@ -23,6 +36,13 @@ working-directory value; an empty header map clears working-directory headers;
 an absent light model selects single-model operation. An absent saved
 compaction threshold leaves normal working-directory/built-in behavior.
 `initial_prompt` is not used by session creation.
+
+New chat and Settings can set or clear a per-chat `light_model` (`null`
+disables dual-model). Direct-only presentation hides unused light-model
+controls but preserves hidden settings
+([session behaviors](../usage/session-behaviors.md)). The persisted session
+snapshot wins on resume. `allow_insecure_http` is a single choice for the
+primary and optional light model; it is not a `[model]` config.toml key.
 
 The ordinary create-request tri-state remains authoritative over the project
 layer: omission inherits, required model/backend/base URL fields reject

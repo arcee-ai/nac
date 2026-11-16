@@ -32,8 +32,10 @@ and a stale expected failure also fails.
 
 The only scored exclusions are:
 
-- OAuth client scenarios, owned by ALL-124 and ALL-126 rather than this
-  protocol-transport change.
+- OAuth client scenarios. Official `make test-mcp-conformance` still excludes
+  them from the scored set (`scripts/mcp-conformance/expected-failures.yml`).
+  That skip is not proof the operator flow is missing; see
+  [MCP OAuth](mcp-oauth.md).
 - `elicitation-sep1034-client-defaults`, because NAC does not yet provide an
   interactive outbound elicitation surface and does not advertise one.
 

@@ -51,6 +51,11 @@ with at most four targeting the same canonical store. Capacity waits are
 bounded. These limits are internal and intentionally not configurable, leaving
 descriptor headroom under the common 256-descriptor process limit.
 
+Leftover `database is locked` and connection-capacity timeouts on mutating
+routes map to HTTP 409. `POST /sessions` retries SQLITE_BUSY/LOCKED with short
+delays inside an Immediate transaction. Exhausted retries still return no
+session id.
+
 ## Projects
 
 Projects are explicit, store-scoped records exposed by `GET /projects`,
@@ -175,6 +180,23 @@ and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
 exists; otherwise it participates in the same successor queue as ordinary
 queued input. These routes reject orchestrator and delegated-child ownership.
 
+## Classic orchestrator steering
+
+While a classic `orchestrator` session is running, `POST /sessions/{session_id}/steering`
+queues `{ "instruction": "..." }` for the active run and returns 202. Worker
+steering is `POST /sessions/{session_id}/threads/{thread_name}/steering`, also
+202, and is granted only to a primary classic orchestrator. Both routes reject
+delegated children. Direct sessions keep using the durable inbox above. See
+[Session behaviors](../usage/session-behaviors.md).
+
+## Conversation forks
+
+`POST /sessions/{session_id}/fork` copies a conversation prefix into a new
+independent session. `DELETE /sessions/{session_id}/forks/{fork_id}` dismisses
+the source marker without deleting the forked session. Delegated children and
+managed orchestrators return 404 at this boundary. See
+[Conversation forks](../usage/forks.md).
+
 ## Traditional child sessions
 
 `GET /sessions/{session_id}/children` lists the durable children of a direct
@@ -233,7 +255,9 @@ nac-web --bind 192.168.1.20:3210 --allow-remote --no-open \
 The callback origin is required for ordinary non-loopback servers. MCP OAuth
 redirects are built only from this explicit HTTPS origin, never from `Host` or
 forwarding headers. Managed NAC derives the same origin from its validated
-`public_hostname`. Loopback servers retain the local callback listener.
+`public_hostname`. Loopback servers retain the local callback listener. See
+[MCP OAuth](../usage/mcp-oauth.md) for dashboard registration, statuses, and the
+per-server remote callback path.
 
 Before doing this, use a firewall, mutually authenticated VPN policy, or
 equivalent control to restrict the exact identities and devices that can reach

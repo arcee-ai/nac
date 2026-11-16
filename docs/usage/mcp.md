@@ -45,6 +45,10 @@ reachable. Remote host filesystem paths are not guide reference paths.
 If current state is absent, report it as unknown and explain how to inspect it;
 do not infer credentials or readiness from documentation.
 
+HTTP MCP servers can use a dashboard OAuth client that NAC owns; see
+[MCP OAuth](mcp-oauth.md). Do not put client secrets, tokens, or Slack app
+identifiers in `config.toml` or this repository.
+
 See [disconnect, log out and revoke](mcp-disconnect-and-logout.md) for the
 separate meanings of disabling a connection, ending local login and revoking
 provider authorization.
