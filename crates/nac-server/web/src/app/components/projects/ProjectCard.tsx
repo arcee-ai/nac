@@ -1,86 +1,48 @@
-import { useSessionNameDisclosure } from "@/app/atoms/session-name-disclosure";
 import { useRef, useState } from "react";
 
 import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
   Icon,
   IconName,
-  ModelLoader,
-  ModelLoaderSize,
+  Popover,
+  PopoverPlacement,
+  PopoverSize,
   SessionAvatar,
-  SessionBehaviorIcon,
-  SessionBehaviorIconSize,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { ProjectCardActions } from "@/app/components/projects/ProjectCardActions";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
-import { useIsDesktop } from "@/app/hooks/useMediaQuery";
+import { compactAge } from "@/app/features/sidebar/relativeTime";
+import { Menu, MenuItem, MenuSeparator } from "@/app/features/sidebar/MenuItem";
+import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { formatCostMicros, isActiveRun, sessionEnvLabel } from "@/app/lib/format";
 import type { ProjectListItem } from "@/app/lib/projects";
-import { providerLabel } from "@/app/lib/providers";
 import type { SessionSummarySnapshot } from "@/app/types/api";
 
-// Figma ProjectCard has a full-bleed "Surface" layer below the content that
-// carries the interaction state. Tokens are applied as CSS variables because the
-// generated utilities have no group-hover/group-active variants. The highlighted
-// row is the design's Status=Running, not its selection — selection is the ring.
-const SURFACE_TOKENS = {
-  default: "--color-bg-btn-ghost",
-  hovered: "--color-bg-btn-ghost-hovered",
-  pressed: "--color-bg-btn-ghost-pressed",
-  highlighted: "--color-bg-btn-ghost-highlighted",
-  highlightedHovered: "--color-bg-btn-ghost-highlighted-hovered",
-  highlightedPressed: "--color-bg-btn-ghost-highlighted-pressed",
-};
-
-function surfaceToken({
-  highlighted,
-  hover,
-  pressed,
-}: {
-  highlighted: boolean;
-  hover: boolean;
-  pressed: boolean;
-}) {
-  if (pressed) {
-    return highlighted ? SURFACE_TOKENS.highlightedPressed : SURFACE_TOKENS.pressed;
-  }
-  if (hover) {
-    return highlighted ? SURFACE_TOKENS.highlightedHovered : SURFACE_TOKENS.hovered;
-  }
-  return highlighted ? SURFACE_TOKENS.highlighted : SURFACE_TOKENS.default;
-}
-
-/**
- * What a card shows, flattened from either kind of row so the body below reads
- * the same for both. A project draws its provenance from its newest chat, which
- * is the only place the environment is recorded.
- */
-interface CardFacts {
+/** What a tile shows, flattened from either kind of item. */
+interface TileFacts {
   id: string;
   orphan: boolean;
   title: string;
   cwd: string;
   pinned: boolean;
-  running: boolean;
+  running: number;
   costMicros: number;
-  /** "3 Sessions" for a project. A loose chat rolls nothing up, so it has none. */
-  countLabel: string | null;
-  /** Drives the run badge next to the title; a loose chat only ever runs once. */
-  runningCount: number;
-  /** The chat whose environment stands in for the row. */
+  sessionCount: number | null;
+  updatedAt: string;
   representative: SessionSummarySnapshot | null;
 }
 
 function factsFor(
   item: ProjectListItem,
-  /** Names an unassigned chat; a project already carries its own name. */
   sessionTitle: (summary: SessionSummarySnapshot) => string,
-): CardFacts {
+): TileFacts {
   if (item.kind === "project") {
-    const { project, sessions, running, totalCostMicros } = item.entry;
+    const { project, sessions, running, totalCostMicros, updatedAt } = item.entry;
     const live = sessions.find((entry) => isActiveRun(entry.active_run));
     return {
       id: project.project_id,
@@ -88,58 +50,26 @@ function factsFor(
       title: project.name,
       cwd: project.cwd,
       pinned: project.pinned,
-      running: running > 0,
+      running,
       costMicros: totalCostMicros,
-      countLabel: `${sessions.length} ${sessions.length === 1 ? "Session" : "Sessions"}`,
-      runningCount: running,
+      sessionCount: sessions.length,
+      updatedAt,
       representative: live?.summary ?? sessions[0]?.summary ?? null,
     };
   }
   const { summary, active_run } = item.session;
-  const running = isActiveRun(active_run);
   return {
     id: summary.session_id,
     orphan: true,
     title: sessionTitle(summary),
     cwd: summary.cwd,
-    // Pinning is a project affordance; an unassigned chat is never pinned.
     pinned: false,
-    running,
+    running: isActiveRun(active_run) ? 1 : 0,
     costMicros: summary.total_cost_micros ?? 0,
-    countLabel: null,
-    runningCount: running ? 1 : 0,
+    sessionCount: null,
+    updatedAt: summary.updated_at,
     representative: summary,
   };
-}
-
-function Metrics({ facts }: { facts: CardFacts }) {
-  const costLabel = facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null;
-  return (
-    <div className="flex items-center gap-2.5 shrink-0 min-w-0">
-      {costLabel ? (
-        <span className="text-micro text-basic-primary whitespace-nowrap">{costLabel}</span>
-      ) : null}
-      {facts.countLabel ? (
-        <span className="text-micro text-info-primary whitespace-nowrap truncate">
-          {facts.countLabel}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function Provenance({ facts }: { facts: CardFacts }) {
-  const provider = providerLabel(facts.representative?.backend);
-  return (
-    <div className="flex flex-wrap items-center gap-2.5 min-w-0 whitespace-nowrap">
-      <span className="label-micro text-basic-tertiary">
-        {sessionEnvLabel(facts.representative)}
-      </span>
-      {provider ? (
-        <span className="text-micro text-basic-muted truncate md:max-w-[128px]">{provider}</span>
-      ) : null}
-    </div>
-  );
 }
 
 export type ProjectListKind = "project" | "orphan";
@@ -156,7 +86,15 @@ export interface ProjectReorderStart {
   height: number;
 }
 
-/** Two vertical bars — Figma Handler on desktop Default-sort cards. */
+export interface ProjectCardReorder {
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onReorderStart: (start: ProjectReorderStart) => void;
+}
+
+/** Fine-pointer drag grip at the tile's left edge. */
 function DragHandle({
   getCardElement,
   onReorderStart,
@@ -168,47 +106,38 @@ function DragHandle({
     <button
       type="button"
       aria-label="Drag to reorder"
+      tabIndex={-1}
       className={cn(
-        "absolute right-1.5 top-1/2 z-1 -translate-y-1/2",
-        "flex h-6 items-center gap-[3px]",
-        "cursor-grab active:cursor-grabbing touch-none",
-        "rounded-sm border-0 bg-transparent p-0",
+        "absolute top-1/2 left-1 z-[1] flex h-8 w-3 -translate-y-1/2 items-center justify-center gap-[2px]",
+        "cursor-grab touch-none rounded-sm opacity-0 transition-opacity duration-150 active:cursor-grabbing",
+        "group-hover/tile:opacity-100 [@media(hover:none)]:hidden",
       )}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
         const card = getCardElement();
         if (!card) return;
         const rect = card.getBoundingClientRect();
-        // Capture on the handle so moves keep flowing after the card floats.
-        e.currentTarget.setPointerCapture(e.pointerId);
+        event.currentTarget.setPointerCapture(event.pointerId);
         onReorderStart({
           itemId: card.dataset.itemId ?? "",
           kind: card.dataset.itemKind === "orphan" ? "orphan" : "project",
           pinned: card.dataset.itemPinned === "true",
-          clientX: e.clientX,
-          clientY: e.clientY,
-          offsetX: e.clientX - rect.left,
-          offsetY: e.clientY - rect.top,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          offsetX: event.clientX - rect.left,
+          offsetY: event.clientY - rect.top,
           width: rect.width,
           height: rect.height,
         });
       }}
     >
-      <span className="h-full w-px rounded-[2px] bg-divider-primary" />
-      <span className="h-full w-px rounded-[2px] bg-divider-primary" />
+      <span className="h-4 w-px rounded-[1px] bg-[var(--f-ink-5)]" />
+      <span className="h-4 w-px rounded-[1px] bg-[var(--f-ink-5)]" />
     </button>
   );
-}
-
-export interface ProjectCardReorder {
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onReorderStart: (start: ProjectReorderStart) => void;
 }
 
 interface ProjectCardProps {
@@ -217,22 +146,21 @@ interface ProjectCardProps {
   attention: boolean;
   onOpen: () => void;
   onDelete: () => void;
-  /** Project rows only. */
+  /** Project tiles only. */
   onTogglePin?: () => void;
   onRename?: () => void;
-  /** Orphan rows only: file the chat under a project. */
+  onNewSession?: () => void;
+  onIntervalTasks?: () => void;
+  /** Unassigned sessions only: file the session under a project. */
   onAssign?: () => void;
-  /** When set (Default sort), shows desktop handle / mobile arrows. Projects
-   *  and orphans reorder within their own group, never across it. */
   reorder?: ProjectCardReorder;
-  /** Card is the active drag ghost (follows the pointer). */
+  /** The tile is the active drag ghost. */
   dragging?: boolean;
 }
 
 /**
- * One row of the project list: either a project with the chats inside it rolled
- * up, or a chat that belongs to none. Both open with a click and can be
- * reordered within their own group — see ProjectCardActions.
+ * Home's project tile (or an unassigned session's): avatar, name, location,
+ * a quiet facts line, and one options menu. Opens with a click or Enter.
  */
 export function ProjectCard({
   item,
@@ -242,32 +170,20 @@ export function ProjectCard({
   onDelete,
   onTogglePin,
   onRename,
+  onNewSession,
+  onIntervalTasks,
   onAssign,
   reorder,
   dragging = false,
 }: ProjectCardProps) {
   const sessionTitle = useSessionTitle();
   const facts = factsFor(item, sessionTitle);
-  const disclosure = useSessionNameDisclosure(facts.title);
-  const configError = facts.representative?.model_config_error;
-
-  const isDesktop = useIsDesktop();
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
-  const [hover, setHover] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [pressed, setPressed] = useState(false);
+  const now = useNow(60_000);
+  const [menuOpen, setMenuOpen] = useState(false);
   const suppressClick = useRef(false);
   const cardRef = useRef<HTMLDivElement>(null);
-
-  // The bottom row swaps provenance for actions as soon as the card is the
-  // user's focus, which is also how the design shows the Focused state. A touch
-  // screen never reaches that state, so the actions stay out and the
-  // provenance moves up under the title instead.
-  const showActions = !isDesktop || hover || focused || selected;
-  const showDesktopHandle = Boolean(reorder) && isDesktop;
-  const showMobileReorder = Boolean(reorder) && !isDesktop;
-  // Touch / narrow layouts stick "hover" after a tap; only desktop gets hover bg.
-  const surfaceHover = isDesktop && hover;
+  const configError = facts.representative?.model_config_error;
+  const kind = facts.orphan ? "session" : "project";
 
   const activate = () => {
     if (suppressClick.current) {
@@ -276,6 +192,18 @@ export function ProjectCard({
     }
     onOpen();
   };
+  const then = (run?: () => void) => () => {
+    setMenuOpen(false);
+    run?.();
+  };
+
+  const meta = [
+    facts.sessionCount != null
+      ? `${facts.sessionCount} ${facts.sessionCount === 1 ? "session" : "sessions"}`
+      : sessionEnvLabel(facts.representative),
+    facts.costMicros > 0 ? formatCostMicros(facts.costMicros) : null,
+    compactAge(facts.updatedAt, now) || null,
+  ].filter(Boolean);
 
   return (
     <div
@@ -283,92 +211,42 @@ export function ProjectCard({
       data-item-id={facts.id}
       data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
+      role="button"
+      tabIndex={0}
+      aria-label={facts.title}
+      aria-pressed={selected}
       className={cn(
-        "group fade relative flex flex-col gap-4 rounded-xl border border-tertiary overflow-hidden cursor-default",
-        isDesktop ? "px-5 pt-4 pb-3" : "p-4",
-        "bg-elevation-level-1",
+        "group/tile relative flex min-w-0 cursor-default flex-col gap-3 rounded-card border p-4 pl-5 outline-none",
+        "bg-elevation-level-1 transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none",
+        "border-tertiary hover:border-secondary focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
         dragging && "shadow-lg",
+        selected && "border-secondary",
       )}
-      role={facts.orphan ? undefined : "button"}
-      tabIndex={facts.orphan ? undefined : 0}
-      aria-pressed={facts.orphan ? undefined : selected}
       onClick={(event) => {
-        if (facts.orphan && (event.target as HTMLElement).closest("button, a, input, textarea"))
-          return;
+        // SAFETY: a mouse event's target is always an element here.
+        if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
         activate();
       }}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
           activate();
         }
       }}
-      onMouseEnter={() => {
-        if (isDesktop) setHover(true);
-      }}
-      onMouseLeave={() => {
-        setHover(false);
-        setPressed(false);
-      }}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      onPointerDown={(e) => {
-        // Inner controls own their pressed state, so the card surface stays calm.
-        if (
-          e.button === 0 &&
-          // SAFETY: a pointer event's target is always an element in practice;
-          // the cast only widens the EventTarget the DOM event types declare.
-          !(e.target as HTMLElement).closest("button, a, input, textarea")
-        ) {
-          setPressed(true);
-        }
-      }}
-      onPointerUp={() => setPressed(false)}
-      onPointerCancel={() => setPressed(false)}
     >
-      {facts.orphan
-        ? disclosure.hint(
-            <button
-              type="button"
-              aria-label={facts.title}
-              aria-pressed={selected}
-              className="absolute inset-0 rounded-[inherit] outline-none"
-              onClick={activate}
-              onPointerDown={(event) => {
-                if (event.button === 0) setPressed(true);
-              }}
-            />,
-          )
-        : null}
-      <div
-        className="absolute inset-0 rounded-[inherit] pointer-events-none ease-out"
-        style={{
-          backgroundColor: `var(${surfaceToken({
-            highlighted: facts.running,
-            hover: surfaceHover,
-            pressed,
-          })})`,
-        }}
-      />
-      {selected || focused || dragging ? (
-        <div
-          className="absolute inset-0 rounded-[inherit] pointer-events-none border-2"
-          style={{ borderColor: "var(--blue-500)" }}
-        />
-      ) : null}
       {attention ? (
         <Tooltip
           title="Run finished"
           position={TooltipPosition.BottomLeft}
           sticky
-          className="absolute left-2 top-2 z-1"
+          className="absolute top-2 right-2 z-[1]"
         >
-          <span className="block size-2 rounded-full bg-brand-450" />
+          {/* `bg-brand-450` is the finished-run marker other surfaces look for. */}
+          <span className="block size-2 rounded-full bg-brand-450 !bg-[var(--f-green)]" />
         </Tooltip>
       ) : null}
-
-      {showDesktopHandle && reorder ? (
+      {reorder ? (
         <DragHandle
           getCardElement={() => cardRef.current}
           onReorderStart={(start) => {
@@ -381,110 +259,136 @@ export function ProjectCard({
         />
       ) : null}
 
-      <div
-        className={cn(
-          "relative flex gap-4 w-full",
-          isDesktop ? "items-center" : "items-start",
-          facts.orphan && "pointer-events-none",
+      <div className="flex min-w-0 items-center gap-3">
+        {facts.orphan ? (
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-pill bg-[var(--f-wash-1)]">
+            <Icon iconName={IconName.Chat} size={14} className="text-basic-tertiary" />
+          </span>
+        ) : (
+          <SessionAvatar id={facts.id} size={28} isRunning={facts.running > 0} />
         )}
-      >
-        {facts.orphan ? null : <SessionAvatar id={facts.id} size={40} isRunning={facts.running} />}
-        <div
-          className={cn(
-            "flex flex-col flex-1 min-w-0",
-            facts.orphan ? "gap-2" : facts.pinned ? "gap-1" : "gap-0.5",
-          )}
-        >
-          <div className={cn("flex items-center w-full", facts.orphan ? "gap-2" : "gap-1.5")}>
-            {facts.orphan ? (
-              facts.running ? (
-                <ModelLoader size={ModelLoaderSize.Large} />
-              ) : showBehaviorIcon ? (
-                <SessionBehaviorIcon
-                  behavior={facts.representative?.behavior}
-                  size={SessionBehaviorIconSize.Large}
-                  className="text-fill-btn-secondary"
-                />
-              ) : null
-            ) : null}
-            {facts.pinned ? (
-              <Icon
-                iconName={IconName.Pin}
-                size={16}
-                className="shrink-0 text-fill-basic-primary"
-              />
-            ) : null}
-            <div
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
               className={cn(
-                "text-base leading-6 font-medium flex-1 min-w-0 truncate",
-                facts.running ? "text-shimmer-primary" : "text-basic-primary",
+                "type-strong min-w-0 truncate text-basic-primary",
+                facts.running > 0 && "focus-shimmer",
               )}
             >
               {facts.title}
-            </div>
+            </span>
+            {facts.pinned ? (
+              <Icon iconName={IconName.Pin} size={12} className="shrink-0 text-basic-muted" />
+            ) : null}
             {configError ? (
-              <Tooltip
-                title={configError}
-                position={TooltipPosition.BottomRight}
-                sticky
-                className={facts.orphan ? "pointer-events-auto" : undefined}
-              >
-                <Icon iconName={IconName.Repair} className="text-error-primary shrink-0" />
+              <Tooltip title={configError} position={TooltipPosition.BottomRight} sticky>
+                <Icon
+                  iconName={IconName.Repair}
+                  size={14}
+                  className="shrink-0 text-error-primary"
+                />
               </Tooltip>
             ) : null}
-            {/* A project counts the chats currently running inside it; a loose
-                chat is its own run, so the loader leading its title says it. */}
-            {facts.running && !facts.orphan ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <ModelLoader size={ModelLoaderSize.Small} />
-                <span className="text-micro text-basic-primary whitespace-nowrap">
-                  {facts.runningCount}
-                  <span className="sr-only"> running</span>
-                </span>
-              </div>
-            ) : null}
           </div>
-          <div className="code text-xs leading-5 text-basic-tertiary truncate w-full">
+          <span className="type-meta truncate font-mono text-basic-muted" title={facts.cwd}>
             {facts.cwd}
-          </div>
+          </span>
         </div>
       </div>
-      {!isDesktop ? <Provenance facts={facts} /> : null}
 
-      <div
-        className={cn(
-          "relative flex flex-wrap items-center justify-between w-full min-h-6 gap-2",
-          facts.orphan && "pointer-events-none",
-        )}
-      >
-        <Metrics facts={facts} />
-        <div className={cn("contents", facts.orphan && "pointer-events-auto")}>
-          {facts.orphan ? disclosure.action : null}
-          {showActions ? (
-            <ProjectCardActions
-              orphan={facts.orphan}
-              pinned={facts.pinned}
-              onTogglePin={onTogglePin}
-              onRename={onRename}
-              onDelete={onDelete}
-              onAssign={onAssign}
-              reorder={
-                showMobileReorder && reorder
-                  ? {
-                      canMoveUp: reorder.canMoveUp,
-                      canMoveDown: reorder.canMoveDown,
-                      onMoveUp: reorder.onMoveUp,
-                      onMoveDown: reorder.onMoveDown,
-                    }
-                  : undefined
-              }
-            />
-          ) : (
-            <Provenance facts={facts} />
-          )}
-        </div>
+      <div className="flex min-h-6 min-w-0 items-center justify-between gap-2">
+        <p className="type-meta tabular flex min-w-0 items-center gap-1.5 text-basic-tertiary">
+          {facts.running > 0 && !facts.orphan ? (
+            <span className="inline-flex shrink-0 items-center gap-1 text-basic-primary">
+              <span
+                aria-hidden
+                className="status-dot-pulse size-1.5 rounded-pill bg-[var(--f-ink)]"
+              />
+              {facts.running}
+              <span className="sr-only"> running</span>
+            </span>
+          ) : null}
+          <span className="truncate">{meta.join(" · ")}</span>
+        </p>
+        <Popover
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          sticky
+          placement={PopoverPlacement.BottomLeft}
+          size={PopoverSize.Small}
+          content={
+            <Menu label={`${facts.title} options`}>
+              {onNewSession ? (
+                <MenuItem icon={IconName.Add} label="New session" onSelect={then(onNewSession)} />
+              ) : null}
+              {onIntervalTasks ? (
+                <MenuItem
+                  icon={IconName.Clock}
+                  label="Interval tasks"
+                  onSelect={then(onIntervalTasks)}
+                />
+              ) : null}
+              {onAssign ? (
+                <MenuItem
+                  icon={IconName.Folder}
+                  label="Assign to project"
+                  onSelect={then(onAssign)}
+                />
+              ) : null}
+              {onTogglePin ? (
+                <MenuItem
+                  icon={facts.pinned ? IconName.Unpin : IconName.Pin}
+                  label={facts.pinned ? "Unpin project" : "Pin project"}
+                  onSelect={then(onTogglePin)}
+                />
+              ) : null}
+              {onRename ? (
+                <MenuItem icon={IconName.Edit} label={`Rename ${kind}`} onSelect={then(onRename)} />
+              ) : null}
+              {reorder ? (
+                <>
+                  <MenuItem
+                    icon={IconName.ArrowTop}
+                    label="Move earlier"
+                    disabled={!reorder.canMoveUp}
+                    onSelect={then(reorder.onMoveUp)}
+                  />
+                  <MenuItem
+                    icon={IconName.ArrowDown}
+                    label="Move later"
+                    disabled={!reorder.canMoveDown}
+                    onSelect={then(reorder.onMoveDown)}
+                  />
+                </>
+              ) : null}
+              <MenuSeparator />
+              <MenuItem
+                icon={IconName.Trash}
+                label={`Delete ${kind}`}
+                destructive
+                onSelect={then(onDelete)}
+              />
+            </Menu>
+          }
+        >
+          <Button
+            variant={ButtonVariant.Ghost}
+            size={ButtonSize.Small}
+            content={ButtonContent.Icon}
+            aria-label={`${facts.title} options`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className={cn(
+              "max-md:!size-11",
+              !menuOpen &&
+                "opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100",
+            )}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <Icon iconName={IconName.MenuHorizontal} />
+          </Button>
+        </Popover>
       </div>
-      {facts.orphan ? disclosure.overlay : null}
     </div>
   );
 }

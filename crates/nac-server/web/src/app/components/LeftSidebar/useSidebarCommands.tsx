@@ -7,8 +7,9 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/queries";
 
 /**
- * The sidebar's destinations: the same dialogs the header already opens, plus
- * a new session in the project on screen (or a new project when none is).
+ * The desktop command contract (and the sidebar's "New session"): settings
+ * destinations plus a new session in the project on screen, or Home's
+ * composer when no project is on screen.
  */
 export function useSidebarCommands() {
   const navigation = useProductNavigationOwner();
@@ -37,10 +38,11 @@ export function useSidebarCommands() {
       void actions.newChat(projectId);
       return true;
     }
-    // A session route's project id arrives with the list. Opening New Project
-    // before that lands sends the click to the wrong dialog.
+    // A session route's project id arrives with the list. Choosing a
+    // destination before that lands sends the gesture to the wrong place.
     if (sessionId && !sessionKnown) return false;
-    actions.create();
+    // Home's composer is the one new-session flow; it picks the project.
+    navigate(routes.newSession(), { state: { focusComposer: Date.now() } });
     return true;
   };
 

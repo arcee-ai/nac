@@ -1,4 +1,4 @@
-import { Button, ButtonContent, ButtonSize, ButtonVariant, SessionIllustration } from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 interface ProjectsEmptyStateProps {
@@ -12,10 +12,8 @@ interface ProjectsEmptyStateProps {
 }
 
 /**
- * Shown in place of the whole list — rail and search bar included — while the
- * account has no projects and no loose chats, which is how the design frames
- * the state at every width. A filtered-away list keeps the regular chrome
- * instead.
+ * Home with no projects and no loose sessions: one calm "Add a project" card.
+ * Managed hosts lead with "Add repository" and show what is ready.
  */
 export function ProjectsEmptyState({
   onStart,
@@ -33,19 +31,22 @@ export function ProjectsEmptyState({
         mobile ? "px-4" : "px-6",
       )}
     >
-      <div className="flex w-[420px] max-w-full flex-col items-center gap-6">
-        <SessionIllustration />
-        <div className="w-full text-center">
-          <p className="header-2xl text-basic-primary">No projects yet</p>
-          <p className="text-medium text-basic-tertiary">
+      <div className="flex w-[440px] max-w-full flex-col items-start gap-5 rounded-card border border-tertiary bg-elevation-level-1 p-6">
+        <span className="flex size-10 items-center justify-center rounded-pill bg-[var(--f-wash-1)]">
+          <Icon iconName={IconName.FolderOpen} size={18} className="text-basic-secondary" />
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <p className="type-meta text-basic-tertiary">No projects yet</p>
+          <h1 className="type-title text-basic-primary">Add a project</h1>
+          <p className="type-body-chrome text-basic-secondary">
             {managed
-              ? "Connect a repository or create a Project from an existing path."
-              : "Create your first and start building!"}
+              ? "Connect a repository, or create a project from an existing path. Sessions start from there."
+              : "Point NAC at a folder — on this machine, over SSH, or in a sandbox — and start your first session there."}
           </p>
         </div>
         {managed ? (
-          <div
-            className="grid w-full grid-cols-1 gap-2 rounded-lg border border-basic p-4 text-left sm:grid-cols-3"
+          <dl
+            className="grid w-full grid-cols-3 gap-3 border-t border-muted pt-4"
             data-testid="managed-empty-status"
           >
             <ManagedState
@@ -59,12 +60,12 @@ export function ProjectsEmptyState({
               ready={Boolean(githubConnected)}
             />
             <ManagedState label="Projects" value="None" ready={false} />
-          </div>
+          </dl>
         ) : null}
-        <div className="flex flex-wrap justify-center gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={ButtonVariant.Primary}
-            size={ButtonSize.Large}
+            size={mobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Text}
             onClick={managed ? onAddRepository : onStart}
           >
@@ -73,7 +74,7 @@ export function ProjectsEmptyState({
           {managed ? (
             <Button
               variant={ButtonVariant.Secondary}
-              size={ButtonSize.Large}
+              size={mobile ? ButtonSize.Large : ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={onStart}
             >
@@ -82,8 +83,8 @@ export function ProjectsEmptyState({
           ) : null}
           {managed && !githubConnected && onManagedSettings ? (
             <Button
-              variant={ButtonVariant.Tertiary}
-              size={ButtonSize.Large}
+              variant={ButtonVariant.Ghost}
+              size={mobile ? ButtonSize.Large : ButtonSize.Medium}
               content={ButtonContent.Text}
               onClick={onManagedSettings}
             >
@@ -99,10 +100,10 @@ export function ProjectsEmptyState({
 function ManagedState({ label, value, ready }: { label: string; value: string; ready: boolean }) {
   return (
     <div className="min-w-0">
-      <p className="text-small text-basic-tertiary">{label}</p>
-      <p className={`label-small ${ready ? "text-success-primary" : "text-basic-primary"}`}>
+      <dt className="type-meta text-basic-tertiary">{label}</dt>
+      <dd className={cn("type-meta-strong", ready ? "text-success-primary" : "text-basic-primary")}>
         {value}
-      </p>
+      </dd>
     </div>
   );
 }

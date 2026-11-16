@@ -62,7 +62,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("project redirect", () => {
-  it("starts the first chat only after both ownership queries succeed", async () => {
+  it("opens the composer only after both ownership queries succeed", async () => {
     mount();
     await waitFor(() => expect(fakes.newChat).toHaveBeenCalledOnce());
     expect(fakes.newChat).toHaveBeenCalledWith("project-1", true);
@@ -137,7 +137,7 @@ describe("project redirect", () => {
   });
 });
 
-it("opens normal new-chat for a legacy-only project instead of first-chat redirecting to hidden history", async () => {
+it("opens the composer for a legacy-only project instead of redirecting to hidden history", async () => {
   fakes.sessions.mockReturnValue({
     data: [
       {
@@ -151,5 +151,5 @@ it("opens normal new-chat for a legacy-only project instead of first-chat redire
     isSuccess: true,
   });
   mount();
-  await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("project-1", false));
+  await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("project-1", true));
 });

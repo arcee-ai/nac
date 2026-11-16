@@ -61,17 +61,15 @@ describe("chat session behavior identity", () => {
       </UiPolicyContext.Provider>,
     );
 
-    expect(screen.getByRole("button", { name: "Plan the release, NAC orchestrator" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Fix the parser, Direct coding agent" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Plan the release, Orchestrator" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fix the parser, Agent" })).toBeTruthy();
     const hybrid = screen.getByRole("button", {
-      name: "Coordinate the migration, Direct + NAC orchestration",
+      name: "Coordinate the migration, Agent + Orchestrator",
     });
     expect(hybrid).toBeTruthy();
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText("Direct")).toBeNull();
-    expect(screen.queryByText("Direct + NAC")).toBeNull();
+    expect(screen.queryByText("Agent + Orchestrator")).toBeNull();
     expect(hybrid.querySelector('[data-session-behavior-icon="planeAdd"]')).toBeTruthy();
 
     fireEvent.click(hybrid);

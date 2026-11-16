@@ -1,42 +1,56 @@
-import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
-import {
-  Badge,
-  BadgeColor,
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  Modal,
-  Separator,
-  TabButton,
-  TabButtonSize,
-} from "@/app/atoms";
-import { SessionFilters } from "@/app/components/sessions/SessionFilters";
+import { Icon, IconName, Modal } from "@/app/atoms";
+import { ThemeSegmented } from "@/app/components/ThemeToggle";
+import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
+import { SessionTree } from "@/app/features/sidebar/SessionTree";
+import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
-import { MobileSearchModal } from "./MobileSearchModal";
-import { NewSessionPopover } from "./NewSessionPopover";
-import { SidebarProjectList } from "./SidebarProjectList";
-import { useSidebarCommands } from "./useSidebarCommands.tsx";
+import { useSidebarCommands } from "./useSidebarCommands";
+
+function MenuRow({
+  icon,
+  label,
+  active = false,
+  onClick,
+}: {
+  icon: IconName;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      className={cn(
+        "type-label flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left !text-md outline-none",
+        "transition-colors duration-150 ease-out active:bg-[var(--f-wash-2)]",
+        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-ring)]",
+        active ? "bg-[var(--f-wash-2)] text-basic-primary" : "text-basic-primary",
+      )}
+    >
+      <Icon iconName={icon} size={18} className="shrink-0 text-basic-tertiary" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
 
 /**
- * The phone's navigation, in place of the desktop sidebar: its destinations
- * over the project tree, or over the card filters on All Projects.
+ * The phone's navigation sheet: the sidebar's destinations, theme, and the
+ * same session list (44px rows, actions always visible).
  */
 export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const commands = useSidebarCommands();
   const managed = useManagedHost();
-  const [searching, setSearching] = useState(false);
   const { data: sessions = [] } = useVisibleSessions();
   const { data: projectList } = useProjects();
-  const projectsPage = pathname === routes.list();
 
   const closeAnd = (run: () => void) => () => {
     onClose();
@@ -44,115 +58,51 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
   };
 
   return (
-    <>
-      <Modal
-        open={open}
-        onClose={onClose}
-        title="Menu"
-        bodyClassName="p-0 pb-[184px] [&>*]:shrink-0"
-      >
-        <nav aria-label="Menu" className="flex flex-col gap-1 border-b border-muted px-2 py-3">
-          <NewSessionPopover
-            projectId={commands.projectId}
-            onUnavailable={closeAnd(commands.newSession)}
-            className="w-full"
-          >
-            {(openMenu) => (
-              <TabButton size={TabButtonSize.Large} onClick={openMenu}>
-                <Icon iconName={IconName.Add} />
-                <span className="flex-grow text-left">New Session</span>
-                <Icon iconName={IconName.Right} />
-              </TabButton>
-            )}
-          </NewSessionPopover>
-          <TabButton size={TabButtonSize.Large} onClick={() => setSearching(true)}>
-            <Icon iconName={IconName.Search} />
-            <span className="flex-grow text-left">
-              {projectsPage ? "Search Projects" : "Search Chats"}
-            </span>
-            <Icon iconName={IconName.Right} />
-          </TabButton>
-          <div className="flex items-center gap-2">
-            <TabButton
-              size={TabButtonSize.Large}
-              className="!w-auto flex-1"
-              onClick={closeAnd(commands.openProjects)}
-            >
-              <Icon iconName={IconName.Folders} />
-              <span className="flex-grow truncate text-left">All projects</span>
-            </TabButton>
-            <Button
-              variant={ButtonVariant.Ghost}
-              size={ButtonSize.Large}
-              content={ButtonContent.Icon}
-              aria-label={managed.isManaged ? "Add repository" : "New project"}
-              onClick={closeAnd(commands.newProject)}
-            >
-              <Icon iconName={IconName.Add} />
-            </Button>
-          </div>
-          <TabButton
-            size={TabButtonSize.Large}
-            aria-label={commands.mcpLabel}
-            onClick={closeAnd(commands.openMcp)}
-          >
-            <Icon iconName={IconName.Toolbox} />
-            <span className="flex-grow text-left">MCP</span>
-            {commands.activeMcp > 0 ? (
-              <Badge
-                text={`${commands.activeMcp} ACTIVE`}
-                color={BadgeColor.Blue}
-                background={false}
-              />
-            ) : null}
-          </TabButton>
-          <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.openSsh)}>
-            <Icon iconName={IconName.Globe} />
-            <span className="flex-grow text-left">SSH</span>
-            {commands.sshCount > 0 ? (
-              <Badge text={String(commands.sshCount)} color={BadgeColor.Gray} background={false} />
-            ) : null}
-          </TabButton>
-          <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.inspectProduct)}>
-            <Icon iconName={IconName.Info} />
-            <span className="flex-grow text-left">NAC capabilities</span>
-          </TabButton>
-          <Separator />
-          <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.openConfigurations)}>
-            <Icon iconName={IconName.Gear} />
-            <span className="flex-grow text-left">Configurations</span>
-            <Icon iconName={IconName.Right} />
-          </TabButton>
-          <TabButton size={TabButtonSize.Large} onClick={closeAnd(commands.openManaged)}>
-            <Icon iconName={IconName.Controls} />
-            <span className="flex-grow text-left">Manage Host</span>
-            <Icon iconName={IconName.Right} />
-          </TabButton>
-        </nav>
-        {projectsPage ? (
-          <div className="px-2 py-4">
-            <SessionFilters sessions={sessions} inset />
-          </div>
-        ) : (
-          <SidebarProjectList
-            projects={projectList?.projects ?? []}
-            sessions={sessions}
-            query=""
-            activeSessionId={commands.sessionId}
-            activeProjectId={commands.projectId}
-            mobile
-            onNavigate={onClose}
+    <Modal open={open} onClose={onClose} title="Menu" bodyClassName="p-0 [&>*]:shrink-0">
+      <nav aria-label="Menu" className="flex flex-col gap-px border-b border-muted px-2 py-2">
+        <MenuRow
+          icon={IconName.AddChat}
+          label="New session"
+          onClick={closeAnd(() => void commands.newSession())}
+        />
+        <MenuRow icon={IconName.Search} label="Search" onClick={closeAnd(openCommandPalette)} />
+        <MenuRow
+          icon={IconName.Home}
+          label="Home"
+          active={pathname === routes.list()}
+          onClick={closeAnd(() => navigate(routes.list()))}
+        />
+        <MenuRow
+          icon={IconName.Add}
+          label={commands.createLabel === "New Project" ? "Add project" : commands.createLabel}
+          onClick={closeAnd(commands.newProject)}
+        />
+        {managed.isManaged ? null : (
+          <MenuRow
+            icon={IconName.Clock}
+            label="Interval tasks"
+            onClick={closeAnd(() => navigate(routes.taskSchedules()))}
           />
         )}
-      </Modal>
-      <MobileSearchModal
-        open={searching}
-        onClose={() => setSearching(false)}
-        onNavigate={onClose}
-        kind={projectsPage ? "projects" : "chats"}
-        activeSessionId={commands.sessionId}
-        activeProjectId={commands.projectId}
-      />
-    </>
+        <MenuRow
+          icon={IconName.Gear}
+          label="Settings"
+          onClick={closeAnd(() => navigate(routes.settings()))}
+        />
+        <div className="flex min-h-11 items-center justify-between gap-3 px-3">
+          <span className="type-label !text-md text-basic-primary">Theme</span>
+          <ThemeSegmented />
+        </div>
+      </nav>
+      <div className="px-2 pt-2 pb-[calc(16px+env(safe-area-inset-bottom))]">
+        <SessionTree
+          touch
+          projects={projectList?.projects ?? []}
+          sessions={sessions}
+          activeSessionId={commands.sessionId}
+          onNavigate={onClose}
+        />
+      </div>
+    </Modal>
   );
 }

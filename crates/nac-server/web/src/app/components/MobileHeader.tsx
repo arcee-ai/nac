@@ -1,174 +1,66 @@
-import SessionNameDisclosure, {
-  useSessionNameDisclosure,
-} from "@/app/atoms/session-name-disclosure";
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  CodeChangesBadge,
-  Icon,
-  IconName,
-  Logo,
-  StickyButton,
-} from "@/app/atoms";
+import { Icon, IconName, Logo } from "@/app/atoms";
 import { MobileMenu } from "@/app/components/LeftSidebar/MobileMenu";
-import { SessionIntegrations } from "@/app/features/session-integrations/SessionIntegrations";
-import { useSessionTitle } from "@/app/hooks/useSessionTitle";
+import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
 import { cn } from "@/app/lib/cn";
-import { routes, sessionIdFromPath } from "@/app/lib/routes";
-import {
-  useSessionSnapshot,
-  useSessionSummary,
-  useVisibleSessions,
-  useWorkspaceRevisionChanges,
-} from "@/app/services/queries";
+import { routes } from "@/app/lib/routes";
+
+function titleFor(pathname: string): string {
+  if (pathname === routes.list()) return "Home";
+  if (pathname.endsWith("/task-schedules")) return "Interval tasks";
+  return "";
+}
+
+const TARGET = cn(
+  "inline-flex size-11 shrink-0 items-center justify-center rounded-pill text-basic-secondary outline-none",
+  "transition-colors duration-150 ease-out active:bg-[var(--f-wash-2)] hover:bg-[var(--f-wash-1)]",
+  "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+);
 
 /**
- * The phone's only bar: home, what is on screen, then the side panel and the
- * menu that stands in for the desktop sidebar.
+ * The phone's app header outside a session: the NAC mark (Home), the page
+ * title, Search (the ⌘K palette) and the menu. A session's own header
+ * replaces it there.
  */
 export function MobileHeader() {
-  const { openSidePanelList } = useNativeRuntime().stores.sessionLayoutStore;
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const sessionId = sessionIdFromPath(pathname);
-
   return (
     <>
-      <header className="@container fade-from-top relative z-10 w-full min-w-0 shrink-0 p-2">
-        <div className="flex flex-wrap items-center gap-1 @min-[356px]:gap-2">
-          <StickyButton
-            content={ButtonContent.Icon}
-            className="!size-11 shrink-0"
-            buttonClassName="!size-11"
-            aria-label="All projects"
-            onClick={() => navigate(routes.list())}
-          >
-            <Logo markOnly height={24} className="icon" />
-          </StickyButton>
-          <div className="order-last min-w-0 basis-full @min-[356px]:order-none @min-[356px]:flex-1 @min-[356px]:basis-0">
-            {sessionId ? (
-              <SessionHeading sessionId={sessionId} />
-            ) : (
-              <p className="header-md min-w-0 truncate text-basic-primary">All Projects</p>
-            )}
-          </div>
-          {sessionId ? (
-            <StickyButton
-              content={ButtonContent.Icon}
-              className="!size-11 shrink-0"
-              buttonClassName="!size-11"
-              aria-label="Open panel"
-              onClick={() => openSidePanelList()}
-            >
-              <Icon iconName={IconName.ShowSidePanel} />
-            </StickyButton>
-          ) : null}
-          <StickyButton
-            content={ButtonContent.Icon}
-            className="!size-11 shrink-0"
-            buttonClassName="!size-11"
-            aria-label="Open the menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <Icon iconName={IconName.MenuVertical} />
-          </StickyButton>
-        </div>
+      <header className="relative z-10 flex w-full min-w-0 shrink-0 items-center gap-1 px-2 pt-[max(4px,env(safe-area-inset-top))] pb-1">
+        <button
+          type="button"
+          aria-label="Home"
+          className={cn(TARGET, "text-basic-primary")}
+          onClick={() => navigate(routes.list())}
+        >
+          <Logo markOnly height={16} />
+        </button>
+        <p className="type-heading min-w-0 flex-1 truncate text-basic-primary">
+          {titleFor(pathname)}
+        </p>
+        <button
+          type="button"
+          aria-label="Search"
+          className={TARGET}
+          onClick={() => openCommandPalette()}
+        >
+          <Icon iconName={IconName.Search} size={20} />
+        </button>
+        <button
+          type="button"
+          aria-label="Open the menu"
+          aria-expanded={menuOpen}
+          className={TARGET}
+          onClick={() => setMenuOpen(true)}
+        >
+          <Icon iconName={IconName.Hamburger} size={20} />
+        </button>
       </header>
       <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
     </>
-  );
-}
-
-/** Title over the checkout; a delegated chat leads with a link up to its parent. */
-function SessionHeading({ sessionId }: { sessionId: string }) {
-  const { useRunning } = useNativeRuntime().stores.runtimeStore;
-  const { useSelectedRevision } = useNativeRuntime().stores.sessionLayoutStore;
-  const navigate = useNavigate();
-  const sessionTitle = useSessionTitle();
-  // The page keeps this snapshot fresh; the bar only reads it.
-  const { data: snapshot = null } = useSessionSnapshot(sessionId, { enabled: false });
-  const { data: entry = null } = useSessionSummary(sessionId);
-  const { data: sessions = [] } = useVisibleSessions();
-  const running = useRunning(sessionId);
-  const selectedRevision = useSelectedRevision();
-  const changes = useWorkspaceRevisionChanges(sessionId, selectedRevision);
-
-  const workspace = snapshot?.workspace ?? null;
-  const totals =
-    selectedRevision == null
-      ? workspace
-      : (changes.data ?? { total_additions: 0, total_deletions: 0 });
-  const additions = totals?.total_additions ?? 0;
-  const deletions = totals?.total_deletions ?? 0;
-  const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
-  const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
-  const parent = lineage
-    ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
-    : undefined;
-  const parentTitle = parent ? sessionTitle(parent.summary) : "Parent session";
-  const parentDisclosure = useSessionNameDisclosure(parentTitle);
-
-  const title = (
-    <SessionNameDisclosure
-      key={sessionId}
-      name={sessionTitle(entry?.summary)}
-      running={running}
-      className={cn(
-        "text-sm leading-5 font-medium truncate text-left text-btn-secondary-pressed",
-        lineage ? "min-h-11 min-w-11 flex-1 basis-16" : "min-w-0 flex-1",
-      )}
-    />
-  );
-
-  return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      {lineage ? (
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-1">
-          {parentDisclosure.hint(
-            <Button
-              variant={ButtonVariant.Tertiary}
-              size={ButtonSize.Medium}
-              className="!min-h-11 !min-w-11 max-w-16 shrink-0"
-              aria-label={`${parentTitle}, parent chat`}
-              onClick={() => navigate(routes.session(lineage.parent_session_id, "delegated"))}
-            >
-              <span className="truncate underline">{parentTitle}</span>
-            </Button>,
-          )}
-          {parentDisclosure.action}
-          {parentDisclosure.overlay}
-          <Icon
-            iconName={IconName.Right}
-            size={16}
-            color="var(--color-fill-basic-tertiary)"
-            className="shrink-0"
-          />
-          {title}
-        </div>
-      ) : (
-        <div className="@container flex w-full min-w-0 items-center gap-1">
-          {title}
-          <SessionIntegrations key={sessionId} sessionId={sessionId} />
-        </div>
-      )}
-      {repo || additions || deletions ? (
-        <div className="flex w-full min-w-0 items-center gap-4 overflow-clip rounded-[4px]">
-          {repo ? (
-            <span className="label-micro min-w-0 truncate text-btn-secondary">{repo}</span>
-          ) : null}
-          {additions || deletions ? (
-            <CodeChangesBadge additions={additions} deletions={deletions} className="shrink-0" />
-          ) : null}
-        </div>
-      ) : null}
-    </div>
   );
 }

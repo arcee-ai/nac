@@ -76,3 +76,15 @@ it("waits for canonical route identity before choosing a creation destination", 
   expect(state.newChat).toHaveBeenCalledExactlyOnceWith("project");
   expect(state.create).not.toHaveBeenCalled();
 });
+
+it("sends a project-less new session to Home's composer instead of a new project", () => {
+  state.sessions = [];
+  const { result } = renderHook(useSidebarCommands, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MemoryRouter initialEntries={["/task-schedules"]}>{children}</MemoryRouter>
+    ),
+  });
+  act(() => expect(result.current.newSession()).toBe(true));
+  expect(state.create).not.toHaveBeenCalled();
+  expect(state.newChat).not.toHaveBeenCalled();
+});
