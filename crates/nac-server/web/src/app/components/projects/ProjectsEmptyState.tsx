@@ -29,7 +29,7 @@ export function ProjectsEmptyState({
   return (
     <div
       className={cn(
-        "flex h-full flex-col items-center justify-center py-16",
+        "flex min-h-full flex-col items-center justify-center py-16",
         mobile ? "px-4" : "px-6",
       )}
     >

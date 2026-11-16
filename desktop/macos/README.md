@@ -1,5 +1,28 @@
 # NAC Mac development preview
 
+Normal `LOCAL_APP` storage uses a persistent WebKit profile and a private
+presentation checkpoint selected from the verified track, canonical Rust store
+and launch home. This does not copy Rust session/query/credential ownership into
+Swift. Ports and launch nonces remain live runtime fences; only nonsecret
+preferences and existing ALL-336 draft/review text use a stable persistence
+binding. The UI never restores an approval, shell intent, terminal bytes or a
+pending send request. Unknown submission outcomes remain text for review. Cold
+checkpoint drafts also require explicit review/Restore because a valid old file
+cannot prove that a later accepted send or clear reached disk. Fresh typing and
+sending remain usable while that text awaits review; preferences are separate.
+
+Presentation files use private no-follow descriptors, an exclusive profile
+lease and ordered atomic replacements. An acknowledged native write is separate
+from merely posting a WebKit message. Failed or timed-out persistence uses
+memory, reports unavailable recovery and cannot prove durable clear or the last
+unacknowledged keystroke. Cross-Quit, new-port/profile isolation, file failures
+and replacement require actual system WKWebView evidence. Source and pure
+JavaScript tests alone do not qualify these native behaviors. Disposable preview
+keeps its ephemeral website store and existing owned cleanup. The non-GUI
+`WorkspaceStorageRecoveryTests.swift` fixture characterizes actual dual write/
+unlink failure and fresh owner snapshots using an externally owned private root;
+it does not establish app/WK window, cross-Quit or trusted-input acceptance.
+
 ALL-340 wraps NAC's existing production workspace in AppKit and system
 WKWebView. It is a disposable development fixture, with a deterministic local
 Responses provider. Each launch starts empty; closing the window quits the
@@ -40,8 +63,10 @@ product/build/source/track identity, canonical selected store and opened schema
 before seeding or loading the workspace. Stdout/stderr are asynchronously drained
 into a separate bounded 64 KiB diagnostic buffer; logs never establish identity.
 The shell never probes or adopts port 3210.
-Main-frame navigation is confined to that origin. There is no web-to-native
-message bridge.
+Main-frame navigation is confined to that origin. The bounded native UI bridge
+accepts only ready/retirement/settlement receipts from the current main frame;
+workspace actions remain with the shared React owners. Native Edit uses the
+AppKit/WK responder chain. See [NativeCommands.md](NativeCommands.md).
 
 Missing/unlaunchable engine, startup exit, readiness timeout and WebKit load or
 renderer failure display a native status message. Close or Cmd-Q initiates Rust
@@ -54,6 +79,59 @@ cleanup and persistence drain. Parent death can leave the disposable profile on
 disk because AppKit cannot run its deletion callback; the smoke runner removes
 only its own recorded fixture after checking engine settlement.
 Watchdog diagnostics are best effort and never gate the forced-exit callback.
+
+## CI fixture allowance
+
+The ordinary `ci.py` fixture-discovery command has a 600-second allowance for
+its composed suite, including compiler-driven controls. This is one CI batch
+resource bound: discovery, every test and skip condition, per-control compiler
+and execution limits, process ownership and cleanup remain unchanged. The
+existing enclosing CI deadline still clamps the command to 30 minutes overall;
+native startup tickets and AX freshness retain their separate limits. A complete
+retained suite result is required; this allowance is not native acceptance.
+
+The pending ALL-342 integration at `3e6d834d` exercised 600 methods (595 passed,
+five existing optional skips). That evidence belongs to its candidate, not this
+dev baseline. This resource adjustment changes no test inventory and requires
+no startup feature changes. Startup UI acceptance remains a separate gate.
+
+## Pending profile initialization (ALL-349)
+
+Normal profile selection is app-owned and coalesced across renderer retirement.
+Every document continuation revalidates its launch/profile and document ownership
+after the shared open. Missing, invalid or foreign normal profiles fail explicitly;
+a valid profile with unavailable/corrupt storage retains the existing explicit
+memory capability. Sleep/wake never turns a pending normal selection into ordinary
+origin storage. Stop and common failure retire pending selection ownership.
+
+`test_profile_initialization.py --evidence EXTERNAL_DIRECTORY` runs a bounded
+headless oracle under the coordinated browser/compiler gate. It binds verbatim
+`PreviewApp.load`, retirement, failure/shutdown and recovery methods plus the real
+profile/receipt/lifecycle types. Platform, checkpoint I/O and product-document
+construction remain doubles. Its 14 cases cover both sides of the delayed open,
+pre-base retirement, repeated wake, stale/foreign identity, Stop/common failure,
+valid degradation, initial loading and Quit. `--source-revision COMMIT` binds an
+immutable baseline. A missing-symbol compile failure is never semantic RED.
+This oracle does not prove actual WK persistence, file leases or OS sleep.
+
+For a separately admitted actual-app episode, a `LOCAL_APP` lifecycle-smoke build
+uses `RecoverySmoke` and the `PREVIEW_SMOKE`-only bounded profile-open barrier.
+The external owner creates a private `nac-all349-profile-*` root and private
+`control` directory, then runs `profile_initialization_smoke.py arm --root ROOT
+--case CASE` before launching the exact qualified fixture bundle with its existing
+`--recovery-control ROOT/control --recovery-output ROOT/recovery.json` arguments.
+After launch, `observe` with the same arguments advances the case and records its
+bounded observations. Cases are `wake-before-release`, `release-while-suspended`,
+`sleep-before-base`, `common-failure` and `stop-pending`. The before-base case must
+observe that ordering or fails rather than claiming it. The barrier expires after
+five seconds; timeout is a failed fixture episode, never permission to retry.
+
+This controller neither launches an app nor admits Aqua/OS input. Sleep/wake is
+callback injection, and native Stop uses the existing fixture Quit owner. The
+external owner retains exact source/binary/profile custody and must stop, reap and
+clean up every episode even after controller failure. Actual normal-app/WK data
+restoration across Quit/new port and profile isolation remain required separately;
+headless or compile-only results do not establish that acceptance.
 
 ## Acceptance checks
 
@@ -115,8 +193,58 @@ for the entire build/test journey, including use of a shared binary.
 The compiler target is macOS 14, the parent's candidate minimum. Actual smoke
 evidence records the host OS/SDK separately; this preview makes no claim of
 macOS 14 qualification, signing/notarization, consumer installation, background
-window lifecycle, native menus/bridge, or performance.
+window lifecycle, trusted native input or performance beyond the explicitly recorded command fixtures.
 Those have separate owners in the ALL-339 work map.
+
+A caught configuredLocal XCTest failure now preserves diagnostics and lets the
+existing external exact-identity owner settle the app after failed result
+collection. Successful teardown, other cases, audit/abort/sandbox/input/freshness
+and cleanup authority remain unchanged. This addresses a source-supported
+teardown/abort coupling, not a proven Actual16 cause or native acceptance.
+
+## Ordinary startup supplier binding
+
+This private P12 nomination binds product
+`4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
+`1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
+`8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
+`04c22a7fa1e06a72219f59f37e811813cf64cd98`. Q is the immutable interaction-preflight
+ten-file supplier `f671fd15f002e3bda4df5040df998e80be1f6dd8`; its journey
+SHA256 is `90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3`.
+The normal P12 package has independent genuine supplier evidence; that evidence
+supplies no current Q/H SDK, AX, UI or minimum-OS qualification. P10/P11 and all
+historical startup/SDK results keep their original source and consumed counters.
+
+The H plus canonical Q observer inputs come from `observer_sources`; callers
+must compile all four, retaining the original guards/receipt/custody contracts.
+All four ordinary startup cases and independent R7325 remain required. R's actual
+compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
+under a separate Root admission; schema50 alone is insufficient. No runtime or
+publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global
+AX preflight, preserving all original postconditions and positive cleanup.
+The required panel policy lane admits exactly six geometry, seven AX/refusal,
+and thirty-one whole-client/request receipt methods: forty-four total with
+zero skips. The receipt methods include the original-error identity/catch-order
+control and the true native infinite-rectangle fixture within the existing
+point-selection method. Exact count checks reject missing or extra controls;
+these source controls do not replace the full generated XCTest SDK gate or
+later native UI qualification. The canonical reader accepts the bounded readonly snapshot
+of an already opened inode after atomic replacement or unlink; the next named
+open still fails when absent. This does not prove continuous name presence or
+immutability against another writer with the same UID.
+The selected public coordinate is Float-representable and inside its actual
+anchor; fractional centers use a public offset coordinate with exact screenPoint
+readback before publication. The same coordinate is retained for dispatch.
+Raw CG extras no longer veto that contract. The accepted last-instant race is
+not atomic or independently observed delivered-event equality.
+
+The configured journey also retains a first closed local failure before its
+existing teardown, using the same owned witness publisher at the fixed `.failure`
+suffix. H copies only a strict nonce/configuration-bound passive projection into
+case evidence before profile cleanup. Missing or malformed evidence changes no
+error precedence, input, process, freshness or settlement authority. Listener
+generation refusals retain only already-held absence/signature-mismatch bits;
+no extra kernel sample or raw identity is introduced.
 
 ## Private launch contract (ALL-341)
 
@@ -142,7 +270,7 @@ No channel is inherited by ordinary CLI invocations, whose existing lifetime
 and worker/helper dispatch remain independent.
 
 The native consumer seam is `PreviewEngine.receipt` and the existing
-`onReady(URL)`, `onFailure(String)`, `onExit(Int32)` and `stop(completion)`
+`onReady(URL)`, `onFailure(EngineFailure)`, `onExit(Int32)` and `stop(completion)`
 callbacks. The receipt is available only for the current verified live launch;
 stop, channel failure and exit retire it before notifying consumers. Its launch
 UUID is distinct from the server's `NativeRuntimeScope.incarnation` and any
@@ -158,3 +286,547 @@ watchdog. The checked-in runner records source/engine/native binary identities,
 exact receipts, OS/SDK, native failure snapshots and cleanup. `engine_contract.py`
 adds direct binary/channel controls using the same bundled executable. These
 fixtures add no production bridge and make no trusted OS input qualification.
+
+## Normal local startup (ALL-342)
+
+`./desktop/macos/preview.sh app-build` produces the ordinary `NAC.app` with
+`LOCAL_APP`; `app-run` opens it. It starts in HOME by default, independently of
+the app's location or LaunchServices cwd. `--directory` selects another existing
+bootstrap directory; relative arguments resolve from HOME. `--store-path`
+overrides the normal Rust configuration/track store choice. Repeated
+`--command-path directory` arguments prepend explicit command locations before
+the inherited PATH and standard Apple Silicon/Intel Homebrew directories.
+No shell, dotfiles, global preferences or installer runs during discovery.
+
+The exact bundled Rust engine performs bounded `__desktop-configuration`
+discovery using the ordinary NAC_HOME/XDG_CONFIG_HOME/HOME and immutable build
+track owners, including stable legacy-store fallback. It recovers pending
+configuration publications and prepares store parents through their existing
+Rust owners; it opens neither a database nor a serving lease. The subsequent
+identified engine opens that exact selected store and launches workers using
+its own bundled executable. Credentials remain in the existing hardened Rust
+stores or inherited environment; the native app never copies or persists them.
+Missing Git prevents launch with recovery guidance. Optional SSH, Podman and
+MCP discovery retain their normal shared settings and chosen execution backend.
+
+Ordinary and startup-smoke builds exclude PreviewProfile, FixtureProvider and
+FixtureBootstrap definitions from their compiler inputs. The ordinary binary
+also rejects disposable fixture markers during provenance verification.
+`smoke-build` builds the existing disposable preview instrumentation without
+launching it, allowing separate build and native/browser leases.
+
+`startup-build` compiles `LOCAL_APP` plus `PREVIEW_SMOKE` into the separate
+`NAC Startup Smoke.app`. Run `python3 -B desktop/macos/startup_smoke.py APP OUTPUT`
+under the host's native/browser lease. `startup-smoke` combines those steps for
+hosts without a separate lease requirement. The runner relocates the real app,
+uses disposable profiles, drives the production UI in system WKWebView, and
+records startup, configured Local runs, failures and bounded cleanup. Optional
+command cases are selected with `NAC_STARTUP_SCENARIOS` (comma-separated
+`startup-missing-ssh`, `startup-missing-podman`, `startup-missing-mcp`,
+`startup-custom-mcp`). The test-only missing-command switch excludes fallback
+directories only in that smoke bundle. Dummy provider results do not establish
+real-vendor authentication; locked-session DOM results do not establish visible
+paint or trusted OS input.
+
+Every builder mode emits `Contents/Resources/build-receipt.json` with source,
+compiler flags, native source hashes, engine identity and both executable
+hashes. It rejects an engine from another source revision or source changes
+during compilation. This is unsigned compiler provenance for the packaging
+owner; signing requires a separate final artifact manifest. The local builder's
+development bundle identifier is not the distribution or track identity contract.
+This receipt also records the selected bundle ID/name, build-support hashes
+and whether instance instrumentation was compiled. Distribution/signing policy
+remains separately owned.
+
+
+### External AX environment preflight (source only)
+
+`CIStartupObserver --ax-preflight CONFIG REQUEST` is an explicit one-shot
+read-only diagnostic, separate from the unchanged `nac342-owner-v1` stream.
+`ci_startup_owner.capture_ax_preflight` captures its bounded closed receipt
+through the existing process/clock owner (10 seconds), retaining helper failure
+before propagating it. Neither entry point is wired into startup qualification.
+A caller must first obtain a separate finite admission and own a new disposable
+ordinary app through the existing preinstalled owner; cleaned prior episodes
+are never available for probing. The parent binds exact source/binary hashes,
+configuration, latest kernel lifetime and sole window; helper rechecks canonical
+resources/lifetime/window before and after the read. Signing status/flags and
+the static app-sandbox entitlement are context only, not a claim about effective
+sandbox policy. A missing signing observation is retained as unknown.
+
+The helper calls plain `AXIsProcessTrusted()` once, never prompts or grants.
+False means zero AX messaging. True permits one `AXWindows` read with the
+existing one-second messaging policy, bounded type/count/PID checks and unique
+root geometry from that same array. It never traverses children, reads user
+text, performs actions, changes focus/value or posts input. Only closed facts
+and binding digests enter its receipt; acceptance is always false. Success
+proves host API availability only, never persistent CFEqual identity, picker
+focus/value/ancestry, all27 guard freshness, or native four-case acceptance.
+
+A live preflight controller is UNAPPLIED: it needs an independently reviewed
+ordinary diagnostic launch owner, exact package/source/artifact prerequisites,
+Root literal clock, exact-host image gate before bootstrap, attempt1/no retry,
+always-retained failure evidence and existing positive cleanup. Reusing the
+four-case driver would request unauthorized XCTest/input; changing that driver
+or inventing a launch path is outside this source unit. Q057, all guards and
+inputs, XCTest entitlements/sandbox, P10/R and the four-case matrix stay intact.
+
+## App instances and store conflicts (ALL-343)
+
+`app-run` uses ordinary LaunchServices opening, without `-n`. Finder/Dock reopen
+events focus or restore the existing window; they never start another engine
+or replay a command. The current close-to-quit policy remains unchanged.
+
+Normal app identities come only from the exact bundled engine's compiled track:
+
+| Track | Bundle ID | Display name |
+| --- | --- | --- |
+| stable | `ai.arcee.nac` | NAC |
+| beta | `ai.arcee.nac.beta` | NAC Beta |
+| dev | `ai.arcee.nac.dev` | NAC Development |
+
+The read-only `BundleIdentity.sh` metadata helper is the mapping owner. Inherited
+`NAC_BUILD_TRACK` cannot select a different bundle identity. The preview retains
+its separate development identity. This partition adds no beta publication policy.
+
+Rust's ordinary serving lease still decides ownership. A typed busy error uses
+the existing private version-1 failure envelope with `stage: startup` and
+`code: store_owned`. Swift validates version/incarnation before recognizing it;
+unknown codes and peer text never become native diagnostic text. A conflict
+shows the selected canonical store and track, explains deliberate owner shutdown
+or an explicit different `--store-path`, and enables **Retry** only after the
+failed bundled child is reaped. Retry keeps the selected configuration and asks
+the ordinary engine to start again. It cannot signal an existing CLI, delete a
+lock, select another store, attach to a server or grant execution authority.
+No custom app discovery/PID records are introduced; a retained lock file is
+not proof of a live owner.
+
+`instance-build` produces the separate `NAC Instance Smoke.app` with
+`LOCAL_APP`, `PREVIEW_SMOKE` and `INSTANCE_SMOKE`, plus `InstanceObservation`.
+Its bundle ID has an `.instance-smoke` suffix. Use separate output directories
+and exact same-source private dev/stable engines to build the two track fixtures.
+Then run under the native/browser lease:
+
+```sh
+python3 -B desktop/macos/instance_smoke.py DEV_APP OUTPUT OBSERVER STABLE_APP
+```
+
+`instance-smoke` combines build/run; supply the stable fixture through
+`NAC_MAC_STABLE_APP`. `NAC_INSTANCE_SCENARIOS` selects bounded cases and records
+whether the full set ran. The eight cases cover simultaneous ordinary opens,
+same-window reopen, real CLI conflicts through canonical/file/directory aliases,
+retry while the CLI remains live, graceful/crash/draining-owner exit, app-crash
+relaunch and dev/stable coexistence. The runner verifies served assets, native
+window/engine/store identities, screenshots and bounded fixture cleanup. It
+fails before app launch on a locked console. Only its own live app incarnation
+and fixture-owned CLI handles can receive cleanup controls; focus restoration
+is conditional on the fixture still being frontmost. These checks require
+actual AppKit/system WKWebView evidence, with screenshots reviewed separately.
+
+The coexist fixture runs each bundled configuration helper with the exact owned
+profile as both process cwd and `--directory`. Before accessing its store, it
+requires selected version 1, the expected dev/stable track, the same canonical
+root and a canonical absolute store path strictly inside that owned root;
+foreign paths and symlink escapes fail before app creation. Fresh track defaults are `dev.db` and
+`stable.db`; legacy stable `store.db` reuse applies only when that file exists.
+On mismatch, `dev/configuration-failure.json` or
+`stable/configuration-failure.json` retains bounded allowlisted protocol facts
+and output byte counts/hashes. Arbitrary helper text and stderr are redacted.
+Run the adjacent fixture contracts with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_instance_*.py'`.
+
+## Native command qualification (ALL-346)
+
+The `commands` smoke scenario opens Settings and New Session through native
+menus once, checks shared focus return and Projects routing, rejects a foreign
+key window, exercises malformed/stale/duplicate/iframe/foreign-WebView receipts,
+blocks navigation/popups, and verifies document replacement and retirement.
+The `commands-input` scenario additionally uses paired OS events targeted only
+to the fixture process for Cmd-N, Settings and native Edit. It requires existing
+event-post access and fresh unlocked console/window/DOM ownership; it never
+requests privacy changes. Prior clipboard representations stay only in memory
+and are restored only if the change count is still owned by the fixture.
+The smoke controller runs a separate, source-bound public Quartz driver for
+this scenario. It checks existing event-post access before each exact-PID key
+pair, the relocated app's build hashes and foreground window, then echoes the
+app's bounded phase receipt. The app still checks the resulting trusted WK
+events and UI state. Missing driver access or any ownership mismatch fails the
+scenario; no access request or privacy-setting change is attempted.
+
+Select either with `NAC_MAC_SMOKE_SCENARIOS=commands` or
+`NAC_MAC_SMOKE_SCENARIOS=commands-input` before `preview.sh smoke`.
+Programmatic NSMenu results do not qualify OS keyboard/Edit provenance. A locked
+console, missing event-post access or unqualified paint is incomplete acceptance,
+even when compilation, parser tests or scripted DOM journeys pass. Normal app
+compiler inputs and binaries exclude all command fixture instrumentation.
+
+## Normal app close and Quit (ALL-344)
+
+Closing a normal NAC workspace keeps its document, streams, native command
+bridge and owned engine running. Reopening the same app from the Dock restores
+that window. The disposable development preview still quits on close.
+
+A view failure, including a renderer callback after the window is hidden,
+retires the broken view's commands while keeping a verified ready engine and
+its running work. Reopen shows a truthful native status; explicit Quit still
+owns confirmation and cleanup. Engine/protocol failures invalidate readiness
+before callbacks and retain ordinary owned cleanup.
+
+Explicit Quit presents **Cancel** and **Stop and Quit**. Activity is conservative:
+the shell does not infer idle from one run while approvals, terminal shells or
+commands with uncertain outcomes may remain. Cancel preserves the workspace.
+Stop retires the bridge, cancels pending startup/navigation and releases the
+WebView before requesting the existing private engine shutdown. Rust owns run,
+descendant and store cleanup under its existing 20-second watchdog. The existing
+owned-engine fallback remains 23 seconds. A later 26-second UI wait can report
+pending cleanup, but cannot claim cleanup, restart the retired
+workspace or send another stop. Quit again waits on that original shutdown.
+Unsettled AppKit termination retains the originating request with terminateLater,
+including a logout, restart or shutdown request. Cancel completes that request
+with false; Stop completes it with true after owned shutdown completion. A native
+duplicate is fenced before entering AppKit using the delegate-owned transaction
+and the original public call. Presentation, replies and the 26-second UI wait
+remain serviceable in the modal run-loop mode. Timeout declines that wait without
+resending engine control; a late completion does not implicitly authorize exit.
+The builder and main explicitly select NACApplication for LOCAL_APP; disposable
+preview continues to use NSApplication. ATTENTION_SMOKE's explicit test-only
+cleanup completes an already-pending transaction, or requests local exit after
+owned cleanup when no interactive transaction exists. Its cleanup intent survives
+the UI deadline without another stop, activation or manufactured success.
+
+`preview.sh lifecycle-build` builds separate test instrumentation around the
+normal app owner. Run `python3 -B desktop/macos/lifecycle_smoke.py APP OUTPUT
+OBSERVER` under the coordinated Mac/browser lease, using that exact bundle and
+its compiled `InstanceObservation` helper. The fixture exercises real model,
+approval and terminal activity; native window close and LaunchServices reopen;
+Cancel, duplicate Quit and Stop; document/bridge release; durable transcript and
+goal retention; descendant cleanup and ordinary same-store reacquisition.
+The terminal case starts Quit through the exact-owned OS application helper and
+observes the real delegate confirmation before issuing a reentrant OS request.
+Repeated OS requests can coalesce; the fixture records actual delegate decisions
+and the native duplicate's delegate entry and return. Evidence binds the actual
+OS and system WebKit versions.
+Sheet completion is programmatic AppKit, with no OS input events. Evidence
+records locked-console provenance and keeps visible paint and trusted input
+acceptance false. This is not a substitute for full native acceptance.
+
+The separately selected `NAC_LIFECYCLE_SCENARIOS=renderer-hidden` case qualifies
+this ALL-344 failure-status prefix on its owning layer, before ALL-345's renderer
+recovery replaces that presentation. It injects the actual renderer delegate
+callback after close, verifies running work and the same owned engine, reopens
+the native status and chooses explicit Stop and Quit. It is not an actual
+WebKit process crash, OS-shutdown case or trusted-input acceptance.
+Unlike close/Cancel, view retirement can disconnect the final interactive
+approver. The renderer case requires the same original pending Ask or its
+exact once-only disconnect denial in that same run, while proving independent
+model/terminal work survives, manual mode and empty grants/executions remain,
+and no input or new admission is replayed. The ordinary close/Cancel fixture
+continues to require its pending Ask to remain unchanged.
+
+The separate `QuitWebViewFixture.swift` / `quit_webview_fixture.py` probe records
+real system WK document/SSE lifetime. Hiding a retained document can keep a live
+observer through graceful shutdown. `stopLoading()` behavior is recorded per OS;
+it does not release ownership of the WebView. Neither helper nor any provider or
+lifecycle fixture is included in the ordinary app's compiler inputs or binary.
+
+## Workspace recovery (ALL-345)
+
+When the renderer or connection fails, NAC retires the old document and tries
+one automatic reload against the same verified engine. **Reload Workspace**
+explicitly retries reading canonical state. A replacement is refused while the
+old WebView is still retained; the timeout does not permit bypassing its release.
+Explicit reload is bounded to three total attempts per engine incarnation,
+including the automatic attempt. Wake revalidates the engine separately.
+Waiting for the old view to release does not consume those attempts; failed
+engine-readiness checks do. The same retirement object remains the release barrier.
+
+If the engine has exited, choose **Restart Engine…** and confirm the restart.
+NAC waits for owned cleanup before launching a new engine; restart is bounded
+to two attempts per app launch. Saved chat history remains available, but old
+live terminals and their process-local output cannot be restored. A pending
+Quit confirmation prevents recovery from installing another workspace; Cancel
+leaves explicit recovery available, while Stop retires it.
+The restart budget is consumed only after old-document release and current
+Quit/generation admission, including a failed attempt to restart the engine.
+
+Recovery never resends prompts, approvals, shell commands or terminal bytes.
+Review canonical history and uncertain outcomes before taking another action.
+Same-engine recovered terminals require explicit acknowledgement before input;
+initial startup and a new engine retain their existing behavior. Native renderer
+crash, sleep/wake, replacement and trusted-input acceptance require separately
+qualified actual AppKit/WKWebView evidence; headless controls and compilation do
+not establish those behaviors.
+
+## Native attention (ALL-350)
+
+The native **Notifications** menu defaults off. Enabling saves a completion
+cutoff before requesting system permission; a saved opt-in survives ordinary
+cold launches without another permission request. Muting keeps unread attention
+accounting. Clear completion indicator clears its native count; Reset notification
+settings removes only native notification preferences. A failed save suspends
+delivery and warns that the previous saved setting may return next launch.
+Generic notification content contains no prompt, goal, tool or approval text.
+System scheduling acknowledgement does not establish that a banner was shown.
+While a current decision projection is unavailable or reconnecting, the Dock
+shows `?` (or a retained completion count plus `?`), rather than claiming there
+are no pending decisions. Only a current accepted baseline/resolution can clear
+that uncertainty; muting or system denial does not hide it.
+Clicking opens the existing app's normal shared chat after a canonical session
+lookup. IME composition, a modal or an editor without retained text defers the
+response; it never triggers a later automatic navigation.
+
+`preview.sh attention-build` creates a separate fixture bundle plus
+`InstanceObservation` and `AttentionFixtureCleanup` helpers. In an explicitly
+admitted Aqua/browser lane, run `python3 -B desktop/macos/attention_app_smoke.py
+APP OUTPUT INSTANCE_OBSERVER`. The driver uses an external disposable profile,
+actual system WK, real committed engine completions and an injected notification
+center. It covers default-off, durable opt-in/cold restore, hidden completion,
+click into shared chat, retained draft on close/reopen, Cancel/Stop, reset and
+exact-owned WebKit/profile cleanup. It cannot qualify signed OS banners, trusted
+IME input or hidden CPU/wakeups. Those remain required separate acceptance lanes.
+
+The portable source contracts run with
+`npm --prefix crates/nac-server/web run test:attention-fixtures`, and are included
+in `npm test` (also reached by `make test-web` and the existing frontend CI lane).
+They cover absolute deadlines, custody/publication/capture ordering, default
+callers, the actual route builder, and the verbatim chat-readiness script against
+negative DOM cases and real React component structure with inert providers.
+The passive observer under `test_support/` is a test fixture; its OS calls are
+mocked by these controls. Geometry and hit testing are symbolic JSDOM checks,
+not actual AppKit/WKWebView paint, input or native-delivery qualification.
+## Fixed hosted lifecycle qualification (ALL-344)
+
+`all-344-lifecycle-macos26` adds one closed adapter to the existing exact-supplier
+lane. It pins supplier `7d8322f1d8cad25cc1aa79dc5a7a025a6719065b` and tree
+`89a58b792f4b181a6d64af5dfcb5bc4d6bb24053`; the supplier must be published by its
+owner before GitHub can check it out. Its normal fifteen Swift inputs, production
+blobs, fixture, builder and observer are unchanged. Historical local bundle hashes
+are custody evidence; fresh hosted binary hashes are checked against fresh build
+receipts, rather than assumed equal across toolchains.
+
+The root coordinator's live transfer/custody ledger is authoritative for
+admission and consumption of allocation `nac344-ordering-7e-one`. The original
+pre-dispatch blocked record is historical; it does not establish an unspent
+balance. Documentation grants no admission or retry, restores no consumed counts,
+and never resets the original clock. Under the fixed one-dispatch contract,
+root must atomically reserve its durable transfer/custody record, bind the exact
+published harness and supplier, and supply `lifecycle_custody` JSON. The capsule
+must contain exactly the fields checked by `require_capsule`: version, allocation,
+supplier/tree, harness, repository/workflow/branch, attempt 1, ordered scenarios,
+all-zero prior counts, zero retry/production-repair budgets, the eight pinned
+historical custody digests, and a root-reserved 64-hex admission nonce. Missing,
+altered or extra fields fail closed. A lost dispatch response is reconciled by
+root against the existing run, never resubmitted. This contents-read runner is
+not a global replay database: root must reject reuse of a capsule on another host.
+
+The existing macOS 26 toolchain envelope and positive hosted console guards
+remain required. Setup, a private exact Rust engine, all five build-only bundle
+modes and the image reader complete before any case reservation. Each case
+rechecks source/build/console identity, then fsyncs its command and custody hashes
+before spawn. The fixed order is `run`, `approval`, `terminal`; no case repeats,
+and the first failure, interruption, unknown cleanup or incomplete critical
+evidence stops all remaining cases. The case envelope is six minutes, including
+the four-minute driver bound; the supervisor reserves an additional 150 seconds
+for the target's cleanup and 120 seconds for upload. Budget shortage stops
+before reserving the next case.
+
+`require_budget` requires the remaining case count times 360 seconds, plus
+150 seconds for cleanup and 120 seconds for upload. Before the first of the
+three ordered cases, this is `3 * 360 + 150 + 120 = 1350` seconds. All preparation
+shares the original 1800-second deadline, leaving at most 450 seconds of
+preparation headroom before that first-case threshold. These conservative checks
+fail before reservation when time is insufficient; they do not guarantee that
+healthy preparation always fits. Full lifecycle/native acceptance still requires
+all three cases and their evidence and cleanup guards.
+
+The external child installs interruption handling before executing the unchanged
+supplier entry point. The supplier owns native/engine/descendant settlement.
+The harness retains the supplier's bounded fixture receipt before private teardown,
+binds it to the selected store, then observes exact private fixture applications,
+matching private process paths and the recorded terminal descendant afterward.
+A live or reused descendant PID leaves cleanup unknown. The harness never signals
+native PIDs from JSON or searches by application name. Passing cases require store reacquisition, preserved transcript,
+goal, approval mode and inbox identities, no grants/replay, completed duplicate
+Quit/Cancel ordering and settled descendants.
+
+Four WK workspace snapshots and one AppKit sheet snapshot per case are required.
+Each original PNG is bounded, hashed before/after decoding and checked for
+readability; sheets require their Cancel/Stop-and-Quit controls. Root still
+inspects actual originals. These snapshots do not prove composited OS paint,
+trusted keyboard/IME input or accessibility. Complete redacted critical JSON is
+retained, splitting oversized receipts into indexed readable text parts with
+raw/reassembled-export hashes. Database, bundle and private profile data are not
+uploaded. A critical export failure is an explicit failure, not a capped pass.
+
+Lifecycle export reserves a separate finite allowance for the exact fifteen PNG
+paths: at most 2 MiB each and 30 MiB together. Actual redacted non-image payload,
+including JSON split wrappers, remains bounded to 11.75 MiB; its index remains
+256 KiB. The whole lifecycle envelope is 42 MiB (44,040,192 bytes). Shared export
+caps and other qualifications are unchanged. Before the first reservation, the
+harness records this capacity in its build manifest and checks existing payload
+with 4 MiB reserved inside the non-image budget for the complete finalization
+tail. Its exported slots cover the final result and ledger (256 KiB each), GUI
+log and three crash snippets (256 KiB each), report (2 MiB), finalization receipt
+and failure receipt (256 KiB each). The known report/build baseline must fit
+128 KiB before admission; final GUI JSON is limited to 32 KiB. These lifecycle
+producer bounds do not increase any shared or per-kind export cap. Every slot
+charges actual UTF8/redacted bytes and JSON split wrappers. It rechecks the
+reserved allowance after every case. Completed image cases must form the fixed
+run/approval/terminal prefix; final success requires all fifteen original images.
+Extra paths, missing successful final images or any byte overflow stop remaining cases with
+unknown export acceptance and no retry. This capacity declaration is source
+evidence; synthetic export-byte controls do not establish PNG validity or OCR.
+Stopped failed/unknown runs and consistent unfinished dispatched prefixes export
+their available original expected-path images
+from dispatched cases, including earlier successful cases, with complete bounded
+redacted JSON/logs. A separate failure-evidence receipt lists missing captures
+and explicitly denies native acceptance. This failure export never satisfies a
+successful case's exact-five or the final exact-fifteen capture requirement.
+Unfinished export validates prior/active/later states and exact one-dispatch
+counts without mutating or finalizing the ledger. All late writers are staged
+and checked together before atomic export publication. A late producer violation
+forces a failed report and retains complete bounded originals where the actual
+envelope fits, or explicit incomplete failure metadata when it cannot; it never
+publishes a passing report from a failed export.
+
+Ordinary PR/push/release guards, permissions and the other named qualifications
+are preserved. A manual stable workflow also starts its existing ordinary CI jobs
+on their isolated standard hosts; this adapter does not reroute them. Publication
+and the actual hosted admission require separate root decisions. Source controls
+and compilation alone do not qualify any lifecycle case or complete ALL-344/354.
+
+### ALL-347 path adapter (source contract; native qualification pending)
+
+`all-347-paths-macos26` selects only product
+`7013a96f2f2fdf3046c6976e018c9bf988eebfe0` and the ordered fresh-profile cases
+`paths-xctest`, then `paths-failure-xctest`. The maintained project materializer
+references H's `PathJourneys.swift` and `PathPhaseObserver.swift` plus the actual
+T `NativePathJourney.swift` (SHA-256
+`c72c1178ba99ca82f23e264c46fb21b809934782f77060781454c42f78920e21`), with
+`NATIVE_UI_TESTS`. No helper copy, standalone extraction or fabricated xctestrun
+is accepted. `preview.sh app-build` and `smoke-build` remain the app writers;
+their compiler-input, engine identity and output hashes are checked.
+
+The product owner and coordinator froze this supplier on the final UI foundation
+`a6098e3655119075a349a8c923ef82f37f25bee4`. The unchanged helper hash is not
+runtime acceptance. Relative to the original producer, it adds `expected_path_root`
+to its denial probe; its phase schema, ordered transitions and helper interface
+remain unchanged. Actual picker/Finder execution and captures remain **UNRUN**.
+
+The later `ci.py --qualification all-347-paths-macos26 --expected-sha <H>
+--source-root <canonical-T-checkout> --output <absent-private-output>` invocation
+also needs an explicit `NAC_PATHS_CUSTODY` capsule from ROOT's separately reviewed
+source/host/custody allocation and `CARGO_BUILD_JOBS=2`. The bounded capsule binds
+version 1, H, T, both ordered cases, `source_preflight=true`,
+`native_eligibility=true`, one allocation ID, original start/deadline epochs
+(maximum 2340 queue-inclusive seconds), and zero retries. Exclusive `.consumed` creation prevents
+reusing it. The maintained manual selector transports the optional `paths_custody` JSON
+through `macos-qualification.yml`. The additional native-only dispatcher uses
+`native-qualification=all-347-paths-macos26` and `native-paths-custody`; it validates
+the original capsule on an Ubuntu admission job before requesting a Mac. Ordinary
+CI and the legacy underscore input remain separate, unchanged interfaces. Its
+skipped aggregate has a distinct name and cannot supply `Required PR checks`.
+Both actual path xcodebuild calls use the shared runner environment filter,
+removing ambient managed configuration, tokens and API keys while preserving
+selected Xcode/SDK, private fixture and locale plumbing. The path-only step validates the original
+contract and writes those exact bytes into a fresh private runner directory,
+then sets `NAC_PATHS_CUSTODY` for the existing CLI. Missing, stale, foreign or
+reused handoffs fail closed. The runner creates no eligibility or deadline,
+and hosted rerun attempts are rejected. Selecting or transporting this contract
+does not itself allocate a run. Local/hosted envelope qualification remains an
+independent prerequisite; no SDK, TCC, toolchain or settings changes are implied.
+
+The actor reads only H's predeclared private app JSON through a no-follow regular
+file descriptor, permits atomic inode replacement and identical rereads, and
+rejects mutated, skipped, backward or foreign phases. Normal phases are ready0,
+document-reloaded1 (one successor UUID), folder-moved2, folder-restored3,
+reveal-observed4; failure is ready0 then failure-panel-observed1 on the initial
+document. Authorization before helper input checks exact app/engine bytes,
+launch/start identity, owner/window, current document/phase, unlocked same-user
+console and unchanged existing helper/developer/automation policy. It never
+activates Finder, sends Finder input or claims Finder close authority.
+
+Named original PNGs bind chooser/Unicode, replacement form, moved-folder error,
+successful session/Files and Finder's unique selected leaf; the failure case
+retains its pending panel. Actual readable paint and non-occlusion review is
+mandatory and cannot be replaced by AX labels, PNG framing, OCR or app receipts.
+Each PNG is at most 2 MiB; the existing exporter retains at most 12 MiB total,
+with complete essential JSON (256 KiB each) before verbose diagnostics. Missing
+proof preserves relocated roots. Case finalization always attempts the existing
+H cleanup owner independently of SDK collection failure. Known Finder residual
+windows stay open and explicit. The original B499-2 disappearance repair stays
+owned by `settle_apps`; this adapter does not duplicate it.
+
+Portable source controls run with
+`python3 -B -m unittest discover -s desktop/macos -p 'test_ci_paths*.py' -v`
+and are discovered by the existing workflow-lint job. They establish no compiled
+XCTest import/target, sandbox readability, trusted input, actual chooser/Finder,
+minimum-OS or complete ALL-354/ALL-347 acceptance. Those gates remain **UNRUN**
+until a separate frozen-source native allocation.
+
+The path clock uses one original ROOT allocation started before its one exact
+dispatch, at most2340s including queues. ROOT’s operation ledger must bind the
+actual repository/ref/H/run/firstattempt and exact original capsule bytes; local
+`.consumed` is not cross-run replay evidence. `native_eligibility=true` expresses
+conditional ROOT authorization; actual clean source/toolchain/console/policy
+checks before input remain mandatory. It does not attest to a future host.
+
+Under the existing synchronized-UTC engineering premise, a declared60s allowance
+shortens the ROOT deadline once; it is not measured skew evidence. C' is the
+earlier of that conservative conversion and H's original import+1800s deadline.
+Work/collection ends C'-600, cleanup C'-120 and retention C'. Build1200s and
+sharedcases900s only shorten those fixed bounds. Clock discontinuity, expiry or
+unknown cleanup latches failure, retains relocated bundles and permits only
+independent bounded cleanup/retention; it never renews a case or grants input.
+
+## ALL-343 capture evidence contract (source only)
+
+`ci_instance_capture_contract.py` projects the already admitted T34
+(`34f8ed0d4f82d4df50553f8faa27765e61f03e57`) preparation receipt into canonical
+`nac343-public-resource-v1` bytes. The H caller supplies independently retained
+target/H source pins and manifest/preparation SHA-256 values. T remains the
+owner of full live artifact validation and exclusive preparation consumption.
+The resource contains the fixed 19-point roster, run/preparation identity and
+public dev/stable bundle spellings, identifiers and binary hashes. It contains
+no store, configuration, observer, request, release or control-file paths. Its
+SHA-256 is kept outside the resource, avoiding a self-referential digest.
+
+`ci_instance_capture_attachments.collect` accepts only an existing private,
+owned export directory, the resource, host-retained T record bytes and an
+independent selected-result origin. Its `nac343-selected-export-v1` index is an
+H-normalized contract, **not an implemented xcresulttool format adapter**. A
+future adapter must establish the actual result-bundle inventory hash, exact
+test identifier/URL, result and resource binding before constructing that index.
+Every index row names one flat metadata/PNG pair and its SHA-256 values. Public
+`nac343-public-capture-v1` metadata binds equal closed AX phases before/after,
+the public app URL spelling, declared geometry/scale and PNG bytes/hash. H joins
+each pair to its retained T configuration/request/private fence and diagnostic,
+and all eight complete case records to the T summary/run. Notification hints
+have no input or authority in this interface. No T path is reopened; successful
+T fixture deletion does not prevent collection from retained attestations.
+
+The collector reads without following links, pins directory/file generations,
+rejects aliases, wrong owners, special files and changed records, and enforces
+32 KiB records, 256 KiB aggregate text, 2 MiB individual PNGs and 12 MiB aggregate
+images (including supplied diagnostic bytes). It writes nothing. On failure,
+`CollectionError.partial` preserves the unambiguous validated prefix and its
+metadata/PNG bytes in memory; the caller owns any durable retention. Interrupts
+and unexpected errors retain their original type with `instance_capture_partial`
+attached. Close failures cannot replace a primary failure. Rejected payload
+bytes are excluded. Original export files remain untouched.
+
+`structurally_complete` establishes only this finite join. PNG signature/hash
+and declared geometry checks do not decode images or prove actual OS window
+geometry, visibility, OCR or paint. Complete semantic records are hashed and
+joined; the existing `ci_instances.require_cases` engine/assets/console/cleanup
+gate is still required. No actor, controller, generated XCTest target, SDK
+adapter or qualification entry invokes these modules. Full-Xcode/pinned OS,
+trusted desktop input, clock admission, actual 8-case/19-frame qualification
+and independent acceptance remain separate gates.
+
+These 38 portable synthetic controls also run in the Stable release
+`workflow-lint` job on each PR (no SDK, app, engine or network):
+
+```sh
+python3 -B -m unittest discover -s desktop/macos -p 'test_ci_instance_capture_*.py' -v
+```

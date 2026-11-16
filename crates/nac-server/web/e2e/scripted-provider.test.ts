@@ -121,3 +121,73 @@ test("fresh-task matching excludes the caller's quoted handoff receipt", async (
   ]);
   provider.assertConsumed();
 });
+
+test.each([
+  ["request-shaped SSE", "request", true, true],
+  ["request-shaped JSON", "request", false, false],
+  ["request-omitted JSON", "request", undefined, false],
+  ["explicit SSE remains SSE", true, false, true],
+  ["explicit JSON remains JSON", false, true, false],
+  ["default remains JSON", undefined, true, false],
+] as const)("function-call wire: %s", async (_name, mode, requested, streaming) => {
+  const provider = new ScriptedProvider();
+  await provider.start();
+  providers.push(provider);
+  provider.enqueue(
+    "status",
+    { token: "WIRE_PROBE" },
+    {
+      kind: "function_call",
+      name: "subagent_status",
+      callId: "status-call",
+      arguments: { child_session_id: "controlled-child", _nac: null },
+      stream: mode,
+    },
+  );
+  provider.enqueue(
+    "after-status",
+    { functionOutputCallId: "status-call" },
+    {
+      kind: "text",
+      text: "status retained",
+      stream: "request",
+    },
+  );
+  const response = await send(provider, requested);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe(
+    streaming ? "text/event-stream" : "application/json",
+  );
+  const body = await response.text();
+  const events = streaming
+    ? body
+        .trim()
+        .split("\n\n")
+        .map((event) => JSON.parse(event.slice(6)))
+    : [];
+  const envelope = streaming
+    ? events.find((event) => event.type === "response.completed").response
+    : JSON.parse(body);
+  const item = envelope.output[0];
+  expect(item).toMatchObject({
+    type: "function_call",
+    call_id: "status-call",
+    name: "subagent_status",
+  });
+  expect(JSON.parse(item.arguments)).toEqual({ child_session_id: "controlled-child", _nac: null });
+  if (streaming)
+    expect(events.find((event) => event.type === "response.output_item.done").item).toEqual(item);
+  const completed = await fetch(`${provider.baseUrl}/responses`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      stream: true,
+      input: [{ type: "function_call_output", call_id: item.call_id, output: "controlled status" }],
+    }),
+    signal: AbortSignal.timeout(2_000),
+  });
+  expect(completed.status).toBe(200);
+  expect(completed.headers.get("content-type")).toBe("text/event-stream");
+  expect(await completed.text()).toContain('"text":"status retained"');
+  provider.assertConsumed();
+});

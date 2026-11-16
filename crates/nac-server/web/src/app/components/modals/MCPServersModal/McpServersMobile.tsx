@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   Icon,
@@ -19,6 +19,13 @@ import type { McpLibraryEntry } from "@/app/types/api";
 /** A draft's origin: a catalog template, or nothing for a hand-written server. */
 type Draft = { template: McpLibraryEntry | null };
 
+// Keep phone actions large enough and reserve the footer's actual wrapped height.
+const mobileModalClassName =
+  "max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11 max-md:[&>header_div:has(>.btn-sticky)]:min-w-11 [&>.modal-footer-mobile]:relative [&>.modal-footer-mobile]:shrink-0 [&>.modal-footer-mobile]:flex-wrap [&>.modal-footer-mobile_.btn-sticky]:min-h-11 [&>.modal-footer-mobile_.btn-sticky]:min-w-11 [&>.modal-footer-mobile>div]:min-h-11 [&>.modal-footer-mobile>div]:min-w-11";
+
+// Keep paint order stable when the form reopens during its retained exit.
+const mobileModalZIndex = { list: 100, catalog: 101, form: 102 } as const;
+
 /**
  * The phone has no room for the sidebar the desktop dialog puts the servers in,
  * so the panel itself is the list and everything it leads to opens as another
@@ -32,6 +39,12 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [formFooter, setFormFooter] = useState<ReactNode>(null);
+  // A closing phone form remains mounted; only its current selection may finish navigation.
+  const formEpoch = useRef(0);
+  const currentFormEpoch = formEpoch.current;
+  useLayoutEffect(() => {
+    if (!open) formEpoch.current += 1;
+  }, [open]);
 
   const record = servers.find((entry) => entry.name === editing) ?? null;
   const template = draft?.template ?? null;
@@ -48,19 +61,27 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
   // Saving and deleting both finish the errand, so they land back on the list
   // rather than the catalog the draft came from.
   const backToList = () => {
+    formEpoch.current += 1;
     setDraft(null);
     setEditing(null);
     setPicking(false);
   };
 
   const closeForm = () => {
+    formEpoch.current += 1;
     setDraft(null);
     setEditing(null);
   };
 
   return (
     <>
-      <Modal open={open} onClose={onClose} title="MCP servers">
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="MCP servers"
+        className={mobileModalClassName}
+        zIndex={mobileModalZIndex.list}
+      >
         {isError ? (
           <McpServersLoadError
             error={error}
@@ -81,7 +102,10 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
               <TabButton
                 key={server.name}
                 size={TabButtonSize.Large}
-                onClick={() => setEditing(server.name)}
+                onClick={() => {
+                  formEpoch.current += 1;
+                  setEditing(server.name);
+                }}
               >
                 <span className="text-left flex-grow truncate">{server.name}</span>
                 <Icon iconName={IconName.Right} className="shrink-0" />
@@ -101,11 +125,19 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
         open={picking}
         onClose={() => setPicking(false)}
         title="Add server"
+        className={mobileModalClassName}
+        zIndex={mobileModalZIndex.catalog}
         bodyClassName="p-0 overflow-hidden flex flex-col"
       >
         <LibraryPicker
-          onPick={(entry) => setDraft({ template: entry })}
-          onCustom={() => setDraft({ template: null })}
+          onPick={(entry) => {
+            formEpoch.current += 1;
+            setDraft({ template: entry });
+          }}
+          onCustom={() => {
+            formEpoch.current += 1;
+            setDraft({ template: null });
+          }}
         />
       </Modal>
 
@@ -113,6 +145,8 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
         open={draft !== null || editing !== null}
         onClose={closeForm}
         title={record?.name ?? template?.name ?? "Custom server"}
+        className={mobileModalClassName}
+        zIndex={mobileModalZIndex.form}
         bodyClassName="p-0 overflow-hidden flex flex-col"
         footer={formFooter}
       >
@@ -122,8 +156,13 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
           template={template}
           libraryEntry={libraryEntry}
           onClose={closeForm}
-          onSaved={backToList}
-          onDeleted={backToList}
+          onSaved={() => {
+            if (formEpoch.current === currentFormEpoch) backToList();
+          }}
+          onDeleted={() => {
+            if (formEpoch.current === currentFormEpoch) backToList();
+          }}
+          isCurrent={() => formEpoch.current === currentFormEpoch}
           setFooter={setFormFooter}
         />
       </Modal>

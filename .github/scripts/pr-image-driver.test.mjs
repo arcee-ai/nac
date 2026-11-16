@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ const sort = value => Array.isArray(value) ? value.map(sort) : value && typeof v
 const digest = value => createHash('sha256').update(JSON.stringify(sort(value))).digest('hex');
 
 function verify(value) {
-  const config = structuredClone(value);
+  const config = structuredClone(value); reverseAssetTokens(config);
   const steps = config.jobs['build-smoke'].steps;
   const selector = steps.find(s => s.id === 'image-driver');
   assert.deepEqual(selector, {

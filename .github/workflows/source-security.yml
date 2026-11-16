@@ -59,6 +59,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned scanner
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: sh candidate/.github/scripts/install-osv-scanner.sh "$RUNNER_TEMP/osv-scanner"
       - name: Test candidate security contracts and live safe/vulnerable fixtures
         run: |

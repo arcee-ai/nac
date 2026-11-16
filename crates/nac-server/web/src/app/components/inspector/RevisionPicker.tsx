@@ -36,7 +36,8 @@ function Row({
   return (
     <button
       type="button"
-      className="flex items-start gap-2 w-full p-1 rounded-[4px] text-left btn-ghost"
+      className="flex items-start gap-2 w-full min-h-11 p-2 rounded-[4px] text-left btn-ghost"
+      aria-pressed={selected}
       onClick={onClick}
     >
       <Icon
@@ -45,9 +46,9 @@ function Row({
         className="shrink-0 mt-[2px]"
       />
       <span className="flex-1 min-w-0 flex flex-col">
-        <span className="label-micro text-btn-secondary truncate">{title}</span>
+        <span className="text-sm leading-5 text-basic-primary break-words">{title}</span>
         {subtitle ? (
-          <span className="label-micro text-basic-muted truncate">{subtitle}</span>
+          <span className="text-xs leading-4 text-basic-tertiary break-words">{subtitle}</span>
         ) : null}
       </span>
       {trailing ? (

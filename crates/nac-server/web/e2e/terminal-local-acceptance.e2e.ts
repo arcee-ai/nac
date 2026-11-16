@@ -62,6 +62,19 @@ async function show(page: Page, base: string, session: string) {
   await expect(pane).toBeVisible();
   return pane;
 }
+async function prepareNewShell(pane: Locator) {
+  const launch = pane.getByRole("button", { name: /^New shell$/i });
+  const openList = pane.getByRole("button", { name: "Open list", exact: true });
+  // Compact panels put creation on their list screen; wide panels keep the
+  // same action beside the detail. Follow the public navigation in either case.
+  await expect(launch.or(openList)).toBeVisible();
+  if (!(await launch.isVisible())) {
+    await expect(openList).toBeVisible();
+    await openList.click();
+  }
+  await expect(launch).toBeVisible();
+  await expect(launch).toBeEnabled();
+}
 async function focus(pane: Locator) {
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
 }
@@ -197,6 +210,7 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
   const pane = await show(page, harness.baseUrl, session);
   let terminal: string | undefined;
   try {
+    await prepareNewShell(pane);
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
     terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -316,6 +330,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   let pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -438,6 +453,7 @@ test("actual Python build and unittest consume active agent edits in the shell w
     completion,
   );
   const pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;
@@ -605,11 +621,12 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       // 45-second test budget, even if the finite output finishes during setup.
       " time.sleep(45)",
       "except KeyboardInterrupt:",
-      " os.write(1,b'\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
+      " os.write(1,b'\\x18\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
       " raise",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
+  await prepareNewShell(pane);
   await expect(pane.getByText("No recent activity is available.")).toBeVisible();
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -682,9 +699,8 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
         expect(afterHistory.rows).toBe(before.rows);
       }),
     ).toBe("SELECT-WHILE-OUTPUT");
-    // The controlled history race is complete. Retire its interception before
-    // timing unrelated production observer traffic; keep all race assertions.
-    await page.unroute(historyPattern, holdHistory);
+    // The history promise is released. Keep interception stable until terminal
+    // cleanup rather than changing global routing under an in-flight pull.
     const resizedAt = performance.now();
     await page.setViewportSize({ width: 1050, height: 650 });
     await expect
@@ -727,13 +743,13 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
-    await page.unroute(historyPattern, holdHistory);
     await page.evaluate(() => {
       window.terminalRenderedMarker?.dispose();
       delete window.terminalRenderedMarker;
     });
     await api.terminateTerminal(session, terminal);
     await Promise.allSettled(pending);
+    await page.unroute(historyPattern, holdHistory);
     const heartbeat = await page.evaluate(() => {
       const value = (window as unknown as { terminalHeartbeat: { active: boolean } })
         .terminalHeartbeat;

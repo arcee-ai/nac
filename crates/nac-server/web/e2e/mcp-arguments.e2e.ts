@@ -395,7 +395,19 @@ process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
       // The helper inherits the server environment, so first prove an unset forwarded name fails.
       await forwarded.fill("NAC_E2E_UNSET_FORWARD");
       await testConnection.click();
-      await expect(page.getByText(/^Test failed:/)).toBeVisible();
+      const failureDialog = page.getByRole("dialog", {
+        name: mobile ? "Custom server" : "MCP servers",
+        exact: true,
+      });
+      await expect(
+        failureDialog.getByRole("alert").filter({ hasText: /^Test failed:/ }),
+      ).toBeVisible();
+      await expect(
+        page
+          .getByRole("region", { name: "Notifications", exact: true })
+          .getByRole("alert")
+          .filter({ hasText: /^Test failed:/ }),
+      ).toBeVisible();
       await expect(fs.stat(record)).rejects.toThrow();
       // NAC_E2E_API_KEY is set only by the e2e harness for nac-web.
       await forwarded.fill("NAC_E2E_API_KEY");

@@ -1,7 +1,8 @@
 import { type ReactNode } from "react";
 import type { InsightsEmptyCopy, InsightTurnSection } from "../model/types";
 import { type InsightsRowController } from "./InsightsTurnSection";
-export declare const InsightsList: import("react").MemoExoticComponent<({ sections, pendingPrompt, emptyCopy, focusNonce, controller, footer, }: {
+export declare const InsightsList: import("react").MemoExoticComponent<({ sessionId, sections, pendingPrompt, emptyCopy, focusNonce, controller, footer, }: {
+    sessionId: string;
     sections: readonly InsightTurnSection[];
     /** The prompt a streamed turn answers before the snapshot shows it. */
     pendingPrompt: string;
