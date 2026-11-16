@@ -3,7 +3,12 @@ use super::*;
 /// Schema 51 records which owned relationship generation admitted an inbox
 /// row. Columns are additive and NULL for every other row, so existing
 /// readers and person/automation input keep their meaning.
-pub(super) fn ensure_columns(connection: &Connection) -> Result<()> {
+///
+/// Returns whether this transaction added them. A store that already has
+/// them comes from the ALL-557 preview lineage (its schemas 41 to 43), whose
+/// one-time classification is final and is not run again.
+pub(super) fn ensure_columns(connection: &Connection) -> Result<bool> {
+    let added = !column_exists(connection, "session_inbox", "completion_source")?;
     ensure_column(
         connection,
         "session_inbox",
@@ -23,7 +28,7 @@ pub(super) fn ensure_columns(connection: &Connection) -> Result<()> {
         "INTEGER CHECK ((completion_generation IS NULL) = (completion_source IS NULL)) \
          CHECK (completion_generation IS NULL OR completion_generation > 0)",
     )?;
-    Ok(())
+    Ok(added)
 }
 
 /// Classify legacy rows that are still pending, and only from durable
