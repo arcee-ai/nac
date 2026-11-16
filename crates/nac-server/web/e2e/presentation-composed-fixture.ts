@@ -395,6 +395,11 @@ export function primaryModelTrigger(form: Locator, legacy = false) {
 /** Tablet navigation starts in a real collapsed rail, independently per instance. */
 export async function revealDesktopSidebar(root: Locator) {
   const show = root.getByRole("button", { name: "Show sidebar", exact: true });
+  const search = root.getByRole("button", { name: "Search", exact: true });
+  // Wait briefly for the shell to settle; full-page Settings has no sidebar.
+  await expect(show.or(search).first())
+    .toBeVisible({ timeout: 3_000 })
+    .catch(() => {});
   if (await show.isVisible()) await show.click();
 }
 
@@ -446,7 +451,14 @@ async function openPhoneMenu(j: Journey, press: Press) {
 /** Runs one ⌘K palette command from the sidebar's Search control. */
 async function paletteCommand(j: Journey, label: string, press: Press) {
   await revealDesktopSidebar(j.root);
-  await press(j.root.getByRole("button", { name: "Search", exact: true }).first());
+  const search = j.root.getByRole("button", { name: "Search", exact: true }).first();
+  if (await search.isVisible()) await press(search);
+  else {
+    // Full-page Settings has no sidebar: the palette's own ⌘K/Ctrl+K opens it.
+    const mac = await j.page.evaluate(() => /Mac/.test(navigator.userAgent));
+    await j.root.getByRole("heading").first().click();
+    await j.page.keyboard.press(mac ? "Meta+k" : "Control+k");
+  }
   const palette = j.root.getByRole("dialog", { name: "Command palette", exact: true });
   await palette.getByRole("combobox", { name: "Search commands", exact: true }).fill(label);
   await press(palette.getByRole("option", { name: label, exact: true }).first());

@@ -1,8 +1,8 @@
-/* Toasts rise from the bottom edge and settle; nothing else moves. */
+/* Toasts drop in from the top edge and settle; nothing else moves. */
 .nac-toast {
   container-type: inline-size;
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(-8px) scale(0.98);
   transition:
     opacity 160ms ease-out,
     transform 160ms ease-out;

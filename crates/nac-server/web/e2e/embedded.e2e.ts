@@ -451,7 +451,8 @@ test("keeps approval state and actions reachable with many remembered permission
   await onScreen(sheetAllow);
 
   // Putting the sheet aside never answers the request: the card comes back with it.
-  await page.mouse.click(4, 4);
+  // (The scrim starts below the live 52px session header.)
+  await page.mouse.click(4, 120);
   await expect(sheet.getByRole("region", { name: "Pending permission requests" })).toBeHidden();
   await expect(requested).toContainText(`dependency-${rememberedRequests}-`);
   await expect(awaiting).toBeVisible();
