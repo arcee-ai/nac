@@ -4532,7 +4532,7 @@ function Ro({ title: e, pinned: t = !1, isMobile: n = !1, onPin: r, onRename: i,
 // src/app/lib/markdownChunk.ts
 var zo = null, Bo = !1;
 function Vo() {
-	return zo ??= import("./markdown-renderer-DK0d-af7.js").then((e) => e.t).then((e) => (Bo = !0, e)), zo;
+	return zo ??= import("./markdown-renderer-DGvTFOkv.js").then((e) => e.t).then((e) => (Bo = !0, e)), zo;
 }
 function Ho() {
 	return Bo;
