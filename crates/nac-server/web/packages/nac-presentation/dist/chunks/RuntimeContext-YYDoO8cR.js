@@ -729,6 +729,7 @@ function ue(e, t = {}) {
 		createSshConfig: (e) => r("POST", "/ssh-configs", { body: e }),
 		updateSshConfig: (e, t) => r("PATCH", `/ssh-configs/${encodeURIComponent(e)}`, { body: t }),
 		deleteSshConfig: (e) => r("DELETE", `/ssh-configs/${encodeURIComponent(e)}`),
+		listSshAliases: (e) => r("GET", "/ssh/aliases", { signal: e }),
 		getMcpLibrary: (e) => r("GET", "/mcp_library/library", { signal: e }),
 		listMcpServers: (e) => r("GET", "/mcp_library/servers", { signal: e }),
 		createMcpServer: (e) => r("POST", "/mcp_library/servers", { body: e }),
