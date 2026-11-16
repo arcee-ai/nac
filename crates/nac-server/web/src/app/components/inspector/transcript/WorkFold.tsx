@@ -78,6 +78,7 @@ export const WorkFoldView = memo(function WorkFoldView({
         <button
           type="button"
           aria-expanded={open}
+          aria-current={selected ? "true" : undefined}
           aria-controls={open || pinned.length > 0 ? listId : undefined}
           onClick={() => setToggled(!open)}
           className={cn(

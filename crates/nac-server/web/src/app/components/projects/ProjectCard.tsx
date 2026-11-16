@@ -14,6 +14,7 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { useSessionNameDisclosure } from "@/app/atoms/session-name-disclosure";
 import { compactAge } from "@/app/features/sidebar/relativeTime";
 import { Menu, MenuItem, MenuSeparator } from "@/app/features/sidebar/MenuItem";
 import { useNow } from "@/app/hooks/useNow";
@@ -184,6 +185,11 @@ export function ProjectCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const configError = facts.representative?.model_config_error;
   const kind = facts.orphan ? "session" : "project";
+  // An unassigned session's tile names a session, whose title can be long:
+  // it opens through a full-tile button and discloses the full name, so no
+  // control ever nests inside another.
+  const disclosure = useSessionNameDisclosure(facts.title);
+  const orphan = facts.orphan;
 
   const activate = () => {
     if (suppressClick.current) {
@@ -211,10 +217,10 @@ export function ProjectCard({
       data-item-id={facts.id}
       data-item-kind={facts.orphan ? "orphan" : "project"}
       data-item-pinned={facts.pinned ? "true" : "false"}
-      role="button"
-      tabIndex={0}
-      aria-label={facts.title}
-      aria-pressed={selected}
+      role={orphan ? undefined : "button"}
+      tabIndex={orphan ? undefined : 0}
+      aria-label={orphan ? undefined : facts.title}
+      aria-pressed={orphan ? undefined : selected}
       className={cn(
         "group/tile relative flex min-w-0 cursor-default flex-col gap-3 rounded-card border p-4 pl-5 outline-none",
         "bg-elevation-level-1 transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none",
@@ -228,13 +234,24 @@ export function ProjectCard({
         activate();
       }}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
+        if (orphan || event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           activate();
         }
       }}
     >
+      {orphan
+        ? disclosure.hint(
+            <button
+              type="button"
+              aria-label={facts.title}
+              aria-pressed={selected}
+              className="absolute inset-0 rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]"
+              onClick={activate}
+            />,
+          )
+        : null}
       {attention ? (
         <Tooltip
           title="Run finished"
@@ -259,7 +276,7 @@ export function ProjectCard({
         />
       ) : null}
 
-      <div className="flex min-w-0 items-center gap-3">
+      <div className={cn("flex min-w-0 items-center gap-3", orphan && "pointer-events-none")}>
         {facts.orphan ? (
           <span className="flex size-7 shrink-0 items-center justify-center rounded-pill bg-[var(--f-wash-1)]">
             <Icon iconName={IconName.Chat} size={14} className="text-basic-tertiary" />
@@ -297,7 +314,12 @@ export function ProjectCard({
       </div>
 
       <div className="flex min-h-6 min-w-0 items-center justify-between gap-2">
-        <p className="type-meta tabular flex min-w-0 items-center gap-1.5 text-basic-tertiary">
+        <p
+          className={cn(
+            "type-meta tabular flex min-w-0 items-center gap-1.5 text-basic-tertiary",
+            orphan && "pointer-events-none",
+          )}
+        >
           {facts.running > 0 && !facts.orphan ? (
             <span className="inline-flex shrink-0 items-center gap-1 text-basic-primary">
               <span
@@ -310,85 +332,93 @@ export function ProjectCard({
           ) : null}
           <span className="truncate">{meta.join(" · ")}</span>
         </p>
-        <Popover
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          sticky
-          placement={PopoverPlacement.BottomLeft}
-          size={PopoverSize.Small}
-          content={
-            <Menu label={`${facts.title} options`}>
-              {onNewSession ? (
-                <MenuItem icon={IconName.Add} label="New session" onSelect={then(onNewSession)} />
-              ) : null}
-              {onIntervalTasks ? (
-                <MenuItem
-                  icon={IconName.Clock}
-                  label="Interval tasks"
-                  onSelect={then(onIntervalTasks)}
-                />
-              ) : null}
-              {onAssign ? (
-                <MenuItem
-                  icon={IconName.Folder}
-                  label="Assign to project"
-                  onSelect={then(onAssign)}
-                />
-              ) : null}
-              {onTogglePin ? (
-                <MenuItem
-                  icon={facts.pinned ? IconName.Unpin : IconName.Pin}
-                  label={facts.pinned ? "Unpin project" : "Pin project"}
-                  onSelect={then(onTogglePin)}
-                />
-              ) : null}
-              {onRename ? (
-                <MenuItem icon={IconName.Edit} label={`Rename ${kind}`} onSelect={then(onRename)} />
-              ) : null}
-              {reorder ? (
-                <>
+        <div className="relative z-[1] flex shrink-0 items-center gap-0.5">
+          {orphan ? disclosure.action : null}
+          <Popover
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            sticky
+            placement={PopoverPlacement.BottomLeft}
+            size={PopoverSize.Small}
+            content={
+              <Menu label={`${facts.title} options`}>
+                {onNewSession ? (
+                  <MenuItem icon={IconName.Add} label="New session" onSelect={then(onNewSession)} />
+                ) : null}
+                {onIntervalTasks ? (
                   <MenuItem
-                    icon={IconName.ArrowTop}
-                    label="Move earlier"
-                    disabled={!reorder.canMoveUp}
-                    onSelect={then(reorder.onMoveUp)}
+                    icon={IconName.Clock}
+                    label="Interval tasks"
+                    onSelect={then(onIntervalTasks)}
                   />
+                ) : null}
+                {onAssign ? (
                   <MenuItem
-                    icon={IconName.ArrowDown}
-                    label="Move later"
-                    disabled={!reorder.canMoveDown}
-                    onSelect={then(reorder.onMoveDown)}
+                    icon={IconName.Folder}
+                    label="Assign to project"
+                    onSelect={then(onAssign)}
                   />
-                </>
-              ) : null}
-              <MenuSeparator />
-              <MenuItem
-                icon={IconName.Trash}
-                label={`Delete ${kind}`}
-                destructive
-                onSelect={then(onDelete)}
-              />
-            </Menu>
-          }
-        >
-          <Button
-            variant={ButtonVariant.Ghost}
-            size={ButtonSize.Small}
-            content={ButtonContent.Icon}
-            aria-label={`${facts.title} options`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            className={cn(
-              "max-md:!size-11",
-              !menuOpen &&
-                "opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100",
-            )}
-            onClick={() => setMenuOpen((open) => !open)}
+                ) : null}
+                {onTogglePin ? (
+                  <MenuItem
+                    icon={facts.pinned ? IconName.Unpin : IconName.Pin}
+                    label={facts.pinned ? "Unpin project" : "Pin project"}
+                    onSelect={then(onTogglePin)}
+                  />
+                ) : null}
+                {onRename ? (
+                  <MenuItem
+                    icon={IconName.Edit}
+                    label={`Rename ${kind}`}
+                    onSelect={then(onRename)}
+                  />
+                ) : null}
+                {reorder ? (
+                  <>
+                    <MenuItem
+                      icon={IconName.ArrowTop}
+                      label="Move earlier"
+                      disabled={!reorder.canMoveUp}
+                      onSelect={then(reorder.onMoveUp)}
+                    />
+                    <MenuItem
+                      icon={IconName.ArrowDown}
+                      label="Move later"
+                      disabled={!reorder.canMoveDown}
+                      onSelect={then(reorder.onMoveDown)}
+                    />
+                  </>
+                ) : null}
+                <MenuSeparator />
+                <MenuItem
+                  icon={IconName.Trash}
+                  label={`Delete ${kind}`}
+                  destructive
+                  onSelect={then(onDelete)}
+                />
+              </Menu>
+            }
           >
-            <Icon iconName={IconName.MenuHorizontal} />
-          </Button>
-        </Popover>
+            <Button
+              variant={ButtonVariant.Ghost}
+              size={ButtonSize.Small}
+              content={ButtonContent.Icon}
+              aria-label={`${facts.title} options`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className={cn(
+                "max-md:!size-11",
+                !menuOpen &&
+                  "opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100",
+              )}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <Icon iconName={IconName.MenuHorizontal} />
+            </Button>
+          </Popover>
+        </div>
       </div>
+      {orphan ? disclosure.overlay : null}
     </div>
   );
 }

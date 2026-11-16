@@ -1,4 +1,5 @@
 import { Icon, IconName, StatusDot } from "@/app/atoms";
+import { useSessionNameDisclosure } from "@/app/atoms/session-name-disclosure";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { cn } from "@/app/lib/cn";
 import type { SessionStatus } from "@/app/lib/sessionStatus";
@@ -72,6 +73,8 @@ export function SessionRow({
   onAssign,
 }: SessionRowProps) {
   const age = compactAge(updatedAt, now);
+  // Long titles truncate; the full name stays one hover/keyboard step away.
+  const disclosure = useSessionNameDisclosure(title);
   return (
     <div
       data-session-row
@@ -84,37 +87,38 @@ export function SessionRow({
         "transition-colors duration-150 ease-out motion-reduce:transition-none",
       )}
     >
-      <button
-        type="button"
-        aria-label={label}
-        aria-current={active ? "page" : undefined}
-        title={title}
-        onClick={onOpen}
-        className={cn(
-          "flex h-full min-w-0 flex-1 items-center gap-2 text-left outline-none",
-          // Stretched hit area: the whole row opens the session.
-          "after:absolute after:inset-0 after:rounded-md",
-          "focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[var(--f-ring)]",
-        )}
-        style={{ paddingLeft: 10 + depth * INDENT }}
-      >
-        <span className="flex size-3 shrink-0 items-center justify-center">
-          <StatusDot status={status} />
-        </span>
-        {pinned ? (
-          <Icon iconName={IconName.Pin} size={12} className="shrink-0 text-basic-muted" />
-        ) : null}
-        <span
+      {disclosure.hint(
+        <button
+          type="button"
+          aria-label={label}
+          aria-current={active ? "page" : undefined}
+          onClick={onOpen}
           className={cn(
-            "min-w-0 flex-1 truncate",
-            touch ? "type-body-chrome !text-md" : "type-body-chrome",
-            active ? "font-medium text-basic-primary" : "text-basic-secondary",
-            status === "working" && "focus-shimmer",
+            "flex h-full min-w-0 flex-1 items-center gap-2 text-left outline-none",
+            // Stretched hit area: the whole row opens the session.
+            "after:absolute after:inset-0 after:rounded-md",
+            "focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[var(--f-ring)]",
           )}
+          style={{ paddingLeft: 10 + depth * INDENT }}
         >
-          {title}
-        </span>
-      </button>
+          <span className="flex size-3 shrink-0 items-center justify-center">
+            <StatusDot status={status} />
+          </span>
+          {pinned ? (
+            <Icon iconName={IconName.Pin} size={12} className="shrink-0 text-basic-muted" />
+          ) : null}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              touch ? "type-body-chrome !text-md" : "type-body-chrome",
+              active ? "font-medium text-basic-primary" : "text-basic-secondary",
+              status === "working" && "focus-shimmer",
+            )}
+          >
+            {title}
+          </span>
+        </button>,
+      )}
       {childCount > 0 && onToggleChildren ? (
         <button
           type="button"
@@ -157,6 +161,7 @@ export function SessionRow({
             )}
           />
         )}
+        {disclosure.action}
         <ChatSessionActions
           title={title}
           pinned={pinned}
@@ -167,6 +172,7 @@ export function SessionRow({
           onAssign={onAssign}
         />
       </div>
+      {disclosure.overlay}
     </div>
   );
 }

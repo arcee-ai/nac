@@ -10,13 +10,22 @@ import {
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import { createConfiguredChat } from "@/app/features/setup/workflow";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { creationBehavior } from "@/app/features/ui-policy/policy";
+import {
+  creationBehavior,
+  firstChatAdmission,
+  visibleSessions,
+} from "@/app/features/ui-policy/policy";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { UncertainCommandAdmissionError } from "@/app/services/nacClient";
-import { useCreateModelConfig, useCreateSession, useSubmitRun } from "@/app/services/queries";
+import {
+  useCreateModelConfig,
+  useCreateSession,
+  useSessions,
+  useSubmitRun,
+} from "@/app/services/queries";
 import type { BackendKind, SessionBehavior } from "@/app/types/api";
 
 import {
@@ -51,6 +60,23 @@ export function useStartSession() {
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
   const submitRun = useSubmitRun();
+  const { data: allSessions = [] } = useSessions();
+
+  /**
+   * A project's first primary session keeps the server's first-chat
+   * convergence: concurrent starts in an empty project land in one session.
+   * Hidden legacy sessions still count against admission, as before.
+   */
+  const firstChat = (projectId: string) => {
+    const visible = visibleSessions(policy, allSessions);
+    const empty = !visible.some(
+      (entry) => entry.lineage == null && entry.summary.project_id === projectId,
+    );
+    return {
+      first_chat: empty && firstChatAdmission(policy, allSessions, projectId),
+      first_chat_same_behavior: !policy.orchestrationEnabled,
+    };
+  };
   const { update: updateDraft } = useNativeRuntime().stores.promptDraftStore;
   const [error, setError] = useState<string | null>(null);
   const [plainBusy, setPlainBusy] = useState(false);
@@ -86,15 +112,16 @@ export function useStartSession() {
           };
         },
         chat: async (selected) => {
-          const snapshot = await createSession.mutateAsync(
-            configuredSessionRequest({
+          const snapshot = await createSession.mutateAsync({
+            ...configuredSessionRequest({
               policy,
               projectId: request.projectId,
               behavior: request.behavior,
               selected,
               light: overrideLight(policy, override, selected),
             }),
-          );
+            ...firstChat(request.projectId),
+          });
           return snapshot.metadata.session_id ?? null;
         },
       }),
@@ -106,6 +133,7 @@ export function useStartSession() {
     const snapshot = await createSession.mutateAsync({
       project_id: request.projectId,
       behavior: creationBehavior(policy, request.behavior),
+      ...firstChat(request.projectId),
     });
     return snapshot.metadata.session_id ?? null;
   };

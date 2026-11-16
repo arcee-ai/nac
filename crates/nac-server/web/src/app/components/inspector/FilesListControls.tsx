@@ -62,7 +62,7 @@ function Segmented({
             className={cn(
               "min-w-0 truncate rounded-pill transition-colors duration-150 ease-out",
               "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-border-focus-outline)]",
-              large ? "h-10 px-4 type-label" : "h-6 px-2.5 type-meta-strong",
+              large ? "h-11 px-4 type-label" : "h-6 px-2.5 type-meta-strong",
               selected
                 ? "bg-elevation-level-1 text-basic-primary shadow-sm"
                 : "text-basic-tertiary hover:text-basic-primary",

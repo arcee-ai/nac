@@ -212,7 +212,7 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
             size={ButtonSize.Medium}
             content={ButtonContent.Icon}
             aria-label="Settings"
-            onClick={() => go(routes.settings())}
+            onClick={() => go("/settings")}
           >
             <Icon iconName={IconName.Gear} />
           </Button>

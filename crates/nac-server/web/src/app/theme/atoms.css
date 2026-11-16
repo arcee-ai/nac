@@ -129,6 +129,15 @@
   height: 40px;
   padding: 0 18px;
 }
+/* Phones and touch screens: a large control is a full 44px target. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .btn-large.btn-icon,
+  .btn-large.btn-icon-left,
+  .btn-large.btn-icon-right,
+  .btn-large.btn-text {
+    height: 44px;
+  }
+}
 /* Tertiary is only as tall as its line. Same specificity as the matrix above,
    so it has to come after it. */
 .btn.btn-tertiary,
@@ -1201,4 +1210,12 @@
 }
 .group:hover .tooltip-box {
   pointer-events: auto;
+}
+
+/* Settings on phones: a focused field (and its error) scrolls clear of the
+   sticky Save/Cancel footer instead of under it. */
+@media (max-width: 767.98px) {
+  [data-settings-surface] :is(input, textarea, select, button, [role="alert"]) {
+    scroll-margin-bottom: 200px;
+  }
 }

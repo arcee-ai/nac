@@ -87,7 +87,7 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
         <MenuRow
           icon={IconName.Gear}
           label="Settings"
-          onClick={closeAnd(() => navigate(routes.settings()))}
+          onClick={closeAnd(() => navigate("/settings"))}
         />
         <div className="flex min-h-11 items-center justify-between gap-3 px-3">
           <span className="type-label !text-md text-basic-primary">Theme</span>
