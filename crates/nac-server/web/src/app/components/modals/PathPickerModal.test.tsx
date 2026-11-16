@@ -55,6 +55,7 @@ beforeEach(() => {
   localAnswers.clear();
   answerLocal(OLD, listing(OLD, [{ name: "nested", path: `${OLD}/nested`, is_directory: true }]));
   answerLocal(SPACED, listing(SPACED));
+  answerLocal(`  ${SPACED}  `, listing(`  ${SPACED}  `));
   answerLocal(`${SPACED}/`, listing(SPACED));
   answerLocal("~/proj", listing("/home/me/proj"));
   answerLocal("/work/missing", refuse(404, "path '/work/missing' does not exist"));
@@ -133,7 +134,7 @@ it.each([
   ["a path with spaces and Unicode", SPACED, SPACED],
   ["a trailing slash, resolved by the server", `${SPACED}/`, SPACED],
   ["a home-relative path, expanded by the server", "~/proj", "/home/me/proj"],
-  ["surrounding whitespace", `  ${SPACED}  `, SPACED],
+  ["literal surrounding whitespace", `  ${SPACED}  `, `  ${SPACED}  `],
 ])("Select applies the typed folder for %s without pressing Enter", async (_, typed, expected) => {
   const onSelect = vi.fn();
   renderWithClient(<Picker onSelect={onSelect} />);

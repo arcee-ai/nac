@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,7 +14,7 @@ const trust = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev
 const sort = value => Array.isArray(value) ? value.map(sort) : value && typeof value === "object"
   ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)])) : value;
 function verify(workflow) {
-  workflow = structuredClone(workflow); reverseAdmission(workflow);
+  workflow = structuredClone(workflow); reverseAssetTokens(workflow); reverseAdmission(workflow);
   const job = workflow.jobs["test-server"];
   assert.equal(job["runs-on"], "ubuntu-latest");
   assert.equal(job.needs, "prepare");
@@ -47,10 +48,10 @@ function verify(workflow) {
     step.run = step.run.replace("--fully-parallel ", "");
   }
   reversed.jobs["test-server"].steps.find(s => s.name === "Run nac-server tests").run = "cargo test -p nac-server --locked";
-  // Canonical full parsed workflow from ad3400565aad89834742893ad36183254b5098af.
+  // Canonical projection retains required startup custody and isolated native auth checks.
   // Reverse ONLY S12's server input: all three provenance fields stay present.
   assert.equal(createHash("sha256").update(JSON.stringify(sort(reversed))).digest("hex"),
-    "ff682ecf61c3194aebcd0de6b24cf8ebeaa583a9c542c6ef726db9c8826ed6ac");
+    "d58c312b872e6dc99dd0ba26f0dde69192e185297912c7125f10764bb2d77877");
 }
 
 test("only the server runner input changes; pinned compiler/cache trust and stable identity stay", () => verify(read()));

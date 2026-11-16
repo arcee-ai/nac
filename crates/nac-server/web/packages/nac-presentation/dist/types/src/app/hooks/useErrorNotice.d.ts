@@ -1,11 +1,9 @@
+import type { ChatSessionMessageAction } from "../atoms/chat-session-message";
 import { type RunError } from "../lib/providerError";
 export interface ErrorNotice {
     title: string;
     description?: string;
-    action?: {
-        label: string;
-        onClick: () => void;
-    };
+    action?: ChatSessionMessageAction;
 }
 /**
  * Turns a failure into the notice the chat shows, with the offered fix wired to

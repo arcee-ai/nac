@@ -1,6 +1,49 @@
 //! Bounded migration observations and credential-free operational status.
 use super::*;
 
+/// The selected store was written with a schema newer than this binary supports.
+/// This cause carries no path, SQL or stored data and never authorizes recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreFutureSchemaError {
+    found_version: i64,
+    minimum_supported_version: i64,
+    maximum_supported_version: i64,
+}
+
+impl StoreFutureSchemaError {
+    pub(super) fn new(found_version: i64) -> Self {
+        Self {
+            found_version,
+            minimum_supported_version: MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+            maximum_supported_version: STORE_SCHEMA_VERSION,
+        }
+    }
+
+    pub const fn found_version(&self) -> i64 {
+        self.found_version
+    }
+
+    pub const fn minimum_supported_version(&self) -> i64 {
+        self.minimum_supported_version
+    }
+
+    pub const fn maximum_supported_version(&self) -> i64 {
+        self.maximum_supported_version
+    }
+}
+
+impl std::fmt::Display for StoreFutureSchemaError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "unsupported store schema version {}; this build supports versions {} through {}",
+            self.found_version, self.minimum_supported_version, self.maximum_supported_version
+        )
+    }
+}
+
+impl std::error::Error for StoreFutureSchemaError {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreMigrationState {
     Migrating,
