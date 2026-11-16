@@ -310,7 +310,7 @@ pub(super) fn test_active_service(label: &str, session_id: &str) -> (SessionServ
     test_active_service_with_skills(label, session_id, ModelClient::new_for_test(), None)
 }
 
-pub(super) fn test_direct_active_service(
+pub(crate) fn test_direct_active_service(
     label: &str,
     session_id: &str,
     client: ModelClient,
@@ -318,7 +318,7 @@ pub(super) fn test_direct_active_service(
     test_direct_active_service_at(session_id, client, test_store_path(label))
 }
 
-pub(super) fn test_direct_active_service_at(
+pub(crate) fn test_direct_active_service_at(
     session_id: &str,
     client: ModelClient,
     store_path: PathBuf,

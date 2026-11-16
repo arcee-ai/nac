@@ -51,8 +51,21 @@ describe("session panel policy", () => {
     });
     for (const behavior of ["direct", "direct-with-orchestrator"] satisfies SessionBehavior[]) {
       expect(sessionPanelPolicy(behavior, null)).toEqual({
-        widePanels: ["insights", "delegated", "files", "terminal"],
-        mobilePanels: ["insights", "delegated", "files", "terminal", "history"],
+        widePanels: [
+          "insights",
+          "delegated",
+          "files",
+          "terminal",
+          ...(behavior === "direct" ? ["heartbeats"] : []),
+        ],
+        mobilePanels: [
+          "insights",
+          "delegated",
+          "files",
+          "terminal",
+          "history",
+          ...(behavior === "direct" ? ["heartbeats"] : []),
+        ],
         defaultPanel: "insights",
         readOnly: false,
       });

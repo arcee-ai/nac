@@ -1,0 +1,511 @@
+{
+  "strategy": "S02",
+  "refinement": "Native individual-test ordinary sharding; no new strategy count.",
+  "parent": "3769e2aa11d2c36de75305355f167c921b2b81e8",
+  "immutable_code_and_test_source": "9db6465ed019af0a32a1086d620a333fdb11329b",
+  "scope": "Two ordinary CLI flags plus strict lane-specific inventory and parsed guards. Default Playwright config/proof lane/assertions/deadlines/retries/ignored behavior unchanged.",
+  "fixture_isolation": "Native per-test harness/workspace/store/provider/context; no beforeAll/afterAll/serial suite/worker-scoped fixture coupling. Only remote.e2e all-hooks, already excluded from native selection.",
+  "actual_current_offline_control_and_assignment_model": {
+    "source": "3769e2aa11d2c36de75305355f167c921b2b81e8",
+    "native_complete": 205,
+    "native_proof": 2,
+    "cold_run": 41980585599,
+    "prepared_source": "941d0f6d06fc2c0ea6d90e343445b769675883d2",
+    "file": {
+      "parts": [
+        {
+          "shard": 1,
+          "tests": 31,
+          "cold614_test_time_sum_seconds": 96.831,
+          "skip_count": 0
+        },
+        {
+          "shard": 2,
+          "tests": 21,
+          "cold614_test_time_sum_seconds": 102.9,
+          "skip_count": 0
+        },
+        {
+          "shard": 3,
+          "tests": 27,
+          "cold614_test_time_sum_seconds": 98.0,
+          "skip_count": 0
+        },
+        {
+          "shard": 4,
+          "tests": 24,
+          "cold614_test_time_sum_seconds": 178.709,
+          "skip_count": 0
+        },
+        {
+          "shard": 5,
+          "tests": 44,
+          "cold614_test_time_sum_seconds": 284.3,
+          "skip_count": 1
+        },
+        {
+          "shard": 6,
+          "tests": 9,
+          "cold614_test_time_sum_seconds": 30.8,
+          "skip_count": 0
+        },
+        {
+          "shard": 7,
+          "tests": 22,
+          "cold614_test_time_sum_seconds": 153.4,
+          "skip_count": 0
+        },
+        {
+          "shard": 8,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 169.343,
+          "skip_count": 0
+        }
+      ],
+      "max_modeled_execution_seconds": 284.3,
+      "full_disjoint_union": 205
+    },
+    "test": {
+      "parts": [
+        {
+          "shard": 1,
+          "tests": 26,
+          "cold614_test_time_sum_seconds": 70.031,
+          "skip_count": 0
+        },
+        {
+          "shard": 2,
+          "tests": 26,
+          "cold614_test_time_sum_seconds": 129.7,
+          "skip_count": 0
+        },
+        {
+          "shard": 3,
+          "tests": 26,
+          "cold614_test_time_sum_seconds": 88.1,
+          "skip_count": 0
+        },
+        {
+          "shard": 4,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 188.609,
+          "skip_count": 0
+        },
+        {
+          "shard": 5,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 145.3,
+          "skip_count": 1
+        },
+        {
+          "shard": 6,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 163.0,
+          "skip_count": 0
+        },
+        {
+          "shard": 7,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 160.2,
+          "skip_count": 0
+        },
+        {
+          "shard": 8,
+          "tests": 25,
+          "cold614_test_time_sum_seconds": 169.343,
+          "skip_count": 0
+        }
+      ],
+      "max_modeled_execution_seconds": 188.609,
+      "full_disjoint_union": 205
+    },
+    "cold614_runtime_skips": [
+      [
+        "review.e2e.ts",
+        25,
+        "reviews eligible requests, returns blocked actions and reviews an authorized retry again"
+      ]
+    ],
+    "longest_current_files": [
+      [
+        "session-names.e2e.ts",
+        154.70000000000002
+      ],
+      [
+        "embedded.e2e.ts",
+        86.25800000000001
+      ],
+      [
+        "hosted-surfaces.e2e.ts",
+        54.0
+      ],
+      [
+        "ui-policy.e2e.ts",
+        49.038
+      ],
+      [
+        "terminal-selection.e2e.ts",
+        43.900000000000006
+      ]
+    ],
+    "limits": "Only assignment model from actual cold614 per-test times. Does not model changed startup/CPU/load/worker lifecycle; no hosted gain claimed. Proof same2cases left serial and unchanged."
+  },
+  "actual_native_local_file_comparison": {
+    "strategy": "S02 refinement only",
+    "code_source": "9db6465ed019af0a32a1086d620a333fdb11329b",
+    "runtime_binary_source": "28ac6bead8fbb616fe424b7a720c1b72a35a3f00",
+    "runtime_binary_sha256": "7f311f35ca780d04c7365483b82f708e087e2a01cca66ababa0532ed74713010",
+    "binary_source_limit": "Runtime sourceID28ac differs; entire Rust dependency/source/build graph, version, lock and committed assets equal3769. Same immutable APFS clone both arms, never mutable hardlink. This is local scheduling validation, not current-head ALL471/CI acceptance.",
+    "scope": "Actual current longest21-case session-names file, native4partition commands/oneworker each; not fullordinary or8-hosted-machine acceptance. Originalfile mode has3empty local subpartitions/1activeworker; new mode has4activeworkers. Every21case executes exactlyonce each arm.",
+    "cases_passed_each_arm": 21,
+    "case_timeout_parity": true,
+    "failures": 0,
+    "retries": 0,
+    "skips": 0,
+    "file_mode": {
+      "reports": [
+        {
+          "file": "local-file-1.json",
+          "stats": {
+            "startTime": "2026-11-05T07:10:30.489Z",
+            "duration": 112221.44099999999,
+            "expected": 21,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "actualWorkers": 1
+        }
+      ],
+      "times": [
+        {
+          "file": "local-file-1.time",
+          "wall": 112.45,
+          "user": 80.87,
+          "system": 21.64,
+          "Darwin_max_RSS_bytes": 921960448
+        }
+      ],
+      "elapsed_seconds": 112.70939712499967,
+      "max_active_CLI_worker_slots": 1,
+      "sampled_owned_process_RSS_sum_peak_kib": 2070336,
+      "user_seconds_sum": 80.87,
+      "system_seconds_sum": 21.64
+    },
+    "test_mode": {
+      "reports": [
+        {
+          "file": "local-test-1.json",
+          "stats": {
+            "startTime": "2026-11-05T07:12:24.419Z",
+            "duration": 32796.383,
+            "expected": 6,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "actualWorkers": 1
+        },
+        {
+          "file": "local-test-2.json",
+          "stats": {
+            "startTime": "2026-11-05T07:12:24.410Z",
+            "duration": 26989.586,
+            "expected": 5,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "actualWorkers": 1
+        },
+        {
+          "file": "local-test-3.json",
+          "stats": {
+            "startTime": "2026-11-05T07:12:24.412Z",
+            "duration": 31171.571,
+            "expected": 5,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "actualWorkers": 1
+        },
+        {
+          "file": "local-test-4.json",
+          "stats": {
+            "startTime": "2026-11-05T07:12:24.412Z",
+            "duration": 24034.75,
+            "expected": 5,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          },
+          "actualWorkers": 1
+        }
+      ],
+      "times": [
+        {
+          "file": "local-test-1.time",
+          "wall": 33.06,
+          "user": 31.12,
+          "system": 7.67,
+          "Darwin_max_RSS_bytes": 322945024
+        },
+        {
+          "file": "local-test-2.time",
+          "wall": 27.24,
+          "user": 19.61,
+          "system": 6.07,
+          "Darwin_max_RSS_bytes": 915144704
+        },
+        {
+          "file": "local-test-3.time",
+          "wall": 31.42,
+          "user": 23.05,
+          "system": 7.36,
+          "Darwin_max_RSS_bytes": 911982592
+        },
+        {
+          "file": "local-test-4.time",
+          "wall": 24.29,
+          "user": 17.96,
+          "system": 4.97,
+          "Darwin_max_RSS_bytes": 487391232
+        }
+      ],
+      "elapsed_seconds": 33.61647416697815,
+      "max_active_CLI_worker_slots": 4,
+      "sampled_owned_process_RSS_sum_peak_kib": 5236512,
+      "user_seconds_sum": 91.74000000000001,
+      "system_seconds_sum": 26.07
+    },
+    "local_file_elapsed_reduction_fraction": 0.7017420461428251,
+    "memory_method": "0.5s ps RSS samples sum owned CLI descendants+isolated binary processes; shared pages may be double-counted. Darwin time maxRSS per command is not aggregate memory.",
+    "host_free_bytes": 23479357440,
+    "owned_evidence_bytes_after": 406331392,
+    "binary_hash_after": "7f311f35ca780d04c7365483b82f708e087e2a01cca66ababa0532ed74713010",
+    "remaining_owned_binary_processes": [],
+    "test_names": [
+      "extreme current name, rename, navigation and deletion lifetimes",
+      "embedded consumers keep full-name layers and keyboard ownership isolated",
+      "packed full-name view stays inside the hosted frame and preserves caller styles",
+      "narrow delegated detail headers reveal the current full name 768",
+      "full-name view is viewport-bounded with an oversized presentation ancestor",
+      "full names on navigation 1440 dark",
+      "orphan cards disclose names without nested controls 390",
+      "running full-name headings keep their visible shimmer text",
+      "retained tab strip and session collection 1440",
+      "orphan cards disclose names without nested controls 1440",
+      "full names on navigation 390 dark",
+      "full names at real 200 percent browser zoom",
+      "full names on navigation 768 dark",
+      "parent names preserve lineage and navigation 390",
+      "retained tab strip and session collection 768",
+      "full names on navigation 768 light",
+      "full names on navigation 390 light",
+      "full names on navigation 1440 light",
+      "retained tab strip and session collection 390",
+      "parent names preserve lineage and navigation 1440",
+      "narrow delegated detail headers reveal the current full name 390"
+    ],
+    "limits": [
+      "Single ordered file-only pair; CPU/cache/order/startup contention can affect results.",
+      "Different active worker counts are the intended native shard distribution mechanism; do not call this fullsuite local worker comparison or a new strategy.",
+      "Proofcase execution was not repeated; its exact2-case native selection/config/workflow unchanged, and complete205union guards passed.",
+      "Current source has no fresh-interval-tasks file; oldmodel2x132s premise was rejected. Actualcold614session-name timings substantiate current imbalance."
+    ]
+  },
+  "runtime_build_binding": {
+    "candidate_source": "9db6465ed019af0a32a1086d620a333fdb11329b",
+    "test_source_parent": "3769e2aa11d2c36de75305355f167c921b2b81e8",
+    "binary_source": "28ac6bead8fbb616fe424b7a720c1b72a35a3f00",
+    "binary_sha256": "7f311f35ca780d04c7365483b82f708e087e2a01cca66ababa0532ed74713010",
+    "binary_bytes": 237228520,
+    "binary_version": "nac-web 0.1.4 (28ac6bead8fb)",
+    "binary_identity_limit": "Runtime sourceID28ac differs; entire Rust dependency/source/build graph, version, lock and committed assets equal3769. Same immutable APFS clone both arms, never mutable hardlink. This is local scheduling validation, not current-head ALL471/CI acceptance.",
+    "source_graph_equal_paths": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "version.txt",
+      "scripts/build-identity.rs",
+      "crates/*/Cargo.toml",
+      "crates/*/build.rs",
+      "crates/*/src",
+      "crates/nac-server/assets"
+    ],
+    "platform": "macOS27.0.1/aarch64",
+    "worker_cap": 4,
+    "started_utc": "2026-11-05T07:10:28.775302+00:00",
+    "finished_utc": "2026-11-05T07:12:57.933184+00:00"
+  },
+  "native_command_receipts": [
+    {
+      "mode": "file",
+      "started_utc": "2026-11-05T07:10:30.255003+00:00",
+      "commands": [
+        {
+          "shard": 1,
+          "command": [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-file-1.time",
+            "/opt/homebrew/bin/node",
+            "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web/node_modules/@playwright/test/cli.js",
+            "test",
+            "session-names.e2e.ts",
+            "--shard=1/4",
+            "--reporter=json"
+          ],
+          "env_additions": {
+            "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-file-results-1",
+            "NAC_E2E_CLEANUP_ID": "all582-s02-file-1-d79aabd21881484d828136c045a58b28"
+          },
+          "selected": 21,
+          "pid": 71919
+        }
+      ],
+      "idle_empty_partitions": [
+        2,
+        3,
+        4
+      ],
+      "max_active_CLI_worker_slots": 1,
+      "max_owned_process_RSS_kib": 2070336,
+      "elapsed_seconds": 112.70939712499967,
+      "finished_utc": "2026-11-05T07:12:22.965090+00:00",
+      "exit_codes": {
+        "1": 0
+      },
+      "remaining_owned_processes": []
+    },
+    {
+      "mode": "test",
+      "started_utc": "2026-11-05T07:12:24.154998+00:00",
+      "commands": [
+        {
+          "shard": 1,
+          "command": [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-1.time",
+            "/opt/homebrew/bin/node",
+            "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web/node_modules/@playwright/test/cli.js",
+            "test",
+            "session-names.e2e.ts",
+            "--shard=1/4",
+            "--fully-parallel",
+            "--reporter=json"
+          ],
+          "env_additions": {
+            "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-results-1",
+            "NAC_E2E_CLEANUP_ID": "all582-s02-test-1-6b4e904d7b504d92b3589e30150b67f8"
+          },
+          "selected": 6,
+          "pid": 81225
+        },
+        {
+          "shard": 2,
+          "command": [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-2.time",
+            "/opt/homebrew/bin/node",
+            "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web/node_modules/@playwright/test/cli.js",
+            "test",
+            "session-names.e2e.ts",
+            "--shard=2/4",
+            "--fully-parallel",
+            "--reporter=json"
+          ],
+          "env_additions": {
+            "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-results-2",
+            "NAC_E2E_CLEANUP_ID": "all582-s02-test-2-a111563ae8b543c3982a7da2b5f0a9af"
+          },
+          "selected": 5,
+          "pid": 81226
+        },
+        {
+          "shard": 3,
+          "command": [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-3.time",
+            "/opt/homebrew/bin/node",
+            "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web/node_modules/@playwright/test/cli.js",
+            "test",
+            "session-names.e2e.ts",
+            "--shard=3/4",
+            "--fully-parallel",
+            "--reporter=json"
+          ],
+          "env_additions": {
+            "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-results-3",
+            "NAC_E2E_CLEANUP_ID": "all582-s02-test-3-142ee8fd06ad4b1888a30f0a5126c21a"
+          },
+          "selected": 5,
+          "pid": 81228
+        },
+        {
+          "shard": 4,
+          "command": [
+            "/usr/bin/time",
+            "-l",
+            "-o",
+            "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-4.time",
+            "/opt/homebrew/bin/node",
+            "/Users/allison/.codex/worktrees/all-582-browser/allison-demo/crates/nac-server/web/node_modules/@playwright/test/cli.js",
+            "test",
+            "session-names.e2e.ts",
+            "--shard=4/4",
+            "--fully-parallel",
+            "--reporter=json"
+          ],
+          "env_additions": {
+            "NAC_E2E_ARTIFACTS": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards/local-test-results-4",
+            "NAC_E2E_CLEANUP_ID": "all582-s02-test-4-ea588509920a4c7d9dbaf0cf1428ac37"
+          },
+          "selected": 5,
+          "pid": 81230
+        }
+      ],
+      "idle_empty_partitions": [],
+      "max_active_CLI_worker_slots": 4,
+      "max_owned_process_RSS_kib": 5236512,
+      "elapsed_seconds": 33.61647416697815,
+      "finished_utc": "2026-11-05T07:12:57.771694+00:00",
+      "exit_codes": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0
+      },
+      "remaining_owned_processes": []
+    }
+  ],
+  "native_inventory_report_hashes": {
+    "complete.json": "3cda360db751ca322301ed8964bf7a05ec18e59096c840939b3a7b666a61a9ed",
+    "proof.json": "feb8db181453bc0b37a3e5064f018f650802e6c857dcc1218236310232305cdc",
+    "test-1.json": "112a2b18c6ae97cc49a23e573d0301c4b95b1d6aff353b352a36b0f449889e52",
+    "test-2.json": "3bb27ee2482c9c00cd9f346e8fe950ebc16f938f3439e20eab3284be3b6f6cfb",
+    "test-3.json": "a0d6f1f76f2524e8f96314bc6ac5acf437a77aa329b0757bb10f70412427531e",
+    "test-4.json": "23e0f3e9902a92c6e7fbf346f2c668975a5257639dbedcac057e24a95ce3aa15",
+    "test-5.json": "c4248f117c091074dc6795922e0a520b120691cbd70dd8946aacb89429697732",
+    "test-6.json": "4d14ec5b130d10fc065fb176a7ddc705830fda39ab4bb7b72d69cd7f4d18f11d",
+    "test-7.json": "4af29946c0c138ab0e389c73f04776ebf410037b7e04bc004816ae83abd28e39",
+    "test-8.json": "571f6a224d5a62e38099c5e7316eb55e3eecb088918ea60d57323032b1e96b95"
+  },
+  "proof_limit": "Same exact2-case list/config/workflow; proof was not executed again by this file-only control. Hosted future candidate must still execute all mandatory proof and ordinary cases.",
+  "postprocessing_notes": [
+    "Initial duration parser corrected nested suite title paths and a Counter key-only update; original native list collection retained.",
+    "Review fixture is an existing runtime skip observed directly in cold614; static native list expectedStatus remains unchanged, not reclassified to make the model pass.",
+    "Historical fresh-interval file does not exist in current source; no synthetic source/test window was created."
+  ],
+  "raw_local_only_locator": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/browser/s02-test-shards",
+  "raw_locator_boundary": "Local retained raw metadata/logs/JSON/timers/SQLite/provider journals, never portable build inputs.",
+  "first_outcome_boundary": "Both actual arms passed once,21/21 each, no retries or runtime reruns. Original measured S02/S06/S12 evidence unchanged.",
+  "acceptance_limit": "Full203ordinary+2proof hosted performance/current-candidate acceptance pending; no8-machine, whole-CI, compression, aggregate physical-memory or cloud compute-saving claim."
+}

@@ -7,6 +7,7 @@ import { NoticeAction, TerminalFrame, TerminalNotice, type TerminalOption } from
 import type { TerminalSelectionCapture } from "./TerminalPane";
 import type { TerminalHeading } from "./terminalLabels";
 import { useInputOwnership } from "./useInputOwnership";
+import { useTerminalLinkMode } from "./terminalLinkMode";
 import { useTerminalController } from "./useTerminalController";
 
 interface ExecutionDetailProps {
@@ -72,10 +73,12 @@ function TerminalDisplay({
   onReviewSelection,
 }: ExecutionDetailProps & { notices: readonly ReactNode[] }) {
   const terminalId = source.id;
+  const linkMode = useTerminalLinkMode();
   const ownership = useInputOwnership(sessionId, source, historical);
   const element = useRef<HTMLDivElement>(null);
   const controller = useTerminalController(sessionId, terminalId, element, source, {
     readonly: historical,
+    linkMode,
     inputControl: ownership.state ?? null,
     inputPaused: ownership.pending,
   });

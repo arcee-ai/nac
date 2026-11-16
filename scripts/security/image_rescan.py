@@ -10,7 +10,8 @@ from image_inventory import require, timestamp, write_json
 from image_scan import ROOT, command
 
 PRODUCER = ".github/workflows/stable-release.yml"
-INVENTORY_JOB = "managed / build-smoke"
+INVENTORY_JOB = "managed-image / build-smoke"
+LEGACY_INVENTORY_JOB = "managed / build-smoke"
 INVENTORY_STEP = "Inventory the exact tested image"
 
 
@@ -24,7 +25,8 @@ def trusted_run(run, now):
 
 
 def inventory_succeeded(jobs):
-    producers = [job for job in jobs if job.get("name") == INVENTORY_JOB]
+    producers = [job for job in jobs if job.get("name") in {INVENTORY_JOB, LEGACY_INVENTORY_JOB}]
+    require(len(producers) <= 1, "inventory producer jobs are ambiguous")
     if len(producers) != 1 or producers[0].get("status") != "completed":
         return False
     steps = [step for step in producers[0].get("steps", []) if step.get("name") == INVENTORY_STEP]

@@ -1039,6 +1039,7 @@ async fn child_terminal_crash_window_recovers_report_and_delivers_once() {
         session_id,
         "run-terminal",
         crate::store::RunTerminalDisposition::Completed,
+        None,
     )
     .unwrap();
     transaction.commit().unwrap();
@@ -1325,6 +1326,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
 
     let (prompt_commit, _prompt_commit_receiver) = watch::channel(RunPromptCommitStatus::Pending);
     *service.lock_active_operation() = Some(ActiveSessionOperation::Run(ActiveRunState {
+        heartbeat: false,
         snapshot: ActiveRunSnapshot {
             run_id: SessionRunId::new(),
             client_id: None,
@@ -1340,6 +1342,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         transcript_baseline: None,
         command_cancellation: crate::tools::ThreadCancellation::default(),
         inbox_item_id: None,
+        inbox_prompt: None,
         review_intent: None,
         _operation_lease: None,
         _workspace_activity_lease: None,
@@ -1857,4 +1860,94 @@ async fn maintenance_rejects_child_steering_before_inbox_mutation() {
         .is_empty());
     parts.service.clear_finished_run(&active.run_id);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[path = "question_delivery_retry.rs"]
+mod question_delivery_retry;
+
+#[test]
+fn stopped_direct_wake_waits_for_admitted_unowned_tail_before_store_retirement() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let id = "stopped-wake-tail";
+        let (parts, path) =
+            test_direct_active_service("stopped_wake_tail", id, ModelClient::new_for_test());
+        let service = parts.service.clone();
+        assert!(crate::store::coordinator::owner_for(&path)
+            .unwrap()
+            .is_none());
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        struct Release(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                *self.0 .0.lock().unwrap() = true;
+                self.0 .1.notify_all();
+            }
+        }
+        let release = Release(gate.clone());
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered.send(()).unwrap();
+            let held = gate.0.lock().unwrap();
+            let (held, _) = gate
+                .1
+                .wait_timeout_while(held, Duration::from_secs(5), |released| !*released)
+                .unwrap();
+            assert!(*held, "test gate expired before explicit release");
+        });
+        started.await.unwrap();
+        let predecessor = service.clone();
+        let predecessor_path = path.clone();
+        // Exercise the real with-lease caller under the same wake ownership as
+        // start_next_direct_inbox_item, queued behind the local blocking pool.
+        let mut tail = Box::pin(async move {
+            let _wake = predecessor.inbox_wake.lock().await;
+            let lease =
+                sessions::SessionOperationLease::try_acquire(&predecessor_path, id).unwrap();
+            predecessor
+                .start_next_direct_inbox_item_with_lease_async(lease)
+                .await
+        });
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(tail.as_mut(), &mut context).is_pending());
+        assert!(!service.has_active_operation());
+        // Stop raises the admission gate on its first poll, but its real
+        // heartbeat/terminal cancellation also needs the occupied pool.
+        let mut stop = Box::pin(service.stop_run_admission());
+        assert!(std::future::Future::poll(stop.as_mut(), &mut context).is_pending());
+        assert!(service
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire));
+        let mut stopped_wake = Box::pin(service.start_next_direct_inbox_item());
+        assert!(std::future::Future::poll(stopped_wake.as_mut(), &mut context).is_pending());
+        // Both stop's cancellation and the earlier read need this worker.
+        // Release it before awaiting either, then join every real obligation.
+        drop(release);
+        blocker.await.unwrap();
+        let (tail, stop, stopped_wake) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(tail, stop, stopped_wake)
+        })
+        .await
+        .unwrap();
+        assert!(tail.unwrap().is_none());
+        stop.unwrap();
+        assert!(stopped_wake.unwrap().is_none());
+        assert!(!service.has_active_operation());
+        let root = path.parent().unwrap().to_owned();
+        std::fs::remove_dir_all(&root).unwrap();
+        // Even a later finishing wake cannot recreate a deleted store once
+        // admission is closed: its stopped check precedes every store read.
+        assert!(service
+            .start_next_direct_inbox_item()
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!root.exists());
+        drop(service);
+        drop(parts);
+    });
 }

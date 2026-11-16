@@ -1101,7 +1101,10 @@ test("uses an Advanced saved provider account from the unified composer without 
     (candidate) =>
       candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
   );
-  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  await page
+    .getByRole("group", { name: "Model results", exact: true })
+    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
+    .click();
   const body = (await mutation).postDataJSON() as Record<string, unknown>;
   expect(body).toMatchObject({
     backend: "fireworks-chat",
@@ -1151,7 +1154,10 @@ test("uses an Advanced saved provider account for the light model without exposi
   const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
   await lightRow.getByRole("button").click();
   await page.getByPlaceholder("Search models…").fill("fireworks-chat");
-  await page.getByRole("button", { name: /gpt-5\.6-sol gpt-5\.6-sol/ }).click();
+  await page
+    .getByRole("group", { name: "Model results", exact: true })
+    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
+    .click();
 
   const mutation = page.waitForRequest(
     (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
@@ -1816,7 +1822,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Parent chat" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("button", { name: "Parent chat" })).toBeVisible();
   await expect(page.getByText("Traditional coding agent", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
@@ -1838,11 +1844,13 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await expect(mobilePanel.getByRole("tab", { name: "Threads" })).toHaveCount(0);
   await expect(mobilePanel.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  // The visible Close target still moves until the phone sheet finishes entering.
+  await expect(mobilePanel).toHaveCSS("translate", "0px");
   await mobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(mobilePanel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "Parent chat" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Parent chat" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await showSidePanel(page);
   await page
@@ -1918,6 +1926,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await managedMobilePanel.getByRole("tab", { name: "History" }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/history$`));
   await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
+  await expect(managedMobilePanel).toHaveCSS("translate", "0px");
   await managedMobilePanel.getByRole("button", { name: "Close" }).click();
   await expect(managedMobilePanel).toBeHidden();
   await page.getByRole("button", { name: "Parent chat" }).click();

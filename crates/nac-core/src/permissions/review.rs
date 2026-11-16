@@ -872,6 +872,15 @@ impl ReviewMemory {
         }
     }
 
+    pub(super) fn blocked_ids(&self) -> impl ExactSizeIterator<Item = (&str, &str)> {
+        self.blocked.iter().map(|blocked| {
+            (
+                blocked.review.session_id.as_str(),
+                blocked.review.id.as_str(),
+            )
+        })
+    }
+
     pub(crate) fn blocked(&self) -> Vec<PermissionReview> {
         self.blocked
             .iter()
