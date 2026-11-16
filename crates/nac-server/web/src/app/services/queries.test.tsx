@@ -130,6 +130,7 @@ describe("session-list polling split", () => {
     const delayedStats = deferred<ManagedSessionSummary[]>();
     let baseRead = 0;
     let statsRead = 0;
+    let allowNewBase = false;
     // Hold the empty base response until after the late stats merge is
     // asserted — otherwise a 5ms base poll can race past the merge window.
     let allowEmptyBase = false;
@@ -140,7 +141,9 @@ describe("session-list polling split", () => {
         return Promise.resolve([session("deleted", "stale", 99)]);
       }
       baseRead += 1;
-      if (baseRead === 1) return Promise.resolve([session("kept", "old")]);
+      if (baseRead === 1 || !allowNewBase) {
+        return Promise.resolve([session("kept", "old")]);
+      }
       if (!allowEmptyBase) return Promise.resolve([session("kept", "new")]);
       return Promise.resolve([]);
     });
@@ -153,6 +156,7 @@ describe("session-list polling split", () => {
       expect(renderedData(renderer)).toEqual([{ title: "old" }]);
     });
     expect(statsRead).toBe(1);
+    allowNewBase = true;
 
     await waitFor(() => {
       expect(renderedData(renderer)).toEqual([{ title: "new" }]);

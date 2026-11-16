@@ -3,6 +3,7 @@
 export const NAC_API_SURFACE = {
     "GET /sessions/{session_id}/integrations": "private:standalone session integration status",
     "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh",
+    "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath",
     "GET /product-context": "api.getProductContext",
     "POST /product-destinations/resolve": "api.resolveProductDestination",
     "POST /sessions/{session_id}/task-followup-delegations": "private:human task follow-up delegation issuance",

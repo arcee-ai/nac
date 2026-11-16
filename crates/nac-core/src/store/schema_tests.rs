@@ -1,4 +1,6 @@
 use super::*;
+#[path = "schema/dependency_tests.rs"]
+mod dependency_tests;
 #[path = "schema/http_policy_tests.rs"]
 mod http_policy_tests;
 

@@ -37,7 +37,9 @@ async fn removing_deleted_server_oauth_flow_aborts_its_watchdog() {
         OAuthFlowState::Connecting {
             generation: u64::MAX,
             authorization_url: "https://auth.example.test/authorize".into(),
+            started_at: std::time::Instant::now(),
             task: Some(task),
+            loopback_listeners: None,
         },
     );
 
