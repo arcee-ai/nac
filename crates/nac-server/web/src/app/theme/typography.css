@@ -1,187 +1,166 @@
-/* Typography from ArceeFM index.css, with @apply resolved to concrete values
-   (text-xs .75/1rem, text-sm .875/1.25, text-base 1/1.5, text-lg 1.125/1.75,
-   text-xl 1.25/1.75; medium 500, semibold 600, bold 700). Font: Inter. */
+/* Focus — one type scale.
+   Every class below draws from the `--type-*` steps in `primitives.css`, so
+   the many historical names (header-*, label-*, text-*, paragraph-*) are
+   aliases onto a single ramp rather than parallel scales:
 
+     2xs 11 · xs 12 · sm 13 (chrome) · md 14 · body 15 (conversation)
+     lg 17 · xl 20 · 2xl 24 · 3xl 30        weights 400 / 500 / 600
+
+   Prefer the short `type-*` names in new code. */
+
+.type-display,
 .title {
-  font-family: Inter;
-  font-weight: 500;
-  font-size: 28px;
-  line-height: 2rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--type-2xl);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
 }
 @media (min-width: 768px) {
+  .type-display,
   .title {
-    font-size: 32px;
-    line-height: 36px;
+    font-size: var(--type-3xl);
   }
 }
-.subtitle {
-  font-family: Inter;
-  font-weight: 500;
-  font-size: 22px;
-  line-height: 1.75rem;
-}
-@media (min-width: 768px) {
-  .subtitle {
-    font-size: 24px;
-    line-height: 32px;
-  }
-}
-
-/* Figma "Header/Header-md": semibold 16/24, unlike .header-small which is bold. */
-.header-md {
-  font-family: Inter;
-  font-size: 1rem;
-  line-height: 1.5rem;
-  font-weight: 600;
-}
-/* Figma "Header/Header-sm": semibold 14/20, unlike .header-micro which is bold. */
-.header-sm {
-  font-family: Inter;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
-  font-weight: 600;
-}
-/* Figma "Header/Header-2xs": semibold 11/14, the size of a git status letter. */
-.header-2xs {
-  font-family: Inter;
-  font-size: 0.6875rem;
-  line-height: 0.875rem;
-  font-weight: 600;
-}
-/* Figma "Header/Header-2xl": semibold 24/32, unlike .subtitle which is medium. */
+.type-title,
+.subtitle,
 .header-2xl {
-  font-family: Inter;
-  font-size: 1.5rem;
-  line-height: 2rem;
+  font-family: var(--font-sans);
   font-weight: 600;
+  font-size: var(--type-xl);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
 }
-
-.header-big {
-  font-family: Inter;
-  font-size: 1.25rem;
-  line-height: 1.75rem;
-  font-weight: 700;
-}
+.type-heading,
+.header-big,
 .header-medium {
-  font-family: Inter;
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--type-lg);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
 }
+.type-subheading,
+.header-md,
 .header-small {
-  font-family: Inter;
-  font-size: 1rem;
-  line-height: 1.5rem;
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--type-md);
+  line-height: 1.45;
 }
+.type-strong,
+.header-sm,
 .header-micro {
-  font-family: Inter;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--type-sm);
+  line-height: 1.45;
+}
+.header-2xs {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--type-2xs);
+  line-height: 1.3;
 }
 
-.label-big {
-  font-family: Inter;
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-  font-weight: 500;
-}
+.label-big,
 .label-medium {
-  font-family: Inter;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  font-family: var(--font-sans);
   font-weight: 500;
+  font-size: var(--type-md);
+  line-height: 1.45;
 }
+.type-label,
 .label-small {
-  font-family: Inter;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-family: var(--font-sans);
   font-weight: 500;
+  font-size: var(--type-sm);
+  line-height: 1.45;
 }
+.type-meta-strong,
 .label-micro {
-  font-family: Inter;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-family: var(--font-sans);
   font-weight: 500;
+  font-size: var(--type-xs);
+  line-height: 1.35;
 }
-/* Figma "Label/Label-2xs": medium 11/14, the date over a message. */
 .label-2xs {
-  font-family: Inter;
-  font-size: 0.6875rem;
-  line-height: 0.875rem;
+  font-family: var(--font-sans);
   font-weight: 500;
+  font-size: var(--type-2xs);
+  line-height: 1.3;
 }
 
-.text-big {
-  font-family: Inter;
-  font-size: 1.125rem;
-  line-height: 1.5rem;
-}
+.text-big,
 .text-medium {
-  font-family: Inter;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-md);
+  line-height: 1.5;
 }
+.type-body-chrome,
 .text-small {
-  font-family: Inter;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-sm);
+  line-height: 1.5;
 }
+.type-meta,
 .text-micro {
-  font-family: Inter;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-xs);
+  line-height: 1.4;
 }
 
-.paragraph-big {
-  font-family: Inter;
-  font-size: 1.125rem;
-  line-height: 1.75rem;
-}
+.type-body,
+.paragraph-big,
 .paragraph-medium {
-  font-family: Inter;
-  font-size: 1rem;
-  line-height: 1.75rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-body);
+  line-height: 1.65;
 }
 .paragraph-small {
-  font-family: Inter;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-sm);
+  line-height: 1.55;
 }
 .paragraph-micro {
-  font-family: Inter;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-family: var(--font-sans);
+  font-size: var(--type-xs);
+  line-height: 1.45;
 }
 
+/* Small caps-free tag: Focus avoids ALL-CAPS labels. */
+.type-tag,
 .tag-label {
-  font-family: Inter;
-  font-size: 10px;
-  line-height: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-family: var(--font-sans);
+  font-size: var(--type-2xs);
+  line-height: 1.3;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .code,
 code {
-  font-family: "IBMPlexMono", source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
-  line-height: 1.5;
-  letter-spacing: -0.01em;
+  font-family: var(--font-mono);
+  line-height: 1.55;
+  letter-spacing: 0;
+  font-feature-settings: normal;
 }
 .code-micro {
-  font-size: 10px;
-  line-height: 12px;
+  font-size: var(--type-2xs);
+  line-height: 1.3;
   font-weight: 500;
   letter-spacing: 0;
 }
 .code-small {
-  font-size: 12px;
+  font-size: var(--type-xs);
 }
 .code-medium {
-  font-size: 13px;
+  font-size: var(--type-mono);
 }
 .code-large {
-  font-size: 14px;
+  font-size: var(--type-sm);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

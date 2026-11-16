@@ -16,13 +16,15 @@ const PLACEHOLDER = {
 
 export const NAC_THEME_NAME = "nac";
 
+// The code palette is its own set of tokens (GitHub-like, defined per mode in
+// `theme/*-mode.css`), so one registration is correct in light and dark.
 export const nacColorReplacements: Record<string, string> = {
-  [PLACEHOLDER.muted]: "var(--color-text-basic-muted)",
-  [PLACEHOLDER.accent]: "var(--color-text-accent-primary)",
-  [PLACEHOLDER.success]: "var(--color-text-success-primary)",
-  [PLACEHOLDER.danger]: "var(--color-text-danger-primary)",
-  [PLACEHOLDER.info]: "var(--color-text-info-primary)",
-  [PLACEHOLDER.secondary]: "var(--color-text-basic-secondary)",
+  [PLACEHOLDER.muted]: "var(--color-code-comment)",
+  [PLACEHOLDER.accent]: "var(--color-code-keyword)",
+  [PLACEHOLDER.success]: "var(--color-code-string)",
+  [PLACEHOLDER.danger]: "var(--color-code-number)",
+  [PLACEHOLDER.info]: "var(--color-code-function)",
+  [PLACEHOLDER.secondary]: "var(--color-code-variable)",
   [PLACEHOLDER.error]: "var(--color-text-error-primary)",
   [PLACEHOLDER.fg]: "var(--color-text-basic-primary)",
 };
@@ -40,7 +42,9 @@ function styleRule(scope: string | string[], fontStyle: string) {
 
 export const nacTheme: ThemeRegistration = {
   name: NAC_THEME_NAME,
-  type: "dark",
+  // Colours resolve through CSS variables, so the type only tells Shiki which
+  // defaults to fall back to; it does not pin the page to a mode.
+  type: "light",
   fg: PLACEHOLDER.fg,
   bg: "#000000",
   colorReplacements: nacColorReplacements,

@@ -11,13 +11,62 @@ const ROW_HEIGHT = 16;
 const LINE_HEIGHT = 1;
 const FONT = '"IBMPlexMono", Menlo, monospace';
 
+/**
+ * xterm parses only sRGB colour syntax, and the theme tokens are OKLCH, so
+ * each one is drawn once into a 1px canvas and read back as rgba().
+ */
+function toRgb(value: string | undefined): string | undefined {
+  if (!value || typeof document === "undefined") return value;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return value;
+    context.fillStyle = value;
+    context.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+    return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  } catch {
+    return value;
+  }
+}
+
 /** xterm draws literal colours, so the tokens are resolved where it is mounted. */
 function tokenTheme(element: HTMLElement) {
   const style = getComputedStyle(element);
-  const token = (name: string) => style.getPropertyValue(name).trim() || undefined;
+  const token = (name: string) => toRgb(style.getPropertyValue(name).trim() || undefined);
   const background = token("--color-bg-elevation-ground");
   const foreground = token("--color-text-basic-primary");
-  return { background, foreground, cursor: foreground, cursorAccent: background };
+  return {
+    background,
+    foreground,
+    cursor: foreground,
+    cursorAccent: background,
+    selectionBackground: token("--color-bg-info-secondary"),
+    red: token("--color-code-keyword"),
+    green: token("--color-text-success-primary"),
+    yellow: token("--color-text-danger-primary"),
+    blue: token("--color-code-number"),
+    magenta: token("--color-code-function"),
+    cyan: token("--color-code-string"),
+  };
+}
+
+/** Re-resolves the palette when the surrounding theme class flips. */
+function followTheme(terminal: Terminal, element: HTMLElement): () => void {
+  if (typeof MutationObserver === "undefined") return () => {};
+  const scope = element.closest<HTMLElement>("[data-theme]") ?? document.documentElement;
+  const observer = new MutationObserver(() => {
+    terminal.options.theme = tokenTheme(element);
+  });
+  observer.observe(scope, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  if (scope !== document.documentElement)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+  return () => observer.disconnect();
 }
 
 /** Only public xterm APIs. Bytes are acknowledged after its parser callback. */
@@ -66,6 +115,7 @@ export async function createTerminalRenderer(
     theme: tokenTheme(element),
   });
   terminal.open(element);
+  const unfollowTheme = followTheme(terminal, element);
   if (options.linkMode === "native-visible-anchor") links = terminalLinkAffordance(terminal);
   // Untrusted command output must not write the user's clipboard through OSC 52.
   const clipboard = terminal.parser.registerOscHandler(52, () => true);
@@ -103,6 +153,7 @@ export async function createTerminalRenderer(
     },
     dispose: () => {
       disposed = true;
+      unfollowTheme();
       links?.dispose();
       clipboard.dispose();
       terminal.dispose();

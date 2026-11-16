@@ -18,7 +18,7 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
   open = false,
   zIndex = 40,
   opacity = 0.25,
-  blur = 2,
+  blur = 0,
   className = "",
   style,
   ...props
@@ -30,7 +30,7 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
       className,
     )}
     style={{
-      background: `rgba(0, 0, 0, ${opacity})`,
+      background: `oklch(0.14 0.006 85 / ${opacity})`,
       zIndex,
       backdropFilter: blur ? `blur(${blur}px)` : undefined,
       ...style,
