@@ -20,7 +20,7 @@ test("New folder creates one folder that Select then applies", async ({
   await page.goto(harness.baseUrl);
   await page.getByRole("button", { name: "New Project", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
-  const folderButton = form.getByRole("button", { name: "Working Folder", exact: true });
+  const folderButton = form.getByRole("button", { name: /^Choose Working Folder(?::|$)/ });
   await expect(folderButton).toHaveText(workspaceCanonical);
   const picker = page.getByRole("dialog", { name: "Select Working Folder" });
   const draft = picker.getByPlaceholder("/path/to/directory");
