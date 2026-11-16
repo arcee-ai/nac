@@ -1,6 +1,9 @@
 //! A real published input survives producer death; one unavailable runtime must
 //! settle its own occurrence rather than starving another due schedule.
 use super::*;
+#[cfg(unix)]
+#[path = "attachment/command_tests.rs"]
+mod command_tests;
 
 const RECOVER_ROOT: &str = "NAC_TEST_FRESH_ATTACHMENT_ROOT";
 const RECOVER_ENDPOINT: &str = "NAC_TEST_FRESH_ATTACHMENT_ENDPOINT";
@@ -19,11 +22,25 @@ async fn call<T: Send + 'static>(
 // Only the child process receives dummy credentials and isolated configuration.
 // In particular, the test driver never mutates its process environment.
 fn command(root: &Path, test: &str, log: &str) -> Command {
+    command_with_environment(root, test, log, |name| std::env::var_os(name))
+}
+
+fn command_with_environment(
+    root: &Path,
+    test: &str,
+    log: &str,
+    mut read_environment: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.env_clear();
-    for name in ["PATH", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"] {
-        if let Some(value) = std::env::var_os(name) {
-            command.env(name, value);
+    {
+        // PATH writers remove their private executables after restoring it.
+        // Freeze the allowlist under their lock, never across a child wait.
+        let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+        for name in ["PATH", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"] {
+            if let Some(value) = read_environment(name) {
+                command.env(name, value);
+            }
         }
     }
     for directory in ["nac-home", "home", "xdg", "tmp"] {

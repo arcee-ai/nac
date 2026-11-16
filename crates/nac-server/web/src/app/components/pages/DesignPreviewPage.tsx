@@ -26,8 +26,6 @@ import { TypographySection } from "@/app/components/pages/design-preview/Typogra
  * lands as a fast way to eyeball the token port.
  */
 export default function DesignPreviewPage() {
-  const [modalOpen, setModalOpen] = useState(false);
-
   return (
     <div className="h-full overflow-y-auto bg-elevation-ground text-basic-primary">
       <header className="flex items-center gap-4 h-14 px-6 border-b border-secondary">
@@ -40,7 +38,7 @@ export default function DesignPreviewPage() {
         <QualificationSection />
         <ButtonsSection />
         <BadgesSection />
-        <InputsSection onOpenModal={() => setModalOpen(true)} />
+        <InputsAndModalPreview />
         <PopoverSection />
         <ChoicesSection />
         <NoticesSection />
@@ -57,7 +55,17 @@ export default function DesignPreviewPage() {
         <CodeBlockSection />
         <TypographySection />
       </main>
+    </div>
+  );
+}
 
+/** Modal interaction belongs to its example, leaving the other showcase sections settled. */
+function InputsAndModalPreview() {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  return (
+    <>
+      <InputsSection onOpenModal={() => setModalOpen(true)} />
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -79,6 +87,6 @@ export default function DesignPreviewPage() {
         This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the
         atom.
       </Modal>
-    </div>
+    </>
   );
 }

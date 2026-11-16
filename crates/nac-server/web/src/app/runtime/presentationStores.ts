@@ -5,7 +5,7 @@ import * as attentionStore from "../store/attentionStore";
 import * as chatTabsStore from "../store/chatTabsStore";
 import * as promptDraftStore from "../store/promptDraftStore";
 import type { NativeRuntimeScope } from "./nativeRuntime";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import * as composerStore from "../store/composerStore";
 import * as runtimeStore from "../store/runtimeStore";
 import * as sessionFiltersStore from "../store/sessionFiltersStore";
@@ -34,9 +34,14 @@ export function createPresentationStores(
   storage?: Pick<Storage, "getItem" | "setItem">,
   scope?: NativeRuntimeScope,
   draftStorage?: PromptDraftStorage,
+  draftPersistenceBinding?: PromptDraftPersistenceBinding,
 ): PresentationStores {
   return {
-    promptDraftStore: promptDraftStore.createPromptDraftStore(scope, draftStorage),
+    promptDraftStore: promptDraftStore.createPromptDraftStore(
+      scope,
+      draftStorage,
+      draftPersistenceBinding,
+    ),
     panelWidth: panelWidth.createPanelWidth(storage),
     threadLogHeight: threadLogHeight.createThreadLogHeight(storage),
     lastLight: lastLight.createLastLight(storage),

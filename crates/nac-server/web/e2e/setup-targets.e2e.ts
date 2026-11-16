@@ -90,9 +90,7 @@ for (const zoomed of [false, true]) {
       const popup = page.waitForEvent("popup");
       await accounts.getByRole("button", { name: "Sign in with ChatGPT", exact: true }).click();
       await (await popup).close();
-      await expect(
-        accounts.getByRole("button", { name: "Open ChatGPT", exact: true }),
-      ).toBeVisible();
+      await expect(accounts.getByRole("link", { name: "Open ChatGPT", exact: true })).toBeVisible();
       await audit("provider-waiting");
       await accounts.getByRole("button", { name: "Cancel", exact: true }).click();
       expect(loginCalls).toEqual(["POST", "DELETE"]);

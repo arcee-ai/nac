@@ -21,6 +21,9 @@ import { errorMessage } from "@/app/providers/ToastProvider";
 import type { BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { localDirectoryCapability } from "@/app/features/setup/localFolder";
+import { NativeFolderPicker } from "@/app/features/setup/NativeFolderPicker";
 
 import { PathPickerNewFolder } from "./PathPickerNewFolder";
 import { useNewFolder } from "./useNewFolder";
@@ -38,6 +41,8 @@ import { usePathPicker } from "./usePathPicker";
 interface PathPickerProps {
   kind: BrowseKind;
   initialPath: string;
+  /** Explicit opt-in from the normal create-project Local backend only. */
+  nativeLocalDirectory?: boolean;
   /** Browses this host instead of the local filesystem. */
   ssh?: SshTarget | null;
   /** Overrides the title derived from `kind`. */
@@ -51,13 +56,30 @@ interface PathPickerProps {
   onSelect: (path: string) => void;
 }
 
-export function PathPickerModal({ open, ssh, ...props }: PathPickerProps & { open: boolean }) {
+export function PathPickerModal({
+  open,
+  ssh,
+  nativeLocalDirectory = false,
+  ...props
+}: PathPickerProps & { open: boolean }) {
   const mounted = useExitTransition(open);
-  // Each opening is its own picker, even one that reopens while the last is
-  // still sliding out: no draft or pending Select carries over.
+  // Each opening owns its draft and pending Select, including a quick reopen.
   const [opening, setOpening] = useState({ open, count: 0 });
   if (opening.open !== open) setOpening({ open, count: opening.count + (open ? 1 : 0) });
+  const { nativeDirectory } = useNativeRuntime();
+  const port = localDirectoryCapability(nativeDirectory, nativeLocalDirectory, props.kind, ssh);
   if (!mounted) return null;
+  if (port)
+    return (
+      <NativeFolderPicker
+        key={opening.count}
+        port={port}
+        open={open}
+        initialPath={props.initialPath}
+        onSelect={props.onSelect}
+        onClose={props.onClose}
+      />
+    );
   return <PathPicker key={opening.count} open={open} ssh={ssh ?? null} {...props} />;
 }
 
@@ -223,8 +245,7 @@ function PathPicker({
             value={draft}
             onChange={(event) => picker.setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing)
-                picker.goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) picker.goTo(draft);
             }}
           />
           <Button

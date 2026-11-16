@@ -67,8 +67,10 @@ export function usePathPicker({
   const pickingFile = kind !== "directory";
   // A directory is picked from an empty path so the server starts at its root,
   // or the host at the login home.
-  const [directory, setDirectory] = useState(initialPath.trim());
-  const [draft, setDraftValue] = useState(initialPath.trim());
+  // Nonblank local paths are literal filesystem entries; SSH retains trimming.
+  const browsePath = (path: string) => (ssh || !path.trim() ? path.trim() : path);
+  const [directory, setDirectory] = useState(browsePath(initialPath));
+  const [draft, setDraftValue] = useState(browsePath(initialPath));
   const [file, setFile] = useState<string | null>(null);
   const [hidden, setHidden] = useState(showHidden);
   const [pending, setPending] = useState<PendingSelect | null>(null);
@@ -118,8 +120,9 @@ export function usePathPicker({
     moves.current += 1;
     supersede();
     setFailure(null);
-    setDirectory(path);
-    setDraftValue(path);
+    const next = browsePath(path);
+    setDirectory(next);
+    setDraftValue(next);
     setFile(null);
   };
 
@@ -137,7 +140,7 @@ export function usePathPicker({
 
   // What Select would apply right now. A cleared draft falls back to the
   // listed directory rather than to nothing.
-  const typed = draft.trim() || directory;
+  const typed = browsePath(draft) || directory;
   const chosen = pickingFile ? file : typed || (listing.data?.path ?? "");
 
   const select = () => {

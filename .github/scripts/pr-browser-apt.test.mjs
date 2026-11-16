@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -15,10 +16,11 @@ const require=createRequire(import.meta.url),YAML=require('yaml');
 const workflow=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
 const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
 const hash=v=>createHash('sha256').update(JSON.stringify(sort(v))).digest('hex');
-// Full pre-relay parsed workflow at exact parent914782659a6183b89070a3516e2e44776b1eeb06.
-const parentHash='ae09c30f8765b2116cd9ed25365d2115dffcd7c36630bfa485a4db6e50d19b18';
+// Full pre-relay graph from parent914782659a6183b89070a3516e2e44776b1eeb06,
+// composed with the required startup-custody and native-auth fixture controls.
+const parentHash='f799f1ec07a7600fa690d9f31c9c87e8bee082926cadc6cf06ce91a157ec0567';
 function validate(value) {
-  const old=structuredClone(value);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
+  const old=structuredClone(value);reverseAssetTokens(old);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');
   for(const role of ['browser-shards','browser-proof']) {
     const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary','browser-apt']);
