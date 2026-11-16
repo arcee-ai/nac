@@ -141,6 +141,35 @@ exact revision; the measurement passed and left no fixture roots.
 | 10 | 4 | 4 / 6 | 157.42 | 13.89 | 182 | 620 | 49,568 / 54,064 |
 | 100 | 4 | 4 / 96 | 155.15 | 12.20 | 409 | 900 | 54,080 / 54,960 |
 
+A separately authorized hosted Linux/debug run on November 2, 2026 (UTC),
+[41507785062, attempt 1](https://github.com/arcee-ai/nac/actions/runs/41507785062/job/125491404146),
+used control `1370c66b56ff4305fb899ab38f8937c8fb44fbe6` and product
+`48b9769453c7cb0b245d9f9b1f955ef4a880a431` (tree
+`b2f53563c8bebdc8322c636b74a57fac1f981086`). The same retained test executable
+listed 352 registered tests; only one exact ignored measurement ran, covering
+1/10/100 schedules and two scheduler owners.
+
+| Stored schedules | Runnable chats | Admitted / pending | Cold scan, ms | Warm p95, ms | Maximum initial admission lateness, ms | DB + WAL + SHM, KiB | Process RSS before / active, KiB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 / 0 | 91.325 | 16.213 | 92 | 564 | 63,312 / 92,404 |
+| 10 | 4 | 4 / 6 | 315.876 | 18.763 | 369 | 624 | 93,716 / 99,212 |
+| 100 | 4 | 4 / 96 | 351.993 | 19.612 | 956 | 900 | 99,340 / 101,200 |
+
+Fresh namespace custody checks, postmeasurement resource/fixture/source checks,
+the complete 180-file export (including 20 new hidden font-cache files), and
+namespace retirement passed. The earlier
+[41307523898](https://github.com/arcee-ai/nac/actions/runs/41307523898) remains
+failed: its upload omitted 20 manifested font-cache originals and its
+postmeasurement checks were not reached. The later export does not recover
+those missing originals or relabel that failed run.
+
+These are historical product48 fixture observations, not current-dev timings.
+Current question/admission and calendar overhead is unmeasured. Hosted VM
+competition was not controlled; this result establishes neither an SLA nor
+physical-host exclusivity, live-vendor reliability, WKWebView/OS delivery or
+security qualification. The recorded execution allocation is consumed; this
+documentation does not authorize another benchmark.
+
 The ignored test
 `heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention`
 runs two independent scheduler owners against one isolated fixture store and

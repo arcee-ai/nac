@@ -15,12 +15,12 @@ export function McpServersLoadError({
   return (
     <div className="flex h-full min-h-0 flex-col items-start justify-center gap-3 overflow-auto p-6">
       <div className="label-small text-error-primary">MCP servers could not be loaded.</div>
-      <p className="max-w-full whitespace-pre-wrap break-words text-micro text-basic-secondary">
+      <p className="max-w-full whitespace-pre-wrap break-words text-small !leading-[22px] text-basic-secondary">
         {detail}
       </p>
       <Button
         variant={ButtonVariant.Secondary}
-        size={ButtonSize.Small}
+        size={ButtonSize.Large}
         content={ButtonContent.Text}
         loading={retrying}
         onClick={onRetry}

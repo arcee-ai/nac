@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 export const pins = JSON.parse(
   fs.readFileSync(new URL("./workflow-lint-tools.json", import.meta.url)),
@@ -17,6 +18,27 @@ export function verifyArchive(bytes, expected) {
   }
 }
 
+// Only qualified version/platform pairs use the unauthenticated binary API.
+// The existing SHA256 remains the authority for both downloaded and cached bytes.
+export function downloadUrl(pin, platform) {
+  const asset = pin.assets[platform];
+  if (!asset) throw new Error(`unsupported workflow lint platform: ${platform}`);
+  const ids = pin.release_asset_ids;
+  if (ids !== undefined) {
+    if (!ids || Object.keys(ids).length !== 1 || !Object.hasOwn(ids, pin.version))
+      throw new Error("stale workflow lint release asset mapping");
+    if (!ids[pin.version] || typeof ids[pin.version] !== "object" ||
+        Object.entries(ids[pin.version]).some(([host, id]) =>
+          !Object.hasOwn(pin.assets, host) || !Number.isSafeInteger(id) || id <= 0))
+      throw new Error("invalid release asset ID");
+  }
+  const id = ids?.[pin.version]?.[platform];
+  if (id !== undefined) {
+    return `https://api.github.com/repos/${pin.repository}/releases/assets/${id}`;
+  }
+  return `https://github.com/${pin.repository}/releases/download/v${pin.version}/${asset[0]}`;
+}
+
 // Cache archives, never executables. Reverify even cache hits and extract only the
 // named binary into a fresh private directory on every invocation.
 export function installTools(cache = path.join(os.homedir(), ".cache/nac/workflow-lint")) {
@@ -29,10 +51,15 @@ export function installTools(cache = path.join(os.homedir(), ".cache/nac/workflo
       if (!asset)
         throw new Error(`unsupported workflow lint platform: ${process.platform}/${process.arch}`);
       const [filename, digest, member] = asset;
+      const url = downloadUrl(pin, `${process.platform}-${process.arch}`);
       const archive = path.join(cache, filename);
       if (!fs.existsSync(archive)) {
         const download = path.join(directory, filename);
-        execFileSync(
+        if (url.startsWith("https://api.github.com/")) {
+          execFileSync("python3", [fileURLToPath(new URL("./github_asset.py", import.meta.url)),
+            "--url", url, "--output", download, "--max-bytes", String(150 * 1024 * 1024)],
+          { stdio: "inherit" });
+        } else execFileSync(
           "curl",
           [
             "--fail",
@@ -47,7 +74,11 @@ export function installTools(cache = path.join(os.homedir(), ".cache/nac/workflo
             "180",
             "--proto",
             "=https",
-            `https://github.com/${pin.repository}/releases/download/v${pin.version}/${filename}`,
+            "--proto-redir",
+            "=https",
+            "--header",
+            "Accept: application/octet-stream",
+            url,
             "--output",
             download,
           ],

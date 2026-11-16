@@ -1,3 +1,4 @@
+import {reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from 'node:assert/strict';
 
 // Exact coalescing-only projection. FULL execution must recover landed APT source.
@@ -174,6 +175,7 @@ export function fullGuard(config){
 }
 
 export function reverseAdmission(w){
+ reverseNativeQualification(w);
  if(!w.jobs['ci-admission'])return;
  assert.equal(w.concurrency.group,routingGroup);w.concurrency.group=sourceGroup;
  assert.deepEqual(w.jobs['ci-admission'],unitCaller);delete w.jobs['ci-admission'];

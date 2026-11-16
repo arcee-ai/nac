@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Modal, ModalSize } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
@@ -33,11 +33,19 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
   const [template, setTemplate] = useState<McpLibraryEntry | null>(null);
   const [customDraft, setCustomDraft] = useState(false);
   const [footer, setFooter] = useState<ReactNode>(null);
+  // A closing phone form remains mounted; only its current selection may finish navigation.
+  const formEpoch = useRef(0);
+  const currentFormEpoch = formEpoch.current;
+  useLayoutEffect(() => {
+    if (!open) formEpoch.current += 1;
+  }, [open]);
   const selected = picked ?? servers.at(-1)?.name ?? DRAFT;
   const record = servers.find((entry) => entry.name === selected) ?? null;
   const drafting = selected === DRAFT;
 
   const pick = (id: string) => {
+    // A repeated selection keeps the current form and its in-flight callbacks valid.
+    if (id !== selected || template !== null || customDraft) formEpoch.current += 1;
     setPicked(id);
     setTemplate(null);
     setCustomDraft(false);
@@ -89,8 +97,14 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
 
           {drafting && !template && !customDraft ? (
             <LibraryPicker
-              onPick={(entry) => setTemplate(entry)}
-              onCustom={() => setCustomDraft(true)}
+              onPick={(entry) => {
+                formEpoch.current += 1;
+                setTemplate(entry);
+              }}
+              onCustom={() => {
+                formEpoch.current += 1;
+                setCustomDraft(true);
+              }}
               onClose={onClose}
               setFooter={setFooter}
             />
@@ -100,14 +114,15 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
               record={record}
               template={template}
               libraryEntry={libraryEntry}
-              onBack={() => {
-                setPicked(DRAFT);
-                setTemplate(null);
-                setCustomDraft(false);
-              }}
+              onBack={() => pick(DRAFT)}
               onClose={onClose}
-              onSaved={pick}
-              onDeleted={() => pick(DRAFT)}
+              onSaved={(name) => {
+                if (formEpoch.current === currentFormEpoch) pick(name);
+              }}
+              onDeleted={() => {
+                if (formEpoch.current === currentFormEpoch) pick(DRAFT);
+              }}
+              isCurrent={() => formEpoch.current === currentFormEpoch}
               setFooter={setFooter}
             />
           )}

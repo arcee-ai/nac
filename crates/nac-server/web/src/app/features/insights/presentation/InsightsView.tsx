@@ -19,6 +19,7 @@ import {
   insightFilterOptions,
 } from "@/app/features/insights/model/timeline";
 import type {
+  DelegatedRowKey,
   InsightEntry,
   InsightGroupEntry,
   InsightSegment,
@@ -92,6 +93,7 @@ export function InsightsView({
     selectThread,
     showSidePanelList,
     toggleInsightGroup,
+    rememberInsightsReturn,
   } = useNativeRuntime().stores.sessionLayoutStore;
   const model = useTranscriptModelContext();
   const navigation = useInsightsNavigation();
@@ -156,6 +158,28 @@ export function InsightsView({
     [resolveSession, threads],
   );
 
+  const openSubagent = useCallback(
+    (rowKey: DelegatedRowKey) => {
+      const origin =
+        highlighted?.kind === "group"
+          ? {
+              kind: "group" as const,
+              groupId: highlighted.entry.id,
+              segmentKey: highlighted.segmentKey,
+            }
+          : highlighted?.kind === "thread"
+            ? { kind: "thread" as const }
+            : null;
+      rememberInsightsReturn(
+        sessionId,
+        origin,
+        highlighted?.kind === "thread" ? highlighted : undefined,
+      );
+      navigation.openSubagent(rowKey);
+    },
+    [navigation, rememberInsightsReturn, sessionId, highlighted],
+  );
+
   const controller = useMemo<InsightsRowController>(() => {
     const segmentAction = (entry: InsightGroupEntry, segment: InsightSegment) => {
       if (segment.kind === "workset") {
@@ -180,7 +204,7 @@ export function InsightsView({
       }
       if (entry.kind === "session") {
         const session = resolveSession(entry.rowKey);
-        return session ? () => navigation.openSubagent(session.rowKey) : null;
+        return session ? () => openSubagent(session.rowKey) : null;
       }
       const { segments } = entry.group;
       if (segments.length === 1) return segmentAction(entry, segments[0]);
@@ -206,6 +230,7 @@ export function InsightsView({
     marked,
     highlighted,
     navigation,
+    openSubagent,
     resolveSession,
     selectInsight,
     selectThread,
@@ -221,13 +246,22 @@ export function InsightsView({
     () => ({
       sessionId,
       resolveSession,
-      openSubagent: navigation.openSubagent,
+      openSubagent,
       openWorkset: navigation.openWorkset,
       workspaceRoots: [hostRoot, workspaceHostPath, cwd],
       filePathPrefix,
       openFile: navigation.openFile,
     }),
-    [sessionId, resolveSession, navigation, hostRoot, filePathPrefix, workspaceHostPath, cwd],
+    [
+      sessionId,
+      resolveSession,
+      navigation,
+      openSubagent,
+      hostRoot,
+      filePathPrefix,
+      workspaceHostPath,
+      cwd,
+    ],
   );
   const [threadView, setThreadView] = useState<ThreadDetailView>("log");
   const [steeringThread, setSteeringThread] = useState<string | null>(null);
@@ -332,6 +366,7 @@ export function InsightsView({
     <>
       <PanelSplit
         listTitle="Insights"
+        phoneListToolbarInFlow
         listToolbar={<InsightsFilter options={options} value={filter} onChange={changeFilter} />}
         listClassName="p-2"
         title={title}
@@ -361,6 +396,7 @@ export function InsightsView({
         }
         list={
           <InsightsList
+            sessionId={sessionId}
             sections={sections}
             pendingPrompt={model.pendingText}
             emptyCopy={emptyCopy}
