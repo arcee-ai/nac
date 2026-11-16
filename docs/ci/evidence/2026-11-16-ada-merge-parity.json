@@ -1,0 +1,148 @@
+{
+  "repository": "arcee-ai/nac",
+  "verified_at": "2026-11-16T17:23:39.504473+00:00",
+  "authorization": "Allison requested matching full repository privileges and manual merge support for Ada; identity confirmed as adalundhe.",
+  "accounts": [
+    {
+      "login": "allisoneer",
+      "id": 20910163,
+      "before_permission": "admin",
+      "after_permission": "admin"
+    },
+    {
+      "login": "adalundhe",
+      "id": 23642200,
+      "before_permission": "write",
+      "after_permission": "admin"
+    }
+  ],
+  "review_ruleset_before": {
+    "id": 26484091,
+    "name": "NAC PR requirements (Allison manual merge exception)",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "arcee-ai/nac",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": true,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": true,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "Required PR checks",
+              "integration_id": 15368
+            }
+          ]
+        }
+      }
+    ],
+    "bypass_actors": [
+      {
+        "actor_id": 20910163,
+        "actor_type": "User",
+        "bypass_mode": "pull_request"
+      }
+    ]
+  },
+  "review_ruleset_after": {
+    "id": 26484091,
+    "name": "NAC PR requirements (Allison and Ada manual merge exceptions)",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "arcee-ai/nac",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": true,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      },
+      {
+        "type": "required_status_checks",
+        "parameters": {
+          "strict_required_status_checks_policy": true,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "Required PR checks",
+              "integration_id": 15368
+            }
+          ]
+        }
+      }
+    ],
+    "bypass_actors": [
+      {
+        "actor_id": 20910163,
+        "actor_type": "User",
+        "bypass_mode": "pull_request"
+      },
+      {
+        "actor_id": 23642200,
+        "actor_type": "User",
+        "bypass_mode": "pull_request"
+      }
+    ]
+  },
+  "unchanged_ruleset_ids": [
+    2955537,
+    2955527,
+    25983949
+  ],
+  "verification": "REST readback confirmed equal admin permissions, exact proposed review ruleset values and unchanged other rulesets. No PR was merged and no bypass execution was tested using Ada credentials."
+}
