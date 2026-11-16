@@ -307,18 +307,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         path: string;
         truncated: boolean;
     }>;
-    /**
-     * Creates one named folder inside a listed local directory. Never retried
-     * here: a lost answer leaves the outcome unknown, so the caller looks
-     * before it offers to try again.
-     */
-    createFolder: (parent: string, name: string) => Promise<{
-        path: string;
-    }>;
-    /** The same, on the SSH host the picker is browsing — never locally. */
-    createSshFolder: (target: SshTarget, parent: string, name: string) => Promise<{
-        path: string;
-    }>;
     /** Validates the key as a side effect: a bad key cannot list models. */
     listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) => Promise<{
         base_url: string;
@@ -410,6 +398,15 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         updated_at: string;
     }>;
     deleteSshConfig: (configId: string) => Promise<void>;
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) => Promise<{
+        aliases: string[];
+        undiscoverable_patterns: number;
+        warnings: import("./openapi.generated.js").components["schemas"]["OpenSshAliasWarning"][];
+    }>;
     getMcpLibrary: (signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["McpLibraryEntry"][];
     }>;
@@ -1039,7 +1036,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getMessages: (id: string, options?: MessagesPageOptions) => Promise<{
         created_at: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
-        page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
+        page: 
+        /** Ask nac-web to open a local workspace path with the OS default handler. */
+        import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
     }>;
     getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{

@@ -204,6 +204,7 @@ export const NAC_API_SURFACE = {
   "PATCH /ssh-configs/{config_id}": "api.updateSshConfig",
   "POST /ssh/browse": "api.browseSshPath",
   "POST /ssh/folders": "api.createSshFolder",
+  "GET /ssh/aliases": "api.listSshAliases",
   "GET /store": "api.getStore",
   "GET /ui-config": "client.getUiConfiguration",
 } as const;

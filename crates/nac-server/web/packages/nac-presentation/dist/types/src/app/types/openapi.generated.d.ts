@@ -1,0 +1,2456 @@
+export interface components {
+    schemas: {
+        ActiveCompactionSnapshot: {
+            client_id?: components["schemas"]["SessionClientId"] | null;
+            compaction_id: string;
+            started_at_epoch_ms: number;
+        };
+        ActiveRunSnapshot: {
+            client_id?: components["schemas"]["SessionClientId"] | null;
+            prompt_preview: string;
+            run_id: components["schemas"]["SessionRunId"];
+            started_at_epoch_ms: number;
+            submitted_user_message?: components["schemas"]["SubmittedUserMessageSnapshot"] | null;
+        };
+        AgentEvent: {
+            prompt_preview: string;
+            thread_name?: string | null;
+            type: "run_started";
+        } | {
+            iteration: number;
+            thread_name?: string | null;
+            type: "model_call_started";
+        } | {
+            thread_name?: string | null;
+            type: "token_usage_updated";
+            usage: components["schemas"]["TokenUsage"];
+        } | {
+            args_detail?: string | null;
+            args_preview: string;
+            call_id: string;
+            key_arg_preview?: string | null;
+            name: string;
+            thread_name?: string | null;
+            type: "tool_call_started";
+        } | {
+            call_id: string;
+            cleanup_duration_ms?: number | null;
+            command_status?: components["schemas"]["CommandStatus"] | null;
+            completion_status?: components["schemas"]["ToolCompletionStatus"] | null;
+            content_preview: string;
+            effective_timeout_ms?: number | null;
+            execution_duration_ms?: number | null;
+            exit_code?: number | null;
+            is_error: boolean;
+            name: string;
+            remote_outcome_uncertain?: boolean;
+            thread_name?: string | null;
+            type: "tool_call_finished";
+        } | {
+            action: string;
+            name: string;
+            source_threads: string[];
+            type: "thread_started";
+        } | {
+            line: string;
+            name: string;
+            type: "thread_log";
+        } | {
+            instruction_preview: string;
+            name: string;
+            steering_id: number;
+            type: "thread_steering_queued";
+        } | {
+            instruction_preview: string;
+            name: string;
+            steering_id: number;
+            type: "thread_steering_delivered";
+        } | {
+            instruction_preview: string;
+            name: string;
+            steering_id: number;
+            type: "thread_steering_expired";
+        } | {
+            instruction_preview: string;
+            steering_id: number;
+            type: "orchestrator_steering_queued";
+        } | {
+            instruction_preview: string;
+            steering_id: number;
+            type: "orchestrator_steering_delivered";
+        } | {
+            instruction_preview: string;
+            steering_id: number;
+            type: "orchestrator_steering_expired";
+        } | {
+            compaction_id: string;
+            reason: components["schemas"]["CompactionReason"];
+            type: "orchestrator_compaction_started";
+        } | {
+            compaction_id: string;
+            reason: components["schemas"]["CompactionReason"];
+            type: "orchestrator_compaction_completed";
+        } | {
+            cause: components["schemas"]["CompactionSkipReason"];
+            compaction_id: string;
+            reason: components["schemas"]["CompactionReason"];
+            type: "orchestrator_compaction_skipped";
+        } | {
+            compaction_id: string;
+            failure: components["schemas"]["CompactionFailure"];
+            reason: components["schemas"]["CompactionReason"];
+            type: "orchestrator_compaction_failed";
+        } | {
+            exit_code: number;
+            name: string;
+            timed_out: boolean;
+            timeout_reason?: string | null;
+            type: "thread_finished";
+            usage?: components["schemas"]["TokenUsage"] | null;
+        } | {
+            content: string;
+            thread_name?: string | null;
+            type: "assistant_message";
+            usage?: components["schemas"]["TokenUsage"] | null;
+        } | {
+            message: string;
+            thread_name?: string | null;
+            type: "error";
+        } | {
+            reason: string;
+            server_name: string;
+            thread_name?: string | null;
+            type: "mcp_server_skipped";
+        } | {
+            kind: components["schemas"]["McpNotificationKind"];
+            message: string;
+            server_name: string;
+            thread_name?: string | null;
+            type: "mcp_notification";
+        } | {
+            message: string;
+            thread_name?: string | null;
+            type: "model_error";
+        } | {
+            thread_name?: string | null;
+            type: "run_finished";
+        };
+        ApiErrorBody: {
+            error: string;
+        };
+        AssignSessionRequest: {
+            session_id: string;
+        };
+        AssistantStreamDelta: {
+            reasoning?: string | null;
+            reset?: boolean;
+            retry_attempt?: number | null;
+            text?: string | null;
+            thread_name?: string | null;
+        };
+        AttachUserTerminalRequest: {
+            page_limit: number;
+            protocol_version: number;
+        };
+        AttentionAvailabilityDto: {
+            permissions: components["schemas"]["AttentionFacetDto"];
+            questions: components["schemas"]["AttentionFacetDto"];
+            reviews: components["schemas"]["AttentionFacetDto"];
+            topology: components["schemas"]["AttentionFacetDto"];
+            work: components["schemas"]["AttentionFacetDto"];
+        };
+        AttentionChangeDto: {
+            kind: "source_replaced";
+            snapshot: components["schemas"]["AttentionSnapshotDto"];
+        } | {
+            kind: "work_settled";
+            work: components["schemas"]["AttentionWorkDto"];
+        } | {
+            kind: "work_cleared";
+        } | {
+            decision: components["schemas"]["AttentionDecisionDto"];
+            kind: "decision_pending";
+        } | {
+            decision: components["schemas"]["AttentionDecisionDto"];
+            kind: "decision_resolved";
+        } | {
+            kind: "session_deleted";
+        } | {
+            availability: components["schemas"]["AttentionAvailabilityDto"];
+            kind: "availability";
+        } | {
+            kind: "checkpoint";
+        };
+        AttentionCursor: {
+            engine: string;
+            epoch: string;
+            sequence: number;
+        };
+        AttentionDecisionDto: {
+            kind: "permission";
+            request_id: string;
+        } | {
+            kind: "review";
+            review_id: string;
+        } | {
+            generation: string;
+            kind: "question";
+            request_id: string;
+            revision: number;
+            run_id: string;
+        };
+        AttentionDispositionDto: "completed" | "continuing" | "waiting_for_decision";
+        AttentionFacetDto: "available" | "unknown" | "unsupported";
+        AttentionFrame: {
+            kind: "completions";
+            page: components["schemas"]["CompletionPageDto"];
+        } | {
+            boundary: components["schemas"]["AttentionCursor"];
+            kind: "baseline";
+            reset: components["schemas"]["AttentionResetDto"] | null;
+            sources: components["schemas"]["AttentionSnapshotDto"][];
+        } | {
+            boundary: components["schemas"]["AttentionCursor"];
+            change: components["schemas"]["AttentionChangeDto"];
+            kind: "record";
+            new_attention: boolean;
+            source: components["schemas"]["AttentionSourceDto"];
+            source_revision: number;
+        } | {
+            kind: "reset";
+            reason: components["schemas"]["AttentionResetDto"];
+        };
+        AttentionGoalDto: {
+            id: string;
+            version: number;
+        };
+        AttentionResetDto: "incarnation" | "replay_gap" | "invalid_cursor";
+        AttentionSnapshotDto: {
+            availability: components["schemas"]["AttentionAvailabilityDto"];
+            pending: components["schemas"]["AttentionDecisionDto"][];
+            revision: number;
+            source: components["schemas"]["AttentionSourceDto"];
+            work: components["schemas"]["AttentionWorkDto"] | null;
+        };
+        AttentionSourceDto: {
+            epoch: string;
+            session_id: string;
+        };
+        AttentionWorkDto: {
+            disposition: components["schemas"]["AttentionDispositionDto"];
+            goal: components["schemas"]["AttentionGoalDto"] | null;
+            run_id: string;
+        };
+        AuthenticateMcpOAuthRequest: {
+            additional_scopes?: string[];
+        };
+        AuthenticateMcpOAuthResponse: {
+            authorization_url: string;
+            status: components["schemas"]["McpOAuthPublicStatus"];
+        };
+        AuthStatus: "ready" | "no_credential";
+        BackendKind: "deepseek-chat" | "fireworks-chat" | "together-chat" | "openai-responses" | "openai-chat-completions" | "chatgpt-codex-responses" | "anthropic-messages" | "arcee-auth" | "arcee-api";
+        Branch: {
+            is_current: boolean;
+            name: string;
+        };
+        BranchList: {
+            branches: components["schemas"]["Branch"][];
+            current?: string | null;
+            dirty: boolean;
+        };
+        BrowseEntry: {
+            is_directory: boolean;
+            name: string;
+            path: string;
+        };
+        BrowseKind: "directory" | "toml" | "file";
+        BrowseListing: {
+            entries: components["schemas"]["BrowseEntry"][];
+            home?: string | null;
+            parent?: string | null;
+            path: string;
+            truncated: boolean;
+        };
+        CancelInboxItemRequest: {
+            expected_version: number;
+        };
+        CancelQuestionRequest: {
+            expected_revision: number;
+        };
+        ChangedFileStat: {
+            additions?: number | null;
+            deletions?: number | null;
+            path: string;
+            status: string;
+        };
+        ClearGoalRequest: {
+            expected_version: number;
+        };
+        CommandStatus: "completed" | "timed_out" | "cancelled" | "spawn_error";
+        CommitOutcome: {
+            additions: number;
+            branch?: string | null;
+            deletions: number;
+            files_changed: number;
+            sha: string;
+        };
+        CommitWorkspaceRequest: {
+            message: string;
+        };
+        CompactionFailure: "summary_request_failed" | "summary_rejected" | "checkpoint_persistence_failed" | "cancelled";
+        CompactionReason: "auto" | "manual";
+        CompactionSkipReason: "no_eligible_boundary" | "already_compacted";
+        CompactSessionResponse: {
+            compaction_id: string;
+            status: "compacted";
+        } | {
+            compaction_id: string;
+            reason: components["schemas"]["CompactionSkipReason"];
+            status: "unchanged";
+        };
+        CompletionKindDto: "request" | "goal";
+        CompletionOccurrenceDto: {
+            behavior: string;
+            goal_id: string | null;
+            kind: components["schemas"]["CompletionKindDto"];
+            mark_version: number | null;
+            run_id: string;
+            sequence: number;
+            session_id: string;
+        };
+        CompletionPageDto: {
+            baseline: boolean;
+            cursor: number;
+            high_water: number;
+            items: components["schemas"]["CompletionOccurrenceDto"][];
+            more: boolean;
+            store_id: string;
+        };
+        ConfigureMcpOAuthRequest: {
+            authorization_metadata?: components["schemas"]["McpOAuthAuthorizationMetadataRequest"] | null;
+            client_id_credential?: string | null;
+            client_secret_credential?: string | null;
+            registration?: components["schemas"]["McpOAuthRegistrationRequest"] | null;
+            scopes?: string[];
+        };
+        ControlledTerminalInputRequest: {
+            bytes: number[];
+            expected_revision: string;
+            protocol_version: number;
+        };
+        CostTier: {
+            cache_read: number;
+            cache_write: number;
+            input: number;
+            input_tokens_above: number;
+            output: number;
+        };
+        CreateGoalRequest: {
+            objective: string;
+            token_budget?: number | null;
+        };
+        CreateInboxItemRequest: {
+            delivery: components["schemas"]["InboxDelivery"];
+            prompt: string;
+        };
+        CreateMcpServerRequest: {
+            allowed_tools?: string[] | null;
+            approval?: components["schemas"]["McpToolApproval"];
+            args?: string[];
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            denied_tools?: string[];
+            enabled?: boolean;
+            env?: Record<string, string>;
+            env_headers?: Record<string, string>;
+            env_vars?: string[];
+            execution_timeout_ms?: number | null;
+            header_helper?: components["schemas"]["McpHeaderHelperConfig"] | null;
+            headers?: Record<string, string>;
+            library_id?: string | null;
+            name: string;
+            protocol?: components["schemas"]["McpProtocolSelection"];
+            required?: boolean;
+            startup_timeout_ms?: number | null;
+            tool_approvals?: Record<string, components["schemas"]["McpToolApproval"]>;
+            transport: components["schemas"]["McpTransportSchema"];
+            url?: string | null;
+        };
+        CreateModelConfigurationRequest: {
+            allow_insecure_http?: boolean;
+            api_key?: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url?: string | null;
+            extra_headers?: Record<string, string> | null;
+            initial_prompt?: string | null;
+            light_model?: components["schemas"]["LightModelSettings"] | null;
+            model: string;
+            name: string;
+            orchestrator_compaction_threshold?: number | null;
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+        };
+        CreateProjectRequest: {
+            cwd: string;
+            default_model_config_id?: string | null;
+            description?: string | null;
+            name?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSessionRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key_env?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_String_String"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            behavior?: components["schemas"]["SessionBehavior"];
+            cwd?: string | null;
+            extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
+            first_chat?: boolean;
+            first_chat_same_behavior?: boolean;
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            project_id?: string | null;
+            reasoning_effort?: components["schemas"]["RequestField_String_String"];
+            sandbox?: components["schemas"]["SandboxRequest"];
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSshConfigurationRequest: {
+            name: string;
+            ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        DefaultLimits: {
+            context_window: number;
+            max_tokens: number;
+            supported_efforts: components["schemas"]["ReasoningEffort"][];
+        };
+        DeleteProjectResponse: {
+            deleted_session_ids: string[];
+            released_session_ids: string[];
+        };
+        DeleteProjectSessions: "keep" | "delete";
+        DeviceLoginStartedResponse: {
+            expires_in_secs: number;
+            login_id: string;
+            provider: components["schemas"]["ManagedAuthProvider"];
+            user_code: string | null;
+            verification_uri: string;
+        };
+        DeviceLoginStateResponse: {
+            state: "pending";
+        } | {
+            auth: components["schemas"]["ManagedAuthStatusResponse"];
+            state: "complete";
+        } | {
+            error: string;
+            state: "failed";
+        };
+        EpisodeSnapshot: {
+            action: string;
+            content: string;
+            created_at: string;
+            id: number;
+            session_id: string;
+            status: components["schemas"]["EpisodeStatus"];
+            thread_name: string;
+        };
+        EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
+        ExecutionFrameResponse: {
+            bytes: number[];
+            caught_up: boolean;
+            execution: components["schemas"]["ExecutionStatus"];
+            gap: boolean;
+            next_offset: string;
+            observer_id: string;
+            offset: string;
+            protocol_version: number;
+            requires_ack: boolean;
+            retained_end: string;
+            retained_start: string;
+            segments: components["schemas"]["ExecutionOutputSegment"][];
+            terminal: components["schemas"]["UserTerminalResponse"];
+        };
+        ExecutionHistory: {
+            entries: components["schemas"]["ExecutionHistoryEntry"][];
+            limit: number;
+            older_entries_omitted: boolean;
+        };
+        ExecutionHistoryEntry: {
+            command?: components["schemas"]["ShellCommandSnapshot"] | null;
+            execution?: components["schemas"]["ExecutionStatus"] | null;
+            id: string;
+            outcome?: components["schemas"]["CommandStatus"] | null;
+            output: components["schemas"]["ExecutionHistoryOutput"];
+            started_at_epoch_ms: string;
+        };
+        ExecutionHistoryOutput: {
+            availability: components["schemas"]["ExecutionOutputAvailability"];
+            retained_end?: string | null;
+            retained_start?: string | null;
+        };
+        ExecutionHistoryResponse: {
+            history: components["schemas"]["ExecutionHistory"];
+            protocol_version: number;
+        };
+        ExecutionListResponse: {
+            executions: components["schemas"]["ExecutionStatus"][];
+            protocol_version: number;
+        };
+        ExecutionOrigin: "human" | "agent" | "human_command";
+        ExecutionOutputAvailability: "retained" | "tail_gap" | "expired" | "process_local_unavailable" | "not_recorded";
+        ExecutionOutputSegment: {
+            combined_end: string;
+            combined_start: string;
+            sequence: string;
+            stream: string;
+            stream_end: string;
+            stream_start: string;
+        };
+        ExecutionProcessState: "running" | "cleanup_pending" | "settled";
+        ExecutionRepresentation: "pty" | "log";
+        ExecutionStatus: {
+            alive: boolean;
+            backend: string;
+            cols: number;
+            cwd: string;
+            exit_code?: number | null;
+            id: string;
+            input: boolean;
+            origin: components["schemas"]["ExecutionOrigin"];
+            output_complete: boolean;
+            output_error?: string | null;
+            process_state: components["schemas"]["ExecutionProcessState"];
+            representation: components["schemas"]["ExecutionRepresentation"];
+            request_id?: string | null;
+            resize: boolean;
+            retained: boolean;
+            rows: number;
+            stop: boolean;
+        };
+        ForkSessionRequest: {
+            message_idx: number;
+        };
+        ForkSessionResponse: {
+            session_id: string;
+        };
+        FreshTaskDestination: {
+            default_ref?: string | null;
+            model?: string | null;
+            pinned_commit?: string | null;
+            project_id: string;
+            reasoning_effort?: string | null;
+            retained_limit: number;
+        };
+        FreshTaskLaunchReceipt: {
+            binding: components["schemas"]["HeartbeatBinding"];
+            created_at_ms: number;
+            destination: components["schemas"]["FreshTaskDestination"];
+            first_input_id?: number | null;
+            initial_outcome?: components["schemas"]["HeartbeatOccurrence"] | null;
+            initial_run_id?: string | null;
+            occurrence_id: string;
+            request: components["schemas"]["TaskLaunchRequest"];
+            schedule_id: string;
+            session_id: string;
+            shared_directory?: boolean | null;
+            stop_requested: boolean;
+        };
+        FreshTaskRetainedAllowance: {
+            retained_count: number;
+            retained_limit: number;
+            revision: number;
+        };
+        FreshTaskRetainedAllowanceChange: {
+            expected_revision: number;
+            request_id: string;
+            retained_limit: number;
+        };
+        FreshTaskRetainedAllowanceReceipt: {
+            allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+            request_id: string;
+        };
+        FreshTaskScheduleControlRequest: {
+            creator_session_id?: string | null;
+            destination?: components["schemas"]["FreshTaskDestination"] | null;
+            operation: components["schemas"]["HeartbeatAction"];
+            request_id: string;
+        };
+        FreshTaskScheduleInspection: {
+            heartbeat: components["schemas"]["HeartbeatInspection"];
+            host_allowance: components["schemas"]["FreshTaskRetainedAllowance"];
+            host_retained_limit: number;
+            inventory: components["schemas"]["FreshTaskLaunchReceipt"][];
+            launches: components["schemas"]["TaskLaunchRecord"][];
+        };
+        FunctionCall: {
+            arguments: string;
+            name: string;
+        };
+        GeneratedCredential: {
+            name: string;
+        };
+        GitHubBranchListResponse: {
+            branches: string[];
+        };
+        GitHubLoginStartedResponse: {
+            expires_in_secs: number;
+            login_id: string;
+            user_code: string;
+            verification_uri: string;
+        };
+        GitHubLoginStateResponse: {
+            state: "pending";
+        } | {
+            auth: components["schemas"]["GitHubStatusResponse"];
+            state: "complete";
+        } | {
+            error: string;
+            state: "failed";
+        };
+        GitHubRepositoryListResponse: {
+            repositories: components["schemas"]["GitHubRepositoryResponse"][];
+        };
+        GitHubRepositoryResponse: {
+            can_read: boolean;
+            can_write: boolean;
+            clone_url: string;
+            default_branch: string;
+            full_name: string;
+            html_url: string;
+            id: number;
+            name: string;
+            private: boolean;
+        };
+        GitHubStatusResponse: {
+            avatar_url?: string | null;
+            configured: boolean;
+            connected: boolean;
+            expires_at_ms?: number | null;
+            git_configured: boolean;
+            git_email?: string | null;
+            git_name?: string | null;
+            login?: string | null;
+            name?: string | null;
+            organization?: string | null;
+        };
+        GitIdentityResponse: {
+            email: string;
+            name: string;
+        };
+        GoalStatus: "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
+        HealthResponse: {
+            status: string;
+        };
+        HeartbeatAction: {
+            action: "create";
+            spec: components["schemas"]["HeartbeatSpec"];
+        } | {
+            action: "edit";
+            expected_version: number;
+            schedule_id: string;
+            spec: components["schemas"]["HeartbeatSpec"];
+        } | {
+            action: "pause";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "resume";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "stop";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "delete";
+            expected_version: number;
+            schedule_id: string;
+        } | {
+            action: "run_now";
+            expected_version: number;
+            schedule_id: string;
+        };
+        HeartbeatAttentionAcknowledgement: {
+            through_sequence: number;
+        };
+        HeartbeatAttentionResult: {
+            occurrence_id: string;
+            outcome: components["schemas"]["HeartbeatOutcome"];
+            run_id?: string | null;
+            schedule_id: string;
+            seen: boolean;
+            sequence: number;
+        };
+        HeartbeatBinding: {
+            backend: string;
+            config_version: number;
+            creator_session_id?: string | null;
+            cwd: string;
+            execution_cwd?: string | null;
+            fresh_task?: components["schemas"]["FreshTaskDestination"] | null;
+            model_configuration_id?: string | null;
+            project_id?: string | null;
+            scheduling_request?: string | null;
+            seen_through_sequence?: number;
+        };
+        HeartbeatCalendarDays: {
+            kind: "daily";
+        } | {
+            days: number[];
+            kind: "weekdays";
+        } | {
+            day: number;
+            kind: "weekly";
+        };
+        HeartbeatCalendarDraft: {
+            data_version?: string | null;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
+        HeartbeatCalendarPreview: {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            next_due?: components["schemas"]["HeartbeatCalendarPreviewPoint"] | null;
+            occurrences: components["schemas"]["HeartbeatCalendarPreviewPoint"][];
+        };
+        HeartbeatCalendarPreviewPoint: {
+            due_ms: number;
+            local: string;
+            utc: string;
+        };
+        HeartbeatCalendarRule: {
+            data_version: string;
+            days: components["schemas"]["HeartbeatCalendarDays"];
+            hour: number;
+            minute: number;
+            zone: string;
+        };
+        HeartbeatControlRequest: {
+            operation: components["schemas"]["HeartbeatAction"];
+            request_id: string;
+        };
+        HeartbeatInspection: {
+            calendar_preview?: components["schemas"]["HeartbeatCalendarPreview"] | null;
+            history: components["schemas"]["HeartbeatOccurrence"][];
+            schedule: components["schemas"]["HeartbeatSchedule"];
+        };
+        HeartbeatOccurrence: {
+            attempt_count: number;
+            coalesced_count: number;
+            due_first_ms: number;
+            due_last_ms: number;
+            evidence?: string | null;
+            generation?: string | null;
+            inbox_item_id?: number | null;
+            occurrence_id: string;
+            outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+            provisional_outcome?: components["schemas"]["HeartbeatOutcome"] | null;
+            receipt_id: string;
+            revision: number;
+            run_id?: string | null;
+            run_now: boolean;
+            schedule_id: string;
+            schedule_version: number;
+            session_id?: string | null;
+            settled_at_ms?: number | null;
+            settlement_sequence?: number | null;
+            spec: components["schemas"]["HeartbeatSpec"];
+            started_at_ms?: number | null;
+            state: components["schemas"]["HeartbeatOccurrenceState"];
+            tokens_used?: number | null;
+        };
+        HeartbeatOccurrenceState: "pending" | "admitted" | "settled" | "withdrawn";
+        HeartbeatOutcome: "unchanged" | "meaningful" | "finished" | "needs_human_action" | "failed" | "interrupted" | "unknown";
+        HeartbeatPreviewRequest: {
+            calendar: components["schemas"]["HeartbeatCalendarDraft"];
+            count?: number | null;
+        };
+        HeartbeatReceipt: {
+            active_occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+            occurrence?: components["schemas"]["HeartbeatOccurrence"] | null;
+            request_id: string;
+            schedule: components["schemas"]["HeartbeatSchedule"];
+        };
+        HeartbeatSchedule: {
+            anchor_ms: number;
+            binding: components["schemas"]["HeartbeatBinding"];
+            created_at_ms: number;
+            next_due_ms: number;
+            reason?: string | null;
+            schedule_id: string;
+            session_id?: string | null;
+            spec: components["schemas"]["HeartbeatSpec"];
+            starts: number;
+            state: components["schemas"]["HeartbeatState"];
+            time_used_ms: number;
+            tokens_used: number;
+            updated_at_ms: number;
+            usage_unknown: boolean;
+            version: number;
+        };
+        HeartbeatSpec: {
+            calendar?: components["schemas"]["HeartbeatCalendarRule"] | null;
+            end_condition: string;
+            execution_timeout_ms?: number;
+            goal_id?: string | null;
+            instructions: string;
+            interval_ms?: number | null;
+            max_occurrences?: number;
+            name: string;
+            skills?: string[];
+            token_allowance?: number | null;
+        } & ({
+            calendar?: null;
+            interval_ms: number;
+        } | {
+            calendar: components["schemas"]["HeartbeatCalendarRule"];
+            interval_ms?: null;
+        });
+        HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
+        InboxDelivery: "steer" | "queue";
+        InboxItemResponse: {
+            cancelled_at?: string | null;
+            client_id?: string | null;
+            created_at: string;
+            delivered_at?: string | null;
+            delivered_run_id?: string | null;
+            delivery: components["schemas"]["InboxDelivery"];
+            id: number;
+            prompt: string;
+            session_id: string;
+            status: components["schemas"]["InboxStatus"];
+            target_run_id?: string | null;
+            terminal_selection?: components["schemas"]["TerminalSelectionEvidence"] | null;
+            updated_at: string;
+            version: number;
+        };
+        InboxStatus: "pending" | "delivered" | "cancelled";
+        InputController: "human" | "agent";
+        InputControlStatus: {
+            controller: components["schemas"]["InputController"];
+            frozen: boolean;
+            in_flight: boolean;
+            revision: string;
+        };
+        InputDeliveryOutcome: "written" | "rejected" | "unconfirmed";
+        InputDeliveryReceipt: {
+            error?: string | null;
+            outcome: components["schemas"]["InputDeliveryOutcome"];
+        };
+        LaggedEvent: {
+            missed: number;
+        };
+        LaunchModelDefaults: {
+            configured_model?: string | null;
+            configured_reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+        };
+        LaunchModelDefaultsRequest: {
+            cwd?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        LightModelSettings: {
+            api_key_env?: string | null;
+            backend?: components["schemas"]["BackendKind"] | null;
+            base_url?: string | null;
+            model: string;
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+        };
+        ManagedAcceptedIdentity: {
+            host_incarnation_id: string;
+            managed_host_id: string;
+            operation_id: string;
+            target: components["schemas"]["ManagedUpgradeTarget"];
+        };
+        ManagedAuthListResponse: {
+            providers: components["schemas"]["ManagedAuthStatusResponse"][];
+        };
+        ManagedAuthProvider: "arcee" | "codex";
+        ManagedAuthStatusResponse: {
+            account: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url: string | null;
+            expires_at_ms: number | null;
+            organization: string | null;
+            path: string;
+            provider: components["schemas"]["ManagedAuthProvider"];
+            signed_in: boolean;
+        };
+        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "managed_orchestrator" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
+        ManagedCloneOperation: {
+            branch: string;
+            created_at_unix_ms: number;
+            destination: string;
+            error?: string | null;
+            operation_id: string;
+            progress: string;
+            project?: components["schemas"]["ProjectRecord"] | null;
+            project_id: string;
+            project_name: string;
+            repository: string;
+            repository_id: number;
+            reused_existing_checkout: boolean;
+            source_identity: string;
+            status: components["schemas"]["ManagedCloneStatus"];
+            updated_at_unix_ms: number;
+            version: number;
+        };
+        ManagedCloneStatus: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+        ManagedHostStatusResponse: {
+            build_id: string;
+            build_track: string;
+            checks: components["schemas"]["ReadinessCheck"][];
+            github_status: string;
+            logical_host_id: string;
+            maintenance?: components["schemas"]["ManagedMaintenanceSnapshot"] | null;
+            maintenance_state: string;
+            managed: boolean;
+            migration_failure?: string | null;
+            migration_state: string;
+            minimum_migratable_schema_version: number;
+            model: components["schemas"]["ManagedModelStatus"];
+            model_ready: boolean;
+            opened_schema_version?: number | null;
+            owner?: string | null;
+            product_version: string;
+            project_count: number;
+            public_hostname: string;
+            ready: boolean;
+            repository_root: string;
+            schema_version: number;
+            secret_count: number;
+            session_count: number;
+            source_revision: string;
+            supported_schema_version: number;
+            version: string;
+        };
+        ManagedMaintenanceSnapshot: {
+            accepted_identity?: components["schemas"]["ManagedAcceptedIdentity"] | null;
+            blockers: components["schemas"]["ManagedUpgradeBlocker"][];
+            operation_id?: string | null;
+            prepared_at?: string | null;
+            state: components["schemas"]["ManagedMaintenanceState"];
+            target?: components["schemas"]["ManagedUpgradeTarget"] | null;
+            version: number;
+        };
+        ManagedMaintenanceState: "serving" | "maintenance";
+        ManagedModelStatus: {
+            backend: components["schemas"]["BackendKind"];
+            display_name: string;
+            endpoint: string;
+            id: string;
+        };
+        ManagedOrchestratorRecord: {
+            completion_inbox_id?: number | null;
+            created_at: string;
+            description: string;
+            execution_mode?: components["schemas"]["TraditionalChildExecutionMode"] | null;
+            failure?: string | null;
+            generation: number;
+            orchestrator_session_id: string;
+            parent_session_id: string;
+            report?: string | null;
+            root_session_id: string;
+            run_id?: string | null;
+            status: components["schemas"]["TraditionalChildStatus"];
+            updated_at: string;
+            version: number;
+        };
+        ManagedSecretList: {
+            healthy: boolean;
+            secrets: components["schemas"]["ManagedSecretSummary"][];
+        };
+        ManagedSecretSummary: {
+            name: string;
+            updated_at_unix_ms: number;
+        };
+        ManagedSessionSummary: {
+            active: boolean;
+            active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+            attention_revision?: number;
+            attention_updated_at?: string | null;
+            heartbeat_results?: components["schemas"]["HeartbeatAttentionResult"][];
+            lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
+            summary: components["schemas"]["SessionSummarySnapshot"];
+            workspace_diff?: components["schemas"]["WorkspaceDiffTotals"] | null;
+        };
+        ManagedUpgradeBlocker: {
+            detail: string;
+            id: string;
+            kind: components["schemas"]["ManagedBlockerKind"];
+            session_id?: string | null;
+        };
+        ManagedUpgradeTarget: {
+            minimum_schema_version: number;
+            product_version: string;
+            release_id: string;
+            schema_version: number;
+            source_sha: string;
+        };
+        McpHeaderHelperConfig: {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        McpLibraryAuth: "none" | "optional_header" | "required_header";
+        McpLibraryEntry: {
+            auth: components["schemas"]["McpLibraryAuth"];
+            auth_header?: string | null;
+            auth_hint?: string | null;
+            category: string;
+            description: string;
+            docs_url: string;
+            icon_url?: string | null;
+            id: string;
+            name: string;
+            tags: string[];
+            transport: string;
+            url: string;
+        };
+        McpLibraryResponse: {
+            entries: components["schemas"]["McpLibraryEntry"][];
+        };
+        McpNotificationKind: "catalog_refreshed" | "catalog_refresh_failed" | "resource_updated" | "log" | "progress" | "subscription_ended";
+        McpOAuthAuthorizationMetadataRequest: {
+            authorization_endpoint: string;
+            code_challenge_methods_supported?: string[] | null;
+            issuer?: string | null;
+            jwks_uri?: string | null;
+            registration_endpoint?: string | null;
+            response_types_supported?: string[] | null;
+            scopes_supported?: string[] | null;
+            token_endpoint: string;
+        } & Record<string, unknown>;
+        McpOAuthPublicStatus: "needs_configuration" | "needs_authorization" | "connecting" | "connected" | "failed";
+        McpOAuthRegistrationRequest: {
+            client_id_credential: string;
+            client_secret_credential?: string | null;
+            type: "pre_registered";
+        } | {
+            type: "client_metadata";
+            url: string;
+        } | {
+            client_name?: string | null;
+            type: "dynamic";
+        };
+        McpOAuthStatusResponse: {
+            authorization_url?: string | null;
+            message?: string | null;
+            status: components["schemas"]["McpOAuthPublicStatus"];
+        };
+        McpProbedTool: {
+            _meta?: unknown;
+            annotations?: unknown;
+            description?: string | null;
+            icons?: unknown;
+            name: string;
+            output_schema?: unknown;
+            title?: string | null;
+        };
+        McpProbeResult: {
+            capabilities: string[];
+            catalog_warnings: string[];
+            instructions?: string | null;
+            prompt_count: number;
+            protocol_version: string;
+            resource_count: number;
+            resource_template_count: number;
+            server_name?: string | null;
+            server_version?: string | null;
+            tools: components["schemas"]["McpProbedTool"][];
+        };
+        McpPromptArgument: {
+            description?: string | null;
+            name: string;
+            required: boolean;
+        };
+        McpProtocolSelection: "legacy" | "auto" | "current";
+        McpRuntimeState: "disabled" | "disconnected" | "connecting" | "connected" | "failed";
+        McpRuntimeStatus: {
+            auth_required: boolean;
+            error?: string | null;
+            name: string;
+            protocol_version?: string | null;
+            required: boolean;
+            server_name?: string | null;
+            server_version?: string | null;
+            sessions_blocked: boolean;
+            state: components["schemas"]["McpRuntimeState"];
+            tool_count: number;
+        };
+        McpRuntimeStatusList: {
+            servers: components["schemas"]["McpRuntimeStatus"][];
+        };
+        McpServerList: {
+            servers: components["schemas"]["McpServerView"][];
+        };
+        McpServerView: {
+            allowed_tools?: string[] | null;
+            approval: components["schemas"]["McpToolApproval"];
+            args: string[];
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            denied_tools: string[];
+            enabled: boolean;
+            env: Record<string, string>;
+            env_headers: Record<string, string>;
+            env_vars: string[];
+            execution_timeout_ms?: number | null;
+            header_helper?: components["schemas"]["McpHeaderHelperConfig"] | null;
+            headers: Record<string, string>;
+            library_id?: string | null;
+            name: string;
+            protocol: components["schemas"]["McpProtocolSelection"];
+            required: boolean;
+            startup_timeout_ms?: number | null;
+            tool_approvals: Record<string, components["schemas"]["McpToolApproval"]>;
+            transport: components["schemas"]["McpTransportSchema"];
+            url?: string | null;
+        };
+        McpToolApproval: "allow" | "ask";
+        McpTransportSchema: "stdio" | "streamable_http";
+        Message: {
+            content: string;
+            role: "system";
+        } | {
+            content: string;
+            role: "user";
+        } | {
+            content: string | null;
+            duration_ms?: number | null;
+            model_origin?: components["schemas"]["ModelOrigin"] | null;
+            reasoning_details?: unknown;
+            reasoning_field?: string | null;
+            reasoning_text?: string | null;
+            role: "assistant";
+            tool_calls?: components["schemas"]["ToolCall"][] | null;
+        } | {
+            content: components["schemas"]["ToolContentSchema"];
+            role: "tool";
+            tool_call_id: string;
+        };
+        MessageCycleMetadata: {
+            marker: string;
+            thread_names: string[];
+        };
+        MessagePageMetadata: {
+            end: number;
+            has_older: boolean;
+            start: number;
+            total: number;
+        };
+        MessagesPageResponse: {
+            created_at: (string | null)[];
+            messages: components["schemas"]["Message"][];
+            page: components["schemas"]["MessagePageMetadata"];
+            terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+        };
+        ModelConfigFromFileRequest: {
+            path: string;
+        };
+        ModelConfigurationList: {
+            configurations: components["schemas"]["ModelConfigurationRecord"][];
+        };
+        ModelConfigurationRecord: {
+            allow_insecure_http: boolean;
+            api_key_env?: string | null;
+            backend: string;
+            base_url: string;
+            config_id: string;
+            created_at: string;
+            extra_headers: Record<string, string>;
+            initial_prompt?: string | null;
+            light_model?: components["schemas"]["LightModelSettings"] | null;
+            model: string;
+            name: string;
+            orchestrator_compaction_threshold?: number | null;
+            reasoning_effort?: string | null;
+            updated_at: string;
+        };
+        ModelCostRates: {
+            cache_read: number;
+            cache_write: number;
+            input: number;
+            output: number;
+            tiers?: components["schemas"]["CostTier"][] | null;
+        };
+        ModelEntry: {
+            context_window: number;
+            cost: components["schemas"]["ModelCostRates"];
+            display_name: string | null;
+            id: string;
+            max_tokens: number;
+            reasoning: boolean;
+            source: components["schemas"]["ModelSource"];
+            supported_efforts: components["schemas"]["ReasoningEffort"][];
+        };
+        ModelListing: {
+            catalog_version: number;
+            providers: components["schemas"]["ProviderListing"][];
+        };
+        ModelOrigin: {
+            backend: components["schemas"]["BackendKind"];
+            model: string;
+        };
+        ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
+        OpenLocalPathResult: {
+            fell_back_to_parent: boolean;
+            opened: string;
+        };
+        OpenSshAliasList: {
+            aliases: string[];
+            undiscoverable_patterns: number;
+            warnings: components["schemas"]["OpenSshAliasWarning"][];
+        };
+        OpenSshAliasWarning: "home_unavailable" | "unreadable_file" | "oversized_file" | "missing_include" | "include_cycle" | "include_depth_exceeded" | "file_limit_reached" | "alias_limit_reached" | "unsupported_include" | "conditional_include_skipped" | "malformed_line";
+        OpenUserTerminalRequest: {
+            cols: number;
+            launch_id: string;
+            protocol_version: number;
+            rows: number;
+        };
+        OpenWorkspacePathRequest: {
+            path: string;
+        };
+        OrchestratorSteeringRequest: {
+            instruction: string;
+        };
+        OrchestratorSteeringResponse: {
+            instruction_preview: string;
+            status: string;
+            steering_id: number;
+        };
+        PartialModelOutput: {
+            reasoning?: boolean;
+            text?: boolean;
+            tool_call?: boolean;
+        };
+        PermissionApprovalMode: "manual" | "auto_approve" | "review";
+        PermissionGrantRecord: {
+            action: string;
+            backend: string;
+            created_at: string;
+            id: string;
+            resource: string;
+            session_config_version: number;
+            session_id: string;
+        };
+        PermissionReply: "once" | "always" | "reject";
+        PermissionRequest: {
+            call_id?: string | null;
+            created_at_epoch_ms: number;
+            id: string;
+            resources: components["schemas"]["PermissionRequestResource"][];
+            session_id: string;
+            tool: string;
+        };
+        PermissionRequestResource: {
+            action: string;
+            display: string;
+            resource: string;
+            save_resource?: string | null;
+        };
+        PermissionReview: {
+            backend: string;
+            call_id?: string | null;
+            category?: components["schemas"]["ReviewCategory"] | null;
+            code?: components["schemas"]["PermissionReviewCode"] | null;
+            created_at_epoch_ms: number;
+            duration_ms?: number | null;
+            failure_reason?: components["schemas"]["PermissionReviewFailureReason"] | null;
+            id: string;
+            outcome?: components["schemas"]["PermissionReviewOutcome"] | null;
+            resources: components["schemas"]["ReviewResource"][];
+            reviewer: string;
+            session_id: string;
+            tool: string;
+            user_authorized_retry: boolean;
+        };
+        PermissionReviewCode: "review_rejected" | "review_uncertain" | "review_unavailable" | "review_stopped";
+        PermissionReviewFailureReason: "authentication" | "access_denied" | "model_unavailable" | "insufficient_credits" | "rate_limited" | "timeout" | "invalid_response" | "service_unavailable" | "cancelled";
+        PermissionReviewOutcome: "approved" | "rejected" | "uncertain" | "unavailable";
+        PermissionStateResponse: {
+            approval_mode: components["schemas"]["PermissionApprovalMode"];
+            authorizable_review_ids?: string[];
+            grants: components["schemas"]["PermissionGrantRecord"][];
+            requests: components["schemas"]["PermissionRequest"][];
+            reviews?: components["schemas"]["PermissionReview"][];
+        };
+        ProductAvailability: "available" | "disabled" | "unavailable" | "unknown";
+        ProductBuild: {
+            build_id: string;
+            product_version: string;
+            source_revision: string;
+            track: string;
+        };
+        ProductCapability: {
+            availability: components["schemas"]["ProductAvailability"];
+            count: number | null;
+        };
+        ProductContext: {
+            build: components["schemas"]["ProductBuild"];
+            destinations: components["schemas"]["ProductDestinationInfo"][];
+            features: components["schemas"]["ProductFeature"][];
+            managed: boolean;
+            mcp: components["schemas"]["ProductCapability"];
+            schema_version: number;
+            session: components["schemas"]["ProductSessionContext"] | null;
+            source: string;
+        };
+        ProductDestination: "projects" | "mcp-settings" | "configurations" | "model-authentication" | "ssh-configurations" | "session-subagents" | "session-files" | "session-terminal" | "session-history";
+        ProductDestinationInfo: {
+            availability: components["schemas"]["ProductAvailability"];
+            destination: components["schemas"]["ProductDestination"];
+            label: string;
+            steps: string;
+        };
+        ProductExecutionBackend: "local" | "ssh" | "podman";
+        ProductFeature: {
+            availability: components["schemas"]["ProductAvailability"];
+            feature: components["schemas"]["ProductFeatureKind"];
+            label: string;
+        };
+        ProductFeatureKind: "traditional_subagents" | "managed_orchestrators" | "managed_host" | "product_navigation";
+        ProductNavigationRequest: {
+            destination: components["schemas"]["ProductDestination"];
+            expected_build_id: string;
+            session_id?: string | null;
+        };
+        ProductNavigationResolution: {
+            build: components["schemas"]["ProductBuild"];
+            opened: boolean;
+            session_id: string | null;
+            target: components["schemas"]["ProductDestinationInfo"];
+        };
+        ProductSessionContext: {
+            behavior: components["schemas"]["SessionBehavior"];
+            execution_backend: components["schemas"]["ProductExecutionBackend"];
+            session_id: string;
+            skills: components["schemas"]["ProductCapability"];
+            tools: components["schemas"]["ProductCapability"];
+        };
+        ProjectList: {
+            projects: components["schemas"]["ProjectRecord"][];
+        };
+        ProjectRecord: {
+            created_at: string;
+            cwd: string;
+            default_model_config_id?: string | null;
+            description?: string | null;
+            name: string;
+            pinned: boolean;
+            presentation_version: number;
+            project_id: string;
+            sort_order: number;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+            updated_at: string;
+        };
+        ProviderAuth: "api_key_env" | "managed_arcee" | "codex_oauth";
+        ProviderConnection: {
+            api_key_env: string | null;
+            base_url: string;
+        };
+        ProviderListing: {
+            auth: components["schemas"]["ProviderAuth"];
+            auth_hint: string | null;
+            auth_status: components["schemas"]["AuthStatus"];
+            connection: components["schemas"]["ProviderConnection"] | null;
+            default_base_url: string | null;
+            default_limits: components["schemas"]["DefaultLimits"];
+            id: components["schemas"]["BackendKind"];
+            managed_base_url: string | null;
+            models: components["schemas"]["ModelEntry"][];
+        };
+        ProviderModel: {
+            display_name: string | null;
+            id: string;
+        };
+        ProviderModelList: {
+            base_url: string;
+            models: components["schemas"]["ProviderModel"][];
+        };
+        ProviderModelsRequest: {
+            allow_insecure_http?: boolean;
+            api_key?: string | null;
+            api_key_env?: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url?: string | null;
+        };
+        PullUserTerminalRequest: {
+            acknowledge_offset?: string | null;
+            acknowledge_reset: boolean;
+            protocol_version: number;
+            wait_ms: number;
+        };
+        PutManagedSecretRequest: {
+            value: string;
+        };
+        QuestionAnswer: {
+            answer: string;
+            expected_revision: number;
+            generation: string;
+            request_id: string;
+            run_id: string;
+        };
+        QuestionAnswerReceipt: {
+            answer: string;
+            continuation_run_id: string;
+            generation: string;
+            inbox_item_id: number;
+            request_id: string;
+            revision: number;
+            run_id: string;
+            session_id: string;
+        };
+        QuestionRecord: {
+            answer: components["schemas"]["QuestionAnswerReceipt"] | null;
+            continuation_state: string | null;
+            created_at: string;
+            goal_id: string | null;
+            request: components["schemas"]["QuestionRequest"];
+            revision: number;
+            status: string;
+        };
+        QuestionRequest: {
+            choices: string[];
+            generation: string;
+            request_id: string;
+            responder_class: components["schemas"]["QuestionResponder"];
+            run_id: string;
+            session_id: string;
+            text: string;
+        };
+        QuestionResponder: "information" | "human_decision";
+        RawSessionConfig: {
+            allow_insecure_http: boolean;
+            api_key_env: string | null;
+            backend: string | null;
+            base_url: string;
+            config_version: number;
+            diagnostics?: string[];
+            extra_headers_json: string | null;
+            light_model?: components["schemas"]["LightModelSettings"] | null;
+            model: string;
+            orchestrator_compaction_threshold: number | null;
+            reasoning_effort: string | null;
+            session_id: string;
+        };
+        ReadinessCheck: {
+            detail: string;
+            name: string;
+            ready: boolean;
+        };
+        ReadinessResponse: {
+            build_id: string;
+            build_track: string;
+            checks: components["schemas"]["ReadinessCheck"][];
+            maintenance_state: string;
+            managed: boolean;
+            migration_failure?: string | null;
+            migration_state: string;
+            minimum_migratable_schema_version: number;
+            opened_schema_version?: number | null;
+            product_version: string;
+            schema_version: number;
+            source_revision: string;
+            status: string;
+            supported_schema_version: number;
+            version: string;
+        };
+        ReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+        RecentEventsResponse: {
+            boundary: components["schemas"]["SessionEventBoundary"];
+            events: components["schemas"]["SessionEventEnvelope"][];
+        };
+        RecoveryAction: "automatic_retry" | "resume_goal" | "regenerate_with_rewind" | "settings" | "none";
+        RefreshSessionIntegrationsRequest: {
+            expected_revision: number;
+        };
+        RegenerateSessionRequest: {
+            message_idx: number;
+        };
+        ReorderProjectsRequest: {
+            expected_versions: Record<string, number>;
+            pinned: boolean;
+            project_ids: string[];
+        };
+        ReorderProjectsResponse: {
+            pinned: boolean;
+            projects: components["schemas"]["ProjectRecord"][];
+        };
+        ReorderSessionsRequest: {
+            expected_versions: Record<string, number>;
+            pinned: boolean;
+            session_ids: string[];
+        };
+        ReorderSessionsResponse: {
+            pinned: boolean;
+            sessions: components["schemas"]["SessionSummarySnapshot"][];
+        };
+        ReplayBoundaryEvent: {
+            epoch_id: string;
+            replay_boundary_sequence_id: number;
+        };
+        ReplayGapEvent: {
+            replay_gap: components["schemas"]["SessionReplayGap"];
+        };
+        ReplyPermissionRequest: {
+            reply: components["schemas"]["PermissionReply"];
+        };
+        RequestField_BackendKind_BackendKind: null | ("deepseek-chat" | "fireworks-chat" | "together-chat" | "openai-responses" | "openai-chat-completions" | "chatgpt-codex-responses" | "anthropic-messages" | "arcee-auth" | "arcee-api");
+        RequestField_bool_bool: null | boolean;
+        RequestField_BTreeMap_BTreeMap_String_McpToolApproval: null | Record<string, "allow" | "ask">;
+        RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
+        RequestField_BTreeMap_BTreeMap_String_String: null | Record<string, string>;
+        RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
+        RequestField_LightModelSettings_LightModelSettings: null | {
+            api_key_env?: string | null;
+            backend?: components["schemas"]["BackendKind"] | null;
+            base_url?: string | null;
+            model: string;
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+        };
+        RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
+        RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
+        RequestField_ReasoningEffort_ReasoningEffort: null | ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max");
+        RequestField_String_String: null | string;
+        RequestField_u16_u16: null | number;
+        RequestField_u64_u64: null | number;
+        RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest: null | {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string | null>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        RequestField_Vec_Vec_String: null | string[];
+        ResizeUserTerminalRequest: {
+            cols: number;
+            protocol_version: number;
+            rows: number;
+        };
+        ResolvedModelConfiguration: {
+            allow_insecure_http: boolean;
+            api_key_env: string | null;
+            backend: components["schemas"]["BackendKind"];
+            base_url: string;
+            model: string | null;
+            models: components["schemas"]["ProviderModel"][];
+            models_error: string | null;
+            reasoning_effort: components["schemas"]["ReasoningEffort"] | null;
+        };
+        ResponseTimingSnapshot: {
+            cumulative_token_usage?: components["schemas"]["TokenUsage"] | null;
+            last_response_duration_ms?: number | null;
+            last_token_usage?: components["schemas"]["TokenUsage"] | null;
+            previous_response_duration_ms?: number | null;
+            response_durations_ms?: (number | null)[] | null;
+            token_usages?: (components["schemas"]["TokenUsage"] | null)[] | null;
+            unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
+        };
+        RevealWorkspacePathRequest: {
+            expected_path_root: string;
+            expected_workspace_root: string;
+            path: string;
+        };
+        RevertSessionRequest: {
+            message_idx: number;
+        };
+        RevertSessionResponse: {
+            messages_removed: number;
+            revisions_removed: number;
+            threads_removed: number;
+            transcript_len: number;
+            workspace_restored: boolean;
+        };
+        ReviewCategory: "routine" | "destructive" | "exfiltration" | "credential" | "out_of_scope" | "unclear";
+        ReviewResource: {
+            action: string;
+            display: string;
+            resource: string;
+        };
+        RunFailure: {
+            attempt_count: number;
+            diagnostic: string;
+            http_status?: number | null;
+            kind: components["schemas"]["RunFailureKind"];
+            partial_output?: components["schemas"]["PartialModelOutput"];
+            phase: components["schemas"]["RunFailurePhase"];
+            recovery_action: components["schemas"]["RecoveryAction"];
+            retry_after_ms?: number | null;
+            summary: string;
+            transient: boolean;
+        };
+        RunFailureKind: "transport" | "capacity" | "authentication" | "validation" | "configuration" | "protocol" | "interrupted" | "unknown";
+        RunFailurePhase: "request" | "response" | "stream" | "decode" | "agent";
+        SandboxActivity: {
+            phase: string;
+            since_epoch_ms: number;
+        };
+        SandboxAvailability: {
+            detail?: string | null;
+            guidance?: string | null;
+            status: components["schemas"]["SandboxAvailabilityStatus"];
+        };
+        SandboxAvailabilityStatus: "ready" | "missing" | "unavailable";
+        SandboxRequest: {
+            activity_key?: string | null;
+            backend?: string | null;
+            cpus?: number | null;
+            enabled?: boolean;
+            gpus?: string[];
+            image?: string | null;
+            memory_mib?: number | null;
+            mounts?: string[];
+            mounts_ro?: string[];
+            no_mount_cwd?: boolean;
+            session_key?: string | null;
+            shm_size?: string | null;
+            workdir?: string | null;
+        };
+        SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
+        SessionClientId: string;
+        SessionEvent: {
+            event: components["schemas"]["AgentEvent"];
+            type: "agent";
+        } | {
+            prompt_preview: string;
+            started_at_epoch_ms: number;
+            submitted_user_message?: components["schemas"]["SubmittedUserMessageSnapshot"] | null;
+            type: "run_started";
+        } | {
+            duration_ms?: number | null;
+            response: string;
+            type: "run_completed";
+        } | {
+            failure?: components["schemas"]["RunFailure"] | null;
+            message: string;
+            type: "run_failed";
+        } | {
+            type: "run_cancelled";
+        } | {
+            request: components["schemas"]["PermissionRequest"];
+            type: "permission_asked";
+        } | {
+            reply: components["schemas"]["PermissionReply"];
+            request_id: string;
+            type: "permission_replied";
+        } | {
+            reason: string;
+            request_id: string;
+            type: "permission_dismissed";
+        } | {
+            mode: components["schemas"]["PermissionApprovalMode"];
+            type: "permission_approval_mode_changed";
+        } | {
+            review: components["schemas"]["PermissionReview"];
+            type: "permission_review_started";
+        } | {
+            review: components["schemas"]["PermissionReview"];
+            type: "permission_reviewed";
+        } | {
+            session_id: string;
+            type: "snapshot_saved";
+        } | {
+            transcript_len: number;
+            type: "transcript_appended";
+        } | {
+            transcript_len: number;
+            type: "transcript_reverted";
+        };
+        SessionEventBoundary: {
+            epoch_id: string;
+            sequence_id: number;
+        };
+        SessionEventEnvelope: {
+            client_id?: components["schemas"]["SessionClientId"] | null;
+            epoch_id: string;
+            event: components["schemas"]["SessionEvent"];
+            run_id?: components["schemas"]["SessionRunId"] | null;
+            sequence_id: number;
+            session_id?: string | null;
+        };
+        SessionForkLink: {
+            deleted: boolean;
+            session_id: string;
+            source_message_idx: number;
+            title?: string | null;
+        };
+        SessionForkOrigin: {
+            deleted?: boolean;
+            session_id: string;
+            title: string;
+        };
+        SessionFrontendSnapshot: {
+            active_compaction?: components["schemas"]["ActiveCompactionSnapshot"] | null;
+            active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+            active_threads?: string[];
+            covered_orchestrator_steering_ids?: number[];
+            forks?: components["schemas"]["SessionForkLink"][];
+            message_created_at?: (string | null)[];
+            messages: components["schemas"]["Message"][];
+            metadata: components["schemas"]["SessionMetadata"];
+            primary_tool_events?: components["schemas"]["AgentEvent"][];
+            response_timing: components["schemas"]["ResponseTimingSnapshot"];
+            run_failure?: components["schemas"]["RunFailure"] | null;
+            sessions: components["schemas"]["SessionSummarySnapshot"][];
+            shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
+            thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
+            thread_event_boundary: components["schemas"]["SessionEventBoundary"];
+            thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
+            thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;
+            thread_steering?: components["schemas"]["ThreadSteeringRecord"][];
+            threads: components["schemas"]["ThreadSnapshot"][];
+            transcript_recovery_warning?: string | null;
+            worksets: components["schemas"]["WorksetsSnapshot"];
+            workspace: components["schemas"]["WorkspaceSnapshot"];
+        };
+        SessionGoalRecord: {
+            accounting_run_id: string | null;
+            accounting_started_at_epoch_ms: number | null;
+            accounting_token_baseline: number | null;
+            consecutive_transient_failures: number;
+            continuation_run_id: string | null;
+            created_at: string;
+            goal_id: string;
+            last_failure: components["schemas"]["RunFailure"] | null;
+            next_attempt_at_epoch_ms: number | null;
+            objective: string;
+            session_id: string;
+            status: components["schemas"]["GoalStatus"];
+            time_used_ms: number;
+            token_budget: number | null;
+            tokens_used: number;
+            updated_at: string;
+            version: number;
+        };
+        SessionLineageKind: "traditional-child" | "managed-orchestrator";
+        SessionLineageSnapshot: {
+            description: string;
+            kind: components["schemas"]["SessionLineageKind"];
+            parent_session_id: string;
+            root_session_id: string;
+        };
+        SessionMcpRefreshState: "not_requested" | "current" | "pending" | "degraded" | "failed" | "scheduled_for_workers";
+        SessionMcpRefreshStatus: {
+            applied_revision: number | null;
+            incarnation_id: string | null;
+            message: string | null;
+            requested_at: string | null;
+            revision: number;
+            state: components["schemas"]["SessionMcpRefreshState"];
+        };
+        SessionMetadata: {
+            agents_md_status: string;
+            api_key_env?: string | null;
+            backend: string;
+            base_url?: string;
+            behavior?: components["schemas"]["SessionBehavior"];
+            cwd: string;
+            extra_headers?: Record<string, string>;
+            model: string;
+            project_id?: string | null;
+            reasoning_effort?: string | null;
+            sandbox_status: string;
+            session_id?: string | null;
+            store_path: string;
+            workspace_host_path?: string | null;
+        };
+        SessionReplayGap: {
+            missing_from_sequence_id: number;
+            missing_to_sequence_id: number;
+        };
+        SessionRunId: string;
+        SessionSnapshotResponse: components["schemas"]["SessionFrontendSnapshot"] & {
+            lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
+            message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
+            message_page?: components["schemas"]["MessagePageMetadata"] | null;
+            terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+        };
+        SessionSummarySnapshot: {
+            backend: string;
+            behavior?: components["schemas"]["SessionBehavior"];
+            created_at: string;
+            cwd: string;
+            forked_from?: components["schemas"]["SessionForkOrigin"] | null;
+            last_user_prompt: string | null;
+            model: string;
+            model_config_error?: string | null;
+            pinned?: boolean;
+            presentation_version?: number;
+            project_id?: string | null;
+            run_count?: number;
+            sandboxed: boolean;
+            session_id: string;
+            sort_order?: number;
+            ssh_host: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+            title: string | null;
+            total_cost_micros?: number | null;
+            total_tokens?: number | null;
+            updated_at: string;
+            visible_message_count: number;
+        };
+        ShellCommandRequest: {
+            command: string;
+            request_id: string;
+            timeout_ms?: number | null;
+        };
+        ShellCommandSnapshot: {
+            accepted_at_epoch_ms: number;
+            command: string;
+            diagnostic?: string | null;
+            exit_code?: number | null;
+            finished_at_epoch_ms?: number | null;
+            operation_id: string;
+            output_id?: string | null;
+            request_id: string;
+            state: components["schemas"]["ShellCommandState"];
+            stderr: string;
+            stdout: string;
+            timeout_ms: number;
+            transcript_index?: number | null;
+        };
+        ShellCommandState: "accepted" | "started" | "completed" | "timed_out" | "cancelled" | "rejected" | "spawn_failed" | "interrupted" | "outcome_unknown";
+        ShellOutputPage: {
+            content: string;
+            eof: boolean;
+            next_offset: number;
+            offset: number;
+            overflowed: boolean;
+        };
+        SkillCatalogEntry: {
+            compatibility?: string | null;
+            description: string;
+            name: string;
+        };
+        SlashCommand: "compact" | "goal" | "mcp_prompt";
+        SlashCommandDefinition: {
+            accepts_arguments: boolean;
+            arguments?: components["schemas"]["McpPromptArgument"][];
+            command: components["schemas"]["SlashCommand"];
+            description: string;
+            name: string;
+        };
+        SshBrowseRequest: {
+            hidden?: boolean;
+            path?: string | null;
+            ssh_host?: string | null;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        SshConfigurationList: {
+            configurations: components["schemas"]["SshConfigurationRecord"][];
+        };
+        SshConfigurationRecord: {
+            config_id: string;
+            created_at: string;
+            name: string;
+            ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+            updated_at: string;
+        };
+        StartManagedCloneRequest: {
+            branch: string;
+            destination: string;
+            project_description?: string | null;
+            project_name: string;
+            repository: string;
+            repository_id: number;
+        };
+        StartManagedOrchestratorRequest: {
+            background?: boolean;
+            description: string;
+            orchestrator_session_id?: string | null;
+            prompt: string;
+        };
+        StartTraditionalChildRequest: {
+            background?: boolean;
+            child_session_id?: string | null;
+            description: string;
+            profile: string;
+            prompt: string;
+        };
+        StoreCredentialRequest: {
+            value: string;
+        };
+        StoredCredentialList: {
+            credentials: components["schemas"]["StoredCredentialSummary"][];
+        };
+        StoredCredentialSummary: {
+            last_four: string;
+            name: string;
+        };
+        StoreInfo: {
+            root_cwd: string;
+            store_path: string;
+            worker_executable: string;
+        };
+        SubmitPromptRequest: {
+            prompt: string;
+        };
+        SubmitPromptResponse: {
+            client_id?: string | null;
+            display_prompt: string;
+            run_id: string;
+        };
+        SubmittedUserMessageSnapshot: {
+            client_id?: components["schemas"]["SessionClientId"] | null;
+            content: string;
+            run_id: components["schemas"]["SessionRunId"];
+            submitted_at_epoch_ms: number;
+            terminal_selection?: components["schemas"]["TerminalSelectionEvidence"] | null;
+        };
+        SwitchBranchRequest: {
+            create?: boolean;
+            name: string;
+        };
+        TaskFollowupAction: "queue" | "steer" | "auto";
+        TaskFollowupDelegation: {
+            action: components["schemas"]["TaskFollowupAction"];
+            caller_session_id: string;
+            created_at: string;
+            human_request_id: string;
+            id: string;
+            issued_config_version: number;
+            origin: string;
+            revoked_at?: string | null;
+            target_session_id: string;
+        };
+        TaskFollowupDelegationRequest: {
+            action: components["schemas"]["TaskFollowupAction"];
+            project_id?: string | null;
+            request_id: string;
+            target_session_id: string;
+        };
+        TaskLaunchPhase: "pinned" | "preparing_workspace" | "preparing_runtime" | "ready" | "failed" | "cancelled";
+        TaskLaunchRecord: {
+            created_at: string;
+            error?: string | null;
+            first_input_id?: number | null;
+            phase: components["schemas"]["TaskLaunchPhase"];
+            request: components["schemas"]["TaskLaunchRequest"];
+            session_id: string;
+            session_present: boolean;
+            source: components["schemas"]["TaskLaunchSource"];
+            updated_at: string;
+            workspace_path: string;
+        };
+        TaskLaunchRequest: {
+            default_ref?: string | null;
+            git_ref?: string | null;
+            invoking_session_id?: string | null;
+            project_id: string;
+            prompt: string;
+            request_id: string;
+            title: string;
+        };
+        TaskLaunchSource: {
+            commit: string;
+            common_git_dir: string;
+            default_ref: string;
+            excluded_source_edits: boolean;
+            project_cwd: string;
+            repo_root: string;
+            repository_identity: string;
+            selected_ref: string;
+            source_cwd: string;
+            subdirectory: string;
+        };
+        TaskLaunchSourceInfo: {
+            default_ref?: string | null;
+            eligible: boolean;
+        };
+        TerminalSelectionAttribution: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            intent_sha256: string;
+            owner_instance_id: string;
+            protocol_version: number;
+            source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+            source_session_id: string;
+            terminal_id: string;
+        };
+        TerminalSelectionDelivery: "send" | "queue" | "steer";
+        TerminalSelectionEvidence: {
+            attribution: components["schemas"]["TerminalSelectionAttribution"];
+            text: string;
+            user_text?: string | null;
+        };
+        TerminalSelectionIntent: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            initial_delivery: components["schemas"]["TerminalSelectionDelivery"];
+            initial_expected_run_id?: string | null;
+            owner_instance_id: string;
+            protocol_version: number;
+            source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+            source_session_id: string;
+            terminal_id: string;
+            text: string;
+            user_text?: string | null;
+        };
+        TerminalSelectionMessageReference: {
+            attribution: components["schemas"]["TerminalSelectionAttribution"];
+            evidence?: components["schemas"]["TerminalSelectionEvidence"] | null;
+            message_index: number;
+        };
+        TerminalSelectionPreviewRequest: {
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            protocol_version: number;
+            selected_text: string;
+            user_text?: string | null;
+        };
+        TerminalSelectionPreviewResponse: {
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            controls_removed: number;
+            input_scalars: number;
+            input_utf8_bytes: number;
+            line_endings_normalized: number;
+            max_scalars: number;
+            max_utf8_bytes: number;
+            owner_instance_id: string;
+            previewed_at_ms: string;
+            protocol_version: number;
+            source_kind: components["schemas"]["TerminalSelectionSourceKind"];
+            source_session_id: string;
+            terminal_id: string;
+            text: string;
+            text_scalars: number;
+            text_utf8_bytes: number;
+            truncated: boolean;
+            user_text?: string | null;
+        };
+        TerminalSelectionSourceKind: "user_supplied_rendered_selection";
+        TerminalSelectionSubmissionRequest: {
+            admission_id: string;
+            capture_id: string;
+            client_capture_time_ms?: string | null;
+            delivery: components["schemas"]["TerminalSelectionDelivery"];
+            expected_owner_instance_id: string;
+            expected_run_id?: string | null;
+            expected_selection_text: string;
+            expected_user_text?: string | null;
+            original_selected_text: string;
+            original_user_text?: string | null;
+            protocol_version: number;
+        };
+        TerminalSelectionSubmissionResponse: {
+            accepted_intent: components["schemas"]["TerminalSelectionIntent"];
+            admission_id: string;
+            current_delivery: components["schemas"]["InboxDelivery"];
+            current_target_run_id?: string | null;
+            delivered_run_id?: string | null;
+            inbox_id: string;
+            protocol_version: number;
+            replayed: boolean;
+            status: components["schemas"]["InboxStatus"];
+            version: number;
+        };
+        TestMcpServerRequest: {
+            args?: string[] | null;
+            bearer_token_env_var?: string | null;
+            catalog_timeout_ms?: number | null;
+            command?: string | null;
+            cwd?: string | null;
+            env?: Record<string, string | null> | null;
+            env_headers?: Record<string, string> | null;
+            env_vars?: string[] | null;
+            execution_timeout_ms?: number | null;
+            header_helper?: components["schemas"]["UpdateMcpHeaderHelperRequest"] | null;
+            headers?: Record<string, string | null> | null;
+            name?: string | null;
+            protocol?: components["schemas"]["McpProtocolSelection"] | null;
+            startup_timeout_ms?: number | null;
+            stored_name?: string | null;
+            transport?: string | null;
+            url?: string | null;
+        };
+        TestMcpServerResponse: {
+            auth_required: boolean;
+            connected: boolean;
+            error?: string | null;
+            probe?: components["schemas"]["McpProbeResult"] | null;
+            tools: components["schemas"]["McpProbedTool"][];
+        };
+        ThreadEventDecodeDiagnostic: {
+            created_at: string;
+            error: string;
+            id: number;
+            thread_name: string;
+        };
+        ThreadEventPage: {
+            diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
+            events: components["schemas"]["ThreadEventPageItem"][];
+            has_older: boolean;
+            next_before_id?: number | null;
+            thread_event_boundary?: components["schemas"]["SessionEventBoundary"] | null;
+        };
+        ThreadEventPageItem: {
+            created_at: string;
+            event: components["schemas"]["AgentEvent"];
+            id: number;
+        };
+        ThreadSnapshot: {
+            created_at: string;
+            episode_count: number;
+            latest_action: string | null;
+            name: string;
+            session_id: string;
+            updated_at: string;
+        };
+        ThreadSteeringRecord: {
+            claimed_at?: string | null;
+            created_at: string;
+            delivered_at?: string | null;
+            dispatch_id: string;
+            expired_at?: string | null;
+            id: number;
+            instruction: string;
+            session_id: string;
+            status: string;
+            thread_name: string;
+        };
+        ThreadSteeringRequest: {
+            instruction: string;
+        };
+        ThreadSteeringResponse: {
+            instruction_preview: string;
+            status: string;
+            steering_id: number;
+            thread_name: string;
+        };
+        TokenCostMicros: {
+            cache_read?: number;
+            cache_write?: number;
+            input?: number;
+            output?: number;
+            total?: number;
+        };
+        TokenUsage: {
+            cache_read_tokens: number;
+            cache_write_tokens: number;
+            cost?: components["schemas"]["TokenCostMicros"];
+            input_tokens: number;
+            output_tokens: number;
+            reasoning_tokens?: number;
+            total_tokens: number;
+        };
+        ToolCall: {
+            function: components["schemas"]["FunctionCall"];
+            id: string;
+            type: string;
+        };
+        ToolCallContentResponse: {
+            arguments: string;
+            arguments_truncated: boolean;
+            call_id: string;
+            output: string | null;
+            output_truncated: boolean;
+        };
+        ToolCompletionStatus: "success" | "error" | "timed_out" | "cancelled";
+        ToolContentPartSchema: {
+            text: string;
+            type: "text";
+        } | {
+            image: components["schemas"]["ToolImageSchema"];
+            type: "image";
+        };
+        ToolContentSchema: string | components["schemas"]["ToolContentPartSchema"][];
+        ToolImageSchema: {
+            data: string;
+            mime_type: string;
+        };
+        TraditionalChildExecutionMode: "foreground" | "background";
+        TraditionalChildRecord: {
+            change_summary: string | null;
+            child_session_id: string;
+            completion_inbox_id: number | null;
+            created_at: string;
+            description: string;
+            execution_mode: components["schemas"]["TraditionalChildExecutionMode"] | null;
+            failure: string | null;
+            generation: number;
+            nesting_depth: number;
+            parent_session_id: string;
+            profile: string;
+            report: string | null;
+            root_session_id: string;
+            run_id: string | null;
+            status: components["schemas"]["TraditionalChildStatus"];
+            updated_at: string;
+            verification_summary: string | null;
+            version: number;
+        };
+        TraditionalChildStatus: "idle" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+        TransferTerminalControlRequest: {
+            acknowledge_uncertainty: boolean;
+            controller: components["schemas"]["InputController"];
+            expected_revision: string;
+            protocol_version: number;
+        };
+        UiConfiguration: {
+            diagnostic?: string | null;
+            orchestration_enabled: boolean;
+        };
+        UpdateConfigRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key_env?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_String_String"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            reasoning_effort?: components["schemas"]["RequestField_String_String"];
+        };
+        UpdateGitIdentityRequest: {
+            email: string;
+            name: string;
+        };
+        UpdateGoalRequest: {
+            expected_version: number;
+            objective?: string | null;
+            status?: components["schemas"]["GoalStatus"] | null;
+            token_budget?: components["schemas"]["RequestField_u64_u64"];
+        };
+        UpdateInboxItemRequest: {
+            delivery: components["schemas"]["InboxDelivery"];
+            expected_version: number;
+        };
+        UpdateMcpHeaderHelperRequest: {
+            args?: string[];
+            command: string;
+            cwd?: string | null;
+            env?: Record<string, string | null>;
+            env_vars?: string[];
+            timeout_ms?: number | null;
+        };
+        UpdateMcpServerRequest: {
+            allowed_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
+            approval?: components["schemas"]["RequestField_McpToolApproval_McpToolApproval"];
+            args?: components["schemas"]["RequestField_Vec_Vec_String"];
+            bearer_token_env_var?: components["schemas"]["RequestField_String_String"];
+            catalog_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            command?: components["schemas"]["RequestField_String_String"];
+            cwd?: components["schemas"]["RequestField_String_String"];
+            denied_tools?: components["schemas"]["RequestField_Vec_Vec_String"];
+            enabled?: components["schemas"]["RequestField_bool_bool"];
+            env?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
+            env_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
+            env_vars?: components["schemas"]["RequestField_Vec_Vec_String"];
+            execution_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            header_helper?: components["schemas"]["RequestField_UpdateMcpHeaderHelperRequest_UpdateMcpHeaderHelperRequest"];
+            headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_Option_String"];
+            library_id?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            protocol?: components["schemas"]["RequestField_McpProtocolSelection_McpProtocolSelection"];
+            required?: components["schemas"]["RequestField_bool_bool"];
+            startup_timeout_ms?: components["schemas"]["RequestField_u64_u64"];
+            tool_approvals?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_McpToolApproval"];
+            transport?: components["schemas"]["RequestField_String_String"];
+            url?: components["schemas"]["RequestField_String_String"];
+        };
+        UpdateModelConfigurationRequest: {
+            allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
+            api_key?: components["schemas"]["RequestField_String_String"];
+            backend?: components["schemas"]["RequestField_BackendKind_BackendKind"];
+            base_url?: components["schemas"]["RequestField_String_String"];
+            extra_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
+            initial_prompt?: components["schemas"]["RequestField_String_String"];
+            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
+            model?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
+            reasoning_effort?: components["schemas"]["RequestField_ReasoningEffort_ReasoningEffort"];
+        };
+        UpdatePermissionApprovalModeRequest: {
+            mode: components["schemas"]["PermissionApprovalMode"];
+        };
+        UpdateProjectRequest: {
+            default_model_config_id?: components["schemas"]["RequestField_String_String"];
+            description?: components["schemas"]["RequestField_String_String"];
+            name?: components["schemas"]["RequestField_String_String"];
+            pinned?: components["schemas"]["RequestField_bool_bool"];
+        };
+        UpdateSessionPresentationRequest: {
+            expected_version: number;
+            pinned: boolean;
+            title: string;
+        };
+        UpdateSshConfigurationRequest: {
+            name?: components["schemas"]["RequestField_String_String"];
+            ssh_host?: components["schemas"]["RequestField_String_String"];
+            ssh_identity_file?: components["schemas"]["RequestField_String_String"];
+            ssh_port?: components["schemas"]["RequestField_u16_u16"];
+        };
+        UserTerminalFrameResponse: {
+            bytes: number[];
+            caught_up: boolean;
+            gap: boolean;
+            next_offset: string;
+            observer_id: string;
+            offset: string;
+            protocol_version: number;
+            requires_ack: boolean;
+            retained_end: string;
+            retained_start: string;
+            terminal: components["schemas"]["UserTerminalResponse"];
+        };
+        UserTerminalInputRequest: {
+            bytes: number[];
+            protocol_version: number;
+        };
+        UserTerminalListResponse: {
+            protocol_version: number;
+            terminals: components["schemas"]["UserTerminalResponse"][];
+        };
+        UserTerminalObserverResponse: {
+            idle_expiry_ms: number;
+            observer_id: string;
+            protocol_version: number;
+            terminal: components["schemas"]["UserTerminalResponse"];
+        };
+        UserTerminalResponse: {
+            alive: boolean;
+            cols: number;
+            exit_code?: number | null;
+            output_complete: boolean;
+            output_error?: string | null;
+            protocol_version: number;
+            rows: number;
+            terminal_id: string;
+        };
+        WorksetItemSnapshot: {
+            acceptance: string;
+            depends_on: string[];
+            description: string;
+            notes?: string | null;
+            position: number;
+            role: string;
+            scope: string;
+            title: string;
+            updated_at: string;
+        };
+        WorksetSnapshot: {
+            created_at: string;
+            goal: string;
+            id: string;
+            items: components["schemas"]["WorksetItemSnapshot"][];
+            session_id: string;
+            status: string;
+            summary: string;
+            updated_at: string;
+            verification_recipe?: string | null;
+        };
+        WorksetsSnapshot: {
+            error?: string | null;
+            items: components["schemas"]["WorksetSnapshot"][];
+        };
+        WorkspaceDiffHunk: {
+            function_context: string | null;
+            lines: components["schemas"]["WorkspaceDiffLine"][];
+            new_lines: number;
+            new_start: number;
+            old_lines: number;
+            old_start: number;
+        };
+        WorkspaceDiffLine: {
+            content: string;
+            has_trailing_newline: boolean;
+            kind: string;
+            new_lineno: number | null;
+            old_lineno: number | null;
+        };
+        WorkspaceDiffSection: {
+            additions: number;
+            binary: boolean;
+            deletions: number;
+            error: string | null;
+            hunks: components["schemas"]["WorkspaceDiffHunk"][];
+            stage: string;
+            status: string;
+            too_large: boolean;
+            truncated: boolean;
+        };
+        WorkspaceDiffTotals: {
+            error?: string | null;
+            total_additions: number;
+            total_deletions: number;
+        };
+        WorkspaceFileContent: {
+            binary: boolean;
+            content?: string | null;
+            path: string;
+            size: number;
+            too_large: boolean;
+        };
+        WorkspaceFileDiff: {
+            error: string | null;
+            old_path: string | null;
+            path: string;
+            sections: components["schemas"]["WorkspaceDiffSection"][];
+        };
+        WorkspaceFileList: {
+            files: string[];
+            path_root?: string | null;
+            truncated: boolean;
+        };
+        WorkspaceRevisionChanges: {
+            changed_files: components["schemas"]["ChangedFileStat"][];
+            error?: string | null;
+            total_additions: number;
+            total_deletions: number;
+        };
+        WorkspaceRevisionRecord: {
+            additions: number;
+            base_sha: string | null;
+            branch: string | null;
+            changed_files: number;
+            commit_sha: string;
+            created_at: string;
+            deletions: number;
+            id: number;
+            label: string;
+            run_id: string;
+            session_id: string;
+            transcript_len: number | null;
+        };
+        WorkspaceSnapshot: {
+            branch?: string | null;
+            changed_files: components["schemas"]["ChangedFileStat"][];
+            error?: string | null;
+            file_path_prefix?: string | null;
+            host_root?: string | null;
+            repo_label?: string | null;
+            total_additions: number;
+            total_deletions: number;
+            workspace_display: string;
+        };
+    };
+}
+export type ApiSchema<Name extends keyof components["schemas"]> = components["schemas"][Name];
