@@ -375,7 +375,7 @@ export function createNacApi(
         body: { parent, name } satisfies CreateFolderRequest,
       }),
 
-    /** The same, on the SSH host the picker is browsing — never locally. */
+    /** The same on the SSH host the picker is browsing, never on this machine. */
     createSshFolder: (target: SshTarget, parent: string, name: string) =>
       request<CreatedFolder>("POST", "/ssh/folders", {
         body: { ...target, parent, name } satisfies CreateSshFolderRequest,
