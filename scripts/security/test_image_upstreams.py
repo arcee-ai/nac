@@ -40,12 +40,25 @@ class UpstreamTests(unittest.TestCase):
             "krb5": "cpe:2.3:a:mit:kerberos_5:1.22.2:*:*:*:*:*:*:*",
             "curl": "cpe:2.3:a:haxx:curl:8.23.0:*:*:*:*:*:*:*",
             "sasl": "cpe:2.3:a:cyrusimap:cyrus-sasl:2.1.28:*:*:*:*:*:*:*",
-            "gcc_headers": "cpe:2.3:a:gnu:gcc:16.2.0:*:*:*:*:*:*:*"})
+            "gcc_headers": "cpe:2.3:a:gnu:gcc:16.2.0:*:*:*:*:*:*:*",
+            "libssh2": "cpe:2.3:a:libssh2:libssh2:1.11.1:*:*:*:*:*:*:*"})
         for value in original["owned_runtime_packages"]["packages"].values():
             value["package_version"] = value["version"] + "-r999999"
         self.assertEqual(upstream.upstream_targets(original), targets)
         self.assertEqual(upstream.wolfi_upstream_targets(targets)["curl"],
                          "pkg:apk/wolfi/curl@8.23.0?distro=wolfi-20230201")
+        self.assertEqual(upstream.wolfi_upstream_targets(targets)["libssh2"],
+                         "pkg:apk/wolfi/libssh2@1.11.1?distro=wolfi-20230201")
+
+    def test_libssh2_conservative_high_and_unknown_findings_are_retained(self):
+        targets = {"libssh2": upstream.upstream_targets(coverage())["libssh2"]}
+        for wolfi in (False, True):
+            inputs = upstream.wolfi_upstream_targets(targets) if wolfi else targets
+            for severity in ("High", "Unknown"):
+                findings = upstream.upstream_findings(report(inputs, wolfi=wolfi, severity=severity), inputs, wolfi=wolfi)
+                self.assertEqual(findings[0]["severity"], severity)
+                self.assertEqual(findings[0]["version"], "1.11.1")
+                self.assertEqual(findings[0]["fixed"], [])
 
     def test_missing_unknown_or_split_identity_fails_even_with_empty_scan(self):
         mutations = [lambda x: x.pop("owned_runtime_packages"),
@@ -124,7 +137,7 @@ class UpstreamTests(unittest.TestCase):
                         self.assertEqual(len(seen), 2)
                         self.assertTrue(seen[0][0].startswith("cpes:"))
                         self.assertTrue(seen[1][0].startswith("purl:"))
-                        self.assertEqual([len(value[1]) for value in seen], [4, 4])
+                        self.assertEqual([len(value[1]) for value in seen], [5, 5])
 
 
 if __name__ == "__main__":

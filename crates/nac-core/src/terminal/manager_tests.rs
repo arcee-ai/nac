@@ -1247,10 +1247,9 @@ async fn direct_run_settlement_keeps_only_explicitly_retained_terminals() {
         .unwrap();
     let info = manager.retain(&retained).await.unwrap();
     assert!(info.retained);
-    assert_eq!(
-        manager.live_terminal_names(),
-        vec![foreground.clone(), retained.clone()]
-    );
+    let mut expected_names = vec![foreground.clone(), retained.clone()];
+    expected_names.sort();
+    assert_eq!(manager.live_terminal_names(), expected_names);
 
     manager.settle_run().await.unwrap();
     assert!(manager.get(&foreground).await.is_none());

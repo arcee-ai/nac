@@ -1,0 +1,387 @@
+{
+  "ticket": "ALL-582",
+  "kind": "actual-controlled-partial-retry-not-ordinary-sample",
+  "summary": {
+    "run_id": 41963983443,
+    "attempt": 2,
+    "url": "https://github.com/arcee-ai/nac/actions/runs/41963983443",
+    "event": "pull_request",
+    "branch_head_sha": "7abfb43c75d853db220f42f744d13abb02c09e53",
+    "candidate_sha": "115dd249b2f9638a2854508872c89ac4d1aecab1",
+    "status": "completed",
+    "conclusion": "success",
+    "processing_seconds": null,
+    "event_to_green_seconds": null,
+    "observed_prepare_to_result_seconds": null,
+    "observed_event_to_result_seconds": null,
+    "initial_wait_seconds": null,
+    "metric_eligible": false,
+    "ordinary_first_attempt_metric": false,
+    "cohort_qualified": false,
+    "cohort_remaining": [
+      "consecutive ordinary run sequence",
+      "at least five meaningful source SHAs",
+      "representative backend/managed/frontend/docs cases",
+      "controlled cold-cache evidence",
+      "complete coverage matrix and negative controls",
+      "cache/resources/cost disclosure"
+    ],
+    "completed_job_seconds_by_runner": {
+      "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 249.0
+    },
+    "completed_job_seconds": 249.0,
+    "carried_forward_job_ids": [
+      127046257293,
+      127046257838,
+      127046257978,
+      127046258001,
+      127046258145,
+      127046258147,
+      127046258299,
+      127046258411,
+      127046258466,
+      127046258470,
+      127046258489,
+      127046258676,
+      127046259109,
+      127046259126,
+      127046259130,
+      127046259230,
+      127046259277,
+      127046259294,
+      127046259341,
+      127046259401,
+      127046259567,
+      127046259588,
+      127046259657,
+      127046259693,
+      127046259835,
+      127046260863,
+      127046297682,
+      127046308480,
+      127046310191
+    ],
+    "carried_forward_job_seconds_by_runner": {
+      "{\"labels\": [\"ubuntu-latest\"], \"runner_group\": \"GitHub Actions\"}": 5622.0,
+      "{\"labels\": [\"macos-26\"], \"runner_group\": \"GitHub Actions\"}": 520.0
+    },
+    "carried_forward_job_seconds": 6142.0,
+    "job_view_completed_seconds": 6391.0,
+    "unclassified_completed_job_seconds": 0.0,
+    "compute_scope": "new execution only; carried-forward job-view durations reported separately",
+    "incomplete_compute_job_ids": [],
+    "cost": "not estimated; runner-seconds are not billable cost or CPU time",
+    "ineligible_reasons": [
+      "partial retry carries forward prior job results",
+      "preparation predates event",
+      "invalid event/preparation/aggregate ordering"
+    ]
+  },
+  "attempt_boundary": "2026-11-05T04:17:33Z",
+  "returned_attempt_created_at": "2026-11-05T04:17:35Z",
+  "jobs": [
+    {
+      "id": 127046257104,
+      "name": "browser-proof",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:18:49Z",
+      "completed_at": "2026-11-05T04:22:45Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046257293,
+      "name": "prepare",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:35Z",
+      "completed_at": "2026-11-05T03:49:57Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046257838,
+      "name": "browser-binary",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:52:27Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046257978,
+      "name": "test-server-web",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:54:57Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258001,
+      "name": "managed-image / prepare",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:50:23Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258145,
+      "name": "test-server",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:58:25Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258147,
+      "name": "test-workspace",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:56:44Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258299,
+      "name": "workflow-lint",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:50:13Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258411,
+      "name": "test-core",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:55:00Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258466,
+      "name": "managed-fault / fault",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:56:30Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258470,
+      "name": "source-security / Full locked source scan",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:50:38Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258489,
+      "name": "lint",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:51:01Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046258676,
+      "name": "browser-shards (2)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:58:21Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259109,
+      "name": "browser-shards (8)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:56:27Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259126,
+      "name": "quality",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:58:27Z",
+      "completed_at": "2026-11-05T03:58:33Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259130,
+      "name": "managed-image / contract",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:25Z",
+      "completed_at": "2026-11-05T03:50:38Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259230,
+      "name": "browser-shards (3)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:54:45Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259277,
+      "name": "browser-shards (6)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:53:33Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259294,
+      "name": "browser-shards (1)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:55:35Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259341,
+      "name": "managed-image / build-smoke",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:40Z",
+      "completed_at": "2026-11-05T04:05:01Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259401,
+      "name": "browser-shards (5)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T04:00:05Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259567,
+      "name": "browser-shards (7)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:56:31Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259588,
+      "name": "managed-image / scanner-qualification",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:40Z",
+      "completed_at": "2026-11-05T03:53:32Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259657,
+      "name": "managed-image / Managed image checks complete",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:05:04Z",
+      "completed_at": "2026-11-05T04:05:11Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259693,
+      "name": "browser-shards (4)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:52:30Z",
+      "completed_at": "2026-11-05T03:57:42Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046259835,
+      "name": "managed-quality / quality",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:58:35Z",
+      "completed_at": "2026-11-05T03:58:43Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046260863,
+      "name": "managed",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:05:14Z",
+      "completed_at": "2026-11-05T04:05:20Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046297682,
+      "name": "build (ubuntu-latest, x86_64-unknown-linux-musl)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:56:04Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046308480,
+      "name": "build (macos-26, aarch64-apple-darwin)",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:49:59Z",
+      "completed_at": "2026-11-05T03:55:44Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127046310191,
+      "name": "macos-native / ARM macOS process and credentials",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T03:50:00Z",
+      "completed_at": "2026-11-05T03:52:55Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127047575588,
+      "name": "browser",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:22:48Z",
+      "completed_at": "2026-11-05T04:22:51Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127047607072,
+      "name": "test",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:22:53Z",
+      "completed_at": "2026-11-05T04:22:56Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127047634554,
+      "name": "Required PR checks",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:22:58Z",
+      "completed_at": "2026-11-05T04:23:05Z",
+      "conclusion": "success"
+    },
+    {
+      "id": 127047688706,
+      "name": "publish",
+      "run_attempt": 2,
+      "started_at": "2026-11-05T04:23:05Z",
+      "completed_at": "2026-11-05T04:23:05Z",
+      "conclusion": "skipped"
+    }
+  ],
+  "proof_verification": {
+    "run_id": 41963983443,
+    "attempt": 2,
+    "branch_head": "7abfb43c75d853db220f42f744d13abb02c09e53",
+    "candidate": "115dd249b2f9638a2854508872c89ac4d1aecab1",
+    "original_producer_attempt": 1,
+    "original_artifact_id": 13386173625,
+    "fallback_reason": "older-attempt",
+    "source_build_reported_seconds": 154,
+    "proof_cases_passed": 2,
+    "proof_execution_reported_seconds": 14.7,
+    "artifact_id": 13387613962,
+    "artifact_zip_sha256": "14c42e57520608a251bb32e207322eb0fbc73a2bc7e7a0064a46e272e479f96e",
+    "proof_manifest_byte_equal_after_original_collector": true,
+    "initial_restart_and_second_case_source_hash_match": true,
+    "new_artifact_name_does_not_replace_attempt1": true,
+    "ordinary_cohort_qualified": false,
+    "scope": "Controlled partial retry, never an ordinary first-attempt sample. No original executable was downloaded or executed locally."
+  },
+  "original_evidence_sha256": {
+    "ci-hillclimb/snapshot-browser-controlled-partial-retry/run-41963983443-attempt-2/run.json": "ed77e5dede50e536e09bd78907d5d4c8406e24dfda19beacb33b9c4ae9f1c6dd",
+    "ci-hillclimb/snapshot-browser-controlled-partial-retry/run-41963983443-attempt-2/jobs.json": "92b9419083dc6ab966e66b06666b577d1aa0d41a6a33411aa1c19e5bc045deb8",
+    "browser/retry-41963983443/attempt-2/proof.log": "0cf0e1394bab2759d59a89c497ac1f56677d21935339ec39533c0b9e337ac060",
+    "browser/retry-41963983443/attempt-2/proof.zip": "14c42e57520608a251bb32e207322eb0fbc73a2bc7e7a0064a46e272e479f96e"
+  },
+  "limitations": [
+    "Original raw responses and proof receipts are local-only; relative integrity locators identify them without a public download claim.",
+    "GitHub returned copied job IDs/attempt2 for original execution; run_attempt equality alone cannot distinguish current compute.",
+    "Timings classify observed job intervals, not CPU, storage, dollars or newly executed quality for every carried-forward job.",
+    "Successful strict source fallback and proof retention do not remove coverage gaps or qualify a consecutive ordinary cohort."
+  ]
+}

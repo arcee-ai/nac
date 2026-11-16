@@ -72,6 +72,8 @@ fn disabled_emitters_return_before_taking_the_recorder_lock() {
     let emitter = std::thread::spawn(move || {
         let _member = register_test_recorder_thread();
         emit_everything(&correlation());
+        observe_oauth_callback(7, OAuthCallbackObservation::Listening);
+        observe_oauth_callback(7, OAuthCallbackObservation::StateRejected);
         let _ = returned_tx.send(());
     });
 

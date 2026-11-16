@@ -123,6 +123,10 @@ pub(super) struct Mount {
 pub(super) struct ConnectionSnapshot(Option<ConnectionRecord>);
 
 impl ConnectionSnapshot {
+    pub(super) fn revision(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self.0)?)
+    }
+
     pub(super) fn mount(&self, server_name: &str) -> Mount {
         Mount {
             epoch: self.0.as_ref().map(|record| record.epoch),
@@ -150,6 +154,9 @@ pub(super) struct ConnectionState {
 }
 
 impl ConnectionState {
+    pub(super) fn revision(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self.read()?)?)
+    }
     pub(super) fn for_home(paths: &PathContext) -> Result<Self> {
         let home = paths
             .nac_home_dir()

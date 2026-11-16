@@ -6,6 +6,7 @@ import {
   type ConfigurationsPanelInitial,
   type LaunchModelSelection,
 } from "@/app/components/modals/ConfigurationsPanel";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { PrimaryModelSection } from "@/app/components/modals/PrimaryModelSection";
 import { ProviderConnections } from "@/app/features/managed/presentation/ProviderConnections";
 
@@ -68,7 +69,7 @@ export function ModelSetupSection({
     [onChange],
   );
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6">
       {advanced ? (
         <ConfigurationsPanel initial={seed} invalid={invalid} onChange={advancedChange}>
           {children}
@@ -81,37 +82,55 @@ export function ModelSetupSection({
           onChange={primaryChange}
         />
       )}
-      <Button
-        variant={ButtonVariant.Secondary}
-        aria-expanded={connections}
-        onClick={() => setConnections((value) => !value)}
+      <FormSection
+        title="Connection & advanced options"
+        className="max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_button]:max-w-full max-md:[&_button]:!whitespace-normal max-md:[&_button]:!h-auto max-md:[&_button]:!py-3 max-md:[&_button>span]:min-w-0 max-md:[&_button>span]:break-words max-md:[&_section[aria-label]_div]:min-w-0 max-md:[&_section[aria-label]_div]:max-w-full max-md:[&_section[aria-label]_div.flex.items-center.gap-2]:flex-wrap"
+        description="Use provider connections to sign in, or open advanced setup for saved presets and custom endpoints."
       >
-        Provider connections
-      </Button>
-      {connections ? <ProviderConnections /> : null}
-      <Button
-        variant={ButtonVariant.Secondary}
-        aria-expanded={advanced}
-        onClick={() => {
-          const selected = remembered.current;
-          if (selected?.kind === "resolved")
-            setSeed({ ...selected, extra_headers: selected.extra_headers ?? {} });
-          // An unsaved provider setup cannot be projected into the catalog without losing its secret draft.
-          if (selected?.kind === "save" && advanced) return;
-          setAdvanced((value) => !value);
-        }}
-        disabled={advanced && hasDraft}
-      >
-        {advanced ? "Back to unified models" : "Advanced presets and provider setup"}
-      </Button>
+        <div className="flex flex-col items-stretch gap-2 md:flex-row md:flex-wrap">
+          <Button
+            className="min-h-11 md:min-h-9"
+            variant={ButtonVariant.Secondary}
+            aria-expanded={connections}
+            onClick={() => setConnections((value) => !value)}
+          >
+            Provider connections
+          </Button>
+          <Button
+            className="min-h-11 md:min-h-9"
+            variant={ButtonVariant.Ghost}
+            aria-expanded={advanced}
+            onClick={() => {
+              const selected = remembered.current;
+              if (selected?.kind === "resolved")
+                setSeed({ ...selected, extra_headers: selected.extra_headers ?? {} });
+              // An unsaved provider setup cannot be projected into the catalog without losing its secret draft.
+              if (selected?.kind === "save" && advanced) return;
+              setAdvanced((value) => !value);
+            }}
+            disabled={advanced && hasDraft}
+          >
+            {advanced ? "Back to unified models" : "Advanced presets and provider setup"}
+          </Button>
+        </div>
+        {connections ? <ProviderConnections /> : null}
+        {advanced && hasDraft ? (
+          <p className="text-small !leading-[22px] text-basic-secondary">
+            Finish this provider setup before switching back to unified models. Your unsaved key
+            stays in this form.
+          </p>
+        ) : null}
+      </FormSection>
       {!advanced && children ? (
-        <details className="text-micro">
-          <summary className="cursor-pointer py-2">Advanced execution settings</summary>
+        <details className="border-t border-muted pt-4 text-small">
+          <summary className="flex min-h-11 cursor-pointer items-center py-2 label-small text-basic-primary">
+            Advanced execution settings
+          </summary>
           {children}
         </details>
       ) : null}
       {errorText ? (
-        <p role="alert" className="text-micro text-error-primary">
+        <p role="alert" className="text-small !leading-[22px] text-error-primary">
           {errorText}
         </p>
       ) : null}

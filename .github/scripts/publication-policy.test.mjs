@@ -59,7 +59,7 @@ function fixture(
     copyFileSync(
       fileURLToPath(
         new URL(
-          `./fixtures/security/${kind}/${input === INPUTS[0] ? "Cargo.lock" : "package-lock.json"}`,
+          `./fixtures/security/${kind}/${input === INPUTS[0] ? "Cargo.lock" : "package-lock.json"}.fixture`,
           import.meta.url,
         ),
       ),

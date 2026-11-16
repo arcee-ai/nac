@@ -12,6 +12,7 @@ export const SESSION_PANELS = [
   "delegated",
   "files",
   "terminal",
+  "heartbeats",
   "worksets",
   "history",
 ] as const;
@@ -27,6 +28,7 @@ export const SESSION_PANEL_LABEL = {
   delegated: "Subagents",
   files: "Files",
   terminal: "Terminal",
+  heartbeats: "Heartbeats",
   worksets: "Worksets",
   history: "History",
 } satisfies Record<SessionPanel, string>;
@@ -51,6 +53,8 @@ export const routes = {
     `/session/${encodeURIComponent(sessionId)}/${panel}`,
   /** Redirects to the project's newest session, or offers to start one. */
   project: (projectId: string) => `/project/${encodeURIComponent(projectId)}`,
+  taskSchedules: (projectId?: string) =>
+    projectId ? `/project/${encodeURIComponent(projectId)}/task-schedules` : "/task-schedules",
   designPreview: () => "/design",
 };
 
