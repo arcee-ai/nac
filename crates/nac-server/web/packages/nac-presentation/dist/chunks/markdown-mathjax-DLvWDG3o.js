@@ -1,7 +1,7 @@
 import { t as e } from "./rolldown-runtime-QGRDbDUS.js";
-import { c as t, i as n, l as r, n as i, s as a, u as o } from "./lib-rX7C_D5H.js";
-import { c as s, i as c, n as l, o as u, r as d, s as f } from "./markdown-renderer-nvtq3u0L.js";
-// node_modules/mathjax-full/js/util/Options.js
+import { a as t, c as n, l as r, r as i, s as a, u as o } from "./ccount-DroVdA6L.js";
+import { c as s, i as c, n as l, o as u, r as d, s as f } from "./markdown-renderer-5BhwKVD9.js";
+// ../../../../pr-469/crates/nac-server/web/node_modules/mathjax-full/js/util/Options.js
 var p = /* @__PURE__ */ e(((e, t, n) => {
 	var r = n && n.__values || function(e) {
 		var t = typeof Symbol == "function" && Symbol.iterator, n = t && e[t], r = 0;
@@ -31357,7 +31357,7 @@ function kn(e) {
 function An(e) {
 	return typeof e == "object" && !!e && "type" in e && "tagName" in e;
 }
-// node_modules/hast-util-to-text/lib/index.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-text/lib/index.js
 var jn = /\n/g, Mn = /[\t ]+/g, Nn = R("br"), Pn = R(qn), Fn = R("p"), In = R("tr"), Ln = R([
 	"datalist",
 	"head",
@@ -31458,7 +31458,7 @@ function qn(e) {
 function Jn(e) {
 	return e.tagName === "dialog" && !(e.properties || {}).open;
 }
-// node_modules/rehype-mathjax/lib/create-plugin.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/rehype-mathjax/lib/create-plugin.js
 var Yn = {}, Xn = [];
 function Zn(e) {
 	return function(t) {
@@ -31502,7 +31502,7 @@ function Zn(e) {
 		};
 	};
 }
-// node_modules/hast-util-parse-selector/lib/index.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-parse-selector/lib/index.js
 var Qn = /[#.]/g;
 function $n(e, t) {
 	let n = e || "", r = {}, i = 0, a, o;
@@ -31518,7 +31518,7 @@ function $n(e, t) {
 		children: []
 	};
 }
-// node_modules/hastscript/lib/create-h.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/hastscript/lib/create-h.js
 function er(e, t, n) {
 	let r = n ? or(n) : void 0;
 	function i(n, i, ...a) {
@@ -31558,19 +31558,19 @@ function tr(e) {
 	}
 	return !!("children" in e && Array.isArray(e.children));
 }
-function nr(e, t, a, o) {
+function nr(e, n, a, o) {
 	let s = r(e, a), c;
 	if (o != null) {
 		if (typeof o == "number") {
 			if (Number.isNaN(o)) return;
 			c = o;
-		} else c = typeof o == "boolean" ? o : typeof o == "string" ? s.spaceSeparated ? i(o) : s.commaSeparated ? n(o) : s.commaOrSpaceSeparated ? i(n(o).join(" ")) : ir(s, s.property, o) : Array.isArray(o) ? [...o] : s.property === "style" ? ar(o) : String(o);
+		} else c = typeof o == "boolean" ? o : typeof o == "string" ? s.spaceSeparated ? i(o) : s.commaSeparated ? t(o) : s.commaOrSpaceSeparated ? i(t(o).join(" ")) : ir(s, s.property, o) : Array.isArray(o) ? [...o] : s.property === "style" ? ar(o) : String(o);
 		if (Array.isArray(c)) {
 			let e = [];
 			for (let t of c) e.push(ir(s, s.property, t));
 			c = e;
 		}
-		s.property === "className" && Array.isArray(t.className) && (c = t.className.concat(c)), t[s.property] = c;
+		s.property === "className" && Array.isArray(n.className) && (c = n.className.concat(c)), n[s.property] = c;
 	}
 }
 function rr(e, t) {
@@ -31601,10 +31601,10 @@ function or(e) {
 	for (let n of e) t.set(n.toLowerCase(), n);
 	return t;
 }
-// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var sr = /* @__PURE__ */ "altGlyph.altGlyphDef.altGlyphItem.animateColor.animateMotion.animateTransform.clipPath.feBlend.feColorMatrix.feComponentTransfer.feComposite.feConvolveMatrix.feDiffuseLighting.feDisplacementMap.feDistantLight.feDropShadow.feFlood.feFuncA.feFuncB.feFuncG.feFuncR.feGaussianBlur.feImage.feMerge.feMergeNode.feMorphology.feOffset.fePointLight.feSpecularLighting.feSpotLight.feTile.feTurbulence.foreignObject.glyphRef.linearGradient.radialGradient.solidColor.textArea.textPath".split("."), cr = er(a, "div");
-er(t, "g", sr);
-// node_modules/mathjax-full/js/core/DOMAdaptor.js
+er(n, "g", sr);
+// ../../../../pr-469/crates/nac-server/web/node_modules/mathjax-full/js/core/DOMAdaptor.js
 var lr = /* @__PURE__ */ e(((e, t, n) => {
 	var r = n && n.__values || function(e) {
 		var t = typeof Symbol == "function" && Symbol.iterator, n = t && e[t], r = 0;
@@ -47316,12 +47316,12 @@ function ya(e) {
 	} : ya(n));
 	return cr(e.kind, e.attributes, t);
 }
-// node_modules/rehype-mathjax/lib/chtml.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/rehype-mathjax/lib/chtml.js
 var ba = wn(), xa = Zn(function(e) {
 	if (!e.chtml || !e.chtml.fontURL) throw Error("rehype-mathjax: missing `fontURL` in options, which must be set to a URL to reach MathJaX fonts");
 	return va(e, new ba.CHTML(e.chtml));
 });
-// node_modules/mdast-util-math/lib/index.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/mdast-util-math/lib/index.js
 function Sa() {
 	return {
 		enter: {
@@ -47461,7 +47461,7 @@ function Ca(e) {
 		return "$";
 	}
 }
-// node_modules/micromark-extension-math/lib/math-flow.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-math/lib/math-flow.js
 var wa = {
 	tokenize: Ea,
 	concrete: !0,
@@ -47530,7 +47530,7 @@ function Da(e, t, n) {
 		return r.parser.lazy[r.now().line] ? n(e) : t(e);
 	}
 }
-// node_modules/micromark-extension-math/lib/math-text.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-math/lib/math-text.js
 function Oa(e) {
 	let t = (e || {}).singleDollarTextMath;
 	return t ??= !0, {
@@ -47573,14 +47573,14 @@ function ka(e) {
 function Aa(e) {
 	return e !== 36 || this.events[this.events.length - 1][1].type === "characterEscape";
 }
-// node_modules/micromark-extension-math/lib/syntax.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/micromark-extension-math/lib/syntax.js
 function ja(e) {
 	return {
 		flow: { 36: wa },
 		text: { 36: Oa(e) }
 	};
 }
-// node_modules/remark-math/lib/index.js
+// ../../../../pr-469/crates/nac-server/web/node_modules/remark-math/lib/index.js
 var Ma = {};
 function Na(e) {
 	let t = this, n = e || Ma, r = t.data(), i = r.micromarkExtensions ||= [], a = r.fromMarkdownExtensions ||= [], o = r.toMarkdownExtensions ||= [];
