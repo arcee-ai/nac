@@ -1249,7 +1249,7 @@ function un({ open: e, onClose: a, title: s, label: l, headerActions: u, expande
 		onOpenChange: (e) => e ? void 0 : a(),
 		children: /* @__PURE__ */ V(i, {
 			forceMount: !0,
-			children: [/* @__PURE__ */ B(c, { className: T("fixed inset-0 z-[60] bg-[var(--f-scrim)] transition-opacity duration-200 ease-out motion-reduce:transition-none", b ? "" : "top-[var(--header-height)] bg-transparent", k ? "opacity-100" : "opacity-0") }), /* @__PURE__ */ V(D, {
+			children: [/* @__PURE__ */ B(c, { className: T("fixed inset-0 z-[60] bg-[var(--f-scrim)] transition-opacity duration-200 ease-out motion-reduce:transition-none", b ? "" : "top-[var(--header-height)] bg-transparent", k ? "opacity-100" : "pointer-events-none opacity-0") }), /* @__PURE__ */ V(D, {
 				side: b ? "bottom" : "right",
 				forceMount: !0,
 				ref: w,
@@ -1259,7 +1259,7 @@ function un({ open: e, onClose: a, title: s, label: l, headerActions: u, expande
 				},
 				"aria-label": N,
 				"aria-describedby": void 0,
-				className: T("z-[61] flex flex-col overflow-hidden bg-elevation-level-1 text-basic-primary shadow-2xl outline-none", "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none", b ? T("inset-x-0 bottom-0 max-h-[92dvh] min-h-[40dvh] rounded-t-sheet pb-[env(safe-area-inset-bottom)]", k ? "translate-y-0" : "translate-y-full") : T("top-[calc(var(--header-height)+4px)] right-2 bottom-2 h-auto rounded-sheet", d ? "left-2 w-auto" : "w-[min(var(--drawer-width),calc(100vw-16px))]", k ? "translate-x-0" : "translate-x-[calc(100%+16px)]"), g),
+				className: T("z-[61] flex flex-col overflow-hidden bg-elevation-level-1 text-basic-primary shadow-2xl outline-none", "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none", !k && "pointer-events-none", b ? T("inset-x-0 bottom-0 max-h-[92dvh] min-h-[40dvh] rounded-t-sheet pb-[env(safe-area-inset-bottom)]", k ? "translate-y-0" : "translate-y-full") : T("top-[calc(var(--header-height)+4px)] right-2 bottom-2 h-auto rounded-sheet", d ? "left-2 w-auto" : "w-[min(var(--drawer-width),calc(100vw-16px))]", k ? "translate-x-0" : "translate-x-[calc(100%+16px)]"), g),
 				children: [
 					b ? /* @__PURE__ */ B("div", {
 						"aria-hidden": !0,
