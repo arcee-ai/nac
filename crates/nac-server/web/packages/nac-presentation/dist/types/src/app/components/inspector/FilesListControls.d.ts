@@ -1,6 +1,17 @@
 import { type FileListing } from "../../store/sessionLayoutStore";
 import type { ChangedFileStat } from "../../types/api";
-/** How the files are listed, and the commit action. */
+/**
+ * Which checkout the panel describes: the working tree against HEAD, or what
+ * one finished run changed. Choosing a snapshot here opens the newest one
+ * unless another is already selected; the session's revision picker and the
+ * History panel share the same selection.
+ */
+export declare function FilesScopeToggle({ sessionId, revision, large, }: {
+    sessionId: string;
+    revision: number | null;
+    large?: boolean;
+}): import("react").JSX.Element | null;
+/** How the files are listed, which changes they show, and the commit action. */
 export declare function FilesListToolbar({ sessionId, listing, changed, revision, readOnly, reveal, }: {
     sessionId: string;
     listing: FileListing;

@@ -1,6 +1,6 @@
 /**
- * The phone's navigation, in place of the desktop sidebar: its destinations
- * over the project tree, or over the card filters on All Projects.
+ * The phone's navigation sheet: the sidebar's destinations, theme, and the
+ * same session list (44px rows, actions always visible).
  */
 export declare function MobileMenu({ open, onClose }: {
     open: boolean;

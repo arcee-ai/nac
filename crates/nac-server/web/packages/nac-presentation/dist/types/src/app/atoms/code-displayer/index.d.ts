@@ -22,12 +22,27 @@ interface CodeDisplayerProps {
     className?: string;
 }
 /**
+ * Focus mono: IBM Plex Mono at 12.5/20 without tracking, the GitHub diff
+ * rhythm. `.code` sets its own line height and tracking in unlayered CSS,
+ * which only `!` utilities outrank.
+ */
+export declare const DIFF_CODE_TYPE = "code text-[length:var(--type-mono)] !leading-5 !tracking-normal tabular";
+/** The line-number column: muted, right-aligned, never selected with the code. */
+export declare const DIFF_GUTTER: string;
+/**
+ * One line of a diff or a file: number, a `+`/`−` sign column and the code,
+ * on a green or red wash when it changed. Long lines wrap, so the pane stays
+ * the only scroller. Shared by the Changes panel and the Insights items.
+ */
+export declare function DiffLineRow({ line }: {
+    line: CodeDisplayerLine;
+}): React.JSX.Element;
+/**
  * A diff with line numbers, as the Create and Edit Insights items draw it
- * under their file button. An inserted line sits on the success tint and a
- * deleted one on the error tint, each behind a 2px rule of its tone; a context
- * line keeps a clear rule so every line's code starts at the same place. Long
- * lines wrap instead of scrolling sideways. The caller passes the hunks, with
- * tokens when it wants syntax colours.
+ * under their file button: GitHub-like green and red washes on the code
+ * surface, a muted gutter and a sign column so every line's code starts at
+ * the same place. Long lines wrap instead of scrolling sideways. The caller
+ * passes the hunks, with tokens when it wants syntax colours.
  *
  * It is a named group rather than a region: a transcript can show many diffs,
  * and each would otherwise become a landmark.

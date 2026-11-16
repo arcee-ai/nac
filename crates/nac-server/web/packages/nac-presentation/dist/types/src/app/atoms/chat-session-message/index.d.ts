@@ -22,8 +22,9 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
 }
 /**
  * What the transcript says when something happened to the run rather than in
- * it. Unlike `MessageBox` it carries no surface of its own — a coloured rule
- * down the left is the whole frame, so it reads as part of the conversation.
+ * it: a quiet surface card whose hairline and title carry its signal — red
+ * failed, amber needs you, green done, neutral information — so it is seen
+ * without shouting.
  */
 declare const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
     Variant: typeof ChatSessionMessageVariant;

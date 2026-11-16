@@ -5,6 +5,9 @@ interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>
     disabled?: boolean;
     children?: React.ReactNode;
 }
-/** Square toggle for a single boolean, with the label as its own hit area. */
+/**
+ * Square toggle for a single boolean, with the label as its own hit area.
+ * Unchecked is a hairline box; checked fills with ink and an on-ink tick.
+ */
 declare const Checkbox: React.FC<CheckboxProps>;
 export default Checkbox;

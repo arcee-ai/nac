@@ -1,6 +1,7 @@
 /**
- * The sidebar's destinations: the same dialogs the header already opens, plus
- * a new session in the project on screen (or a new project when none is).
+ * The desktop command contract (and the sidebar's "New session"): settings
+ * destinations plus a new session in the project on screen, or Home's
+ * composer when no project is on screen.
  */
 export declare function useSidebarCommands(): {
     projectId: string | null;

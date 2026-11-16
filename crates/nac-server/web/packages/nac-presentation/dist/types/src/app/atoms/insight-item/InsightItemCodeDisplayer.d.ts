@@ -24,8 +24,8 @@ interface InsightItemCodeDisplayerProps {
     note?: string | null;
 }
 /**
- * A tool call's input or output inside an `InsightItem`, behind a 2px muted
- * rule. The caller owns the state and the full content: "Show full" asks for
+ * A tool call's input or output inside an `InsightItem`, on the code surface
+ * in a hairline box. The caller owns the state and the full content: "Show full" asks for
  * it, Loading keeps the preview on screen with the link disabled, and Expanded
  * shows the full content with "Hide" and a copy button. Long lines wrap, so
  * the detail column stays the only scroller.
