@@ -27,6 +27,7 @@ import {
   TextArea,
 } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
+import { SettingsSurface } from "@/app/features/settings/SettingsSurface";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
@@ -92,17 +93,76 @@ export function ConfigurationsModal({ open, onClose }: { open: boolean; onClose:
   return <ConfigurationsManager open={open} onClose={onClose} />;
 }
 
-function ConfigurationsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * The same manager as a Settings section: rendered in the page instead of a
+ * dialog. Saving stays explicit; Cancel discards the open form's edits.
+ */
+export function ConfigurationsSettings() {
+  return <ConfigurationsManager presentation="page" />;
+}
+
+function ConfigurationsManager({
+  open = true,
+  onClose,
+  presentation = "modal",
+}: {
+  open?: boolean;
+  onClose?: () => void;
+  presentation?: "modal" | "page";
+}) {
   const isMobile = useIsMobile();
   const { data, isLoading } = useModelConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [footer, setFooter] = useState<ReactNode>(null);
+  // A page has nothing to close; Cancel remounts the form on what is stored.
+  const [revision, setRevision] = useState(0);
+  const discard = useCallback(() => setRevision((value) => value + 1), []);
+  const cancel = presentation === "page" ? discard : (onClose ?? discard);
 
   // Null until the user picks, so the default below can still settle once the
   // list arrives. The server orders by creation, hence the last entry.
   const [picked, setPicked] = useState<string | null>(null);
   const selected = picked ?? configurations.at(-1)?.config_id ?? DRAFT;
   const record = configurations.find((entry) => entry.config_id === selected) ?? null;
+
+  const body = (
+    <>
+      <ConfigListNav
+        draftLabel="New configuration"
+        draftSelected={selected === DRAFT}
+        onSelectDraft={() => setPicked(DRAFT)}
+        entries={configurations.map((entry) => ({
+          id: entry.config_id,
+          name: entry.name,
+        }))}
+        selectedId={selected}
+        onSelect={setPicked}
+        isLoading={isLoading}
+      />
+
+      <ConfigurationForm
+        key={`${selected}:${revision}`}
+        record={record}
+        takenNames={configurations
+          .filter((entry) => entry.config_id !== selected)
+          .map((entry) => entry.name)}
+        onClose={cancel}
+        onSaved={setPicked}
+        onDeleted={() => setPicked(null)}
+        setFooter={setFooter}
+        isMobile={isMobile}
+        flat={presentation === "page"}
+      />
+    </>
+  );
+
+  if (presentation === "page") {
+    return (
+      <SettingsSurface label="Configurations" footer={footer}>
+        {body}
+      </SettingsSurface>
+    );
+  }
 
   return (
     <Modal
@@ -120,33 +180,7 @@ function ConfigurationsManager({ open, onClose }: { open: boolean; onClose: () =
       bodyClassName="p-0 overflow-hidden"
       footer={footer}
     >
-      <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">
-        <ConfigListNav
-          draftLabel="New configuration"
-          draftSelected={selected === DRAFT}
-          onSelectDraft={() => setPicked(DRAFT)}
-          entries={configurations.map((entry) => ({
-            id: entry.config_id,
-            name: entry.name,
-          }))}
-          selectedId={selected}
-          onSelect={setPicked}
-          isLoading={isLoading}
-        />
-
-        <ConfigurationForm
-          key={selected}
-          record={record}
-          takenNames={configurations
-            .filter((entry) => entry.config_id !== selected)
-            .map((entry) => entry.name)}
-          onClose={onClose}
-          onSaved={setPicked}
-          onDeleted={() => setPicked(null)}
-          setFooter={setFooter}
-          isMobile={isMobile}
-        />
-      </div>
+      <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">{body}</div>
     </Modal>
   );
 }
@@ -167,6 +201,7 @@ function ConfigurationForm({
   onDeleted,
   setFooter,
   isMobile,
+  flat = false,
 }: {
   record: ModelConfigurationRecord | null;
   takenNames: string[];
@@ -175,6 +210,8 @@ function ConfigurationForm({
   onDeleted: () => void;
   setFooter: (footer: ReactNode) => void;
   isMobile: boolean;
+  /** Inside the Settings page card: no second card around the fields. */
+  flat?: boolean;
 }) {
   const toast = useToast();
   const createConfig = useCreateModelConfig();
@@ -231,7 +268,10 @@ function ConfigurationForm({
 
   useEffect(() => {
     if (!error) return;
-    const dialog = formRef.current?.closest<HTMLElement>('[data-modal-open="true"]');
+    // A dialog or the Settings page frame bounds where late feedback may land.
+    const dialog = formRef.current?.closest<HTMLElement>(
+      '[data-modal-open="true"], [data-settings-surface="true"]',
+    );
     if (!dialog || dialog.hasAttribute("data-covered") || dialog.closest("[inert]")) return;
     const active = dialog.ownerDocument.activeElement;
     // A late response must not take focus from a new field, overlay or instance.
@@ -548,7 +588,14 @@ function ConfigurationForm({
             {error.message}
           </p>
         ) : null}
-        <div className="flex flex-col md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 gap-4 md:gap-2">
+        <div
+          className={cn(
+            "flex flex-col gap-4",
+            flat
+              ? "md:gap-3 md:px-2 md:py-1"
+              : "md:rounded-[8px] md:bg-elevation-level-2 md:border md:border-muted md:p-3 md:gap-2",
+          )}
+        >
           <ConfigRow
             presentation="form"
             label="Model Provider"

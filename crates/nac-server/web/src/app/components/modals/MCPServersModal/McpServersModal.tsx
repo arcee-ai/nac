@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Modal, ModalSize } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
@@ -6,6 +6,7 @@ import { LibraryPicker } from "@/app/components/modals/MCPServersModal/McpLibrar
 import { McpServerForm } from "@/app/components/modals/MCPServersModal/McpServerForm";
 import { McpServersLoadError } from "@/app/components/modals/MCPServersModal/McpServersLoadError";
 import { McpServersMobile } from "@/app/components/modals/MCPServersModal/McpServersMobile";
+import { SettingsSurface } from "@/app/features/settings/SettingsSurface";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useMcpLibrary, useMcpServers } from "@/app/services/queries";
@@ -23,7 +24,25 @@ export function McpServersModal({ open, onClose }: { open: boolean; onClose: () 
   return <McpServersManager open={open} onClose={onClose} />;
 }
 
-function McpServersManager({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * The same manager as the Settings › MCP servers section. A phone keeps its
+ * pushed catalog and form panels; only the list moves into the page.
+ */
+export function McpServersSettings() {
+  const isMobile = useIsMobile();
+  if (isMobile) return <McpServersMobile open presentation="page" />;
+  return <McpServersManager presentation="page" />;
+}
+
+function McpServersManager({
+  open = true,
+  onClose,
+  presentation = "modal",
+}: {
+  open?: boolean;
+  onClose?: () => void;
+  presentation?: "modal" | "page";
+}) {
   // Warms the catalog as soon as the modal opens, so the picker's grouped
   // sections are already there when "Add server" is selected.
   const { data: library } = useMcpLibrary();
@@ -33,6 +52,10 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
   const [template, setTemplate] = useState<McpLibraryEntry | null>(null);
   const [customDraft, setCustomDraft] = useState(false);
   const [footer, setFooter] = useState<ReactNode>(null);
+  // A page has nothing to close; Cancel remounts the form on what is stored.
+  const [revision, setRevision] = useState(0);
+  const discard = useCallback(() => setRevision((value) => value + 1), []);
+  const cancel = presentation === "page" ? discard : (onClose ?? discard);
   // A closing phone form remains mounted; only its current selection may finish navigation.
   const formEpoch = useRef(0);
   const currentFormEpoch = formEpoch.current;
@@ -61,17 +84,8 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
         ) ?? null)
       : null);
 
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="MCP servers"
-      size={ModalSize.Large}
-      flush
-      className="md:h-[740px]"
-      bodyClassName="p-0 overflow-hidden"
-      footer={footer}
-    >
+  const content = (
+    <>
       {isError ? (
         <McpServersLoadError
           error={error}
@@ -105,17 +119,17 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
                 formEpoch.current += 1;
                 setCustomDraft(true);
               }}
-              onClose={onClose}
+              onClose={presentation === "page" ? undefined : onClose}
               setFooter={setFooter}
             />
           ) : (
             <McpServerForm
-              key={record ? record.name : (template?.id ?? "custom")}
+              key={`${record ? record.name : (template?.id ?? "custom")}:${revision}`}
               record={record}
               template={template}
               libraryEntry={libraryEntry}
               onBack={() => pick(DRAFT)}
-              onClose={onClose}
+              onClose={cancel}
               onSaved={(name) => {
                 if (formEpoch.current === currentFormEpoch) pick(name);
               }}
@@ -128,6 +142,29 @@ function McpServersManager({ open, onClose }: { open: boolean; onClose: () => vo
           )}
         </div>
       )}
+    </>
+  );
+
+  if (presentation === "page") {
+    return (
+      <SettingsSurface label="MCP servers" footer={footer}>
+        {content}
+      </SettingsSurface>
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="MCP servers"
+      size={ModalSize.Large}
+      flush
+      className="md:h-[740px]"
+      bodyClassName="p-0 overflow-hidden"
+      footer={footer}
+    >
+      {content}
     </Modal>
   );
 }
