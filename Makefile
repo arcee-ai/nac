@@ -148,7 +148,7 @@ test-source-size:
 	bash scripts/check-source-size.sh
 
 .PHONY: test-manual-stack-override
-## Exercise the human-only stack override without GitHub mutations
+## Exercise the maintainer-authorized stack override without GitHub mutations
 test-manual-stack-override:
 	node --test scripts/manual-stack-override.test.mjs scripts/manual-stack-admission.test.mjs
 
