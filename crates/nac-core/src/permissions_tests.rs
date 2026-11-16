@@ -1932,3 +1932,64 @@ async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
     ));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+// Keep fixture commands within the real shell projection and approval boundaries.
+#[test]
+fn all425_fixture_commands_keep_real_policy_boundaries() {
+    let cwd = Path::new("/workspace");
+    let backend = local(cwd);
+    let policy = PermissionPolicy::for_backend(PermissionBackend::Local, []);
+    let commands = [
+        r#"python3 .all425/artifact.py prepare && git add -- 'preparation.json' && git commit -m 'ALL425 B prepare' && git rev-parse HEAD"#,
+        r#"python3 .all425/artifact.py produce && git add -- 'artifact.json' && git commit -m 'ALL425 A produce' && git rev-parse HEAD"#,
+        r#"python3 .all425/artifact.py check --producer-ref 'refs/heads/all425-a-fixture' --commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"#,
+        r#"python3 .all425/artifact.py consume --producer-ref 'refs/heads/all425-a-fixture' --commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && git add -- 'result.json' && git commit -m 'ALL425 B consume' && git rev-parse HEAD"#,
+        r#"python3 .all425/artifact.py check --producer-ref 'refs/heads/all425-a-fixture' --commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && python3 .all425/artifact.py consume --producer-ref 'refs/heads/all425-a-fixture' --commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' && git add result.json && git commit -m 'ALL425 verified consumer' && git rev-parse HEAD"#,
+        r#"git commit --allow-empty -m 'ALL425 invalidate previous proof' && git rev-parse HEAD"#,
+    ];
+    let config_commit = r#"git -c user.name='ALL425 fixture' -c user.email='fixture@example.invalid' -c commit.gpgsign=false -c core.hooksPath=/dev/null commit"#;
+    for (index, command) in commands.into_iter().enumerate() {
+        let prefix = if index == 1 {
+            "git switch -c 'all425-a-fixture' && "
+        } else {
+            "git switch -c 'all425-b-fixture' && "
+        };
+        let prefixes: &[&str] = if index < 4 { &["", prefix] } else { &[""] };
+        for prefix in prefixes {
+            let command = format!("{prefix}{command}");
+            let resources = shell_resources(&command, cwd, &backend);
+            assert!(
+                resources.iter().all(|r| r.hard_denial.is_none()),
+                "{command}"
+            );
+            assert!(resources.iter().any(|r| r.action == "execute_broad"));
+            assert!(resources.iter().all(|r| r.action != "execute_opaque"));
+            assert!(resources.iter().all(|r| r.save_resource.is_none()));
+            assert_eq!(
+                policy.evaluate(&resources, &[]).effect,
+                PermissionEffect::Ask
+            );
+            if command.contains("git commit") {
+                let denied = command.replace("git commit", config_commit);
+                let resources = shell_resources(&denied, cwd, &backend);
+                assert!(resources.iter().any(|r| r
+                    .hard_denial
+                    .as_deref()
+                    .is_some_and(|s| s.contains("Git command-scoped configuration"))));
+                assert_eq!(
+                    policy.evaluate(&resources, &[]).effect,
+                    PermissionEffect::Deny
+                );
+            }
+        }
+    }
+    for command in [
+        "git --config-env=user.name=AUTHOR commit -m fixture",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=fixture git commit -m fixture",
+        "git symbolic-ref --quiet HEAD >/dev/null",
+    ] {
+        let resources = shell_resources(command, cwd, &backend);
+        assert!(resources.iter().any(|r| r.hard_denial.is_some()));
+        assert_eq!(policy.evaluate(&resources, &[]).effect, PermissionEffect::Deny);
+    }
+}

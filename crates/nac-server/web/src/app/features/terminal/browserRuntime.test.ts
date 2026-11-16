@@ -6,6 +6,7 @@ import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import { openTerminalObservation, type TerminalControls } from "./browserRuntime";
 import { useTerminalController } from "./useTerminalController";
+import { TerminalInputRecovery } from "./inputRecovery";
 
 const factory = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("./xtermAdapter", () => ({ createTerminalRenderer: factory.create }));
@@ -108,6 +109,43 @@ afterEach(() => {
 });
 
 describe("scoped terminal observation", () => {
+  it.each([undefined, "browser", "native-visible-anchor"] as const)(
+    "passes only explicit %s presentation mode to the renderer",
+    async (linkMode) => {
+      const f = fixture();
+      closers.push(openTerminalObservation({ ...f.ports, linkMode }));
+      await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+      if (linkMode === "native-visible-anchor")
+        expect(factory.create).toHaveBeenCalledExactlyOnceWith(f.ports.host, { linkMode });
+      else expect(factory.create).toHaveBeenCalledExactlyOnceWith(f.ports.host);
+      expect(f.api.terminateTerminal).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retires the prior renderer when presentation mode changes", async () => {
+    const f = fixture();
+    const next = adapter();
+    factory.create.mockResolvedValueOnce(next);
+    function Bridge({ mode }: { mode: "browser" | "native-visible-anchor" }) {
+      const host = useRef<HTMLDivElement | null>(null);
+      useTerminalController("session", "terminal", host, undefined, { linkMode: mode });
+      return createElement("div", { ref: host });
+    }
+    const runtime = { ...standaloneRuntime, api: f.api };
+    const root = (mode: "browser" | "native-visible-anchor") =>
+      createElement(RuntimeContext.Provider, { value: runtime }, createElement(Bridge, { mode }));
+    const view = render(root("browser"));
+    await vi.waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledOnce());
+    view.rerender(root("native-visible-anchor"));
+    await vi.waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    expect(f.view.dispose).toHaveBeenCalledOnce();
+    expect(factory.create.mock.calls[0]).toHaveLength(1);
+    expect(factory.create.mock.calls[1][1]).toEqual({ linkMode: "native-visible-anchor" });
+    expect(f.api.terminateTerminal).not.toHaveBeenCalled();
+    view.unmount();
+    expect(next.dispose).toHaveBeenCalledOnce();
+  });
+
   it("keeps StrictMode's abandoned renderer separate from the live activation", async () => {
     const f = fixture();
     const late = deferred<ReturnType<typeof adapter>>();
@@ -151,6 +189,36 @@ describe("scoped terminal observation", () => {
     expect(f.api.attachUserTerminal).not.toHaveBeenCalled();
     expect(f.ports.controls).not.toHaveBeenCalled();
     expect(f.ports.phase).not.toHaveBeenCalled();
+  });
+
+  it("carries active-delivery uncertainty and discards queued bytes across a link-mode replacement", async () => {
+    const f = fixture();
+    const active = deferred<void>();
+    const input = vi.fn<typeof f.api.inputUserTerminal>().mockReturnValueOnce(active.promise);
+    const ports = { ...f.ports, api: { ...f.api, inputUserTerminal: input } };
+    const close = openTerminalObservation({ ...ports, linkMode: "browser" });
+    closers.push(close);
+    await vi.waitFor(() => expect(f.api.pullUserTerminal).toHaveBeenCalledOnce());
+    const controls = f.ports.controls.mock.calls.at(-1)![0] as TerminalControls;
+    const first = controls.pump.send(Uint8Array.of(65));
+    const queued = controls.pump.send(Uint8Array.of(66));
+    const rejected = expect(queued).rejects.toThrow("consumer closed");
+    close();
+    await rejected;
+    expect(f.ports.previousFailure.current).toBe(true);
+    const next = adapter();
+    factory.create.mockResolvedValueOnce(next);
+    closers.push(
+      openTerminalObservation({ ...ports, reconnect: true, linkMode: "native-visible-anchor" }),
+    );
+    await vi.waitFor(() => expect(f.api.attachUserTerminal).toHaveBeenCalledTimes(2));
+    expect(next.terminal.options.disableStdin).toBe(true);
+    expect(input).toHaveBeenCalledOnce();
+    active.resolve();
+    await first;
+    expect(input).toHaveBeenCalledOnce();
+    expect(input.mock.calls[0][2].bytes).toEqual([65]);
+    expect(f.api.terminateTerminal).not.toHaveBeenCalled();
   });
 
   it("finishes synchronous disposal before replacement activation acquires resources", async () => {
@@ -449,3 +517,33 @@ describe("scoped terminal observation", () => {
     textarea.remove();
   });
 });
+
+it.each([true, false])(
+  "distinguishes observational unavailability (%s) from exhausted live recovery capacity",
+  async (observationOnly) => {
+    const f = fixture();
+    const owner = new TerminalInputRecovery(128, true);
+    if (!observationOnly)
+      for (let id = 0; id < 128; id++) owner.acquire("session", `live-${id}`).release();
+    const lease = owner.acquire("session", "same-identity", observationOnly);
+    expect(lease.available).toBe(false);
+    expect(lease.acknowledge()).toBe(false);
+    closers.push(
+      openTerminalObservation({ ...f.ports, readonly: observationOnly, previousFailure: lease }),
+    );
+    await vi.waitFor(() => expect(f.ports.phase).toHaveBeenCalledWith("Connected"));
+    expect(f.view.terminal.options.disableStdin).toBe(true);
+    const capacityNotice =
+      "Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal.";
+    if (observationOnly) {
+      expect(f.ports.notice).not.toHaveBeenCalledWith(capacityNotice);
+      lease.release();
+      const live = owner.acquire("session", "same-identity");
+      expect(live.available).toBe(true);
+      expect(live.current).toBe(true); // The readonly observation did not acknowledge this live identity.
+    } else {
+      expect(f.ports.notice).toHaveBeenCalledWith(capacityNotice);
+      expect(owner.acquire("session", "live-0").current).toBe(true);
+    }
+  },
+);

@@ -93,14 +93,18 @@ impl NativeTool for CreateGoalTool {
         _input: &Self::Input,
         services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
-        Ok(vec![PermissionResource::new(
+        let mut resource = PermissionResource::new(
             "goal_create",
             services
                 .runtime
                 .session_id
                 .as_deref()
                 .unwrap_or("unpersisted"),
-        )])
+        );
+        if services.runtime.heartbeat_execution {
+            resource=resource.with_hard_denial("heartbeat execution cannot create a durable goal or obtain limits through a new goal");
+        }
+        Ok(vec![resource])
     }
 
     fn execute<'a>(
@@ -210,17 +214,24 @@ impl NativeTool for UpdateGoalTool {
 
     fn permission_resources(
         &self,
-        _input: &Self::Input,
+        input: &Self::Input,
         services: ToolServices<'_>,
     ) -> Result<Vec<PermissionResource>, ToolResult> {
-        Ok(vec![PermissionResource::new(
+        let mut resource = PermissionResource::new(
             "goal_update",
             services
                 .runtime
                 .session_id
                 .as_deref()
                 .unwrap_or("unpersisted"),
-        )])
+        );
+        if services.runtime.heartbeat_execution
+            && services.runtime.heartbeat_goal_id.as_deref() != Some(input.goal_id.as_str())
+        {
+            resource =
+                resource.with_hard_denial("this heartbeat is not bound to that exact durable goal");
+        }
+        Ok(vec![resource])
     }
 
     fn execute<'a>(

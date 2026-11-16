@@ -12,6 +12,7 @@ across features. User-visible behavior remains documented under the topical
 - [0006 — Human terminal execution and observation](0006-human-terminal-observation.md)
 
 - [0007 — Scoped UI primitives and presentation overlay layers](0007-scoped-ui-primitives.md)
+- [0008 — Retained authority for independent task follow-ups](0008-task-followup-delegation.md)
 
 When a change creates a durable new boundary or changes one of these decisions,
 update the relevant record in the same commit. Do not use ADRs as progress logs.

@@ -198,8 +198,12 @@ def main():
         for package in packages:
             run([cargo, 'test', '--locked', '-p', package, '--lib', '--no-run'],
                 output / f'{package}-build.log', env, report['phases'], f'{package}-build')
-        with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-') as directory:
+        # Darwin's default /var/folders root can exceed Unix socket path limits
+        # after the invocation prefix and unchanged Rust fixture suffixes.
+        with tempfile.TemporaryDirectory(prefix='nac-portability-fixture-', dir='/tmp') as directory:
             fixture = Path(directory).resolve()
+            report['fixture_root'] = str(fixture)
+            report['fixture_root_bytes'] = len(str(fixture).encode('utf-8'))
             test_env = dict(env, TMPDIR=str(fixture), TMP=str(fixture), TEMP=str(fixture),
                             NAC_MANAGED_LOAD_WORKER=str(worker))
             try:

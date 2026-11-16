@@ -50,6 +50,8 @@ export const InsightsFilter = memo(function InsightsFilter({
         size={ButtonSize.Large}
         variant={ButtonVariant.Ghost}
         floating
+        className="[&>div.rounded-full]:!h-11"
+        triggerClassName="!h-11 !min-w-11"
         triggerLabel={pillLabel(options, value)}
       />
     );

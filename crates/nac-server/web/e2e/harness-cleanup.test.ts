@@ -37,6 +37,39 @@ describe("E2E harness cleanup", () => {
   });
 
   test.skipIf(process.platform === "win32")(
+    "cleanup of one fixture preserves a concurrent fixture with a sibling marker",
+    async () => {
+      const prefix = `cleanup-parallel-${process.pid}-${Date.now()}`;
+      const groups = ["one", "two"].map((suffix) => {
+        const marker = `${prefix}-${suffix}`;
+        const child = spawnLeaderWithSignalResistantDescendant(marker);
+        spawnedGroups.push({ child, marker });
+        return { child, marker };
+      });
+      const descendants = await Promise.all(groups.map(({ child }) => readPid(child)));
+      await Promise.all(groups.map(({ child }) => waitForExit(child)));
+      expect(descendants.every(processExists)).toBe(true);
+
+      await terminateProcessGroup(groups[0].child, {
+        graceMs: 100,
+        killMs: 1_000,
+        pollMs: 10,
+        marker: groups[0].marker,
+      });
+      expect(processExists(descendants[0])).toBe(false);
+      expect(processExists(descendants[1])).toBe(true);
+
+      await terminateProcessGroup(groups[1].child, {
+        graceMs: 100,
+        killMs: 1_000,
+        pollMs: 10,
+        marker: groups[1].marker,
+      });
+      expect(processExists(descendants[1])).toBe(false);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
     "kills a signal-resistant descendant after its process-group leader exits",
     async () => {
       const marker = `cleanup-test-${process.pid}-${Date.now()}`;

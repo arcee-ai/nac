@@ -41,7 +41,7 @@ function SessionCollectionRow({
   const viewedAt = useSessionViewedAt(entry.summary.session_id);
   const title = sessionTitle(entry.summary);
   const running = isActiveRun(entry.active_run);
-  const unread = isSessionUnread(entry.summary.updated_at, viewedAt);
+  const unread = isSessionUnread(entry.attention_updated_at ?? entry.summary.updated_at, viewedAt);
   const status = entry.summary.model_config_error
     ? "Needs attention"
     : running

@@ -3,7 +3,8 @@ import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavi
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDesktopVisible } from "@/app/features/desktop-commands/visibility";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Modal } from "@/app/atoms";
@@ -88,6 +89,7 @@ function useAutoSshConnect(
 
 /** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
 export default function SessionPage() {
+  const desktopVisible = useDesktopVisible();
   const {
     useSidePanelExpanded,
     useSidePanelCollapsed,
@@ -99,7 +101,7 @@ export default function SessionPage() {
     showSidePanelList,
     revealSidePanel,
     setSidePanelAnimate,
-    resetSessionSelection,
+    activateSessionSelection,
     unbindSidePanelProject,
     bindSidePanelProject,
   } = useNativeRuntime().stores.sessionLayoutStore;
@@ -161,10 +163,20 @@ export default function SessionPage() {
     navigate(routes.session(id, target), { replace: true });
   }, [effectivePanel, id, navigate, panel, routedPanel, selectInsight, selectedThread, snapshot]);
 
+  const heartbeatResultsThrough =
+    entry?.summary.session_id === id
+      ? (entry.heartbeat_results ?? []).reduce(
+          (maximum, result) => Math.max(maximum, result.sequence),
+          0,
+        )
+      : 0;
   useEffect(() => {
-    if (id) clearAttention(id);
-    resetSessionSelection();
-  }, [clearAttention, id, resetSessionSelection]);
+    if (id) clearAttention(id, heartbeatResultsThrough);
+  }, [clearAttention, id, heartbeatResultsThrough]);
+
+  useEffect(() => {
+    activateSessionSelection(id);
+  }, [id, activateSessionSelection]);
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {
@@ -246,7 +258,7 @@ export default function SessionPage() {
   );
 
   const page = (
-    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-hidden bg-elevation-ground">
+    <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-clip bg-elevation-ground">
       <div className="relative flex flex-1 min-w-0 h-full min-h-0">
         <div className="flex flex-col items-center flex-1 min-w-0 h-full">
           <div ref={setChatColumn} className="flex flex-col flex-1 min-h-0 w-full relative">
@@ -369,10 +381,12 @@ export default function SessionPage() {
   );
 
   return (
-    <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
-      <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
-        {page}
-      </InsightsNavigationProvider>
-    </TranscriptModelProvider>
+    <Activity mode={desktopVisible ? "visible" : "hidden"}>
+      <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
+        <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
+          {page}
+        </InsightsNavigationProvider>
+      </TranscriptModelProvider>
+    </Activity>
   );
 }
