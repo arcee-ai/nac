@@ -135,7 +135,7 @@ fn push_word(segment: &mut Vec<String>, word: &mut String, word_started: &mut bo
     }
 }
 
-pub(super) fn canonical_command(tokens: &[String]) -> String {
+pub(crate) fn canonical_command(tokens: &[String]) -> String {
     let mut canonical = String::from("command:");
     for token in tokens {
         canonical.push('[');

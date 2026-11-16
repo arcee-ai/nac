@@ -1,3 +1,6 @@
+import type { DesktopCommandPort } from "../features/desktop-commands/adapter";
+import { HeartbeatAttentionController } from "@/app/features/heartbeats/HeartbeatAttentionController";
+import { TerminalLinkModeProvider } from "../features/terminal/terminalLinkMode";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "../../App";
@@ -17,6 +20,8 @@ export interface NativePresentationRootProps {
   styles?: ReactNode;
   /** Standalone entry owns document shortcuts; embedded views own focused shortcuts. */
   globalKeyboard?: boolean;
+  /** Optional UI-only native menu capability, owned by this presentation. */
+  desktopCommands?: DesktopCommandPort;
 }
 
 export function NativePresentationRoot(props: NativePresentationRootProps) {
@@ -30,6 +35,7 @@ function RuntimePresentation({
   className,
   styles,
   globalKeyboard,
+  desktopCommands,
 }: NativePresentationRootProps) {
   useEffect(() => runtime.retain(), [runtime]);
   const closed = useSyncExternalStore(runtime.subscribe, runtime.isClosed, runtime.isClosed);
@@ -41,12 +47,19 @@ function RuntimePresentation({
       styles={styles}
       globalKeyboard={globalKeyboard}
     >
-      {router(<App />)}
+      {router(
+        // Explicit desktop presentation capability selects the affordance only;
+        // browser/hosted consumers without it retain their existing behavior.
+        <TerminalLinkModeProvider value={desktopCommands ? "native-visible-anchor" : "browser"}>
+          <App desktopCommands={desktopCommands} />
+        </TerminalLinkModeProvider>,
+      )}
     </ThemedPresentation>
   );
   return (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={runtime.queryClient}>
+        <HeartbeatAttentionController />
         {theme ? theme(view) : <ThemeProvider local>{view}</ThemeProvider>}
       </QueryClientProvider>
     </RuntimeContext.Provider>

@@ -56,7 +56,7 @@ export function createChatTabsStore(storage?: Pick<Storage, "getItem" | "setItem
 
   const { getState, setState, subscribe, useStore } = chatTabsStore;
 
-  subscribe(() => {
+  const stopPersistence = subscribe(() => {
     const { dismissed, order } = getState();
     try {
       storage?.setItem(STORAGE_KEY, JSON.stringify({ dismissed: [...dismissed], order }));
@@ -122,6 +122,7 @@ export function createChatTabsStore(storage?: Pick<Storage, "getItem" | "setItem
     useStore((state) => (projectId ? (state.order[projectId] ?? NO_ORDER) : NO_ORDER));
   return {
     release: () => {
+      stopPersistence();
       chatTabsStore.setState(initial_chatTabsStore);
     },
     chatTabsStore,

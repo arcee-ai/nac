@@ -12,6 +12,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from rust_test_support import add_rust_bundle, rust_fixture
 import image_inventory as inv
 import image_scan as scan
 import image_rescan as rescan
@@ -279,6 +280,7 @@ class DriverTests(unittest.TestCase):
         for name, value in [("sbom.syft.json", SBOM), ("runtime.json", RUNTIME),
                             ("identity.json", {"image": IMAGE}), ("coverage.json", {})]:
             inv.write_json(self.root / name, value)
+        add_rust_bundle(self.root)
         scan.bundle_manifest(self.root, IMAGE)
         output = self.root / "rescan"
         output.mkdir()
@@ -296,6 +298,7 @@ class DriverTests(unittest.TestCase):
                                 ("identity.json", {"image": IMAGE, "source_revision": "a" * 40,
                                                    "go_application_pins": PINS}), ("coverage.json", {})]:
                 inv.write_json(bundle / name, value)
+            add_rust_bundle(bundle)
             scan.bundle_manifest(bundle, IMAGE)
             args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
                                       output=bundle / "rescan", tool_cache=self.root, db_cache=self.root)
@@ -405,6 +408,26 @@ class DriverTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rescan.select_run([run], {12: [dict(artifact, expired=True)]}, jobs, NOW)
 
+    def test_current_producer_precedes_legacy_without_hiding_missing_evidence(self):
+        newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
+                  "created_at": "2026-10-21T08:00:00Z", "head_sha": "a" * 40,
+                  "head_repository": {"full_name": "arcee-ai/nac"}}
+        old = dict(newest, id=1, head_sha="b" * 40)
+        current = {"name": rescan.INVENTORY_JOB, "status": "completed", "conclusion": "failure", "steps": [
+            {"name": rescan.INVENTORY_STEP, "status": "completed", "conclusion": "success"}]}
+        legacy = dict(current, name=rescan.LEGACY_INVENTORY_JOB)
+        jobs = {2: [current], 1: [legacy]}
+        artifacts = {2: [{"name": "managed-image-security-" + "a" * 40, "expired": False}],
+                     1: [{"name": "managed-image-security-" + "b" * 40, "expired": False}]}
+        self.assertEqual(rescan.select_run([newest, old], artifacts, jobs, NOW)[0]["id"], 2)
+        self.assertEqual(rescan.select_run([old], artifacts, jobs, NOW)[0]["id"], 1)
+        for invalid in ([], [dict(artifacts[2][0], expired=True)]):
+            with self.assertRaises(ValueError):
+                rescan.select_run([newest, old], artifacts | {2: invalid}, jobs, NOW)
+        for ambiguous in ([current, current], [current, legacy]):
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                rescan.select_run([newest, old], artifacts, jobs | {2: ambiguous}, NOW)
+
     def test_latest_red_inventory_cannot_fall_back_to_older_green(self):
         newest = {"id": 2, "event": "push", "head_branch": "dev", "path": rescan.PRODUCER,
                   "conclusion": "failure", "created_at": "2026-10-21T08:00:00Z", "head_sha": "a" * 40,
@@ -449,6 +472,7 @@ class DriverTests(unittest.TestCase):
                                                                "go_application_pins": PINS}),
                                             ("coverage.json", {})]:
                             inv.write_json(bundle / name, value)
+                        add_rust_bundle(bundle)
                         scan.bundle_manifest(bundle, IMAGE)
                         if corruption == "tampered":
                             (bundle / "runtime.json").write_text("{}")
@@ -472,7 +496,8 @@ class DriverTests(unittest.TestCase):
                     rescan, "subprocess", SimpleNamespace(run=fresh_scan)), patch.object(
                     scan, "install_tools", return_value=({}, {})), patch.object(
                     scan, "scan_sbom", return_value=report) as scanner, patch.object(
-                    scan, "query_runtimes", return_value=[finding]) as runtime:
+                    scan, "query_runtimes", return_value=[finding]) as runtime, patch.object(
+                    scan, "query_rust", return_value=[]):
                 if corruption == "missing":
                     with self.assertRaises(FileNotFoundError):
                         rescan.rescan(output)
@@ -491,7 +516,8 @@ class DriverTests(unittest.TestCase):
         inventory = self.root / "inventory"
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=None, inventory_only=True,
                                   output=inventory, tool_cache=self.root, db_cache=self.root)
-        raw = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")
+        fixture_pins, fixture_raw = rust_fixture(self.root)
+        raw = dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)", rust=fixture_raw)
         raw_sbom = copy.deepcopy(SBOM)
         raw_sbom["artifacts"][2]["metadata"]["symbols"] = {
             "github.com/cli/cli/v2/cmd/gh": ["main"]}
@@ -514,6 +540,8 @@ class DriverTests(unittest.TestCase):
                 output.write_text(result)
             return result
         with patch.object(scan, "command", side_effect=inventory_command), patch.object(
+                scan, "source_rust_pins", return_value=fixture_pins), patch.object(
+                scan, "collect_distribution", side_effect=lambda pins, out, dl: rust_fixture(out)), patch.object(
                 scan, "install_tools", return_value=({"syft": "syft"}, {})), patch.object(scan, "scan_sbom") as advisory:
             self.assertEqual(scan.run(args), 0)
         advisory.assert_not_called()
@@ -558,6 +586,7 @@ class DriverTests(unittest.TestCase):
         for name, value in [("sbom.syft.json", SBOM), ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
                             ("identity.json", identity), ("coverage.json", {})]:
             inv.write_json(bundle / name, value)
+        add_rust_bundle(bundle)
         scan.bundle_manifest(bundle, IMAGE)
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
                                   output=self.root / "rescan", tool_cache=self.root, db_cache=self.root,
@@ -569,6 +598,7 @@ class DriverTests(unittest.TestCase):
                 scan, "managed_go_pins", side_effect=AssertionError("current checkout read")), patch.object(
                 scan, "install_tools", return_value=({}, {})), patch.object(scan, "scan_sbom", return_value={}), patch.object(
                 scan, "grype_findings", return_value=[]), patch.object(scan, "query_runtimes", return_value=[]), patch.object(
+                scan, "query_rust", return_value=[]), patch.object(
                 scan, "evaluate", return_value={"blocking": [], "excepted": [], "reporting": []}):
             self.assertEqual(scan.run(args), 0)
         retained = json.loads((args.output / "identity.json").read_text())
@@ -602,6 +632,7 @@ class DriverTests(unittest.TestCase):
         for name, value in [("sbom.syft.json", SBOM), ("runtime.json", dict(RUNTIME, nac="nac-web 0.1.0 (aaaaaaaaaaaa)")),
                             ("identity.json", {"image": IMAGE, "source_revision": "a" * 40}), ("coverage.json", {})]:
             inv.write_json(bundle / name, value)
+        add_rust_bundle(bundle)
         scan.bundle_manifest(bundle, IMAGE)  # Valid old hashes, not tampered bytes.
         args = argparse.Namespace(image=IMAGE, source_revision="a" * 40, bundle=bundle,
                                   output=self.root / "legacy-rescan", tool_cache=self.root, db_cache=self.root)

@@ -38,7 +38,7 @@ function fixture(t, { candidate = empty, reviewed = granted(entry) } = {}) {
   for (const input of INPUTS) {
     mkdirSync(join(candidateRoot, dirname(input)), { recursive: true });
     const source = input === INPUTS[0] ? 'Cargo.lock' : 'package-lock.json';
-    copyFileSync(fileURLToPath(new URL(`../../.github/scripts/fixtures/security/safe/${source}`,
+    copyFileSync(fileURLToPath(new URL(`../../.github/scripts/fixtures/security/safe/${source}.fixture`,
       import.meta.url)), join(candidateRoot, input));
   }
   mkdirSync(join(candidateRoot, dirname(POLICY)), { recursive: true });

@@ -56,9 +56,14 @@ function SshConfigsManager({ open, onClose }: { open: boolean; onClose: () => vo
       open={open}
       onClose={onClose}
       title="SSH configs"
+      subheader={
+        isMobile
+          ? undefined
+          : "Save connection details for the NAC server. Testing a connection is always explicit."
+      }
       size={ModalSize.Large}
       flush
-      className="max-w-[780px] md:h-[480px]"
+      className="max-w-[780px] md:h-[480px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
       bodyClassName="p-0 overflow-hidden"
       footer={footer}
     >
@@ -200,13 +205,15 @@ function SshConfigForm({
 
   useLayoutEffect(() => {
     setFooter(
-      <>
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 md:contents">
         {record ? (
           isMobile ? (
             <StickyButton
+              buttonClassName="min-h-11 min-w-11 max-w-full"
               variant={ButtonVariant.SecondaryDestructive}
               content={ButtonContent.Icon}
-              className="mr-auto"
+              aria-label="Delete SSH configuration"
+              className="mr-auto min-h-11 max-w-full"
               disabled={busy}
               onClick={() => void removeRef.current()}
             >
@@ -217,6 +224,7 @@ function SshConfigForm({
               size={ButtonSize.Large}
               variant={ButtonVariant.SecondaryDestructive}
               content={ButtonContent.Icon}
+              aria-label="Delete SSH configuration"
               className="mr-auto"
               disabled={busy}
               onClick={() => void removeRef.current()}
@@ -227,6 +235,8 @@ function SshConfigForm({
         ) : null}
         {isMobile ? (
           <StickyButton
+            buttonClassName="min-h-11 min-w-11 max-w-full"
+            className="min-h-11 max-w-full"
             variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             onClick={onClose}
@@ -240,6 +250,8 @@ function SshConfigForm({
         )}
         {isMobile ? (
           <StickyButton
+            buttonClassName="min-h-11 min-w-11 max-w-full"
+            className="min-h-11 max-w-full"
             variant={ButtonVariant.Primary}
             content={ButtonContent.Text}
             disabled={busy}
@@ -257,14 +269,14 @@ function SshConfigForm({
             Save
           </Button>
         )}
-      </>,
+      </div>,
     );
     return () => setFooter(null);
   }, [busy, isMobile, onClose, record, setFooter]);
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
-      <div className={cn("flex-1 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-[88px]")}>
+      <div className={cn("flex-1 overflow-auto p-4 [&>*]:shrink-0", isMobile && "pb-32")}>
         <SshConnectionBox
           mode="manage"
           connection={null}

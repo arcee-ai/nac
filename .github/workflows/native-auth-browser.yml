@@ -1,0 +1,64 @@
+name: Native authentication browser acceptance
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/native-auth-browser.yml
+      - desktop/macos/**
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - Makefile
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: native-auth-browser-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  native-auth:
+    name: Hosted macOS26 native authentication
+    runs-on: macos-26
+    # Covers the 2100s work + 120s cleanup allocation, setup and artifact upload.
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_DEV_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      PYTHONDONTWRITEBYTECODE: "1"
+      CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha }}
+      CANDIDATE_BASE: ${{ github.event.pull_request.base.sha }}
+      CANDIDATE_PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: native-auth-browser-opt1
+          save-if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Set up the locked candidate
+        run: make setup
+      - name: Bind the actual hosted job and run the existing native authentication journeys
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B desktop/macos/ci_native_auth.py "$GITHUB_WORKSPACE" "$RUNNER_TEMP/native-auth-browser"
+      - name: Retain source, host, binary receipts and actual journey evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-auth-browser-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-auth-browser/evidence
+          if-no-files-found: error
+          retention-days: 7
