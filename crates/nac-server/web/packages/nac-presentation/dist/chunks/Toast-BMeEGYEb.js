@@ -8507,11 +8507,17 @@ function ym(e) {
 var bm = 300, xm = "pt-[calc(56px+env(safe-area-inset-top))]", Sm = "pb-[calc(84px+env(safe-area-inset-bottom))]", Cm = /* @__PURE__ */ function(e) {
 	return e.Small = "max-w-[420px]", e.Medium = "max-w-[600px]", e.Wide = "max-w-[640px]", e.Large = "max-w-[760px]", e;
 }({}), wm = ({ open: e, onClose: t, onNavigate: n, title: r, subheader: i, headerActions: a, size: o = "max-w-[600px]", zIndex: s = 100, closeOnOverlay: c = !0, flush: l = !1, fullScreen: u = !1, chromeless: f = !1, mobileCloseIcon: p = W.Left, hideClose: m = !1, keepOnNavigate: _ = !1, alert: v = !1, className: S = "", bodyClassName: C = "", children: w, footer: T }) => {
-	let E = Ro(), ee = h(null), D = h(""), O = x(), [k, A] = g(e), [j, M] = g(e), [N, te] = g(!0);
-	if (j !== e && (M(e), e ? (A(!0), E && te(!0)) : E ? te(!0) : A(!1)), d(() => {
-		if (!e || !E || !k) return;
+	let E = Ro(), ee = h(null), [D, O] = g(null), [k, A] = g(0);
+	d(() => {
+		if (!D || typeof ResizeObserver > "u") return;
+		let e = new ResizeObserver(() => A(D.offsetHeight));
+		return e.observe(D), () => e.disconnect();
+	}, [D]);
+	let j = h(""), M = x(), [N, te] = g(e), [P, ne] = g(e), [re, ie] = g(!0);
+	if (P !== e && (ne(e), e ? (te(!0), E && ie(!0)) : E ? ie(!0) : te(!1)), d(() => {
+		if (!e || !E || !N) return;
 		let t = 0, n = requestAnimationFrame(() => {
-			t = requestAnimationFrame(() => te(!1));
+			t = requestAnimationFrame(() => ie(!1));
 		});
 		return () => {
 			cancelAnimationFrame(n), cancelAnimationFrame(t);
@@ -8519,27 +8525,27 @@ var bm = 300, xm = "pt-[calc(56px+env(safe-area-inset-top))]", Sm = "pb-[calc(84
 	}, [
 		e,
 		E,
-		k
+		N
 	]), d(() => {
-		if (e || !E || !k) return;
-		let t = setTimeout(() => A(!1), bm);
+		if (e || !E || !N) return;
+		let t = setTimeout(() => te(!1), bm);
 		return () => clearTimeout(t);
 	}, [
 		e,
 		E,
-		k
+		N
 	]), d(() => {
 		e && ee.current?.focus();
 	}, [e]), d(() => {
-		D.current && D.current !== O.pathname && e && !_ && (n ?? t)?.(), D.current = O.pathname;
+		j.current && j.current !== M.pathname && e && !_ && (n ?? t)?.(), j.current = M.pathname;
 	}, [
-		O.pathname,
+		M.pathname,
 		e,
 		t,
 		n,
 		_
-	]), !k) return null;
-	let P = v ? gm : Mp, ne = v ? _m : Fp, re = v ? vm : Lp, ie = v ? ym : Rp, ae = c && !E, F = (e) => E ? /* @__PURE__ */ y(hm, {
+	]), !N) return null;
+	let ae = v ? gm : Mp, F = v ? _m : Fp, I = v ? vm : Lp, oe = v ? ym : Rp, se = c && !E, L = (e) => E ? /* @__PURE__ */ y(hm, {
 		variant: im.Ghost,
 		content: am.Icon,
 		className: "shrink-0",
@@ -8554,31 +8560,31 @@ var bm = 300, xm = "pt-[calc(56px+env(safe-area-inset-top))]", Sm = "pb-[calc(84
 		"aria-label": "Close",
 		onClick: t,
 		children: /* @__PURE__ */ y(Ao, { iconName: e })
-	}), I = u && !E, oe = E && !i, se = f && (I || E) && t && !m, L = H("flex min-w-0 flex-1 items-center text-basic-primary", E ? "type-heading" : "type-subheading"), ce = /* @__PURE__ */ b("div", {
+	}), ce = u && !E, le = E && !i, ue = f && (ce || E) && t && !m, de = H("flex min-w-0 flex-1 items-center text-basic-primary", E ? "type-heading" : "type-subheading"), fe = /* @__PURE__ */ b("div", {
 		className: H("flex items-center", i ? E ? "min-h-14" : "min-h-[52px]" : "h-full", E ? H("gap-3 py-1 pl-2", a ? "pr-1" : "pr-4") : "gap-2 py-1 pl-5 pr-2.5"),
 		children: [
-			E && t ? F(p) : null,
-			r ? /* @__PURE__ */ y(ie, {
+			E && t ? L(p) : null,
+			r ? /* @__PURE__ */ y(oe, {
 				asChild: !0,
 				children: /* @__PURE__ */ y("div", {
-					className: L,
+					className: de,
 					children: r
 				})
-			}) : /* @__PURE__ */ y("div", { className: L }),
+			}) : /* @__PURE__ */ y("div", { className: de }),
 			a ? /* @__PURE__ */ y("div", {
 				className: "flex shrink-0 items-center gap-1",
 				children: a
 			}) : null,
-			!E && t ? F(W.Close) : null
+			!E && t ? L(W.Close) : null
 		]
-	}), le = !f && (r || i || a || t) ? /* @__PURE__ */ b("header", {
-		className: H("flex flex-col", E ? H("fade-from-top z-10 pt-[env(safe-area-inset-top)]", i ? "shrink-0" : "h-[calc(56px+env(safe-area-inset-top))]", oe ? "absolute inset-x-0 top-0" : "shrink-0") : H("shrink-0 border-b border-muted", i ? "min-h-[52px]" : "h-[52px]")),
-		children: [ce, i ? /* @__PURE__ */ y("div", {
+	}), pe = !f && (r || i || a || t) ? /* @__PURE__ */ b("header", {
+		className: H("flex flex-col", E ? H("fade-from-top z-10 pt-[env(safe-area-inset-top)]", i ? "shrink-0" : "h-[calc(56px+env(safe-area-inset-top))]", le ? "absolute inset-x-0 top-0" : "shrink-0") : H("shrink-0 border-b border-muted", i ? "min-h-[52px]" : "h-[52px]")),
+		children: [fe, i ? /* @__PURE__ */ y("div", {
 			className: E ? "px-4 pb-3" : "px-5 pb-3",
 			children: i
 		}) : null]
-	}) : null, ue = e && !N ? "translate-x-0 data-[covered]:translate-x-[-30px]" : "translate-x-full";
-	return /* @__PURE__ */ y(P, {
+	}) : null, me = e && !re ? "translate-x-0 data-[covered]:translate-x-[-30px]" : "translate-x-full";
+	return /* @__PURE__ */ y(ae, {
 		open: e,
 		onOpenChange: (e) => {
 			e || t?.();
@@ -8586,18 +8592,18 @@ var bm = 300, xm = "pt-[calc(56px+env(safe-area-inset-top))]", Sm = "pb-[calc(84
 		inertBackground: !E,
 		children: /* @__PURE__ */ b(Np, {
 			forceMount: !0,
-			children: [/* @__PURE__ */ y(ne, {
+			children: [/* @__PURE__ */ y(F, {
 				asChild: !0,
-				dismissible: ae,
+				dismissible: se,
 				children: /* @__PURE__ */ y(Up, {
-					open: e && (!E || !N),
+					open: e && (!E || !re),
 					zIndex: s,
 					className: E ? "!duration-300" : void 0
 				})
 			}), /* @__PURE__ */ y("div", {
 				style: { zIndex: s },
 				className: H("pointer-events-none fixed inset-0 z-[100] flex", !E && "items-center justify-center p-4"),
-				children: /* @__PURE__ */ b(re, {
+				children: /* @__PURE__ */ b(I, {
 					ref: ee,
 					forceMount: !0,
 					"aria-modal": "true",
@@ -8605,21 +8611,23 @@ var bm = 300, xm = "pt-[calc(56px+env(safe-area-inset-top))]", Sm = "pb-[calc(84
 					tabIndex: -1,
 					"data-modal-open": e ? "true" : void 0,
 					onOpenAutoFocus: (e) => e.preventDefault(),
-					className: H("pointer-events-auto relative flex flex-col outline-none", E ? H("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", ue, !f && "bg-elevation-ground") : H("fade w-full motion-reduce:!animate-none", o, f ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-sheet bg-elevation-level-2 shadow-2xl", I && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), S, E && "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full"),
+					className: H("pointer-events-auto relative flex flex-col outline-none", E ? H("rounded-none transition-transform duration-300 ease-in-out motion-reduce:transition-none", me, !f && "bg-elevation-ground") : H("fade w-full motion-reduce:!animate-none", o, f ? "shadow-none" : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-sheet bg-elevation-level-2 shadow-2xl", ce && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden"), S, E && "h-[min(100%,100dvh)] max-h-[min(100%,100dvh)] min-h-[min(100%,100dvh)] w-full min-w-full max-w-full"),
 					children: [
-						se ? /* @__PURE__ */ y("div", {
+						ue ? /* @__PURE__ */ y("div", {
 							className: "absolute top-[calc(4px+env(safe-area-inset-top))] right-2 z-10",
-							children: F(W.Close)
+							children: L(W.Close)
 						}) : null,
-						le,
+						pe,
 						/* @__PURE__ */ y("div", {
-							className: H("flex w-full min-h-0 flex-auto flex-col overflow-auto overscroll-contain", oe && !f && xm),
+							className: H("flex w-full min-h-0 flex-auto flex-col overflow-auto overscroll-contain", le && !f && xm),
 							children: /* @__PURE__ */ y("div", {
-								className: H(f ? "flex min-h-0 w-full flex-1 flex-col" : "modal-body paragraph-medium flex flex-col px-5 py-4 text-basic-secondary", E || I ? "min-h-0 flex-1 overflow-auto" : l && "flex-1", E && T && Sm, C),
+								className: H(f ? "flex min-h-0 w-full flex-1 flex-col" : "modal-body paragraph-medium flex flex-col px-5 py-4 text-basic-secondary", E || ce ? "min-h-0 flex-1 overflow-auto" : l && "flex-1", E && T && Sm, C),
+								style: E && T && k > 72 ? { paddingBottom: `calc(${k + 16}px)` } : void 0,
 								children: w
 							})
 						}),
 						T ? /* @__PURE__ */ y("footer", {
+							ref: E ? O : void 0,
 							className: H("modal-footer flex items-center justify-end", E ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 px-3 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))]" : "shrink-0 gap-2 border-t border-muted px-5 py-3"),
 							children: T
 						}) : null
