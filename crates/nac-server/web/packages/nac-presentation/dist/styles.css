@@ -7463,8 +7463,8 @@
 }
 
 [data-nac-runtime]:is(.chat-response.streaming p .streaming-chunk), [data-nac-runtime] .chat-response.streaming p .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming li .streaming-chunk), [data-nac-runtime] .chat-response.streaming li .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h1 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h1 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h2 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h2 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h3 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h3 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h4 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h4 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h5 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h5 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h6 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h6 .streaming-chunk {
-  opacity: 0;
-  animation: .15s ease-out forwards nac-presentation-fadeInOut;
+  opacity: 1;
+  animation: .15s ease-out nac-presentation-fadeInOut;
 }
 
 @keyframes nac-presentation-fadeInOut {
