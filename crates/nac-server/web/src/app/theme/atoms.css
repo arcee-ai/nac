@@ -1222,3 +1222,16 @@
     scroll-margin-bottom: 200px;
   }
 }
+
+/* Sticky pills keep the 44px phone/touch target too (they are 40px on desktop). */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .btn-sticky.btn-large.btn-icon,
+  .btn-sticky.btn-large.btn-icon-left,
+  .btn-sticky.btn-large.btn-icon-right,
+  .btn-sticky.btn-large.btn-text {
+    height: 44px;
+  }
+  .btn-sticky.btn-large.btn-icon {
+    min-width: 44px;
+  }
+}

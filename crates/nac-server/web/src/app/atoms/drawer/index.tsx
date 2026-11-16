@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/cn";
 import { Sheet, SheetContent, SheetOverlay, SheetPortal, SheetTitle } from "../../ui/sheet";
@@ -50,6 +50,7 @@ export default function Drawer({
   children,
 }: DrawerProps) {
   const isMobile = useIsMobile();
+  const surface = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
@@ -86,13 +87,23 @@ export default function Drawer({
         <SheetOverlay
           className={cn(
             "fixed inset-0 z-[60] bg-[var(--f-scrim)] transition-opacity duration-200 ease-out motion-reduce:transition-none",
-            isMobile ? "" : "bg-transparent",
+            // Desktop leaves the 52px page header live, so its pills switch
+            // panels (and its ⋯ menu stays reachable) while a drawer is open.
+            isMobile ? "" : "top-[var(--header-height)] bg-transparent",
             shown ? "opacity-100" : "opacity-0",
           )}
         />
         <SheetContent
           side={isMobile ? "bottom" : "right"}
           forceMount
+          ref={surface}
+          tabIndex={-1}
+          // Focus lands on the drawer itself, not its first header control, so
+          // opening never flashes that control's tooltip; Tab moves inside.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            surface.current?.focus({ preventScroll: true });
+          }}
           aria-label={name}
           aria-describedby={undefined}
           className={cn(
@@ -104,7 +115,7 @@ export default function Drawer({
                   shown ? "translate-y-0" : "translate-y-full",
                 )
               : cn(
-                  "top-2 right-2 bottom-2 h-auto rounded-sheet",
+                  "top-[calc(var(--header-height)+4px)] right-2 bottom-2 h-auto rounded-sheet",
                   expanded ? "left-2 w-auto" : "w-[min(var(--drawer-width),calc(100vw-16px))]",
                   shown ? "translate-x-0" : "translate-x-[calc(100%+16px)]",
                 ),

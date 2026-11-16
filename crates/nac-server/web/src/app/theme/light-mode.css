@@ -13,7 +13,7 @@
   --f-surface: oklch(1 0 0);
   --f-raised: oklch(1 0 0);
   --f-overlay: oklch(1 0 0);
-  --f-scrim: oklch(0.2 0.01 85 / 22%);
+  --f-scrim: oklch(0.2 0.01 85 / 14%);
 
   /* Ink */
   --f-ink: oklch(0.2 0.005 85);

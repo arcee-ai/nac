@@ -202,6 +202,9 @@ async function conversationComposed(j: Journey, id: string) {
   // Insights opened as a drawer (sheet on phones); close it to return to the chat.
   const insights = j.root.getByRole("dialog", { name: "Insights", exact: true });
   if (await insights.isVisible()) {
+    // A phone sheet's detail screen leads back to its list, whose header closes the sheet.
+    const openList = insights.getByRole("button", { name: "Open list", exact: true });
+    if (await openList.isVisible()) await activate(j, openList);
     await activate(j, insights.getByRole("button", { name: /^(Hide panel|Close)$/ }).first());
     await expect(insights).toHaveCount(0);
   }
