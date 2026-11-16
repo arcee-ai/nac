@@ -19,6 +19,8 @@ export type ScriptedResponse =
 
 export type ScriptMatch = {
   token?: string;
+  /** Distinguish a fresh task request from a caller's quoted launch brief. */
+  forbiddenToken?: string;
   functionOutputCallId?: string;
   requiredTools?: string[];
   forbiddenTools?: string[];
@@ -215,6 +217,7 @@ export class ScriptedProvider {
     }
     const serialized = JSON.stringify(body);
     if (match.token != null && !serialized.includes(match.token)) return false;
+    if (match.forbiddenToken != null && serialized.includes(match.forbiddenToken)) return false;
     if (
       match.functionOutputCallId != null &&
       !serialized.includes(`"call_id":"${match.functionOutputCallId}"`)

@@ -1,0 +1,151 @@
+{
+  "strategy": "S08",
+  "source": "a98abc0c5db164e681d0d8df6269adb23424ba39",
+  "commands": [
+    "cargo run --locked -p nac-server --example export-openapi --message-format=json -- --check crates/nac-server/web/openapi.json",
+    "cargo test --locked -p nac-server --no-run --message-format=json"
+  ],
+  "environment": {
+    "platform": "macOS ARM64",
+    "logical_cpus": 18,
+    "cargo": "1.98.0",
+    "jobs": 6,
+    "incremental": false,
+    "test_debug": 0,
+    "baseline_dev_debug": "default",
+    "aligned_dev_debug": 0,
+    "targets": "separate new owned targets; registry already fetched",
+    "order": "baseline then aligned; repeats after each; no concurrent large Cargo/browser trial"
+  },
+  "phases": [
+    {
+      "variant": "baseline",
+      "phase": "exporter-cold",
+      "time_real": 68.69,
+      "time_user": 0.34,
+      "time_sys": 1.45,
+      "time_max_rss_bytes": 33652736,
+      "target_bytes": 3676123136,
+      "artifacts": {
+        "total": 370,
+        "fresh": 0,
+        "compiled": 370
+      }
+    },
+    {
+      "variant": "baseline",
+      "phase": "server-test-compile",
+      "time_real": 73.42,
+      "time_user": 196.11,
+      "time_sys": 26.56,
+      "time_max_rss_bytes": 3179347968,
+      "target_bytes": 5950791680,
+      "artifacts": {
+        "total": 376,
+        "fresh": 0,
+        "compiled": 376
+      }
+    },
+    {
+      "variant": "baseline",
+      "phase": "exporter-repeat",
+      "time_real": 2.01,
+      "time_user": 0.11,
+      "time_sys": 0.12,
+      "time_max_rss_bytes": 33734656,
+      "target_bytes": 5977620480,
+      "artifacts": {
+        "total": 370,
+        "fresh": 370,
+        "compiled": 0
+      }
+    },
+    {
+      "variant": "baseline",
+      "phase": "server-test-repeat",
+      "time_real": 0.25,
+      "time_user": 0.08,
+      "time_sys": 0.09,
+      "time_max_rss_bytes": 125698048,
+      "target_bytes": 5950791680,
+      "artifacts": {
+        "total": 376,
+        "fresh": 376,
+        "compiled": 0
+      }
+    },
+    {
+      "variant": "aligned",
+      "phase": "exporter-cold",
+      "time_real": 63.63,
+      "time_user": 0.36,
+      "time_sys": 1.5,
+      "time_max_rss_bytes": 33292288,
+      "target_bytes": 1722941440,
+      "artifacts": {
+        "total": 370,
+        "fresh": 0,
+        "compiled": 370
+      }
+    },
+    {
+      "variant": "aligned",
+      "phase": "server-test-compile",
+      "time_real": 22.33,
+      "time_user": 37.68,
+      "time_sys": 2.53,
+      "time_max_rss_bytes": 4028137472,
+      "target_bytes": 2498088960,
+      "artifacts": {
+        "total": 376,
+        "fresh": 370,
+        "compiled": 6
+      }
+    },
+    {
+      "variant": "aligned",
+      "phase": "exporter-repeat",
+      "time_real": 1.81,
+      "time_user": 0.11,
+      "time_sys": 0.1,
+      "time_max_rss_bytes": 33210368,
+      "target_bytes": 2498088960,
+      "artifacts": {
+        "total": 370,
+        "fresh": 370,
+        "compiled": 0
+      }
+    },
+    {
+      "variant": "aligned",
+      "phase": "server-test-repeat",
+      "time_real": 0.16,
+      "time_user": 0.08,
+      "time_sys": 0.07,
+      "time_max_rss_bytes": 125517824,
+      "target_bytes": 2498088960,
+      "artifacts": {
+        "total": 376,
+        "fresh": 376,
+        "compiled": 0
+      }
+    }
+  ],
+  "profile_controls": {
+    "artifact_records_checked": 2984,
+    "assertions": {
+      "opt_level": "0",
+      "debug_assertions": true,
+      "overflow_checks": true
+    },
+    "result": "pass",
+    "scope": "Every emitted compiler-artifact across all eight phases; runtime controls separately retained in profiles/negative-controls.json"
+  },
+  "limits": [
+    "One serial local comparison; not hosted CI acceptance.",
+    "--no-run compiled tests without executing them.",
+    "Per-command RSS/CPU is not complete compiler-tree accounting.",
+    "Server splitting changes overlap; do not add this isolated compile saving to S10 DAG saving.",
+    "New profile/job cache roles can be cold before trusted push; PRs never gain cache-write privilege."
+  ]
+}

@@ -198,10 +198,16 @@ impl DesktopLaunch {
 
     /// Deliberately constant diagnostics: configuration, credentials and raw
     /// migration/provider errors never cross into a receipt or native log.
-    pub fn failed(&self) {
+    pub fn failed(&self, error: &anyhow::Error) {
+        let code = startup_failure_code(error);
+        let message = match code {
+            "store_owned" => "Another NAC process owns the selected store.",
+            "store_schema_incompatible" => "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.",
+            _ => "The bundled engine could not initialize its selected store or listener.",
+        };
         let _ = self.send(serde_json::json!({"kind":"failed", "version":VERSION,
-            "incarnation":self.incarnation, "stage":"startup", "code":"engine_unavailable",
-            "message":"The bundled engine could not initialize its selected store or listener."}));
+            "incarnation":self.incarnation, "stage":"startup", "code":code,
+            "message":message}));
     }
 
     pub async fn serve(&self, addr: SocketAddr, manager: SessionManager) -> Result<()> {
@@ -210,6 +216,7 @@ impl DesktopLaunch {
         }
         let info = manager.store_info();
         let selected_store = info.store_path;
+        let attention_manager = manager.clone();
         let mut publication_failed = false;
         let mut stopped = self.stopped.clone();
         let shutdown = async move {
@@ -236,6 +243,12 @@ impl DesktopLaunch {
                         return;
                     }
                 };
+                if let Ok(engine) = uuid::Uuid::parse_str(&self.incarnation) {
+                    attention_manager
+                        .inner
+                        .attention
+                        .configure_native(engine, bound.to_string());
+                }
                 if self
                     .send(serde_json::json!({"kind":"ready", "version":VERSION,
                 "incarnation":self.incarnation, "endpoint":format!("http://{bound}"),
@@ -254,6 +267,28 @@ impl DesktopLaunch {
             bail!("desktop selected store mismatch");
         }
         result
+    }
+}
+
+fn startup_failure_code(error: &anyhow::Error) -> &'static str {
+    if matches!(
+        error.downcast_ref::<nac_core::sessions::StoreProcessLeaseError>(),
+        Some(nac_core::sessions::StoreProcessLeaseError::Busy)
+    ) || error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<nac_core::sessions::StoreProcessLeaseError>(),
+            Some(nac_core::sessions::StoreProcessLeaseError::Busy)
+        )
+    }) {
+        "store_owned"
+    } else if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<nac_core::store::StoreFutureSchemaError>()
+            .is_some()
+    }) {
+        "store_schema_incompatible"
+    } else {
+        "engine_unavailable"
     }
 }
 

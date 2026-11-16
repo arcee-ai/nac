@@ -30,6 +30,17 @@ import {
   PANEL_LIST_MIN_WIDTH,
 } from "@/app/hooks/usePanelListWidth";
 
+// SessionPage's normal desktop minimum is 480px outside SessionSideBox's 1px
+// border. This container measures the content inside it: 479px must still split,
+// while genuinely narrower embedded panels keep separate list/detail screens.
+const PANEL_SPLIT_MIN_WIDTH = 480 - 1;
+const PANEL_DETAIL_MIN_WIDTH = 240;
+
+function panelListWidthLimit(width: number): number {
+  // The list includes its leading 1px border.
+  return Math.floor(Math.min(width * PANEL_LIST_MAX_RATIO, width - PANEL_DETAIL_MIN_WIDTH - 1));
+}
+
 /**
  * The shape every side-box panel shares: the detail of whatever is selected,
  * with a narrow list of rows in a column on its right.
@@ -47,6 +58,8 @@ export function PanelSplit({
   title,
   titleAction,
   actions,
+  phoneHeaderInFlow = false,
+  phoneListToolbarInFlow = false,
   children,
 }: {
   list: ReactNode;
@@ -66,6 +79,10 @@ export function PanelSplit({
   titleAction?: ReactNode;
   /** Panel's own controls, trailing the narrow header. */
   actions?: ReactNode;
+  /** Selected phone child details can keep their controls above the scroll viewport. */
+  phoneHeaderInFlow?: boolean;
+  /** Files controls wrap below the phone list title without covering content. */
+  phoneListToolbarInFlow?: boolean;
   children: ReactNode;
 }) {
   const { setPanelListWidth, usePanelListWidth } = useNativeRuntime().stores.panelWidth;
@@ -84,8 +101,8 @@ export function PanelSplit({
   useEffect(() => () => releaseDrag.current?.(), []);
 
   // Measured before paint: an unresized list is a share of this width, and a
-  // first frame at the floor would visibly jump. The container only exists in
-  // the desktop split, so a change of layout measures again.
+  // first frame at the floor would visibly jump. The container exists in both
+  // non-phone layouts, including a narrow embedded root in a desktop browser.
   useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return undefined;
@@ -98,12 +115,13 @@ export function PanelSplit({
 
   const maxWidth =
     containerWidth > 0
-      ? containerWidth * PANEL_LIST_MAX_RATIO
+      ? panelListWidthLimit(containerWidth)
       : (storedWidth ?? PANEL_LIST_DEFAULT_WIDTH);
   const listWidth = clampPanelListWidth(
     storedWidth ?? defaultPanelListWidth(containerWidth),
     maxWidth,
   );
+  const compact = isTablet || (containerWidth > 0 && containerWidth < PANEL_SPLIT_MIN_WIDTH);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -123,7 +141,7 @@ export function PanelSplit({
       if (!dragging.current || moveEvent.pointerId !== event.pointerId) return;
       const rect = container.getBoundingClientRect();
       const next = rect.right - moveEvent.clientX;
-      setPanelListWidth(clampPanelListWidth(next, rect.width * PANEL_LIST_MAX_RATIO));
+      setPanelListWidth(clampPanelListWidth(next, panelListWidthLimit(rect.width)));
     };
 
     const onUp = () => {
@@ -149,9 +167,20 @@ export function PanelSplit({
   if (isMobile) {
     if (showList) {
       return (
-        <PanelPhoneScreen title={listTitle} actions={listToolbar} bar>
+        <PanelPhoneScreen
+          title={listTitle}
+          actions={listToolbar}
+          headerInFlow={phoneListToolbarInFlow}
+          actionsBelowTitle={phoneListToolbarInFlow}
+          bar
+        >
           {/* Clear of the header above and of the tab bar over the last rows. */}
-          <div className="flex flex-col flex-1 min-h-0 overflow-auto px-2 pt-16 pb-32 gap-1 [&>*]:shrink-0">
+          <div
+            className={cn(
+              "flex flex-col flex-1 min-h-0 overflow-auto px-2 pb-32 gap-1 [&>*]:shrink-0",
+              phoneListToolbarInFlow ? "pt-2" : "pt-16",
+            )}
+          >
             {list}
           </div>
         </PanelPhoneScreen>
@@ -162,6 +191,8 @@ export function PanelSplit({
         title={title ?? listTitle}
         titleAction={titleAction}
         actions={actions}
+        headerInFlow={phoneHeaderInFlow}
+        actionsBelowTitle={phoneHeaderInFlow ? "narrow" : false}
         back={{ label: "Open list", onClick: () => showSidePanelList(true) }}
       >
         {children}
@@ -173,10 +204,10 @@ export function PanelSplit({
   // leads to it, and the one above the list leads back. The detail holds the
   // same place in both layouts: crossing the breakpoint keeps it mounted, so a
   // live terminal in it is neither reattached nor unfocused.
-  const listScreen = isTablet && showList;
+  const listScreen = compact && showList;
   return (
-    <div ref={containerRef} className={cn("flex flex-1 min-h-0 w-full", isTablet && "flex-col")}>
-      {isTablet && !showList ? (
+    <div ref={containerRef} className={cn("flex flex-1 min-h-0 w-full", compact && "flex-col")}>
+      {compact && !showList ? (
         <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
           <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
           {titleAction}
@@ -218,10 +249,21 @@ export function PanelSplit({
           </div>
         </div>
       ) : null}
-      {listScreen ? null : (
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground">{children}</div>
+      {/* Embedded desktop details retain drafts, scroll and mounted engines
+          while their list is open. Keep the existing tablet/phone lifecycle. */}
+      {listScreen && isTablet ? null : (
+        <div
+          hidden={listScreen}
+          inert={listScreen}
+          className={cn(
+            "flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground",
+            listScreen ? "hidden" : "flex",
+          )}
+        >
+          {children}
+        </div>
       )}
-      {isTablet ? null : (
+      {compact ? null : (
         <div
           className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
           style={{ width: listWidth }}

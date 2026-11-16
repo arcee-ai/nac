@@ -1,13 +1,51 @@
+import { reverseAdmission } from "./ci-admission-wiring.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { qualityJobs, qualityReceipt, verifyQuality, qualityMode, requiredJobs, requireComplete } from "./pr-checks.mjs";
+import { managedCallerJobs, imageJobs, managedJobs, qualityJobs, qualityReceipt, verifyQuality, qualityMode, requiredJobs, requireComplete } from "./pr-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml");
-const workflow = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
+// Exact reviewed nomination; file digests checked against immutable Q and R sources.
+const reviewedStartupSupplier = {
+  "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
+  "test_source_sha": "f671fd15f002e3bda4df5040df998e80be1f6dd8",
+  "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "profile": "macos26",
+  "suite": "startup",
+  "scenario_count": 4,
+  "scenarios": [
+    "onboarding",
+    "configuredLocal",
+    "invalidConfig",
+    "futureStore"
+  ],
+  "test_files": {
+    "README.md": "eeb6d84c341b0e68ad6af24d08f6a7a2493bf8c0d7071efc2cd67a53d3db2f00",
+    "StartupJourneys.swift": "90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3",
+    "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
+    "test_contract.py": "c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e",
+    "StartupAXGuard.swift": "266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d",
+    "StartupAXReceipt.swift": "94e3f3512a9caaebc42841d8cffc34e8a1275cdff2bc4d43501e5deaba202247",
+    "AX-WITNESS-CONTRACT.md": "67ef84950affed7cf3ab5cff9df9127a5081b3a93d1dff1469e67a83fddb0191",
+    "test_ax_witness.py": "4400ffed7d2b30ed1613e3829d0e2d61b740f7a3fd352a092f22eac9f7fee878",
+    "AGENTS.md": "3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6",
+    "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
+  },
+
+  "protocol_files": {
+    "Cargo.lock": "8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa",
+    "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",
+    "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
+  }
+};
+function assertStartupSupplier(catalog) {
+  assert.deepEqual(catalog["all-342-startup-macos26"], reviewedStartupSupplier);
+}
+
 const sha = "a".repeat(40);
 const context = { run_id: "123", run_attempt: "1", repository: "arcee-ai/nac" };
 const quality = () => ({
@@ -60,36 +98,40 @@ test("caller supplies observed complete quality needs; standalone always runs fu
   assert.equal(receipt.env.NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(receipt.env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
   assert.match(receipt.run, /pr-checks.mjs quality-receipt/);
-  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "quality"]);
-  assert.equal(stable.jobs.managed.with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
-  assert.equal(managed.on.workflow_call.inputs.quality_receipt.default, "");
+  assert.deepEqual(stable.jobs["managed-quality"].needs, ["prepare", "quality", "managed-fault"]);
+  assert.equal(stable.jobs["managed-image"].needs, "prepare");
+  assert.deepEqual(stable.jobs.managed.needs, ["prepare", "managed-image", "managed-fault", "managed-quality"]);
+  assert.equal(stable.jobs["managed-quality"].with.quality_receipt, "${{ needs.quality.outputs.quality_receipt }}");
+  assert.equal(workflow("managed-quality").on.workflow_call.inputs.quality_receipt.default, "");
   assert.equal(managed.on.workflow_dispatch, null, "standalone has no caller-supplied skip/receipt inputs");
-  const steps = managed.jobs.quality.steps;
+  const steps = workflow("managed-quality").jobs.quality.steps;
   const validate = steps.findIndex(s => s.run?.includes("pr-checks.mjs quality-mode"));
   const full = steps.findIndex(s => s.run === "make ci");
   const fault = steps.findIndex(s => s.run === "make test-managed-fault-fixture");
   assert.ok(validate >= 0 && full > validate && fault > full);
   assert.equal(steps[validate].if, undefined);
   assert.equal(steps[validate].env.QUALITY_RECEIPT, "${{ inputs.quality_receipt }}");
-  assert.equal(steps[validate].env.EXPECTED_SHA, "${{ needs.prepare.outputs.sha }}");
+  assert.equal(steps[validate].env.EXPECTED_SHA, "${{ inputs.source_sha }}");
   assert.equal(steps[full].if, "steps.quality-mode.outputs.mode == 'full'");
-  assert.equal(steps[fault].if, undefined, "feature-gated fault tests are never deduplicated");
+  assert.equal(steps[fault].if, "steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'", "private fixture requires fresh full execution unless exact same-attempt early evidence validates");
   for (const step of steps) assert.equal(step["continue-on-error"], undefined);
 });
 
 test("browser binds the same committed bundle and independent drift gate without a second web build", () => {
-  const steps = workflow("stable-release").jobs["test-server"].steps;
+  const steps = workflow("stable-release").jobs["test-server-web"].steps;
   assert.equal(steps.filter(s => s.run === "make test-assets").length, 1);
   assert.equal(steps.filter(s => /(?:npm run build|make test-e2e)/.test(s.run ?? "")).length, 0);
   const stable = workflow("stable-release");
-  const browserJob = stable.jobs.browser;
-  assert.equal(browserJob.needs, "prepare");
+  const browserJob = stable.jobs["browser-shards"];
+  assert.deepEqual(browserJob.needs, ["prepare", "browser-binary", "browser-apt"]);
   assert.equal(browserJob.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
   assert.ok(requiredJobs.includes("browser"));
   assert.deepEqual(stable.jobs.test.needs, ["prepare", "quality", "browser"]);
-  const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser tests");
-  assert.match(browser.run, /cargo build --locked -p nac-server --bin nac-web/);
-  assert.match(browser.run, /NAC_E2E_BINARY="\$GITHUB_WORKSPACE\/target\/debug\/nac-web" npm --prefix crates\/nac-server\/web run test:e2e/);
+  const browser = browserJob.steps.find(s => s.name === "Run production-embedded browser shard");
+  assert.equal(browser.env.NAC_E2E_BINARY, "${{ steps.runtime.outputs.binary }}");
+  assert.match(browser.run, /npm --prefix crates\/nac-server\/web run test:e2e/);
+  assert.match(stable.jobs["browser-binary"].steps.find(s => s.id === "pack").run,
+    /cargo build --locked -p nac-server --bin nac-web/);
   const makefile = readFileSync("Makefile", "utf8");
   assert.match(makefile, /test-assets: test-api-contract/);
   for (const output of ["assets/dist", "packages/nac-client/dist", "packages/nac-presentation/dist"]) assert.ok(makefile.includes(output));
@@ -108,16 +150,95 @@ test("release-local guide drift runs before a reusable quality receipt", () => {
     "standalone managed full quality must check the same guide sources");
 });
 
+test("native-auth fixture tests bind the checkout and fail closed without leaking fixture identity", () => {
+  const stable = workflow("stable-release");
+  const job = stable.jobs["test-server"];
+  const index = job.steps.findIndex(s => s.name === "Test isolated native-auth fixture boundary");
+  const ordinary = job.steps.findIndex(s => s.name === "Run nac-server tests");
+  const readiness = job.steps.findIndex(s => s.name === "Exercise stable binary readiness and status identity");
+  assert.ok(ordinary >= 0 && index > ordinary && readiness > index);
+  assert.equal(job.steps[ordinary].run, "python3 .github/scripts/server-tests.py");
+  assert.equal(job.steps[readiness].run, "make test-stable-binary");
+  assert.equal(job.steps.filter(s => s.name === "Test isolated native-auth fixture boundary").length, 1);
+  const step = job.steps[index];
+  assert.equal(step.if, undefined);
+  assert.equal(step["continue-on-error"], undefined);
+  assert.deepEqual(step.env, { EXPECTED_SOURCE_SHA: "${{ needs.prepare.outputs.sha }}" });
+  assert.equal(job.steps[0].with.ref, "${{ needs.prepare.outputs.sha }}");
+  assert.equal(job["continue-on-error"], undefined);
+  assert.ok(requiredJobs.includes("test-server"));
+  assert.ok(stable.jobs["required-pr-checks"].needs.includes("test-server"));
+  assert.ok(stable.jobs.quality.needs.includes("test-server"));
+  assert.doesNotMatch(step.run, /GITHUB_ENV/);
+  for (const environment of [stable.env, job.env]) {
+    for (const key of ["NAC_BUILD_TRACK", "NAC_BUILD_ID", "NAC_SOURCE_REVISION"]) {
+      assert.equal(environment?.[key], undefined);
+    }
+  }
+  for (const [name, other] of Object.entries(stable.jobs)) {
+    if (name !== "test-server") assert.doesNotMatch(JSON.stringify(other), /native-auth-fixture/);
+  }
+
+  // Run the actual workflow shell with inert commands. An empty executable PATH
+  // prevents a future command-shape change from invoking real Git or Cargo.
+  const script = [
+    "git() {",
+    "  test \"$*\" = \"rev-parse --verify HEAD\" || return 91",
+    "  printf '%s\\n' \"$CONTROL_SOURCE_SHA\"",
+    "}",
+    "cargo() {",
+    "  printf 'cargo-arg:%s\\n' \"$@\"",
+    "  printf 'cargo-track:%s\\n' \"$NAC_BUILD_TRACK\"",
+    "  printf 'cargo-build:%s\\n' \"$NAC_BUILD_ID\"",
+    "  printf 'cargo-source:%s\\n' \"$NAC_SOURCE_REVISION\"",
+    "  return \"$CONTROL_CARGO_EXIT\"",
+    "}",
+    step.run,
+    "printf 'outer-track:%s\\n' \"$NAC_BUILD_TRACK\"",
+    "printf 'outer-build:%s\\n' \"$NAC_BUILD_ID\"",
+    "printf 'outer-source:%s\\n' \"$NAC_SOURCE_REVISION\"",
+  ].join("\n");
+  const invoke = (extra = {}) => spawnSync("/bin/bash", ["-e", "-c", script], {
+    encoding: "utf8", env: {
+      ...process.env, PATH: "/nonexistent/nac-native-auth-policy-no-executables",
+      EXPECTED_SOURCE_SHA: sha, CONTROL_SOURCE_SHA: sha, CONTROL_CARGO_EXIT: "0",
+      NAC_BUILD_TRACK: "outer-track", NAC_BUILD_ID: "outer-build", NAC_SOURCE_REVISION: "outer-source",
+      ...extra,
+    },
+  });
+  const positive = invoke();
+  assert.equal(positive.status, 0, positive.stderr);
+  assert.deepEqual(positive.stdout.split("\n").filter(line => line.startsWith("cargo-arg:"))
+    .map(line => line.slice("cargo-arg:".length)), [
+    "test", "--locked", "-p", "nac-server", "--lib", "--features", "native-auth-fixture", "native_auth_fixture::tests::",
+  ]);
+  for (const line of [
+    "cargo-track:dev", `cargo-build:native-auth-fixture-v1-${sha}`, `cargo-source:${sha}`,
+    "outer-track:outer-track", "outer-build:outer-build", "outer-source:outer-source",
+  ]) assert.ok(positive.stdout.split("\n").includes(line), line);
+  const mismatch = invoke({ EXPECTED_SOURCE_SHA: "b".repeat(40) });
+  assert.notEqual(mismatch.status, 0);
+  assert.doesNotMatch(mismatch.stdout, /cargo-arg:/);
+  const failed = invoke({ CONTROL_CARGO_EXIT: "73" });
+  assert.equal(failed.status, 73, failed.stderr);
+  assert.match(failed.stdout, /cargo-arg:test/);
+  assert.doesNotMatch(failed.stdout, /outer-track:/);
+});
+
 const trustedWrite = "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}";
-test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Cargo/container caches", () => {
-  for (const file of ["stable-release", "managed-image", "macos-native"]) {
+const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "browser-shards"]);
+test("compiler caches preserve independent roles and one trusted server/browser writer", () => {
+  for (const file of ["stable-release", "managed-image", "managed-image-build", "managed-quality", "managed-fault", "macos-native"]) {
     const config = workflow(file);
     assert.equal(config.permissions.contents, "read");
-    for (const job of Object.values(config.jobs)) {
+    for (const [jobName, job] of Object.entries(config.jobs)) {
       for (const step of job.steps ?? []) {
         if (step.uses?.startsWith("Swatinem/rust-cache@")) {
-          assert.equal(step.with["save-if"], trustedWrite, file);
-          assert.equal(step.with["prefix-key"], "nac-ci-v1");
+          const readonly = file === "stable-release" && readonlyBrowserCaches.has(jobName);
+          assert.equal(step.with["save-if"], readonly ? "false" : trustedWrite, `${file}/${jobName}`);
+          assert.equal(step.with["prefix-key"], file === "stable-release"
+            ? "${{ needs.prepare.outputs.cold_caches == 'true' && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}"
+            : "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}");
           assert.ok(step.with.key || step.with["shared-key"], file);
         }
         if (step.uses?.startsWith("actions/setup-node@")) assert.equal(step.with.cache, undefined, "implicit npm cache post-save is forbidden");
@@ -125,8 +246,9 @@ test("compiler caches isolate job/profile/toolchain and PRs cannot save npm/Carg
       }
     }
   }
-  const build = workflow("managed-image").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
-  assert.equal(build.with["cache-from"], "type=gha,scope=nac-managed-linux-amd64-v1");
+  const build = workflow("managed-image-build").jobs["build-smoke"].steps.find(s => s.uses?.startsWith("docker/build-push-action@"));
+  assert.equal(build.with["cache-from"], "${{ !((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true) && 'type=gha,scope=nac-managed-linux-amd64-v1' || '' }}");
+  assert.equal(build.with["no-cache"], "${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true }}");
   assert.equal(build.with["cache-to"], "${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=nac-managed-linux-amd64-v1' || '' }}");
   assert.equal(build.with.push, false);
   assert.equal(workflow("stable-release").jobs.publish.permissions.contents, "write");
@@ -152,9 +274,9 @@ test("PR identity cancels superseded checks while tag/push/dispatch/release muta
 });
 
 test("seeded browser/source/native/image failures still fail the full current-candidate aggregate", () => {
-  for (const job of ["test-server", "browser", "quality", "source-security", "macos-native", "workflow-lint", "managed"]) {
+  for (const job of ["test-server", "browser-apt", "browser", "quality", "source-security", "macos-native", "workflow-lint", ...managedCallerJobs]) {
     for (const result of ["failure", "cancelled", "skipped"]) {
-      const needs = Object.fromEntries([...requiredJobs, "managed"].map(name => [name, { result: "success" }]));
+      const needs = Object.fromEntries([...requiredJobs, ...managedCallerJobs].map(name => [name, { result: "success" }]));
       needs.prepare.outputs = { sha, run: "true" };
       needs[job].result = result;
       assert.throws(() => requireComplete(needs, "true", sha), undefined, `${job}/${result}`);
@@ -183,12 +305,34 @@ test("failed-job reruns repeat full quality for a valid earlier attempt without 
 });
 
 test("unprivileged image verification overlaps fault compilation but final managed and publication gates require both", () => {
-  const managed = workflow("managed-image");
+  const managed = workflow("managed-image-build");
   assert.deepEqual(managed.jobs["build-smoke"].needs, ["prepare", "contract"]);
-  assert.deepEqual(managed.jobs.result.needs, ["prepare", "contract", "quality", "build-smoke"]);
+  assert.deepEqual(managed.jobs.result.needs, imageJobs);
+  assert.deepEqual(workflow("managed-image").jobs.result.needs, managedJobs);
   assert.equal(managed.permissions.contents, "read");
   assert.equal(managed.jobs["build-smoke"].permissions, undefined);
   const stable = workflow("stable-release");
   assert.ok(stable.jobs["required-pr-checks"].needs.includes("managed"));
   assert.ok(stable.jobs.publish.needs.includes("required-pr-checks"));
+});
+
+
+test("immutable startup nomination rejects supplier, source-file and policy drift", () => {
+  const catalog = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"));
+  assertStartupSupplier(catalog);
+  for (const mutate of [
+    s => { s.source_sha = "0".repeat(40); },
+    s => { s.test_source_sha = "0".repeat(40); },
+    s => { s.protocol_source_sha = "0".repeat(40); },
+    s => { s.test_files["StartupJourneys.swift"] = "0".repeat(64); },
+    s => { delete s.test_files["contract.py"]; },
+    s => { s.protocol_files["Cargo.lock"] = "0".repeat(64); },
+    s => { s.profile = "macos14"; },
+    s => { s.scenario_count--; },
+    s => { s.scenarios.reverse(); },
+    s => { s.acceptance = true; },
+  ]) {
+    const value = structuredClone(catalog); mutate(value["all-342-startup-macos26"]);
+    assert.throws(() => assertStartupSupplier(value));
+  }
 });

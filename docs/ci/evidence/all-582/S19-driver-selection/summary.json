@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "strategy": "S19",
+  "status": "Candidate implementation; tiny mechanism evidence only. Hosted full NAC/actual driver/caches/performance pending; no strategy/cohort/security-clearance credit.",
+  "base": "62db3dba6c499b0aa3655a1a925708f7fac35992",
+  "source_snapshots": {
+    "Dockerfile_sha256": "9a489070ccc928932701a372e6d882a802065d7120f78d6acb5e47cd13e48740",
+    "Cargo_lock_sha256": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8",
+    "selector_sha256": "7c0b27309a050fcbbac8f7fc4ca3eedf9ea249ca9f5abec14badc1e70209bb96",
+    "prior_workflow_sha256": "900dedfcc205ecd07f7b1a5215e8dc8036fd69de625a9276ef5362f6e747743e",
+    "prior_canonical_workflow_sha256": "ad745396dfc6813101518ec3c40e7b2a86c8fb368f5380436cb7eb2fb8b11ba5",
+    "reversal": "Remove only image-driver step, setup id+driver input, build builder input. Full prior parsed workflow hash must match; existing cold guard additionally reverses only these fields before its unchanged older hashes."
+  },
+  "admission": {
+    "Engine": "Released29.x, Linux/x86_64, overlayfs, unique driver-type=io.containerd.snapshotter.v1",
+    "Buildx": "Exact reviewed preinstalled0.38.1, hexadecimal commit; unknown CLI versions fallback",
+    "context": "default only; same context builder name used by pinned setup action",
+    "builder": "Single matching docker node, running/noerror, linux/amd64 advertised; released BuildKit0.20\u20130.34",
+    "fallback": "Original pinned setup action with docker-container. No custom version/resource/entitlement option; no daemon config/bootstrap/prune in selector.",
+    "bounds": "4read-only CLI queries at most;64KiB/10s each. New invocation session owns CLI/plugin group; time/byte failure SIGKILLs only that group, then <=1s reap. No upstream text forwarded to Actions outputs.",
+    "outputs": [
+      "driver=docker",
+      "driver=docker-container"
+    ]
+  },
+  "pinned_action_source": [
+    {
+      "url": "https://raw.githubusercontent.com/docker/setup-buildx-action/8d2750c68a42422c14e847fe6c8ac0403b4cbd6f/action.yml",
+      "path": "setup-action.yml",
+      "sha256": "54c34591e6a6eb35505b7bc08171ea27f7cd6d173119a5723e3c612f9333305c",
+      "bytes": 3052
+    },
+    {
+      "url": "https://raw.githubusercontent.com/docker/setup-buildx-action/8d2750c68a42422c14e847fe6c8ac0403b4cbd6f/src/context.ts",
+      "path": "setup-context.ts",
+      "sha256": "dc0980f34b0c21dc6a7693b4a6733986678559f7581fc5a214a408e40e943e5b",
+      "bytes": 4898
+    },
+    {
+      "url": "https://raw.githubusercontent.com/docker/setup-buildx-action/8d2750c68a42422c14e847fe6c8ac0403b4cbd6f/src/main.ts",
+      "path": "setup-main.ts",
+      "sha256": "c7f262db8c8c27e13d2da851b3a6f032812a8e687bfbae3fba1b5f96c74efa9d",
+      "bytes": 13109
+    },
+    {
+      "url": "https://raw.githubusercontent.com/docker/build-push-action/10e90e3645eae34f1e60eeb005ba3a3d33f178e8/src/context.ts",
+      "path": "build-push-context.ts",
+      "sha256": "eb2dcd408e67d81629bf5bf7a77c2f970789e79ac873e5840d7ab1f3be391931",
+      "bytes": 10655
+    },
+    {
+      "url": "https://raw.githubusercontent.com/docker/build-push-action/10e90e3645eae34f1e60eeb005ba3a3d33f178e8/src/main.ts",
+      "path": "build-push-main.ts",
+      "sha256": "7e1056f28b030af05f7231d47751eea9ba84808e0b0494f1ade0f824b0c90ff1",
+      "bytes": 10727
+    }
+  ],
+  "hosted_cli_ordering": {
+    "run": 41990799405,
+    "source_head": "cfed09c49757bd91770d34563d9f69e3750217d0",
+    "setup_log_local_only": {
+      "path": "/Users/allison/.codex/visualizations/2026/11/05/01a1a901-93cd-7452-a13e-ff387749e4ba/image-workflow/cold-run-audit-41990799405/logs/managed-image _ build-smoke/3_Run docker_setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f.txt",
+      "sha256": "bd6d6a200b7f87bee96da0747ec274c431978d6e0aca2f3d59902092ee576b35"
+    },
+    "version_line": 106,
+    "version": "github.com/docker/buildx v0.38.1 0dbe87f36ed472fe36b6796c3f70b4210a731fc5",
+    "Buildx_version_group_line": 104,
+    "builder_creation_line": 127,
+    "download_or_install_Buildx_groups_present": false,
+    "source_reason": "Pinned setup installs only if CLI unavailable or version input nonempty; prior step has no version input. Actual retained CLI therefore already available before selector/setup. This does not guarantee future runners activate direct path.",
+    "current_CI_explicit_BuildKit_or_resource_pin": false,
+    "external_Engine_BuildKit_observed": "0.34.2 / mutable moby/buildkit:buildx-stable-1; no existing explicit version/resource pin is removed."
+  },
+  "tiny_probe": {
+    "local_only_packet": "S19-tiny-driver-probe",
+    "analysis_sha256": "a54a7d7a0f0a951b8d0b36e75a94e82d3adb28e4074b4c17562c99653b5982be",
+    "receipt_sha256": "5af044ab5e7e9ff3dee1a7fee77c7b78a58246df399f5e7c8f566a039a5350ff",
+    "manifest_sha256": "c1fca62ec1e3783d3b8d4d73479d78029e2b1a3ce26dcb3011d582aa8416cce5",
+    "payload_bytes": 1048576,
+    "payload_sha256": "bc09c8023c6fe980b23c417e29ae40dbc2e72f0fa806ad284ddbd1e7be50b72a",
+    "arms": [
+      {
+        "driver": "docker",
+        "build_wall_seconds": 0.45187220798106864,
+        "iid": "sha256:07bba8ae7eccb80375aa49fc9ff6e3ab11ae4ba737ddbbe2cd96d5874e2f501e",
+        "docker_inspect_Id": "sha256:07bba8ae7eccb80375aa49fc9ff6e3ab11ae4ba737ddbbe2cd96d5874e2f501e",
+        "actual_config_digest": "sha256:87f5c78c3690dbf42198941080328c4574978868070d4fad457ac6d1e591fb2f",
+        "rootfs_diff_ids": [
+          "sha256:eac10a959f4ff044940b5952bc895cdee26e0b94e04ba4aa50fc7765bf1c1e84"
+        ],
+        "payload_bytes": 1048576,
+        "payload_sha256": "bc09c8023c6fe980b23c417e29ae40dbc2e72f0fa806ad284ddbd1e7be50b72a",
+        "image_platform": "linux/amd64",
+        "frontend": "1.26.0"
+      },
+      {
+        "driver": "docker-container",
+        "build_wall_seconds": 0.24952879204647616,
+        "iid": "sha256:6d660d61c154d6a852596dd06be4a91663b8adc04179605438fad9d30246783f",
+        "docker_inspect_Id": "sha256:6d660d61c154d6a852596dd06be4a91663b8adc04179605438fad9d30246783f",
+        "actual_config_digest": "sha256:99c30e8958bf3067a4fc6a90daca256433392d9cd309357d5319dd11bd6e876d",
+        "rootfs_diff_ids": [
+          "sha256:3d2b77ae421a35d0a3da2d74973d985a0ed7dbaf367c0c8792579ccb85628380"
+        ],
+        "payload_bytes": 1048576,
+        "payload_sha256": "bc09c8023c6fe980b23c417e29ae40dbc2e72f0fa806ad284ddbd1e7be50b72a",
+        "image_platform": "linux/amd64",
+        "frontend": "1.27.0"
+      }
+    ],
+    "versions": {
+      "engine": "29.7.2",
+      "buildx": "0.36.1-desktop.1",
+      "default_buildkit": "0.32.2",
+      "owned_container_buildkit": "0.33.1",
+      "host": "Docker Desktop Linux arm64; image amd64; no workload execution/emulation"
+    },
+    "resources": {
+      "default": "Engine-shared worker; no per-builder CPU/memory params changed",
+      "external": "Owned arm64 privileged BuildKit daemon, default network.host entitlement, Memory/MemorySwap/NanoCpus/CpuShares/CpuQuota/CpuPeriod0; no custom resource flags",
+      "tool_image": "Pre-existing immutable moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea; bootstrap refreshed immutable metadata; no extra image IDs remain."
+    },
+    "extra_cross_arm_RootFS_equality": "FAILED; original first failure retained. Equal payload bytes/mode/uid/gid/filemtime do not prove equal layer/archive metadata. BuildKit/frontend versions differed; cause remains unproved.",
+    "export_mechanism": {
+      "default": "exporting to image; no importing-to-docker or sending-tarball vertex",
+      "external": "importing to docker + exporting to OCI image format + sending tarball"
+    },
+    "performance": "Single tiny different-daemon/frontend order,0.452s direct vs0.250s external; no NAC speedup/regression or saved56.7s claim.",
+    "cleanup": "Only owned temporary resources removed; unchanged default builder/context;2new records <3MiB retained, no shared prune."
+  },
+  "preserved": "Unchanged Dockerfile syntax1.7/platform/toolchain/profile/features/source args. All original cache-from/no-cache/cache-to/trustedpush guards, loadtrue/pushfalse, actual IID\u2192dockerinspect binding, exact smoke/inventory/live scans/qualifier, quality/receipt/publication and standalone contracts remain hash-bound. IID is not assumed to be raw config digest.",
+  "qualification_remaining": [
+    "Actual hosted full NAC direct driver selection and successful image/compiler/runtime/smoke/inventory/live-security/quality joins",
+    "Actual GHA auth/import behavior and typed-cold misses; containerd marker is capability evidence, not transfer/auth proof",
+    "Trusted main/dev mode=max export and subsequent seeded source change only after human approval; PR/manual/tag no exports",
+    "Whole DAG/cold/warm/resource/cache/storage timing; no additive savings or isolated-stage credit",
+    "Independent review, human approval/no automatic merge"
+  ],
+  "official_capability_sources": [
+    "https://docs.docker.com/build/cache/backends/gha/",
+    "https://github.com/moby/buildkit/releases/tag/v0.20.0",
+    "https://raw.githubusercontent.com/docker/buildx/v0.38.1/commands/inspect.go",
+    "https://raw.githubusercontent.com/docker/buildx/v0.38.1/build/opt.go"
+  ],
+  "local_validation_scope": "Fake CLI capability/process controls and parsed workflow tests only; no new Docker build/probe or full NAC build. Existing owned setup reused, lockfiles unchanged.",
+  "local_validation": [
+    {
+      "command": "python3 .github/scripts/image-build-driver.test.py",
+      "result": "7tests pass, including actual owned plugin-group timeout+retained unrelated sentinel; all CLI programs are fake fixture children, not real Docker."
+    },
+    {
+      "command": "node --test .github/scripts/pr-image-driver.test.mjs .github/scripts/pr-cold-cache.test.mjs .github/scripts/pr-ci-efficiency.test.mjs scripts/security/image-policy.test.mjs scripts/security/image-workflow.test.mjs scripts/security/image-scanner-workflow.test.mjs scripts/security/image-publication.test.mjs",
+      "result": "47tests pass,0skipped;20new wiring mutations rejected, exact62db and prior cold hashes preserved."
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/security -p 'test_*.py'",
+      "result": "57tests pass; expected scanner/policy failure negatives remain fail closed."
+    },
+    {
+      "command": "make lint-workflows test-workflow-lint test-source-size",
+      "result": "Pinned actionlint1.7.12/ShellCheck0.11.0 pass;10workflow-lint tests pass;1791tracked human-source files fit2000lines."
+    },
+    {
+      "command": "sh scripts/test-managed-image-contract.sh",
+      "result": "Pass, including existing dependency layer/smoke contracts and new selector fixtures."
+    }
+  ]
+}

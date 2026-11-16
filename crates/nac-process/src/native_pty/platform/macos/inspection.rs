@@ -112,6 +112,28 @@ impl Probe for Native {
         }
         // SAFETY: exact-size success initializes the complete integer ABI record.
         let record = unsafe { record.assume_init_ref() };
+        #[cfg(test)]
+        {
+            use super::diagnostics::{record as observe, Stage};
+            observe(
+                Stage::MetadataCredentials,
+                pid,
+                1,
+                None,
+                [
+                    record.uid as i128,
+                    record.ruid as i128,
+                    record.svuid as i128,
+                ],
+            );
+            observe(
+                Stage::MetadataStatus,
+                pid,
+                1,
+                None,
+                [record.status as i128, record.flags as i128, 0],
+            );
+        }
         *output = Short {
             pid: record.pid as libc::pid_t,
             ppid: record.ppid as libc::pid_t,
@@ -156,19 +178,49 @@ fn read_into<T>(
     }
     if returned <= 0 {
         let error = io::Error::last_os_error();
+        #[cfg(test)]
+        super::diagnostics::record(
+            super::diagnostics::Stage::MetadataRead,
+            pid,
+            3,
+            Some(&error),
+            [flavor as i128, returned as i128, size as i128],
+        );
         if error.raw_os_error() == Some(libc::ESRCH) {
             return Ok(false);
         }
         return Err(error);
     }
-    Err(io::Error::new(
+    Err(invalid_record_size(pid, flavor, returned, size))
+}
+
+// Private size-mismatch classification shared with pure diagnostic controls.
+#[inline(always)]
+pub(super) fn invalid_record_size(
+    _pid: libc::pid_t,
+    _flavor: i32,
+    _returned: i32,
+    _size: i32,
+) -> io::Error {
+    let error = io::Error::new(
         io::ErrorKind::InvalidData,
         "unsupported native process identity record size",
-    ))
+    );
+    #[cfg(test)]
+    super::diagnostics::record(
+        super::diagnostics::Stage::MetadataRead,
+        _pid,
+        3,
+        Some(&error),
+        [_flavor as i128, _returned as i128, _size as i128],
+    );
+    error
 }
 
 #[inline(always)]
 pub(super) fn snapshot(pid: libc::pid_t, probe: &impl Probe) -> io::Result<Option<Snapshot>> {
+    #[cfg(test)]
+    let probe = &super::diagnostics::ObservedProbe::new(probe);
     for _ in 0..3 {
         let mut first = Unique::default();
         if !probe.unique_into(pid, &mut first)? {

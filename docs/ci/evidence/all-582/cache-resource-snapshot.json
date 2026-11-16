@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-11-05T02:00:43Z",
+  "repository": "arcee-ai/nac",
+  "active_caches_count": 74,
+  "active_caches_size_in_bytes": 11466115493,
+  "max_cache_size_gb": 10,
+  "source_endpoints": [
+    "GET /repos/arcee-ai/nac/actions/cache/usage",
+    "GET /repos/arcee-ai/nac/actions/cache/storage-limit (X-GitHub-Api-Version:2026-03-10)"
+  ],
+  "mutations": "none; no limit increase or cache deletion",
+  "interpretation": "Point-in-time usage exceeds configured cap; service eviction timing can differ. No paid limit increase is authorized. New compiler payloads may evict other dependency/image caches and must be measured across the whole pipeline.",
+  "S18_payload_observations_bytes": {
+    "A_raw": 1485000000,
+    "B_raw": 2518000000
+  },
+  "payload_precision": "Rounded local raw compiler-data observations, not compressed hosted cache sizes or billing.",
+  "remaining": [
+    "actual compressed cache sizes by release target",
+    "cold and trusted-seeded hit rates",
+    "transfer/hash/restore/stage duration",
+    "effects on other role caches and eviction",
+    "actual storage/billing if exposed"
+  ],
+  "references": [
+    "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manage-caches",
+    "https://docs.github.com/en/rest/actions/cache",
+    "https://docs.github.com/en/actions/concepts/billing-and-usage"
+  ]
+}

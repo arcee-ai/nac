@@ -14,6 +14,7 @@ import { NoticesSection } from "@/app/components/pages/design-preview/NoticesSec
 import { NumericInputsSection } from "@/app/components/pages/design-preview/NumericInputsSection";
 import { PopoverSection } from "@/app/components/pages/design-preview/PopoverSection";
 import { ReasoningSection } from "@/app/components/pages/design-preview/ReasoningSection";
+import { QualificationSection } from "@/app/components/pages/design-preview/QualificationSection";
 import { SessionAvatarsSection } from "@/app/components/pages/design-preview/SessionAvatarsSection";
 import { SessionIdentitySection } from "@/app/components/pages/design-preview/SessionIdentitySection";
 import { SubagentCardSection } from "@/app/components/pages/design-preview/SubagentCardSection";
@@ -25,8 +26,6 @@ import { TypographySection } from "@/app/components/pages/design-preview/Typogra
  * lands as a fast way to eyeball the token port.
  */
 export default function DesignPreviewPage() {
-  const [modalOpen, setModalOpen] = useState(false);
-
   return (
     <div className="h-full overflow-y-auto bg-elevation-ground text-basic-primary">
       <header className="flex items-center gap-4 h-14 px-6 border-b border-secondary">
@@ -36,9 +35,10 @@ export default function DesignPreviewPage() {
 
       <main className="p-6 flex flex-col gap-6 max-w-[1100px]">
         <ReasoningSection />
+        <QualificationSection />
         <ButtonsSection />
         <BadgesSection />
-        <InputsSection onOpenModal={() => setModalOpen(true)} />
+        <InputsAndModalPreview />
         <PopoverSection />
         <ChoicesSection />
         <NoticesSection />
@@ -55,7 +55,17 @@ export default function DesignPreviewPage() {
         <CodeBlockSection />
         <TypographySection />
       </main>
+    </div>
+  );
+}
 
+/** Modal interaction belongs to its example, leaving the other showcase sections settled. */
+function InputsAndModalPreview() {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  return (
+    <>
+      <InputsSection onOpenModal={() => setModalOpen(true)} />
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -77,6 +87,6 @@ export default function DesignPreviewPage() {
         This is the shared modal shell: overlay click, Escape and a Tab focus trap all come from the
         atom.
       </Modal>
-    </div>
+    </>
   );
 }

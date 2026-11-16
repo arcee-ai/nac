@@ -1,9 +1,58 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/app/services/api";
+import { api, createNativeApi } from "@/app/services/api";
+import { createNacClient } from "@/app/services/nacClient";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+it("keeps MCP refresh and fresh-task controls on the same captured client binding", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
+  const otherFetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
+  const bound = createNativeApi(createNacClient({ endpoint: "/bound", fetch }));
+  createNativeApi(createNacClient({ endpoint: "/other", fetch: otherFetch }));
+  const controller = new AbortController();
+  const control = {
+    request_id: "same-intent",
+    operation: { action: "pause" as const, schedule_id: "schedule:one", expected_version: 7 },
+    destination: null,
+    creator_session_id: null,
+  };
+  const allowance = { request_id: "same-allowance", expected_revision: 3, retained_limit: 4 };
+
+  await bound.sessionIntegrations("session:one", controller.signal);
+  await bound.refreshSessionIntegrations("session:one", 2);
+  await bound.freshTaskScheduleInventory("project:one", controller.signal);
+  await bound.freshTaskScheduleInspection("project:one", "schedule:one", controller.signal);
+  await bound.controlFreshTaskSchedule("project:one", control);
+  await bound.changeFreshTaskRetainedAllowance("project:one", allowance);
+
+  expect(otherFetch).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+    "/bound/sessions/session%3Aone/integrations",
+    "/bound/sessions/session%3Aone/integrations/refresh",
+    "/bound/projects/project%3Aone/task-schedules",
+    "/bound/projects/project%3Aone/task-schedules/schedule%3Aone",
+    "/bound/projects/project%3Aone/task-schedules/control",
+    "/bound/projects/project%3Aone/task-schedules/retained-allowance",
+  ]);
+  for (const index of [0, 2, 3]) {
+    expect(fetch.mock.calls[index][1]).toMatchObject({
+      method: "GET",
+      signal: controller.signal,
+    });
+  }
+  for (const [index, body] of [
+    [1, { expected_revision: 2 }],
+    [4, control],
+    [5, allowance],
+  ] as const) {
+    expect(fetch.mock.calls[index][1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
 });
 
 describe("managed upgrade transport", () => {

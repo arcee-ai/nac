@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import type { McpLibraryEntry, McpServerView } from "../../../types/api";
-export declare function McpServerForm({ record, template, libraryEntry, onBack, onClose, onSaved, onDeleted, setFooter, }: {
+export declare function McpServerForm({ record, template, libraryEntry, onBack, onClose, onSaved, onDeleted, isCurrent, setFooter, }: {
     record: McpServerView | null;
     template: McpLibraryEntry | null;
     libraryEntry: McpLibraryEntry | null;
@@ -13,5 +13,7 @@ export declare function McpServerForm({ record, template, libraryEntry, onBack, 
     onClose: () => void;
     onSaved: (serverName: string) => void;
     onDeleted: () => void;
+    /** The selection/opening that owns this render, captured by each async request. */
+    isCurrent?: () => boolean;
     setFooter: (footer: ReactNode) => void;
 }): import("react").JSX.Element;

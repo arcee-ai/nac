@@ -131,5 +131,109 @@
       "NAC_TEST_SSH_KEY"
     ],
     "reason": "External SSH credentials and host excluded; local fake-SSH discovery selection is distinct."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::calibration::live_reviewer_calibration",
+    "disposition": "excluded",
+    "capabilities": [
+      "authorized isolated dev2 Arcee credential",
+      "paid live reviewer network calls",
+      "NAC_CALIBRATION_CASES absolute path",
+      "NAC_CALIBRATION_REPORT new absolute path",
+      "NAC_CALIBRATION_MODELS explicit selection"
+    ],
+    "reason": "Manual synthetic reviewer calibration against the approved dev2 endpoint; commands are projected, never executed. NAC_CALIBRATION_PREPARE=1 is an offline projection-only mode requiring explicitly selected inputs and is not live calibration acceptance."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::corpus_tests::live_jev_corpus",
+    "disposition": "excluded",
+    "capabilities": [
+      "Arcee credential with reviewer access",
+      "paid live reviewer network calls"
+    ],
+    "reason": "Live corpus evaluation sends eligible projected requests to the reviewer and reports usage/cost. Unattended native coverage has no authorized provider credential; deterministic corpus routing tests remain in the default suite."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::tests::live_default_clef_scope_profile_smoke",
+    "disposition": "excluded",
+    "capabilities": [
+      "authorized isolated dev2 Arcee credential",
+      "paid live reviewer network calls",
+      "NAC_PERMISSION_REVIEW_PROFILE unset"
+    ],
+    "reason": "Exercises the factory-selected production default through an actual reviewer request, requiring all credentials to resolve to the approved dev2 origin. Synthetic shell input is projected, never executed; offline policy tests do not establish live availability."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::jev::tests::live_jev_smoke",
+    "disposition": "excluded",
+    "capabilities": [
+      "Arcee stored login or ARCEE_API_KEY",
+      "paid live reviewer network calls"
+    ],
+    "reason": "Sends a synthetic request through the configured reviewer authentication path. No live provider credential or paid request is authorized for unattended nightly coverage."
+  },
+  {
+    "package": "nac-core",
+    "name": "model::reviewer_policy::tests::replay_frozen_responses_through_production_policy",
+    "disposition": "excluded",
+    "capabilities": [
+      "NAC_REVIEW_REPLAY_FILE explicitly selected absolute path",
+      "reviewed frozen replay matching compiled profile metadata"
+    ],
+    "reason": "Offline manual replay entrypoint requires an explicitly selected frozen response file; it makes no model calls. The committed Clef holdout uses the same replay helper in a separate default test, which remains in the full workspace suite; that does not certify arbitrary external replay inputs."
+  },
+  {
+    "package": "nac-core",
+    "name": "skills::qualification::sources::exact_catalog_links_and_repository_skills_are_discovered_expanded_and_read",
+    "disposition": "coverage-gap",
+    "capabilities": [
+      "NAC_QUALIFY_CATALOG clean read-only checkout",
+      "NAC_QUALIFY_INSTALLED explicitly selected installed symlinks",
+      "NAC_QUALIFY_SOURCE read-only checkout",
+      "NAC_QUALIFY_CATALOG_REV immutable full revision",
+      "NAC_QUALIFY_SOURCE_REV immutable full revision"
+    ],
+    "reason": "Opt-in qualification of an actual reviewed catalog and installed package set; hosted nightly provisions neither. No credentials or remote calls are needed, but personal installed paths and moving catalog heads are not portable CI inputs. Local synthetic discovery/permission fixtures remain in the default suite; this exact-source qualification is not executed or counted as passing."
+  },
+  {
+    "package": "nac-core",
+    "name": "tools::task_wait::tests::maximum_timeout_measurement",
+    "disposition": "excluded",
+    "capabilities": [
+      "exclusive performance window",
+      "real 60-second timeout measurement",
+      "less than 2-second upper-bound scheduling allowance"
+    ],
+    "reason": "Explicit exclusive-window measurement waits the real MAX_TIMEOUT_MS with eight active targets and requires elapsed time below MAX_TIMEOUT_MS + 2000. Shared hosted scheduling is not this timing qualification; shorter default task-wait correctness tests remain enabled."
+  },
+  {
+    "package": "nac-server",
+    "name": "application::heartbeat_scheduler::tests::heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention",
+    "disposition": "excluded",
+    "capabilities": [
+      "shared exclusive Rust/browser/setup measurement lease",
+      "loopback hanging HTTP fixture and real Local admission",
+      "isolated SQLite store and non-Git workspace",
+      "process-wide model environment lock",
+      "manual 1/10/100-schedule timing/RSS/database-size measurement"
+    ],
+    "reason": "Manual measurement requires the owner's shared exclusive lease. It also asserts bounded admission, pending accounting and unique occurrences at 1/10/100 schedules. The enabled two-schedule owner/shutdown test is distinct; this scale measurement is not executed or counted as passing by nightly."
+  },
+  {
+    "package": "nac-server",
+    "name": "application::heartbeat_scheduler::tests::heartbeat_calendar_measure_1_10_100_with_two_owners_and_seven_day_downtime",
+    "disposition": "excluded",
+    "capabilities": [
+      "shared exclusive Rust/browser/setup measurement lease",
+      "loopback hanging HTTP fixture and real Local admission",
+      "isolated SQLite store and non-Git workspace",
+      "process-wide model environment lock",
+      "manual 1/10/100-schedule calendar catch-up timing/RSS/database-size measurement"
+    ],
+    "reason": "Manual calendar measurement requires the owner's shared exclusive lease. Seven days of backdated due points do not require a seven-day real wait. It asserts eight inclusive catch-up points per schedule, bounded admission and exactly one retained occurrence per schedule at 1/10/100 schedules. The enabled two-schedule calendar correctness test is distinct; this scale measurement is not executed or counted as passing by nightly."
   }
 ]

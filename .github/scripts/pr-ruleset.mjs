@@ -21,6 +21,22 @@ export const actionsApp = 15368;
 export const codeowners = `* ${owners.map(({ login }) => `@${login}`).join(" ")}\n`;
 
 export const targetRuleset = 25983949;
+export const reviewRuleset = 26484091;
+const allisonId = 20910163;
+
+// Exact human-approved split observed November 3, 2026. Neither this validation
+// nor the status-check proposal grants agents permission to use the exception.
+const reviewParameters = {
+  required_approving_review_count: 1,
+  dismiss_stale_reviews_on_push: false,
+  required_reviewers: [],
+  require_code_owner_review: true,
+  dismissal_restriction: { enabled: false, allowed_actors: [] },
+  require_last_push_approval: true,
+  required_review_thread_resolution: true,
+  require_extra_approval_for_unattributed_changes: true,
+  allowed_merge_methods: ["merge", "squash", "rebase"],
+};
 
 export function requiredCheckRule() {
   return {
@@ -33,24 +49,36 @@ export function requiredCheckRule() {
   };
 }
 
-function target(snapshot) {
-  validateSnapshot(snapshot);
-  const matches = snapshot.rulesets.filter((item) => item.id === targetRuleset);
+function splitRuleset(snapshot, id, bypass) {
+  const matches = snapshot.rulesets.filter((item) => item.id === id);
   const current = matches[0];
   if (matches.length !== 1 || current.source_type !== "Repository" ||
       current.source !== snapshot.repository || current.target !== "branch" ||
       current.enforcement !== "active" ||
       digest(current.conditions) !== digest({ ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }) ||
-      !Array.isArray(current.bypass_actors) || current.bypass_actors.length !== 0 ||
-      !Array.isArray(current.rules)) {
-    throw new Error("current target ruleset differs: rebaseline with human review");
+      !Array.isArray(current.bypass_actors) || digest(current.bypass_actors) !== digest(bypass) || !Array.isArray(current.rules)) {
+    throw new Error(`current ruleset ${id} differs: rebaseline with human review`);
   }
-  const reviews = current.rules.filter((rule) => rule.type === "pull_request");
-  const review = reviews[0]?.parameters;
-  if (reviews.length !== 1 || review.required_approving_review_count < 1 ||
-      !review.require_code_owner_review || !review.require_last_push_approval ||
-      !review.required_review_thread_resolution || !review.require_extra_approval_for_unattributed_changes) {
-    throw new Error("current review protections are missing");
+  return current;
+}
+
+function target(snapshot) {
+  validateSnapshot(snapshot);
+  const current = splitRuleset(snapshot, targetRuleset, []);
+  const reviews = splitRuleset(snapshot, reviewRuleset, [
+    { actor_id: allisonId, actor_type: "User", bypass_mode: "pull_request" },
+  ]);
+  if (digest(reviews.rules) !== digest([{ type: "pull_request", parameters: reviewParameters }])) {
+    throw new Error("current review protections differ: rebaseline with human review");
+  }
+  const universalReview = current.rules.filter((rule) => rule.type === "pull_request");
+  const universalParameters = { ...reviewParameters,
+    required_approving_review_count: 0, require_code_owner_review: false,
+    require_last_push_approval: false, require_extra_approval_for_unattributed_changes: false };
+  if (digest(universalReview) !== digest([{ type: "pull_request", parameters: universalParameters }]) ||
+      ["deletion", "non_fast_forward"].some((type) =>
+        current.rules.filter((rule) => rule.type === type).length !== 1)) {
+    throw new Error("current universal protections differ: rebaseline with human review");
   }
   return current;
 }
@@ -200,12 +228,14 @@ export const qualificationCases = [
   "image-failure-blocked", "image-unknown-blocked", "strict-image-baseline-qualified",
   "failed-blocked", "pending-blocked", "cancelled-blocked", "missing-blocked",
   "stale-check-blocked", "wrong-app-blocked", "unexpected-skip-blocked",
-  ...owners.map(({ login }) => `${login}-approval`), "self-approval-blocked",
-  "outside-only-blocked", "author-excluded-requests", "bot-owner-requests",
-  "last-push-self-approval-blocked", "unattributed-extra-approval-required",
+  ...owners.map(({ login }) => `${login}-approval`), "ordinary-self-approval-blocked",
+  "ordinary-outside-only-blocked", "author-excluded-requests", "bot-owner-requests",
+  "ordinary-last-push-self-approval-blocked", "ordinary-unattributed-extra-approval-required",
   "unresolved-conversation-blocked", "two-layer-stack-base-codeowners",
   "ordinary-bypass-blocked", "automation-bypass-blocked", "direct-push-blocked",
   "inherited-protections-preserved",
+  "allisoneer-review-approval-bypass", "allisoneer-status-check-bypass-blocked",
+  "allisoneer-unresolved-conversation-blocked", "allisoneer-direct-push-blocked",
 ];
 
 export function validateQualification(receipt, baseline, now = Date.now()) {
@@ -229,7 +259,9 @@ export function validateQualification(receipt, baseline, now = Date.now()) {
     if (
       cases.length !== 1 ||
       item.result !== "passed" ||
-      !Number.isSafeInteger(item.actor_id) ||
+      !Number.isSafeInteger(item.actor_id) || item.actor_id < 1 ||
+      (name.startsWith("allisoneer-") && item.actor_id !== allisonId) ||
+      ((name.startsWith("ordinary-") || name === "automation-bypass-blocked") && item.actor_id === allisonId) ||
       !/^[a-f0-9]{40}$/.test(item.head_sha ?? "") ||
       !item.evidence_url?.startsWith(`https://github.com/${receipt.fixture_repository}/`)
     ) {
