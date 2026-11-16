@@ -35,7 +35,16 @@ async fn inbox_http_reports_origin_and_refuses_mutating_delegated_results() {
         "background child",
     )
     .unwrap();
-    let endpoint = point_session_at_hanging_endpoint(&root, "parent").await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut snapshot = sessions::load_session(&store, "parent").unwrap();
+    snapshot.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    sessions::update_session_config(&store, &snapshot).unwrap();
+    let (request_started, request_received) = tokio::sync::oneshot::channel();
+    let endpoint = tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        request_started.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
     let manager = test_manager(&root);
     let app = router(manager.clone());
 
@@ -47,16 +56,12 @@ async fn inbox_http_reports_origin_and_refuses_mutating_delegated_results() {
     )
     .await;
     assert_eq!(busy.status(), StatusCode::ACCEPTED);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while nac_core::store::load_run_recovery(&store, "parent")
-            .unwrap()
-            .is_none()
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("parent run should commit its prompt");
+    // A committed prompt can still be before the first inbox boundary. Wait
+    // until the model request is parked so it cannot consume these test rows.
+    tokio::time::timeout(Duration::from_secs(5), request_received)
+        .await
+        .expect("parent should enter its model request")
+        .unwrap();
 
     nac_core::store::begin_traditional_child_run(
         &store,
