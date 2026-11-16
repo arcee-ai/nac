@@ -1,0 +1,723 @@
+{
+  "audit": "constrained actual first-attempt cold cache mechanism, not cohort/latency/global-cold qualification",
+  "run_url": "https://github.com/arcee-ai/nac/actions/runs/41963985617/attempts/1",
+  "run_id": 41963985617,
+  "attempt": 1,
+  "head": "2a4a52e2044eb6db14c93f97ea83a36b79a1f61c",
+  "prepared": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+  "source": {
+    "head": "2a4a52e2044eb6db14c93f97ea83a36b79a1f61c",
+    "prepared": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+    "head_tree": "5c187d96c812d764eb6c1fdc0eb50de9f5bd1aaf",
+    "prepared_tree": "5c187d96c812d764eb6c1fdc0eb50de9f5bd1aaf",
+    "changed_paths": [],
+    "prepared_commit": [
+      "081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "5f714aad145447e09af25d5ed50a9ce57a4aef62 2a4a52e2044eb6db14c93f97ea83a36b79a1f61c",
+      "5c187d96c812d764eb6c1fdc0eb50de9f5bd1aaf",
+      "Merge 2a4a52e2044eb6db14c93f97ea83a36b79a1f61c into 5f714aad145447e09af25d5ed50a9ce57a4aef62"
+    ]
+  },
+  "event": "pull_request",
+  "actual_current_body_first_line": "<!-- nac-ci-cold-caches -->",
+  "marker_provenance_limit": "Current body read plus parent-verified first-line creation; raw triggering webhook JSON was not separately retained by this audit. Actual cold selector output is corroborated by all consumers.",
+  "metrics": {
+    "parent_prepare_to_result_seconds": 1189,
+    "parent_event_to_result_seconds": 1192,
+    "sum_job_seconds": 7665.0,
+    "timing_api_run_duration_ms": 1193000,
+    "timing_api_billable_totals": "all 0: unavailable as cost evidence, not free compute"
+  },
+  "rust_cache": {
+    "actual_actions": [
+      {
+        "log": "logs/11_browser-shards (1).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/11_browser-shards (1).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/13_browser-shards (7).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/13_browser-shards (7).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/14_browser-shards (5).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/14_browser-shards (5).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/15_browser-shards (2).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/15_browser-shards (2).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/21_test-server.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-test-server-test-server-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-test-server-test-server-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/21_test-server.txt",
+          "line": 411,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/22_build (ubuntu-latest, x86_64-unknown-linux-musl).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-build-x86_64-unknown-linux-musl-incremental16-v1-build-Linux-x64-dd457c2a",
+        "cache_key": "nac-ci-cold-41963985617-1-build-x86_64-unknown-linux-musl-incremental16-v1-build-Linux-x64-dd457c2a-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/22_build (ubuntu-latest, x86_64-unknown-linux-musl).txt",
+          "line": 493,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/23_macos-native _ ARM macOS process and credentials.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-native-regressions-Darwin-arm64-8e2c271d",
+        "cache_key": "nac-ci-cold-41963985617-1-native-regressions-Darwin-arm64-8e2c271d-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/23_macos-native _ ARM macOS process and credentials.txt",
+          "line": 402,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/26_managed-fault _ fault.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-managed-fault-fault-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-managed-fault-fault-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/26_managed-fault _ fault.txt",
+          "line": 452,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/27_test-core.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-test-core-test-core-Linux-x64-8c9843e5",
+        "cache_key": "nac-ci-cold-41963985617-1-test-core-test-core-Linux-x64-8c9843e5-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/27_test-core.txt",
+          "line": 396,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/28_build (macos-26, aarch64-apple-darwin).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-build-aarch64-apple-darwin-incremental16-v1-build-Darwin-arm64-fe37d73a",
+        "cache_key": "nac-ci-cold-41963985617-1-build-aarch64-apple-darwin-incremental16-v1-build-Darwin-arm64-fe37d73a-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/28_build (macos-26, aarch64-apple-darwin).txt",
+          "line": 385,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/29_browser-binary.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-binary-browser-binary-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-binary-browser-binary-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/29_browser-binary.txt",
+          "line": 462,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/30_test-server-web.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-test-server-web-test-server-web-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-test-server-web-test-server-web-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/30_test-server-web.txt",
+          "line": 411,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/31_lint.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-lint-lint-Linux-x64-a8cfc50b",
+        "cache_key": "nac-ci-cold-41963985617-1-lint-lint-Linux-x64-a8cfc50b-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/31_lint.txt",
+          "line": 379,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/32_test-workspace.txt",
+        "restore_key": "nac-ci-cold-41963985617-1-test-workspace-test-workspace-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-test-workspace-test-workspace-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/32_test-workspace.txt",
+          "line": 410,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/8_browser-shards (3).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/8_browser-shards (3).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      },
+      {
+        "log": "logs/9_browser-shards (4).txt",
+        "restore_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54",
+        "cache_key": "nac-ci-cold-41963985617-1-browser-shards-browser-shards-Linux-x64-a7860c54-055f132a",
+        "prefix": "nac-ci-cold-41963985617-1",
+        "save_if": false,
+        "miss": {
+          "path": "logs/9_browser-shards (4).txt",
+          "line": 538,
+          "text": "No cache found."
+        }
+      }
+    ],
+    "restores_observed": 0,
+    "saves_enabled": 0,
+    "same_run_shard_key_shared": "six fallback shards have identical key but all miss and all save false; prefix uniqueness is run/attempt, not per shard",
+    "bytes": "No cache transfer/storage byte total logged; miss is direct outcome evidence, not measured target-directory bytes"
+  },
+  "s18": {
+    "targets": [
+      "x86_64-unknown-linux-musl",
+      "aarch64-apple-darwin"
+    ],
+    "actual_restore_results": [
+      {
+        "path": "logs/22_build (ubuntu-latest, x86_64-unknown-linux-musl).txt",
+        "line": 505,
+        "text": "{\"reason\": \"absent-cache\", \"status\": \"cold\"}"
+      },
+      {
+        "path": "logs/28_build (macos-26, aarch64-apple-darwin).txt",
+        "line": 397,
+        "text": "{\"reason\": \"absent-cache\", \"status\": \"cold\"}"
+      }
+    ],
+    "stage_step_conclusions": [
+      {
+        "job": "build (macos-26, aarch64-apple-darwin)",
+        "conclusion": "skipped"
+      },
+      {
+        "job": "build (ubuntu-latest, x86_64-unknown-linux-musl)",
+        "conclusion": "skipped"
+      }
+    ],
+    "compiler_incremental": "CARGO_INCREMENTAL=1 is still used during fresh release compilation; absent refers to external staged snapshot, not disabling intra-build compiler work"
+  },
+  "docker": {
+    "argv": "/usr/bin/docker buildx build --build-arg NAC_BUILD_TRACK=dev --build-arg NAC_BUILD_ID=dev-081fcbdece55f2a9c897b4a22eccbea44953d804 --build-arg NAC_SOURCE_REVISION=081fcbdece55f2a9c897b4a22eccbea44953d804 --file docker/managed/Dockerfile --iidfile /home/runner/work/_temp/docker-actions-toolkit-iK3NOc/build-iidfile-ce14b02f0e.txt --platform linux/amd64 --attest type=provenance,disabled=true --attest type=sbom,disabled=true --tag nac-managed-smoke:081fcbdece55 --load --metadata-file /home/runner/work/_temp/docker-actions-toolkit-iK3NOc/build-metadata-4efb4db17e.json --no-cache .",
+    "no_cache": true,
+    "cache_from_flags": [],
+    "cache_to_flags": [],
+    "cached_result_markers": 0,
+    "image": "sha256:e8b6298f35161baa32fa29c90f7fcf7f37d865c1a110f057bd7f77eeff191c6d",
+    "image_bytes": 798392328,
+    "platform": "linux/amd64",
+    "cpu_count_logged": 4,
+    "total_memory_logged": "15.61GiB",
+    "storage_driver": "overlayfs",
+    "context_transfer_logged": "39.53MB",
+    "buildkit": "v0.34.2",
+    "smoke": {
+      "path": "logs/17_managed-image _ build-smoke.txt",
+      "line": 13428,
+      "text": "managed image smoke: ok"
+    },
+    "peak_cpu_ram_disk_buildcache_bytes": null,
+    "base_or_cdn_globally_cold": false
+  },
+  "browser": {
+    "producer_receipt": {
+      "archive_bytes": 39677082,
+      "archive_sha256": "bc9ddecadb97d3e873fef3ba0dd5ed604b3a805e81da29dee0b3f671f043b43f",
+      "binary_bytes": 223890224,
+      "binary_sha256": "6a09406b9bc07c6925fead9ef1956a0be3c1c13a89c5cddaf2fd494f03019008",
+      "build_id": "dev-081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "build_track": "dev",
+      "dev_debug": 0,
+      "manifest_bytes": 493,
+      "manifest_sha256": "f6fedca51ec9387f925055dafe4e16fe4eb85f74bf9a6f3c8180d3ffafbe5dc9",
+      "profile": "dev",
+      "repository": "arcee-ai/nac",
+      "run_attempt": 1,
+      "run_id": "41963985617",
+      "runner_image": "ubuntu26@20261026.180.1",
+      "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "schema": 1,
+      "source_revision": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "target": "x86_64-unknown-linux-gnu"
+    },
+    "consumers": [
+      {
+        "log": "logs/10_browser-shards (8).txt",
+        "line": 471,
+        "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+        "binary_sha256": "6a09406b9bc07c6925fead9ef1956a0be3c1c13a89c5cddaf2fd494f03019008",
+        "consumer_runner_image": "ubuntu26@20261026.180.1",
+        "fallback_reason": "",
+        "mode": "artifact",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/11_browser-shards (1).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/12_browser-shards (6).txt",
+        "line": 471,
+        "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+        "binary_sha256": "6a09406b9bc07c6925fead9ef1956a0be3c1c13a89c5cddaf2fd494f03019008",
+        "consumer_runner_image": "ubuntu26@20261026.180.1",
+        "fallback_reason": "",
+        "mode": "artifact",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/13_browser-shards (7).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/14_browser-shards (5).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/15_browser-shards (2).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/16_browser-proof.txt",
+        "line": 471,
+        "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+        "binary_sha256": "6a09406b9bc07c6925fead9ef1956a0be3c1c13a89c5cddaf2fd494f03019008",
+        "consumer_runner_image": "ubuntu26@20261026.180.1",
+        "fallback_reason": "",
+        "mode": "artifact",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/8_browser-shards (3).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      },
+      {
+        "log": "logs/9_browser-shards (4).txt",
+        "line": 471,
+        "binary": "",
+        "binary_sha256": "",
+        "consumer_runner_image": "ubuntu26@20261101.186.1",
+        "fallback_reason": "runner-image-change",
+        "mode": "source",
+        "producer_attempt": 1,
+        "producer_runner_image": "ubuntu26@20261026.180.1"
+      }
+    ],
+    "source_fallbacks": 6,
+    "same_attempt_artifact_consumers": 3,
+    "explanation": "runner-image-change; all fallback cache actions missed and cargo rebuilt source, same-run executable receipt validates exact source/compiler/runner/bytes"
+  },
+  "quality": {
+    "shared_receipts": {
+      "QUALITY_RECEIPT": {
+        "sha": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "run_id": "41963985617",
+        "run_attempt": "1",
+        "repository": "arcee-ai/nac",
+        "results": {
+          "prepare": "success",
+          "lint": "success",
+          "workflow-lint": "success",
+          "test-server": "success",
+          "test-server-web": "success",
+          "test-core": "success",
+          "test-workspace": "success"
+        }
+      },
+      "FAULT_RECEIPT": {
+        "schema_version": 1,
+        "sha": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "repository": "arcee-ai/nac",
+        "run_id": "41963985617",
+        "run_attempt": "1",
+        "fixture_result": "success"
+      }
+    },
+    "joins_file": "joins.json",
+    "job_steps_file": "job-steps.json",
+    "reuse": "Same candidate/run/attempt successful quality and fault receipts; downstream duplicate cache/install/quality steps skipped. Actual upstream gates ran."
+  },
+  "native": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "architecture": "arm64",
+    "runner_image": "20261026.0455.2",
+    "cache_hit": "false",
+    "core_tests": [
+      "terminal::manager::user::tests::native::natural_exit_settles_ordinary_and_disowned_separate_groups",
+      "terminal::manager::user::tests::native::explicit_close_and_manager_drop_settle_separate_groups",
+      "terminal::manager::user::tests::native::immediate_exit_remains_owned_until_cleanup_and_output_settle",
+      "terminal::manager::user::tests::native::failed_cleanup_preserves_capacity_leases_and_responsive_cached_observation",
+      "terminal::manager::user::tests::native::close_is_prompt_but_output_drain_retains_entry_and_leases_until_final_append",
+      "terminal::manager::user::tests::native::concurrent_admission_never_holds_observation_map_while_waiting_for_history",
+      "terminal::manager::tests::successful_one_shot_kills_background_descendants",
+      "terminal::manager::tests::worker_one_shot_does_not_hang_on_descendant_inherited_pipes",
+      "terminal::manager::tests::explicit_cancellation_is_structured_and_stops_late_side_effects",
+      "terminal::manager::tests::pty_cancellation_stops_waiting_and_late_side_effects",
+      "terminal::session::tests::kill_removes_background_jobs_from_pty_shell",
+      "terminal::session::tests::completed_pty_root_kills_surviving_process_group"
+    ],
+    "phases": {
+      "packages-build": 11.131,
+      "core-build": 193.225,
+      "packages-first": 4.012,
+      "core-first": 5.239,
+      "packages-warm": 4.178,
+      "core-warm": 5.084,
+      "seed-restored": 1.157
+    },
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8\n",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)\n",
+    "candidate": "081fcbdece55f2a9c897b4a22eccbea44953d804\n",
+    "fixture_processes_remaining": [],
+    "fixture_files_remaining": [],
+    "seed": {
+      "seconds": 1.423,
+      "detected": "native_pty::platform::macos::tests::pending_fork_is_live_and_unknown_status_never_proves_death",
+      "source_sha256": "22225dda38637b989bc380367dde94e51a3e3861b3c4a0ff80a182caad6154af"
+    },
+    "result": "passed"
+  },
+  "source_security": {
+    "scanner": "OSV-Scanner 2.7.0",
+    "scanned_at": "2026-11-05T03:50:33.043Z",
+    "inputs": [
+      {
+        "context": "Cargo.lock",
+        "packages": 396,
+        "supplemental_packages": 0,
+        "sha256": "d20ce32ccaa9d58d63b400b9160e2ac9f036989dd0b5dec0cb1bfa584bbf0bb8"
+      },
+      {
+        "context": "crates/nac-server/web/package-lock.json",
+        "packages": 676,
+        "supplemental_packages": 5,
+        "sha256": "c2b6c7c9f9f313bcf652dc1bfcc335625d532fdd75ca50823af52e24e46abaaf"
+      },
+      {
+        "context": ".github/scripts/package-lock.json",
+        "packages": 269,
+        "supplemental_packages": 0,
+        "sha256": "50c6a1dc7a799d86d624f8a9ed08cd863201adbdc5d1eee60d3ae0ac0a1567ce"
+      }
+    ],
+    "blocking": [],
+    "excepted": [],
+    "errors": [],
+    "passed": true
+  },
+  "image_security": {
+    "inventory": {
+      "status": "inventoried",
+      "image": "sha256:e8b6298f35161baa32fa29c90f7fcf7f37d865c1a110f057bd7f77eeff191c6d",
+      "source_revision": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "security_verdict": false
+    },
+    "ci_report": {
+      "schema_version": 1,
+      "enforcement": "deferred",
+      "security_verdict": "blocked",
+      "image": "sha256:e8b6298f35161baa32fa29c90f7fcf7f37d865c1a110f057bd7f77eeff191c6d",
+      "source_revision": "081fcbdece55f2a9c897b4a22eccbea44953d804",
+      "blocking": 32,
+      "findings": 55,
+      "result_sha256": "e53000e053930d3971d2f7efaf8c99ff9b1a2e65a5d00714e3a0bc73417bbd39",
+      "notice": "CI reports image findings; success does not establish image security clearance."
+    },
+    "result": {
+      "status": "blocked",
+      "image": "sha256:e8b6298f35161baa32fa29c90f7fcf7f37d865c1a110f057bd7f77eeff191c6d",
+      "scanned_at": "2026-11-05T04:08:37.574830+00:00",
+      "blocking": 32,
+      "findings": 55
+    },
+    "database": {
+      "built": "2026-11-04T06:20:59Z",
+      "age_seconds": 78442.275574,
+      "schema": "v6.1.10",
+      "sha256": "a31a8c9346f97f5e6f015ed6bd6ec5fe47fdef2a5222bacd068f511df032f529"
+    },
+    "scanner": {
+      "grype": {
+        "version": "0.121.0",
+        "archive_sha256": "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519",
+        "binary_sha256": "bd511334178bc3002eb9eb58880f89e01e35f7fed7cfbe671171127a8afa3596",
+        "platform": "linux_amd64"
+      }
+    },
+    "qualification": {
+      "qualified_at": "2026-11-05T03:52:08.871662+00:00",
+      "fixtures": {
+        "vulnerable": {
+          "node": "18.0.0",
+          "os": "libtasn1-6@4.19.0-2",
+          "blocking": 35,
+          "findings": 70,
+          "control_matches": 2,
+          "other_advisories": 68
+        },
+        "safe": {
+          "node": "24.22.1",
+          "os": "base-files@12.4+deb12u12",
+          "blocking": 0,
+          "findings": 0,
+          "control_matches": 0,
+          "other_advisories": 0
+        }
+      },
+      "wolfi_apk": {
+        "vulnerable": {
+          "version": "3.0.6-r0",
+          "findings": 158,
+          "control_matches": 1,
+          "other_advisories": 157
+        },
+        "safe": {
+          "version": "3.0.7-r0",
+          "findings": 152,
+          "control_matches": 0,
+          "other_advisories": 152
+        }
+      },
+      "owned_upstream_queries": {
+        "cpes": {
+          "vulnerable": {
+            "version": "2.1.27",
+            "findings": 2,
+            "control_matches": 1,
+            "other_advisories": 1
+          },
+          "safe": {
+            "version": "2.1.28",
+            "findings": 0,
+            "control_matches": 0,
+            "other_advisories": 0
+          }
+        },
+        "purl": {
+          "vulnerable": {
+            "version": "3.0.6",
+            "findings": 147,
+            "control_matches": 1,
+            "other_advisories": 146
+          },
+          "safe": {
+            "version": "3.0.8",
+            "findings": 139,
+            "control_matches": 0,
+            "other_advisories": 139
+          }
+        }
+      },
+      "runtime_version_queries": {
+        "vulnerable": {
+          "versions": {
+            "go": "1.27.0",
+            "uv": "0.12.1",
+            "git_lfs": "3.6.0",
+            "gh": "2.0.0"
+          },
+          "findings": 37,
+          "control_matches": 5,
+          "other_advisories": 32
+        },
+        "safe": {
+          "versions": {
+            "go": "1.27.3",
+            "uv": "0.13.4",
+            "git_lfs": "3.8.0",
+            "gh": "2.103.0"
+          },
+          "findings": 0,
+          "control_matches": 0,
+          "other_advisories": 0
+        }
+      },
+      "db_network_failure": "rejected with a cached young DB",
+      "unknown_debian_release": "rejected independently of scanner exit/match count",
+      "scope": "real Node binary detection and live OS/Node advisory matching"
+    },
+    "clearance": false
+  },
+  "artifacts": {
+    "api_size_sum_bytes": 106822588,
+    "items": [
+      {
+        "id": 13387835046,
+        "name": "nac-aarch64-apple-darwin",
+        "size_in_bytes": 28353345,
+        "expired": false,
+        "digest": "sha256:76708ecd11630c507ddfacea301396f081add27f7d6cd8b318e71411c9feb7dd"
+      },
+      {
+        "id": 13387741279,
+        "name": "managed-image-security-081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "size_in_bytes": 5753207,
+        "expired": false,
+        "digest": "sha256:09a6a523ecdab5028f2eea76c36ce47fdeeb0bf6a112d0640e4b3efd77f4bf2a"
+      },
+      {
+        "id": 13387507347,
+        "name": "arcee-ai~nac~6AI1C0.dockerbuild",
+        "size_in_bytes": 324435,
+        "expired": false,
+        "digest": "sha256:668d91b1b0ed2f828fe5baaf4023655fd1edee7a97aa3f2715f3dceca334357f"
+      },
+      {
+        "id": 13387011940,
+        "name": "browser-binary-081fcbdece55f2a9c897b4a22eccbea44953d804-41963985617-1",
+        "size_in_bytes": 39677238,
+        "expired": false,
+        "digest": "sha256:a719e074aba46a5dd77d368eb8d7a3e082628bf7c8139e9165dedd8f3f1d8c3e"
+      },
+      {
+        "id": 13386877317,
+        "name": "native-macos-081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "size_in_bytes": 63100,
+        "expired": false,
+        "digest": "sha256:1b803b7a61db9fd2d54254a1e347f24d3580fc633015faf9cb78d459831dc9d9"
+      },
+      {
+        "id": 13386747553,
+        "name": "managed-image-security-fixtures-081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "size_in_bytes": 379741,
+        "expired": false,
+        "digest": "sha256:bf25bd9c678b887200da2347d2748881cad0a258b6c340db9fc09c463dc1c1fa"
+      },
+      {
+        "id": 13386497818,
+        "name": "source-security-081fcbdece55f2a9c897b4a22eccbea44953d804",
+        "size_in_bytes": 25794,
+        "expired": false,
+        "digest": "sha256:297f2fc21708028d3d5b03dc51d67bb0218e718ddc10e82f7051e9e626768a06"
+      },
+      {
+        "id": 13386299047,
+        "name": "all471-goal-proof-081fcbdece55f2a9c897b4a22eccbea44953d804-41963985617-1",
+        "size_in_bytes": 5423,
+        "expired": false,
+        "digest": "sha256:8dd8e008a7c0efad2d34119d1e6c97c0667df2bdd223799d80f9c7f112982f8d"
+      },
+      {
+        "id": 13386179465,
+        "name": "nac-x86_64-unknown-linux-musl",
+        "size_in_bytes": 32240305,
+        "expired": false,
+        "digest": "sha256:edb64dc5e39610bf403680be0664739b80783de0ca5a3cf053d771d15fab3f66"
+      }
+    ],
+    "note": "GitHub compressed archive sizes; not runner disk, cache storage, or executable installed footprint. Binaries were not downloaded by this audit."
+  },
+  "limits": [
+    "No negative mutation was injected into this live run; contract negative-control tests executed successfully and are retained in test-core/image contract/native logs.",
+    "Only this run/attempt inspected. No automatic cohort or strategy acceptance.",
+    "No global CDN/toolcache/base-content/registry cache coldness proof. Node and runner tools may come preinstalled; same-run outputs and native first/warm controls intentionally reuse current computation.",
+    "Image finding enforcement remains deferred at this source. Publication job skipped on PR; no release/publication qualification.",
+    "No hosted CPU-time/peak memory/disk/cache-byte telemetry beyond Docker configuration and explicit artifact/image sizes."
+  ],
+  "acquisition": {
+    "utc": "2026-11-05T04:24:09.313329+00:00",
+    "method": "gh api GET only; full /actions/runs/41963985617/attempts/1/logs and attempt jobs; selected evidence artifact ZIPs, no binary/tool/DB downloads; Git fetch exact prepared commit without changing branches",
+    "logs_zip_sha256": "2461ebe31d4ac6a495c5fe714d75fe88897734ef05701b4542cf6f264a9969e2"
+  },
+  "all_join_inputs_success": true,
+  "all457_ignored_gap": "Not requalified or resolved by this audit. Ordinary Cargo and native package logs retain ignored tests (e.g. nac-server 3 ignored and nac-process 1 ignored); cold-mode success is not complete ignored-test coverage.",
+  "negative_controls": "negative-control-evidence.json; contract tests/live scanner fixtures/native seeded failure all ran. Native FAILED line is intentional mutation detected, then original source restored and control passed."
+}

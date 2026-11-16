@@ -50,7 +50,7 @@ const snapshot = {
 beforeEach(() => {
   viewport.mobile = false;
   viewport.tablet = false;
-  sessionLayoutStore.setState({ collapsed: false, expanded: false });
+  sessionLayoutStore.setState({ collapsed: false, expanded: false, panelList: false });
 });
 
 afterEach(cleanup);
@@ -114,5 +114,22 @@ describe("session side box tabs", () => {
 
     rerender(<SessionSideBox {...props} snapshot={managed} />);
     expect(screen.getByTestId("insights").getAttribute("data-can-steer")).toBe("false");
+  });
+  it("reactivates selected Insights on the tablet list while desktop selection stays stable", () => {
+    const props = {
+      sessionId: "session-a",
+      snapshot,
+      panel: "insights" as const,
+      onPanelChange: vi.fn(),
+    };
+    const view = render(<SessionSideBox {...props} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Insights" }));
+    expect(sessionLayoutStore.getState().panelList).toBe(false);
+    viewport.tablet = true;
+    view.rerender(<SessionSideBox {...props} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Insights" }));
+    expect(sessionLayoutStore.getState().panelList).toBe(true);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(sessionLayoutStore.getState().panelList).toBe(false);
   });
 });

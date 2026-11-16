@@ -613,7 +613,7 @@ async fn current_protocol_honors_server_cache_hints() {
 
 #[tokio::test]
 async fn refreshed_auth_handshake_gets_a_fresh_startup_budget() {
-    let (url, server) = start_auth_retry_http_mcp_server();
+    let (url, server, trace) = start_auth_retry_http_mcp_server();
     let helper = McpHeaderHelperConfig {
         command: "/bin/sh".to_string(),
         args: vec![
@@ -645,23 +645,36 @@ async fn refreshed_auth_handshake_gets_a_fresh_startup_budget() {
     };
     let handler = NacMcpClientHandler::unbound(Vec::new());
     let started = std::time::Instant::now();
+    trace.note("connect-start", 0);
 
-    let mut service = connect_server(
+    let result = connect_server(
         "auth-retry",
         &config,
         &handler,
         Path::new("/tmp"),
         Duration::from_millis(500),
     )
-    .await
-    .unwrap();
+    .await;
+    trace.note("connect-returned", 0);
+    let mut service = result.unwrap_or_else(|error| {
+        panic!(
+            "auth-retry connection failed: {error:?}; {}",
+            trace.snapshot()
+        )
+    });
 
     assert!(
         started.elapsed() > Duration::from_millis(500),
-        "the test must exceed one startup budget to cover the old outer timeout"
+        "the test must exceed one startup budget to cover the old outer timeout; {}",
+        trace.snapshot()
     );
     close_mcp_service(&mut service).await;
-    server.join().unwrap();
+    server.join().unwrap_or_else(|error| {
+        panic!(
+            "auth-retry fixture thread failed: {error:?}; {}",
+            trace.snapshot()
+        )
+    });
 }
 
 #[cfg(unix)]

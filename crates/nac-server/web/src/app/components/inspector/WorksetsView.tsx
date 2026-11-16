@@ -53,7 +53,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Item({ item }: { item: WorksetItemSnapshot }) {
   return (
-    <div className="flex flex-col gap-4 p-3 rounded-[4px] bg-elevation-sublevel-variant-A shadow-concave">
+    <div className="flex flex-col gap-4 border-l border-muted py-4 pl-4">
       {item.role ? <Badge text={item.role} color={BadgeColor.Blue} className="self-start" /> : null}
       <div className="flex flex-col gap-1">
         <span className="header-sm text-basic-primary">{item.title}</span>
@@ -62,11 +62,11 @@ function Item({ item }: { item: WorksetItemSnapshot }) {
         ) : null}
       </div>
       {item.description ? (
-        <p className="text-small text-basic-secondary">{item.description}</p>
+        <p className="text-sm leading-[22px] text-basic-secondary">{item.description}</p>
       ) : null}
       {item.acceptance ? (
         <Field label="acceptance">
-          <p className="text-small text-basic-secondary">{item.acceptance}</p>
+          <p className="text-sm leading-[22px] text-basic-secondary">{item.acceptance}</p>
         </Field>
       ) : null}
       {item.depends_on.length > 0 ? (
@@ -92,7 +92,7 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-8 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
+        "flex flex-col gap-6 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
         isMobile && "py-18",
       )}
     >

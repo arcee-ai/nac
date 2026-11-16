@@ -5,13 +5,14 @@ import { cn } from "@/app/lib/cn";
 export function ManagedModelCredentialStatus({ ready }: { ready: boolean }) {
   return (
     <ConfigRow
+      presentation="form"
       label="Credential"
       verticalOnMobile
       hint="This managed host supplies the credential securely; it is not stored in this configuration or exposed to commands."
       control={
         <div
           className={cn(
-            "flex items-center gap-1.5 rounded-[4px] py-2 pl-2 pr-4",
+            "flex items-center gap-2 rounded-[4px] py-2 pl-2 pr-4",
             ready ? "bg-success-secondary" : "bg-error-tertiary",
           )}
         >

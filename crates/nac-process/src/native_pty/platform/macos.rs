@@ -12,8 +12,12 @@ use std::io;
 use std::sync::OnceLock;
 
 mod census;
+#[cfg(test)]
+pub(in crate::native_pty::platform) mod diagnostics;
 mod discovery;
 mod inspection;
+#[cfg(test)]
+pub(super) mod signal_diagnostics;
 pub(in crate::native_pty) use census::aligned_delay;
 pub(super) use discovery::Discovery;
 
@@ -120,14 +124,22 @@ impl Identity {
     }
 
     pub fn signal(&self, signal: i32) -> io::Result<bool> {
+        #[cfg(test)]
+        let signal_function = || diagnostics::resolve(signal_function());
         self.signal_with(signal, signal_function()?)
     }
 
     fn signal_with(&self, signal: i32, send: AuditSignal) -> io::Result<bool> {
+        #[cfg(test)]
+        let inspect = diagnostics::signal_inspector(inspect);
+        #[cfg(test)]
+        let mut failure_observation = signal_diagnostics::FailureObservation::default();
         for _ in 0..3 {
             let Some(current) = inspect(self.pid)? else {
                 return Ok(false);
             };
+            #[cfg(test)]
+            diagnostics::validation(self.pid, self.uniqueid, &current);
             if current.unique.uniqueid != self.uniqueid || !current.live {
                 return Ok(false);
             }
@@ -137,9 +149,19 @@ impl Identity {
             let mut key = [0u32; 8];
             key[5] = self.pid as u32;
             key[7] = current.unique.version as u32;
+            #[cfg(test)]
+            let send_started = std::time::Instant::now();
             // SAFETY: runtime symbol has the installed libproc signature; key
             // is initialized audit-token-sized storage valid for this call.
             let result = unsafe { send(&key, signal) };
+            #[cfg(test)]
+            let send_elapsed = send_started.elapsed();
+            #[cfg(test)]
+            diagnostics::native_send(self.pid, signal, current.unique.version, result);
+            #[cfg(test)]
+            failure_observation.observe(self.pid, self.uniqueid, result, send_elapsed, || {
+                inspection::snapshot(self.pid, &inspection::Native)
+            });
             if result == 0 {
                 return Ok(true);
             }

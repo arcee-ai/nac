@@ -44,7 +44,14 @@ fn selection_provenance_atomic_delivery_replay_and_copied_lookalike() {
         .unwrap();
     let mut connection = open_runtime_connection(&path).unwrap();
     let tx = connection.transaction().unwrap();
-    clear_active_run(&tx, "session", "run", RunTerminalDisposition::Completed).unwrap();
+    clear_active_run(
+        &tx,
+        "session",
+        "run",
+        RunTerminalDisposition::Completed,
+        None,
+    )
+    .unwrap();
     tx.commit().unwrap();
     writer.append("session", 1, &message).unwrap(); // exact genuine-envelope copy lacks annotation
     let plain = create_session_inbox_item(

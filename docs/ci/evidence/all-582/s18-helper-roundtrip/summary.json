@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "strategy": "S18",
+  "status": "mechanism-only passed",
+  "qualification": "MODELED LOCAL PUSH METADATA; NOT A GITHUB TRUSTED SEED, COHORT, COMPILER REUSE OR HOSTED CACHE TRIAL",
+  "source_head": "8921b78ff882a58227554ce108527a78b4085565",
+  "helper_sha256": "928aa7b416aa947d7d7456e9f77107caf4d762d805c6d4436f4f35ff47a736dd",
+  "started": "2026-11-05T02:20:37.905707+00:00",
+  "ended": "2026-11-05T02:20:41.736622+00:00",
+  "runtime": {
+    "python": "3.15.2 (main, Oct 25 2026, 16:57:51) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "system": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\nbinary: rustc\ncommit-hash: 88d9e12ae178fab0fb5cc050a94da85685d449ea\ncommit-date: 2026-08-18\nhost: aarch64-apple-darwin\nrelease: 1.98.0\nLLVM version: 22.1.8",
+    "timing_tool": "macOS /usr/bin/time -l; maximum process RSS, not summed process-family peak"
+  },
+  "payload": {
+    "files": 433,
+    "logical_bytes": 1484480503,
+    "historical_allocated_snapshot_bytes": 1485402112,
+    "target_namespace": "aarch64-apple-darwin",
+    "compiler_origin": "host release Cargo1.98 codegen16 synthetic identity A; no cross-target compilation claim",
+    "record_set_digest_algorithm": "SHA256 of UTF-8 JSON files array with sort_keys=True,separators=(comma,colon), no newline; each record has relative path,size,sha256",
+    "source_record_set_sha256": "480be0f4ae94d7cfec9be38d122d01532951ede04c137866a067f309cc827ce3",
+    "staged_record_set_sha256": "480be0f4ae94d7cfec9be38d122d01532951ede04c137866a067f309cc827ce3",
+    "restored_record_set_sha256": "480be0f4ae94d7cfec9be38d122d01532951ede04c137866a067f309cc827ce3",
+    "staged_digest_verification": "actual restore hashed every staged file while copying and checked the full manifest; independent audit rehashed original and restored files",
+    "manifest_sha256": "521f2eddda9f2d41d0b609fa0a1429e567bda6043a9a5f354601d96c44c7fbdc"
+  },
+  "commands": {
+    "stage": "python3 scripts/ci-incremental.py stage --workspace \"$WORKSPACE\" --target aarch64-apple-darwin",
+    "restore": "python3 scripts/ci-incremental.py restore --workspace \"$WORKSPACE\" --target aarch64-apple-darwin",
+    "environment": {
+      "RUSTUP_TOOLCHAIN": "1.98.0",
+      "CARGO_INCREMENTAL": "1",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_TARGET_DIR": "unset/default workspace target",
+      "GITHUB_EVENT_NAME": "push (MODELED LOCAL ONLY)",
+      "GITHUB_REF": "refs/heads/dev (MODELED LOCAL ONLY)",
+      "GITHUB_REPOSITORY": "arcee-ai/nac",
+      "GITHUB_SHA": "8921b78ff882a58227554ce108527a78b4085565",
+      "GITHUB_EVENT_PATH": "owned MODELED-LOCAL-push.json with matching repository/ref/after",
+      "GITHUB_RUN_ID": "1 (MODELED LOCAL ONLY)",
+      "GITHUB_RUN_ATTEMPT": "1 (MODELED LOCAL ONLY)"
+    },
+    "metadata_only": "helper invokes cargo -V; cargo metadata --locked --offline --no-deps --format-version 1; rustc -Vv; no compilation"
+  },
+  "measurement": {
+    "hardlink_mirror_seconds": 0.09923912497470155,
+    "stage_seconds": 1.4827020830125548,
+    "restore_seconds": 1.016443624976091,
+    "independent_hash_audit_seconds": 1.0573674580082297,
+    "cleanup_seconds": 0.15574149996973574,
+    "stage_user_seconds": 0.52,
+    "stage_system_seconds": 0.38,
+    "restore_user_seconds": 0.5,
+    "restore_system_seconds": 0.28,
+    "stage_max_rss_bytes": 33193984,
+    "restore_max_rss_bytes": 33193984,
+    "payload_copies": 2,
+    "payload_copy_bytes": 2968961006,
+    "audit_additional_read_bytes": 2968961006,
+    "source_page_cache": "not flushed; local filesystem/warm registry/toolchain, source compiler artifacts retained from previous trials; no network/archive measurement"
+  },
+  "space": {
+    "floor_bytes": 12884901888,
+    "minimum_required_before_start_bytes": 15988080622,
+    "free_start_bytes": 24673189888,
+    "minimum_observed_free_bytes": 21701500928,
+    "free_after_cleanup_bytes": 24672841728
+  },
+  "verified": {
+    "exact_inventory": true,
+    "source_manifest_restored_sha256_equal": true,
+    "private_stage_restored_files": true,
+    "compiler_reuse_tested": false,
+    "hosted_cache_tested": false
+  },
+  "ownership_cleanup": {
+    "seconds": 0.15574149996973574,
+    "original_inodes_sizes_link_counts_restored": true,
+    "source_retained": true,
+    "mirror_absent": true,
+    "stage_absent": true,
+    "free_after": 24672841728,
+    "source_link_counts_before": [
+      1
+    ],
+    "source_link_counts_after": [
+      1
+    ],
+    "temporary_hardlinks": "source nlink/ctime temporarily change; original inode/size/link counts checked after cleanup; ctime cannot be restored",
+    "deleted_only": "new owned target incremental hardlink mirror/restored files and .nac-ci-incremental-cache/<target> staged files; original source snapshot and all benchmark targets retained"
+  },
+  "guide_control": {
+    "qualification": "MECHANISM ONLY; retained synthetic B executable, not current candidate/cohort/hosted compiler reuse",
+    "binary_sha256": "e7c25de0f3a4e1eeb1aaf37271763af664a4bda161471a8419da3a29e2ce504a",
+    "binary_bytes": 86334832,
+    "verifier_parent_head": "efd55a1eb8070c6fcccb9a547b9a742fa8c5ed1d",
+    "verifier_sha256": "f7928b8ec0d4daa3a48c0f0679dc0ced5457182bad9dfc27104c9493901ebadb",
+    "guide_sha256": "8bf17c87cdb6fa20c3a215fc5831545f379dfe4a41c28b41627a040c55e7b3ce",
+    "guide_env": {
+      "HOME": "absent owned offline path",
+      "NAC_HOME": "same absent owned offline path",
+      "PATH": ""
+    },
+    "runtime_home_created": false,
+    "identity": {
+      "build_id": "dev-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "product_version": "0.1.4",
+      "source_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "track": "dev"
+    },
+    "seconds": 0.24418945802608505
+  },
+  "guide_cases": [
+    {
+      "case": "exact-synthetic-B",
+      "expected_source": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "exit_code": 0,
+      "stdout": "Verified full release-local Guide identity for the prepared candidate\n",
+      "error_observed": false
+    },
+    {
+      "case": "wrong-full-sha-same-12-prefix",
+      "expected_source": "bbbbbbbbbbbbcccccccccccccccccccccccccccc",
+      "exit_code": 1,
+      "stdout": "",
+      "error_observed": true
+    }
+  ],
+  "raw_evidence": "incremental/real-helper-roundtrip in original owned campaign artifact directory: run.py, receipt.json, manifest.json, source-links-before/after.json, stage/restore stdout and time logs, actual retained-B-guide.json, guide controls/stdout/stderr",
+  "remaining_gates": [
+    "actual compiler acceptance/reuse through this helper",
+    "Linux/musl/macOS target acceptance",
+    "hosted trusted seed and cold/warm whole pipeline",
+    "compression/transfer/storage/eviction under repository10GB cap",
+    "current candidate full checks and ALL-582 timing cohort"
+  ]
+}

@@ -1,0 +1,51 @@
+name: Source admission authority
+on:
+  workflow_call:
+    outputs:
+      mode:
+        value: ${{ jobs.identity.outputs.mode }}
+      tuple_digest:
+        value: ${{ jobs.identity.outputs.tuple_digest }}
+      observation_digest:
+        value: ${{ jobs.identity.outputs.observation_digest }}
+permissions:
+  contents: read
+jobs:
+  identity:
+    name: NAC admission identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      mode: ${{ steps.base.outputs.mode }}
+      tuple_digest: ${{ steps.base.outputs.tuple_digest }}
+      observation_digest: ${{ steps.base.outputs.observation_digest }}
+      marker_name: ${{ steps.base.outputs.marker_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select only through the original immutable base bootstrap
+        id: base
+        env:
+          ORIGINAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GIT_NO_LAZY_FETCH: '1'
+        run: |
+          trusted=$(mktemp "$RUNNER_TEMP/nac-base-bootstrap.XXXXXX")
+          trap 'rm -f "$trusted"' EXIT
+          if [[ "$ORIGINAL_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] &&
+             git --no-replace-objects show "$ORIGINAL_BASE_SHA:.github/scripts/ci-admission-bootstrap.py" > "$trusted"; then
+            python3 "$trusted" --event "$GITHUB_EVENT_PATH" --repository "$GITHUB_WORKSPACE"
+          else
+            printf 'mode=full\nmarker_name=NAC admission unavailable\n' >> "$GITHUB_OUTPUT"
+            printf 'Original base has no supported bootstrap; unchanged FULL coverage\n'
+          fi
+  marker:
+    name: ${{ needs.identity.outputs.marker_name || 'NAC admission unavailable' }}
+    needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Publish source selection identity only
+        run: printf 'Selection identity only; no quality verdict or receipt reuse\n'

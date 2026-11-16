@@ -1,6 +1,7 @@
+import { type AriaAttributes } from "react";
 import { type CatalogPick } from "../../lib/catalog";
 import type { BackendKind, ModelCatalog, ProviderModel } from "../../types/api";
-export declare function CatalogModelPicker({ catalog, loading, failed, disabled, compact, liveByBackend, value, onSelect, }: {
+export declare function CatalogModelPicker({ catalog, loading, failed, disabled, compact, liveByBackend, value, onSelect, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy, }: {
     catalog: ModelCatalog | undefined;
     loading: boolean;
     failed: boolean;
@@ -11,4 +12,4 @@ export declare function CatalogModelPicker({ catalog, loading, failed, disabled,
     liveByBackend: Map<BackendKind, ProviderModel[] | null>;
     value: CatalogPick | null;
     onSelect: (pick: CatalogPick) => void;
-}): import("react").JSX.Element;
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">): import("react").JSX.Element;
