@@ -1,5 +1,29 @@
 # Required PR checks and current dev protection
 
+## Current settings: November 16, 2026
+
+Allison authorized matching NAC repository privileges for Ada (`adalundhe`,
+User **23642200**). Both `allisoneer` and `adalundhe` now have repository
+**admin** access and PR-only bypass on ruleset **26484091**. Its review and
+strict `Required PR checks` rules are unchanged; both accounts can manually
+bypass that ruleset. Universal ruleset **25983949** still requires PRs, blocks
+deletion and force pushes, and has no bypass actors. Inherited rules are
+unchanged. The [verified settings receipt](evidence/2026-11-16-ada-merge-parity.json)
+records the before/after values; no merge was performed.
+
+The [manual stack helper](../manual-stack-override.md) supports both accounts
+and retains its independent quality gates. Maintainers may explicitly authorize
+an agent to merge an exact reviewed set; account capability alone is not merge
+authority. The nine-owner CODEOWNERS roster is unchanged.
+
+## Historical ALL-506 planner baseline
+
+The following describes the earlier November 3 baseline and a proposed separate
+status-check placement. It is historical, not the current live policy. The
+planner deliberately rejects today's changed bypass list and rule placement;
+it needs a separately reviewed rebaseline before future activation. Old
+qualification receipts must not be reused.
+
 [ALL-506](https://linear.app/arcee/issue/ALL-506) prepares an additive update to
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
