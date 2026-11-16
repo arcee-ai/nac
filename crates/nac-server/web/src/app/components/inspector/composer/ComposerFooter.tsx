@@ -153,7 +153,8 @@ export function ComposerFooter({
             Compact
           </Button>
         ) : null}
-        {submit.onQueue ? (
+        {/* Queue only means something once there is text to queue. */}
+        {submit.onQueue && submit.mode !== "stop" ? (
           <Button
             type="button"
             size={compact ? ButtonSize.Large : ButtonSize.Medium}

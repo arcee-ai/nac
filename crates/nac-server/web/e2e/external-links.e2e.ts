@@ -125,9 +125,8 @@ for (const viewport of [
         .getByRole("dialog", { name: "Menu", exact: true })
         .getByRole("button", { name: "Settings", exact: true })
         .click();
-      // The menu opens the General overview; "‹ Settings" pushes back to the section list.
-      await expect(page.getByRole("main", { name: "General", exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      // On a phone the menu opens Settings on its section list (push navigation).
+      await expect(page).toHaveURL(`${harness.baseUrl}/#/settings`);
     } else {
       await page.getByRole("button", { name: "Settings", exact: true }).click();
     }

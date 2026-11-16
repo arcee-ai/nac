@@ -67,8 +67,12 @@ export function SnapshotBadge({
           <Icon iconName={IconName.Edit} size={16} aria-hidden className="shrink-0 !text-current" />
           <span className="truncate">{summary}</span>
           <span className="flex shrink-0 items-center gap-1.5 type-meta tabular">
-            <span className="text-success-primary">+{revision.additions}</span>
-            <span className="text-error-primary">−{revision.deletions}</span>
+            {revision.additions || !revision.deletions ? (
+              <span className="text-success-primary">+{revision.additions}</span>
+            ) : null}
+            {revision.deletions ? (
+              <span className="text-error-primary">−{revision.deletions}</span>
+            ) : null}
           </span>
         </button>
         {count > 0 ? (

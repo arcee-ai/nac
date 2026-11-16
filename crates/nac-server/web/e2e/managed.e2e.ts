@@ -15,8 +15,8 @@ async function openManagedHost(page: Page) {
 }
 
 /**
- * A phone reaches Managed host from the Menu: Settings opens the General
- * overview, "‹ Settings" pushes back to the section list, then Managed host.
+ * A phone reaches Managed host from the Menu: Settings opens on its section
+ * list (push navigation), then Managed host.
  */
 async function openManagedHostFromPhoneMenu(page: Page) {
   await page.getByRole("button", { name: "Open the menu", exact: true }).click();
@@ -24,8 +24,7 @@ async function openManagedHostFromPhoneMenu(page: Page) {
     .getByRole("dialog", { name: "Menu", exact: true })
     .getByRole("button", { name: "Settings", exact: true })
     .click();
-  await expect(settingsSection(page, "General")).toBeVisible();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/#\/settings$/);
   await page
     .getByRole("navigation", { name: "Settings sections", exact: true })
     .getByRole("link", { name: /^Managed host/ })

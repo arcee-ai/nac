@@ -137,6 +137,9 @@
   .btn-large.btn-text {
     height: 44px;
   }
+  .btn-large.btn-icon {
+    min-width: 44px;
+  }
 }
 /* Tertiary is only as tall as its line. Same specificity as the matrix above,
    so it has to come after it. */
