@@ -1,0 +1,181 @@
+{
+  "ticket": "ALL-351",
+  "minimum_candidate": "14",
+  "minimum_selected": null,
+  "features": [
+    {
+      "id": "projects",
+      "owner": "components/pages/ProjectsListPage.tsx",
+      "requirement": "local project list and project navigation",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "direct",
+      "owner": "components/modals/CreateProjectModal.tsx",
+      "requirement": "create and run immutable direct session through production controls",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "hybrid",
+      "owner": "features/delegation",
+      "requirement": "direct-with-orchestrator creation and managed orchestrator topology",
+      "scenario": "workspace-legacy"
+    },
+    {
+      "id": "legacy",
+      "owner": "features/ui-policy",
+      "requirement": "opt-in legacy orchestrator creation, preserved defaults and panels",
+      "scenario": "workspace-legacy"
+    },
+    {
+      "id": "orchestration-opt-in",
+      "owner": "features/ui-policy",
+      "requirement": "orchestration absent when disabled",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "managed-disabled",
+      "owner": "features/managed",
+      "requirement": "managed-host flows absent or inert when disabled",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "provider",
+      "owner": "components/modals/ConfigurationsModal.tsx",
+      "requirement": "saved local provider configuration; dummy fixture never qualifies vendor authentication",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "settings",
+      "owner": "components/modals/SettingsModal.tsx",
+      "requirement": "session settings save and authoritative readback",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "mcp",
+      "owner": "components/modals/MCPServersModal",
+      "requirement": "outgoing MCP settings and local fixture configuration",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "transcript",
+      "owner": "features/insights/transcript",
+      "requirement": "streaming and persisted transcript reload",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "goals",
+      "owner": "components/inspector/GoalControls.tsx",
+      "requirement": "durable goal creation and versioned pause/readback",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "approvals",
+      "owner": "features/permissions",
+      "requirement": "real pending tool request and production approval controls",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "delegation",
+      "owner": "features/delegation",
+      "requirement": "traditional child and managed-orchestrator transcript navigation",
+      "scenario": "workspace-legacy"
+    },
+    {
+      "id": "files",
+      "owner": "components/inspector/FilesView.tsx",
+      "requirement": "working tree files and highlighted source",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "git",
+      "owner": "components/inspector/FilesView.tsx",
+      "requirement": "Git status, diff and revision presentation",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "css-layout",
+      "owner": "ui/tokens.css",
+      "requirement": "modern CSS/Tailwind computed layout and bounds",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "resize-zoom",
+      "owner": "components/pages/SessionPage.tsx",
+      "requirement": "native window resize and WKWebView page zoom",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "fonts-chunks",
+      "owner": "runtime/NativePresentationRoot.tsx",
+      "requirement": "production local font and lazy chunk requests",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "markdown-math",
+      "owner": "lib/markdown-renderer.tsx",
+      "requirement": "Markdown table, MathJax font request and code highlighting",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "visible-paint",
+      "owner": "hooks/useTranscriptReveal.ts",
+      "requirement": "visible, painting actual WKWebView and inspected native screenshots",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "offline-assets",
+      "owner": "runtime/NativePresentationRoot.tsx",
+      "requirement": "all exercised resources served from isolated loopback without internet",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "links",
+      "owner": "lib/markdown-renderer.tsx",
+      "requirement": "safe internal navigation and external link behavior",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "overlays-focus",
+      "owner": "ui/layer-stack.ts",
+      "requirement": "modal/popover bounds, inertness, dismissal and focus return",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "synthetic-composition",
+      "owner": "components/inspector/ChatInputBox.tsx",
+      "requirement": "synthetic IME guard characterization only",
+      "scenario": "workspace-direct"
+    },
+    {
+      "id": "real-keyboard",
+      "owner": "components/inspector/ChatInputBox.tsx",
+      "requirement": "actual Mac keyboard navigation and editing",
+      "method": "physical-input"
+    },
+    {
+      "id": "real-cjk",
+      "owner": "components/inspector/ChatInputBox.tsx",
+      "requirement": "real CJK input-method composition without premature submission",
+      "method": "physical-input"
+    },
+    {
+      "id": "rich-selection-clipboard",
+      "owner": "lib/markdown-renderer.tsx",
+      "requirement": "selectable rich text and actual Mac copy/paste",
+      "method": "physical-input"
+    },
+    {
+      "id": "voiceover",
+      "owner": "ui/layer-stack.ts",
+      "requirement": "VoiceOver accessibility navigation of production flows",
+      "method": "voiceover"
+    },
+    {
+      "id": "lifecycle-cleanup",
+      "owner": "desktop/macos/PreviewSmoke.swift",
+      "requirement": "failure, active close, exact owned-process and profile cleanup",
+      "scenario": "baseline-smoke"
+    }
+  ]
+}

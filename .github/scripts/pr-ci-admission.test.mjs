@@ -1,3 +1,5 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
+import {reverseNativeQualification} from './native-qualification-wiring.mjs';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -9,7 +11,9 @@ import {aptProducerSteps} from './browser-apt-wiring.mjs';
 import {reverseParallelApt} from './browser-apt-parallel-wiring.mjs';
 import {reverseElapsedEvidence} from './elapsed-evidence-wiring.mjs';
 const stable=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml','utf8'));
-const parentHash="bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2";
+reverseNativeQualification(stable);
+// Full pre-admission graph plus the required startup-custody and native-auth fixture controls.
+const parentHash="9faf04f1f32d65e2249fbf855c8158e2b24faa652b34d9b370cd6f73542ac167";
 const sealedPins={
   ".github/scripts/ci-admission.py": "afa1c74728cdf5646de034a553c32bc5af6552ecc6fdf0bacab67eca31aef04a",
   ".github/scripts/ci-admission-bootstrap.py": "df4d0eac66df699dfae980bdca700f160a383d2a5d1a501b6232f1c049cf0ff0",
@@ -40,7 +44,7 @@ function state(mode='full'){
 function group(source,g){return source.replace(/\$\{\{([\s\S]*?)\}\}/g,(_,body)=>expression(body,{github:g}));}
 
 test('FULL split projection preserves the landed graph; six authority pins unchanged and two explicitly rebound',()=>{
- const normalized=structuredClone(stable);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
+ const normalized=structuredClone(stable);reverseAssetTokens(normalized);reverseAdmission(normalized);reverseParallelApt(normalized,aptProducerSteps);reverseElapsedEvidence(normalized);assert.equal(digest(normalized),parentHash);
  for(const [path,expected]of Object.entries(sealedPins))assert.equal(createHash('sha256').update(fs.readFileSync(path)).digest('hex'),expected,path);
 });
 test('actual pre-prepare routing isolates edits and ready before pending-source replacement',()=>{
@@ -109,6 +113,6 @@ test('normalization rejects changed trust, defaults, coverage, APT or extra work
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload selected elapsed interval evidence')['continue-on-error']=true,
   w=>w.jobs['browser-shards'].steps.find(s=>s.name==='Upload browser shard failure artifacts').with.path='crates/nac-server/web/test-results']){
   const value=structuredClone(stable);mutate(value);
-  assert.throws(()=>{reverseAdmission(value);reverseParallelApt(value,aptProducerSteps);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
+  assert.throws(()=>{reverseAssetTokens(value);reverseAdmission(value);reverseParallelApt(value,aptProducerSteps);reverseElapsedEvidence(value);assert.equal(digest(value),parentHash);});
  }
 });

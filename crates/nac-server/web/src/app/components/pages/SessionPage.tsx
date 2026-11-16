@@ -4,6 +4,7 @@ import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import {
+  Activity,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -11,6 +12,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { useDesktopVisible } from "@/app/features/desktop-commands/visibility";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Modal } from "@/app/atoms";
@@ -95,6 +97,7 @@ function useAutoSshConnect(
 
 /** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
 export default function SessionPage() {
+  const desktopVisible = useDesktopVisible();
   const {
     useSidePanelExpanded,
     useSidePanelCollapsed,
@@ -417,10 +420,12 @@ export default function SessionPage() {
   );
 
   return (
-    <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
-      <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
-        {page}
-      </InsightsNavigationProvider>
-    </TranscriptModelProvider>
+    <Activity mode={desktopVisible ? "visible" : "hidden"}>
+      <TranscriptModelProvider sessionId={id} snapshot={snapshot}>
+        <InsightsNavigationProvider sessionId={id} panels={sessionPanels} focusPanel={focusPanel}>
+          {page}
+        </InsightsNavigationProvider>
+      </TranscriptModelProvider>
+    </Activity>
   );
 }

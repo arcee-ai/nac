@@ -621,7 +621,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
       // 45-second test budget, even if the finite output finishes during setup.
       " time.sleep(45)",
       "except KeyboardInterrupt:",
-      " os.write(1,b'\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
+      " os.write(1,b'\\x18\\r\\nNOISE-SIGINT-OBSERVED\\r\\n')",
       " raise",
     ].join("\n") + "\n",
   );
@@ -699,9 +699,8 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
         expect(afterHistory.rows).toBe(before.rows);
       }),
     ).toBe("SELECT-WHILE-OUTPUT");
-    // The controlled history race is complete. Retire its interception before
-    // timing unrelated production observer traffic; keep all race assertions.
-    await page.unroute(historyPattern, holdHistory);
+    // The history promise is released. Keep interception stable until terminal
+    // cleanup rather than changing global routing under an in-flight pull.
     const resizedAt = performance.now();
     await page.setViewportSize({ width: 1050, height: 650 });
     await expect
@@ -744,13 +743,13 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
     expect(measurements.closeSettledMs).toBeLessThan(1500);
   } finally {
     releaseHistory();
-    await page.unroute(historyPattern, holdHistory);
     await page.evaluate(() => {
       window.terminalRenderedMarker?.dispose();
       delete window.terminalRenderedMarker;
     });
     await api.terminateTerminal(session, terminal);
     await Promise.allSettled(pending);
+    await page.unroute(historyPattern, holdHistory);
     const heartbeat = await page.evaluate(() => {
       const value = (window as unknown as { terminalHeartbeat: { active: boolean } })
         .terminalHeartbeat;
