@@ -1,29 +1,29 @@
 import { n as e } from "./rolldown-runtime-QGRDbDUS.js";
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/schema.js
+// node_modules/property-information/lib/util/schema.js
 var t = class {
 	constructor(e, t, n) {
 		this.normal = t, this.property = e, n && (this.space = n);
 	}
 };
 t.prototype.normal = {}, t.prototype.property = {}, t.prototype.space = void 0;
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/merge.js
+// node_modules/property-information/lib/util/merge.js
 function n(e, n) {
 	let r = {}, i = {};
 	for (let t of e) Object.assign(r, t.property), Object.assign(i, t.normal);
 	return new t(r, i, n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/normalize.js
+// node_modules/property-information/lib/normalize.js
 function r(e) {
 	return e.toLowerCase();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/info.js
+// node_modules/property-information/lib/util/info.js
 var i = class {
 	constructor(e, t) {
 		this.attribute = t, this.property = e;
 	}
 };
 i.prototype.attribute = "", i.prototype.booleanish = !1, i.prototype.boolean = !1, i.prototype.commaOrSpaceSeparated = !1, i.prototype.commaSeparated = !1, i.prototype.defined = !1, i.prototype.mustUseProperty = !1, i.prototype.number = !1, i.prototype.overloadedBoolean = !1, i.prototype.property = "", i.prototype.spaceSeparated = !1, i.prototype.space = void 0;
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/types.js
+// node_modules/property-information/lib/util/types.js
 var a = /* @__PURE__ */ e({
 	boolean: () => s,
 	booleanish: () => c,
@@ -36,7 +36,7 @@ var a = /* @__PURE__ */ e({
 function m() {
 	return 2 ** ++o;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/defined-info.js
+// node_modules/property-information/lib/util/defined-info.js
 var h = Object.keys(a), g = class extends i {
 	constructor(e, t, n, r) {
 		let i = -1;
@@ -50,7 +50,7 @@ g.prototype.defined = !0;
 function _(e, t, n) {
 	n && (e[t] = n);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/create.js
+// node_modules/property-information/lib/util/create.js
 function v(e) {
 	let n = {}, i = {};
 	for (let [t, a] of Object.entries(e.properties)) {
@@ -59,7 +59,7 @@ function v(e) {
 	}
 	return new t(n, i, e.space);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/aria.js
+// node_modules/property-information/lib/aria.js
 var y = v({
 	properties: {
 		ariaActiveDescendant: null,
@@ -116,15 +116,15 @@ var y = v({
 		return t === "role" ? t : "aria-" + t.slice(4).toLowerCase();
 	}
 });
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/property-information/lib/util/case-sensitive-transform.js
 function b(e, t) {
 	return t in e ? e[t] : t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/property-information/lib/util/case-insensitive-transform.js
 function x(e, t) {
 	return b(e, t.toLowerCase());
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/lib/html.js
+// node_modules/property-information/lib/html.js
 var S = v({
 	attributes: {
 		acceptcharset: "accept-charset",
@@ -1058,7 +1058,7 @@ function j(e) {
 function M(e) {
 	return e.charAt(1).toUpperCase();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/property-information/index.js
+// node_modules/property-information/index.js
 var N = n([
 	y,
 	S,
@@ -1072,8 +1072,16 @@ var N = n([
 	T,
 	E
 ], "svg");
-// ../../../../pr-469/crates/nac-server/web/node_modules/comma-separated-tokens/index.js
-function F(e) {
+// node_modules/ccount/index.js
+function F(e, t) {
+	let n = String(e);
+	if (typeof t != "string") throw TypeError("Expected character");
+	let r = 0, i = n.indexOf(t);
+	for (; i !== -1;) r++, i = n.indexOf(t, i + t.length);
+	return r;
+}
+// node_modules/comma-separated-tokens/index.js
+function I(e) {
 	let t = [], n = String(e || ""), r = n.indexOf(","), i = 0, a = !1;
 	for (; !a;) {
 		r === -1 && (r = n.length, a = !0);
@@ -1082,32 +1090,24 @@ function F(e) {
 	}
 	return t;
 }
-function I(e, t) {
+function L(e, t) {
 	let n = t || {};
 	return (e[e.length - 1] === "" ? [...e, ""] : e).join((n.padRight ? " " : "") + "," + (n.padLeft === !1 ? "" : " ")).trim();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/space-separated-tokens/index.js
-function L(e) {
+// node_modules/space-separated-tokens/index.js
+function R(e) {
 	let t = String(e || "").trim();
 	return t ? t.split(/[ \t\n\r\f]+/g) : [];
 }
-function R(e) {
+function z(e) {
 	return e.join(" ").trim();
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-whitespace/lib/index.js
-var z = /[ \t\n\f\r]/g;
-function B(e) {
-	return typeof e == "object" ? e.type === "text" && V(e.value) : V(e);
-}
+// node_modules/hast-util-whitespace/lib/index.js
+var B = /[ \t\n\f\r]/g;
 function V(e) {
-	return e.replace(z, "") === "";
+	return typeof e == "object" ? e.type === "text" && H(e.value) : H(e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/ccount/index.js
-function H(e, t) {
-	let n = String(e);
-	if (typeof t != "string") throw TypeError("Expected character");
-	let r = 0, i = n.indexOf(t);
-	for (; i !== -1;) r++, i = n.indexOf(t, i + t.length);
-	return r;
+function H(e) {
+	return e.replace(B, "") === "";
 }
-export { F as a, P as c, R as i, A as l, B as n, I as o, L as r, N as s, H as t, r as u };
+export { L as a, P as c, I as i, A as l, R as n, F as o, z as r, N as s, V as t, r as u };

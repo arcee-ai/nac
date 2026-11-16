@@ -1,56 +1,42 @@
-import { c as e, i as t, l as n, n as r, o as i, s as a, t as o } from "./ccount-DroVdA6L.js";
-// ../../../../pr-469/crates/nac-server/web/node_modules/zwitch/index.js
-var s = {}.hasOwnProperty;
-function c(e, t) {
-	let n = t || {};
-	function r(t, ...n) {
-		let i = r.invalid, a = r.handlers;
-		if (t && s.call(t, e)) {
-			let n = String(t[e]);
-			i = s.call(a, n) ? a[n] : r.unknown;
-		}
-		if (i) return i.call(this, t, ...n);
-	}
-	return r.handlers = n.handlers || {}, r.invalid = n.invalid, r.unknown = n.unknown, r;
-}
-// ../../../../pr-469/crates/nac-server/web/node_modules/@shikijs/types/dist/index.mjs
-var l = class extends Error {
+import { a as e, c as t, l as n, o as r, r as i, s as a, t as o } from "./lib-rX7C_D5H.js";
+// node_modules/@shikijs/types/dist/index.mjs
+var s = class extends Error {
 	constructor(e) {
 		super(e), this.name = "ShikiError";
 	}
 };
-// ../../../../pr-469/crates/nac-server/web/node_modules/@shikijs/vscode-textmate/dist/index.js
+// node_modules/@shikijs/vscode-textmate/dist/index.js
+function c(e) {
+	return l(e);
+}
+function l(e) {
+	return Array.isArray(e) ? u(e) : e instanceof RegExp ? e : typeof e == "object" ? d(e) : e;
+}
 function u(e) {
-	return d(e);
+	let t = [];
+	for (let n = 0, r = e.length; n < r; n++) t[n] = l(e[n]);
+	return t;
 }
 function d(e) {
-	return Array.isArray(e) ? f(e) : e instanceof RegExp ? e : typeof e == "object" ? p(e) : e;
-}
-function f(e) {
-	let t = [];
-	for (let n = 0, r = e.length; n < r; n++) t[n] = d(e[n]);
-	return t;
-}
-function p(e) {
 	let t = {};
-	for (let n in e) t[n] = d(e[n]);
+	for (let n in e) t[n] = l(e[n]);
 	return t;
 }
-function m(e, ...t) {
+function f(e, ...t) {
 	return t.forEach((t) => {
 		for (let n in t) e[n] = t[n];
 	}), e;
 }
-function h(e) {
+function p(e) {
 	let t = ~e.lastIndexOf("/") || ~e.lastIndexOf("\\");
-	return t === 0 ? e : ~t === e.length - 1 ? h(e.substring(0, e.length - 1)) : e.substr(~t + 1);
+	return t === 0 ? e : ~t === e.length - 1 ? p(e.substring(0, e.length - 1)) : e.substr(~t + 1);
 }
-var g = /\$(\d+)|\${(\d+):\/(downcase|upcase)}/g, _ = class {
+var m = /\$(\d+)|\${(\d+):\/(downcase|upcase)}/g, h = class {
 	static hasCaptures(e) {
-		return e !== null && (g.lastIndex = 0, g.test(e));
+		return e !== null && (m.lastIndex = 0, m.test(e));
 	}
 	static replaceCaptures(e, t, n) {
-		return e.replace(g, (e, r, i, a) => {
+		return e.replace(m, (e, r, i, a) => {
 			let o = n[parseInt(r || i, 10)];
 			if (o) {
 				let e = t.substring(o.start, o.end);
@@ -64,30 +50,30 @@ var g = /\$(\d+)|\${(\d+):\/(downcase|upcase)}/g, _ = class {
 		});
 	}
 };
-function v(e, t) {
+function g(e, t) {
 	return e < t ? -1 : +(e > t);
 }
-function ee(e, t) {
+function _(e, t) {
 	if (e === null && t === null) return 0;
 	if (!e) return -1;
 	if (!t) return 1;
 	let n = e.length, r = t.length;
 	if (n === r) {
 		for (let r = 0; r < n; r++) {
-			let n = v(e[r], t[r]);
+			let n = g(e[r], t[r]);
 			if (n !== 0) return n;
 		}
 		return 0;
 	}
 	return n - r;
 }
-function te(e) {
+function v(e) {
 	return !!(/^#[0-9a-f]{6}$/i.test(e) || /^#[0-9a-f]{8}$/i.test(e) || /^#[0-9a-f]{3}$/i.test(e) || /^#[0-9a-f]{4}$/i.test(e));
 }
-function ne(e) {
+function ee(e) {
 	return e.replace(/[\-\\\{\}\*\+\?\|\^\$\.\,\[\]\(\)\#\s]/g, "\\$&");
 }
-var re = class {
+var te = class {
 	constructor(e) {
 		this.fn = e;
 	}
@@ -102,12 +88,12 @@ var re = class {
 		this._colorMap = e, this._defaults = t, this._root = n;
 	}
 	static createFromRawTheme(e, t) {
-		return this.createFromParsedTheme(ce(e), t);
+		return this.createFromParsedTheme(oe(e), t);
 	}
 	static createFromParsedTheme(e, t) {
-		return ue(e, t);
+		return ce(e, t);
 	}
-	_cachedMatchRoot = new re((e) => this._root.match(e));
+	_cachedMatchRoot = new te((e) => this._root.match(e));
 	getColorMap() {
 		return this._colorMap.getColorMap();
 	}
@@ -116,10 +102,10 @@ var re = class {
 	}
 	match(e) {
 		if (e === null) return this._defaults;
-		let t = e.scopeName, n = this._cachedMatchRoot.get(t).find((t) => ae(e.parent, t.parentScopes));
-		return n ? new se(n.fontStyle, n.foreground, n.background) : null;
+		let t = e.scopeName, n = this._cachedMatchRoot.get(t).find((t) => re(e.parent, t.parentScopes));
+		return n ? new ae(n.fontStyle, n.foreground, n.background) : null;
 	}
-}, ie = class e {
+}, ne = class e {
 	constructor(e, t) {
 		this.parent = e, this.scopeName = t;
 	}
@@ -152,7 +138,7 @@ var re = class {
 		return n === e ? t.reverse() : void 0;
 	}
 };
-function ae(e, t) {
+function re(e, t) {
 	if (t.length === 0) return !0;
 	for (let n = 0; n < t.length; n++) {
 		let r = t[n], i = !1;
@@ -160,7 +146,7 @@ function ae(e, t) {
 			if (n === t.length - 1) return !1;
 			r = t[++n], i = !0;
 		}
-		for (; e && !oe(e.scopeName, r);) {
+		for (; e && !ie(e.scopeName, r);) {
 			if (i) return !1;
 			e = e.parent;
 		}
@@ -169,15 +155,15 @@ function ae(e, t) {
 	}
 	return !0;
 }
-function oe(e, t) {
+function ie(e, t) {
 	return t === e || e.startsWith(t) && e[t.length] === ".";
 }
-var se = class {
+var ae = class {
 	constructor(e, t, n) {
 		this.fontStyle = e, this.foregroundId = t, this.backgroundId = n;
 	}
 };
-function ce(e) {
+function oe(e) {
 	if (!e || !e.settings || !Array.isArray(e.settings)) return [];
 	let t = e.settings, n = [], r = 0;
 	for (let e = 0, i = t.length; e < i; e++) {
@@ -206,39 +192,39 @@ function ce(e) {
 			}
 		}
 		let s = null;
-		typeof i.settings.foreground == "string" && te(i.settings.foreground) && (s = i.settings.foreground);
+		typeof i.settings.foreground == "string" && v(i.settings.foreground) && (s = i.settings.foreground);
 		let c = null;
-		typeof i.settings.background == "string" && te(i.settings.background) && (c = i.settings.background);
+		typeof i.settings.background == "string" && v(i.settings.background) && (c = i.settings.background);
 		for (let t = 0, i = a.length; t < i; t++) {
 			let i = a[t].trim().split(" "), l = i[i.length - 1], u = null;
-			i.length > 1 && (u = i.slice(0, i.length - 1), u.reverse()), n[r++] = new le(l, u, e, o, s, c);
+			i.length > 1 && (u = i.slice(0, i.length - 1), u.reverse()), n[r++] = new se(l, u, e, o, s, c);
 		}
 	}
 	return n;
 }
-var le = class {
+var se = class {
 	constructor(e, t, n, r, i, a) {
 		this.scope = e, this.parentScopes = t, this.index = n, this.fontStyle = r, this.foreground = i, this.background = a;
 	}
 }, b = /* @__PURE__ */ ((e) => (e[e.NotSet = -1] = "NotSet", e[e.None = 0] = "None", e[e.Italic = 1] = "Italic", e[e.Bold = 2] = "Bold", e[e.Underline = 4] = "Underline", e[e.Strikethrough = 8] = "Strikethrough", e))(b || {});
-function ue(e, t) {
+function ce(e, t) {
 	e.sort((e, t) => {
-		let n = v(e.scope, t.scope);
-		return n !== 0 || (n = ee(e.parentScopes, t.parentScopes), n !== 0) ? n : e.index - t.index;
+		let n = g(e.scope, t.scope);
+		return n !== 0 || (n = _(e.parentScopes, t.parentScopes), n !== 0) ? n : e.index - t.index;
 	});
 	let n = 0, r = "#000000", i = "#ffffff";
 	for (; e.length >= 1 && e[0].scope === "";) {
 		let t = e.shift();
 		t.fontStyle !== -1 && (n = t.fontStyle), t.foreground !== null && (r = t.foreground), t.background !== null && (i = t.background);
 	}
-	let a = new de(t), o = new se(n, a.getId(r), a.getId(i)), s = new me(new pe(0, null, -1, 0, 0), []);
+	let a = new le(t), o = new ae(n, a.getId(r), a.getId(i)), s = new fe(new de(0, null, -1, 0, 0), []);
 	for (let t = 0, n = e.length; t < n; t++) {
 		let n = e[t];
 		s.insert(0, n.scope, n.parentScopes, n.fontStyle, a.getId(n.foreground), a.getId(n.background));
 	}
 	return new y(a, o, s);
 }
-var de = class {
+var le = class {
 	_isFrozen;
 	_lastColorId;
 	_id2color;
@@ -260,14 +246,14 @@ var de = class {
 	getColorMap() {
 		return this._id2color.slice(0);
 	}
-}, fe = Object.freeze([]), pe = class e {
+}, ue = Object.freeze([]), de = class e {
 	scopeDepth;
 	parentScopes;
 	fontStyle;
 	foreground;
 	background;
 	constructor(e, t, n, r, i) {
-		this.scopeDepth = e, this.parentScopes = t || fe, this.fontStyle = n, this.foreground = r, this.background = i;
+		this.scopeDepth = e, this.parentScopes = t || ue, this.fontStyle = n, this.foreground = r, this.background = i;
 	}
 	clone() {
 		return new e(this.scopeDepth, this.parentScopes, this.fontStyle, this.foreground, this.background);
@@ -280,7 +266,7 @@ var de = class {
 	acceptOverwrite(e, t, n, r) {
 		this.scopeDepth > e ? console.log("how did this happen?") : this.scopeDepth = e, t !== -1 && (this.fontStyle = t), n !== 0 && (this.foreground = n), r !== 0 && (this.background = r);
 	}
-}, me = class e {
+}, fe = class e {
 	constructor(e, t = [], n = {}) {
 		this._mainRule = e, this._children = n, this._rulesWithParentScopes = t;
 	}
@@ -311,19 +297,19 @@ var de = class {
 		let s = n.indexOf("."), c, l;
 		s === -1 ? (c = n, l = "") : (c = n.substring(0, s), l = n.substring(s + 1));
 		let u;
-		this._children.hasOwnProperty(c) ? u = this._children[c] : (u = new e(this._mainRule.clone(), pe.cloneArr(this._rulesWithParentScopes)), this._children[c] = u), u.insert(t + 1, l, r, i, a, o);
+		this._children.hasOwnProperty(c) ? u = this._children[c] : (u = new e(this._mainRule.clone(), de.cloneArr(this._rulesWithParentScopes)), this._children[c] = u), u.insert(t + 1, l, r, i, a, o);
 	}
 	_doInsertHere(e, t, n, r, i) {
 		if (t === null) this._mainRule.acceptOverwrite(e, n, r, i);
 		else {
 			for (let a = 0, o = this._rulesWithParentScopes.length; a < o; a++) {
 				let o = this._rulesWithParentScopes[a];
-				if (ee(o.parentScopes, t) === 0) {
+				if (_(o.parentScopes, t) === 0) {
 					o.acceptOverwrite(e, n, r, i);
 					return;
 				}
 			}
-			n === -1 && (n = this._mainRule.fontStyle), r === 0 && (r = this._mainRule.foreground), i === 0 && (i = this._mainRule.background), this._rulesWithParentScopes.push(new pe(e, t, n, r, i));
+			n === -1 && (n = this._mainRule.fontStyle), r === 0 && (r = this._mainRule.foreground), i === 0 && (i = this._mainRule.background), this._rulesWithParentScopes.push(new de(e, t, n, r, i));
 		}
 	}
 }, x = class e {
@@ -360,17 +346,17 @@ var de = class {
 	}
 	static set(t, n, r, i, a, o, s) {
 		let c = e.getLanguageId(t), l = e.getTokenType(t), u = +!!e.containsBalancedBrackets(t), d = e.getFontStyle(t), f = e.getForeground(t), p = e.getBackground(t);
-		return n !== 0 && (c = n), r !== 8 && (l = ge(r)), i !== null && (u = +!!i), a !== -1 && (d = a), o !== 0 && (f = o), s !== 0 && (p = s), (c | 0 | l << 8 | u << 10 | d << 11 | f << 15 | p << 24) >>> 0;
+		return n !== 0 && (c = n), r !== 8 && (l = me(r)), i !== null && (u = +!!i), a !== -1 && (d = a), o !== 0 && (f = o), s !== 0 && (p = s), (c | 0 | l << 8 | u << 10 | d << 11 | f << 15 | p << 24) >>> 0;
 	}
 };
-function he(e) {
+function pe(e) {
 	return e;
 }
-function ge(e) {
+function me(e) {
 	return e;
 }
 function S(e, t) {
-	let n = [], r = ve(e), i = r.next();
+	let n = [], r = ge(e), i = r.next();
 	for (; i !== null;) {
 		let e = 0;
 		if (i.length === 2 && i.charAt(1) === ":") {
@@ -404,11 +390,11 @@ function S(e, t) {
 			let e = s();
 			return i === ")" && (i = r.next()), e;
 		}
-		if (_e(i)) {
+		if (he(i)) {
 			let e = [];
 			do
 				e.push(i), i = r.next();
-			while (_e(i));
+			while (he(i));
 			return (n) => t(e, n);
 		}
 		return null;
@@ -429,10 +415,10 @@ function S(e, t) {
 		return (t) => e.some((e) => e(t));
 	}
 }
-function _e(e) {
+function he(e) {
 	return !!e && !!e.match(/[\w\.:]+/);
 }
-function ve(e) {
+function ge(e) {
 	let t = /([LR]:|[\w\.:][\w\.:\-]*|[\,\|\-\(\)])/g, n = t.exec(e);
 	return { next: () => {
 		if (!n) return null;
@@ -440,7 +426,7 @@ function ve(e) {
 		return n = t.exec(e), r;
 	} };
 }
-function ye(e) {
+function _e(e) {
 	typeof e.dispose == "function" && e.dispose();
 }
 var C = class {
@@ -450,14 +436,14 @@ var C = class {
 	toKey() {
 		return this.scopeName;
 	}
-}, be = class {
+}, ve = class {
 	constructor(e, t) {
 		this.scopeName = e, this.ruleName = t;
 	}
 	toKey() {
 		return `${this.scopeName}#${this.ruleName}`;
 	}
-}, xe = class {
+}, ye = class {
 	_references = [];
 	_seenReferenceKeys = /* @__PURE__ */ new Set();
 	get references() {
@@ -468,7 +454,7 @@ var C = class {
 		let t = e.toKey();
 		this._seenReferenceKeys.has(t) || (this._seenReferenceKeys.add(t), this._references.push(e));
 	}
-}, Se = class {
+}, be = class {
 	constructor(e, t) {
 		this.repo = e, this.initialScopeName = t, this.seenFullScopeRequests.add(this.initialScopeName), this.Q = [new C(this.initialScopeName)];
 	}
@@ -478,8 +464,8 @@ var C = class {
 	processQueue() {
 		let e = this.Q;
 		this.Q = [];
-		let t = new xe();
-		for (let n of e) Ce(n, this.initialScopeName, this.repo, t);
+		let t = new ye();
+		for (let n of e) xe(n, this.initialScopeName, this.repo, t);
 		for (let e of t.references) if (e instanceof C) {
 			if (this.seenFullScopeRequests.has(e.scopeName)) continue;
 			this.seenFullScopeRequests.add(e.scopeName), this.Q.push(e);
@@ -489,7 +475,7 @@ var C = class {
 		}
 	}
 };
-function Ce(e, t, n, r) {
+function xe(e, t, n, r) {
 	let i = n.lookup(e.scopeName);
 	if (!i) {
 		if (e.scopeName === t) throw Error(`No grammar provided for <${t}>`);
@@ -499,7 +485,7 @@ function Ce(e, t, n, r) {
 	e instanceof C ? w({
 		baseGrammar: a,
 		selfGrammar: i
-	}, r) : we(e.ruleName, {
+	}, r) : Se(e.ruleName, {
 		baseGrammar: a,
 		selfGrammar: i,
 		repository: i.repository
@@ -507,7 +493,7 @@ function Ce(e, t, n, r) {
 	let o = n.injections(e.scopeName);
 	if (o) for (let e of o) r.add(new C(e));
 }
-function we(e, t, n) {
+function Se(e, t, n) {
 	if (t.repository && t.repository[e]) {
 		let r = t.repository[e];
 		T([r], t, n);
@@ -526,14 +512,14 @@ function T(e, t, n) {
 	for (let r of e) {
 		if (n.visitedRule.has(r)) continue;
 		n.visitedRule.add(r);
-		let e = r.repository ? m({}, t.repository, r.repository) : t.repository;
+		let e = r.repository ? f({}, t.repository, r.repository) : t.repository;
 		Array.isArray(r.patterns) && T(r.patterns, {
 			...t,
 			repository: e
 		}, n);
 		let i = r.include;
 		if (!i) continue;
-		let a = Ae(i);
+		let a = Oe(i);
 		switch (a.kind) {
 			case 0:
 				w({
@@ -545,7 +531,7 @@ function T(e, t, n) {
 				w(t, n);
 				break;
 			case 2:
-				we(a.ruleName, {
+				Se(a.ruleName, {
 					...t,
 					repository: e
 				}, n);
@@ -559,42 +545,42 @@ function T(e, t, n) {
 						selfGrammar: r,
 						repository: e
 					};
-					a.kind === 4 ? we(a.ruleName, i, n) : w(i, n);
-				} else a.kind === 4 ? n.add(new be(a.scopeName, a.ruleName)) : n.add(new C(a.scopeName));
+					a.kind === 4 ? Se(a.ruleName, i, n) : w(i, n);
+				} else a.kind === 4 ? n.add(new ve(a.scopeName, a.ruleName)) : n.add(new C(a.scopeName));
 		}
 	}
 }
-var Te = class {
+var Ce = class {
 	kind = 0;
-}, Ee = class {
+}, we = class {
 	kind = 1;
-}, De = class {
+}, Te = class {
 	constructor(e) {
 		this.ruleName = e;
 	}
 	kind = 2;
-}, Oe = class {
+}, Ee = class {
 	constructor(e) {
 		this.scopeName = e;
 	}
 	kind = 3;
-}, ke = class {
+}, De = class {
 	constructor(e, t) {
 		this.scopeName = e, this.ruleName = t;
 	}
 	kind = 4;
 };
-function Ae(e) {
-	if (e === "$base") return new Te();
-	if (e === "$self") return new Ee();
+function Oe(e) {
+	if (e === "$base") return new Ce();
+	if (e === "$self") return new we();
 	let t = e.indexOf("#");
-	return t === -1 ? new Oe(e) : t === 0 ? new De(e.substring(1)) : new ke(e.substring(0, t), e.substring(t + 1));
+	return t === -1 ? new Ee(e) : t === 0 ? new Te(e.substring(1)) : new De(e.substring(0, t), e.substring(t + 1));
 }
-var je = /\\(\d+)/, Me = /\\(\d+)/g, Ne = -1, Pe = -2;
-function Fe(e) {
+var ke = /\\(\d+)/, Ae = /\\(\d+)/g, je = -1, Me = -2;
+function Ne(e) {
 	return e;
 }
-function Ie(e) {
+function Pe(e) {
 	return e;
 }
 var E = class {
@@ -605,19 +591,19 @@ var E = class {
 	_contentNameIsCapturing;
 	_contentName;
 	constructor(e, t, n, r) {
-		this.$location = e, this.id = t, this._name = n || null, this._nameIsCapturing = _.hasCaptures(this._name), this._contentName = r || null, this._contentNameIsCapturing = _.hasCaptures(this._contentName);
+		this.$location = e, this.id = t, this._name = n || null, this._nameIsCapturing = h.hasCaptures(this._name), this._contentName = r || null, this._contentNameIsCapturing = h.hasCaptures(this._contentName);
 	}
 	get debugName() {
-		let e = this.$location ? `${h(this.$location.filename)}:${this.$location.line}` : "unknown";
+		let e = this.$location ? `${p(this.$location.filename)}:${this.$location.line}` : "unknown";
 		return `${this.constructor.name}#${this.id} @ ${e}`;
 	}
 	getName(e, t) {
-		return !this._nameIsCapturing || this._name === null || e === null || t === null ? this._name : _.replaceCaptures(this._name, e, t);
+		return !this._nameIsCapturing || this._name === null || e === null || t === null ? this._name : h.replaceCaptures(this._name, e, t);
 	}
 	getContentName(e, t) {
-		return !this._contentNameIsCapturing || this._contentName === null ? this._contentName : _.replaceCaptures(this._contentName, e, t);
+		return !this._contentNameIsCapturing || this._contentName === null ? this._contentName : h.replaceCaptures(this._contentName, e, t);
 	}
-}, Le = class extends E {
+}, Fe = class extends E {
 	retokenizeCapturedWithRuleId;
 	constructor(e, t, n, r, i) {
 		super(e, t, n, r), this.retokenizeCapturedWithRuleId = i;
@@ -632,7 +618,7 @@ var E = class {
 	compileAG(e, t, n, r) {
 		throw Error("Not supported!");
 	}
-}, Re = class extends E {
+}, Ie = class extends E {
 	_match;
 	captures;
 	_cachedCompiledPatterns;
@@ -657,7 +643,7 @@ var E = class {
 	_getCachedCompiledPatterns(e) {
 		return this._cachedCompiledPatterns || (this._cachedCompiledPatterns = new O(), this.collectPatterns(e, this._cachedCompiledPatterns)), this._cachedCompiledPatterns;
 	}
-}, ze = class extends E {
+}, Le = class extends E {
 	hasMissingPatterns;
 	patterns;
 	_cachedCompiledPatterns;
@@ -679,7 +665,7 @@ var E = class {
 	_getCachedCompiledPatterns(e) {
 		return this._cachedCompiledPatterns || (this._cachedCompiledPatterns = new O(), this.collectPatterns(e, this._cachedCompiledPatterns)), this._cachedCompiledPatterns;
 	}
-}, Be = class extends E {
+}, Re = class extends E {
 	_begin;
 	beginCaptures;
 	_end;
@@ -721,7 +707,7 @@ var E = class {
 		}
 		return this._end.hasBackReferences && (this.applyEndPatternLast ? this._cachedCompiledPatterns.setSource(this._cachedCompiledPatterns.length() - 1, t) : this._cachedCompiledPatterns.setSource(0, t)), this._cachedCompiledPatterns;
 	}
-}, Ve = class extends E {
+}, ze = class extends E {
 	_begin;
 	beginCaptures;
 	whileCaptures;
@@ -732,7 +718,7 @@ var E = class {
 	_cachedCompiledPatterns;
 	_cachedCompiledWhilePatterns;
 	constructor(e, t, n, r, i, a, o, s, c) {
-		super(e, t, n, r), this._begin = new D(i, this.id), this.beginCaptures = a, this.whileCaptures = s, this._while = new D(o, Pe), this.whileHasBackReferences = this._while.hasBackReferences, this.patterns = c.patterns, this.hasMissingPatterns = c.hasMissingPatterns, this._cachedCompiledPatterns = null, this._cachedCompiledWhilePatterns = null;
+		super(e, t, n, r), this._begin = new D(i, this.id), this.beginCaptures = a, this.whileCaptures = s, this._while = new D(o, Me), this.whileHasBackReferences = this._while.hasBackReferences, this.patterns = c.patterns, this.hasMissingPatterns = c.hasMissingPatterns, this._cachedCompiledPatterns = null, this._cachedCompiledWhilePatterns = null;
 	}
 	dispose() {
 		this._cachedCompiledPatterns &&= (this._cachedCompiledPatterns.dispose(), null), this._cachedCompiledWhilePatterns &&= (this._cachedCompiledWhilePatterns.dispose(), null);
@@ -771,19 +757,19 @@ var E = class {
 	_getCachedCompiledWhilePatterns(e, t) {
 		return this._cachedCompiledWhilePatterns || (this._cachedCompiledWhilePatterns = new O(), this._cachedCompiledWhilePatterns.push(this._while.hasBackReferences ? this._while.clone() : this._while)), this._while.hasBackReferences && this._cachedCompiledWhilePatterns.setSource(0, t || "￿"), this._cachedCompiledWhilePatterns;
 	}
-}, He = class e {
+}, Be = class e {
 	static createCaptureRule(e, t, n, r, i) {
-		return e.registerRule((e) => new Le(t, e, n, r, i));
+		return e.registerRule((e) => new Fe(t, e, n, r, i));
 	}
 	static getCompiledRuleId(t, n, r) {
 		return t.id || n.registerRule((i) => {
-			if (t.id = i, t.match) return new Re(t.$vscodeTextmateLocation, t.id, t.name, t.match, e._compileCaptures(t.captures, n, r));
+			if (t.id = i, t.match) return new Ie(t.$vscodeTextmateLocation, t.id, t.name, t.match, e._compileCaptures(t.captures, n, r));
 			if (t.begin === void 0) {
-				t.repository && (r = m({}, r, t.repository));
+				t.repository && (r = f({}, r, t.repository));
 				let i = t.patterns;
-				return i === void 0 && t.include && (i = [{ include: t.include }]), new ze(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, e._compilePatterns(i, n, r));
+				return i === void 0 && t.include && (i = [{ include: t.include }]), new Le(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, e._compilePatterns(i, n, r));
 			}
-			return t.while ? new Ve(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, t.begin, e._compileCaptures(t.beginCaptures || t.captures, n, r), t.while, e._compileCaptures(t.whileCaptures || t.captures, n, r), e._compilePatterns(t.patterns, n, r)) : new Be(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, t.begin, e._compileCaptures(t.beginCaptures || t.captures, n, r), t.end, e._compileCaptures(t.endCaptures || t.captures, n, r), t.applyEndPatternLast, e._compilePatterns(t.patterns, n, r));
+			return t.while ? new ze(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, t.begin, e._compileCaptures(t.beginCaptures || t.captures, n, r), t.while, e._compileCaptures(t.whileCaptures || t.captures, n, r), e._compilePatterns(t.patterns, n, r)) : new Re(t.$vscodeTextmateLocation, t.id, t.name, t.contentName, t.begin, e._compileCaptures(t.beginCaptures || t.captures, n, r), t.end, e._compileCaptures(t.endCaptures || t.captures, n, r), t.applyEndPatternLast, e._compilePatterns(t.patterns, n, r));
 		}), t.id;
 	}
 	static _compileCaptures(t, n, r) {
@@ -809,7 +795,7 @@ var E = class {
 		if (t) for (let a = 0, o = t.length; a < o; a++) {
 			let o = t[a], s = -1;
 			if (o.include) {
-				let t = Ae(o.include);
+				let t = Oe(o.include);
 				switch (t.kind) {
 					case 0:
 					case 1:
@@ -832,7 +818,7 @@ var E = class {
 			} else s = e.getCompiledRuleId(o, n, r);
 			if (s !== -1) {
 				let e = n.getRule(s), t = !1;
-				if ((e instanceof ze || e instanceof Be || e instanceof Ve) && e.hasMissingPatterns && e.patterns.length === 0 && (t = !0), t) continue;
+				if ((e instanceof Le || e instanceof Re || e instanceof ze) && e.hasMissingPatterns && e.patterns.length === 0 && (t = !0), t) continue;
 				i.push(s);
 			}
 		}
@@ -856,7 +842,7 @@ var E = class {
 			}
 			this.hasAnchor = i, n === 0 ? this.source = e : (r.push(e.substring(n, t)), this.source = r.join(""));
 		} else this.hasAnchor = !1, this.source = e;
-		this._anchorCache = this.hasAnchor ? this._buildAnchorCache() : null, this.ruleId = t, this.hasBackReferences = typeof this.source == "string" && je.test(this.source);
+		this._anchorCache = this.hasAnchor ? this._buildAnchorCache() : null, this.ruleId = t, this.hasBackReferences = typeof this.source == "string" && ke.test(this.source);
 	}
 	clone() {
 		return new e(this.source, this.ruleId);
@@ -867,7 +853,7 @@ var E = class {
 	resolveBackReferences(e, t) {
 		if (typeof this.source != "string") throw Error("This method should only be called if the source is a string");
 		let n = t.map((t) => e.substring(t.start, t.end));
-		return Me.lastIndex = 0, this.source.replace(Me, (e, t) => ne(n[parseInt(t, 10)] || ""));
+		return Ae.lastIndex = 0, this.source.replace(Ae, (e, t) => ee(n[parseInt(t, 10)] || ""));
 	}
 	_buildAnchorCache() {
 		if (typeof this.source != "string") throw Error("This method should only be called if the source is a string");
@@ -917,7 +903,7 @@ var E = class {
 	compile(e) {
 		if (!this._cached) {
 			let t = this._items.map((e) => e.source);
-			this._cached = new Ue(e, t, this._items.map((e) => e.ruleId));
+			this._cached = new Ve(e, t, this._items.map((e) => e.ruleId));
 		}
 		return this._cached;
 	}
@@ -925,9 +911,9 @@ var E = class {
 		return this._hasAnchors ? t ? n ? (this._anchorCache.A1_G1 || (this._anchorCache.A1_G1 = this._resolveAnchors(e, t, n)), this._anchorCache.A1_G1) : (this._anchorCache.A1_G0 || (this._anchorCache.A1_G0 = this._resolveAnchors(e, t, n)), this._anchorCache.A1_G0) : n ? (this._anchorCache.A0_G1 || (this._anchorCache.A0_G1 = this._resolveAnchors(e, t, n)), this._anchorCache.A0_G1) : (this._anchorCache.A0_G0 || (this._anchorCache.A0_G0 = this._resolveAnchors(e, t, n)), this._anchorCache.A0_G0) : this.compile(e);
 	}
 	_resolveAnchors(e, t, n) {
-		return new Ue(e, this._items.map((e) => e.resolveAnchors(t, n)), this._items.map((e) => e.ruleId));
+		return new Ve(e, this._items.map((e) => e.resolveAnchors(t, n)), this._items.map((e) => e.ruleId));
 	}
-}, Ue = class {
+}, Ve = class {
 	constructor(e, t, n) {
 		this.regExps = t, this.rules = n, this.scanner = e.createOnigScanner(t);
 	}
@@ -947,15 +933,15 @@ var E = class {
 			captureIndices: r.captureIndices
 		} : null;
 	}
-}, We = class {
+}, He = class {
 	constructor(e, t) {
 		this.languageId = e, this.tokenType = t;
 	}
-}, Ge = class e {
+}, Ue = class e {
 	_defaultAttributes;
 	_embeddedLanguagesMatcher;
 	constructor(e, t) {
-		this._defaultAttributes = new We(e, 8), this._embeddedLanguagesMatcher = new Ke(Object.entries(t || {}));
+		this._defaultAttributes = new He(e, 8), this._embeddedLanguagesMatcher = new We(Object.entries(t || {}));
 	}
 	getDefaultAttributes() {
 		return this._defaultAttributes;
@@ -963,8 +949,8 @@ var E = class {
 	getBasicScopeAttributes(t) {
 		return t === null ? e._NULL_SCOPE_METADATA : this._getBasicScopeAttributes.get(t);
 	}
-	static _NULL_SCOPE_METADATA = new We(0, 0);
-	_getBasicScopeAttributes = new re((e) => new We(this._scopeToLanguage(e), this._toStandardTokenType(e)));
+	static _NULL_SCOPE_METADATA = new He(0, 0);
+	_getBasicScopeAttributes = new te((e) => new He(this._scopeToLanguage(e), this._toStandardTokenType(e)));
 	_scopeToLanguage(e) {
 		return this._embeddedLanguagesMatcher.match(e) || 0;
 	}
@@ -980,14 +966,14 @@ var E = class {
 		throw Error("Unexpected match for standard token type!");
 	}
 	static STANDARD_TOKEN_TYPE_REGEXP = /\b(comment|string|regex|meta\.embedded)\b/;
-}, Ke = class {
+}, We = class {
 	values;
 	scopesRegExp;
 	constructor(e) {
 		if (e.length === 0) this.values = null, this.scopesRegExp = null;
 		else {
 			this.values = new Map(e);
-			let t = e.map(([e, t]) => ne(e));
+			let t = e.map(([e, t]) => ee(e));
 			t.sort(), t.reverse(), this.scopesRegExp = RegExp(`^((${t.join(")|(")}))($|\\.)`, "");
 		}
 	}
@@ -998,31 +984,31 @@ var E = class {
 	}
 };
 typeof process < "u" && process.env.VSCODE_TEXTMATE_DEBUG;
-var qe = class {
+var Ge = class {
 	constructor(e, t) {
 		this.stack = e, this.stoppedEarly = t;
 	}
 };
-function Je(e, t, n, r, i, a, o, s) {
+function Ke(e, t, n, r, i, a, o, s) {
 	let c = t.content.length, l = !1, u = -1;
 	if (o) {
-		let o = Ye(e, t, n, r, i, a);
+		let o = qe(e, t, n, r, i, a);
 		i = o.stack, r = o.linePos, n = o.isFirstLine, u = o.anchorPosition;
 	}
 	let d = Date.now();
 	for (; !l;) {
-		if (s !== 0 && Date.now() - d > s) return new qe(i, !0);
+		if (s !== 0 && Date.now() - d > s) return new Ge(i, !0);
 		f();
 	}
-	return new qe(i, !1);
+	return new Ge(i, !1);
 	function f() {
-		let o = Xe(e, t, n, r, i, u);
+		let o = Je(e, t, n, r, i, u);
 		if (!o) {
 			a.produce(i, c), l = !0;
 			return;
 		}
 		let s = o.captureIndices, d = o.matchedRuleId, f = s && s.length > 0 ? s[0].end > r : !1;
-		if (d === Ne) {
+		if (d === je) {
 			let o = i.getRule(e);
 			a.produce(i, s[0].start), i = i.withContentNameScopesList(i.nameScopesList), k(e, t, n, i, a, o.endCaptures, s), a.produce(i, s[0].end);
 			let d = i;
@@ -1034,7 +1020,7 @@ function Je(e, t, n, r, i, a, o, s) {
 			let o = e.getRule(d);
 			a.produce(i, s[0].start);
 			let p = i, m = o.getName(t.content, s), h = i.contentNameScopesList.pushAttributed(m, e);
-			if (i = i.push(d, r, u, s[0].end === c, null, h, h), o instanceof Be) {
+			if (i = i.push(d, r, u, s[0].end === c, null, h, h), o instanceof Re) {
 				let r = o;
 				k(e, t, n, i, a, r.beginCaptures, s), a.produce(i, s[0].end), u = s[0].end;
 				let d = r.getContentName(t.content, s), m = h.pushAttributed(d, e);
@@ -1042,7 +1028,7 @@ function Je(e, t, n, r, i, a, o, s) {
 					i = i.pop(), a.produce(i, c), l = !0;
 					return;
 				}
-			} else if (o instanceof Ve) {
+			} else if (o instanceof ze) {
 				let r = o;
 				k(e, t, n, i, a, r.beginCaptures, s), a.produce(i, s[0].end), u = s[0].end;
 				let d = r.getContentName(t.content, s), m = h.pushAttributed(d, e);
@@ -1058,19 +1044,19 @@ function Je(e, t, n, r, i, a, o, s) {
 		s[0].end > r && (r = s[0].end, n = !1);
 	}
 }
-function Ye(e, t, n, r, i, a) {
+function qe(e, t, n, r, i, a) {
 	let o = i.beginRuleCapturedEOL ? 0 : -1, s = [];
 	for (let t = i; t; t = t.pop()) {
 		let n = t.getRule(e);
-		n instanceof Ve && s.push({
+		n instanceof ze && s.push({
 			rule: n,
 			stack: t
 		});
 	}
 	for (let c = s.pop(); c; c = s.pop()) {
-		let { ruleScanner: s, findOptions: l } = et(c.rule, e, c.stack.endRule, n, r === o), u = s.findNextMatchSync(t, r, l);
+		let { ruleScanner: s, findOptions: l } = Qe(c.rule, e, c.stack.endRule, n, r === o), u = s.findNextMatchSync(t, r, l);
 		if (u) {
-			if (u.ruleId !== Pe) {
+			if (u.ruleId !== Me) {
 				i = c.stack.pop();
 				break;
 			}
@@ -1087,28 +1073,28 @@ function Ye(e, t, n, r, i, a) {
 		isFirstLine: n
 	};
 }
-function Xe(e, t, n, r, i, a) {
-	let o = Ze(e, t, n, r, i, a), s = e.getInjections();
+function Je(e, t, n, r, i, a) {
+	let o = Ye(e, t, n, r, i, a), s = e.getInjections();
 	if (s.length === 0) return o;
-	let c = Qe(s, e, t, n, r, i, a);
+	let c = Xe(s, e, t, n, r, i, a);
 	if (!c) return o;
 	if (!o) return c;
 	let l = o.captureIndices[0].start, u = c.captureIndices[0].start;
 	return u < l || c.priorityMatch && u === l ? c : o;
 }
-function Ze(e, t, n, r, i, a) {
-	let { ruleScanner: o, findOptions: s } = $e(i.getRule(e), e, i.endRule, n, r === a), c = o.findNextMatchSync(t, r, s);
+function Ye(e, t, n, r, i, a) {
+	let { ruleScanner: o, findOptions: s } = Ze(i.getRule(e), e, i.endRule, n, r === a), c = o.findNextMatchSync(t, r, s);
 	return c ? {
 		captureIndices: c.captureIndices,
 		matchedRuleId: c.ruleId
 	} : null;
 }
-function Qe(e, t, n, r, i, a, o) {
+function Xe(e, t, n, r, i, a, o) {
 	let s = Number.MAX_VALUE, c = null, l, u = 0, d = a.contentNameScopesList.getScopeNames();
 	for (let a = 0, f = e.length; a < f; a++) {
 		let f = e[a];
 		if (!f.matcher(d)) continue;
-		let { ruleScanner: p, findOptions: m } = $e(t.getRule(f.ruleId), t, null, r, i === o), h = p.findNextMatchSync(n, i, m);
+		let { ruleScanner: p, findOptions: m } = Ze(t.getRule(f.ruleId), t, null, r, i === o), h = p.findNextMatchSync(n, i, m);
 		if (!h) continue;
 		let g = h.captureIndices[0].start;
 		if (!(g >= s) && (s = g, c = h.captureIndices, l = h.ruleId, u = f.priority, s === i)) break;
@@ -1119,13 +1105,13 @@ function Qe(e, t, n, r, i, a, o) {
 		matchedRuleId: l
 	} : null;
 }
-function $e(e, t, n, r, i) {
+function Ze(e, t, n, r, i) {
 	return {
 		ruleScanner: e.compileAG(t, n, r, i),
 		findOptions: 0
 	};
 }
-function et(e, t, n, r, i) {
+function Qe(e, t, n, r, i) {
 	return {
 		ruleScanner: e.compileWhileAG(t, n, r, i),
 		findOptions: 0
@@ -1143,29 +1129,29 @@ function k(e, t, n, r, i, a, o) {
 		for (; l.length > 0 && l[l.length - 1].endPos <= d.start;) i.produceFromScopes(l[l.length - 1].scopes, l[l.length - 1].endPos), l.pop();
 		if (l.length > 0 ? i.produceFromScopes(l[l.length - 1].scopes, d.start) : i.produce(r, d.start), c.retokenizeCapturedWithRuleId) {
 			let t = c.getName(s, o), a = r.contentNameScopesList.pushAttributed(t, e), l = c.getContentName(s, o), u = a.pushAttributed(l, e), f = r.push(c.retokenizeCapturedWithRuleId, d.start, -1, !1, null, a, u), p = e.createOnigString(s.substring(0, d.end));
-			Je(e, p, n && d.start === 0, d.start, f, i, !1, 0), ye(p);
+			Ke(e, p, n && d.start === 0, d.start, f, i, !1, 0), _e(p);
 			continue;
 		}
 		let f = c.getName(s, o);
 		if (f !== null) {
 			let t = (l.length > 0 ? l[l.length - 1].scopes : r.contentNameScopesList).pushAttributed(f, e);
-			l.push(new tt(t, d.end));
+			l.push(new $e(t, d.end));
 		}
 	}
 	for (; l.length > 0;) i.produceFromScopes(l[l.length - 1].scopes, l[l.length - 1].endPos), l.pop();
 }
-var tt = class {
+var $e = class {
 	scopes;
 	endPos;
 	constructor(e, t) {
 		this.scopes = e, this.endPos = t;
 	}
 };
-function nt(e, t, n, r, i, a, o, s) {
-	return new at(e, t, n, r, i, a, o, s);
+function et(e, t, n, r, i, a, o, s) {
+	return new rt(e, t, n, r, i, a, o, s);
 }
-function rt(e, t, n, r, i) {
-	let a = S(t, A), o = He.getCompiledRuleId(n, r, i.repository);
+function tt(e, t, n, r, i) {
+	let a = S(t, A), o = Be.getCompiledRuleId(n, r, i.repository);
 	for (let n of a) e.push({
 		debugSelector: t,
 		matcher: n.matcher,
@@ -1178,19 +1164,19 @@ function A(e, t) {
 	if (t.length < e.length) return !1;
 	let n = 0;
 	return e.every((e) => {
-		for (let r = n; r < t.length; r++) if (it(t[r], e)) return n = r + 1, !0;
+		for (let r = n; r < t.length; r++) if (nt(t[r], e)) return n = r + 1, !0;
 		return !1;
 	});
 }
-function it(e, t) {
+function nt(e, t) {
 	if (!e) return !1;
 	if (e === t) return !0;
 	let n = t.length;
 	return e.length > n && e.substr(0, n) === t && e[n] === ".";
 }
-var at = class {
+var rt = class {
 	constructor(e, t, n, r, i, a, o, s) {
-		if (this._rootScopeName = e, this.balancedBracketSelectors = a, this._onigLib = s, this._basicScopeAttributesProvider = new Ge(n, r), this._rootId = -1, this._lastRuleId = 0, this._ruleId2desc = [null], this._includedGrammars = {}, this._grammarRepository = o, this._grammar = ot(t, null), this._injections = null, this._tokenTypeMatchers = [], i) for (let e of Object.keys(i)) {
+		if (this._rootScopeName = e, this.balancedBracketSelectors = a, this._onigLib = s, this._basicScopeAttributesProvider = new Ue(n, r), this._rootId = -1, this._lastRuleId = 0, this._ruleId2desc = [null], this._includedGrammars = {}, this._grammarRepository = o, this._grammar = it(t, null), this._injections = null, this._tokenTypeMatchers = [], i) for (let e of Object.keys(i)) {
 			let t = S(e, A);
 			for (let n of t) this._tokenTypeMatchers.push({
 				matcher: n.matcher,
@@ -1229,13 +1215,13 @@ var at = class {
 		}, t = [], n = this._rootScopeName, r = e.lookup(n);
 		if (r) {
 			let e = r.injections;
-			if (e) for (let n in e) rt(t, n, e[n], this, r);
+			if (e) for (let n in e) tt(t, n, e[n], this, r);
 			let i = this._grammarRepository.injections(n);
 			i && i.forEach((e) => {
 				let n = this.getExternalGrammar(e);
 				if (n) {
 					let e = n.injectionSelector;
-					e && rt(t, e, n, this, n);
+					e && tt(t, e, n, this, n);
 				}
 			});
 		}
@@ -1245,17 +1231,17 @@ var at = class {
 		return this._injections === null && (this._injections = this._collectInjections()), this._injections;
 	}
 	registerRule(e) {
-		let t = ++this._lastRuleId, n = e(Fe(t));
+		let t = ++this._lastRuleId, n = e(Ne(t));
 		return this._ruleId2desc[t] = n, n;
 	}
 	getRule(e) {
-		return this._ruleId2desc[Ie(e)];
+		return this._ruleId2desc[Pe(e)];
 	}
 	getExternalGrammar(e, t) {
 		if (this._includedGrammars[e]) return this._includedGrammars[e];
 		if (this._grammarRepository) {
 			let n = this._grammarRepository.lookup(e);
-			if (n) return this._includedGrammars[e] = ot(n, t && t.$base), this._includedGrammars[e];
+			if (n) return this._includedGrammars[e] = it(n, t && t.$base), this._includedGrammars[e];
 		}
 	}
 	tokenizeLine(e, t, n = 0) {
@@ -1275,16 +1261,16 @@ var at = class {
 		};
 	}
 	_tokenize(e, t, n, r) {
-		this._rootId === -1 && (this._rootId = He.getCompiledRuleId(this._grammar.repository.$self, this, this._grammar.repository), this.getInjections());
+		this._rootId === -1 && (this._rootId = Be.getCompiledRuleId(this._grammar.repository.$self, this, this._grammar.repository), this.getInjections());
 		let i;
-		if (!t || t === st.NULL) {
+		if (!t || t === at.NULL) {
 			i = !0;
 			let e = this._basicScopeAttributesProvider.getDefaultAttributes(), n = this.themeProvider.getDefaults(), r = x.set(0, e.languageId, e.tokenType, null, n.fontStyle, n.foregroundId, n.backgroundId), a = this.getRule(this._rootId).getName(null, null), o;
-			o = a ? j.createRootAndLookUpScopeName(a, r, this) : j.createRoot("unknown", r), t = new st(null, this._rootId, -1, -1, !1, null, o, o);
+			o = a ? j.createRootAndLookUpScopeName(a, r, this) : j.createRoot("unknown", r), t = new at(null, this._rootId, -1, -1, !1, null, o, o);
 		} else i = !1, t.reset();
 		e += "\n";
-		let a = this.createOnigString(e), o = a.content.length, s = new lt(n, e, this._tokenTypeMatchers, this.balancedBracketSelectors), c = Je(this, a, i, 0, t, s, !0, r);
-		return ye(a), {
+		let a = this.createOnigString(e), o = a.content.length, s = new st(n, e, this._tokenTypeMatchers, this.balancedBracketSelectors), c = Ke(this, a, i, 0, t, s, !0, r);
+		return _e(a), {
 			lineLength: o,
 			lineTokens: s,
 			ruleStack: c.stack,
@@ -1292,8 +1278,8 @@ var at = class {
 		};
 	}
 };
-function ot(e, t) {
-	return e = u(e), e.repository = e.repository || {}, e.repository.$self = {
+function it(e, t) {
+	return e = c(e), e.repository = e.repository || {}, e.repository.$self = {
 		$vscodeTextmateLocation: e.$vscodeTextmateLocation,
 		patterns: e.patterns,
 		name: e.scopeName
@@ -1305,14 +1291,14 @@ var j = class e {
 	}
 	static fromExtension(t, n) {
 		let r = t, i = t?.scopePath ?? null;
-		for (let t of n) i = ie.push(i, t.scopeNames), r = new e(r, i, t.encodedTokenAttributes);
+		for (let t of n) i = ne.push(i, t.scopeNames), r = new e(r, i, t.encodedTokenAttributes);
 		return r;
 	}
 	static createRoot(t, n) {
-		return new e(null, new ie(null, t), n);
+		return new e(null, new ne(null, t), n);
 	}
 	static createRootAndLookUpScopeName(t, n, r) {
-		let i = r.getMetadataForScope(t), a = new ie(null, t), o = r.themeProvider.themeMatch(a), s = e.mergeAttributes(n, i, o);
+		let i = r.getMetadataForScope(t), a = new ne(null, t), o = r.themeProvider.themeMatch(a), s = e.mergeAttributes(n, i, o);
 		return new e(null, a, s);
 	}
 	get scopeName() {
@@ -1357,7 +1343,7 @@ var j = class e {
 		}), n = n.parent;
 		return n === e ? t.reverse() : void 0;
 	}
-}, st = class e {
+}, at = class e {
 	constructor(e, t, n, r, i, a, o, s) {
 		this.parent = e, this.ruleId = t, this.beginRuleCapturedEOL = i, this.endRule = a, this.nameScopesList = o, this.contentNameScopesList = s, this.depth = this.parent ? this.parent.depth + 1 : 1, this._enterPos = n, this._anchorPos = r;
 	}
@@ -1429,7 +1415,7 @@ var j = class e {
 	}
 	toStateStackFrame() {
 		return {
-			ruleId: Ie(this.ruleId),
+			ruleId: Pe(this.ruleId),
 			beginRuleCapturedEOL: this.beginRuleCapturedEOL,
 			endRule: this.endRule,
 			nameScopesList: this.nameScopesList?.getExtensionIfDefined(this.parent?.nameScopesList ?? null) ?? [],
@@ -1438,9 +1424,9 @@ var j = class e {
 	}
 	static pushFrame(t, n) {
 		let r = j.fromExtension(t?.nameScopesList ?? null, n.nameScopesList);
-		return new e(t, Fe(n.ruleId), n.enterPos ?? -1, n.anchorPos ?? -1, n.beginRuleCapturedEOL, n.endRule, r, j.fromExtension(r, n.contentNameScopesList));
+		return new e(t, Ne(n.ruleId), n.enterPos ?? -1, n.anchorPos ?? -1, n.beginRuleCapturedEOL, n.endRule, r, j.fromExtension(r, n.contentNameScopesList));
 	}
-}, ct = class {
+}, ot = class {
 	balancedBracketScopes;
 	unbalancedBracketScopes;
 	allowAny = !1;
@@ -1458,7 +1444,7 @@ var j = class e {
 		for (let t of this.balancedBracketScopes) if (t(e)) return !0;
 		return this.allowAny;
 	}
-}, lt = class {
+}, st = class {
 	constructor(e, t, n, r) {
 		this.balancedBracketSelectors = r, this._emitBinaryTokens = e, this._tokenTypeOverrides = n, this._lineText = null, this._tokens = [], this._binaryTokens = [], this._lastTokenEndIndex = 0;
 	}
@@ -1477,7 +1463,7 @@ var j = class e {
 			let n = e?.tokenAttributes ?? 0, r = !1;
 			if (this.balancedBracketSelectors?.matchesAlways && (r = !0), this._tokenTypeOverrides.length > 0 || this.balancedBracketSelectors && !this.balancedBracketSelectors.matchesAlways && !this.balancedBracketSelectors.matchesNever) {
 				let t = e?.getScopeNames() ?? [];
-				for (let e of this._tokenTypeOverrides) e.matcher(t) && (n = x.set(n, 0, he(e.type), null, -1, 0, 0));
+				for (let e of this._tokenTypeOverrides) e.matcher(t) && (n = x.set(n, 0, pe(e.type), null, -1, 0, 0));
 				this.balancedBracketSelectors && (r = this.balancedBracketSelectors.match(t));
 			}
 			if (r && (n = x.set(n, 0, 8, r, -1, 0, 0)), this._binaryTokens.length > 0 && this._binaryTokens[this._binaryTokens.length - 1] === n) {
@@ -1503,7 +1489,7 @@ var j = class e {
 		for (let e = 0, t = this._binaryTokens.length; e < t; e++) n[e] = this._binaryTokens[e];
 		return n;
 	}
-}, ut = class {
+}, ct = class {
 	constructor(e, t) {
 		this._onigLib = t, this._theme = e;
 	}
@@ -1539,16 +1525,16 @@ var j = class e {
 		if (!this._grammars.has(e)) {
 			let a = this._rawGrammars.get(e);
 			if (!a) return null;
-			this._grammars.set(e, nt(e, a, t, n, r, i, this, this._onigLib));
+			this._grammars.set(e, et(e, a, t, n, r, i, this, this._onigLib));
 		}
 		return this._grammars.get(e);
 	}
-}, dt = class {
+}, lt = class {
 	_options;
 	_syncRegistry;
 	_ensureGrammarCache;
 	constructor(e) {
-		this._options = e, this._syncRegistry = new ut(y.createFromRawTheme(e.theme, e.colorMap), e.onigLib), this._ensureGrammarCache = /* @__PURE__ */ new Map();
+		this._options = e, this._syncRegistry = new ct(y.createFromRawTheme(e.theme, e.colorMap), e.onigLib), this._ensureGrammarCache = /* @__PURE__ */ new Map();
 	}
 	dispose() {
 		this._syncRegistry.dispose();
@@ -1563,13 +1549,13 @@ var j = class e {
 		return this.loadGrammarWithConfiguration(e, t, { embeddedLanguages: n });
 	}
 	loadGrammarWithConfiguration(e, t, n) {
-		return this._loadGrammar(e, t, n.embeddedLanguages, n.tokenTypes, new ct(n.balancedBracketSelectors || [], n.unbalancedBracketSelectors || []));
+		return this._loadGrammar(e, t, n.embeddedLanguages, n.tokenTypes, new ot(n.balancedBracketSelectors || [], n.unbalancedBracketSelectors || []));
 	}
 	loadGrammar(e) {
 		return this._loadGrammar(e, 0, null, null, null);
 	}
 	_loadGrammar(e, t, n, r, i) {
-		let a = new Se(this._syncRegistry, e);
+		let a = new be(this._syncRegistry, e);
 		for (; a.Q.length > 0;) a.Q.map((e) => this._loadSingleGrammar(e.scopeName)), a.processQueue();
 		return this._grammarForScopeName(e, t, n, r, i);
 	}
@@ -1589,8 +1575,8 @@ var j = class e {
 	_grammarForScopeName(e, t = 0, n = null, r = null, i = null) {
 		return this._syncRegistry.grammarForScopeName(e, t, n, r, i);
 	}
-}, ft = st.NULL;
-// ../../../../pr-469/crates/nac-server/web/node_modules/@shikijs/primitive/dist/index.mjs
+}, ut = at.NULL;
+// node_modules/@shikijs/primitive/dist/index.mjs
 function M(e, t) {
 	let n = typeof e == "string" ? {} : { ...e.colorReplacements }, r = typeof e == "string" ? e : e.name;
 	for (let [e, i] of Object.entries(t?.colorReplacements || {})) typeof i == "string" ? n[e] = i : e === r && Object.assign(n, i);
@@ -1599,10 +1585,10 @@ function M(e, t) {
 function N(e, t) {
 	return e && (t?.[e?.toLowerCase()] || e);
 }
-function pt(e) {
+function dt(e) {
 	return Array.isArray(e) ? e : [e];
 }
-async function mt(e) {
+async function ft(e) {
 	return Promise.resolve(typeof e == "function" ? e() : e).then((e) => e.default || e);
 }
 function P(e) {
@@ -1613,40 +1599,40 @@ function P(e) {
 		"plain"
 	].includes(e);
 }
-function ht(e) {
+function pt(e) {
 	return e === "ansi" || P(e);
 }
 function F(e) {
 	return e === "none";
 }
-function gt(e) {
+function mt(e) {
 	return F(e);
 }
-var _t = /(\r?\n)/g;
+var ht = /(\r?\n)/g;
 function I(e, t = !1) {
 	if (e.length === 0) return [["", 0]];
-	let n = e.split(_t), r = 0, i = [];
+	let n = e.split(ht), r = 0, i = [];
 	for (let e = 0; e < n.length; e += 2) {
 		let a = t ? n[e] + (n[e + 1] || "") : n[e];
 		i.push([a, r]), r += n[e].length, r += n[e + 1]?.length || 0;
 	}
 	return i;
 }
-var vt = {
+var gt = {
 	light: "#333333",
 	dark: "#bbbbbb"
-}, yt = {
+}, _t = {
 	light: "#fffffe",
 	dark: "#1e1e1e"
-}, bt = "__shiki_resolved";
+}, vt = "__shiki_resolved";
 function L(e) {
-	if (e?.[bt]) return e;
+	if (e?.[vt]) return e;
 	let t = { ...e };
 	t.tokenColors && !t.settings && (t.settings = t.tokenColors, delete t.tokenColors), t.type ||= "dark", t.colorReplacements = { ...t.colorReplacements }, t.settings ||= [];
 	let { bg: n, fg: r } = t;
 	if (!n || !r) {
 		let e = t.settings ? t.settings.find((e) => !e.name && !e.scope) : void 0;
-		e?.settings?.foreground && (r = e.settings.foreground), e?.settings?.background && (n = e.settings.background), !r && t?.colors?.["editor.foreground"] && (r = t.colors["editor.foreground"]), !n && t?.colors?.["editor.background"] && (n = t.colors["editor.background"]), r ||= t.type === "light" ? vt.light : vt.dark, n ||= t.type === "light" ? yt.light : yt.dark, t.fg = r, t.bg = n;
+		e?.settings?.foreground && (r = e.settings.foreground), e?.settings?.background && (n = e.settings.background), !r && t?.colors?.["editor.foreground"] && (r = t.colors["editor.foreground"]), !n && t?.colors?.["editor.background"] && (n = t.colors["editor.background"]), r ||= t.type === "light" ? gt.light : gt.dark, n ||= t.type === "light" ? _t.light : _t.dark, t.fg = r, t.bg = n;
 	}
 	t.settings[0] && t.settings[0].settings && !t.settings[0].scope || t.settings.unshift({ settings: {
 		foreground: t.fg,
@@ -1680,30 +1666,30 @@ function L(e) {
 		let n = o(t.colors[e]);
 		t.colorReplacements[n] = t.colors[e], t.colors[e] = n;
 	}
-	return Object.defineProperty(t, bt, {
+	return Object.defineProperty(t, vt, {
 		enumerable: !1,
 		writable: !1,
 		value: !0
 	}), t;
 }
-async function xt(e) {
-	return [...new Set((await Promise.all(e.filter((e) => !ht(e)).map(async (e) => await mt(e).then((e) => Array.isArray(e) ? e : [e])))).flat())];
+async function yt(e) {
+	return [...new Set((await Promise.all(e.filter((e) => !pt(e)).map(async (e) => await ft(e).then((e) => Array.isArray(e) ? e : [e])))).flat())];
 }
-async function St(e) {
-	return (await Promise.all(e.map(async (e) => gt(e) ? null : L(await mt(e))))).filter((e) => !!e);
+async function bt(e) {
+	return (await Promise.all(e.map(async (e) => mt(e) ? null : L(await ft(e))))).filter((e) => !!e);
 }
-function Ct(e, t) {
+function xt(e, t) {
 	if (!t) return e;
 	if (t[e]) {
 		let n = /* @__PURE__ */ new Set([e]);
 		for (; t[e];) {
-			if (e = t[e], n.has(e)) throw new l(`Circular alias \`${[...n].join(" -> ")} -> ${e}\``);
+			if (e = t[e], n.has(e)) throw new s(`Circular alias \`${[...n].join(" -> ")} -> ${e}\``);
 			n.add(e);
 		}
 	}
 	return e;
 }
-var wt = class extends dt {
+var St = class extends lt {
 	_resolver;
 	_themes;
 	_langs;
@@ -1733,7 +1719,7 @@ var wt = class extends dt {
 		t || (t = y.createFromRawTheme(e), this._textmateThemeCache.set(e, t)), this._syncRegistry.setTheme(t);
 	}
 	getGrammar(e) {
-		return e = Ct(e, this._alias), this._resolvedGrammars.get(e);
+		return e = xt(e, this._alias), this._resolvedGrammars.get(e);
 	}
 	loadLanguage(e) {
 		if (this.getGrammar(e.name)) return;
@@ -1757,7 +1743,7 @@ var wt = class extends dt {
 		let t = [...this._langGraph.entries()], n = t.filter(([e, t]) => !t);
 		if (n.length) {
 			let e = t.filter(([e, t]) => t ? (t.embeddedLanguages || t.embeddedLangs)?.some((e) => n.map(([e]) => e).includes(e)) : !1).filter((e) => !n.includes(e));
-			throw new l(`Missing languages ${n.map(([e]) => `\`${e}\``).join(", ")}, required by ${e.map(([e]) => `\`${e}\``).join(", ")}`);
+			throw new s(`Missing languages ${n.map(([e]) => `\`${e}\``).join(", ")}, required by ${e.map(([e]) => `\`${e}\``).join(", ")}`);
 		}
 		for (let [e, n] of t) this._resolver.addLanguage(n);
 		for (let [e, n] of t) this.loadLanguage(n);
@@ -1770,7 +1756,7 @@ var wt = class extends dt {
 		let t = e.embeddedLanguages ?? e.embeddedLangs;
 		if (t) for (let e of t) this._langGraph.set(e, this._langMap.get(e));
 	}
-}, Tt = class {
+}, Ct = class {
 	_langs = /* @__PURE__ */ new Map();
 	_scopeToLang = /* @__PURE__ */ new Map();
 	_injections = /* @__PURE__ */ new Map();
@@ -1809,18 +1795,18 @@ var wt = class extends dt {
 function z(e) {
 	R += 1, e.warnings !== !1 && R >= 10 && R % 10 == 0 && console.warn(`[Shiki] ${R} instances have been created. Shiki is supposed to be used as a singleton, consider refactoring your code to cache your highlighter instance; Or call \`highlighter.dispose()\` to release unused instances.`);
 	let t = !1;
-	if (!e.engine) throw new l("`engine` option is required for synchronous mode");
-	let n = (e.langs || []).flat(1), r = (e.themes || []).flat(1).map(L), i = new wt(new Tt(e.engine, n), r, n, e.langAlias), a;
+	if (!e.engine) throw new s("`engine` option is required for synchronous mode");
+	let n = (e.langs || []).flat(1), r = (e.themes || []).flat(1).map(L), i = new St(new Ct(e.engine, n), r, n, e.langAlias), a;
 	function o(t) {
-		return Ct(t, e.langAlias);
-	}
-	function s(e) {
-		_();
-		let t = i.getGrammar(typeof e == "string" ? e : e.name);
-		if (!t) throw new l(`Language \`${e}\` not found, you may need to load it first`);
-		return t;
+		return xt(t, e.langAlias);
 	}
 	function c(e) {
+		_();
+		let t = i.getGrammar(typeof e == "string" ? e : e.name);
+		if (!t) throw new s(`Language \`${e}\` not found, you may need to load it first`);
+		return t;
+	}
+	function l(e) {
 		if (e === "none") return {
 			bg: "",
 			fg: "",
@@ -1830,12 +1816,12 @@ function z(e) {
 		};
 		_();
 		let t = i.getTheme(e);
-		if (!t) throw new l(`Theme \`${e}\` not found, you may need to load it first`);
+		if (!t) throw new s(`Theme \`${e}\` not found, you may need to load it first`);
 		return t;
 	}
 	function u(e) {
 		_();
-		let t = c(e);
+		let t = l(e);
 		return a !== e && (i.setTheme(t), a = e), {
 			theme: t,
 			colorMap: i.getColorMap()
@@ -1851,25 +1837,25 @@ function z(e) {
 		_(), i.loadLanguages(e.flat(1));
 	}
 	async function m(...e) {
-		return p(await xt(e));
+		return p(await yt(e));
 	}
 	function h(...e) {
 		_();
 		for (let t of e.flat(1)) i.loadTheme(t);
 	}
 	async function g(...e) {
-		return _(), h(await St(e));
+		return _(), h(await bt(e));
 	}
 	function _() {
-		if (t) throw new l("Shiki instance has been disposed");
+		if (t) throw new s("Shiki instance has been disposed");
 	}
 	function v() {
 		t || (t = !0, i.dispose(), --R);
 	}
 	return {
 		setTheme: u,
-		getTheme: c,
-		getLanguage: s,
+		getTheme: l,
+		getLanguage: c,
 		getLoadedThemes: d,
 		getLoadedLanguages: f,
 		resolveLangAlias: o,
@@ -1881,12 +1867,12 @@ function z(e) {
 		[Symbol.dispose]: v
 	};
 }
-var Et = z;
-async function Dt(e) {
+var wt = z;
+async function Tt(e) {
 	e.engine || console.warn("`engine` option is required. Use `createOnigurumaEngine` or `createJavaScriptRegexEngine` to create an engine.");
 	let [t, n, r] = await Promise.all([
-		St(e.themes || []),
-		xt(e.langs || []),
+		bt(e.themes || []),
+		yt(e.langs || []),
 		e.engine
 	]);
 	return z({
@@ -1896,12 +1882,12 @@ async function Dt(e) {
 		engine: r
 	});
 }
-var Ot = Dt, kt = /* @__PURE__ */ new WeakMap();
+var Et = Tt, Dt = /* @__PURE__ */ new WeakMap();
 function B(e, t) {
-	kt.set(e, t);
+	Dt.set(e, t);
 }
 function V(e) {
-	return kt.get(e);
+	return Dt.get(e);
 }
 var H = class e {
 	_stacks = {};
@@ -1916,7 +1902,7 @@ var H = class e {
 		return this._stacks[this.theme];
 	}
 	static initial(t, n) {
-		return new e(Object.fromEntries(pt(n).map((e) => [e, ft])), t);
+		return new e(Object.fromEntries(dt(n).map((e) => [e, ut])), t);
 	}
 	constructor(...e) {
 		if (e.length === 2) {
@@ -1931,7 +1917,7 @@ var H = class e {
 		return this._stacks[e];
 	}
 	getScopes(e = this.theme) {
-		return At(this._stacks[e]);
+		return Ot(this._stacks[e]);
 	}
 	toJSON() {
 		return {
@@ -1942,7 +1928,7 @@ var H = class e {
 		};
 	}
 };
-function At(e) {
+function Ot(e) {
 	let t = [], n = /* @__PURE__ */ new Set();
 	function r(e) {
 		if (n.has(e)) return;
@@ -1952,12 +1938,12 @@ function At(e) {
 	}
 	return r(e), t;
 }
-function jt(e, t) {
-	if (!(e instanceof H)) throw new l("Invalid grammar state");
+function kt(e, t) {
+	if (!(e instanceof H)) throw new s("Invalid grammar state");
 	return e.getInternalStack(t);
 }
-var Mt = /,/, Nt = / /;
-function Pt(e, t, n = {}) {
+var At = /,/, jt = / /;
+function Mt(e, t, n = {}) {
 	let { theme: r = e.getLoadedThemes()[0] } = n;
 	if (P(e.resolveLangAlias(n.lang || "text")) || F(r)) return I(t).map((e) => [{
 		content: e[0],
@@ -1965,25 +1951,25 @@ function Pt(e, t, n = {}) {
 	}]);
 	let { theme: i, colorMap: a } = e.setTheme(r), o = e.getLanguage(n.lang || "text");
 	if (n.grammarState) {
-		if (n.grammarState.lang !== o.name) throw new l(`Grammar state language "${n.grammarState.lang}" does not match highlight language "${o.name}"`);
-		if (!n.grammarState.themes.includes(i.name)) throw new l(`Grammar state themes "${n.grammarState.themes}" do not contain highlight theme "${i.name}"`);
+		if (n.grammarState.lang !== o.name) throw new s(`Grammar state language "${n.grammarState.lang}" does not match highlight language "${o.name}"`);
+		if (!n.grammarState.themes.includes(i.name)) throw new s(`Grammar state themes "${n.grammarState.themes}" do not contain highlight theme "${i.name}"`);
 	}
-	return It(t, o, i, a, n);
+	return Pt(t, o, i, a, n);
 }
-function Ft(...e) {
+function Nt(...e) {
 	if (e.length === 2) return V(e[1]);
 	let [t, n, r = {}] = e, { lang: i = "text", theme: a = t.getLoadedThemes()[0] } = r;
-	if (P(i) || F(a)) throw new l("Plain language does not have grammar state");
-	if (i === "ansi") throw new l("ANSI language does not have grammar state");
-	let { theme: o, colorMap: s } = t.setTheme(a), c = t.getLanguage(i);
-	return new H(Lt(n, c, o, s, r).stateStack, c.name, o.name);
+	if (P(i) || F(a)) throw new s("Plain language does not have grammar state");
+	if (i === "ansi") throw new s("ANSI language does not have grammar state");
+	let { theme: o, colorMap: c } = t.setTheme(a), l = t.getLanguage(i);
+	return new H(Ft(n, l, o, c, r).stateStack, l.name, o.name);
 }
-function It(e, t, n, r, i) {
-	let a = Lt(e, t, n, r, i), o = new H(a.stateStack, t.name, n.name);
+function Pt(e, t, n, r, i) {
+	let a = Ft(e, t, n, r, i), o = new H(a.stateStack, t.name, n.name);
 	return B(a.tokens, o), a.tokens;
 }
-function Lt(e, t, n, r, i) {
-	let a = M(n, i), { tokenizeMaxLineLength: o = 0, tokenizeTimeLimit: s = 500, includeExplanation: c = !1 } = i, l = I(e), u = i.grammarState ? jt(i.grammarState, n.name) ?? ft : i.grammarContextCode == null ? ft : Lt(i.grammarContextCode, t, n, r, {
+function Ft(e, t, n, r, i) {
+	let a = M(n, i), { tokenizeMaxLineLength: o = 0, tokenizeTimeLimit: s = 500, includeExplanation: c = !1 } = i, l = I(e), u = i.grammarState ? kt(i.grammarState, n.name) ?? ut : i.grammarContextCode == null ? ut : Ft(i.grammarContextCode, t, n, r, {
 		...i,
 		grammarState: void 0,
 		grammarContextCode: void 0
@@ -2022,7 +2008,7 @@ function Lt(e, t, n, r, i) {
 					let n;
 					switch (typeof t.scope) {
 						case "string":
-							n = t.scope.split(Mt).map((e) => e.trim());
+							n = t.scope.split(At).map((e) => e.trim());
 							break;
 						case "object":
 							n = t.scope;
@@ -2031,7 +2017,7 @@ function Lt(e, t, n, r, i) {
 					}
 					e.push({
 						settings: t,
-						selectors: n.map((e) => e.split(Nt))
+						selectors: n.map((e) => e.split(jt))
 					});
 				}
 				f.explanation = [];
@@ -2040,7 +2026,7 @@ function Lt(e, t, n, r, i) {
 					let t = h[g], n = i.substring(t.startIndex, t.endIndex);
 					r += n.length, f.explanation.push({
 						content: n,
-						scopes: c === "scopeName" ? Rt(t.scopes) : zt(e, t.scopes)
+						scopes: c === "scopeName" ? It(t.scopes) : Lt(e, t.scopes)
 					}), g += 1;
 				}
 			}
@@ -2053,38 +2039,38 @@ function Lt(e, t, n, r, i) {
 		stateStack: u
 	};
 }
-function Rt(e) {
+function It(e) {
 	return e.map((e) => ({ scopeName: e }));
 }
-function zt(e, t) {
+function Lt(e, t) {
 	let n = [];
 	for (let r = 0, i = t.length; r < i; r++) {
 		let i = t[r];
 		n[r] = {
 			scopeName: i,
-			themeMatches: Ht(e, i, t.slice(0, r))
+			themeMatches: Bt(e, i, t.slice(0, r))
 		};
 	}
 	return n;
 }
-function Bt(e, t) {
+function Rt(e, t) {
 	return e === t || t.substring(0, e.length) === e && t[e.length] === ".";
 }
-function Vt(e, t, n) {
-	if (!Bt(e.at(-1), t)) return !1;
+function zt(e, t, n) {
+	if (!Rt(e.at(-1), t)) return !1;
 	let r = e.length - 2, i = n.length - 1;
-	for (; r >= 0 && i >= 0;) Bt(e[r], n[i]) && --r, --i;
+	for (; r >= 0 && i >= 0;) Rt(e[r], n[i]) && --r, --i;
 	return r === -1;
 }
-function Ht(e, t, n) {
+function Bt(e, t, n) {
 	let r = [];
-	for (let { selectors: i, settings: a } of e) for (let e of i) if (Vt(e, t, n)) {
+	for (let { selectors: i, settings: a } of e) for (let e of i) if (zt(e, t, n)) {
 		r.push(a);
 		break;
 	}
 	return r;
 }
-function U(e, t, n, r = Pt) {
+function U(e, t, n, r = Mt) {
 	let i = Object.entries(n.themes).filter((e) => e[1]).map((e) => ({
 		color: e[0],
 		theme: e[1]
@@ -2098,7 +2084,7 @@ function U(e, t, n, r = Pt) {
 			state: V(a),
 			theme: typeof i.theme == "string" ? i.theme : i.theme.name
 		};
-	}), o = Ut(...a.map((e) => e.tokens)), s = o[0].map((e, t) => e.map((e, r) => {
+	}), o = Vt(...a.map((e) => e.tokens)), s = o[0].map((e, t) => e.map((e, r) => {
 		let a = {
 			content: e.content,
 			variants: {},
@@ -2111,7 +2097,7 @@ function U(e, t, n, r = Pt) {
 	})), c = a[0].state ? new H(Object.fromEntries(a.map((e) => [e.theme, e.state?.getInternalStack(e.theme)])), a[0].state.lang) : void 0;
 	return c && B(s, c), s;
 }
-function Ut(...e) {
+function Vt(...e) {
 	let t = e.map(() => []), n = e.length;
 	for (let r = 0; r < e[0].length; r++) {
 		let i = e.map((e) => e[r]), a = t.map(() => []);
@@ -2134,8 +2120,8 @@ function Ut(...e) {
 	}
 	return t;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/html-void-elements/index.js
-var Wt = [
+// node_modules/html-void-elements/index.js
+var Ht = [
 	"area",
 	"base",
 	"basefont",
@@ -2156,7 +2142,21 @@ var Wt = [
 	"source",
 	"track",
 	"wbr"
-], Gt = /["&'<>`]/g, Kt = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g, qt = /[\x01-\t\v\f\x0E-\x1F\x7F\x81\x8D\x8F\x90\x9D\xA0-\uFFFF]/g, Jt = /[|\\{}()[\]^$+*?.]/g, Yt = /* @__PURE__ */ new WeakMap();
+], Ut = {}.hasOwnProperty;
+function Wt(e, t) {
+	let n = t || {};
+	function r(t, ...n) {
+		let i = r.invalid, a = r.handlers;
+		if (t && Ut.call(t, e)) {
+			let n = String(t[e]);
+			i = Ut.call(a, n) ? a[n] : r.unknown;
+		}
+		if (i) return i.call(this, t, ...n);
+	}
+	return r.handlers = n.handlers || {}, r.invalid = n.invalid, r.unknown = n.unknown, r;
+}
+// node_modules/stringify-entities/lib/core.js
+var Gt = /["&'<>`]/g, Kt = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g, qt = /[\x01-\t\v\f\x0E-\x1F\x7F\x81\x8D\x8F\x90\x9D\xA0-\uFFFF]/g, Jt = /[|\\{}()[\]^$+*?.]/g, Yt = /* @__PURE__ */ new WeakMap();
 function Xt(e, t) {
 	return e = e.replace(t.subset ? Zt(t.subset) : Gt, r), t.subset || t.escapeOnly ? e : e.replace(Kt, n).replace(qt, r);
 	function n(e, n, r) {
@@ -2175,19 +2175,19 @@ function Qt(e) {
 	for (; ++n < e.length;) t.push(e[n].replace(Jt, "\\$&"));
 	return RegExp("(?:" + t.join("|") + ")", "g");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/stringify-entities/lib/util/to-hexadecimal.js
+// node_modules/stringify-entities/lib/util/to-hexadecimal.js
 var $t = /[\dA-Fa-f]/;
 function en(e, t, n) {
 	let r = "&#x" + e.toString(16).toUpperCase();
 	return n && t && !$t.test(String.fromCharCode(t)) ? r : r + ";";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/stringify-entities/lib/util/to-decimal.js
+// node_modules/stringify-entities/lib/util/to-decimal.js
 var tn = /\d/;
 function nn(e, t, n) {
 	let r = "&#" + String(e);
 	return n && t && !tn.test(String.fromCharCode(t)) ? r : r + ";";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/character-entities-legacy/index.js
+// node_modules/character-entities-legacy/index.js
 var rn = /* @__PURE__ */ "AElig.AMP.Aacute.Acirc.Agrave.Aring.Atilde.Auml.COPY.Ccedil.ETH.Eacute.Ecirc.Egrave.Euml.GT.Iacute.Icirc.Igrave.Iuml.LT.Ntilde.Oacute.Ocirc.Ograve.Oslash.Otilde.Ouml.QUOT.REG.THORN.Uacute.Ucirc.Ugrave.Uuml.Yacute.aacute.acirc.acute.aelig.agrave.amp.aring.atilde.auml.brvbar.ccedil.cedil.cent.copy.curren.deg.divide.eacute.ecirc.egrave.eth.euml.frac12.frac14.frac34.gt.iacute.icirc.iexcl.igrave.iquest.iuml.laquo.lt.macr.micro.middot.nbsp.not.ntilde.oacute.ocirc.ograve.ordf.ordm.oslash.otilde.ouml.para.plusmn.pound.quot.raquo.reg.sect.shy.sup1.sup2.sup3.szlig.thorn.times.uacute.ucirc.ugrave.uml.uuml.yacute.yen.yuml".split("."), an = {
 	nbsp: "\xA0",
 	iexcl: "¡",
@@ -2461,7 +2461,7 @@ function un(e, t, n, r) {
 	}
 	return "";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/stringify-entities/lib/util/format-smart.js
+// node_modules/stringify-entities/lib/util/format-smart.js
 function dn(e, t, n) {
 	let r = en(e, t, n.omitOptionalSemicolons), i;
 	if ((n.useNamedReferences || n.useShortestReferences) && (i = un(e, t, n.omitOptionalSemicolons, n.attribute)), (n.useShortestReferences || !i) && n.useShortestReferences) {
@@ -2470,11 +2470,11 @@ function dn(e, t, n) {
 	}
 	return i && (!n.useShortestReferences || i.length < r.length) ? i : r;
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/stringify-entities/lib/index.js
+// node_modules/stringify-entities/lib/index.js
 function G(e, t) {
 	return Xt(e, Object.assign({ format: dn }, t));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/comment.js
+// node_modules/hast-util-to-html/lib/handle/comment.js
 var fn = /^>|^->|<!--|-->|--!>|<!-$/g, pn = [">"], mn = ["<", ">"];
 function hn(e, t, n, r) {
 	return r.settings.bogusComments ? "<?" + G(e.value, Object.assign({}, r.settings.characterReferences, { subset: pn })) + ">" : "<!--" + e.value.replace(fn, i) + "-->";
@@ -2482,21 +2482,21 @@ function hn(e, t, n, r) {
 		return G(e, Object.assign({}, r.settings.characterReferences, { subset: mn }));
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/doctype.js
+// node_modules/hast-util-to-html/lib/handle/doctype.js
 function gn(e, t, n, r) {
 	return "<!" + (r.settings.upperDoctype ? "DOCTYPE" : "doctype") + (r.settings.tightDoctype ? "" : " ") + "html>";
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/omission/util/siblings.js
+// node_modules/hast-util-to-html/lib/omission/util/siblings.js
 var K = yn(1), _n = yn(-1), vn = [];
 function yn(e) {
 	return t;
-	function t(t, n, i) {
-		let a = t ? t.children : vn, o = (n || 0) + e, s = a[o];
-		if (!i) for (; s && r(s);) o += e, s = a[o];
+	function t(t, n, r) {
+		let i = t ? t.children : vn, a = (n || 0) + e, s = i[a];
+		if (!r) for (; s && o(s);) a += e, s = i[a];
 		return s;
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/omission/omission.js
+// node_modules/hast-util-to-html/lib/omission/omission.js
 var bn = {}.hasOwnProperty;
 function xn(e) {
 	return t;
@@ -2504,7 +2504,7 @@ function xn(e) {
 		return bn.call(e, t.tagName) && e[t.tagName](t, n, r);
 	}
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/omission/closing.js
+// node_modules/hast-util-to-html/lib/omission/closing.js
 var Sn = xn({
 	body: Tn,
 	caption: Cn,
@@ -2527,8 +2527,8 @@ var Sn = xn({
 	tr: In
 });
 function Cn(e, t, n) {
-	let i = K(n, t, !0);
-	return !i || i.type !== "comment" && !(i.type === "text" && r(i.value.charAt(0)));
+	let r = K(n, t, !0);
+	return !r || r.type !== "comment" && !(r.type === "text" && o(r.value.charAt(0)));
 }
 function wn(e, t, n) {
 	let r = K(n, t);
@@ -2585,7 +2585,7 @@ function Ln(e, t, n) {
 	let r = K(n, t);
 	return !r || r.type === "element" && (r.tagName === "td" || r.tagName === "th");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/omission/opening.js
+// node_modules/hast-util-to-html/lib/omission/opening.js
 var Rn = xn({
 	body: Vn,
 	colgroup: Hn,
@@ -2608,7 +2608,7 @@ function Bn(e) {
 }
 function Vn(e) {
 	let t = K(e, -1, !0);
-	return !t || t.type !== "comment" && !(t.type === "text" && r(t.value.charAt(0))) && (t.type !== "element" || t.tagName !== "meta" && t.tagName !== "link" && t.tagName !== "script" && t.tagName !== "style" && t.tagName !== "template");
+	return !t || t.type !== "comment" && !(t.type === "text" && o(t.value.charAt(0))) && (t.type !== "element" || t.tagName !== "meta" && t.tagName !== "link" && t.tagName !== "script" && t.tagName !== "style" && t.tagName !== "template");
 }
 function Hn(e, t, n) {
 	let r = _n(n, t), i = K(e, -1, !0);
@@ -2618,18 +2618,18 @@ function Un(e, t, n) {
 	let r = _n(n, t), i = K(e, -1);
 	return n && r && r.type === "element" && (r.tagName === "thead" || r.tagName === "tbody") && Sn(r, n.children.indexOf(r), n) ? !1 : !!(i && i.type === "element" && i.tagName === "tr");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/element.js
+// node_modules/hast-util-to-html/lib/handle/element.js
 var q = {
 	name: [["	\n\f\r &/=>".split(""), "	\n\f\r \"&'/=>`".split("")], ["\0	\n\f\r \"&'/<=>".split(""), "\0	\n\f\r \"&'/<=>`".split("")]],
 	unquoted: [["	\n\f\r &>".split(""), "\0	\n\f\r \"&'<=>`".split("")], ["\0	\n\f\r \"&'<=>`".split(""), "\0	\n\f\r \"&'<=>`".split("")]],
 	single: [["&'".split(""), "\"&'`".split("")], ["\0&'".split(""), "\0\"&'`".split("")]],
 	double: [["\"&".split(""), "\"&'`".split("")], ["\0\"&".split(""), "\0\"&'`".split("")]]
 };
-function Wn(t, n, r, i) {
-	let a = i.schema, o = a.space !== "svg" && i.settings.omitOptionalTags, s = a.space === "svg" ? i.settings.closeEmptyElements : i.settings.voids.includes(t.tagName.toLowerCase()), c = [], l;
-	a.space === "html" && t.tagName === "svg" && (i.schema = e);
-	let u = Gn(i, t.properties), d = i.all(a.space === "html" && t.tagName === "template" ? t.content : t);
-	return i.schema = a, d && (s = !1), !u && o && Rn(t, n, r) || (c.push("<", t.tagName, u ? " " + u : ""), s && (a.space === "svg" || i.settings.closeSelfClosing) && (l = u.charAt(u.length - 1), (!i.settings.tightSelfClosing || l === "/" || l && l !== "\"" && l !== "'") && c.push(" "), c.push("/")), c.push(">")), c.push(d), s || o && Sn(t, n, r) || c.push("</" + t.tagName + ">"), c.join("");
+function Wn(e, n, r, i) {
+	let a = i.schema, o = a.space !== "svg" && i.settings.omitOptionalTags, s = a.space === "svg" ? i.settings.closeEmptyElements : i.settings.voids.includes(e.tagName.toLowerCase()), c = [], l;
+	a.space === "html" && e.tagName === "svg" && (i.schema = t);
+	let u = Gn(i, e.properties), d = i.all(a.space === "html" && e.tagName === "template" ? e.content : e);
+	return i.schema = a, d && (s = !1), !u && o && Rn(e, n, r) || (c.push("<", e.tagName, u ? " " + u : ""), s && (a.space === "svg" || i.settings.closeSelfClosing) && (l = u.charAt(u.length - 1), (!i.settings.tightSelfClosing || l === "/" || l && l !== "\"" && l !== "'") && c.push(" "), c.push("/")), c.push(">")), c.push(d), s || o && Sn(e, n, r) || c.push("</" + e.tagName + ">"), c.join("");
 }
 function Gn(e, t) {
 	let n = [], r = -1, i;
@@ -2645,33 +2645,33 @@ function Gn(e, t) {
 	}
 	return n.join("");
 }
-function Kn(e, r, a) {
-	let s = n(e.schema, r), c = e.settings.allowParseErrors && e.schema.space === "html" ? 0 : 1, l = +!e.settings.allowDangerousCharacters, u = e.quote, d;
-	if (s.overloadedBoolean && (a === s.attribute || a === "") ? a = !0 : (s.boolean || s.overloadedBoolean) && (typeof a != "string" || a === s.attribute || a === "") && (a = !!a), a == null || a === !1 || typeof a == "number" && Number.isNaN(a)) return "";
-	let f = G(s.attribute, Object.assign({}, e.settings.characterReferences, { subset: q.name[c][l] }));
-	return a === !0 || (a = Array.isArray(a) ? (s.commaSeparated ? i : t)(a, { padLeft: !e.settings.tightCommaSeparatedLists }) : String(a), e.settings.collapseEmptyAttributes && !a) ? f : (e.settings.preferUnquoted && (d = G(a, Object.assign({}, e.settings.characterReferences, {
+function Kn(t, a, o) {
+	let s = n(t.schema, a), c = t.settings.allowParseErrors && t.schema.space === "html" ? 0 : 1, l = +!t.settings.allowDangerousCharacters, u = t.quote, d;
+	if (s.overloadedBoolean && (o === s.attribute || o === "") ? o = !0 : (s.boolean || s.overloadedBoolean) && (typeof o != "string" || o === s.attribute || o === "") && (o = !!o), o == null || o === !1 || typeof o == "number" && Number.isNaN(o)) return "";
+	let f = G(s.attribute, Object.assign({}, t.settings.characterReferences, { subset: q.name[c][l] }));
+	return o === !0 || (o = Array.isArray(o) ? (s.commaSeparated ? e : i)(o, { padLeft: !t.settings.tightCommaSeparatedLists }) : String(o), t.settings.collapseEmptyAttributes && !o) ? f : (t.settings.preferUnquoted && (d = G(o, Object.assign({}, t.settings.characterReferences, {
 		attribute: !0,
 		subset: q.unquoted[c][l]
-	}))), d !== a && (e.settings.quoteSmart && o(a, u) > o(a, e.alternative) && (u = e.alternative), d = u + G(a, Object.assign({}, e.settings.characterReferences, {
+	}))), d !== o && (t.settings.quoteSmart && r(o, u) > r(o, t.alternative) && (u = t.alternative), d = u + G(o, Object.assign({}, t.settings.characterReferences, {
 		subset: (u === "'" ? q.single : q.double)[c][l],
 		attribute: !0
 	})) + u), f + (d && "=" + d));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/text.js
+// node_modules/hast-util-to-html/lib/handle/text.js
 var qn = ["<", "&"];
 function Jn(e, t, n, r) {
 	return n && n.type === "element" && (n.tagName === "script" || n.tagName === "style") ? e.value : G(e.value, Object.assign({}, r.settings.characterReferences, { subset: qn }));
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/raw.js
+// node_modules/hast-util-to-html/lib/handle/raw.js
 function Yn(e, t, n, r) {
 	return r.settings.allowDangerousHtml ? e.value : Jn(e, t, n, r);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/root.js
+// node_modules/hast-util-to-html/lib/handle/root.js
 function Xn(e, t, n, r) {
 	return r.all(e);
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/handle/index.js
-var Zn = c("type", {
+// node_modules/hast-util-to-html/lib/handle/index.js
+var Zn = Wt("type", {
 	invalid: Qn,
 	unknown: $n,
 	handlers: {
@@ -2689,9 +2689,9 @@ function Qn(e) {
 function $n(e) {
 	throw Error("Cannot compile unknown node `" + e.type + "`");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/hast-util-to-html/lib/index.js
+// node_modules/hast-util-to-html/lib/index.js
 var er = {}, tr = {}, nr = [];
-function rr(t, n) {
+function rr(e, n) {
 	let r = n || er, i = r.quote || "\"", o = i === "\"" ? "'" : "\"";
 	if (i !== "\"" && i !== "'") throw Error("Invalid quote `" + i + "`, expected `'` or `\"`");
 	return {
@@ -2711,18 +2711,18 @@ function rr(t, n) {
 			tightSelfClosing: r.tightSelfClosing || !1,
 			collapseEmptyAttributes: r.collapseEmptyAttributes || !1,
 			allowDangerousHtml: r.allowDangerousHtml || !1,
-			voids: r.voids || Wt,
+			voids: r.voids || Ht,
 			characterReferences: r.characterReferences || tr,
 			closeSelfClosing: r.closeSelfClosing || !1,
 			closeEmptyElements: r.closeEmptyElements || !1
 		},
-		schema: r.space === "svg" ? e : a,
+		schema: r.space === "svg" ? t : a,
 		quote: i,
 		alternative: o
-	}.one(Array.isArray(t) ? {
+	}.one(Array.isArray(e) ? {
 		type: "root",
-		children: t
-	} : t, void 0, void 0);
+		children: e
+	} : e, void 0, void 0);
 }
 function ir(e, t, n) {
 	return Zn(e, t, n, this);
@@ -2732,7 +2732,7 @@ function ar(e) {
 	for (; ++r < n.length;) t[r] = this.one(n[r], r, e);
 	return t.join("");
 }
-// ../../../../pr-469/crates/nac-server/web/node_modules/@shikijs/core/dist/index.mjs
+// node_modules/@shikijs/core/dist/index.mjs
 var or = /\s+/g;
 function sr(e, t) {
 	if (!t) return e;
@@ -2830,23 +2830,23 @@ function yr(e, t, n, r, i = "css-vars") {
 		content: e.content,
 		explanation: e.explanation,
 		offset: e.offset
-	}, o = t.map((t) => J(e.variants[t])), s = new Set(o.flatMap((e) => Object.keys(e))), c = {}, u = (e, r) => {
+	}, o = t.map((t) => J(e.variants[t])), c = new Set(o.flatMap((e) => Object.keys(e))), l = {}, u = (e, r) => {
 		let i = r === "color" ? "" : r === "background-color" ? "-bg" : `-${r}`;
 		return n + t[e] + (r === "color" ? "" : i);
 	};
 	return o.forEach((e, n) => {
-		for (let a of s) {
-			let s = e[a] || "inherit";
+		for (let a of c) {
+			let c = e[a] || "inherit";
 			if (n === 0 && r && hr.includes(a)) {
 				if (r === "light-dark()" && o.length > 1) {
 					let e = t.findIndex((e) => e === "light"), r = t.findIndex((e) => e === "dark");
-					if (e === -1 || r === -1) throw new l("When using `defaultColor: \"light-dark()\"`, you must provide both `light` and `dark` themes");
+					if (e === -1 || r === -1) throw new s("When using `defaultColor: \"light-dark()\"`, you must provide both `light` and `dark` themes");
 					let d = o[e][a] || "inherit", f = o[r][a] || "inherit";
-					c[a] = `light-dark(${d}, ${f})`, i === "css-vars" && (c[u(n, a)] = s);
-				} else c[a] = s;
-			} else i === "css-vars" && (c[u(n, a)] = s);
+					l[a] = `light-dark(${d}, ${f})`, i === "css-vars" && (l[u(n, a)] = c);
+				} else l[a] = c;
+			} else i === "css-vars" && (l[u(n, a)] = c);
 		}
-	}), a.htmlStyle = c, a;
+	}), a.htmlStyle = l, a;
 }
 function J(e) {
 	let t = {};
@@ -2867,7 +2867,7 @@ function br() {
 			let n = pr(t.source);
 			function r(e) {
 				if (typeof e == "number") {
-					if (e < 0 || e > t.source.length) throw new l(`Invalid decoration offset: ${e}. Code length: ${t.source.length}`);
+					if (e < 0 || e > t.source.length) throw new s(`Invalid decoration offset: ${e}. Code length: ${t.source.length}`);
 					return {
 						...n.indexToPos(e),
 						offset: e
@@ -2875,9 +2875,9 @@ function br() {
 				}
 				{
 					let t = n.lines[e.line];
-					if (t === void 0) throw new l(`Invalid decoration position ${JSON.stringify(e)}. Lines length: ${n.lines.length}`);
+					if (t === void 0) throw new s(`Invalid decoration position ${JSON.stringify(e)}. Lines length: ${n.lines.length}`);
 					let r = e.character;
-					if (r < 0 && (r = t.length + r), r < 0 || r > t.length) throw new l(`Invalid decoration position ${JSON.stringify(e)}. Line ${e.line} length: ${t.length}`);
+					if (r < 0 && (r = t.length + r), r < 0 || r > t.length) throw new s(`Invalid decoration position ${JSON.stringify(e)}. Line ${e.line} length: ${t.length}`);
 					return {
 						...e,
 						character: r,
@@ -2906,13 +2906,13 @@ function br() {
 		code(e) {
 			if (!this.options.decorations?.length) return;
 			let n = t(this), r = [...e.children].filter((e) => e.type === "element" && e.tagName === "span");
-			if (r.length !== n.converter.lines.length) throw new l(`Number of lines in code element (${r.length}) does not match the number of lines in the source (${n.converter.lines.length}). Failed to apply decorations.`);
+			if (r.length !== n.converter.lines.length) throw new s(`Number of lines in code element (${r.length}) does not match the number of lines in the source (${n.converter.lines.length}). Failed to apply decorations.`);
 			function i(e, t, n, i) {
-				let a = r[e], s = "", c = -1, u = -1;
-				if (t === 0 && (c = 0), n === 0 && (u = 0), n === Infinity && (u = a.children.length), c === -1 || u === -1) for (let e = 0; e < a.children.length; e++) s += Sr(a.children[e]), c === -1 && s.length === t && (c = e + 1), u === -1 && s.length === n && (u = e + 1);
-				if (c === -1) throw new l(`Failed to find start index for decoration ${JSON.stringify(i.start)}`);
-				if (u === -1) throw new l(`Failed to find end index for decoration ${JSON.stringify(i.end)}`);
-				let d = a.children.slice(c, u);
+				let a = r[e], c = "", l = -1, u = -1;
+				if (t === 0 && (l = 0), n === 0 && (u = 0), n === Infinity && (u = a.children.length), l === -1 || u === -1) for (let e = 0; e < a.children.length; e++) c += Sr(a.children[e]), l === -1 && c.length === t && (l = e + 1), u === -1 && c.length === n && (u = e + 1);
+				if (l === -1) throw new s(`Failed to find start index for decoration ${JSON.stringify(i.start)}`);
+				if (u === -1) throw new s(`Failed to find end index for decoration ${JSON.stringify(i.end)}`);
+				let d = a.children.slice(l, u);
 				if (!i.alwaysWrap && d.length === a.children.length) o(a, i, "line");
 				else if (!i.alwaysWrap && d.length === 1 && d[0].type === "element") o(d[0], i, "token");
 				else {
@@ -2922,7 +2922,7 @@ function br() {
 						properties: {},
 						children: d
 					};
-					o(e, i, "wrapper"), a.children.splice(c, d.length, e);
+					o(e, i, "wrapper"), a.children.splice(l, d.length, e);
 				}
 			}
 			function a(e, t) {
@@ -2936,29 +2936,29 @@ function br() {
 					class: e.properties.class
 				}, t.properties?.class && sr(e, t.properties.class), e = i(e, n) || e, e;
 			}
-			let s = [], c = n.decorations.sort((e, t) => t.start.offset - e.start.offset || e.end.offset - t.end.offset);
-			for (let e of c) {
+			let c = [], l = n.decorations.sort((e, t) => t.start.offset - e.start.offset || e.end.offset - t.end.offset);
+			for (let e of l) {
 				let { start: t, end: n } = e;
 				if (t.line === n.line) i(t.line, t.character, n.character, e);
 				else if (t.line < n.line) {
 					i(t.line, t.character, Infinity, e);
-					for (let r = t.line + 1; r < n.line; r++) s.unshift(() => a(r, e));
+					for (let r = t.line + 1; r < n.line; r++) c.unshift(() => a(r, e));
 					i(n.line, 0, n.character, e);
 				}
 			}
-			s.forEach((e) => e());
+			c.forEach((e) => e());
 		}
 	};
 }
 function xr(e) {
 	for (let t = 0; t < e.length; t++) {
 		let n = e[t];
-		if (n.start.offset > n.end.offset) throw new l(`Invalid decoration range: ${JSON.stringify(n.start)} - ${JSON.stringify(n.end)}`);
+		if (n.start.offset > n.end.offset) throw new s(`Invalid decoration range: ${JSON.stringify(n.start)} - ${JSON.stringify(n.end)}`);
 		for (let r = t + 1; r < e.length; r++) {
-			let t = e[r], i = n.start.offset <= t.start.offset && t.start.offset < n.end.offset, a = n.start.offset < t.end.offset && t.end.offset <= n.end.offset, o = t.start.offset <= n.start.offset && n.start.offset < t.end.offset, s = t.start.offset < n.end.offset && n.end.offset <= t.end.offset;
-			if (i || a || o || s) {
-				if (i && a || o && s || o && n.start.offset === n.end.offset || a && t.start.offset === t.end.offset) continue;
-				throw new l(`Decorations ${JSON.stringify(n.start)} and ${JSON.stringify(t.start)} intersect.`);
+			let t = e[r], i = n.start.offset <= t.start.offset && t.start.offset < n.end.offset, a = n.start.offset < t.end.offset && t.end.offset <= n.end.offset, o = t.start.offset <= n.start.offset && n.start.offset < t.end.offset, c = t.start.offset < n.end.offset && n.end.offset <= t.end.offset;
+			if (i || a || o || c) {
+				if (i && a || o && c || o && n.start.offset === n.end.offset || a && t.start.offset === t.end.offset) continue;
+				throw new s(`Decorations ${JSON.stringify(n.start)} and ${JSON.stringify(t.start)} intersect.`);
 			}
 		}
 	}
@@ -3266,44 +3266,44 @@ function Z(e, t, n = {}) {
 		let { theme: r } = e.setTheme(i);
 		return Ir(r, t, n);
 	}
-	return Pt(e, t, n);
+	return Mt(e, t, n);
 }
 function Q(e, t, n) {
-	let r, i, a, o, s, c;
+	let r, i, a, o, c, l;
 	if ("themes" in n) {
 		let { defaultColor: u = "light", cssVariablePrefix: d = "--shiki-", colorsRendering: f = "css-vars" } = n, p = Object.entries(n.themes).filter((e) => e[1]).map((e) => ({
 			color: e[0],
 			theme: e[1]
 		})).sort((e, t) => e.color === u ? -1 : +(t.color === u));
-		if (p.length === 0) throw new l("`themes` option must not be empty");
+		if (p.length === 0) throw new s("`themes` option must not be empty");
 		let m = U(e, t, n, Z);
-		if (c = V(m), u && u !== "light-dark()" && !p.some((e) => e.color === u)) throw new l(`\`themes\` option must contain the defaultColor key \`${u}\``);
+		if (l = V(m), u && u !== "light-dark()" && !p.some((e) => e.color === u)) throw new s(`\`themes\` option must contain the defaultColor key \`${u}\``);
 		let h = p.map((t) => e.getTheme(t.theme)), g = p.map((e) => e.color);
-		a = m.map((e) => e.map((e) => yr(e, g, d, u, f))), c && B(a, c);
+		a = m.map((e) => e.map((e) => yr(e, g, d, u, f))), l && B(a, l);
 		let _ = p.map((e) => M(e.theme, n));
-		i = Rr(p, h, _, d, u, "fg", f), r = Rr(p, h, _, d, u, "bg", f), o = `shiki-themes ${h.map((e) => e.name).join(" ")}`, s = u ? void 0 : [i, r].join(";");
+		i = Rr(p, h, _, d, u, "fg", f), r = Rr(p, h, _, d, u, "bg", f), o = `shiki-themes ${h.map((e) => e.name).join(" ")}`, c = u ? void 0 : [i, r].join(";");
 	} else if ("theme" in n) {
 		let s = M(n.theme, n);
 		a = Z(e, t, n);
-		let l = e.getTheme(n.theme);
-		r = N(l.bg, s), i = N(l.fg, s), o = l.name, c = V(a);
-	} else throw new l("Invalid options, either `theme` or `themes` must be provided");
+		let c = e.getTheme(n.theme);
+		r = N(c.bg, s), i = N(c.fg, s), o = c.name, l = V(a);
+	} else throw new s("Invalid options, either `theme` or `themes` must be provided");
 	return {
 		tokens: a,
 		fg: i,
 		bg: r,
 		themeName: o,
-		rootStyle: s,
-		grammarState: c
+		rootStyle: c,
+		grammarState: l
 	};
 }
 function Rr(e, t, n, r, i, a, o) {
-	return e.map((s, c) => {
-		let u = N(t[c][a], n[c]) || "inherit", d = `${r + s.color}${a === "bg" ? "-bg" : ""}:${u}`;
-		if (c === 0 && i) {
+	return e.map((c, l) => {
+		let u = N(t[l][a], n[l]) || "inherit", d = `${r + c.color}${a === "bg" ? "-bg" : ""}:${u}`;
+		if (l === 0 && i) {
 			if (i === "light-dark()" && e.length > 1) {
 				let r = e.findIndex((e) => e.color === "light"), i = e.findIndex((e) => e.color === "dark");
-				if (r === -1 || i === -1) throw new l("When using `defaultColor: \"light-dark()\"`, you must provide both `light` and `dark` themes");
+				if (r === -1 || i === -1) throw new s("When using `defaultColor: \"light-dark()\"`, you must provide both `light` and `dark` themes");
 				return `light-dark(${N(t[r][a], n[r]) || "inherit"}, ${N(t[i][a], n[i]) || "inherit"});${d}`;
 			}
 			return u;
@@ -3520,9 +3520,9 @@ function Kr(e, t, n) {
 	return i;
 }
 async function qr(e) {
-	let t = await Dt(e);
+	let t = await Tt(e);
 	return {
-		getLastGrammarState: (...e) => Ft(t, ...e),
+		getLastGrammarState: (...e) => Nt(t, ...e),
 		codeToTokensBase: (e, n) => Z(t, e, n),
 		codeToTokensWithThemes: (e, n) => U(t, e, n),
 		codeToTokens: (e, n) => Q(t, e, n),
@@ -3537,7 +3537,7 @@ async function qr(e) {
 function Jr(e) {
 	let t = z(e);
 	return {
-		getLastGrammarState: (...e) => Ft(t, ...e),
+		getLastGrammarState: (...e) => Nt(t, ...e),
 		codeToTokensBase: (e, n) => Z(t, e, n),
 		codeToTokensWithThemes: (e, n) => U(t, e, n),
 		codeToTokens: (e, n) => Q(t, e, n),
@@ -3570,35 +3570,35 @@ function Zr(e) {
 	async function i(e) {
 		function i(n) {
 			if (typeof n == "string") {
-				if (n = e.langAlias?.[n] || n, ht(n)) return [];
+				if (n = e.langAlias?.[n] || n, pt(n)) return [];
 				let r = t[n];
-				if (!r) throw new l(`Language \`${n}\` is not included in this bundle. You may want to load it from external source.`);
+				if (!r) throw new s(`Language \`${n}\` is not included in this bundle. You may want to load it from external source.`);
 				return r;
 			}
 			return n;
 		}
 		function a(e) {
-			if (gt(e)) return "none";
+			if (mt(e)) return "none";
 			if (typeof e == "string") {
 				let t = n[e];
-				if (!t) throw new l(`Theme \`${e}\` is not included in this bundle. You may want to load it from external source.`);
+				if (!t) throw new s(`Theme \`${e}\` is not included in this bundle. You may want to load it from external source.`);
 				return t;
 			}
 			return e;
 		}
-		let o = (e.themes ?? []).map((e) => a(e)), s = (e.langs ?? []).map((e) => i(e)), c = await qr({
+		let o = (e.themes ?? []).map((e) => a(e)), c = (e.langs ?? []).map((e) => i(e)), l = await qr({
 			engine: e.engine ?? r(),
 			...e,
 			themes: o,
-			langs: s
+			langs: c
 		});
 		return {
-			...c,
+			...l,
 			loadLanguage(...e) {
-				return c.loadLanguage(...e.map(i));
+				return l.loadLanguage(...e.map(i));
 			},
 			loadTheme(...e) {
-				return c.loadTheme(...e.map(a));
+				return l.loadTheme(...e.map(a));
 			},
 			getBundledLanguages() {
 				return t;
@@ -3844,4 +3844,4 @@ function ei(e = {}) {
 	};
 	return r || (a.tokenColors = a.tokenColors?.map((e) => (e.settings?.fontStyle && delete e.settings.fontStyle, e))), a;
 }
-export { l as ShikiError, sr as addClassToHast, N as applyColorReplacements, $ as codeToHast, Kr as codeToHtml, Q as codeToTokens, Z as codeToTokensBase, U as codeToTokensWithThemes, Zr as createBundledHighlighter, ei as createCssVariablesTheme, qr as createHighlighterCore, Jr as createHighlighterCoreSync, pr as createPositionConverter, Ot as createShikiInternal, Et as createShikiInternalSync, z as createShikiPrimitive, Dt as createShikiPrimitiveAsync, $r as createSingletonShorthands, yr as flatTokenVariants, Ft as getLastGrammarState, Xr as getSingletonHighlighterCore, J as getTokenStyleObject, mr as guessEmbeddedLanguages, Gr as hastToHtml, F as isNoneTheme, P as isPlainLang, ht as isSpecialLang, gt as isSpecialTheme, Qr as makeSingletonHighlighter, Yr as makeSingletonHighlighterCore, mt as normalizeGetter, L as normalizeTheme, M as resolveColorReplacements, I as splitLines, gr as splitToken, vr as splitTokens, Y as stringifyTokenStyle, pt as toArray, Ir as tokenizeAnsiWithTheme, It as tokenizeWithTheme, Vr as tokensToHast, br as transformerDecorations };
+export { s as ShikiError, sr as addClassToHast, N as applyColorReplacements, $ as codeToHast, Kr as codeToHtml, Q as codeToTokens, Z as codeToTokensBase, U as codeToTokensWithThemes, Zr as createBundledHighlighter, ei as createCssVariablesTheme, qr as createHighlighterCore, Jr as createHighlighterCoreSync, pr as createPositionConverter, Et as createShikiInternal, wt as createShikiInternalSync, z as createShikiPrimitive, Tt as createShikiPrimitiveAsync, $r as createSingletonShorthands, yr as flatTokenVariants, Nt as getLastGrammarState, Xr as getSingletonHighlighterCore, J as getTokenStyleObject, mr as guessEmbeddedLanguages, Gr as hastToHtml, F as isNoneTheme, P as isPlainLang, pt as isSpecialLang, mt as isSpecialTheme, Qr as makeSingletonHighlighter, Yr as makeSingletonHighlighterCore, ft as normalizeGetter, L as normalizeTheme, M as resolveColorReplacements, I as splitLines, gr as splitToken, vr as splitTokens, Y as stringifyTokenStyle, dt as toArray, Ir as tokenizeAnsiWithTheme, Pt as tokenizeWithTheme, Vr as tokensToHast, br as transformerDecorations };
