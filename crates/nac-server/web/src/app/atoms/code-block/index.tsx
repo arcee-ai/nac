@@ -44,7 +44,7 @@ const CodeBody: React.FC<CodeBodyProps> = ({ code, lines, lineNumbers, wrap }) =
       {lineNumbers ? (
         <div
           aria-hidden="true"
-          className="shrink-0 select-none py-2 pl-3 pr-2 text-right text-basic-muted border-r border-muted"
+          className="shrink-0 select-none py-3 pl-4 pr-3 text-right tabular text-basic-muted border-r border-muted"
         >
           {Array.from({ length: count }, (_, index) => (
             <div key={index}>{index + 1}</div>
@@ -53,7 +53,7 @@ const CodeBody: React.FC<CodeBodyProps> = ({ code, lines, lineNumbers, wrap }) =
       ) : null}
       <pre
         className={cn(
-          "flex-1 min-w-0 py-2 px-3 text-basic-primary",
+          "flex-1 min-w-0 py-3 px-4 text-basic-primary",
           wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto",
         )}
       >
@@ -123,16 +123,16 @@ const CodeBlock: React.FC<CodeBlockProps> & { Size: typeof CodeBlockSize } = ({
   return (
     <div
       className={cn(
-        "flex flex-col min-w-0 rounded-[8px] overflow-hidden",
-        "bg-elevation-sublevel-variant-A border border-muted",
+        "flex flex-col min-w-0 rounded-card overflow-hidden",
+        "bg-[var(--color-code-bg)] border border-tertiary",
         "code [&>*]:shrink-0",
         size,
         className,
       )}
     >
       {header ? (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-muted">
-          <div className="flex-1 min-w-0 truncate label-micro text-basic-secondary">
+        <div className="flex h-9 items-center gap-1 border-b border-muted pl-4 pr-1.5">
+          <div className="flex-1 min-w-0 truncate type-meta text-basic-tertiary">
             {title ?? language}
           </div>
           {copyable ? <CopyButton value={code} title="Copy code" /> : null}
