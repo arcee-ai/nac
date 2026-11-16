@@ -70,3 +70,7 @@ pub fn nac_home_dir() -> Option<PathBuf> {
 pub fn nac_config_path() -> Option<PathBuf> {
     nac_home_dir().map(|dir| dir.join("config.toml"))
 }
+
+#[cfg(test)]
+#[path = "paths_tests.rs"]
+mod tests;

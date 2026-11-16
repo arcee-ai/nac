@@ -20,12 +20,14 @@ export function FilesListToolbar({
   changed,
   revision,
   readOnly,
+  reveal,
 }: {
   sessionId: string;
   listing: FileListing;
   changed: ChangedFileStat[];
   revision: number | null;
   readOnly: boolean;
+  reveal?: import("react").ReactNode;
 }) {
   const { selectFileListing } = useNativeRuntime().stores.sessionLayoutStore;
 
@@ -54,6 +56,7 @@ export function FilesListToolbar({
             {item.label}
           </StickyButton>
         ))}
+        {reveal}
         {commit}
       </div>
     );
@@ -81,6 +84,7 @@ export function FilesListToolbar({
     return (
       <div className="flex flex-1 min-w-0 items-center gap-[10px] pr-2">
         {tabs}
+        {reveal}
         {commit}
       </div>
     );
@@ -89,6 +93,7 @@ export function FilesListToolbar({
   return (
     <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
       {tabs}
+      {reveal}
       {commit}
     </div>
   );

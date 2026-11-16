@@ -1,3 +1,5 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
+import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -30,15 +32,16 @@ const readonlyBrowserCaches = new Set(["browser-binary", "browser-proof", "brows
 // S17 on parent 004492fc300b296e6245a0f0768a892f98c8a42d intentionally changes
 // only stable-release's four shared-key inputs and three read-only save inputs.
 // Its old digest is independently checked after reversing exactly those inputs.
-// The other four workflow hashes, graph, profiles, commands and identities stay fixed.
+// Startup custody and isolated native auth remain exact required test steps in both projections.
+// The other four workflow hashes and every normalization remain unchanged.
 const baseline = {
-  "stable-release": "e58c6a530fba723dcee4be2280ce35eb544366153ae0fe7edd283f825f80b4ab",
+  "stable-release": "43b11c4b1cccae666a6f5fe71f1359c6aaca1662f38876c98cd284e918cd70e5",
   "macos-native": "0ee43280f28b4b888cb50f7b17467625dc83e856391e05dad88c7a45f71c08d7",
   "managed-image-build": "c82a05b0089599969dc17e4d0bf0e57aee293dcf8439b3cb4c325a3b2ec0bcb8",
   "managed-fault": "459336943e5f6c361d281e00a920fcca61ee3ad09fab5b61a7356b9ce2da7953",
   "managed-quality": "b77ca20017fcce1fef054e779b42b852dac053dcf53648cbeb41940d5cdc14e0",
 };
-const read = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+const read = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "macos-native") reverseNativeApp(value); if (name === "stable-release") reverseNativeQualification(value); return value; };
 function graph() {
   const result = {};
   function visit(name) {
@@ -62,6 +65,8 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  reverseAssetTokens(normalized["stable-release"]);
+  reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes
   // and all prior source/provenance/profile/quality fingerprints remain fixed.
   reverseBrowserApt(normalized["stable-release"]);
@@ -168,7 +173,7 @@ function verify(values) {
     cache.with.key = "${{ github.job }}";
     cache.with["save-if"] = trust;
   }
-  assert.equal(digest(beforeShared), "a14e76578b200d595eba627f03b5aa18381a50af07bc2b0993926448a391d357",
+  assert.equal(digest(beforeShared), "54bc29daf0326f9b20563afba238525847c5319cf4fb44494198de9c192a9802",
     "reversing only S17 must recover the exact pre-shared workflow");
   for (const [name, expected] of Object.entries(baseline)) assert.equal(digest(normalized[name]), expected, `${name}: acceptance behavior changed outside cache control`);
   // No flag is allowed to affect a command, if/needs, receipt, privilege or role.

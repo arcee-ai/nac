@@ -101,7 +101,7 @@ for (const viewport of VIEWPORTS) {
       exact: true,
     });
     await expectReachableWithoutScrolling(page, copy);
-    await expect(account.getByRole("button", { name: "Open ChatGPT" })).toBeVisible();
+    await expect(account.getByRole("link", { name: "Open ChatGPT" })).toBeVisible();
     await expect(account.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
     await copy.focus();
     await page.keyboard.press("Enter");

@@ -243,7 +243,7 @@ it("copies exactly the visible device code and announces the copy", async () => 
   const writeText = vi.fn().mockResolvedValue(undefined);
   grantClipboard(writeText);
   const copy = await waitingForCode();
-  expect(screen.getByRole("button", { name: /Open ChatGPT/ })).toBeTruthy();
+  expect(screen.getByRole("link", { name: /Open ChatGPT/ })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
 
   copy.focus();
