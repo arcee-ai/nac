@@ -32,7 +32,10 @@ interface SwitchProps extends Omit<
   size?: SwitchSize;
 }
 
-/** Track and knob toggle. Sizes and tokens follow the Figma Switcher. */
+/**
+ * Track and knob toggle. Off is a soft wash with a white knob; on is an ink
+ * track with an on-ink knob, in either theme.
+ */
 const Switch: React.FC<SwitchProps> = ({
   checked = false,
   disabled = false,
@@ -48,7 +51,7 @@ const Switch: React.FC<SwitchProps> = ({
     disabled={disabled}
     onClick={() => !disabled && onChange?.(!checked)}
     className={cn(
-      "relative shrink-0 rounded-full shadow-convex transition-colors duration-150",
+      "relative shrink-0 rounded-pill transition-colors duration-150 ease-out motion-reduce:transition-none",
       "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
       TRACK[size],
       disabled
@@ -63,7 +66,7 @@ const Switch: React.FC<SwitchProps> = ({
   >
     <span
       className={cn(
-        "absolute rounded-full transition-transform duration-150",
+        "absolute rounded-pill shadow-[0_1px_2px_oklch(0_0_0/18%)] transition-transform duration-150 ease-out motion-reduce:transition-none",
         KNOB[size],
         disabled ? "bg-input-knob-disabled" : checked ? "bg-input-knob-active" : "bg-input-knob",
         checked ? KNOB_TRAVEL[size] : "translate-x-0",

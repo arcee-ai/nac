@@ -24,19 +24,21 @@ import Icon, { IconName } from "../icon";
 /** Kept in step with the mobile slide transition. */
 const MOBILE_EXIT_MS = 300;
 
-/** Clearance the body leaves for the phone header floating over it. */
-const MOBILE_HEADER_CLEARANCE = "pt-14";
+/** Clearance the body leaves for the phone header floating over it (56px below the safe area). */
+const MOBILE_HEADER_CLEARANCE = "pt-[calc(56px+env(safe-area-inset-top))]";
 /**
- * Clearance the body leaves for the phone footer floating over it (64px plus
- * the body's own 16px). A full-bleed `bodyClassName` such as `p-0` drops it.
+ * Clearance the body leaves for the phone footer floating over it (a 44px
+ * pill row with 12px around it, plus the body's own 16px, above the safe
+ * area). A full-bleed `bodyClassName` such as `p-0` drops it.
  */
-const MOBILE_FOOTER_CLEARANCE = "pb-20";
+const MOBILE_FOOTER_CLEARANCE = "pb-[calc(84px+env(safe-area-inset-bottom))]";
 
 export enum ModalSize {
-  Small = "max-w-[400px]",
-  /** Figma ModalBox default width. */
-  Medium = "max-w-[604px]",
-  Wide = "max-w-[600px]",
+  /** Confirmations: one question, two answers. */
+  Small = "max-w-[420px]",
+  /** The default form dialog. */
+  Medium = "max-w-[600px]",
+  Wide = "max-w-[640px]",
   Large = "max-w-[760px]",
 }
 
@@ -97,9 +99,11 @@ interface ModalProps {
 }
 
 /**
- * Generic dialog: scrim + centered card on desktop, or a full-screen panel
- * that slides in from the right on a phone (same pattern as ArceeFM's
- * ModalBoxMobile). Overlay tap dismisses only on desktop.
+ * Generic dialog. Desktop: a soft scrim and a centred 20px-radius card with
+ * a 52px header (quiet title, close), a padded body and a footer of pill
+ * actions. Phone: a full-height sheet that pushes in from the right like an
+ * iOS navigation step, with its back/close control leading the header and
+ * safe-area insets top and bottom. Overlay tap dismisses only on desktop.
  */
 const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   open,
@@ -232,13 +236,18 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   // already puts Close in the header row.
   const chromelessClose = chromeless && (isFullScreen || isMobile) && onClose && !hideClose;
 
-  const titleClassName = "header-md flex min-w-0 flex-1 items-center text-basic-primary";
+  const titleClassName = cn(
+    "flex min-w-0 flex-1 items-center text-basic-primary",
+    isMobile ? "type-heading" : "type-subheading",
+  );
   const headerRow = (
     <div
       className={cn(
         "flex items-center",
-        subheader ? "min-h-14" : "h-full",
-        isMobile ? cn("gap-4 py-1 pl-2", headerActions ? "pr-1" : "pr-4") : "gap-2 py-1 pl-4 pr-2",
+        subheader ? (isMobile ? "min-h-14" : "min-h-[52px]") : "h-full",
+        isMobile
+          ? cn("gap-3 py-1 pl-2", headerActions ? "pr-1" : "pr-4")
+          : "gap-2 py-1 pl-5 pr-2.5",
       )}
     >
       {isMobile && onClose ? closeButton(mobileCloseIcon) : null}
@@ -263,15 +272,15 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           "flex flex-col",
           isMobile
             ? cn(
-                "fade-from-top z-10",
-                subheader ? "shrink-0" : "h-14",
+                "fade-from-top z-10 pt-[env(safe-area-inset-top)]",
+                subheader ? "shrink-0" : "h-[calc(56px+env(safe-area-inset-top))]",
                 floatingHeader ? "absolute inset-x-0 top-0" : "shrink-0",
               )
-            : cn("shrink-0 border-b border-muted", subheader ? "min-h-14" : "h-14"),
+            : cn("shrink-0 border-b border-muted", subheader ? "min-h-[52px]" : "h-[52px]"),
         )}
       >
         {headerRow}
-        {subheader ? <div className="px-4 pb-3">{subheader}</div> : null}
+        {subheader ? <div className={isMobile ? "px-4 pb-3" : "px-5 pb-3"}>{subheader}</div> : null}
       </header>
     ) : null;
 
@@ -292,8 +301,6 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
           <CoverBackground
             open={open && (!isMobile || !offscreen)}
             zIndex={zIndex}
-            opacity={0.25}
-            blur={1}
             className={isMobile ? "!duration-300" : undefined}
           />
         </Overlay>
@@ -327,7 +334,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                     size,
                     chromeless
                       ? "shadow-none"
-                      : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[20px] bg-elevation-level-2 shadow-xl",
+                      : "max-h-[calc(100vh-2rem)] overflow-hidden rounded-sheet bg-elevation-level-2 shadow-2xl",
                     isFullScreen && "h-full max-h-none min-h-0 w-full max-w-none overflow-hidden",
                   ),
               className,
@@ -341,7 +348,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
             )}
           >
             {chromelessClose ? (
-              <div className="absolute top-1 right-2 z-10">{closeButton(IconName.Close)}</div>
+              <div className="absolute top-[calc(4px+env(safe-area-inset-top))] right-2 z-10">
+                {closeButton(IconName.Close)}
+              </div>
             ) : null}
             {header}
             <div
@@ -354,7 +363,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 className={cn(
                   chromeless
                     ? "flex min-h-0 w-full flex-1 flex-col"
-                    : "paragraph-medium flex flex-col p-4 text-basic-secondary",
+                    : "modal-body paragraph-medium flex flex-col px-5 py-4 text-basic-secondary",
                   // A phone or full-screen body is pinned to the visible height so
                   // `h-full` children can scroll themselves; it scrolls too, so
                   // taller content keeps the padding and footer clearance below it.
@@ -374,8 +383,8 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                 className={cn(
                   "modal-footer flex items-center justify-end",
                   isMobile
-                    ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 p-3"
-                    : "shrink-0 gap-2 border-t border-muted p-4",
+                    ? "modal-footer-mobile fade-from-bottom absolute inset-x-0 bottom-0 z-10 gap-3 px-3 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))]"
+                    : "shrink-0 gap-2 border-t border-muted px-5 py-3",
                 )}
               >
                 {footer}

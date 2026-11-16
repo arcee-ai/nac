@@ -12,7 +12,7 @@ export function ReasoningSection() {
   return (
     <BoxSurface title="Conversation: reasoning and answer">
       <div className="p-4 flex min-w-0 flex-col gap-4">
-        <p className="text-small text-basic-secondary">
+        <p className="type-body-chrome text-basic-secondary">
           Reasoning: 14px / 22px, secondary text, 12px paragraphs, 16px inset, 1px tertiary rule, no
           filled surface. Header and copy targets: 44px. Answer: existing 14px / 24px primary prose.
           Live opens; settled starts closed. A reader’s toggle, focus or selection wins on

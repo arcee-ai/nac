@@ -37,14 +37,14 @@ const noop = () => {};
 
 export function ToolsBadgeSection() {
   return (
-    <BoxSurface title="Tools and reasoning badge">
+    <BoxSurface title="Tools and reasoning badge" bodyClassName="overflow-x-auto">
       <div className="p-4 grid w-fit grid-cols-[160px_repeat(2,auto)] items-center justify-items-start gap-x-10 gap-y-3">
         <span />
-        <span className="label-micro text-basic-muted">Default</span>
-        <span className="label-micro text-basic-muted">Selected</span>
+        <span className="type-meta-strong text-basic-muted">Default</span>
+        <span className="type-meta-strong text-basic-muted">Selected</span>
         {STATES.map(({ caption, label, inProgress, disabled }) => (
           <Fragment key={caption}>
-            <span className="label-small text-basic-secondary">{caption}</span>
+            <span className="type-body-chrome text-basic-secondary">{caption}</span>
             <ToolsAndReasoningBadge
               label={label}
               inProgress={inProgress}
@@ -62,7 +62,7 @@ export function ToolsBadgeSection() {
         ))}
         {LIVE_STEPS.map(({ label, leadingIcon }, index) => (
           <Fragment key={label}>
-            <span className="label-small text-basic-secondary">
+            <span className="type-body-chrome text-basic-secondary">
               {index === 0 ? "In progress" : null}
             </span>
             <ToolsAndReasoningBadge

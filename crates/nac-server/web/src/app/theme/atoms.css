@@ -1,7 +1,9 @@
-/* Atom styles ported from ArceeFM (button/index.css, input/index.css) with
-   @apply resolved to concrete values. Colours use design tokens directly.
-   The size matrix is generalized to size+content (variant-agnostic) since the
-   values are identical across variants, except tertiary, which has no visual box. */
+/* Focus atom styles. Unlayered on purpose: these rules are the primitives'
+   own shape and must win over incidental utilities on the same element.
+   Colours come from the semantic tokens only (`semantic.css`), so light and
+   dark are both answered here. Controls are pills; boxes take the radius
+   scale (`--radius-*`); the size matrix is generalized to size + content
+   (variant-agnostic), except tertiary, which has no visual box. */
 
 /* ============================ ICON ============================ */
 .icon {
@@ -149,7 +151,6 @@
 .btn-primary {
   color: var(--color-text-btn-primary);
   background-color: var(--color-bg-btn-primary);
-  box-shadow: var(--shadow-convex);
 }
 .btn-primary:hover {
   background-color: var(--color-bg-btn-primary-hovered);
@@ -183,6 +184,7 @@
 .btn-secondary.btn-disabled {
   color: var(--color-text-btn-secondary-disabled);
   background-color: var(--color-bg-btn-secondary-disabled);
+  box-shadow: inset 0 0 0 1px var(--color-border-muted);
 }
 .btn-secondary.btn-disabled:hover,
 .btn-secondary.btn-disabled:active {
@@ -193,7 +195,7 @@
 .btn-secondary-destructive {
   color: var(--color-text-btn-destructive);
   background-color: var(--color-bg-btn-secondary-destructive);
-  box-shadow: var(--shadow-convex);
+  box-shadow: inset 0 0 0 1px var(--color-border-btn-destructive);
 }
 .btn-secondary-destructive:hover {
   color: var(--color-text-btn-destructive-hovered);
@@ -216,7 +218,6 @@
 .btn-secondary-accent {
   color: var(--color-text-btn-accent);
   background-color: var(--color-bg-btn-secondary-accent);
-  box-shadow: var(--shadow-convex);
 }
 .btn-secondary-accent:hover {
   color: var(--color-text-btn-accent-hovered);
@@ -239,7 +240,6 @@
 .btn-secondary-highlighted {
   color: var(--color-text-btn-secondary-highlighted);
   background-color: var(--color-bg-btn-secondary-highlighted);
-  box-shadow: var(--shadow-convex);
 }
 .btn-secondary-highlighted:hover {
   color: var(--color-text-btn-secondary-hovered-highlighted);
@@ -262,7 +262,6 @@
 .btn-secondary-accent-highlighted {
   color: var(--color-text-btn-accent);
   background-color: var(--color-bg-btn-secondary-accent-highlighted);
-  box-shadow: var(--shadow-convex);
 }
 .btn-secondary-accent-highlighted:hover {
   color: var(--color-text-btn-accent-hovered);
@@ -437,6 +436,21 @@
   color: var(--color-text-btn-accent-disabled);
 }
 
+/* A busy button is disabled for input but keeps its resting face, so the
+   spinner reads on the colour the person just pressed. */
+.btn-primary.btn-disabled[aria-busy="true"],
+.btn-primary.btn-disabled[aria-busy="true"]:hover {
+  color: var(--color-text-btn-primary);
+  background-color: var(--color-bg-btn-primary);
+  cursor: progress;
+}
+.btn-secondary.btn-disabled[aria-busy="true"],
+.btn-secondary.btn-disabled[aria-busy="true"]:hover {
+  background-color: var(--color-bg-btn-secondary);
+  box-shadow: var(--shadow-convex);
+  cursor: progress;
+}
+
 /* icon rotate helper */
 .btn.btn-icon-rotate .icon {
   transition: transform 0.15s ease-out;
@@ -577,7 +591,7 @@
   outline-offset: -2px;
 }
 .input:hover:not(:disabled) {
-  box-shadow: inset 0 0 0 1px var(--f-line-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--f-ink) 30%, transparent);
 }
 .input::placeholder {
   color: var(--color-text-input-placeholder);
@@ -595,42 +609,54 @@
   opacity: 0.75;
 }
 .input-validation,
-.input-validation:hover,
+.input-validation:hover {
+  box-shadow: inset 0 0 0 1px var(--color-border-error-primary);
+}
 .input-validation:focus,
 .input-validation:focus-visible {
-  outline: 2px solid var(--color-border-error-primary);
-  outline-offset: -2px;
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--color-border-error-primary),
+    0 0 0 3px var(--f-red-wash-2);
 }
 .input-small {
   height: 24px;
-  font-size: 0.75rem;
+  font-size: var(--type-xs);
   line-height: 1rem;
 }
+/* Field heights match the button matrix (32 / 40), so a field and its
+   action line up in one row. */
 .input-medium {
-  height: 36px;
-  font-size: var(--type-md);
+  height: 32px;
+  font-size: var(--type-sm);
   line-height: 1.25rem;
 }
 .input-large {
-  height: 44px;
-  font-size: var(--type-body);
-  line-height: 1.5rem;
+  height: 40px;
+  font-size: var(--type-md);
+  line-height: 1.375rem;
 }
-/* Phones never zoom into a focused field. */
+/* Phones never zoom into a focused field, and a large field is a full touch
+   target there. */
 @media (pointer: coarse) {
   .input,
   textarea,
   select {
     font-size: max(16px, 1em);
   }
+  .input-large {
+    height: 44px;
+  }
 }
-/* Search at the large size insets its glyph 6px, then leaves 12px before the text. */
+/* Search at the large size insets its glyph 12px, then leaves 8px before the text. */
 .input-large.input-pad-search {
-  padding-left: 42px;
+  padding-left: 40px;
 }
+/* Leading/trailing buttons sit centred on the field, whatever its height. */
 .input-wrapper .btn {
   position: absolute;
-  top: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 .input-wrapper .input-btn-leading {
   left: 0;
@@ -736,6 +762,12 @@
 }
 .tab-btn.btn-large {
   gap: 12px;
+}
+/* The large row is the phone's touch row: a full 44px target there. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .tab-btn.btn-large {
+    height: 44px;
+  }
 }
 /* A row without a leading icon starts on its label, a step further in. */
 .tab-btn.btn-small:not(:has(> .icon:first-child)) {
@@ -867,17 +899,22 @@
   color: var(--color-fill-btn-destructive-disabled);
 }
 
-/* The 2px underline sits inside the box, so an inset shadow keeps the label
-   centered. A real border would shrink the content box and shift it up. */
+/* Quiet pill tabs: the selected tab is a soft ink wash with full-ink text,
+   the rest are muted labels. No underline, so nothing shifts between states. */
 .horizontal-tab-item {
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 -2px 0 0 transparent;
+  border-radius: var(--radius-pill);
 }
-.horizontal-tab-item-active {
-  box-shadow: inset 0 -2px 0 0 var(--color-border-primary);
+.horizontal-tab-item-active,
+.horizontal-tab-item-active:hover {
+  color: var(--color-text-basic-primary);
+  background-color: var(--f-wash-3);
+}
+.horizontal-tab-item-active .icon {
+  color: var(--color-fill-basic-primary);
 }
 .horizontal-tab-item-active.btn-disabled {
-  box-shadow: inset 0 -2px 0 0 var(--color-border-tertiary);
+  color: var(--color-text-btn-secondary-disabled);
+  background-color: var(--f-wash-1);
 }
 .horizontal-tab-item.btn-small {
   gap: 4px;
@@ -905,38 +942,38 @@
   padding: 0 12px;
 }
 .horizontal-tab-item-icon-left.btn-medium {
-  height: 36px;
-  padding: 0 16px 0 8px;
+  height: 32px;
+  padding: 0 14px 0 10px;
 }
 .horizontal-tab-item-icon-right.btn-medium {
-  height: 36px;
-  padding: 0 8px 0 16px;
+  height: 32px;
+  padding: 0 10px 0 14px;
 }
 .horizontal-tab-item-full.btn-medium,
 .horizontal-tab-item-icon.btn-medium {
-  height: 36px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 6px;
 }
 .horizontal-tab-item-text.btn-medium {
-  height: 36px;
-  padding: 0 16px;
+  height: 32px;
+  padding: 0 14px;
 }
 .horizontal-tab-item-icon-left.btn-large {
-  height: 48px;
-  padding: 0 24px 0 12px;
+  height: 40px;
+  padding: 0 18px 0 14px;
 }
 .horizontal-tab-item-icon-right.btn-large {
-  height: 48px;
-  padding: 0 12px 0 24px;
+  height: 40px;
+  padding: 0 14px 0 18px;
 }
 .horizontal-tab-item-full.btn-large,
 .horizontal-tab-item-icon.btn-large {
-  height: 48px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 10px;
 }
 .horizontal-tab-item-text.btn-large {
-  height: 48px;
-  padding: 0 24px;
+  height: 40px;
+  padding: 0 18px;
 }
 
 /* Same unlayered-wins reasoning as the tabs above: the strip lives next to
@@ -955,20 +992,19 @@
    `.code` rule sets a different tracking, so this stays separate. */
 .file-input-meta {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--type-xs);
   line-height: 16px;
   font-weight: 400;
-  letter-spacing: -0.6px;
 }
 .file-input-hint {
-  font-family: Inter, sans-serif;
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: var(--type-2xs);
   line-height: 14px;
   font-weight: 400;
 }
 .file-input {
   border: none;
-  box-shadow: inset 0 0 0 1px var(--color-border-muted);
+  box-shadow: inset 0 0 0 1px var(--color-border-input);
 }
 .file-input[data-invalid="true"] {
   box-shadow: inset 0 0 0 1px var(--color-border-btn-destructive);
@@ -977,17 +1013,19 @@
   padding: 4px 6px;
 }
 
-/* Badge type is Tag-label from Figma: Medium 10/12, no tracking. The shared
-   `.tag-label` rule is semibold with wider tracking, so the badge stays separate. */
+/* Badges are 11px sentence-case tags on a soft wash: a 20px pill, never
+   an ALL-CAPS stamp. */
 .badge {
   font-family: var(--font-sans);
   font-size: var(--type-2xs);
   line-height: 14px;
   font-weight: 500;
-  letter-spacing: 0;
+  letter-spacing: 0.005em;
+  font-variant-numeric: tabular-nums;
 }
 .badge-filled {
-  padding: 3px 7px;
+  min-height: 20px;
+  padding: 3px 8px;
 }
 
 /* Avatar type follows the Figma size scale. The 1px stroke sits inside the box. */
@@ -996,10 +1034,11 @@
   border-style: solid;
   border-width: 1px;
   padding: 1px;
-  font-family: Inter, sans-serif;
+  font-family: var(--font-sans);
   font-weight: 500;
   letter-spacing: 0;
 }
+/* Initials, not words: the only place upper case is drawn on purpose. */
 .avatar-xs,
 .avatar-sm {
   font-size: 10px;
@@ -1029,20 +1068,6 @@
 .avatar-4xl {
   font-size: 24px;
   line-height: 32px;
-}
-
-/* The radio dot uses fill tokens. Those are not background utilities. */
-.radio-mark {
-  background-color: var(--color-fill-basic-primary);
-}
-.group:hover .radio-mark {
-  background-color: var(--color-fill-basic-secondary);
-}
-.group:active .radio-mark {
-  background-color: var(--color-fill-basic-tertiary);
-}
-.radio-mark-disabled {
-  background-color: var(--color-fill-basic-muted);
 }
 
 /* Range track is 4px. The knob is 12px on desktop and 20px on the phone,
@@ -1087,45 +1112,60 @@
     var(--color-bg-elevation-ground) 75%
   );
 }
-/* Desktop footer actions are Figma's large buttons (48px, 16/24, padding 24).
-   Sticky buttons already carry their own size, so they are left alone. */
+/* Dialog body copy is chrome-sized prose (14px), a step under the 15px
+   conversation. `.paragraph-medium` stays on the body as its stable hook. */
+.modal-body.paragraph-medium {
+  font-size: var(--type-md);
+  line-height: 1.55;
+}
+/* Desktop dialog actions are 36px pills at the chrome size: a step above the
+   32px toolbar buttons so the decision reads as the dialog's own. Sticky
+   buttons already carry their own size, so they are left alone. */
 .modal-footer .btn.btn-text:not(.btn-sticky),
 .modal-footer .btn.btn-icon-left:not(.btn-sticky),
 .modal-footer .btn.btn-icon-right:not(.btn-sticky) {
-  height: 48px;
-  padding: 0 24px;
-  gap: 8px;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  height: 36px;
+  padding: 0 16px;
+  gap: 6px;
+  font-size: var(--type-sm);
+  line-height: 1.25rem;
 }
 .modal-footer .btn.btn-icon:not(.btn-sticky) {
-  height: 48px;
-  padding: 0 12px;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  height: 36px;
+  padding: 0 8px;
 }
-/* Phone footer actions are 40px pills. Primary is a flat fill. Everything
-   else sits on elevation level-3 with Shadow-xl, including tertiary. */
+/* Phone actions are 44px touch pills floating over the faded foot of the
+   sheet. Primary is a flat ink fill; everything else is a surface pill with
+   a hairline and a soft lift, tertiary included. */
 .modal-footer-mobile .btn.btn-text:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-icon:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-icon-left:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-icon-right:not(.btn-sticky) {
-  height: 40px;
-  border-radius: 9999px;
-  padding: 8px 16px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: var(--radius-pill);
+  padding: 0 18px;
   gap: 8px;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  font-size: var(--type-md);
+  line-height: 1.375rem;
+}
+.modal-footer-mobile .btn.btn-icon:not(.btn-sticky) {
+  padding: 0 10px;
 }
 .modal-footer-mobile .btn.btn-primary:not(.btn-sticky) {
   box-shadow: none;
 }
 .modal-footer-mobile .btn.btn-secondary:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-secondary-highlighted:not(.btn-sticky),
-.modal-footer-mobile .btn.btn-secondary-destructive:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-secondary-accent:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-secondary-accent-highlighted:not(.btn-sticky) {
-  box-shadow: var(--shadow-xl);
+  background-color: var(--color-bg-elevation-level-3);
+  box-shadow: var(--shadow-md);
+}
+.modal-footer-mobile .btn.btn-secondary-destructive:not(.btn-sticky) {
+  box-shadow:
+    inset 0 0 0 1px var(--color-border-btn-destructive),
+    var(--f-shadow-md);
 }
 .modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-text,
 .modal-footer-mobile .btn-sticky.btn-large.btn-tertiary.btn-icon,
@@ -1139,11 +1179,11 @@
 .modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon,
 .modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-left,
 .modal-footer-mobile .btn-sticky.btn-large.btn-tertiary-accent.btn-icon-right {
-  height: 40px;
-  border-radius: 9999px;
-  padding: 8px 16px;
+  height: 44px;
+  border-radius: var(--radius-pill);
+  padding: 0 18px;
   background-color: var(--color-bg-elevation-level-3);
-  box-shadow: var(--shadow-xl);
+  box-shadow: var(--shadow-md);
 }
 .modal-footer-mobile .btn.btn-ghost:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-ghost-destructive:not(.btn-sticky),
@@ -1152,7 +1192,7 @@
 .modal-footer-mobile .btn.btn-tertiary-destructive:not(.btn-sticky),
 .modal-footer-mobile .btn.btn-tertiary-accent:not(.btn-sticky) {
   background-color: var(--color-bg-elevation-level-3);
-  box-shadow: var(--shadow-xl);
+  box-shadow: var(--shadow-md);
 }
 
 /* ============================ TOOLTIP ============================ */

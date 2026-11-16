@@ -42,7 +42,7 @@ const FileInput: React.FC<FileInputProps> = ({
   return (
     <div
       className={cn(
-        "file-input flex w-full flex-col items-start gap-[10px] rounded-[8px] bg-input p-2",
+        "file-input flex w-full flex-col items-start gap-2.5 rounded-lg bg-input p-2",
         className,
       )}
       data-invalid={hasErrors || undefined}
@@ -65,7 +65,7 @@ const FileInput: React.FC<FileInputProps> = ({
       {files.map((file) => (
         <div
           key={file.id}
-          className="file-input-row flex w-full items-center gap-1 overflow-hidden rounded-[4px] bg-elevation-level-1 shadow-convex"
+          className="file-input-row flex w-full items-center gap-1 overflow-hidden rounded-sm bg-elevation-sublevel-variant-A shadow-convex"
         >
           <Icon
             iconName={IconName.Attachment}
@@ -106,7 +106,7 @@ const FileInput: React.FC<FileInputProps> = ({
         </Button>
       ) : null}
       {errors.map((error, index) => (
-        <p key={`${index}-${error}`} className="label-micro w-full text-error-primary">
+        <p key={`${index}-${error}`} className="type-meta-strong w-full text-error-primary">
           {error}
         </p>
       ))}

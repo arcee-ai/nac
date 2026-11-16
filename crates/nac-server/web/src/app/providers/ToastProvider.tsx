@@ -90,10 +90,12 @@ function ToastContainer({
       aria-label="Notifications"
       aria-live="polite"
       aria-relevant="additions"
-      className="fixed top-4 right-4 z-[1100] flex w-[360px] max-w-[calc(100%-2rem)] flex-col gap-2 pointer-events-none"
+      // Bottom centre, above the home indicator: toasts read as a passing
+      // remark from the app, not as chrome that competes with the header.
+      className="fixed inset-x-0 bottom-[calc(20px+env(safe-area-inset-bottom))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none"
     >
       {toasts.map((toast) => (
-        <div key={toast.id} className="pointer-events-auto">
+        <div key={toast.id} className="pointer-events-none flex w-full justify-center">
           <Toast
             content={toast.content}
             variant={toast.variant}

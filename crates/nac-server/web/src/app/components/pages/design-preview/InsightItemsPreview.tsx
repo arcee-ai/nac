@@ -101,7 +101,9 @@ function CutErrorPreview() {
   const expanded = load.state === InsightItemCodeDisplayerState.Expanded;
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">Error, the message cut by its preview</span>
+      <span className="type-meta-strong text-basic-muted">
+        Error, the message cut by its preview
+      </span>
       <div className="w-[542px] max-w-full bg-elevation-ground">
         <InsightItem
           id="preview-cut-error"
@@ -176,18 +178,18 @@ const DISPLAYER_SAMPLES: ({ label: string } & ComponentProps<typeof InsightItemC
 function CodeDisplayerStatesPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">Code displayer</span>
+      <span className="type-meta-strong text-basic-muted">Code displayer</span>
       <div className="grid grid-cols-3 items-start gap-4">
         {DISPLAYER_SAMPLES.map(({ label, ...props }) => (
           <div key={label} className="flex min-w-0 flex-col gap-2">
-            <span className="label-micro text-basic-tertiary">{label}</span>
+            <span className="type-meta-strong text-basic-tertiary">{label}</span>
             <div className="bg-elevation-ground p-4">
               <InsightItemCodeDisplayer {...props} />
             </div>
           </div>
         ))}
         <div className="flex min-w-0 flex-col gap-2">
-          <span className="label-micro text-basic-tertiary">Interactive</span>
+          <span className="type-meta-strong text-basic-tertiary">Interactive</span>
           <div className="bg-elevation-ground p-4">
             <PreviewField title="Input" shortContent={INDENT_PREVIEW} fullContent={INDENT_FULL} />
           </div>
@@ -294,7 +296,7 @@ const ITEM_STATES = [
 function StackedItemsPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">Stacked, the first one active</span>
+      <span className="type-meta-strong text-basic-muted">Stacked, the first one active</span>
       <div className="flex w-[542px] max-w-full flex-col bg-elevation-ground">
         {ITEM_SAMPLES.map((sample, index) => (
           <InsightItem
@@ -321,14 +323,14 @@ export function InsightItemsPreview() {
       <CutErrorPreview />
       <div className="grid grid-cols-3 items-start gap-x-4 gap-y-2">
         {ITEM_STATES.map(({ state, title }) => (
-          <span key={state} className="label-micro text-basic-muted">
+          <span key={state} className="type-meta-strong text-basic-muted">
             {title}
           </span>
         ))}
         {ITEM_SAMPLES.flatMap((sample) =>
           [false, true].map((active) => (
             <Fragment key={`${sample.type}-${active}`}>
-              <span className="col-span-3 pt-2 label-micro text-basic-tertiary">
+              <span className="col-span-3 pt-2 type-meta-strong text-basic-tertiary">
                 {active ? `${sample.type}, active` : sample.type}
               </span>
               {ITEM_STATES.map(({ state }) => (

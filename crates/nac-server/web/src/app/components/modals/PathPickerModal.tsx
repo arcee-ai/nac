@@ -207,7 +207,7 @@ function PathPicker({
       }
     >
       <div className="flex flex-col gap-3 h-full min-h-0">
-        <p className="shrink-0 text-small !leading-[22px] text-basic-secondary">
+        <p className="type-body-chrome shrink-0 text-basic-tertiary">
           {ssh
             ? "Browse folders on the connected SSH host."
             : "Browse files on the NAC server, including existing Git working folders."}
@@ -258,19 +258,19 @@ function PathPicker({
         </div>
 
         {error ? (
-          <p role="alert" className="text-small !leading-[22px] text-error-primary shrink-0">
+          <p role="alert" className="type-body-chrome shrink-0 text-error-primary">
             {errorMessage(error)}
           </p>
         ) : null}
 
-        <div className="flex-1 min-h-0 overflow-auto rounded-[8px] border border-muted p-1 flex flex-col [&>*]:shrink-0">
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-card border border-tertiary bg-elevation-level-1 p-1 [&>*]:shrink-0">
           {isFetching && !data ? (
             <div className="flex items-center justify-center py-6">
               <Loader size={LoaderSize.Small} />
             </div>
           ) : null}
           {data?.entries.length === 0 ? (
-            <p className="text-micro text-basic-muted px-2 py-3">
+            <p className="type-meta px-2.5 py-3 text-basic-tertiary">
               {kind === "toml"
                 ? "No directories or .toml files here."
                 : kind === "file"
@@ -284,9 +284,9 @@ function PathPicker({
               key={entry.path}
               type="button"
               className={cn(
-                "flex min-h-11 md:min-h-9 items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
-                "hover:bg-elevation-sublevel-variant-A",
-                file === entry.path && "bg-elevation-sublevel-variant-A",
+                "flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-left transition-colors duration-150 ease-out md:min-h-8 md:gap-2 md:py-1.5",
+                "hover:bg-elevation-sublevel-variant-B focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)]",
+                file === entry.path && "bg-elevation-sublevel-variant-B",
               )}
               onClick={() => (entry.is_directory ? goTo(entry.path) : setFile(entry.path))}
               onDoubleClick={() => {
@@ -296,26 +296,19 @@ function PathPicker({
               <Icon
                 iconName={entry.is_directory ? IconName.Folder : IconName.File}
                 size={isMobile ? 20 : 16}
-                className="shrink-0 text-basic-muted"
+                className="shrink-0 text-basic-tertiary"
               />
-              <span
-                className={cn(
-                  "text-basic-primary truncate",
-                  isMobile ? "text-small" : "text-small ",
-                )}
-              >
-                {entry.name}
-              </span>
+              <span className="type-body-chrome truncate text-basic-primary">{entry.name}</span>
             </button>
           ))}
           {data?.truncated ? (
-            <p className="text-micro text-basic-muted px-2 py-2">
+            <p className="type-meta px-2.5 py-2 text-basic-tertiary">
               Only the first entries are listed; type a path to go deeper.
             </p>
           ) : null}
         </div>
 
-        <p className="text-small !leading-[22px] text-basic-secondary shrink-0 break-all">
+        <p className="type-body-chrome shrink-0 break-all text-basic-secondary">
           {chosen ? `Selected: ${chosen}` : "Nothing selected yet."}
         </p>
       </div>

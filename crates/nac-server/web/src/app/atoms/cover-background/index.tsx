@@ -4,7 +4,10 @@ import { cn } from "../../lib/cn";
 interface CoverBackgroundProps extends Omit<React.ComponentPropsWithRef<"div">, "children"> {
   open?: boolean;
   zIndex?: number;
-  /** Alpha of the black scrim. */
+  /**
+   * Alpha of a custom scrim. Left out, the scrim is the theme's own
+   * (`--f-scrim`: a light veil in light mode, a deeper one in dark).
+   */
   opacity?: number;
   /** Backdrop blur radius in pixels; 0 leaves what is behind sharp. */
   blur?: number;
@@ -17,7 +20,7 @@ interface CoverBackgroundProps extends Omit<React.ComponentPropsWithRef<"div">, 
 const CoverBackground: React.FC<CoverBackgroundProps> = ({
   open = false,
   zIndex = 40,
-  opacity = 0.25,
+  opacity,
   blur = 0,
   className = "",
   style,
@@ -25,12 +28,12 @@ const CoverBackground: React.FC<CoverBackgroundProps> = ({
 }) => (
   <div
     className={cn(
-      "fixed inset-0 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+      "fixed inset-0 transition-opacity duration-200 ease-out motion-reduce:transition-none",
       open ? "opacity-100" : "opacity-0 pointer-events-none",
       className,
     )}
     style={{
-      background: `oklch(0.14 0.006 85 / ${opacity})`,
+      background: opacity == null ? "var(--f-scrim)" : `oklch(0.14 0.006 85 / ${opacity})`,
       zIndex,
       backdropFilter: blur ? `blur(${blur}px)` : undefined,
       ...style,

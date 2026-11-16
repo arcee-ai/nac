@@ -38,7 +38,7 @@ const Pagination: React.FC<PaginationProps> = ({
       )}
     >
       {isMobile ? null : (
-        <div className="label-small text-basic-secondary">
+        <div className="type-body-chrome tabular text-basic-tertiary">
           {first}–{last} of {totalItems} {itemLabel}
         </div>
       )}
@@ -53,7 +53,7 @@ const Pagination: React.FC<PaginationProps> = ({
         >
           <Icon iconName={IconName.Left} />
         </Button>
-        <div className="label-small text-basic-secondary">
+        <div className="type-body-chrome tabular text-basic-tertiary">
           Page {page} of {totalPages}
         </div>
         <Button

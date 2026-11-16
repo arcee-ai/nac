@@ -17,7 +17,8 @@ export enum LoaderSize {
 /** CSS color for the spinning glyph, which draws with currentColor. */
 export enum LoaderVariant {
   Brand = "var(--color-fill-accent-primary)",
-  Neutral = "var(--color-fill-basic-primary)",
+  /** Plain, quiet: the tertiary ink, so a loader never shouts over content. */
+  Neutral = "var(--color-fill-basic-tertiary)",
   Destructive = "var(--color-fill-error-primary)",
   OnPrimary = "var(--color-fill-btn-primary)",
 }
