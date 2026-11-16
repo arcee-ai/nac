@@ -97,9 +97,23 @@ vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
 }));
 
 vi.mock("@/app/components/modals/PathPickerModal", () => ({
-  PathPickerModal: ({ open, onSelect }: { open: boolean; onSelect: (path: string) => void }) =>
+  PathPickerModal: ({
+    open,
+    initialPath,
+    onSelect,
+  }: {
+    open: boolean;
+    initialPath: string;
+    onSelect: (path: string) => void;
+  }) =>
     open ? (
-      <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+      <>
+        <output data-testid="picker-initial-path">{initialPath}</output>
+        <button onClick={() => onSelect("/workspace/new")}>Choose different folder</button>
+        <button onClick={() => onSelect("/workspace/Project 日本語 ")}>
+          Choose literal folder
+        </button>
+      </>
     ) : null,
 }));
 
@@ -295,3 +309,85 @@ it.each(["Select preset threshold 222", "Select preset with compaction disabled"
     }
   },
 );
+
+vi.mock("@/app/components/modals/SshConnectionBox", () => ({
+  SshConnectionBox: ({
+    onConnectionChange,
+  }: {
+    onConnectionChange: (
+      target: { ssh_host: string; ssh_port: null; ssh_identity_file: null },
+      home: string,
+    ) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onConnectionChange(
+          { ssh_host: "literal-build-alias", ssh_port: null, ssh_identity_file: null },
+          "/home/fixture/workspace",
+        )
+      }
+    >
+      Connect fixture SSH
+    </button>
+  ),
+}));
+
+it("launches once through the connected SSH project without restating location or adding a sandbox", async () => {
+  const { client, view } = renderModal();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "SSH" }));
+    expect(api.createProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Connect fixture SSH" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    const launch = screen.getByRole("button", { name: "Create Project" });
+    fireEvent.click(launch);
+    fireEvent.click(launch);
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledTimes(1));
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.createProject).mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/home/fixture/workspace",
+      ssh_host: "literal-build-alias",
+      ssh_port: null,
+      ssh_identity_file: null,
+    });
+    const request = vi.mocked(api.createSession).mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      project_id: "created-project",
+      behavior: "orchestrator",
+      model: "gpt-5.2",
+      orchestrator_compaction_threshold: 222,
+    });
+    expect(request).not.toHaveProperty("sandbox");
+    expect(request).not.toHaveProperty("cwd");
+    expect(request).not.toHaveProperty("ssh_host");
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("reopens and submits the exact selected local folder with trailing whitespace", async () => {
+  const { client, view } = renderModal(false);
+  try {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(screen.getByText("/workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose literal folder" }));
+    fireEvent.click(screen.getByText("/workspace/Project 日本語", { exact: false }));
+    expect(screen.getByTestId("picker-initial-path").textContent).toBe(
+      "/workspace/Project 日本語 ",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Choose literal folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.createProject).mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/workspace/Project 日本語 ",
+    });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

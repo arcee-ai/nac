@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "strategy": "S09",
+  "kind": "hosted-failure-and-narrow-repair",
+  "repair_base": "c062894b218da73c71ea982d0ebdf2a264d5728c",
+  "observations": [
+    {
+      "run_id": 41954973930,
+      "run_url": "https://github.com/arcee-ai/nac/actions/runs/41954973930",
+      "event": "pull_request",
+      "head_sha": "837c2e9d3e277b50cac872c91a78a9d5fa86d14a",
+      "run_attempt": 1,
+      "observed_status": "completed",
+      "observed_conclusion": "failure",
+      "prepared_source": "8ba38bbd8ef64e08fec27fb104260fc3b52768ca",
+      "authenticated_producer_receipt": {
+        "archive_bytes": 39677067,
+        "archive_sha256": "8d83264a427daf679b25f27af11f7ff60d53372e4fef4d1db836a6893d1336b6",
+        "binary_bytes": 223890224,
+        "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+        "build_id": "dev-8ba38bbd8ef64e08fec27fb104260fc3b52768ca",
+        "build_track": "dev",
+        "dev_debug": 0,
+        "manifest_bytes": 493,
+        "manifest_sha256": "20879955eb457eec55f785818c1cb579672cdd0e0ec421cdcffbfe4365a737cd",
+        "profile": "dev",
+        "repository": "arcee-ai/nac",
+        "run_attempt": 1,
+        "run_id": "41954973930",
+        "runner_image": "ubuntu26@20261026.180.1",
+        "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+        "schema": 1,
+        "source_revision": "8ba38bbd8ef64e08fec27fb104260fc3b52768ca",
+        "target": "x86_64-unknown-linux-gnu"
+      },
+      "jobs_with_retained_logs": [
+        {
+          "job_id": 127007873708,
+          "job_name": "browser-binary",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127007873708",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:25:05Z",
+          "completed_at": "2026-11-05T02:28:28Z",
+          "job_seconds": 203,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "c9fd73e9b51c4ca2b53fd221ca12833248b296e28aeb1e07a0012301bcf78d73",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [],
+          "phase_seconds": {
+            "Set up job": 1,
+            "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262": 2,
+            "Run dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0": 9,
+            "Run Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4": 1,
+            "Build and package the exact browser executable": 185,
+            "Retain same-run browser executable bytes": 1,
+            "Post Run Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4": 1,
+            "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262": 0,
+            "Complete job": 0
+          }
+        },
+        {
+          "job_id": 127009102190,
+          "job_name": "browser-proof",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102190",
+          "conclusion": "failure",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:28:46Z",
+          "job_seconds": 16,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261101.186.1"
+          },
+          "log_sha256": "17d37521eabd625261d7c680ab78e6ba460fd6528d51a50e7e35e9f1076c1e40",
+          "consume_runner_image_rejection": true,
+          "successful_admission_outputs": [],
+          "consumer_shell_ImageOS_ImageVersion": "Not printed by this version; unequal to authenticated producer runner_image is established by the rejection. Setup Runner Image metadata is recorded separately."
+        },
+        {
+          "job_id": 127009102344,
+          "job_name": "browser-shards (8)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102344",
+          "conclusion": "failure",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:28:51Z",
+          "job_seconds": 21,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261101.186.1"
+          },
+          "log_sha256": "1bbec51f0b82f7079956fa05580b5b9519302012493afc63d7f2bad4db289308",
+          "consume_runner_image_rejection": true,
+          "successful_admission_outputs": [],
+          "consumer_shell_ImageOS_ImageVersion": "Not printed by this version; unequal to authenticated producer runner_image is established by the rejection. Setup Runner Image metadata is recorded separately."
+        },
+        {
+          "job_id": 127009102360,
+          "job_name": "browser-shards (7)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102360",
+          "conclusion": "failure",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:28:52Z",
+          "job_seconds": 22,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261101.186.1"
+          },
+          "log_sha256": "1d4f486538d147565d387611dcefeb4261d62093f7307480e1e657fe73a4f5d3",
+          "consume_runner_image_rejection": true,
+          "successful_admission_outputs": [],
+          "consumer_shell_ImageOS_ImageVersion": "Not printed by this version; unequal to authenticated producer runner_image is established by the rejection. Setup Runner Image metadata is recorded separately."
+        },
+        {
+          "job_id": 127009102364,
+          "job_name": "browser-shards (6)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102364",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:29:46Z",
+          "job_seconds": 76,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "81c1e2f9d89f937193b62fc5ddd0976a37c7cc47a12b475f2dfbe2da3451b145",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [
+            {
+              "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+              "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+              "mode": "artifact",
+              "producer_attempt": 1
+            }
+          ]
+        },
+        {
+          "job_id": 127009102370,
+          "job_name": "browser-shards (2)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102370",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:28:31Z",
+          "completed_at": "2026-11-05T02:31:41Z",
+          "job_seconds": 190,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "9895d323af128a695868cba294bd72362f313da85f4e2fac3c45e44d2766181c",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [
+            {
+              "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+              "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+              "mode": "artifact",
+              "producer_attempt": 1
+            }
+          ]
+        },
+        {
+          "job_id": 127009102378,
+          "job_name": "browser-shards (1)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102378",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:31:49Z",
+          "job_seconds": 199,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "752850a1cf5b04cd6d2254d7ebfaf9c84488327de067505b206c21f392fdcfbe",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [
+            {
+              "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+              "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+              "mode": "artifact",
+              "producer_attempt": 1
+            }
+          ]
+        },
+        {
+          "job_id": 127009102485,
+          "job_name": "browser-shards (3)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102485",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:28:31Z",
+          "completed_at": "2026-11-05T02:31:18Z",
+          "job_seconds": 167,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "780eeb1f1775bc9d2168732532ffa46b9ea6f2c0bc0cd0ed46d6ef4a77e2821d",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [
+            {
+              "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+              "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+              "mode": "artifact",
+              "producer_attempt": 1
+            }
+          ]
+        },
+        {
+          "job_id": 127009102493,
+          "job_name": "browser-shards (5)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102493",
+          "conclusion": "failure",
+          "started_at": "2026-11-05T02:28:30Z",
+          "completed_at": "2026-11-05T02:28:45Z",
+          "job_seconds": 15,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261101.186.1"
+          },
+          "log_sha256": "a5ae692ba1454c32d0417616540096ea2ee23dad23ce1b9bc9a4a9d88f520ec8",
+          "consume_runner_image_rejection": true,
+          "successful_admission_outputs": [],
+          "consumer_shell_ImageOS_ImageVersion": "Not printed by this version; unequal to authenticated producer runner_image is established by the rejection. Setup Runner Image metadata is recorded separately."
+        },
+        {
+          "job_id": 127009102503,
+          "job_name": "browser-shards (4)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41954973930/job/127009102503",
+          "conclusion": "success",
+          "started_at": "2026-11-05T02:28:31Z",
+          "completed_at": "2026-11-05T02:32:32Z",
+          "job_seconds": 241,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "b93a6fbed427555ce3777a257182084bc142542208a771469bda2b9d6df775e0",
+          "consume_runner_image_rejection": false,
+          "successful_admission_outputs": [
+            {
+              "binary": "/home/runner/work/nac/nac/browser-binary-runtime/nac-web",
+              "binary_sha256": "e55e458f6574b58479c3f563b73c5028c751316e54de824499e8623a421db87c",
+              "mode": "artifact",
+              "producer_attempt": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run_id": 41956266866,
+      "run_url": "https://github.com/arcee-ai/nac/actions/runs/41956266866",
+      "event": "pull_request",
+      "head_sha": "4af36f767d722838f0dcb92091389ad9d1468ff3",
+      "run_attempt": 1,
+      "observed_status": "in_progress",
+      "observed_conclusion": null,
+      "prepared_source": "6db7f8d246c4488a4e68c4dd5cb4722d2bc84a66",
+      "authenticated_producer_receipt": {
+        "archive_bytes": 39677059,
+        "archive_sha256": "b2de468bb4fade490ef36423bfe798f79bd011d9f6a780548fc741649fdd29eb",
+        "binary_bytes": 223890224,
+        "binary_sha256": "690f37c8ab326495ae68ab077068369fee46608f9c2e38a29efb6502fdb9fe00",
+        "build_id": "dev-6db7f8d246c4488a4e68c4dd5cb4722d2bc84a66",
+        "build_track": "dev",
+        "dev_debug": 0,
+        "manifest_bytes": 493,
+        "manifest_sha256": "bbb357250939d4c7c6946f01ba4ab6970e2a8015e72533e63d5fe485cea11ce4",
+        "profile": "dev",
+        "repository": "arcee-ai/nac",
+        "run_attempt": 1,
+        "run_id": "41956266866",
+        "runner_image": "ubuntu26@20261101.186.1",
+        "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+        "schema": 1,
+        "source_revision": "6db7f8d246c4488a4e68c4dd5cb4722d2bc84a66",
+        "target": "x86_64-unknown-linux-gnu"
+      },
+      "jobs_with_retained_logs": [
+        {
+          "job_id": 127013219503,
+          "job_name": "browser-shards (2)",
+          "url": "https://github.com/arcee-ai/nac/actions/runs/41956266866/job/127013219503",
+          "conclusion": "failure",
+          "started_at": "2026-11-05T02:40:14Z",
+          "completed_at": "2026-11-05T02:40:34Z",
+          "job_seconds": 20,
+          "setup_runner_image": {
+            "Image": "ubuntu-26.04",
+            "Version": "20261025.179.1"
+          },
+          "log_sha256": "758dd193cea62bcdcafe153e516b9c339ca4b4c681706c972c0f6b611f8e9720",
+          "consume_runner_image_rejection": true,
+          "successful_admission_outputs": [],
+          "consumer_shell_ImageOS_ImageVersion": "Not printed by this version; unequal to authenticated producer runner_image is established by the rejection. Setup Runner Image metadata is recorded separately."
+        }
+      ]
+    }
+  ],
+  "conclusion": "Same-attempt image variation caused exact-image admission failures. The producer succeeded and five same-image ordinary shards consumed the artifact and passed, but the proof and shards5/7/8 failed before E2E execution. This is measured S09 failure evidence, not full successful transport or timing acceptance. The second run retains one analogous failed consumer as corroboration, not a complete second-run browser audit.",
+  "repair_contract": {
+    "artifact": "Only completely valid same-attempt, same-image artifacts expose an executable.",
+    "source": "Only completely validated same-run/candidate artifacts from an older attempt or different valid runner image select fresh locked current-source compilation. Transported bytes are discarded first.",
+    "fallback_reason": [
+      "older-attempt",
+      "runner-image-change"
+    ],
+    "both_reasons": "older-attempt takes precedence",
+    "provenance": "Future successful helper outputs expose validated producer_runner_image and actual caller consumer_runner_image separately from setup metadata.",
+    "errors": "Wrong source/repository/run/compiler/target/profile, future attempts, malformed/missing/corrupt/foreign/unsafe evidence still fail; no catch-all fallback.",
+    "unchanged": "Rust runtime, explicit CARGO_INCREMENTAL0/profile/build/source identity, conditional source cache/build with trusted writes, E2E/proof/cleanup/quality contracts."
+  },
+  "limits": [
+    "First failed run remains failed; no retries into success or cohort acceptance.",
+    "Producer shell runner_image is taken directly from authenticated receipt. Consumer shell ImageOS/ImageVersion was not printed in failing jobs; setup metadata is not substituted for it.",
+    "No Cargo, browser or Docker invocation was used for this repair.",
+    "Full hosted transport/fallback pipeline and whole-path latency/compute after repair remain pending.",
+    "This refines S09 and earns no additional strategy count."
+  ],
+  "repair_validation": {
+    "cli": {
+      "command": "python3 .github/scripts/browser-binary.test.py",
+      "tests": 38,
+      "passed": true,
+      "seconds": 6.258,
+      "negative_cases": "Every reject control with otherwise valid caller image context is additionally executed with a different valid current image, including older-attempt corruption controls.",
+      "positive_cases": [
+        "matching current artifact remains executable",
+        "current valid image change selects source and removes output",
+        "older attempt selects source even with different image",
+        "bounded fallback reason and exact producer/consumer images emitted as JSON and GitHub outputs"
+      ]
+    },
+    "parsed_workflow": {
+      "command": "node --test .github/scripts/pr-browser-binary.test.mjs .github/scripts/pr-browser-sharding.test.mjs",
+      "tests": 7,
+      "passed": true,
+      "seconds": 0.453591375,
+      "diagnostic": "Both consumers print only actual ImageOS@ImageVersion after nonempty checks and before download; producer actual image is already in authenticated receipt.",
+      "preserved": "Conditional source/cache selector, explicit CARGO_INCREMENTAL0, trusted cache writes, pinned runtime, artifact ID/receipt and mandatory proof/final joins are unchanged."
+    },
+    "workflow_lint": {
+      "command": "make lint-workflows",
+      "passed": true,
+      "actionlint": "1.7.12",
+      "shellcheck": "0.11.0"
+    },
+    "diff_check": {
+      "command": "git diff --check",
+      "passed": true
+    },
+    "source_size": {
+      "command": "make test-source-size",
+      "passed": true,
+      "line_limit": 2000
+    },
+    "heavy_work": "No Cargo, browser, Docker or product test invocation."
+  }
+}
