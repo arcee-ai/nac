@@ -8,9 +8,14 @@ export const requiredJobs = [
   "lint",
   "workflow-lint",
   "test-server",
+  "test-server-web",
   "test-core",
   "test-workspace",
   "quality",
+  "browser-binary",
+  "browser-apt",
+  "browser-shards",
+  "browser-proof",
   "browser",
   "test",
   "build",
@@ -19,7 +24,7 @@ export const requiredJobs = [
 ];
 // A receipt is only an optimization within this run, never reusable evidence
 // from another run, attempt, repository, candidate or partial result set.
-export const qualityJobs = ["prepare", "lint", "workflow-lint", "test-server", "test-core", "test-workspace"];
+export const qualityJobs = ["prepare", "lint", "workflow-lint", "test-server", "test-server-web", "test-core", "test-workspace"];
 
 function qualityIdentity(sha, context) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? "") ||
@@ -74,17 +79,35 @@ export function qualityMode(receipt, sha, context) {
   return receipt.run_attempt === context.run_attempt ? "reuse" : "full";
 }
 
-export const managedJobs = ["prepare", "contract", "quality", "build-smoke"];
+export const managedJobs = ["prepare", "quality", "build-smoke"];
+export const imageJobs = ["prepare", "contract", "scanner-qualification", "build-smoke"];
+export const managedCallerJobs = ["managed-image", "managed-fault", "managed-quality", "managed"];
+
+function requireCandidateJobs(needs, expectedSha, jobs, label) {
+  if (!/^[a-f0-9]{40}$/.test(expectedSha ?? "") || needs.prepare?.outputs?.sha !== expectedSha) {
+    throw new Error(`${label} preparation did not bind the caller's candidate`);
+  }
+  if (Object.keys(needs).sort().join() !== [...jobs].sort().join()) {
+    throw new Error(`${label} dependency set differs from its explicit contract`);
+  }
+  for (const job of jobs) {
+    if (needs[job]?.result !== "success") throw new Error(`${job} did not succeed`);
+  }
+}
 
 export function requireManagedComplete(needs, expectedSha) {
-  if (!/^[a-f0-9]{40}$/.test(expectedSha ?? "") || needs.prepare?.outputs?.sha !== expectedSha) {
-    throw new Error("managed preparation did not bind the caller's candidate");
-  }
-  if (Object.keys(needs).sort().join() !== [...managedJobs].sort().join()) {
-    throw new Error("managed dependency set differs from its explicit contract");
-  }
-  for (const job of managedJobs) {
-    if (needs[job]?.result !== "success") throw new Error(`${job} did not succeed`);
+  requireCandidateJobs(needs, expectedSha, managedJobs, "managed");
+}
+
+export function requireImageComplete(needs, expectedSha) {
+  requireCandidateJobs(needs, expectedSha, imageJobs, "image");
+}
+
+export function requireManagedCallerComplete(needs, expectedSha) {
+  requireCandidateJobs(needs, expectedSha, ["prepare", "managed-image", "managed-fault", "managed-quality"], "managed caller");
+  // The image branch resolves its own checkout; it must return this candidate.
+  if (needs["managed-image"].outputs?.sha !== expectedSha) {
+    throw new Error("managed image differs from the caller's candidate");
   }
 }
 
@@ -102,7 +125,7 @@ export function requireComplete(needs, managed, expectedSha) {
   if (needs.prepare?.outputs?.sha !== expectedSha || needs.prepare?.outputs?.run !== "true") {
     throw new Error("preparation did not bind the current workflow candidate");
   }
-  const expected = [...requiredJobs, "managed"];
+  const expected = [...requiredJobs, ...managedCallerJobs];
   if (Object.keys(needs).sort().join() !== expected.sort().join()) {
     throw new Error("aggregate dependency set differs from its explicit contract");
   }
@@ -110,7 +133,9 @@ export function requireComplete(needs, managed, expectedSha) {
     if (needs[job]?.result !== "success") throw new Error(`${job} did not succeed`);
   }
   const managedResult = managed === "true" ? "success" : "skipped";
-  if (needs.managed?.result !== managedResult) throw new Error(`managed must be ${managedResult}`);
+  for (const job of managedCallerJobs) {
+    if (needs[job]?.result !== managedResult) throw new Error(`${job} must be ${managedResult}`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -135,8 +160,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       process.env.EXPECTED_SHA,
     );
     console.log("All applicable checks succeeded for this workflow candidate");
-  } else if (process.argv[2] === "managed-aggregate") {
-    requireManagedComplete(JSON.parse(process.env.NEEDS_JSON), process.env.EXPECTED_SHA);
+  } else if (["managed-aggregate", "managed-image-aggregate", "managed-caller-aggregate"].includes(process.argv[2])) {
+    const verify = {
+      "managed-aggregate": requireManagedComplete,
+      "managed-image-aggregate": requireImageComplete,
+      "managed-caller-aggregate": requireManagedCallerComplete,
+    }[process.argv[2]];
+    verify(JSON.parse(process.env.NEEDS_JSON), process.env.EXPECTED_SHA);
     console.log("All managed checks succeeded for the caller's candidate");
   } else {
     throw new Error(

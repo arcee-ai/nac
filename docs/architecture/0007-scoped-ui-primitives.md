@@ -198,6 +198,37 @@ over preserved pilot `75b2c028`. Adding those deltas to the pilot's measured
 24,189/228 B and 28,077/265 B retains the cumulative +50/+15 KiB ceilings.
 These are build-size results, not a human visual-acceptance decision.
 
+### Inspector hierarchy and return context (ALL-526)
+
+Inspector action rows use 14px/20px titles, 12px/16px tertiary metadata and
+36px desktop / 48px phone rows. Non-reasoning detail prose uses 14px/22px;
+reasoning retains ALL-525's treatment. Workset items use a leading rule instead
+of a nested concave surface. Phone back and child-open controls reach 44px.
+The ActionListButton's optional `metaClassName` is exercised by Insights; its
+compact default remains unchanged elsewhere.
+
+Back to Insights restores an intentional, runtime-local parent origin: filter,
+group/segment or thread episode, expanded groups, narrow list state and reader
+scroll. Explicit new picks still reveal their requested row. Child-page return
+restores only the exact saved parent; existing child selection and draft owners
+remain authoritative. Preview rows cannot navigate the parent's Insights. None
+of these preferences creates a query, durable record or terminal input authority.
+
+The earlier ALL-526 comparison over ALL-522 at `94d56ea6` is historical:
+1,464 B JS / 53 B CSS added to the app and 1,495 B JS / 95 B CSS to presentation,
+with cumulative growth of 27,638 B JS / 791 B CSS and 32,025 B JS / 1,520 B CSS,
+respectively. Those figures do not describe the refreshed stack.
+
+The complete static startup graphs at measured ALL-526 revision `e185835bdf5d`
+over ALL-522 `5b4fe08926b0`, using Node 26.12.0, zlib 1.2.12 and gzip level 9,
+add 1,943 B JS / 69 B CSS to the app and 2,087 B JS / 123 B CSS to presentation.
+Cumulative growth through ALL-526 combines the selected stack's change from
+actual `dev` at `481ee248f755` with the historical ALL-520/525/521 deltas counted
+once: 29,395 B JS / -165 B CSS for the app and 34,171 B JS / 24 B CSS for
+presentation. Both remain within the 51,200 B JS / 15,360 B CSS ceilings;
+unrelated changes on `dev` neither consume nor free migration budget.
+These byte counts do not establish human visual acceptance.
+
 Behavior coverage lives next to its owners: `ui/layer-stack.test.ts` (Escape
 order, outside presses, inertness, focus return), `ui/overlays.test.tsx` (nested
 legacy and migrated layers, the dropdown menu, tooltips, standalone and

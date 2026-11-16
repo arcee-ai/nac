@@ -37,3 +37,54 @@ pub(super) fn create_transcript_append_receipts_table(conn: &Connection) -> Resu
     )?;
     Ok(())
 }
+
+/// Seeds the run counter for sessions that predate it. One run submits exactly
+/// one user message, so the stored history is the best available estimate.
+/// Rows that already counted a run keep their value, and unparseable history
+/// stays at zero rather than failing the migration.
+pub(super) fn backfill_run_counts(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE sessions
+         SET run_count = (
+             SELECT COUNT(*)
+             FROM json_each(sessions.messages_json)
+             WHERE json_extract(value, '$.role') = 'user'
+         )
+         WHERE run_count = 0 AND json_valid(messages_json)",
+        [],
+    )?;
+    Ok(())
+}
+
+pub(super) fn autoincrement_sequence(conn: &Connection, table: &str) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = ?1",
+            params![table],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+pub(super) fn restore_autoincrement_sequence(
+    conn: &Connection,
+    table: &str,
+    prior_sequence: Option<i64>,
+) -> Result<()> {
+    let Some(prior_sequence) = prior_sequence else {
+        return Ok(());
+    };
+    let updated = conn.execute(
+        "UPDATE sqlite_sequence
+         SET seq = MAX(seq, ?2)
+         WHERE name = ?1",
+        params![table, prior_sequence],
+    )?;
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO sqlite_sequence (name, seq) VALUES (?1, ?2)",
+            params![table, prior_sequence],
+        )?;
+    }
+    Ok(())
+}

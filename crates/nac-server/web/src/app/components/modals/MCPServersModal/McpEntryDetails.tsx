@@ -47,12 +47,12 @@ export function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
     if (el) setClamped(el.scrollHeight > el.clientHeight);
   }, [description]);
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-muted p-3 bg-elevation-sublevel-variant-A">
-      <div className="flex items-center gap-2 min-w-0">
+    <div className="flex min-w-0 flex-col gap-3 border-b border-muted pb-6">
+      <div className="flex flex-wrap items-center gap-3 min-w-0">
         <EntryThumbnail entry={entry} />
         <div className="flex flex-col min-w-0 flex-grow">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="header-small text-basic-primary truncate">{entry.name}</span>
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <span className="label-medium text-basic-primary break-words">{entry.name}</span>
             {entry.auth === "required_header" ? (
               <Badge text="Key required" color={BadgeColor.Yellow} />
             ) : null}
@@ -63,7 +63,7 @@ export function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
           href={entry.docs_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1 shrink-0 text-small text-info-primary hover:underline"
+          className="flex min-h-11 items-center gap-1 shrink-0 text-small text-info-primary hover:underline"
         >
           <Icon iconName={IconName.BookOpen} />
           Docs
@@ -73,14 +73,17 @@ export function EntryDetails({ entry }: { entry: McpLibraryEntry }) {
         <>
           <span
             ref={proseRef}
-            className={cn("text-small text-basic-muted", !expanded && "line-clamp-3")}
+            className={cn(
+              "text-small !leading-[22px] text-basic-secondary break-words",
+              !expanded && "line-clamp-3",
+            )}
           >
             {description}
           </span>
           {clamped || expanded ? (
             <button
               type="button"
-              className="self-start text-small text-basic-primary hover:underline"
+              className="min-h-11 self-start text-small text-basic-primary hover:underline"
               onClick={() => setExpanded((value) => !value)}
             >
               {expanded ? "Show less" : "Show more"}

@@ -117,7 +117,8 @@ export function LibraryPicker({
         <div className="flex items-center gap-2 px-4 pt-4">
           <Input
             className="flex-1 min-w-0"
-            inputSize={InputSize.Medium}
+            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+            aria-label="Search the library"
             leading={InputLeading.Icon}
             leadingIconName={IconName.Search}
             placeholder="Search the library"
@@ -125,7 +126,7 @@ export function LibraryPicker({
             onChange={(event) => setQuery(event.target.value)}
           />
           <Button
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             className="shrink-0"
@@ -142,7 +143,7 @@ export function LibraryPicker({
               {[null, ...categories].map((item) => (
                 <Button
                   key={item ?? "all"}
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
+                  size={isMobile ? ButtonSize.Large : ButtonSize.Small}
                   variant={category === item ? ButtonVariant.Primary : ButtonVariant.Secondary}
                   content={ButtonContent.Text}
                   aria-pressed={category === item}
@@ -175,20 +176,22 @@ export function LibraryPicker({
                   key={entry.id}
                   size={TabButtonSize.Large}
                   disabled={added}
-                  className={cn(added && "opacity-50", "!px-2")}
+                  className={cn(added && "opacity-50", "!h-auto min-h-12 !px-2 !py-2")}
                   onClick={() => onPick(entry)}
                 >
                   <EntryThumbnail entry={entry} />
                   <div className="flex flex-col items-start text-left min-w-0 flex-grow py-1">
-                    <div className="flex items-center gap-2">
-                      <span className="label-small text-basic-primary">{entry.name}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="label-small min-w-0 max-w-full text-basic-primary break-words">
+                        {entry.name}
+                      </span>
                       {added ? (
                         <Badge text="Added" color={BadgeColor.Green} />
                       ) : entry.auth === "required_header" ? (
                         <Badge text="Key required" color={BadgeColor.Yellow} />
                       ) : null}
                     </div>
-                    <span className="text-micro text-basic-muted truncate w-full">
+                    <span className="text-small !leading-[22px] text-basic-secondary whitespace-normal break-words w-full">
                       {entry.description}
                     </span>
                   </div>

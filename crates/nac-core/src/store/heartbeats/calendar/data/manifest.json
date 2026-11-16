@@ -1,0 +1,64 @@
+{
+  "writer": "scripts/timezone-data/generate.py",
+  "version": "2026f",
+  "inputs": [
+    {
+      "url": "https://data.iana.org/time-zones/releases/tzcode2026f.tar.gz",
+      "sha256": "5a18da01393679ef2559214dc687563f7f3d05691f6f58b7fbc0166f3e796cd6",
+      "sha512": "eefcea60c37857214e1eba768d1bbd096de2a8f5afc9a776555552922cc174b32892d7442097b699b77efcba4d85649ed7d13e752ffdbcaad1050749c6c7b5aa"
+    },
+    {
+      "url": "https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz",
+      "sha256": "01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d",
+      "sha512": "26189803c8b3e903dcc467404e2feefb7d190cb1870249a23577ce31e9dcbf187e4704e0b45c8d1366d1c501bb5b53a2e80f8e2828b2163be15e532f6acab52d"
+    }
+  ],
+  "provenance": {
+    "official_release_announcement": "https://lists.iana.org/hyperkitty/list/tz-announce@iana.org/thread/LPANPBYMCHJI4WKAII4J6BVXLCFVGRHM/",
+    "admission": "Official HTTPS plus matching published SHA512",
+    "detached_signatures": "NOT VERIFIED; no signature authentication claimed"
+  },
+  "compiler": {
+    "source": "tzcode2026f.tar.gz",
+    "make_target": "zic",
+    "cc": "cc",
+    "cflags": "-O2 -DHAVE_GETTEXT=0",
+    "options": [
+      "-b",
+      "fat"
+    ],
+    "data_sources": [
+      "africa",
+      "antarctica",
+      "asia",
+      "australasia",
+      "europe",
+      "northamerica",
+      "southamerica",
+      "etcetera",
+      "backward"
+    ],
+    "leap_seconds": false
+  },
+  "names": 597,
+  "unique_tzif_blobs": 344,
+  "coverage": "Main IANA zones and backward aliases; no Factory/localtime/host rules.",
+  "files": {
+    "LICENSE": {
+      "bytes": 252,
+      "sha256": "0613408568889f5739e5ae252b722a2659c02002839ad970a63dc5e9174b27cf"
+    },
+    "NOTICE": {
+      "bytes": 5367,
+      "sha256": "925f6adede0e89451f4f7b7691d3e0d3a830589eeb64e1beed28474314a77b48"
+    },
+    "index.tsv": {
+      "bytes": 15659,
+      "sha256": "5488ef840c322274c58723dfdfd90ce72ebc8d5111d0d3a8d4dd978bd90f05a9"
+    },
+    "zones.bin": {
+      "bytes": 405779,
+      "sha256": "2dc82dd642a3fd3e168e0a8ab1a24f28268823e16937ea9fee62162c52ed5470"
+    }
+  }
+}

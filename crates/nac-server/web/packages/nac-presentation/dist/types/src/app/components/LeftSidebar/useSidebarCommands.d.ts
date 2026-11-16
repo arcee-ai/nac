@@ -8,7 +8,7 @@ export declare function useSidebarCommands(): {
     activeMcp: number;
     sshCount: number;
     mcpLabel: string;
-    newSession: () => void;
+    newSession: () => boolean;
     newProject: () => void;
     createLabel: string;
     openProjects: () => void | Promise<void>;

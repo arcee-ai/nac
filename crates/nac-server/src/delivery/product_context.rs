@@ -13,6 +13,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 #[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ContextQuery {
     session_id: Option<String>,

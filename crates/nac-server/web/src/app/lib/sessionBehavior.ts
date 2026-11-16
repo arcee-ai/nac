@@ -108,6 +108,12 @@ const DIRECT_PANELS: SessionPanelPolicy = {
   readOnly: false,
 };
 
+const HEARTBEAT_PANELS: SessionPanelPolicy = {
+  ...DIRECT_PANELS,
+  widePanels: [...DIRECT_PANELS.widePanels, "heartbeats"],
+  mobilePanels: [...DIRECT_PANELS.mobilePanels, "heartbeats"],
+};
+
 const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
   widePanels: ["insights", "files"],
   mobilePanels: ["insights", "files", "history"],
@@ -134,5 +140,7 @@ export function sessionPanelPolicy(
   if (lineageKind === "managed-orchestrator") return MANAGED_ORCHESTRATOR_PANELS;
   return sessionBehaviorPresentation(behavior).id === "orchestrator"
     ? ORCHESTRATOR_PANELS
-    : DIRECT_PANELS;
+    : behavior === "direct"
+      ? HEARTBEAT_PANELS
+      : DIRECT_PANELS;
 }

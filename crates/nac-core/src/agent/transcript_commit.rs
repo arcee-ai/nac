@@ -157,7 +157,7 @@ impl Agent {
         &mut self,
         message: Message,
         run_id: &SessionRunId,
-        inbox_item_id: Option<i64>,
+        inbox_prompt: Option<crate::store::RunInboxPrompt>,
         review_intent: Option<String>,
     ) -> Result<()> {
         let idx = self.messages.len() as u64;
@@ -169,14 +169,24 @@ impl Agent {
             self.steering_append_pending = true;
             self.pending_log_end = Some(idx + 1);
             let appended = crate::store::spawn_blocking_store_caller(move || {
-                let append = || match (inbox_item_id, review_intent.as_deref()) {
-                    (Some(inbox_item_id), _) => writer.append_inbox_run_prompt(
-                        &session_id,
-                        idx,
-                        &stored_message,
-                        &run_id,
-                        inbox_item_id,
-                    ),
+                let append = || match (inbox_prompt.as_ref(), review_intent.as_deref()) {
+                    (Some(crate::store::RunInboxPrompt::CapturedRaw(inbox_prompt)), _) => writer
+                        .append_admitted_inbox_run_prompt(
+                            &session_id,
+                            idx,
+                            &stored_message,
+                            &run_id,
+                            inbox_prompt,
+                        ),
+                    (Some(crate::store::RunInboxPrompt::AdmissionCreatedHeartbeat(id)), _) => {
+                        writer.append_inbox_run_prompt(
+                            &session_id,
+                            idx,
+                            &stored_message,
+                            &run_id,
+                            *id,
+                        )
+                    }
                     (None, Some(review_intent)) => writer.append_person_run_prompt(
                         &session_id,
                         idx,

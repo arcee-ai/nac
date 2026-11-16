@@ -273,33 +273,35 @@ pub fn authorize_human_preparation(
     config: &crate::runtime::NacConfig,
     store_path: &Path,
 ) -> Result<()> {
+    authorize_preparation(launch, config, store_path, true)
+}
+
+/// A saved schedule authorizes its purpose, not human product invocation.
+/// Preparation has no interactive approver; Ask therefore fails closed.
+pub fn authorize_scheduled_preparation(
+    launch: &TaskLaunchRecord,
+    config: &crate::runtime::NacConfig,
+    store_path: &Path,
+) -> Result<()> {
+    crate::permissions::authorize_local_scheduled_project(
+        &launch.request.project_id,
+        &config.permissions.rules,
+    )?;
+    authorize_preparation(launch, config, store_path, false)
+        .map_err(|_| crate::permissions::ScheduledProjectAdmissionRequired.into())
+}
+
+fn authorize_preparation(
+    launch: &TaskLaunchRecord,
+    config: &crate::runtime::NacConfig,
+    store_path: &Path,
+    human_invocation: bool,
+) -> Result<()> {
     use crate::permissions::{PermissionBackend, PermissionEffect, PermissionPolicy};
-    use crate::tools::kernel::PermissionResource;
     let backend = crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: launch.source.source_cwd.clone(),
     };
-    let mut resources = crate::permissions::file_resources(
-        "edit",
-        launch.workspace_path.clone(),
-        &backend,
-        store_path,
-        true,
-    );
-    resources.push(PermissionResource::new(
-        "execute",
-        format!(
-            "git worktree add --detach {} {}",
-            launch.workspace_path.display(),
-            launch.source.commit
-        ),
-    ));
-    resources.push(PermissionResource::new(
-        "execute",
-        format!(
-            "git update-ref refs/nac/task-launches/{} {}",
-            launch.request.request_id, launch.source.commit
-        ),
-    ));
+    let resources = preparation_resources(launch, &backend, store_path);
     let decision =
         PermissionPolicy::for_backend(PermissionBackend::Local, config.permissions.rules.clone())
             .evaluate(&resources, &[]);
@@ -311,7 +313,52 @@ pub fn authorize_human_preparation(
             .as_deref()
             .unwrap_or("configured policy")
     );
+    anyhow::ensure!(
+        human_invocation || decision.effect == PermissionEffect::Allow,
+        "scheduled task workspace preparation requires human action: unattended Ask fails closed"
+    );
     Ok(())
+}
+
+/// Exact effects shared by human denial checks and ordinary native agent authorization.
+pub(crate) fn preparation_resources(
+    launch: &TaskLaunchRecord,
+    backend: &crate::sandbox::ExecutionBackend,
+    store_path: &Path,
+) -> Vec<crate::tools::kernel::PermissionResource> {
+    use crate::tools::kernel::PermissionResource;
+    let mut resources = crate::permissions::file_resources(
+        "edit",
+        launch.workspace_path.clone(),
+        backend,
+        store_path,
+        true,
+    );
+    for tokens in preparation_commands(launch) {
+        resources.push(PermissionResource::new("execute", tokens.join(" ")));
+    }
+    resources
+}
+
+/// Semantic argv for policy. The Git adapter additionally disables hooks/filters
+/// and supplies its own option separators; these never add caller authority.
+pub(crate) fn preparation_commands(launch: &TaskLaunchRecord) -> [Vec<String>; 2] {
+    [
+        vec![
+            "git".into(),
+            "worktree".into(),
+            "add".into(),
+            "--detach".into(),
+            launch.workspace_path.to_string_lossy().into_owned(),
+            launch.source.commit.clone(),
+        ],
+        vec![
+            "git".into(),
+            "update-ref".into(),
+            format!("refs/nac/task-launches/{}", launch.request.request_id),
+            launch.source.commit.clone(),
+        ],
+    ]
 }
 
 /// Must run under the launch's cross-process operation lease. Existing paths
