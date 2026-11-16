@@ -62,12 +62,22 @@ function pendingState(): PermissionStateResponse {
   };
 }
 
-function mount(state: PermissionStateResponse, requesterLabel?: string, compact = false) {
+/** The sheet opens only from its chip; requests themselves ask in the attention card. */
+function openSheet() {
+  fireEvent.click(screen.getByRole("button", { name: /^Permissions|open permissions$/ }));
+}
+
+function mount(
+  state: PermissionStateResponse,
+  requesterLabel?: string,
+  compact = false,
+  open = state.requests.length > 0,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   client.setQueryData(queryKeys.sessionPermissions(SESSION_ID), state);
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ToastProvider>
@@ -81,6 +91,8 @@ function mount(state: PermissionStateResponse, requesterLabel?: string, compact 
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  if (open) openSheet();
+  return view;
 }
 
 vi.spyOn(api, "listTraditionalChildren").mockResolvedValue([]);
@@ -125,10 +137,17 @@ describe("direct permission controls", () => {
   });
 
   it("retains a pending count in the compact permission trigger", () => {
-    mount(pendingState(), undefined, true);
+    mount(pendingState(), undefined, true, false);
     expect(screen.getByRole("button", { name: "Permissions (1)" }).textContent).toContain(
-      "(1 pending)",
+      "1 pending",
     );
+  });
+
+  it("never opens the sheet over the chat for a new request", () => {
+    mount(pendingState(), undefined, false, false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    openSheet();
+    expect(screen.getByRole("dialog", { name: "Permission required" })).toBeTruthy();
   });
 
   it("keeps a large remembered-grant list in the bounded scrolling modal body", () => {
@@ -145,13 +164,12 @@ describe("direct permission controls", () => {
     mount(state);
 
     const dialog = screen.getByRole("dialog");
-    expect(dialog.className).toContain("max-h-[calc(100vh-2rem)]");
     expect(dialog.className).toContain("overflow-hidden");
     const scrollingBody = Array.from(dialog.children).find((element) =>
-      element.className.includes("overflow-auto"),
+      element.className.includes("overflow-y-auto"),
     );
     expect(scrollingBody).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
   });
@@ -547,7 +565,7 @@ describe("direct permission controls", () => {
       true,
     );
     expect(screen.getByRole("button", { name: "Allow once" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Deny" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("renders the exact escaped terminal input and keeps it once-only", () => {

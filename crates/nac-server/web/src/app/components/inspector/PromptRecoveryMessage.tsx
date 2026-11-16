@@ -15,8 +15,8 @@ export function PromptRecoveryMessage({
 }) {
   const { copy, copied } = useCopyToClipboard();
   return (
-    <div className="rounded-[4px] bg-elevation-level-2 p-3 text-small">
-      <p role="status">
+    <div className="type-body-chrome flex flex-col gap-1 rounded-lg bg-[var(--f-wash-1)] px-3 py-2 text-basic-primary">
+      <p role="status" className="text-basic-secondary">
         {recovery.source === "checkpoint"
           ? "Recovered text may be stale or already sent. Check the transcript before restoring it."
           : recovery.status === "pending"
@@ -27,7 +27,7 @@ export function PromptRecoveryMessage({
       </p>
       <p className="max-h-32 overflow-auto whitespace-pre-wrap break-words">{recovery.text}</p>
       {recovery.status !== "pending" ? (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="-ml-2 flex flex-wrap gap-1">
           <Button
             type="button"
             size={ButtonSize.Small}
@@ -56,7 +56,7 @@ export function PromptRecoveryMessage({
         </div>
       ) : null}
       {recovery.status !== "pending" && hasDraft ? (
-        <p className="text-basic-tertiary">
+        <p className="type-meta text-basic-tertiary">
           Your current draft is preserved. Clear it before restoring this message.
         </p>
       ) : null}

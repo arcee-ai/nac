@@ -1,48 +1,41 @@
-import { QuestionControls } from "@/app/features/questions/QuestionControls";
+import { ComposerAttention } from "@/app/features/attention/ComposerAttention";
 import { TerminalSelectionAttachment } from "@/app/features/terminal-selection/TerminalSelectionAttachment";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { shellInput } from "@/app/features/human-shell/input";
 import { useShellPresentation } from "@/app/features/human-shell/presentationLifetime";
 import { useSubmitShellCommand } from "@/app/features/human-shell/queries";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Button,
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  Icon,
-  IconName,
   KeyboardShortcut,
   Popover,
   PopoverPlacement,
-  Tooltip,
-  TooltipPosition,
 } from "@/app/atoms";
+import { ComposerCard, ComposerFrame } from "@/app/components/inspector/composer/ComposerFrame";
 import {
-  ComposerCard,
-  ComposerFrame,
-  ComposerIconButton,
-} from "@/app/components/inspector/composer/ComposerFrame";
+  ComposerFooter,
+  type SubmitMode,
+} from "@/app/components/inspector/composer/ComposerFooter";
+import type { ComposerToken } from "@/app/components/inspector/composer/ComposerMenu";
+import { useCoarsePointer } from "@/app/components/inspector/composer/useCoarsePointer";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
 import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
 import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
-import { ModelPicker } from "@/app/components/inspector/ModelPicker";
-import { PermissionControls } from "@/app/components/inspector/PermissionControls";
-import { GoalComposer, GoalFlag } from "@/app/components/inspector/GoalComposer";
-import { SessionUsage } from "@/app/components/inspector/SessionUsage";
+import { GoalComposer } from "@/app/components/inspector/GoalComposer";
 import { SubagentSessionComposer } from "@/app/components/inspector/SubagentComposer";
-import { SshBadge } from "@/app/components/SshBadge";
-import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import {
   displayPromptFromMessageText,
   ENV_SSH,
-  formatCostMicros,
-  formatTokensCompact,
   runMetrics,
   sessionEnvLabel,
   tokenUsage,
 } from "@/app/lib/format";
+import { routes } from "@/app/lib/routes";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePromptHistoryPreview } from "@/app/hooks/usePromptHistoryPreview";
 import { perfRender } from "@/app/lib/perfDebug";
@@ -60,7 +53,6 @@ import {
   useClearGoal,
   useCreateGoal,
   useCreateInboxItem,
-  useModelCatalog,
   useSessionGoal,
   useSessionInbox,
   useSshConnect,
@@ -152,12 +144,15 @@ const SKILL_EMPHASIS_STYLE = {
   WebkitTextStroke: "0.45px currentColor",
 };
 
+/** The message text, its skill mirror and the collapsed line share one face. */
+const FIELD_TEXT = "text-[15px] leading-6 [@media(pointer:coarse)]:text-[16px]";
+
 function highlightedSkillText(segments: SkillReferenceSegment[]) {
   return segments.map((segment, index) =>
     segment.skillName ? (
       <strong
         key={`${segment.skillName}-${index}`}
-        className="[font-weight:inherit] text-danger-primary"
+        className="rounded-xs bg-[var(--f-wash-3)] [font-weight:inherit] text-basic-primary"
         style={SKILL_EMPHASIS_STYLE}
       >
         {segment.text}
@@ -175,8 +170,9 @@ interface ChatInputBoxProps {
 }
 
 /**
- * Message pill plus the row of session controls under it: model, settings and
- * permissions, and on a phone, which has no session header, the usage readings.
+ * The floating composer: the attention card stacked above it, the message
+ * field, and one row of controls under it — `+`, model, permission mode and
+ * Send in its context ring.
  */
 export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) {
   const runtime = useNativeRuntime();
@@ -188,8 +184,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     useSessionSpend,
     useRunning,
     useRunUsage,
-    useRunStartedAt,
-    useLastElapsedMs,
     useCancelArmed,
     pushLocalEvent,
     liftSessionSpend,
@@ -213,7 +207,15 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     [drafts, sessionId],
   );
   const isMobile = useIsMobile();
+  // A touch screen's Enter is a newline, as on a phone. Undefined outside a
+  // browser, which reads as a fine pointer.
+  const coarsePointer = useCoarsePointer() === true;
+  const navigate = useNavigate();
   const [focused, setFocused] = useState(false);
+  const [permissionSheet, setPermissionSheet] = useState<{
+    open: boolean;
+    focusKey: string | null;
+  }>({ open: false, focusKey: null });
   const [selection, setSelection] = useState<TextSelection>({ start: 0, end: 0 });
   const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
@@ -281,13 +283,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }, [liftSessionSpend, snapshot]);
   const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
   const backend = entry?.summary.backend ?? snapshot?.metadata.backend ?? null;
-  const catalog = useModelCatalog();
   const persistedUsage = tokenUsage(snapshot);
   // A fork inherits context but not spend, so the gauge must not depend on
   // billed usage being present.
   const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
-  const runStartedAt = useRunStartedAt();
-  const lastElapsedMs = useLastElapsedMs();
 
   const sshTarget = sshTargetFromSummary(entry?.summary);
   const sshStatus = useSshConnectionStatus(sshTarget);
@@ -799,37 +798,70 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     await actions.stopRun(sessionId);
   }, [actions, sessionId]);
 
-  const filled = Boolean(value.trim());
-  // An empty field during a run is the stop control. Text turns it back into send.
-  const stopFromSend = (running || stopping) && !filled;
-  const sendButton = (
-    <ComposerIconButton
-      compact={isMobile}
-      className={isMobile ? "!size-11 !min-h-11 !min-w-11" : undefined}
-      variant={ButtonVariant.Primary}
-      type={stopFromSend ? "button" : "submit"}
-      disabled={stopping || (!stopFromSend && !canSend)}
-      loading={stopping}
-      aria-label={
-        stopping
-          ? "Stopping run"
-          : running && !filled
-            ? "Stop run"
-            : runningInteractive
-              ? "Steer active run"
-              : "Send"
+  // One compaction path for the slash command's sibling under the context ring.
+  const compactContext = useCallback(async () => {
+    if (compactSession.isPending) return;
+    const current = captureRuntimeActivation(sessionId);
+    try {
+      await compactSession.mutateAsync(sessionId);
+      if (!current()) return;
+      pushLocalEvent("compaction", "▶ compacting context…");
+    } catch (error) {
+      if (!current()) return;
+      pushLocalEvent("error", `compact failed: ${errorMessage(toRunError(error))}`, true);
+      toast.error(`Failed to compact: ${humanErrorText(toRunError(error), backend)}`);
+    }
+  }, [backend, captureRuntimeActivation, compactSession, pushLocalEvent, sessionId, toast]);
+
+  /**
+   * Starts a `/`, `$` or `!` in the field from the `+` menu, so the field's
+   * own suggestions take it from there. `/` and `!` stand for the whole
+   * message and only start an empty one; `$` goes in at the caret.
+   */
+  const insertToken = useCallback(
+    (token: ComposerToken) => {
+      const textarea = ref.current;
+      let next: string;
+      let caret: number;
+      if (token === "$") {
+        const at = textarea?.selectionEnd ?? value.length;
+        const before = value.slice(0, at);
+        const pad = before && !/\s$/u.test(before) ? " " : "";
+        next = `${before}${pad}$${value.slice(at)}`;
+        caret = at + pad.length + 1;
+      } else {
+        if (value.trim()) return;
+        next = token;
+        caret = 1;
       }
-      onPointerDown={preserveSuggestionFocus}
-      onClick={running && !filled && !stopping ? () => void stop() : undefined}
-    >
-      <Icon iconName={stopFromSend ? IconName.Stop : IconName.ArrowTop} />
-    </ComposerIconButton>
+      setDismissedSuggestion(null);
+      setActiveSuggestion(0);
+      setHoveredSuggestion(null);
+      setSelection({ start: caret, end: caret });
+      if (next === value) {
+        textarea?.focus();
+        textarea?.setSelectionRange(caret, caret);
+        return;
+      }
+      completionCaretRef.current = caret;
+      setValue(next);
+    },
+    [setValue, value],
   );
 
-  // The goal flag rests beside Send and gives way to anything being written.
-  const goalFlag = direct && !focused;
+  const filled = Boolean(value.trim());
+  // An empty field during a run is the stop control. Text turns it back into
+  // send, which says what it will do: Send, or Steer while a run is going.
+  const submitMode: SubmitMode = stopping
+    ? "stopping"
+    : running && !filled
+      ? "stop"
+      : runningInteractive
+        ? "steer"
+        : "send";
+
   // The text, its skill mirror and the lines drawn over it share one inset.
-  const textInset = isMobile ? "py-2 pr-2 pl-3" : "py-3 pr-2 pl-4";
+  const textInset = isMobile ? "py-2 px-2.5" : "py-3 px-3";
 
   const suggestionStatus = suggestionsOpen
     ? suggestionKind === "slash"
@@ -858,7 +890,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             ref={mirrorRef}
             aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]",
+              "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-input [scrollbar-gutter:stable]",
+              FIELD_TEXT,
               textInset,
             )}
           >
@@ -870,7 +903,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           ref={ref}
           data-nac-retained-draft=""
           className={cn(
-            "relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]",
+            "relative block w-full bg-transparent resize-none border-none outline-none text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]",
+            FIELD_TEXT,
             textInset,
             collapsed && "pointer-events-none overflow-hidden opacity-0",
           )}
@@ -883,7 +917,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           aria-controls={suggestionsOpen ? listboxId : undefined}
           aria-activedescendant={activeOptionId}
           aria-describedby={history.active ? previewHelpId : undefined}
-          enterKeyHint={isMobile ? "enter" : undefined}
+          enterKeyHint={isMobile || coarsePointer ? "enter" : undefined}
           // A preview stands where the placeholder would, rather than in the
           // field, so an earlier prompt can be read before it is taken. The row
           // below draws it, hence the blank here.
@@ -941,10 +975,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
-            // A phone's virtual keyboard has no Shift+Enter affordance. Leave
-            // Enter native there, including while suggestions are open;
-            // hardware keyboards can still explicitly send with Cmd/Ctrl+Enter.
-            if (event.key === "Enter" && isMobile && !event.metaKey && !event.ctrlKey) return;
+            // A touch keyboard has no Shift+Enter affordance. Leave Enter
+            // native there, including while suggestions are open; hardware
+            // keyboards can still explicitly send with Cmd/Ctrl+Enter.
+            if (
+              event.key === "Enter" &&
+              (isMobile || coarsePointer) &&
+              !event.metaKey &&
+              !event.ctrlKey
+            ) {
+              return;
+            }
             if (suggestionsOpen && !event.shiftKey) {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -997,7 +1038,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 textInset,
               )}
             >
-              <span className="min-w-0 truncate text-medium text-input-placeholder">
+              <span className={cn("min-w-0 truncate text-input-placeholder", FIELD_TEXT)}>
                 {history.previewText}
               </span>
               <KeyboardShortcut keys={["tab"]} spelled className="shrink-0" />
@@ -1010,15 +1051,12 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             className={cn("absolute inset-0 flex cursor-text items-center", textInset)}
             onClick={focusEnd}
           >
-            <span className="w-full truncate text-medium text-input">
+            <span className={cn("w-full truncate text-input", FIELD_TEXT)}>
               {highlightedSkillText(skillSegments)}
             </span>
           </div>
         ) : null}
       </div>
-      {goalFlag ? (
-        <GoalFlag compact={isMobile} sessionId={sessionId} onOpen={openGoalEditor} />
-      ) : null}
     </div>
   );
 
@@ -1029,11 +1067,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       aria-label={suggestionKind === "skill" ? "Skills" : "Slash commands"}
     >
       {suggestionKind === "slash" && commandDefinitions === undefined ? (
-        <div className="px-3 py-2 text-small text-basic-secondary">
+        <div className="type-body-chrome px-3 py-2 text-basic-secondary">
           {commandsFailed ? "Slash commands unavailable" : "Loading commands…"}
         </div>
       ) : suggestionKind === "skill" && skillDefinitions === undefined ? (
-        <div className="px-3 py-2 text-small text-basic-secondary">
+        <div className="type-body-chrome px-3 py-2 text-basic-secondary">
           {skillsFailed ? "Skills unavailable" : "Loading skills…"}
         </div>
       ) : options.length ? (
@@ -1049,7 +1087,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             aria-selected={index === suggestionIndex}
             tabIndex={-1}
             className={cn(
-              "flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left",
+              "flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left",
               index === suggestionIndex ? "btn-ghost-highlighted" : "btn-ghost",
             )}
             onPointerDown={(event) => event.preventDefault()}
@@ -1061,10 +1099,10 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             }
             onClick={() => completeSuggestion(option)}
           >
-            <span className="code code-small shrink-0 text-basic-primary">{option.name}</span>
+            <span className="code shrink-0 text-[12.5px] text-basic-primary">{option.name}</span>
             <span
               className={cn(
-                "min-w-0 flex-1 text-small text-basic-secondary",
+                "type-body-chrome min-w-0 flex-1 text-basic-secondary",
                 option.kind === "skill" && "truncate",
               )}
             >
@@ -1073,7 +1111,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           </button>
         ))
       ) : (
-        <div className="px-3 py-2 text-small text-basic-secondary">No matching commands</div>
+        <div className="type-body-chrome px-3 py-2 text-basic-secondary">No matching commands</div>
       )}
     </div>
   );
@@ -1088,7 +1126,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       closeOnEscape={false}
       sheetOnMobile={false}
       className="min-w-0 flex-1"
-      size="w-[min(400px,calc(100vw-16px))]"
+      size="w-[min(440px,calc(100vw-16px))]"
       panelClassName="max-h-[min(40vh,320px)] overflow-y-auto"
     >
       {field}
@@ -1100,8 +1138,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       <ComposerFrame compact={isMobile} onSubmit={(event) => event.preventDefault()}>
         <div
           className={cn(
-            "flex items-center gap-3 bg-elevation-level-1 text-small text-basic-secondary shadow-xl",
-            isMobile ? "min-h-12 rounded-[24px] px-4 py-1" : "min-h-16 rounded-[32px] px-6 py-2",
+            "type-body-chrome flex items-center gap-3 rounded-composer border border-tertiary bg-elevation-level-1 text-basic-secondary shadow-lg",
+            isMobile ? "min-h-12 px-4 py-1" : "min-h-14 px-5 py-2",
           )}
         >
           <span className="flex-1">Loading session controls…</span>
@@ -1123,14 +1161,39 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }
 
   if (readOnly && lineage) {
+    // A child agent's own requests ask here too; a managed orchestrator has
+    // no direct permission broker.
+    const childAgent = lineage.kind !== "managed-orchestrator";
     return (
-      <SubagentSessionComposer
-        parentSessionId={lineage.parent_session_id}
-        sessionId={sessionId}
-        kind={lineage.kind}
-        description={lineage.description}
-        behavior={behavior}
-      />
+      <>
+        {childAgent ? (
+          <div
+            className={cn(
+              "pointer-events-none flex flex-col items-center [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]",
+              isMobile ? "px-2" : "px-4",
+            )}
+          >
+            <ComposerAttention
+              sessionId={sessionId}
+              permissions
+              questions={false}
+              requesterLabel={`child agent “${lineage.description || "Subagent"}”`}
+              includeChildren={false}
+              parentSessionId={
+                lineage.kind === "traditional-child" ? lineage.parent_session_id : undefined
+              }
+              poll={running}
+            />
+          </div>
+        ) : null}
+        <SubagentSessionComposer
+          parentSessionId={lineage.parent_session_id}
+          sessionId={sessionId}
+          kind={lineage.kind}
+          description={lineage.description}
+          behavior={behavior}
+        />
+      </>
     );
   }
 
@@ -1150,13 +1213,20 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         void submit();
       }}
     >
-      <QuestionControls sessionId={sessionId} enabled={behavior === "direct"} />
+      <ComposerAttention
+        sessionId={sessionId}
+        permissions={direct}
+        questions={behavior === "direct"}
+        hidden={permissionSheet.open}
+        onReviewAll={(focusKey) => setPermissionSheet({ open: true, focusKey })}
+        onDenied={focusEnd}
+      />
       <ComposerCard
         compact={isMobile}
         surface={inlineGoal ? "goal" : focused ? "focus" : undefined}
       >
         {retentionLimited ? (
-          <p role="status" className="px-2 text-small text-basic-secondary">
+          <p role="status" className="type-meta px-2 pt-1 text-basic-secondary">
             Text recovery storage is full or unavailable. You can keep typing and sending; new edits
             may not restore. Review or dismiss older text to free space.
           </p>
@@ -1165,7 +1235,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           <div
             role="region"
             aria-label="Message delivery"
-            className="flex max-h-48 flex-col gap-2 overflow-y-auto px-2"
+            className="relative flex max-h-48 flex-col gap-1.5 overflow-y-auto"
           >
             {recoveries.map((recovery) => (
               <PromptRecoveryMessage
@@ -1178,6 +1248,63 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             ))}
           </div>
         ) : null}
+
+        {pendingInbox.length ? (
+          <div
+            role="group"
+            aria-label="Pending messages"
+            className="relative flex max-h-40 flex-col gap-0.5 overflow-y-auto"
+          >
+            {pendingInbox.map((item) => (
+              <div
+                key={item.id}
+                className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-[var(--f-wash-1)] py-1 pr-1 pl-3"
+              >
+                <span className="type-meta-strong shrink-0 text-basic-secondary">
+                  {item.delivery === "steer" ? "Steer" : "Queued"}
+                </span>
+                {item.terminal_selection ? (
+                  <TerminalSelectionAttachment
+                    evidence={item.terminal_selection}
+                    canonicalText={item.prompt}
+                    sessionId={sessionId}
+                  />
+                ) : (
+                  <span className="type-body-chrome min-w-0 flex-1 truncate text-basic-primary">
+                    {item.prompt}
+                  </span>
+                )}
+                <span className="ml-auto flex shrink-0 items-center">
+                  <Button
+                    type="button"
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    disabled={mutationPending}
+                    onClick={() =>
+                      void changeInboxDelivery(
+                        item.id,
+                        item.version,
+                        item.delivery === "steer" ? "queue" : "steer",
+                      )
+                    }
+                  >
+                    Change to {item.delivery === "steer" ? "queue" : "steer"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size={ButtonSize.Small}
+                    variant={ButtonVariant.Ghost}
+                    disabled={mutationPending}
+                    onClick={() => void cancelPendingInbox(item.id, item.version)}
+                  >
+                    Cancel
+                  </Button>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="relative flex flex-col">
           {direct ? (
             <GoalComposer
@@ -1188,143 +1315,54 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
               onClose={() => setGoalEditing(false)}
             />
           ) : null}
-          {!inlineGoal ? (
-            <div className="flex items-end">
-              {fieldWithSuggestions}
-              {sendButton}
-            </div>
-          ) : null}
+          {!inlineGoal ? fieldWithSuggestions : null}
         </div>
 
-        {pendingInbox.length ? (
-          <div className="relative flex flex-col gap-2 px-2" aria-label="Pending messages">
-            <div className="tag-label uppercase text-basic-secondary">Pending messages</div>
-            {pendingInbox.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2"
-              >
-                <span className="tag-label text-accent-primary">{item.delivery}</span>
-                {item.terminal_selection ? (
-                  <TerminalSelectionAttachment
-                    evidence={item.terminal_selection}
-                    canonicalText={item.prompt}
-                    sessionId={sessionId}
-                  />
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-small text-basic-primary">
-                    {item.prompt}
-                  </span>
-                )}
-                <Button
-                  type="button"
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  disabled={mutationPending}
-                  onClick={() =>
-                    void changeInboxDelivery(
-                      item.id,
-                      item.version,
-                      item.delivery === "steer" ? "queue" : "steer",
-                    )
-                  }
-                >
-                  Change to {item.delivery === "steer" ? "queue" : "steer"}
-                </Button>
-                <Button
-                  type="button"
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.GhostDestructive}
-                  disabled={mutationPending}
-                  onClick={() => void cancelPendingInbox(item.id, item.version)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ))}
-          </div>
+        {!inlineGoal ? (
+          <ComposerFooter
+            sessionId={sessionId}
+            behavior={behavior}
+            compact={isMobile}
+            menu={{
+              direct,
+              fieldEmpty: !value.trim(),
+              disabled: false,
+              onInsert: insertToken,
+              onGoal: openGoalEditor,
+              onAttachSelection: direct
+                ? () => navigate(routes.session(sessionId, "terminal"))
+                : null,
+            }}
+            metadata={snapshot?.metadata ?? null}
+            modelLabel={metrics.model}
+            modelDisabled={busy}
+            ssh={
+              isSsh
+                ? { connected: sshStatus === "connected", onReconnect: () => void reconnectSsh() }
+                : null
+            }
+            permissionSheet={{
+              open: permissionSheet.open,
+              focusKey: permissionSheet.focusKey,
+              onOpenChange: (open) =>
+                setPermissionSheet((current) => ({
+                  open,
+                  focusKey: open ? current.focusKey : null,
+                })),
+            }}
+            onSettings={null}
+            contextTokens={contextTokens}
+            onCompact={() => void compactContext()}
+            compacting={compactSession.isPending}
+            submit={{
+              mode: submitMode,
+              canSend,
+              onQueue: runningDirect ? () => void submit(value, "queue") : null,
+              onStop: () => void stop(),
+              onPointerDown: preserveSuggestionFocus,
+            }}
+          />
         ) : null}
-
-        {/* The row wraps rather than letting its `shrink-0` controls run into
-            each other, which a run's Queue Next makes them do on a phone. */}
-        <div className="relative flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1 px-2">
-          <div
-            className={cn(
-              "flex grow min-w-0 flex-wrap items-center gap-y-1",
-              isMobile ? "gap-x-1" : "gap-x-2",
-            )}
-          >
-            {runningDirect ? (
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Secondary}
-                disabled={!canSend}
-                onClick={() => void submit(value, "queue")}
-              >
-                Queue Next
-              </Button>
-            ) : null}
-
-            {/* Breaks the line at a fixed width and grows back to its own, so
-                Queue Next shortens the model label for the run instead of
-                wrapping the row and moving the box when a run starts and ends. */}
-            <div className="flex min-w-0 grow basis-[160px] max-w-fit">
-              <ModelPicker
-                sessionId={sessionId}
-                metadata={snapshot?.metadata ?? null}
-                label={metrics.model}
-                disabled={busy}
-              />
-            </div>
-
-            {isSsh ? (
-              <SshBadge
-                state={sshStatus === "connected" ? "connected" : "reconnect"}
-                onReconnect={() => void reconnectSsh()}
-              />
-            ) : null}
-          </div>
-
-          <div className={cn("ml-auto flex shrink-0 items-center", isMobile ? "gap-3" : "gap-4")}>
-            {isMobile ? (
-              <SessionUsage
-                compact
-                context={formatTokensCompact(contextTokens)}
-                contextShare={contextShare(
-                  contextTokens,
-                  resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
-                )}
-                input={formatTokensCompact(metrics.usage?.input_tokens)}
-                output={formatTokensCompact(metrics.usage?.output_tokens)}
-                cacheRead={
-                  metrics.usage?.cache_read_tokens
-                    ? formatTokensCompact(metrics.usage.cache_read_tokens)
-                    : null
-                }
-                cost={formatCostMicros(metrics.usage?.cost?.total)}
-                running={running}
-                startedAt={runStartedAt}
-                lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
-                environment={metrics.env}
-              />
-            ) : null}
-            <Tooltip title="Session settings" position={TooltipPosition.TopLeft}>
-              <Button
-                type="button"
-                size={ButtonSize.Small}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                className={isMobile ? "!size-11 !min-h-11 !min-w-11" : undefined}
-                aria-label="Session settings"
-                onClick={() => actions.settings(sessionId)}
-              >
-                <Icon iconName={IconName.Gear} size={16} />
-              </Button>
-            </Tooltip>
-            <PermissionControls sessionId={sessionId} behavior={behavior} compact={isMobile} />
-          </div>
-        </div>
       </ComposerCard>
     </ComposerFrame>
   );

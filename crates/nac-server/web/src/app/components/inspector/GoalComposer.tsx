@@ -30,6 +30,8 @@ import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useClearGoal, useCreateGoal, useSessionGoal, useUpdateGoal } from "@/app/services/queries";
 import type { GoalStatus, SessionGoalRecord } from "@/app/types/api";
 
+import { goalActionLabel, statusLabel } from "./goalStatus";
+
 const GOAL_HINT =
   "Direct-session work that continues across ordinary turns until completed, blocked, paused or limited.";
 const OBJECTIVE_PLACEHOLDER = "Describe the concrete output";
@@ -41,11 +43,6 @@ const BUDGET_DEFAULT = 9_600;
 
 /** How far the objective grows before it scrolls, as the message field does. */
 const MAX_HEIGHT_PX = 180;
-
-function statusLabel(status: GoalStatus): string {
-  const label = status.replaceAll("_", " ");
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
 
 function badgeColor(status: GoalStatus): BadgeColor {
   if (status === "active") return BadgeColor.Green;
@@ -59,7 +56,7 @@ function clampBudget(value: number): number {
 }
 
 function usageLabel(goal: SessionGoalRecord): string {
-  return `${goal.tokens_used.toLocaleString()} Tokens, ${Math.floor(goal.time_used_ms / 1000)}s`;
+  return `${goal.tokens_used.toLocaleString()} tokens · ${Math.floor(goal.time_used_ms / 1000)}s`;
 }
 
 /**
@@ -240,7 +237,7 @@ export function GoalFlag({ sessionId, compact, onOpen }: GoalFlagProps) {
         <ComposerInlineButton
           type="button"
           variant={active ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-          aria-label={goal ? `Edit goal: ${statusLabel(goal.status)}` : "Set durable goal"}
+          aria-label={goalActionLabel(goal)}
           onClick={onOpen}
         >
           <Icon iconName={IconName.Flag} size={20} />
@@ -259,7 +256,7 @@ function BudgetSwitch({ draft }: { draft: GoalDraft }) {
         aria-label="Token budget"
         onChange={draft.toggleBudget}
       />
-      <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
+      <span className="type-meta-strong shrink-0 text-basic-secondary">Token budget</span>
     </div>
   );
 }
@@ -342,8 +339,8 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
         <>
           <div className="flex items-center justify-between gap-4 py-1 pr-1 pl-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="header-sm shrink-0 text-accent-primary">Current Goal</span>
-              <span className="min-w-0 truncate text-micro text-accent-tertiary">
+              <span className="type-strong shrink-0 text-basic-primary">Current goal</span>
+              <span className="type-meta tabular min-w-0 truncate text-basic-tertiary">
                 {usageLabel(goal)}
               </span>
               <Badge
@@ -392,7 +389,7 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
       <div className="flex items-end">
         <textarea
           ref={field}
-          className="block min-w-0 flex-1 resize-none border-none bg-transparent py-3 pr-2 pl-4 text-medium text-input outline-none placeholder:text-input-placeholder"
+          className="block min-w-0 flex-1 resize-none border-none bg-transparent py-2.5 pr-2 pl-3 text-[15px] leading-6 text-input outline-none placeholder:text-input-placeholder [@media(pointer:coarse)]:text-[16px]"
           rows={1}
           aria-label="Goal objective"
           placeholder={OBJECTIVE_PLACEHOLDER}
@@ -469,7 +466,7 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Set Durable Goal"
+      title="Set durable goal"
       bodyClassName="p-0 pb-20 [&>*]:shrink-0"
       footer={
         ready ? (
@@ -524,8 +521,8 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
         <>
           {goal ? (
             <section className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4">
-              <span className="header-md text-accent-primary">Current Goal</span>
-              <span className="text-medium text-accent-tertiary">{usageLabel(goal)}</span>
+              <span className="type-subheading text-basic-primary">Current goal</span>
+              <span className="type-meta tabular text-basic-tertiary">{usageLabel(goal)}</span>
               <Badge
                 text={statusLabel(goal.status)}
                 color={badgeColor(goal.status)}
@@ -545,8 +542,8 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
           </section>
           <section className="flex flex-col gap-4 p-4">
             <div className="flex items-center gap-2">
-              <span className="label-small min-w-0 flex-1 truncate text-basic-primary">
-                Token Budget
+              <span className="type-label min-w-0 flex-1 truncate text-basic-primary">
+                Token budget
               </span>
               <Switch
                 size={SwitchSize.Large}

@@ -28,10 +28,10 @@ const KeyboardShortcut: React.FC<KeyboardShortcutProps> = ({
         <kbd
           key={index}
           className={cn(
-            "inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-[3px] border tag-label",
+            "type-tag inline-flex h-4 min-w-4 items-center justify-center rounded-xs border px-1 leading-none",
             inversed
               ? "text-secondary-inverse border-tertiary-inversed"
-              : "text-basic-secondary border-secondary bg-input",
+              : "border-tertiary bg-[var(--f-wash-1)] text-basic-tertiary",
           )}
         >
           {spelled ? key : keyGlyph(key)}

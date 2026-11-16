@@ -6,20 +6,22 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
+  Drawer,
   Icon,
   IconName,
-  Modal,
-  ModalSize,
   Radio,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
+import { MODE_OPTIONS, modeName } from "@/app/features/attention/permissionModel";
+import { PermissionDecision } from "@/app/features/attention/PermissionDecision";
+import { usePermissionReply } from "@/app/features/attention/usePermissionReply";
+import { cn } from "@/app/lib/cn";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { toRunError } from "@/app/lib/providerError";
 import {
   useAuthorizePermissionReviewRetry,
   useDeletePermissionGrant,
-  useReplyPermission,
   useSetPermissionApprovalMode,
 } from "@/app/services/queries";
 import type {
@@ -30,37 +32,12 @@ import type {
 } from "@/app/types/api";
 
 import { useDelegatedPermissionStream } from "@/app/hooks/useSessionStream";
-import { usePermissionQueue } from "@/app/features/permissions/usePermissionQueue";
+import {
+  usePermissionQueue,
+  type PermissionReviewEntry,
+} from "@/app/features/permissions/usePermissionQueue";
 
 import { PermissionReviewRow, PermissionReviewStatus } from "./PermissionReviews";
-
-const MODE_OPTIONS: {
-  mode: PermissionApprovalMode;
-  name: string;
-  description: string;
-}[] = [
-  {
-    mode: "manual",
-    name: "Manual",
-    description: "Each request pauses until you approve or deny it.",
-  },
-  {
-    mode: "auto_approve",
-    name: "Approve all",
-    description:
-      "Automatically allows ordinary requests after they reach the permission broker. Hard and configured denials still apply.",
-  },
-  {
-    mode: "review",
-    name: "Approve for me",
-    description:
-      "Eligible requests are reviewed automatically, and routine ones are allowed once. Ineligible requests still ask you. A rejected, uncertain or unavailable review leaves the action unexecuted and returns it to the agent; it does not open a manual prompt. You can switch to Manual to decide requests yourself. Uses your Arcee sign-in or Arcee API key.",
-  },
-];
-
-function modeName(mode: PermissionApprovalMode | undefined): string {
-  return MODE_OPTIONS.find((option) => option.mode === mode)?.name ?? "Manual";
-}
 
 interface PermissionControlsProps {
   sessionId: string;
@@ -73,12 +50,21 @@ interface PermissionControlsProps {
   poll?: boolean;
   /** The trigger drops its mode label but keeps any pending count; its accessible name stays. */
   compact?: boolean;
+  /** Controlled sheet visibility, for a host whose attention card opens it too. */
+  sheetOpen?: boolean;
+  onSheetOpenChange?: (open: boolean) => void;
+  /** The request a host's "Review all" asked the sheet to show first. */
+  focusRequestKey?: string | null;
 }
 
-/** Subscription lifetime is independent of dialog visibility and request selection. */
+/** Subscription lifetime is independent of sheet visibility and request selection. */
 function ChildPermissionBridge({ sessionId, running }: { sessionId: string; running: boolean }) {
   useDelegatedPermissionStream(sessionId, running);
   return null;
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div className="type-meta-strong mb-2 text-basic-secondary">{children}</div>;
 }
 
 function GrantRow({
@@ -93,13 +79,13 @@ function GrantRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-[4px] bg-elevation-level-2 px-3 py-2">
+    <div className="flex items-start gap-3 rounded-md border border-muted px-3 py-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="tag-label uppercase text-basic-secondary">{grant.action}</span>
-          <span className="tag-label uppercase text-basic-tertiary">{grant.backend}</span>
+          <span className="type-tag text-basic-secondary">{grant.action}</span>
+          <span className="type-tag text-basic-tertiary">{grant.backend}</span>
         </div>
-        <div className="mt-1 break-all code code-small text-basic-primary">{grant.resource}</div>
+        <div className="code mt-1 break-all text-[12.5px] text-basic-primary">{grant.resource}</div>
       </div>
       <Button
         size={ButtonSize.Small}
@@ -116,7 +102,12 @@ function GrantRow({
   );
 }
 
-/** Direct-session permission prompt and remembered-grant manager. */
+/**
+ * The quiet permission-mode chip under the composer and the sheet it opens:
+ * pending requests with their full decision, approval mode, automatic
+ * reviews, and remembered grants. The sheet never opens by itself; requests
+ * surface in the attention card above the composer instead.
+ */
 export function PermissionControls({
   sessionId,
   behavior,
@@ -126,6 +117,9 @@ export function PermissionControls({
   retryParentSessionId,
   poll = true,
   compact = false,
+  sheetOpen,
+  onSheetOpenChange,
+  focusRequestKey = null,
 }: PermissionControlsProps) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -137,10 +131,10 @@ export function PermissionControls({
     parentSessionId: retryParentSessionId,
   });
   const permissions = queue.parent;
-  const replyPermission = useReplyPermission();
   const setApprovalMode = useSetPermissionApprovalMode();
   const deleteGrant = useDeletePermissionGrant();
   const authorizeRetry = useAuthorizePermissionReviewRetry();
+  const { reply, replying } = usePermissionReply();
   const toast = useToast();
   const requests = queue.requests;
   const grants = queue.scopes.flatMap((scope) => scope.query.data?.grants ?? []);
@@ -158,38 +152,28 @@ export function PermissionControls({
         ? "Reviewing"
         : null;
   const inheritedAutoApproval = approvalMode !== "manual" && !autoApprovalAvailable;
-  const [manuallyOpen, setManuallyOpen] = useState(false);
-  const [dismissedRequests, setDismissedRequests] = useState("");
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = sheetOpen ?? ownOpen;
+  const setOpen = (next: boolean) => {
+    setOwnOpen(next);
+    onSheetOpenChange?.(next);
+  };
   const [deletingGrant, setDeletingGrant] = useState<string | null>(null);
   const [authorizingReview, setAuthorizingReview] = useState<string | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<{ scope: string; key: string } | null>(
     null,
   );
   const selectionScope = `${sessionId}:${location.key}`;
-  const identity = JSON.stringify(requests.map((entry) => entry.key));
-  // Each newly observed ask gets one automatic presentation. Closing the
-  // dialog records that exact request set; a later request changes the
-  // identity and opens it again without effect-driven state synchronization.
-  const exactRequestKey = requestedPermission
-    ? `request:${selectionScope}:${requestedPermission}`
-    : null;
-  const open =
-    manuallyOpen ||
-    (exactRequestKey
-      ? dismissedRequests !== exactRequestKey
-      : Boolean(requests.length && identity !== dismissedRequests));
-  const close = () => {
-    setDismissedRequests(exactRequestKey ?? identity);
-    setManuallyOpen(false);
-  };
 
   if (!direct) return null;
 
+  // A chosen row wins; then the host's "Review all" request; then an exact
+  // link, which never falls back to another request; then the oldest.
   const selected =
     requests.find(
       (entry) => selectedRequest?.scope === selectionScope && entry.key === selectedRequest.key,
     ) ??
+    requests.find((entry) => entry.key === focusRequestKey) ??
     (requestedPermission
       ? requests.find(
           (entry) =>
@@ -199,25 +183,12 @@ export function PermissionControls({
     null;
   const active = selected?.request ?? null;
   const requester = selected?.scope.label ?? requesterLabel ?? "this session";
-  const requestUnavailable = selected?.scope.query.isError || selected?.scope.query.isPending;
-  const busy = replyingTo !== null;
-  const rememberable = active?.resources.some((resource) => resource.save_resource) ?? false;
+  const busy = replying !== null;
 
-  const reply = async (choice: PermissionReply) => {
-    if (!active || !selected || busy || requestUnavailable) return;
-    setReplyingTo(selected.key);
-    try {
-      await replyPermission.mutateAsync({
-        sessionId: selected.scope.sessionId,
-        requestId: active.id,
-        reply: choice,
-      });
-      if (requests.length === 1) close();
-    } catch (error) {
-      toast.error(`Unable to answer permission request: ${errorMessage(toRunError(error))}`);
-    } finally {
-      setReplyingTo(null);
-    }
+  const answer = async (choice: PermissionReply) => {
+    if (!selected) return;
+    const answered = await reply(selected, choice);
+    if (answered && requests.length === 1) setOpen(false);
   };
 
   const forget = async (scopeId: string, grant: PermissionGrantRecord) => {
@@ -233,19 +204,15 @@ export function PermissionControls({
   };
 
   const changeApprovalMode = async (mode: PermissionApprovalMode) => {
-    setManuallyOpen(true);
     if (mode === approvalMode) return;
     try {
-      await setApprovalMode.mutateAsync({
-        sessionId,
-        mode,
-      });
+      await setApprovalMode.mutateAsync({ sessionId, mode });
     } catch (error) {
       toast.error(`Unable to change approval mode: ${errorMessage(toRunError(error))}`);
     }
   };
 
-  const authorize = async (entry: (typeof reviews)[number]) => {
+  const authorize = async (entry: PermissionReviewEntry) => {
     if (authorizingReview || entry.scope.query.isError || entry.scope.query.isPending) return;
     setAuthorizingReview(entry.key);
     try {
@@ -291,12 +258,9 @@ export function PermissionControls({
       >
         <Button
           size={ButtonSize.Small}
-          variant={
-            requests.length || authorizableCount
-              ? ButtonVariant.GhostHighlightedAccent
-              : ButtonVariant.Ghost
-          }
+          variant={ButtonVariant.Ghost}
           content={compact && !requests.length ? ButtonContent.Icon : ButtonContent.IconLeft}
+          className={cn("!gap-1.5", compact && "!size-auto !min-h-11 !min-w-11")}
           aria-label={
             inheritedAutoApproval
               ? `${label} — ${autoApprove ? "auto-approve" : currentModeName} inherited; open permissions`
@@ -306,33 +270,34 @@ export function PermissionControls({
                   ? `Approve for me enabled${badge} — open permissions`
                   : `${label}${badge}`
           }
-          onClick={() => setManuallyOpen(true)}
+          onClick={() => setOpen(true)}
         >
           <Icon iconName={IconName.Private} size={16} />
           {compact ? null : (
             <>
-              <span className="label-micro">{currentModeName}</span>
+              <span className="type-meta">{currentModeName}</span>
               {reviewMode && reviewAvailability ? (
-                <span className="label-micro text-basic-tertiary">{reviewAvailability}</span>
+                <span className="type-meta text-basic-tertiary">{reviewAvailability}</span>
               ) : null}
             </>
           )}
           {requests.length ? (
-            <span className="label-micro">({requests.length} pending)</span>
+            <span className="type-meta-strong tabular text-[var(--f-amber-text)]">
+              {requests.length} pending
+            </span>
           ) : null}
         </Button>
       </Tooltip>
 
-      <Modal
+      <Drawer
         open={open}
-        onClose={close}
-        size={ModalSize.Wide}
-        flush
+        onClose={() => setOpen(false)}
         title={active ? "Permission required" : "Permissions"}
-        subheader={
-          active
-            ? `${active.tool} requested by ${requester} is paused before execution.`
-            : inheritedAutoApproval
+        bodyClassName="gap-6 px-4 py-4 sm:px-5"
+      >
+        {active ? null : (
+          <p className="type-body-chrome text-basic-secondary">
+            {inheritedAutoApproval
               ? autoApprove
                 ? "Automatic approval is inherited from the parent session; change it from the parent."
                 : `${currentModeName} is inherited from the parent session; change it from the parent.`
@@ -340,319 +305,256 @@ export function PermissionControls({
                 ? "Automatic approval is active for this session and its owned child agents."
                 : reviewMode
                   ? "Approve for me is enabled for this session and its owned child agents. This setting does not guarantee that the review service is available."
-                  : "Remembered access for this session."
-        }
-        footer={
-          active ? (
-            <div className="flex w-full flex-wrap justify-end gap-2">
+                  : "Remembered access for this session."}
+          </p>
+        )}
+        {[
+          ...(queue.includeChildren
+            ? [{ sessionId: "discovery", label: "Child request discovery", query: queue.children }]
+            : []),
+          ...queue.scopes,
+        ].map(({ sessionId: scopeId, label: scopeLabel, query }) =>
+          query.isError ? (
+            <div
+              key={scopeId}
+              role="alert"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--f-red-line)] bg-[var(--f-red-wash)] p-3 type-body-chrome text-error-primary"
+            >
+              <span className="min-w-0 flex-1">
+                Permissions could not be loaded for {scopeLabel}. The run remains fail-closed.
+              </span>
               <Button
-                variant={ButtonVariant.SecondaryDestructive}
-                loading={
-                  replyingTo === selected?.key && replyPermission.variables?.reply === "reject"
-                }
-                disabled={busy || requestUnavailable}
-                onClick={() => void reply("reject")}
-              >
-                Reject
-              </Button>
-              <Button
+                size={ButtonSize.Small}
                 variant={ButtonVariant.Secondary}
-                loading={
-                  replyingTo === selected?.key && replyPermission.variables?.reply === "once"
-                }
-                disabled={busy || requestUnavailable}
-                onClick={() => void reply("once")}
+                onClick={() => void query.refetch()}
               >
-                Allow once
-              </Button>
-              <Button
-                variant={ButtonVariant.Primary}
-                loading={
-                  replyingTo === selected?.key && replyPermission.variables?.reply === "always"
-                }
-                disabled={busy || requestUnavailable || !rememberable}
-                title={
-                  rememberable
-                    ? "Remember the server-derived narrow access pattern"
-                    : "This operation has no safe reusable permission pattern"
-                }
-                onClick={() => void reply("always")}
-              >
-                Always allow
+                Retry {scopeLabel}
               </Button>
             </div>
-          ) : undefined
-        }
-      >
-        <div className="flex flex-col gap-5">
-          {[
-            ...(queue.includeChildren
-              ? [
-                  {
-                    sessionId: "discovery",
-                    label: "Child request discovery",
-                    query: queue.children,
-                  },
-                ]
-              : []),
-            ...queue.scopes,
-          ].map(({ sessionId: scopeId, label: scopeLabel, query }) =>
-            query.isError ? (
-              <div
-                key={scopeId}
-                role="alert"
-                className="rounded-[4px] bg-error-secondary p-3 text-small text-error-primary"
+          ) : query.isPending ? (
+            <div key={scopeId} role="status" className="type-body-chrome text-basic-secondary">
+              Loading permissions for {scopeLabel}…
+            </div>
+          ) : null,
+        )}
+        {requestedPermission && !selected && (
+          <p role="status" className="type-body-chrome text-basic-secondary">
+            This permission request is no longer pending or is unavailable. Refresh the task to
+            inspect its current state.
+          </p>
+        )}
+        {requests.length ? (
+          <section aria-label="Pending permission requests" className="flex flex-col gap-1">
+            <SectionLabel>Pending requests ({requests.length})</SectionLabel>
+            {requests.map((entry) => (
+              <Button
+                key={entry.key}
+                variant={
+                  entry.key === selected?.key
+                    ? ButtonVariant.SecondaryHighlighted
+                    : ButtonVariant.Ghost
+                }
+                className="!h-auto min-h-9 min-w-0 !justify-start !rounded-md !py-2"
+                aria-pressed={entry.key === selected?.key}
+                disabled={busy}
+                onClick={() => setSelectedRequest({ scope: selectionScope, key: entry.key })}
               >
-                Permissions could not be loaded for {scopeLabel}. The run remains fail-closed.
+                <span className="min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]">
+                  {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}
+                </span>
+              </Button>
+            ))}
+          </section>
+        ) : (
+          <div className="type-body-chrome text-basic-secondary">
+            No pending permission requests.
+          </div>
+        )}
+
+        {selected ? (
+          <div className="rounded-card border border-[var(--f-amber-line)] p-4">
+            <PermissionDecision
+              key={selected.key}
+              entry={selected}
+              requester={requester}
+              replying={replying}
+              onReply={(choice) => void answer(choice)}
+              context={
+                <p className="type-meta text-basic-secondary">
+                  Requested by {requester} ({selected.request.session_id}).{" "}
+                  {selected.scope.query.data?.approval_mode === "review"
+                    ? "This request is not eligible for automatic review, so it needs your decision. Eligibility also depends on the available human intent and redaction checks."
+                    : "Manual approval is effective because automatic approval is off for this session and its owned child agents."}
+                  {requests.length > 1
+                    ? ` ${requests.length - 1} more request${requests.length === 2 ? "" : "s"} waiting.`
+                    : ""}
+                </p>
+              }
+            />
+          </div>
+        ) : null}
+
+        {autoApprovalAvailable ? (
+          <section aria-label="Approval mode" role="radiogroup" className="flex flex-col gap-3">
+            <SectionLabel>Approval mode</SectionLabel>
+            {MODE_OPTIONS.map((option) => (
+              <Radio
+                key={option.mode}
+                name={`approval-mode-${sessionId}`}
+                aria-label={option.name}
+                checked={approvalMode === option.mode}
+                disabled={setApprovalMode.isPending || permissions.isError || permissions.isPending}
+                onChange={(checked) => {
+                  if (checked) void changeApprovalMode(option.mode);
+                }}
+              >
+                <div>
+                  <div className="type-label text-basic-primary">{option.name}</div>
+                  <div className="type-meta mt-0.5 text-basic-secondary">{option.description}</div>
+                </div>
+              </Radio>
+            ))}
+            <div className="type-meta text-basic-tertiary">
+              The mode governs this session and all existing or future owned child agents, stays
+              saved across restarts and never creates remembered permissions. Separately managed
+              orchestrators are not included.
+            </div>
+          </section>
+        ) : null}
+
+        {reviewMode ? (
+          <PermissionReviewStatus reviews={reviews.map((entry) => entry.review)} />
+        ) : null}
+        {reviewMode || reviews.length ? (
+          <section aria-label="Automatic reviews">
+            <SectionLabel>Automatic reviews</SectionLabel>
+            <div className="type-meta mb-2 text-basic-secondary">
+              Blocked actions were returned to the agent unexecuted. Authorizing a retry asks the
+              agent to try exactly that action again; it passes policy and a fresh review.
+            </div>
+            <div className="type-meta mb-2 text-basic-tertiary">
+              Review history, blocked actions and retry authorizations are temporary. They are lost
+              when the server restarts or an idle session is unloaded, including after all clients
+              disconnect. The selected mode and recorded human intent remain saved.
+            </div>
+            {reviews.length === 0 ? (
+              <div className="type-body-chrome text-basic-secondary">
+                No reviews are retained for this session.
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-2">
+              {reviews.map((entry) => {
+                const retryUnavailable =
+                  entry.scope.parentSessionId || autoApprovalAvailable
+                    ? undefined
+                    : "Open the child's parent to authorize a retry or switch the parent to Manual.";
+                return (
+                  <section key={entry.key} aria-label={`Review for ${entry.scope.label}`}>
+                    <div className="type-meta mb-1 break-all text-basic-secondary">
+                      {entry.scope.label} ({entry.scope.sessionId})
+                    </div>
+                    <PermissionReviewRow
+                      review={entry.review}
+                      authorizable={entry.authorizable}
+                      authorizing={authorizingReview === entry.key}
+                      disabled={
+                        authorizingReview !== null ||
+                        entry.scope.query.data?.approval_mode !== "review" ||
+                        entry.scope.query.isError ||
+                        entry.scope.query.isPending ||
+                        Boolean(retryUnavailable)
+                      }
+                      disabledReason={retryUnavailable}
+                      onAuthorize={() => void authorize(entry)}
+                    />
+                  </section>
+                );
+              })}
+            </div>
+            {reviewMode && autoApprovalAvailable ? (
+              <div className="mt-2 flex justify-end">
                 <Button
                   size={ButtonSize.Small}
-                  variant={ButtonVariant.Secondary}
-                  onClick={() => void query.refetch()}
-                >
-                  Retry {scopeLabel}
-                </Button>
-              </div>
-            ) : query.isPending ? (
-              <div key={scopeId} role="status" className="text-small text-basic-secondary">
-                Loading permissions for {scopeLabel}…
-              </div>
-            ) : null,
-          )}
-          {requestedPermission && !selected && (
-            <p role="status" className="text-small text-basic-secondary">
-              This permission request is no longer pending or is unavailable. Refresh the task to
-              inspect its current state.
-            </p>
-          )}
-          {requests.length ? (
-            <section aria-label="Pending permission requests" className="flex flex-col gap-2">
-              <div className="tag-label uppercase text-basic-tertiary">
-                Pending requests ({requests.length})
-              </div>
-              {requests.map((entry) => (
-                <Button
-                  key={entry.key}
-                  variant={
-                    entry.key === selected?.key ? ButtonVariant.Secondary : ButtonVariant.Ghost
-                  }
-                  className="!h-auto min-h-9 min-w-0 !py-2"
-                  aria-pressed={entry.key === selected?.key}
-                  disabled={busy}
-                  onClick={() => setSelectedRequest({ scope: selectionScope, key: entry.key })}
-                >
-                  <span className="min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]">
-                    {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}
-                  </span>
-                </Button>
-              ))}
-            </section>
-          ) : (
-            <div className="text-small text-basic-secondary">No pending permission requests.</div>
-          )}
-          {autoApprovalAvailable ? (
-            <section
-              aria-label="Approval mode"
-              role="radiogroup"
-              className="flex flex-col gap-3 rounded-[6px] bg-elevation-level-2 p-3"
-            >
-              {MODE_OPTIONS.map((option) => (
-                <Radio
-                  key={option.mode}
-                  name={`approval-mode-${sessionId}`}
-                  aria-label={option.name}
-                  checked={approvalMode === option.mode}
+                  variant={ButtonVariant.Ghost}
                   disabled={
                     setApprovalMode.isPending || permissions.isError || permissions.isPending
                   }
-                  onChange={(checked) => {
-                    if (checked) void changeApprovalMode(option.mode);
-                  }}
+                  onClick={() => void changeApprovalMode("manual")}
                 >
-                  <div>
-                    <div className="text-small font-medium text-basic-primary">{option.name}</div>
-                    <div className="mt-1 text-small text-basic-secondary">{option.description}</div>
-                  </div>
-                </Radio>
-              ))}
-              <div className="text-small text-basic-tertiary">
-                The mode governs this session and all existing or future owned child agents, stays
-                saved across restarts and never creates remembered permissions. Separately managed
-                orchestrators are not included.
+                  Switch to Manual
+                </Button>
               </div>
-            </section>
-          ) : null}
+            ) : null}
+          </section>
+        ) : null}
 
-          {reviewMode ? (
-            <PermissionReviewStatus reviews={reviews.map((entry) => entry.review)} />
-          ) : null}
-          {reviewMode || reviews.length ? (
-            <section aria-label="Automatic reviews">
-              <div className="mb-2 tag-label uppercase text-basic-tertiary">Automatic reviews</div>
-              <div className="mb-2 text-small text-basic-secondary">
-                Blocked actions were returned to the agent unexecuted. Authorizing a retry asks the
-                agent to try exactly that action again; it passes policy and a fresh review.
-              </div>
-              <div className="mb-2 text-small text-basic-tertiary">
-                Review history, blocked actions and retry authorizations are temporary. They are
-                lost when the server restarts or an idle session is unloaded, including after all
-                clients disconnect. The selected mode and recorded human intent remain saved.
-              </div>
-              {reviews.length === 0 ? (
-                <div className="text-small text-basic-secondary">
-                  No reviews are retained for this session.
-                </div>
-              ) : null}
-              <div className="flex flex-col gap-2">
-                {reviews.map((entry) => {
-                  const retryUnavailable =
-                    entry.scope.parentSessionId || autoApprovalAvailable
-                      ? undefined
-                      : "Open the child's parent to authorize a retry or switch the parent to Manual.";
-                  return (
-                    <section key={entry.key} aria-label={`Review for ${entry.scope.label}`}>
-                      <div className="mb-1 break-all text-small text-basic-secondary">
-                        {entry.scope.label} ({entry.scope.sessionId})
-                      </div>
-                      <PermissionReviewRow
-                        review={entry.review}
-                        authorizable={entry.authorizable}
-                        authorizing={authorizingReview === entry.key}
-                        disabled={
-                          authorizingReview !== null ||
-                          entry.scope.query.data?.approval_mode !== "review" ||
-                          entry.scope.query.isError ||
-                          entry.scope.query.isPending ||
-                          Boolean(retryUnavailable)
-                        }
-                        disabledReason={retryUnavailable}
-                        onAuthorize={() => void authorize(entry)}
-                      />
-                    </section>
-                  );
-                })}
-              </div>
-              {reviewMode && autoApprovalAvailable ? (
-                <div className="mt-2 flex justify-end">
-                  <Button
-                    size={ButtonSize.Small}
-                    variant={ButtonVariant.Ghost}
-                    disabled={
-                      setApprovalMode.isPending || permissions.isError || permissions.isPending
-                    }
-                    onClick={() => void changeApprovalMode("manual")}
-                  >
-                    Switch to Manual
-                  </Button>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
+        {inheritedAutoApproval ? (
+          <section
+            aria-label="Inherited automatic approval mode"
+            className="rounded-md border border-tertiary p-3"
+          >
+            <div className="type-label text-basic-primary">
+              {autoApprove ? "Auto-approve" : currentModeName} inherited
+            </div>
+            <div className="type-meta mt-1 text-basic-secondary">
+              {autoApprove
+                ? "Ordinary requests from this child agent inherit automatic approval from the parent session."
+                : `Ordinary requests from this child agent follow the parent session’s ${currentModeName} mode.`}{" "}
+              Change this mode from the parent session; hard and configured denials still apply.
+            </div>
+          </section>
+        ) : null}
 
-          {inheritedAutoApproval ? (
+        <section aria-label="Remembered permissions">
+          <SectionLabel>Remembered permissions by session</SectionLabel>
+          <div className="type-meta mb-3 text-basic-secondary">
+            Each grant stays in its original session. A child’s grants never apply to the parent or
+            siblings.
+          </div>
+          {queue.scopes.map((scope) => (
             <section
-              aria-label="Inherited automatic approval mode"
-              className="rounded-[6px] border border-accent-primary bg-elevation-level-2 p-3"
+              key={scope.sessionId}
+              aria-label={`Remembered for ${scope.label}`}
+              className="mb-4"
             >
-              <div className="text-small font-medium text-basic-primary">
-                {autoApprove ? "Auto-approve" : currentModeName} inherited
+              <div className="type-meta mb-2 break-all text-basic-secondary">
+                Remembered for {scope.label} ({scope.sessionId})
               </div>
-              <div className="mt-1 text-small text-basic-secondary">
-                {autoApprove
-                  ? "Ordinary requests from this child agent inherit automatic approval from the parent session."
-                  : `Ordinary requests from this child agent follow the parent session’s ${currentModeName} mode.`}{" "}
-                Change this mode from the parent session; hard and configured denials still apply.
-              </div>
-            </section>
-          ) : null}
-
-          {active ? (
-            <section aria-label="Requested access">
-              <div className="mb-2 text-small text-basic-secondary">
-                Requested by {requester} ({active.session_id}).{" "}
-                {selected?.scope.query.data?.approval_mode === "review"
-                  ? "This request is not eligible for automatic review, so it needs your decision. Eligibility also depends on the available human intent and redaction checks."
-                  : "Manual approval is effective because automatic approval is off for this session and its owned child agents."}
-              </div>
-              <div className="mb-2 tag-label uppercase text-basic-tertiary">Requested access</div>
               <div className="flex flex-col gap-2">
-                {active.resources.map((resource, index) => (
-                  <div
-                    key={`${resource.action}:${resource.resource}:${index}`}
-                    className="rounded-[4px] bg-elevation-level-2 px-3 py-2"
-                  >
-                    <div className="tag-label uppercase text-basic-secondary">
-                      {resource.action}
-                    </div>
-                    <div className="mt-1 break-words text-small text-basic-primary">
-                      {resource.display}
-                    </div>
-                    {resource.save_resource ? (
-                      <div className="mt-2 break-all code code-small text-basic-tertiary">
-                        Always: {resource.save_resource}
-                      </div>
-                    ) : null}
+                {scope.sessionId !== sessionId &&
+                scope.query.data?.approval_mode === "auto_approve" ? (
+                  <div className="type-body-chrome text-basic-secondary">
+                    Auto-approve inherited from parent.
                   </div>
+                ) : null}
+                {scope.sessionId !== sessionId && scope.query.data?.approval_mode === "review" ? (
+                  <div className="type-body-chrome text-basic-secondary">
+                    Approve for me inherited from parent.
+                  </div>
+                ) : null}
+                {(scope.query.data?.grants ?? []).map((grant) => (
+                  <GrantRow
+                    key={grant.id}
+                    grant={grant}
+                    deleting={deletingGrant === JSON.stringify([scope.sessionId, grant.id])}
+                    disabled={
+                      deletingGrant !== null || scope.query.isError || scope.query.isPending
+                    }
+                    onDelete={() => void forget(scope.sessionId, grant)}
+                  />
                 ))}
               </div>
-              {requests.length > 1 ? (
-                <div className="mt-2 text-small text-basic-secondary">
-                  {requests.length - 1} more request{requests.length === 2 ? "" : "s"} waiting.
+              {!scope.query.isPending &&
+              !scope.query.isError &&
+              !scope.query.data?.grants.length ? (
+                <div className="type-body-chrome text-basic-secondary">
+                  No remembered permissions.
                 </div>
               ) : null}
             </section>
-          ) : null}
-
-          <section aria-label="Remembered permissions">
-            <div className="mb-2 tag-label uppercase text-basic-tertiary">
-              Remembered permissions by session
-            </div>
-            <div className="mb-3 text-small text-basic-secondary">
-              Each grant stays in its original session. A child’s grants never apply to the parent
-              or siblings.
-            </div>
-            {queue.scopes.map((scope) => (
-              <section
-                key={scope.sessionId}
-                aria-label={`Remembered for ${scope.label}`}
-                className="mb-4"
-              >
-                <div className="mb-2 break-all text-small text-basic-secondary">
-                  Remembered for {scope.label} ({scope.sessionId})
-                </div>
-                <div className="flex flex-col gap-2">
-                  {scope.sessionId !== sessionId &&
-                  scope.query.data?.approval_mode === "auto_approve" ? (
-                    <div className="text-small text-basic-secondary">
-                      Auto-approve inherited from parent.
-                    </div>
-                  ) : null}
-                  {scope.sessionId !== sessionId && scope.query.data?.approval_mode === "review" ? (
-                    <div className="text-small text-basic-secondary">
-                      Approve for me inherited from parent.
-                    </div>
-                  ) : null}
-                  {(scope.query.data?.grants ?? []).map((grant) => (
-                    <GrantRow
-                      key={grant.id}
-                      grant={grant}
-                      deleting={deletingGrant === JSON.stringify([scope.sessionId, grant.id])}
-                      disabled={
-                        deletingGrant !== null || scope.query.isError || scope.query.isPending
-                      }
-                      onDelete={() => void forget(scope.sessionId, grant)}
-                    />
-                  ))}
-                </div>
-                {!scope.query.isPending &&
-                !scope.query.isError &&
-                !scope.query.data?.grants.length ? (
-                  <div className="text-small text-basic-secondary">No remembered permissions.</div>
-                ) : null}
-              </section>
-            ))}
-          </section>
-        </div>
-      </Modal>
+          ))}
+        </section>
+      </Drawer>
     </>
   );
 }
