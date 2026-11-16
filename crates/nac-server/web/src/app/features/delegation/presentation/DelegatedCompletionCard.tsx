@@ -10,9 +10,9 @@ import { routes } from "@/app/lib/routes";
 import type { DelegatedCompletionTurn } from "@/app/lib/transcript";
 
 const KIND = {
-  "coding-agent": { type: "Coding agent", lineage: "traditional-child", row: "child" },
+  "coding-agent": { type: "Subagent", lineage: "traditional-child", row: "child" },
   "nac-orchestrator": {
-    type: "NAC orchestrator",
+    type: "Managed orchestrator",
     lineage: "managed-orchestrator",
     row: "orchestrator",
   },
@@ -57,11 +57,11 @@ export function DelegatedCompletionCard({
         sessionHref={openable ? sessionHref : null}
         onSessionLinkClick={followSessionLink}
       />
-      <details className="mt-2 w-[320px] max-w-full min-w-0 rounded-[4px] bg-elevation-level-1 p-3 text-xs text-basic-secondary">
-        <summary className="cursor-pointer rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]">
+      <details className="group/result mt-2 w-[360px] max-w-full min-w-0 rounded-lg border border-muted px-3 py-2 type-meta text-basic-secondary open:bg-[var(--f-wash-1)]">
+        <summary className="cursor-pointer rounded-md text-basic-tertiary marker:text-basic-muted hover:text-basic-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]">
           Generation {completion.generation} result
         </summary>
-        <div className="mt-2 flex flex-col gap-2 whitespace-pre-wrap break-words">
+        <div className="mt-2 flex flex-col gap-2 whitespace-pre-wrap break-words pb-1 type-body-chrome">
           {completion.outcome ? <p>{completion.outcome}</p> : null}
           {completion.changes ? <p>Changes: {completion.changes}</p> : null}
           {completion.verification ? <p>Verification: {completion.verification}</p> : null}

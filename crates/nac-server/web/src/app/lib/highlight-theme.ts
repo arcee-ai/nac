@@ -12,6 +12,7 @@ const PLACEHOLDER = {
   secondary: "#000006",
   error: "#000007",
   fg: "#000008",
+  inserted: "#000009",
 } as const;
 
 export const NAC_THEME_NAME = "nac";
@@ -27,6 +28,7 @@ export const nacColorReplacements: Record<string, string> = {
   [PLACEHOLDER.secondary]: "var(--color-code-variable)",
   [PLACEHOLDER.error]: "var(--color-text-error-primary)",
   [PLACEHOLDER.fg]: "var(--color-text-basic-primary)",
+  [PLACEHOLDER.inserted]: "var(--color-text-success-primary)",
 };
 
 function colorRule(scope: string | string[], foreground: string, fontStyle?: string) {
@@ -60,7 +62,8 @@ export const nacTheme: ThemeRegistration = {
       ["keyword", "storage", "storage.type", "support.type", "entity.name.type", "entity.name.tag"],
       PLACEHOLDER.accent,
     ),
-    colorRule(["string", "string.regexp", "markup.inserted"], PLACEHOLDER.success),
+    colorRule(["string", "string.regexp"], PLACEHOLDER.success),
+    colorRule("markup.inserted", PLACEHOLDER.inserted),
     colorRule(
       ["constant.numeric", "constant.language", "constant.character", "markup.list"],
       PLACEHOLDER.danger,

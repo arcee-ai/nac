@@ -110,7 +110,7 @@ describe("highlightSource", () => {
     const colors = colorsOf(lines ?? []);
     expect(colors.length).toBeGreaterThan(0);
     for (const color of colors) {
-      expect(color).toMatch(/^var\(--color-text-/);
+      expect(color).toMatch(/^var\(--color-(text|code)-/);
     }
   });
 
@@ -136,7 +136,7 @@ describe("highlightSource", () => {
     expect(flatten(bash ?? [])).toBe("echo hi\n");
     expect(flatten(toml ?? [])).toBe('name = "nac"\n');
     expect(flatten(diff ?? [])).toBe("-old\n+new\n");
-    expect(colorsOf(toml ?? []).some((color) => color.includes("success"))).toBe(true);
+    expect(colorsOf(toml ?? []).some((color) => color.includes("code-string"))).toBe(true);
   });
 });
 
@@ -146,7 +146,7 @@ describe("highlightCode", () => {
     const lines = await highlightCode("src/lib.ts", source);
     expect(lines).not.toBeNull();
     expect(flatten(lines ?? [])).toBe(source);
-    expect(colorsOf(lines ?? []).some((color) => color?.includes("accent"))).toBe(true);
+    expect(colorsOf(lines ?? []).some((color) => color?.includes("code-keyword"))).toBe(true);
   });
 
   it.each(["diff", "patch"] as const)("colours and reconstructs a .%s file", async (extension) => {
