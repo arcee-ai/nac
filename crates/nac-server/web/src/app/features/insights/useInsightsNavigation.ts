@@ -26,6 +26,7 @@ export interface InsightsNavigation {
   openThread(name: string, episodeKey?: string, options?: InsightsOpenOptions): void;
   /** Subagents with that row open; the newest row stands in until the list has it. */
   openSubagent(rowKey: DelegatedRowKey): void;
+  returnToInsights(options?: InsightsOpenOptions): void;
   openWorkset(worksetId: string): void;
   /** Files on the working tree's tree listing, with this workspace-relative file open. */
   openFile(path: string): void;
@@ -42,6 +43,8 @@ export interface InsightsNavigationTarget {
 interface InsightsNavigationValue extends InsightsNavigationTarget {
   /** The pick made with `focusDetail` whose detail has not taken the focus yet. */
   detailFocusRef: { current: InsightSelection | null };
+  /** Keyboard Back can restore a narrow list even when it had no detail pick. */
+  returnFocusRef?: { current: boolean };
 }
 
 /** Outside a session page there is no panel to open, so every jump is a no-op. */
@@ -50,6 +53,7 @@ export const InsightsNavigationContext = createContext<InsightsNavigationValue>(
   panels: [],
   focusPanel: () => {},
   detailFocusRef: { current: null },
+  returnFocusRef: { current: false },
 });
 
 /**
@@ -58,7 +62,8 @@ export const InsightsNavigationContext = createContext<InsightsNavigationValue>(
  * dialog. A panel the session's policy lacks is never opened.
  */
 export function useInsightsNavigation(): InsightsNavigation {
-  const { sessionId, panels, focusPanel, detailFocusRef } = useContext(InsightsNavigationContext);
+  const { sessionId, panels, focusPanel, detailFocusRef, returnFocusRef } =
+    useContext(InsightsNavigationContext);
   const {
     sessionLayoutStore,
     selectInsightsFilter,
@@ -69,6 +74,7 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectRevision,
     selectFileListing,
     selectFile,
+    restoreInsightsReturn,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
   return useMemo(() => {
@@ -101,6 +107,16 @@ export function useInsightsNavigation(): InsightsNavigation {
           pick({ kind: "thread" }, options);
         }),
       openSubagent: (rowKey) => open("delegated", () => selectSubagent(sessionId, rowKey)),
+      returnToInsights: (options) => {
+        if (!panels.includes("insights")) return;
+        focusPanel("insights");
+        if (restoreInsightsReturn(sessionId)) {
+          if (returnFocusRef) returnFocusRef.current = options?.focusDetail === true;
+          detailFocusRef.current = options?.focusDetail
+            ? sessionLayoutStore.getState().selectedInsight
+            : null;
+        }
+      },
       openWorkset: (worksetId) => open("worksets", () => selectWorkset(worksetId)),
       openFile: (path) =>
         open("files", () => {
@@ -114,6 +130,7 @@ export function useInsightsNavigation(): InsightsNavigation {
     panels,
     focusPanel,
     detailFocusRef,
+    returnFocusRef,
     sessionLayoutStore,
     selectInsightsFilter,
     selectInsight,
@@ -123,6 +140,7 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectRevision,
     selectFileListing,
     selectFile,
+    restoreInsightsReturn,
   ]);
 }
 
@@ -135,7 +153,7 @@ export function useInsightsDetailFocus(
   selection: InsightSelection | null,
   showing: boolean,
 ): RefObject<HTMLDivElement | null> {
-  const { detailFocusRef } = useContext(InsightsNavigationContext);
+  const { detailFocusRef, returnFocusRef } = useContext(InsightsNavigationContext);
   const regionRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!showing || !selection || detailFocusRef.current !== selection) return undefined;
@@ -146,10 +164,11 @@ export function useInsightsDetailFocus(
       const region = regionRef.current;
       if (!region || detailFocusRef.current !== selection) return;
       detailFocusRef.current = null;
+      if (returnFocusRef) returnFocusRef.current = false;
       // The panel may still be sliding in; scrolling to it would drag the page.
       region.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [detailFocusRef, selection, showing]);
+  }, [detailFocusRef, returnFocusRef, selection, showing]);
   return regionRef;
 }

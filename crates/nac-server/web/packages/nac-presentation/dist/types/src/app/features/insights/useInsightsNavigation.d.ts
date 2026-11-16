@@ -21,6 +21,7 @@ export interface InsightsNavigation {
     openThread(name: string, episodeKey?: string, options?: InsightsOpenOptions): void;
     /** Subagents with that row open; the newest row stands in until the list has it. */
     openSubagent(rowKey: DelegatedRowKey): void;
+    returnToInsights(options?: InsightsOpenOptions): void;
     openWorkset(worksetId: string): void;
     /** Files on the working tree's tree listing, with this workspace-relative file open. */
     openFile(path: string): void;
@@ -36,6 +37,10 @@ interface InsightsNavigationValue extends InsightsNavigationTarget {
     /** The pick made with `focusDetail` whose detail has not taken the focus yet. */
     detailFocusRef: {
         current: InsightSelection | null;
+    };
+    /** Keyboard Back can restore a narrow list even when it had no detail pick. */
+    returnFocusRef?: {
+        current: boolean;
     };
 }
 /** Outside a session page there is no panel to open, so every jump is a no-op. */

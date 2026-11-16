@@ -12,11 +12,13 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 mod git;
+mod reveal;
 mod revisions;
 pub mod task_worktree;
 pub(crate) mod worktree;
 
 pub use git::GitTarget;
+pub use reveal::{resolve_local_reveal, LocalRevealTarget};
 pub use revisions::{capture, forget, restore, rewind_ref, RevisionCapture};
 
 pub(crate) use git::{first_stderr_line, workspace_lease_identity, WorktreeRead};
