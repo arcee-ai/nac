@@ -654,6 +654,10 @@
     container: panel-phone / inline-size;
   }
 
+[data-nac-runtime]:is(.\@container), [data-nac-runtime] .\@container {
+    container-type: inline-size;
+  }
+
 [data-nac-runtime]:is(.pointer-events-auto), [data-nac-runtime] .pointer-events-auto {
     pointer-events: auto;
   }
@@ -1991,6 +1995,10 @@
     max-width: 140px;
   }
 
+[data-nac-runtime]:is(.max-w-\[160px\]), [data-nac-runtime] .max-w-\[160px\] {
+    max-width: 160px;
+  }
+
 [data-nac-runtime]:is(.max-w-\[180px\]), [data-nac-runtime] .max-w-\[180px\] {
     max-width: 180px;
   }
@@ -2790,10 +2798,6 @@
     border-radius: .25rem !important;
   }
 
-[data-nac-runtime]:is(.\!rounded-\[4px\]), [data-nac-runtime] .\!rounded-\[4px\] {
-    border-radius: 4px !important;
-  }
-
 [data-nac-runtime]:is(.\!rounded-full), [data-nac-runtime] .\!rounded-full {
     border-radius: 3.40282e38px !important;
   }
@@ -3480,6 +3484,10 @@
 
 [data-nac-runtime]:is(.\!px-2), [data-nac-runtime] .\!px-2 {
     padding-inline: calc(var(--spacing) * 2) !important;
+  }
+
+[data-nac-runtime]:is(.\!px-2\.5), [data-nac-runtime] .\!px-2\.5 {
+    padding-inline: calc(var(--spacing) * 2.5) !important;
   }
 
 [data-nac-runtime]:is(.\!px-3\.5), [data-nac-runtime] .\!px-3\.5 {
@@ -6015,6 +6023,24 @@
     }
   }
 
+@container not (min-width: 280px) {
+    [data-nac-runtime]:is(.\@max-\[280px\]\:hidden), [data-nac-runtime] .\@max-\[280px\]\:hidden {
+      display: none;
+    }
+
+    [data-nac-runtime]:is(.\@max-\[280px\]\:w-full), [data-nac-runtime] .\@max-\[280px\]\:w-full {
+      width: 100%;
+    }
+
+    [data-nac-runtime]:is(.\@max-\[280px\]\:flex-wrap), [data-nac-runtime] .\@max-\[280px\]\:flex-wrap {
+      flex-wrap: wrap;
+    }
+
+    [data-nac-runtime]:is(.\@max-\[280px\]\:justify-end), [data-nac-runtime] .\@max-\[280px\]\:justify-end {
+      justify-content: flex-end;
+    }
+  }
+
 @container panel-phone (min-width: 280px) {
     [data-nac-runtime]:is(.\@min-\[280px\]\/panel-phone\:basis-auto), [data-nac-runtime] .\@min-\[280px\]\/panel-phone\:basis-auto {
       flex-basis: auto;
@@ -7231,6 +7257,12 @@
   padding: 0 18px;
 }
 
+@media (max-width: 767.98px), (pointer: coarse) {
+  [data-nac-runtime]:is(.btn-large.btn-icon), [data-nac-runtime] .btn-large.btn-icon, [data-nac-runtime]:is(.btn-large.btn-icon-left), [data-nac-runtime] .btn-large.btn-icon-left, [data-nac-runtime]:is(.btn-large.btn-icon-right), [data-nac-runtime] .btn-large.btn-icon-right, [data-nac-runtime]:is(.btn-large.btn-text), [data-nac-runtime] .btn-large.btn-text {
+    height: 44px;
+  }
+}
+
 [data-nac-runtime]:is(.btn.btn-tertiary), [data-nac-runtime] .btn.btn-tertiary, [data-nac-runtime]:is(.btn.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-tertiary-accent), [data-nac-runtime] .btn.btn-tertiary-accent {
   border-radius: var(--interaction-rounded);
   height: auto;
@@ -8237,6 +8269,12 @@
 
 [data-nac-runtime]:is(.group:hover .tooltip-box), [data-nac-runtime] .group:hover .tooltip-box {
   pointer-events: auto;
+}
+
+@media (max-width: 767.98px) {
+  [data-nac-runtime]:is([data-settings-surface] :is(input, textarea, select, button, [role="alert"])), [data-nac-runtime] [data-settings-surface] :is(input, textarea, select, button, [role="alert"]) {
+    scroll-margin-bottom: 200px;
+  }
 }
 
 [data-nac-runtime]:is(.chat-response.markdown > :first-child), [data-nac-runtime] .chat-response.markdown > :first-child, [data-nac-runtime]:is(.chat-response .markdown-content > :first-child), [data-nac-runtime] .chat-response .markdown-content > :first-child {

@@ -6010,23 +6010,26 @@ function zC(e, t, n) {
 function BC(e, t) {
 	return t.filter((t) => zC(e, t.summary.behavior, t.lineage));
 }
+function VC(e, t, n) {
+	return e.orchestrationEnabled || !t.some((e) => e.lineage == null && e.summary.project_id === n);
+}
 // src/app/features/ui-policy/UiPolicyContext.ts
-var VC = u(LC);
-function HC() {
-	return f(VC);
+var HC = u(LC);
+function UC() {
+	return f(HC);
 }
 // src/app/services/queries/direct.ts
-function UC(e, t, n) {
+function WC(e, t, n) {
 	let r = e.find((e) => n(e) === n(t));
 	return r && (r.generation > t.generation || r.version > t.version) ? e : r ? e.map((e) => n(e) === n(t) ? t : e) : [...e, t];
 }
-function WC(e, t, n) {
+function GC(e, t, n) {
 	return t.map((t) => {
 		let r = e?.find((e) => n(e) === n(t));
 		return r && (r.generation > t.generation || r.version > t.version) ? r : t;
 	});
 }
-function GC(e, t, n = !0) {
+function KC(e, t, n = !0) {
 	let { api: i } = r();
 	return _({
 		queryKey: y.sessionPermissions(e),
@@ -6037,21 +6040,21 @@ function GC(e, t, n = !0) {
 		retry: !1
 	});
 }
-function KC() {
+function qC() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, requestId: n, reply: r }) => e.replyPermission(t, n, r),
 		onSuccess: (e, n) => t.invalidateQueries({ queryKey: y.sessionPermissions(n.sessionId) })
 	});
 }
-function qC() {
+function JC() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, reviewId: n, parentSessionId: r }) => r ? e.authorizeChildPermissionReviewRetry(r, t, n) : e.authorizePermissionReviewRetry(t, n),
 		onSuccess: (e, n) => Promise.all([t.invalidateQueries({ queryKey: y.sessionPermissions(n.sessionId) }), ...n.parentSessionId ? [t.invalidateQueries({ queryKey: y.traditionalChildren(n.parentSessionId) })] : []])
 	});
 }
-function JC() {
+function YC() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, mode: n }) => e.setPermissionApprovalMode(t, n),
@@ -6064,14 +6067,14 @@ function JC() {
 		}
 	});
 }
-function YC() {
+function XC() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, grantId: n }) => e.deletePermissionGrant(t, n),
 		onSuccess: (e, n) => t.invalidateQueries({ queryKey: y.sessionPermissions(n.sessionId) })
 	});
 }
-function XC(e, t) {
+function ZC(e, t) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.sessionGoal(e),
@@ -6081,28 +6084,28 @@ function XC(e, t) {
 		retry: !1
 	});
 }
-function ZC() {
+function QC() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, payload: n }) => e.createGoal(t, n),
 		onSuccess: (e, n) => t.setQueryData(y.sessionGoal(n.sessionId), e)
 	});
 }
-function QC() {
+function $C() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, goalId: n, payload: r }) => e.updateGoal(t, n, r),
 		onSuccess: (e, n) => t.setQueryData(y.sessionGoal(n.sessionId), e)
 	});
 }
-function $C() {
+function ew() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, goalId: n, expectedVersion: r }) => e.clearGoal(t, n, r),
 		onSuccess: (e, n) => t.setQueryData(y.sessionGoal(n.sessionId), null)
 	});
 }
-function ew(e, t) {
+function tw(e, t) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.traditionalChildren(e),
@@ -6110,57 +6113,57 @@ function ew(e, t) {
 		enabled: t,
 		refetchInterval: t ? 1e3 : !1,
 		retry: !1,
-		structuralSharing: (e, t) => WC(e, t, (e) => e.child_session_id)
-	});
-}
-function tw() {
-	let { api: e } = r(), t = v();
-	return g({
-		mutationFn: ({ sessionId: t, payload: n }) => e.startTraditionalChild(t, n),
-		onSuccess: (e, n) => {
-			t.setQueryData(y.traditionalChildren(n.sessionId), (t = []) => UC(t, e, (e) => e.child_session_id));
-		}
+		structuralSharing: (e, t) => GC(e, t, (e) => e.child_session_id)
 	});
 }
 function nw() {
 	let { api: e } = r(), t = v();
 	return g({
-		mutationFn: ({ sessionId: t, childId: n }) => e.cancelTraditionalChild(t, n),
+		mutationFn: ({ sessionId: t, payload: n }) => e.startTraditionalChild(t, n),
 		onSuccess: (e, n) => {
-			t.setQueryData(y.traditionalChildren(n.sessionId), (t = []) => UC(t, e, (e) => e.child_session_id));
+			t.setQueryData(y.traditionalChildren(n.sessionId), (t = []) => WC(t, e, (e) => e.child_session_id));
 		}
 	});
 }
-function rw(e, t) {
-	let { api: n } = r(), i = HC();
+function rw() {
+	let { api: e } = r(), t = v();
+	return g({
+		mutationFn: ({ sessionId: t, childId: n }) => e.cancelTraditionalChild(t, n),
+		onSuccess: (e, n) => {
+			t.setQueryData(y.traditionalChildren(n.sessionId), (t = []) => WC(t, e, (e) => e.child_session_id));
+		}
+	});
+}
+function iw(e, t) {
+	let { api: n } = r(), i = UC();
 	return t &&= i.orchestrationEnabled, _({
 		queryKey: y.managedOrchestrators(e),
 		queryFn: ({ signal: t }) => n.listManagedOrchestrators(e, t),
 		enabled: t,
 		refetchInterval: t ? 1e3 : !1,
 		retry: !1,
-		structuralSharing: (e, t) => WC(e, t, (e) => e.orchestrator_session_id)
-	});
-}
-function iw() {
-	let { api: e } = r(), t = v();
-	return g({
-		mutationFn: ({ sessionId: t, payload: n }) => e.startManagedOrchestrator(t, n),
-		onSuccess: (e, n) => {
-			t.setQueryData(y.managedOrchestrators(n.sessionId), (t = []) => UC(t, e, (e) => e.orchestrator_session_id));
-		}
+		structuralSharing: (e, t) => GC(e, t, (e) => e.orchestrator_session_id)
 	});
 }
 function aw() {
 	let { api: e } = r(), t = v();
 	return g({
-		mutationFn: ({ sessionId: t, orchestratorId: n }) => e.cancelManagedOrchestrator(t, n),
+		mutationFn: ({ sessionId: t, payload: n }) => e.startManagedOrchestrator(t, n),
 		onSuccess: (e, n) => {
-			t.setQueryData(y.managedOrchestrators(n.sessionId), (t = []) => UC(t, e, (e) => e.orchestrator_session_id));
+			t.setQueryData(y.managedOrchestrators(n.sessionId), (t = []) => WC(t, e, (e) => e.orchestrator_session_id));
 		}
 	});
 }
-function ow(e, t) {
+function ow() {
+	let { api: e } = r(), t = v();
+	return g({
+		mutationFn: ({ sessionId: t, orchestratorId: n }) => e.cancelManagedOrchestrator(t, n),
+		onSuccess: (e, n) => {
+			t.setQueryData(y.managedOrchestrators(n.sessionId), (t = []) => WC(t, e, (e) => e.orchestrator_session_id));
+		}
+	});
+}
+function sw(e, t) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.sessionInbox(e),
@@ -6170,7 +6173,7 @@ function ow(e, t) {
 		retry: !1
 	});
 }
-function sw() {
+function cw() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, delivery: n, prompt: r }) => e.createInboxItem(t, n, r),
@@ -6179,7 +6182,7 @@ function sw() {
 		}
 	});
 }
-function cw() {
+function lw() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, itemId: n, expectedVersion: r, delivery: i }) => e.updateInboxItem(t, n, r, i),
@@ -6188,7 +6191,7 @@ function cw() {
 		}
 	});
 }
-function lw() {
+function uw() {
 	let { api: e } = r(), t = v();
 	return g({
 		mutationFn: ({ sessionId: t, itemId: n, expectedVersion: r }) => e.cancelInboxItem(t, n, r),
@@ -6198,51 +6201,51 @@ function lw() {
 	});
 }
 // src/app/features/direct-session/commandWorkflow.ts
-var uw = class extends MS("CommandFailure") {};
-function dw(e) {
+var dw = class extends MS("CommandFailure") {};
+function fw(e) {
 	return PS(function* () {
 		yield* RS(e.optimistic);
 		let t = yield* US({
 			try: e.admit,
-			catch: (e) => new uw({
+			catch: (e) => new dw({
 				operation: "submit",
 				cause: e
 			})
 		}).pipe(XS(() => RS(e.rejected)));
 		return t.kind === "accepted" ? (yield* RS(() => e.reconcile(!1)), t.value) : (yield* RS(() => {
 			t.kind === "uncertain" ? e.reconcile(!0) : e.rejected();
-		}), yield* NS(new uw({
+		}), yield* NS(new dw({
 			operation: "submit",
 			cause: t.error
 		})));
 	});
 }
-function fw(e) {
+function pw(e) {
 	return PS(function* () {
 		yield* RS(e.optimistic), yield* US({
 			try: e.cancel,
-			catch: (e) => new uw({
+			catch: (e) => new dw({
 				operation: "stop",
 				cause: e
 			})
 		}).pipe(XS(() => RS(e.rollback))), yield* RS(e.settled);
 	});
 }
-function pw(e) {
+function mw(e) {
 	return US({
 		try: e.create,
-		catch: (e) => new uw({
+		catch: (e) => new dw({
 			operation: "create",
 			cause: e
 		})
 	}).pipe(YS((t) => RS(() => e.accept(t))));
 }
-function mw(e) {
+function hw(e) {
 	if (e.mode === "direct-running" || e.delivery) {
 		let t = e.delivery ?? "steer";
 		return US({
 			try: () => e.inbox(t),
-			catch: (e) => new uw({
+			catch: (e) => new dw({
 				operation: t,
 				cause: e
 			})
@@ -6251,20 +6254,20 @@ function mw(e) {
 	let t = e.mode === "classic-running";
 	return US({
 		try: t ? e.steer : e.submit,
-		catch: (e) => new uw({
+		catch: (e) => new dw({
 			operation: t ? "steer" : "submit",
 			cause: e
 		})
 	}).pipe(WS(t ? "steered" : "submitted"));
 }
-async function hw(e) {
+async function gw(e) {
 	let t = await $S(e);
 	if (bp(t)) return t.value;
 	let n = kx(t.cause);
 	throw Cn(n) ? n.value.cause : Ax(t.cause);
 }
 // src/app/features/direct-session/commandAdapters.ts
-function gw(e, t) {
+function _w(e, t) {
 	let { api: r, stores: { runtimeStore: { captureRuntimeActivation: i, finishRunCancel: a, requestRunCancel: o, restoreRunCancel: s, runtimeStore: c } } } = n(e), l = i(t), u = y.sessionSnapshot(t), d, f, p, m = [];
 	return {
 		optimistic: () => {
@@ -6303,24 +6306,24 @@ function gw(e, t) {
 	};
 }
 // src/app/lib/messageWindow.ts
-function _w(e, t, n) {
+function vw(e, t, n) {
 	return Number.isSafeInteger(e.start) && Number.isSafeInteger(e.end) && Number.isSafeInteger(e.total) && e.start >= 0 && e.start <= e.end && e.end <= e.total && e.end - e.start === t && n === t;
 }
-function vw(e, t, n) {
+function yw(e, t, n) {
 	let r = /* @__PURE__ */ new Set();
 	return (e ?? []).every(({ message_index: e }) => !Number.isSafeInteger(e) || r.has(e) || t[e - n]?.role !== "user" ? !1 : (r.add(e), !0));
 }
-function yw(e, t, n) {
+function bw(e, t, n) {
 	return (e ?? []).filter(({ message_index: e }) => e >= t && e < n);
 }
-function bw(e) {
-	return _w(e.page, e.messages.length, e.created_at.length) && vw(e.terminal_selection_attributions, e.messages, e.page.start);
-}
 function xw(e) {
-	let t = e.message_page, n = e.message_created_at ?? [];
-	return !!(t && _w(t, e.messages.length, n.length) && vw(e.terminal_selection_attributions, e.messages, t.start));
+	return vw(e.page, e.messages.length, e.created_at.length) && yw(e.terminal_selection_attributions, e.messages, e.page.start);
 }
 function Sw(e) {
+	let t = e.message_page, n = e.message_created_at ?? [];
+	return !!(t && vw(t, e.messages.length, n.length) && yw(e.terminal_selection_attributions, e.messages, t.start));
+}
+function Cw(e) {
 	return e.message_page ?? {
 		start: 0,
 		end: e.messages.length,
@@ -6328,14 +6331,14 @@ function Sw(e) {
 		has_older: !1
 	};
 }
-function Cw(e) {
+function ww(e) {
 	let t = e.message_created_at ?? [];
 	return t.length === e.messages.length ? t : Array.from({ length: e.messages.length }, () => null);
 }
-function ww(e, t) {
-	if (!bw(t)) return { kind: "snapshot-required" };
-	let n = Sw(e), r = Cw(e);
-	if (!_w(n, e.messages.length, r.length) || t.page.end !== t.page.total || t.page.total < n.total || t.page.start > n.end) return { kind: "snapshot-required" };
+function Tw(e, t) {
+	if (!xw(t)) return { kind: "snapshot-required" };
+	let n = Cw(e), r = ww(e);
+	if (!vw(n, e.messages.length, r.length) || t.page.end !== t.page.total || t.page.total < n.total || t.page.start > n.end) return { kind: "snapshot-required" };
 	for (let i = Math.max(n.start, t.page.start); i < Math.min(n.end, t.page.end); i += 1) if (JSON.stringify(e.messages[i - n.start]) !== JSON.stringify(t.messages[i - t.page.start]) || r[i - n.start] !== t.created_at[i - t.page.start]) return { kind: "snapshot-required" };
 	if (t.page.start <= n.start) return {
 		kind: "accepted",
@@ -6354,7 +6357,7 @@ function ww(e, t) {
 			...e,
 			messages: [...e.messages.slice(0, i), ...t.messages],
 			message_created_at: [...r.slice(0, i), ...t.created_at],
-			terminal_selection_attributions: [...yw(e.terminal_selection_attributions, n.start, t.page.start), ...t.terminal_selection_attributions ?? []],
+			terminal_selection_attributions: [...bw(e.terminal_selection_attributions, n.start, t.page.start), ...t.terminal_selection_attributions ?? []],
 			message_page: {
 				...t.page,
 				start: n.start,
@@ -6363,14 +6366,14 @@ function ww(e, t) {
 		}
 	};
 }
-function Tw(e, t, n) {
-	if (!bw(t)) return null;
-	let r = Sw(e), i = Cw(e);
-	return r.start !== n || t.page.end !== n || t.page.total !== r.total || !_w(r, e.messages.length, i.length) ? null : {
+function Ew(e, t, n) {
+	if (!xw(t)) return null;
+	let r = Cw(e), i = ww(e);
+	return r.start !== n || t.page.end !== n || t.page.total !== r.total || !vw(r, e.messages.length, i.length) ? null : {
 		...e,
 		messages: [...t.messages, ...e.messages],
 		message_created_at: [...t.created_at, ...i],
-		terminal_selection_attributions: [...t.terminal_selection_attributions ?? [], ...yw(e.terminal_selection_attributions, r.start, r.end)],
+		terminal_selection_attributions: [...t.terminal_selection_attributions ?? [], ...bw(e.terminal_selection_attributions, r.start, r.end)],
 		message_page: {
 			start: t.page.start,
 			end: r.end,
@@ -6379,10 +6382,10 @@ function Tw(e, t, n) {
 		}
 	};
 }
-function Ew(e, t, n) {
+function Dw(e, t, n) {
 	if (n || !e || !t.message_page) return t;
-	if (!xw(t)) return e;
-	let r = t.message_created_at ?? [], i = ww(e, {
+	if (!Sw(t)) return e;
+	let r = t.message_created_at ?? [], i = Tw(e, {
 		messages: t.messages,
 		created_at: r,
 		page: t.message_page,
@@ -6397,7 +6400,7 @@ function Ew(e, t, n) {
 	} : t;
 }
 // src/app/lib/sessionOrder.ts
-function Dw(e, t, n) {
+function Ow(e, t, n) {
 	let r = e.filter((e) => e !== t), i = Math.max(0, Math.min(n, r.length));
 	return [
 		...r.slice(0, i),
@@ -6405,13 +6408,13 @@ function Dw(e, t, n) {
 		...r.slice(i)
 	];
 }
-function Ow(e, t) {
+function kw(e, t) {
 	return (e.sort_order ?? 0) - (t.sort_order ?? 0) || o(t.created_at) - o(e.created_at);
 }
-function kw(e, t) {
-	return e.filter((e) => !!e.summary.pinned === t).sort((e, t) => Ow(e.summary, t.summary));
+function Aw(e, t) {
+	return e.filter((e) => !!e.summary.pinned === t).sort((e, t) => kw(e.summary, t.summary));
 }
-function Aw(e, t, n) {
+function jw(e, t, n) {
 	let r = new Map(n.map((e) => [e.summary.session_id, e])), i = {};
 	for (let e of t) i[e] = r.get(e)?.summary.presentation_version ?? 0;
 	return {
@@ -6420,13 +6423,13 @@ function Aw(e, t, n) {
 		expected_versions: i
 	};
 }
-function jw(e, t) {
+function Mw(e, t) {
 	return e.map((e) => e.summary.session_id === t.session_id ? {
 		...e,
 		summary: t
 	} : e);
 }
-function Mw(e, t, n, r) {
+function Nw(e, t, n, r) {
 	if (t === r) {
 		let t = e.findIndex((e) => e.summary.session_id === r);
 		return t < 0 ? e.length : t;
@@ -6434,11 +6437,11 @@ function Mw(e, t, n, r) {
 	let i = e.filter((e) => e.summary.session_id !== r), a = i.findIndex((e) => e.summary.session_id === t);
 	return a < 0 ? i.length : n === "before" ? a : a + 1;
 }
-function Nw(e, t) {
+function Pw(e, t) {
 	return e.length === t.length && e.every((e, n) => e === t[n]);
 }
 // src/app/services/queries/invalidation.ts
-function Pw() {
+function Fw() {
 	let e = v();
 	return {
 		sessions: () => e.invalidateQueries({ queryKey: y.sessionsAll }),
@@ -6451,41 +6454,41 @@ function Pw() {
 	};
 }
 // src/app/services/sessionRefresh.ts
-var Fw = /* @__PURE__ */ new Map(), Iw = 0, Lw = /* @__PURE__ */ new WeakMap(), Rw = 0;
-function zw(e, t) {
-	let n = Lw.get(e);
-	return n === void 0 && (n = ++Rw, Lw.set(e, n)), `${n}:${t}`;
+var Iw = /* @__PURE__ */ new Map(), Lw = 0, Rw = /* @__PURE__ */ new WeakMap(), zw = 0;
+function Bw(e, t) {
+	let n = Rw.get(e);
+	return n === void 0 && (n = ++zw, Rw.set(e, n)), `${n}:${t}`;
 }
-function Bw(e) {
-	let t = Fw.get(e);
+function Vw(e) {
+	let t = Iw.get(e);
 	if (t) return t;
 	let n = {
-		generation: ++Iw,
+		generation: ++Lw,
 		replaceNextSnapshot: !1,
 		tailController: null,
 		historyControllers: /* @__PURE__ */ new Set()
 	};
-	return Fw.set(e, n), n;
+	return Iw.set(e, n), n;
 }
-function Vw(e, t = !1) {
-	let n = Bw(e);
-	n.generation = ++Iw, n.replaceNextSnapshot ||= t, n.tailController?.abort(), n.tailController = null;
+function Hw(e, t = !1) {
+	let n = Vw(e);
+	n.generation = ++Lw, n.replaceNextSnapshot ||= t, n.tailController?.abort(), n.tailController = null;
 	for (let e of n.historyControllers) e.abort();
 	return n.historyControllers.clear(), n.generation;
 }
-function Hw(e) {
-	let t = Bw(e);
+function Uw(e) {
+	let t = Vw(e);
 	return {
-		generation: Vw(e),
+		generation: Hw(e),
 		replace: t.replaceNextSnapshot
 	};
 }
-function Uw(e, t) {
-	let n = Fw.get(e);
+function Ww(e, t) {
+	let n = Iw.get(e);
 	n?.generation === t.generation && t.replace && (n.replaceNextSnapshot = !1);
 }
-function Ww(e) {
-	let t = Bw(e);
+function Gw(e) {
+	let t = Vw(e);
 	t.tailController?.abort();
 	let n = new AbortController();
 	return t.tailController = n, {
@@ -6493,31 +6496,31 @@ function Ww(e) {
 		controller: n
 	};
 }
-function Gw(e, t) {
-	let n = Fw.get(e);
+function Kw(e, t) {
+	let n = Iw.get(e);
 	n?.tailController === t.controller && (n.tailController = null);
 }
-function Kw(e, t) {
-	return Fw.get(e)?.generation === t;
+function qw(e, t) {
+	return Iw.get(e)?.generation === t;
 }
-function qw(e) {
-	let t = Bw(e), n = new AbortController();
+function Jw(e) {
+	let t = Vw(e), n = new AbortController();
 	return t.historyControllers.add(n), {
 		generation: t.generation,
 		controller: n
 	};
 }
-function Jw(e, t) {
-	Fw.get(e)?.historyControllers.delete(t.controller);
+function Yw(e, t) {
+	Iw.get(e)?.historyControllers.delete(t.controller);
 }
-function Yw(e) {
-	let t = Fw.get(e);
+function Xw(e) {
+	let t = Iw.get(e);
 	t?.tailController?.abort();
 	for (let e of t?.historyControllers ?? []) e.abort();
-	Fw.delete(e);
+	Iw.delete(e);
 }
 // src/app/services/queries/session.ts
-function Xw(e = _e) {
+function Zw(e = _e) {
 	let { api: t } = r();
 	return _({
 		queryKey: y.sessions(!1),
@@ -6527,7 +6530,7 @@ function Xw(e = _e) {
 		placeholderData: te
 	});
 }
-function Zw(e) {
+function Qw(e) {
 	let { api: t } = r(), n = d((t) => t.find((t) => t.summary.session_id === e) ?? null, [e]);
 	return _({
 		queryKey: y.sessions(!1),
@@ -6538,37 +6541,37 @@ function Zw(e) {
 		select: n
 	});
 }
-function Qw(e) {
+function $w(e) {
 	return (t, n) => n?.queryKey[1] === e ? t : void 0;
 }
-function $w(e, t) {
+function eT(e, t) {
 	let { api: n } = r(), i = v();
 	return _({
 		queryKey: y.sessionSnapshot(e ?? ""),
 		queryFn: async ({ signal: t }) => {
-			let r = Hw(zw(i, e)), a = await n.getSession(e, {
+			let r = Uw(Bw(i, e)), a = await n.getSession(e, {
 				messageLimit: 24,
 				threadEventLimit: 50,
 				includeSessions: !1,
 				includeSystem: !0,
 				signal: t
 			});
-			if (!xw(a)) throw Error("The server returned an invalid snapshot message page.");
-			if (t.aborted || !Kw(zw(i, e), r.generation)) throw new DOMException("Snapshot superseded", "AbortError");
-			return Uw(zw(i, e), r), Ew(i.getQueryData(y.sessionSnapshot(e)), a, r.replace);
+			if (!Sw(a)) throw Error("The server returned an invalid snapshot message page.");
+			if (t.aborted || !qw(Bw(i, e), r.generation)) throw new DOMException("Snapshot superseded", "AbortError");
+			return Ww(Bw(i, e), r), Dw(i.getQueryData(y.sessionSnapshot(e)), a, r.replace);
 		},
 		enabled: !!e,
 		staleTime: 1e3,
-		placeholderData: Qw(e ?? ""),
+		placeholderData: $w(e ?? ""),
 		...t
 	});
 }
-function eT(e) {
+function tT(e) {
 	let { api: t } = r(), n = v();
 	return g({ mutationFn: async () => {
 		let r = n.getQueryData(y.sessionSnapshot(e))?.message_page?.start;
 		if (r === void 0 || r <= 0) throw Error("No older messages are available.");
-		let i = zw(n, e), a = qw(i);
+		let i = Bw(n, e), a = Jw(i);
 		try {
 			let o = await t.getMessages(e, {
 				before: r,
@@ -6576,23 +6579,23 @@ function eT(e) {
 				includeSystem: !0,
 				signal: a.controller.signal
 			});
-			if (!bw(o)) throw Error("The server returned an invalid message page.");
-			if (!Kw(i, a.generation)) return !1;
+			if (!xw(o)) throw Error("The server returned an invalid message page.");
+			if (!qw(i, a.generation)) return !1;
 			let s = !1;
 			return n.setQueryData(y.sessionSnapshot(e), (e) => {
 				if (!e) return e;
-				let t = Tw(e, o, r);
+				let t = Ew(e, o, r);
 				return t ? (s = !0, t) : e;
 			}), s;
 		} catch (e) {
 			if (a.controller.signal.aborted) return !1;
 			throw e;
 		} finally {
-			Jw(i, a);
+			Yw(i, a);
 		}
 	} });
 }
-function tT(e, t) {
+function nT(e, t) {
 	let { api: n } = r();
 	return ne({
 		queryKey: y.threadEvents(e ?? "", t ?? ""),
@@ -6607,7 +6610,7 @@ function tT(e, t) {
 		staleTime: Infinity
 	});
 }
-function nT(e) {
+function rT(e) {
 	let { api: t } = r();
 	return _({
 		queryKey: y.sessionConfig(e ?? ""),
@@ -6615,21 +6618,21 @@ function nT(e) {
 		enabled: !!e
 	});
 }
-function rT() {
-	let { api: e } = r(), t = Pw(), n = v();
+function iT() {
+	let { api: e } = r(), t = Fw(), n = v();
 	return g({
 		retry: !1,
-		mutationFn: (r) => hw(pw({
+		mutationFn: (r) => gw(mw({
 			create: () => e.createSession(r),
 			accept: (e) => {
 				let r = e.metadata.session_id;
 				if (!r) throw Error("The server returned a chat without an identity.");
-				Vw(zw(n, r), !0), n.setQueryData(y.sessionSnapshot(r), e), t.sessions();
+				Hw(Bw(n, r), !0), n.setQueryData(y.sessionSnapshot(r), e), t.sessions();
 			}
 		}))
 	});
 }
-function iT(e, t) {
+function aT(e, t) {
 	let n = [];
 	for (let r of e.getQueryCache().findAll({ queryKey: ["session"] })) {
 		let e = r.queryKey;
@@ -6639,18 +6642,18 @@ function iT(e, t) {
 	}
 	return n;
 }
-function aT() {
-	let { api: e, stores: { promptDraftStore: t } } = r(), n = Pw(), i = v();
+function oT() {
+	let { api: e, stores: { promptDraftStore: t } } = r(), n = Fw(), i = v();
 	return g({
 		mutationFn: (t) => e.deleteSession(t),
 		onSuccess: (e, r) => {
 			t.purgeSessions([r]), n.sessions(), i.removeQueries({ queryKey: y.sessionRoot(r) });
-			for (let e of iT(i, r)) n.sessionRoot(e);
+			for (let e of aT(i, r)) n.sessionRoot(e);
 		}
 	});
 }
-function oT() {
-	let { api: e } = r(), t = Pw();
+function sT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		retry: !1,
 		mutationFn: ({ id: t, title: n, pinned: r, expectedVersion: i }) => e.updatePresentation(t, {
@@ -6661,8 +6664,8 @@ function oT() {
 		onSuccess: () => t.sessions()
 	});
 }
-function sT() {
-	let e = oT();
+function cT() {
+	let e = sT();
 	return {
 		...e,
 		toggle: (t) => e.mutateAsync({
@@ -6673,8 +6676,8 @@ function sT() {
 		})
 	};
 }
-function cT() {
-	let { api: e } = r(), t = Pw();
+function lT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		mutationFn: async ({ sessions: t, sessionId: n, targetPinned: r, targetIndex: i }) => {
 			let a = t, o = a.find((e) => e.summary.session_id === n);
@@ -6685,16 +6688,16 @@ function cT() {
 					pinned: r,
 					expected_version: o.summary.presentation_version ?? 0
 				});
-				a = jw(a, t);
+				a = Mw(a, t);
 			}
-			let s = kw(a, r), c = s.map((e) => e.summary.session_id), l = Dw(c, n, i);
-			return Nw(c, l) ? null : e.reorderSessions(Aw(r, l, s));
+			let s = Aw(a, r), c = s.map((e) => e.summary.session_id), l = Ow(c, n, i);
+			return Pw(c, l) ? null : e.reorderSessions(jw(r, l, s));
 		},
 		onSuccess: () => t.sessions()
 	});
 }
-function lT() {
-	let { api: e } = r(), t = Pw(), n = v();
+function uT() {
+	let { api: e } = r(), t = Fw(), n = v();
 	return g({
 		retry: !1,
 		mutationFn: ({ id: t, patch: n }) => e.updateConfig(t, n),
@@ -6703,13 +6706,13 @@ function lT() {
 		}
 	});
 }
-function uT() {
-	let { api: e } = r(), { captureRuntimeActivation: t, setOptimisticUserPrompt: n } = r().stores.runtimeStore, a = Pw(), o = v();
+function dT() {
+	let { api: e } = r(), { captureRuntimeActivation: t, setOptimisticUserPrompt: n } = r().stores.runtimeStore, a = Fw(), o = v();
 	return g({
 		retry: !1,
 		mutationFn: ({ id: r, prompt: s, signal: c }) => {
 			let l = t(r);
-			return hw(dw({
+			return gw(fw({
 				optimistic: () => {
 					l() && n(s);
 				},
@@ -6730,54 +6733,54 @@ function uT() {
 					l() && n(null);
 				},
 				reconcile: (e) => {
-					e ? (Vw(zw(o, r), !0), a.sessionRoot(r)) : a.session(r);
+					e ? (Hw(Bw(o, r), !0), a.sessionRoot(r)) : a.session(r);
 				}
 			}));
 		}
 	});
 }
-function dT() {
+function fT() {
 	let { api: e } = r();
 	return g({ mutationFn: ({ id: t, instruction: n }) => e.steerOrchestrator(t, n) });
 }
-function fT() {
+function pT() {
 	let { api: e } = r();
 	return g({ mutationFn: ({ id: t, threadName: n, instruction: r }) => e.steerThread(t, n, r) });
 }
-function pT() {
+function mT() {
 	let e = v();
 	return g({
 		retry: !1,
-		mutationFn: (t) => hw(fw(gw(e, t)))
-	});
-}
-function mT() {
-	let { api: e } = r(), t = Pw(), n = v();
-	return g({
-		mutationFn: (t) => e.compactSession(t),
-		onSuccess: (e, r) => (Vw(zw(n, r), !0), t.sessionRoot(r))
+		mutationFn: (t) => gw(pw(_w(e, t)))
 	});
 }
 function hT() {
-	let { api: e } = r(), t = Pw(), n = v();
+	let { api: e } = r(), t = Fw(), n = v();
 	return g({
-		mutationFn: ({ id: t, messageIdx: n }) => e.revertSession(t, n),
-		onSuccess: (e, { id: r }) => {
-			Vw(zw(n, r), !0), t.sessionRoot(r), t.sessions();
-		}
+		mutationFn: (t) => e.compactSession(t),
+		onSuccess: (e, r) => (Hw(Bw(n, r), !0), t.sessionRoot(r))
 	});
 }
 function gT() {
-	let { api: e } = r(), t = Pw(), n = v();
+	let { api: e } = r(), t = Fw(), n = v();
 	return g({
-		mutationFn: ({ id: t, messageIdx: n }) => e.regenerateRun(t, n),
+		mutationFn: ({ id: t, messageIdx: n }) => e.revertSession(t, n),
 		onSuccess: (e, { id: r }) => {
-			Vw(zw(n, r), !0), t.sessionRoot(r), t.sessions();
+			Hw(Bw(n, r), !0), t.sessionRoot(r), t.sessions();
 		}
 	});
 }
 function _T() {
-	let { api: e } = r(), t = Pw();
+	let { api: e } = r(), t = Fw(), n = v();
+	return g({
+		mutationFn: ({ id: t, messageIdx: n }) => e.regenerateRun(t, n),
+		onSuccess: (e, { id: r }) => {
+			Hw(Bw(n, r), !0), t.sessionRoot(r), t.sessions();
+		}
+	});
+}
+function vT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		mutationFn: ({ id: t, messageIdx: n }) => e.forkSession(t, n),
 		onSuccess: (e, { id: n }) => {
@@ -6785,8 +6788,8 @@ function _T() {
 		}
 	});
 }
-function vT() {
-	let { api: e } = r(), t = Pw();
+function yT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		mutationFn: ({ id: t, forkId: n }) => e.dismissSessionFork(t, n),
 		onSuccess: (e, { id: n }) => {
@@ -6794,18 +6797,18 @@ function vT() {
 		}
 	});
 }
-function yT() {
-	let e = Xw(), t = HC(), n = m(() => e.data ? BC(t, e.data) : void 0, [e.data, t]);
+function bT() {
+	let e = Zw(), t = UC(), n = m(() => e.data ? BC(t, e.data) : void 0, [e.data, t]);
 	return {
 		...e,
 		data: n
 	};
 }
 // src/app/services/queries/workspace.ts
-function bT(e) {
+function xT(e) {
 	return (t, n) => n?.queryKey[1] === e ? t : void 0;
 }
-function xT(e, t, n = "all", i = 3, a = null) {
+function ST(e, t, n = "all", i = 3, a = null) {
 	let { api: o } = r();
 	return _({
 		queryKey: y.workspaceDiff(e ?? "", t ?? "", n, i, a),
@@ -6816,30 +6819,30 @@ function xT(e, t, n = "all", i = 3, a = null) {
 			signal: r
 		}),
 		enabled: !!(e && t),
-		placeholderData: bT(e ?? "")
+		placeholderData: xT(e ?? "")
 	});
 }
-function ST(e, t = null) {
+function CT(e, t = null) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.workspaceFiles(e ?? "", t),
 		queryFn: ({ signal: r }) => n.getWorkspaceFiles(e, t, r),
 		enabled: !!e,
 		staleTime: t == null ? 1e4 : Infinity,
-		placeholderData: bT(e ?? "")
+		placeholderData: xT(e ?? "")
 	});
 }
-function CT(e, t, n = null) {
+function wT(e, t, n = null) {
 	let { api: i } = r();
 	return _({
 		queryKey: y.workspaceFile(e ?? "", t ?? "", n),
 		queryFn: ({ signal: r }) => i.getWorkspaceFile(e, t, n, r),
 		enabled: !!(e && t),
 		staleTime: n == null ? 1e4 : Infinity,
-		placeholderData: bT(e ?? "")
+		placeholderData: xT(e ?? "")
 	});
 }
-function wT(e) {
+function TT(e) {
 	let { api: t } = r();
 	return _({
 		queryKey: y.workspaceRevisions(e ?? ""),
@@ -6849,17 +6852,17 @@ function wT(e) {
 		retry: !1
 	});
 }
-function TT(e, t) {
+function ET(e, t) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.workspaceRevisionChanges(e ?? "", t ?? 0),
 		queryFn: ({ signal: r }) => n.getWorkspaceRevisionChanges(e, t, r),
 		enabled: !!(e && t != null),
 		staleTime: Infinity,
-		placeholderData: bT(e ?? "")
+		placeholderData: xT(e ?? "")
 	});
 }
-function ET(e, t) {
+function DT(e, t) {
 	let { api: n } = r();
 	return _({
 		queryKey: y.branches(e ?? ""),
@@ -6869,7 +6872,7 @@ function ET(e, t) {
 		retry: !1
 	});
 }
-function DT(e) {
+function OT(e) {
 	let { api: t } = r(), n = v();
 	return g({
 		mutationFn: (n) => t.switchBranch(e, n),
@@ -6878,7 +6881,7 @@ function DT(e) {
 		}
 	});
 }
-function OT(e) {
+function kT(e) {
 	let { api: t } = r(), n = v();
 	return g({
 		mutationFn: (n) => t.commitWorkspace(e, n),
@@ -6888,7 +6891,7 @@ function OT(e) {
 	});
 }
 // src/app/services/queries/projects.ts
-function kT() {
+function AT() {
 	let { api: e } = r();
 	return _({
 		queryKey: y.projects,
@@ -6897,24 +6900,24 @@ function kT() {
 		retry: !1
 	});
 }
-function AT() {
-	let { api: e } = r(), t = Pw();
+function jT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		retry: !1,
 		mutationFn: (t) => e.createProject(t),
 		onSuccess: () => t.projects()
 	});
 }
-function jT() {
-	let { api: e } = r(), t = Pw();
+function MT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		retry: !1,
 		mutationFn: ({ projectId: t, payload: n }) => e.updateProject(t, n),
 		onSuccess: () => t.projects()
 	});
 }
-function MT() {
-	let e = jT();
+function NT() {
+	let e = MT();
 	return {
 		...e,
 		toggle: (t) => e.mutateAsync({
@@ -6923,29 +6926,29 @@ function MT() {
 		})
 	};
 }
-function NT() {
-	let { api: e, stores: { promptDraftStore: t } } = r(), n = Pw();
+function PT() {
+	let { api: e, stores: { promptDraftStore: t } } = r(), n = Fw();
 	return g({
 		mutationFn: ({ projectId: t, sessions: n }) => e.deleteProject(t, n),
 		onSuccess: (e) => (t.purgeSessions(e.deleted_session_ids), Promise.all([n.projects(), n.sessions()]))
 	});
 }
-function PT() {
-	let { api: e } = r(), t = Pw();
+function FT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		mutationFn: ({ projectId: t, sessionId: n }) => e.assignSessionToProject(t, { session_id: n }),
 		onSuccess: () => Promise.all([t.projects(), t.sessions()])
 	});
 }
-function FT() {
-	let { api: e } = r(), t = Pw();
+function IT() {
+	let { api: e } = r(), t = Fw();
 	return g({
 		mutationFn: async ({ projects: t, projectId: n, targetPinned: r, targetIndex: i }) => {
 			let a = t.find((e) => e.project_id === n);
 			if (!a) return;
 			let o = t;
 			a.pinned !== r && (await e.updateProject(n, { pinned: r }), o = (await e.listProjects()).projects);
-			let s = o.filter((e) => e.pinned === r).sort((e, t) => e.sort_order - t.sort_order), c = Dw(s.map((e) => e.project_id), n, i);
+			let s = o.filter((e) => e.pinned === r).sort((e, t) => e.sort_order - t.sort_order), c = Ow(s.map((e) => e.project_id), n, i);
 			await e.reorderProjects({
 				pinned: r,
 				project_ids: c,
@@ -6956,11 +6959,11 @@ function FT() {
 	});
 }
 // src/app/features/managed/model.ts
-var IT = [
+var LT = [
 	"status",
 	"github",
 	"secrets"
-], LT = /* @__PURE__ */ new Set([
+], RT = /* @__PURE__ */ new Set([
 	"PATH",
 	"HOME",
 	"NAC_HOME",
@@ -6968,27 +6971,27 @@ var IT = [
 	"GITHUB_TOKEN",
 	"EXA_API_KEY"
 ]);
-function RT(e) {
-	return e ? /^[A-Za-z_][A-Za-z0-9_]*$/.test(e) ? LT.has(e) ? `${e} is managed by NAC and cannot be replaced here.` : "" : "Use letters, digits, and underscores; the first character cannot be a digit." : "Enter a variable name.";
-}
 function zT(e) {
+	return e ? /^[A-Za-z_][A-Za-z0-9_]*$/.test(e) ? RT.has(e) ? `${e} is managed by NAC and cannot be replaced here.` : "" : "Use letters, digits, and underscores; the first character cannot be a digit." : "Enter a variable name.";
+}
+function BT(e) {
 	let t = e?.split("/") ?? [];
 	return t.length === 2 && t[0] && t[1] ? [t[0], t[1]] : null;
 }
-function BT(e) {
+function VT(e) {
 	return e?.status === "running";
 }
-function VT(e) {
+function HT(e) {
 	return e ? {
 		backend: e.model.backend,
 		model: e.model.id,
 		baseUrl: e.model.endpoint
 	} : null;
 }
-function HT(e, t) {
+function UT(e, t) {
 	return !!(t && e && t.backend === e.model.backend && t.baseUrl === e.model.endpoint);
 }
-function UT(e, t) {
+function WT(e, t) {
 	return (e?.providers ?? []).flatMap((e) => {
 		if (e.auth_status !== "ready") return [];
 		if (e.auth !== "api_key_env") return [{ backend: e.id }];
@@ -7004,18 +7007,18 @@ function UT(e, t) {
 	});
 }
 // src/app/features/managed/upgrade.ts
-function WT(e) {
+function GT(e) {
 	return typeof e == "object" && e && "status" in e ? e.status : null;
 }
-function GT(e) {
-	return KT(e) || e instanceof Error && e.name === "ManagedUpgradeContractError";
-}
 function KT(e) {
-	let t = WT(e);
-	return t === 401 || t === 403 || t === 409;
+	return qT(e) || e instanceof Error && e.name === "ManagedUpgradeContractError";
 }
 function qT(e) {
-	let t = WT(e);
+	let t = GT(e);
+	return t === 401 || t === 403 || t === 409;
+}
+function JT(e) {
+	let t = GT(e);
 	return t === 401 || t === 403 ? {
 		message: "This managed session is no longer authorized. Reopen this host from the Arcee portal.",
 		retryLabel: null
@@ -7027,7 +7030,7 @@ function qT(e) {
 		retryLabel: "Try again"
 	};
 }
-var JT = /* @__PURE__ */ new Set([
+var YT = /* @__PURE__ */ new Set([
 	"pending",
 	"preparing",
 	"blocked",
@@ -7036,10 +7039,10 @@ var JT = /* @__PURE__ */ new Set([
 	"starting/migrating",
 	"verifying"
 ]);
-function YT(e) {
-	return JT.has(e);
-}
 function XT(e) {
+	return YT.has(e);
+}
+function ZT(e) {
 	switch (e) {
 		case "pending": return "Queued";
 		case "preparing": return "Preparing this host";
@@ -7052,7 +7055,7 @@ function XT(e) {
 		case "failed": return "Upgrade failed";
 	}
 }
-function ZT(e) {
+function QT(e) {
 	switch (e) {
 		case "cancel_active_run": return "Stop run";
 		case "cancel_traditional_child": return "Cancel coding agent";
@@ -7062,14 +7065,14 @@ function ZT(e) {
 		case "wait": return "Wait";
 	}
 }
-function QT(e) {
+function $T(e) {
 	return e === null ? "Accepted-release distance unavailable" : e === 0 ? "Current accepted release" : `${e} accepted ${e === 1 ? "release" : "releases"} ahead`;
 }
-function $T(e, t) {
+function eE(e, t) {
 	return e.release_id === t.release_id && e.source_revision === t.source_revision && e.build_id === t.build_id && e.product_version === t.product_version && e.schema_version === t.schema_version;
 }
 // src/app/features/managed/upgradeContract.ts
-var eE = /* @__PURE__ */ new Set([
+var tE = /* @__PURE__ */ new Set([
 	"pending",
 	"preparing",
 	"blocked",
@@ -7079,7 +7082,7 @@ var eE = /* @__PURE__ */ new Set([
 	"verifying",
 	"succeeded",
 	"failed"
-]), tE = /* @__PURE__ */ new Set([
+]), nE = /* @__PURE__ */ new Set([
 	"active_run",
 	"compaction",
 	"traditional_child",
@@ -7093,14 +7096,14 @@ var eE = /* @__PURE__ */ new Set([
 	"host-release",
 	"host-readiness",
 	"maintenance"
-]), nE = /* @__PURE__ */ new Set([
+]), rE = /* @__PURE__ */ new Set([
 	"wait",
 	"cancel_active_run",
 	"cancel_traditional_child",
 	"cancel_managed_orchestrator",
 	"terminate_terminal",
 	"cancel_clone_operation"
-]), rE = {
+]), iE = {
 	active_run: ["An active run must finish before maintenance can start"],
 	compaction: ["An active compaction must finish before maintenance can start"],
 	traditional_child: ["An active child session must finish before maintenance can start"],
@@ -7119,33 +7122,33 @@ var eE = /* @__PURE__ */ new Set([
 		"NAC is not yet safe to stop",
 		"NAC reported an unsupported maintenance blocker; wait for it to clear"
 	]
-}, iE = class extends Error {
+}, aE = class extends Error {
 	constructor() {
 		super("Managed upgrade status did not match the browser contract."), this.name = "ManagedUpgradeContractError";
 	}
 };
-function aE() {
-	throw new iE();
+function oE() {
+	throw new aE();
 }
-function oE(e, t, n) {
-	(typeof e != "object" || !e || Array.isArray(e)) && aE();
+function sE(e, t, n) {
+	(typeof e != "object" || !e || Array.isArray(e)) && oE();
 	let r = e;
-	return Object.keys(r).some((e) => !t.includes(e)) && aE(), n.some((e) => !Object.hasOwn(r, e)) && aE(), r;
+	return Object.keys(r).some((e) => !t.includes(e)) && oE(), n.some((e) => !Object.hasOwn(r, e)) && oE(), r;
 }
-function sE(e, t, n = !0) {
-	return (typeof e != "string" || e.length > t || !n && e.length === 0 || /\p{Cc}/u.test(e)) && aE(), e;
+function cE(e, t, n = !0) {
+	return (typeof e != "string" || e.length > t || !n && e.length === 0 || /\p{Cc}/u.test(e)) && oE(), e;
 }
-function cE(e) {
-	return (typeof e != "number" || !Number.isSafeInteger(e) || e < 0) && aE(), e;
+function lE(e) {
+	return (typeof e != "number" || !Number.isSafeInteger(e) || e < 0) && oE(), e;
 }
-function lE(e, t) {
-	return typeof e == "string" && t.has(e) || aE(), e;
+function uE(e, t) {
+	return typeof e == "string" && t.has(e) || oE(), e;
 }
-function uE(e, t, n) {
-	return Object.hasOwn(e, t) ? sE(e[t], n) : void 0;
+function dE(e, t, n) {
+	return Object.hasOwn(e, t) ? cE(e[t], n) : void 0;
 }
-function dE(e) {
-	let t = oE(e, [
+function fE(e) {
+	let t = sE(e, [
 		"release_id",
 		"source_revision",
 		"build_id",
@@ -7157,23 +7160,23 @@ function dE(e) {
 		"build_id",
 		"product_version",
 		"schema_version"
-	]), n = sE(t.source_revision, 40, !1);
-	return /^[a-f0-9]{40}$/.test(n) || aE(), {
-		release_id: sE(t.release_id, 63, !1),
+	]), n = cE(t.source_revision, 40, !1);
+	return /^[a-f0-9]{40}$/.test(n) || oE(), {
+		release_id: cE(t.release_id, 63, !1),
 		source_revision: n,
-		build_id: sE(t.build_id, 128, !1),
-		product_version: sE(t.product_version, 128, !1),
-		schema_version: cE(t.schema_version)
+		build_id: cE(t.build_id, 128, !1),
+		product_version: cE(t.product_version, 128, !1),
+		schema_version: lE(t.schema_version)
 	};
 }
-function fE(e, t) {
-	return Object.hasOwn(e, t) ? dE(e[t]) : void 0;
-}
-function pE(e) {
-	let t = sE(e, 128, !1);
-	return /^[A-Za-z0-9_.:@-]+$/.test(t) || aE(), t;
+function pE(e, t) {
+	return Object.hasOwn(e, t) ? fE(e[t]) : void 0;
 }
 function mE(e) {
+	let t = cE(e, 128, !1);
+	return /^[A-Za-z0-9_.:@-]+$/.test(t) || oE(), t;
+}
+function hE(e) {
 	let t = [
 		"session_id",
 		"run_id",
@@ -7181,25 +7184,25 @@ function mE(e) {
 		"orchestrator_session_id",
 		"terminal_id",
 		"clone_operation_id"
-	], n = oE(e, t, []);
-	return Object.fromEntries(t.filter((e) => Object.hasOwn(n, e)).map((e) => [e, pE(n[e])]));
+	], n = sE(e, t, []);
+	return Object.fromEntries(t.filter((e) => Object.hasOwn(n, e)).map((e) => [e, mE(n[e])]));
 }
-function hE(e, t) {
+function gE(e, t) {
 	let n = Object.keys(e).sort();
 	return n.length === t.length && t.every((t) => n.includes(t) && !!e[t]);
 }
-function gE(e, t, n) {
+function _E(e, t, n) {
 	switch (t) {
-		case "cancel_active_run": return e === "active_run" && hE(n, ["session_id", "run_id"]);
-		case "cancel_traditional_child": return e === "traditional_child" && hE(n, ["session_id", "child_session_id"]);
-		case "cancel_managed_orchestrator": return e === "managed_orchestrator" && hE(n, ["session_id", "orchestrator_session_id"]);
-		case "terminate_terminal": return e === "terminal_process" && hE(n, ["session_id", "terminal_id"]);
-		case "cancel_clone_operation": return e === "clone_operation" && hE(n, ["clone_operation_id"]);
+		case "cancel_active_run": return e === "active_run" && gE(n, ["session_id", "run_id"]);
+		case "cancel_traditional_child": return e === "traditional_child" && gE(n, ["session_id", "child_session_id"]);
+		case "cancel_managed_orchestrator": return e === "managed_orchestrator" && gE(n, ["session_id", "orchestrator_session_id"]);
+		case "terminate_terminal": return e === "terminal_process" && gE(n, ["session_id", "terminal_id"]);
+		case "cancel_clone_operation": return e === "clone_operation" && gE(n, ["clone_operation_id"]);
 		case "wait": return !1;
 	}
 }
-function _E(e) {
-	let t = oE(e, [
+function vE(e) {
+	let t = sE(e, [
 		"selection_key",
 		"kind",
 		"message",
@@ -7213,12 +7216,12 @@ function _E(e) {
 		"actionable",
 		"action",
 		"target"
-	]), n = sE(t.selection_key, 71, !1);
-	/^sha256:[a-f0-9]{64}$/.test(n) || aE();
-	let r = lE(t.kind, tE), i = sE(t.message, 512, !1);
-	rE[r].includes(i) || aE(), typeof t.actionable != "boolean" && aE();
-	let a = lE(t.action, nE);
-	if (!t.actionable) return (a !== "wait" || t.target !== null) && aE(), {
+	]), n = cE(t.selection_key, 71, !1);
+	/^sha256:[a-f0-9]{64}$/.test(n) || oE();
+	let r = uE(t.kind, nE), i = cE(t.message, 512, !1);
+	iE[r].includes(i) || oE(), typeof t.actionable != "boolean" && oE();
+	let a = uE(t.action, rE);
+	if (!t.actionable) return (a !== "wait" || t.target !== null) && oE(), {
 		selection_key: n,
 		kind: r,
 		message: i,
@@ -7226,8 +7229,8 @@ function _E(e) {
 		action: a,
 		target: null
 	};
-	let o = mE(t.target);
-	return gE(r, a, o) || aE(), {
+	let o = hE(t.target);
+	return _E(r, a, o) || oE(), {
 		selection_key: n,
 		kind: r,
 		message: i,
@@ -7236,8 +7239,8 @@ function _E(e) {
 		target: o
 	};
 }
-function vE(e) {
-	let t = oE(e, [
+function yE(e) {
+	let t = sE(e, [
 		"operation_id",
 		"managed_host_id",
 		"kind",
@@ -7256,25 +7259,25 @@ function vE(e) {
 		"kind",
 		"state"
 	]);
-	t.kind !== "upgrade" && aE();
+	t.kind !== "upgrade" && oE();
 	let n;
-	return Object.hasOwn(t, "blockers") && ((!Array.isArray(t.blockers) || t.blockers.length > 100) && aE(), n = t.blockers.map(_E)), {
-		operation_id: sE(t.operation_id, 128, !1),
-		managed_host_id: sE(t.managed_host_id, 128, !1),
+	return Object.hasOwn(t, "blockers") && ((!Array.isArray(t.blockers) || t.blockers.length > 100) && oE(), n = t.blockers.map(vE)), {
+		operation_id: cE(t.operation_id, 128, !1),
+		managed_host_id: cE(t.managed_host_id, 128, !1),
 		kind: "upgrade",
-		state: lE(t.state, eE),
-		reason: uE(t, "reason", 128),
-		message: uE(t, "message", 512),
-		target_release: fE(t, "target_release"),
-		desired_release: fE(t, "desired_release"),
-		observed_release: fE(t, "observed_release"),
+		state: uE(t.state, tE),
+		reason: dE(t, "reason", 128),
+		message: dE(t, "message", 512),
+		target_release: pE(t, "target_release"),
+		desired_release: pE(t, "desired_release"),
+		observed_release: pE(t, "observed_release"),
 		blockers: n,
-		created_at: uE(t, "created_at", 64),
-		updated_at: uE(t, "updated_at", 64)
+		created_at: dE(t, "created_at", 64),
+		updated_at: dE(t, "updated_at", 64)
 	};
 }
-function yE(e) {
-	let t = oE(e, ["preview", "operation"], ["preview", "operation"]), n = oE(t.preview, [
+function bE(e) {
+	let t = sE(e, ["preview", "operation"], ["preview", "operation"]), n = sE(t.preview, [
 		"current",
 		"latest_beta",
 		"upgrade_available",
@@ -7285,20 +7288,20 @@ function yE(e) {
 		"upgrade_available",
 		"distance"
 	]);
-	typeof n.upgrade_available != "boolean" && aE();
+	typeof n.upgrade_available != "boolean" && oE();
 	let r = null;
-	return n.distance !== null && (r = { accepted_releases: cE(oE(n.distance, ["accepted_releases"], ["accepted_releases"]).accepted_releases) }), {
+	return n.distance !== null && (r = { accepted_releases: lE(sE(n.distance, ["accepted_releases"], ["accepted_releases"]).accepted_releases) }), {
 		preview: {
-			current: dE(n.current),
-			latest_beta: dE(n.latest_beta),
+			current: fE(n.current),
+			latest_beta: fE(n.latest_beta),
 			upgrade_available: n.upgrade_available,
 			distance: r
 		},
-		operation: t.operation === null ? null : vE(t.operation)
+		operation: t.operation === null ? null : yE(t.operation)
 	};
 }
 // src/app/features/managed/queries.ts
-var bE = {
+var xE = {
 	hostStatus: ["managed-host-status"],
 	github: ["managed-github"],
 	secrets: ["managed-secrets"],
@@ -7311,74 +7314,74 @@ var bE = {
 	] : ["managed-provider-models", e],
 	providerModelsAll: ["managed-provider-models"]
 };
-function xE() {
+function SE() {
 	let { api: e } = r();
 	return _({
-		queryKey: bE.hostStatus,
+		queryKey: xE.hostStatus,
 		queryFn: ({ signal: t }) => e.getManagedStatus(t),
 		staleTime: 5e3,
 		refetchInterval: 15e3,
 		retry: !1
 	});
 }
-function SE(e = !0) {
+function CE(e = !0) {
 	let { api: t } = r();
 	return _({
-		queryKey: bE.upgrade,
-		queryFn: async ({ signal: e }) => yE(await t.getManagedUpgrade(e)),
+		queryKey: xE.upgrade,
+		queryFn: async ({ signal: e }) => bE(await t.getManagedUpgrade(e)),
 		enabled: e,
 		staleTime: 0,
-		refetchInterval: (e) => e.state.data?.operation && YT(e.state.data.operation.state) ? 1e3 : 15e3,
+		refetchInterval: (e) => e.state.data?.operation && XT(e.state.data.operation.state) ? 1e3 : 15e3,
 		refetchIntervalInBackground: !0,
 		retry: !1
 	});
 }
-function CE() {
+function wE() {
 	let { api: e } = r(), t = v();
 	return g({
-		mutationFn: async (t) => vE(await e.startManagedUpgrade(t)),
-		onSuccess: (e) => (t.setQueryData(bE.upgrade, (t) => t && {
+		mutationFn: async (t) => yE(await e.startManagedUpgrade(t)),
+		onSuccess: (e) => (t.setQueryData(xE.upgrade, (t) => t && {
 			...t,
 			operation: e
-		}), t.invalidateQueries({ queryKey: bE.upgrade }))
-	});
-}
-function wE(e = !0) {
-	let { api: t } = r();
-	return _({
-		queryKey: bE.github,
-		queryFn: ({ signal: e }) => t.getManagedGitHub(e),
-		enabled: e,
-		retry: !1
+		}), t.invalidateQueries({ queryKey: xE.upgrade }))
 	});
 }
 function TE(e = !0) {
 	let { api: t } = r();
 	return _({
-		queryKey: bE.secrets,
+		queryKey: xE.github,
+		queryFn: ({ signal: e }) => t.getManagedGitHub(e),
+		enabled: e,
+		retry: !1
+	});
+}
+function EE(e = !0) {
+	let { api: t } = r();
+	return _({
+		queryKey: xE.secrets,
 		queryFn: ({ signal: e }) => t.listManagedSecrets(e),
 		enabled: e,
 		retry: !1
 	});
 }
-function EE() {
-	let { api: e } = r(), t = v();
-	return g({
-		mutationFn: ({ name: t, value: n }) => e.putManagedSecret(t, n),
-		onSuccess: () => Promise.all([t.invalidateQueries({ queryKey: bE.secrets }), t.invalidateQueries({ queryKey: bE.hostStatus })])
-	});
-}
 function DE() {
 	let { api: e } = r(), t = v();
 	return g({
-		mutationFn: (t) => e.deleteManagedSecret(t),
-		onSuccess: () => Promise.all([t.invalidateQueries({ queryKey: bE.secrets }), t.invalidateQueries({ queryKey: bE.hostStatus })])
+		mutationFn: ({ name: t, value: n }) => e.putManagedSecret(t, n),
+		onSuccess: () => Promise.all([t.invalidateQueries({ queryKey: xE.secrets }), t.invalidateQueries({ queryKey: xE.hostStatus })])
 	});
 }
-function OE(e = !0, t = !1) {
+function OE() {
+	let { api: e } = r(), t = v();
+	return g({
+		mutationFn: (t) => e.deleteManagedSecret(t),
+		onSuccess: () => Promise.all([t.invalidateQueries({ queryKey: xE.secrets }), t.invalidateQueries({ queryKey: xE.hostStatus })])
+	});
+}
+function kE(e = !0, t = !1) {
 	let { api: n } = r();
 	return _({
-		queryKey: bE.auth,
+		queryKey: xE.auth,
 		queryFn: ({ signal: e }) => n.listManagedAuth(e),
 		enabled: e,
 		staleTime: 3e4,
@@ -7386,11 +7389,11 @@ function OE(e = !0, t = !1) {
 		retry: !1
 	});
 }
-function kE(e, t, n) {
+function AE(e, t, n) {
 	let { api: i } = r();
 	return _({
 		queryKey: [
-			...bE.providerModels(e ?? ""),
+			...xE.providerModels(e ?? ""),
 			"after-refusal",
 			t,
 			n
@@ -7401,10 +7404,10 @@ function kE(e, t, n) {
 		staleTime: Infinity
 	});
 }
-function AE(e, t, n = null) {
+function jE(e, t, n = null) {
 	let { api: i } = r();
 	return _({
-		queryKey: bE.providerModels(e ?? "", n),
+		queryKey: xE.providerModels(e ?? "", n),
 		queryFn: ({ signal: t }) => i.listProviderModels(n ? {
 			backend: e,
 			base_url: n
@@ -7414,9 +7417,9 @@ function AE(e, t, n = null) {
 		staleTime: 3e5
 	});
 }
-function jE(e) {
-	let { api: t } = r(), n = xE().data ?? null, i = m(() => UT(e, n), [e, n]), a = re({ queries: i.map((e) => ({
-		queryKey: bE.providerModels(e.backend, e.base_url),
+function ME(e) {
+	let { api: t } = r(), n = SE().data ?? null, i = m(() => WT(e, n), [e, n]), a = re({ queries: i.map((e) => ({
+		queryKey: xE.providerModels(e.backend, e.base_url),
 		queryFn: ({ signal: n }) => t.listProviderModels(e, n),
 		retry: !1,
 		staleTime: 3e5
@@ -7427,8 +7430,8 @@ function jE(e) {
 	}), o;
 }
 // src/app/providers/ToastProvider.tsx
-var ME = u(null), NE = 150, PE = 3, FE = 0, IE = () => `toast-${Date.now()}-${FE++}`;
-function LE({ toasts: e, removeToast: t }) {
+var NE = u(null), PE = 150, FE = 3, IE = 0, LE = () => `toast-${Date.now()}-${IE++}`;
+function RE({ toasts: e, removeToast: t }) {
 	let n = a(), r = h(/* @__PURE__ */ new Map());
 	return p(() => {
 		let n = r.current;
@@ -7455,27 +7458,27 @@ function LE({ toasts: e, removeToast: t }) {
 		}, e.id))
 	}), n);
 }
-function RE({ children: e }) {
+function zE({ children: e }) {
 	let [t, n] = ee([]), r = d((e) => {
-		let t = IE();
+		let t = LE();
 		return n((n) => [...n, {
 			id: t,
 			content: e.content,
 			variant: e.variant ?? s.Info,
-			life: e.life ?? PE,
+			life: e.life ?? FE,
 			keep: e.keep ?? !1,
 			dismissing: !1
 		}]), t;
 	}, []), i = d((e) => {
 		n((t) => {
 			let r = t.find((t) => t.id === e);
-			return !r || r.dismissing ? t : (setTimeout(() => n((t) => t.filter((t) => t.id !== e)), NE), t.map((t) => t.id === e ? {
+			return !r || r.dismissing ? t : (setTimeout(() => n((t) => t.filter((t) => t.id !== e)), PE), t.map((t) => t.id === e ? {
 				...t,
 				dismissing: !0
 			} : t));
 		});
 	}, []), a = d(() => {
-		n((e) => e.length === 0 ? e : (setTimeout(() => n((e) => e.filter((e) => !e.dismissing)), NE), e.map((e) => ({
+		n((e) => e.length === 0 ? e : (setTimeout(() => n((e) => e.filter((e) => !e.dismissing)), PE), e.map((e) => ({
 			...e,
 			dismissing: !0
 		}))));
@@ -7508,24 +7511,24 @@ function RE({ children: e }) {
 		i,
 		a
 	]);
-	return /* @__PURE__ */ oe(ME.Provider, {
+	return /* @__PURE__ */ oe(NE.Provider, {
 		value: o,
-		children: [e, /* @__PURE__ */ ae(LE, {
+		children: [e, /* @__PURE__ */ ae(RE, {
 			toasts: t,
 			removeToast: i
 		})]
 	});
 }
-function zE() {
-	let e = f(ME);
+function BE() {
+	let e = f(NE);
 	if (!e) throw Error("useToast must be used within a ToastProvider");
 	return e;
 }
-function BE(e) {
+function VE(e) {
 	return e instanceof Error ? e.message : String(e);
 }
 // src/app/lib/PerfProfiler.tsx
-var VE = (e, n, r) => {
+var HE = (e, n, r) => {
 	t(`commit:${e}`, {
 		ms: r,
 		fields: { phase: n },
@@ -7533,34 +7536,34 @@ var VE = (e, n, r) => {
 		slowMs: 16
 	});
 };
-function HE({ id: t, children: n }) {
+function UE({ id: t, children: n }) {
 	return e() ? /* @__PURE__ */ ae(l, {
 		id: t,
-		onRender: VE,
+		onRender: HE,
 		children: n
 	}) : /* @__PURE__ */ ae(ie, { children: n });
 }
 // src/app/lib/workspaceLink.ts
-var UE = /^(https?|ircs?|mailto|xmpp|file)$/i, WE = /^[a-zA-Z]:[\\/]/, GE = /^(https?|mailto|ircs?|xmpp):/i;
-function KE(e) {
+var WE = /^(https?|ircs?|mailto|xmpp|file)$/i, GE = /^[a-zA-Z]:[\\/]/, KE = /^(https?|mailto|ircs?|xmpp):/i;
+function qE(e) {
 	let t = String(e ?? "").trim();
 	if (!t) return "";
-	if (WE.test(t)) return t;
+	if (GE.test(t)) return t;
 	let n = t.indexOf(":");
-	return n === -1 || UE.test(t.slice(0, n)) ? t : "";
+	return n === -1 || WE.test(t.slice(0, n)) ? t : "";
 }
-function qE(e) {
+function JE(e) {
 	return e.replace(/\\/g, "/");
 }
-function JE(e, t) {
+function YE(e, t) {
 	if (!t) return null;
-	let n = qE(t).replace(/\/+$/, "");
+	let n = JE(t).replace(/\/+$/, "");
 	return n ? e === n ? "" : e.startsWith(`${n}/`) ? e.slice(n.length + 1) : null : null;
 }
-function YE(e, t = []) {
+function XE(e, t = []) {
 	let n = (e ?? "").trim();
 	if (!n || n.startsWith("#")) return { kind: "blocked" };
-	if (GE.test(n)) return {
+	if (KE.test(n)) return {
 		kind: "external",
 		href: n
 	};
@@ -7572,17 +7575,17 @@ function YE(e, t = []) {
 	} catch {
 		r = r.replace(/^file:\/\//i, "").replace(/^localhost/i, "");
 	}
-	r = qE(r);
+	r = JE(r);
 	for (let e of t) {
-		let t = JE(r, e);
+		let t = YE(r, e);
 		if (t != null) {
 			r = t;
 			break;
 		}
 	}
-	return r.startsWith("/") || WE.test(r) || (r = r.replace(/^\.\//, ""), !r || r === ".") || r.split("/").includes("..") || r.includes("://") ? { kind: "blocked" } : {
+	return r.startsWith("/") || GE.test(r) || (r = r.replace(/^\.\//, ""), !r || r === ".") || r.split("/").includes("..") || r.includes("://") ? { kind: "blocked" } : {
 		kind: "workspace",
 		path: r
 	};
 }
-export { _T as $, Nx as $n, FC as $t, RT as A, GS as An, aw as At, ET as B, $S as Bn, GC as Bt, XT as C, _C as Cn, kw as Ct, IT as D, nC as Dn, hw as Dt, $T as E, lC as En, mw as Et, NT as F, VS as Fn, YC as Ft, ST as G, RS as Gn, QC as Gt, DT as H, qS as Hn, iw as Ht, FT as I, ZS as In, rw as It, pT as J, HS as Jn, HC as Jt, TT as K, XS as Kn, cw as Kt, kT as L, FS as Ln, KC as Lt, zT as M, KS as Mn, $C as Mt, PT as N, NS as Nn, ZC as Nt, BT as O, rC as On, qC as Ot, AT as P, PS as Pn, sw as Pt, vT as Q, Mx as Qn, IC as Qt, MT as R, JS as Rn, XC as Rt, YT as S, oC as Sn, Ow as St, GT as T, jC as Tn, ww as Tt, xT as U, IS as Un, tw as Ut, OT as V, eC as Vn, JC as Vt, CT as W, LS as Wn, ew as Wt, rT as X, DS as Xn, zC as Xt, mT as Y, MS as Yn, RC as Yt, aT as Z, jx as Zn, BC as Zt, jE as _, kC as _n, Yw as _t, BE as a, AC as an, xp as ar, $w as at, KT as b, aC as bn, Kw as bt, DE as c, MC as cn, y as cr, dT as ct, xE as d, yC as dn, de as dr, tT as dt, PC as en, Fx as er, eT as et, AE as f, vC as fn, pe as fr, sT as ft, EE as g, CC as gn, Ww as gt, kE as h, bC as hn, he as hr, yT as ht, RE as i, mC as in, bp as ir, nT as it, HT as j, BS as jn, nw as jt, VT as k, zS as kn, lw as kt, OE as l, uC as ln, ue as lr, fT as lt, SE as m, wC as mn, me as mr, oT as mt, KE as n, EC as nn, Ax as nr, gT as nt, zE as o, cC as on, oi as or, Zw as ot, TE as p, pC as pn, ge as pr, lT as pt, wT as q, US as qn, VC as qt, HE as r, iC as rn, yp as rr, hT as rt, bE as s, gC as sn, Cn as sr, Xw as st, YE as t, NC as tn, kx as tr, cT as tt, wE as u, fC as un, le as ur, uT as ut, CE as v, OC as vn, Vw as vt, qT as w, hC as wn, Mw as wt, QT as x, sC as xn, zw as xt, ZT as y, DC as yn, Gw as yt, jT as z, QS as zn, ow as zt };
+export { vT as $, Mx as $n, IC as $t, zT as A, zS as An, ow as At, DT as B, QS as Bn, KC as Bt, ZT as C, oC as Cn, Aw as Ct, LT as D, lC as Dn, gw as Dt, eE as E, jC as En, hw as Et, PT as F, PS as Fn, XC as Ft, CT as G, LS as Gn, $C as Gt, OT as H, eC as Hn, aw as Ht, IT as I, VS as In, iw as It, mT as J, US as Jn, UC as Jt, ET as K, RS as Kn, lw as Kt, AT as L, ZS as Ln, qC as Lt, BT as M, BS as Mn, ew as Mt, FT as N, KS as Nn, QC as Nt, VT as O, nC as On, JC as Ot, jT as P, NS as Pn, cw as Pt, yT as Q, jx as Qn, BC as Qt, NT as R, FS as Rn, ZC as Rt, XT as S, sC as Sn, kw as St, KT as T, hC as Tn, Tw as Tt, ST as U, qS as Un, nw as Ut, kT as V, $S as Vn, YC as Vt, wT as W, IS as Wn, tw as Wt, iT as X, MS as Xn, VC as Xt, hT as Y, HS as Yn, RC as Yt, oT as Z, DS as Zn, zC as Zt, ME as _, CC as _n, Xw as _t, VE as a, mC as an, bp as ar, eT as at, qT as b, DC as bn, qw as bt, OE as c, gC as cn, Cn as cr, fT as ct, SE as d, fC as dn, le as dr, nT as dt, FC as en, Nx as er, tT as et, jE as f, yC as fn, de as fr, cT as ft, DE as g, bC as gn, he as gr, Gw as gt, AE as h, wC as hn, me as hr, bT as ht, zE as i, iC as in, yp as ir, rT as it, UT as j, GS as jn, rw as jt, HT as k, rC as kn, uw as kt, kE as l, MC as ln, y as lr, pT as lt, CE as m, pC as mn, ge as mr, sT as mt, qE as n, NC as nn, kx as nr, _T as nt, BE as o, AC as on, xp as or, Qw as ot, EE as p, vC as pn, pe as pr, uT as pt, TT as q, XS as qn, HC as qt, UE as r, EC as rn, Ax as rr, gT as rt, xE as s, cC as sn, oi as sr, Zw as st, XE as t, PC as tn, Fx as tr, lT as tt, TE as u, uC as un, ue as ur, dT as ut, wE as v, kC as vn, Hw as vt, JT as w, _C as wn, Nw as wt, $T as x, aC as xn, Bw as xt, QT as y, OC as yn, Kw as yt, MT as z, JS as zn, sw as zt };
