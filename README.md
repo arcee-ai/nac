@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
 
 ## Contributing
 
-Pull requests are welcome. A CLA-signing bot checks every PR against arcee-ai's [CLA](https://github.com/arcee-ai/mergekit/blob/main/CLA.md); comment `I have read the CLA Document and I hereby sign the CLA` on your PR to sign it (or `recheck` to re-run the check).
+Pull requests are welcome; see [pull request guidance](docs/contributing/pull-requests.md) for scope and before/after evidence. A CLA-signing bot checks every PR against arcee-ai's [CLA](https://github.com/arcee-ai/mergekit/blob/main/CLA.md); comment `I have read the CLA Document and I hereby sign the CLA` on your PR to sign it (or `recheck` to re-run the check).
 
 Development happens on the remote's default branch, currently `dev`; `main`
 is not the integration branch. Ask the remote rather than trusting a local
