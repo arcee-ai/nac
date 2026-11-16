@@ -20,7 +20,7 @@ test("Select applies the typed working folder without pressing Enter", async ({
   const workspaceCanonical = await fs.realpath(path.join(harness.runRoot, "workspace"));
 
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "New Project", exact: true }).click();
+  await page.getByRole("button", { name: "Get Started", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
   const folderButton = form.getByRole("button", { name: "Working Folder", exact: true });
   await expect(folderButton).toHaveText(workspaceCanonical);
