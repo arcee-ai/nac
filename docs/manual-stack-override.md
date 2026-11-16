@@ -1,12 +1,12 @@
 # Manual review override for NAC stacks
 
-`scripts/manual-stack-override.mjs` lets Allison explicitly process a reviewed
-stack from bottom to top using her existing personal PR bypass permission. The helper independently
-requires green checks and resolved conversations, even when her account can
+`scripts/manual-stack-override.mjs` lets Allison and Ada process a reviewed
+stack from bottom to top using their personal PR bypass permissions. The helper
+requires green checks and resolved conversations, even when the account can
 manually bypass those requirements.
-This is a **human-invoked maintenance command**, never an agent tool or CI job.
-An agent authenticated as Allison is not authorized to execute it merely because
-the identity check passes. Preparing this utility does not authorize any merge.
+Execution requires **maintainer authorization for the exact merge set**. A
+maintainer may run it directly or ask an agent to execute the reviewed plan.
+Authentication and a saved plan alone do not authorize a merge or CI automation.
 
 There is no supported atomic force-whole-stack operation. GitHub permits bypass
 on the **lowest unmerged member**. Each successful member lands independently;
@@ -18,7 +18,10 @@ the whole stack meets its requirements.
 Requires Node.js, installed `gh`, and existing authentication to github.com.
 No extension install, token export, local Git checkout modification or settings
 change is needed. The repository is fixed to `arcee-ai/nac`, target `dev`, and
-the authenticated user must be `allisoneer`, numeric User ID `20910163`.
+the authenticated account must be `allisoneer` (User `20910163`) or
+`adalundhe` (User `23642200`). Both have repository admin access and the same
+PR-only ruleset bypass as of November 16, 2026. These settings are already live;
+merging the helper update makes this command available to Ada.
 
 Choose the exact stack number and **every open member in bottom-to-top order**.
 For example, this only reads stack 571 and writes a new local private plan:
@@ -34,9 +37,9 @@ each layer's authored diff. Review the complete changes at those revisions and
 the saved plan before choosing execution. Existing plan files are never
 overwritten. A plan is a snapshot, not permission or a claim of merge readiness.
 
-## Explicit human execution
+## Explicitly authorized execution
 
-Only after a human decides to merge that exact set and reviews the plan:
+Only after Allison or Ada authorizes that exact set and reviews the plan:
 
 ```sh
 node scripts/manual-stack-override.mjs --execute /tmp/nac-stack-571.json
@@ -74,11 +77,32 @@ merge commit. This deliberately rejects harmless changes within affected files,
 some context changes and unrelated trunk advances. No author code is
 automatically fixed, rebased or marked ready.
 
+## Instructions to give an agent
+
+After the helper update lands on `dev`, Allison or Ada can give an agent this
+instruction, substituting the actual stack and complete open-member list:
+
+> Resolve the merge conflicts, run the relevant checks, and push the fixes.
+> Authenticate `gh` as my own approved GitHub account (`adalundhe` for Ada), then
+> create a fresh preview with `node scripts/manual-stack-override.mjs --stack
+> STACK --members BOTTOM,TOP --plan /absolute/new-plan.json`. Inspect every
+> member, diff and blocker. I authorize merging exactly PRs #BOTTOM and #TOP in
+> that order using `node scripts/manual-stack-override.mjs --execute
+> /absolute/new-plan.json` once all helper gates pass. Stop on drift, partial
+> completion, a queued result or an uncertain request; report the result before
+> any retry.
+
+Use a current `dev` checkout containing the helper update. Never use another
+person's credentials. For an ordinary PR, the GitHub PR page also offers the
+same manual bypass capability to both accounts; inspect the exact current head
+and any overridden requirements before clicking merge. Conflicts still need
+resolution. This change does not merge any existing PR.
+
 ## Safeguards and limits
 
-- Only the existing singleton Allison PR exception (ruleset 26484091) is
-  accepted: User20910163 in pull-request-only mode. Its review and strict
-  `Required PR checks` requirements must match the current policy and be
+- Only the Allison and Ada PR exceptions (ruleset 26484091) are
+  accepted: Users `20910163` and `23642200`, both in pull-request-only mode.
+  Its review and strict `Required PR checks` requirements must match the current policy and be
   effective on `dev`. The hard PR/direct-push, deletion and force-push
   protections (25983949) retain no bypass. Inherited protections remain in the
   full policy fingerprint and check inventory. Policy drift requires a new
@@ -86,7 +110,7 @@ automatically fixed, rebased or marked ready.
 - The account's manual CI/conversation bypass is not a quality waiver for this
   helper. Pending, failed, missing or unproven current checks and unresolved
   conversations still stop automated execution. No bypass permission grants an
-  agent merge authority; explicit human authorization for the exact set is
+  agent merge authority; explicit maintainer authorization for the exact set is
   separate from identity, capability and a saved plan.
 - Every remaining member must be non-draft, conflict-free, and have known
   mergeability. Unresolved conversations and pending/failed check results stop
@@ -124,8 +148,8 @@ automatically fixed, rebased or marked ready.
 - On partial completion, there is no automatic rollback. Inspect current stack
   membership, actual merged PRs and any outstanding UUID; create a new plan only
   for the exact remaining open members after human review. Removing this script
-  and runbook removes the utility; no GitHub policy was changed by installing it.
-  Reverting a landed PR is a separate reviewed action.
+  and runbook removes the utility but does not revoke either live GitHub grant.
+  Revoking access or reverting a landed PR is a separate explicit action.
 
 Tests use deterministic fake transport/`gh`, with no real mutation:
 
