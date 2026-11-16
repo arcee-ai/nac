@@ -1033,7 +1033,7 @@ fn open_connection_with_hooks(
     // input from agents, MCP clients and NAC itself.
     ensure_column(&transaction, "session_inbox", "review_intent", "TEXT")?;
     ensure_column(&transaction, "thread_steering", "review_intent", "TEXT")?;
-    internal_completions::ensure_columns(&transaction)?;
+    let completion_origins_added = internal_completions::ensure_columns(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     ensure_column(
@@ -1052,7 +1052,7 @@ fn open_connection_with_hooks(
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
     delegation_receipts::create_and_seed(&transaction)?;
-    if schema_version < INTERNAL_COMPLETION_ORIGIN_VERSION {
+    if schema_version < INTERNAL_COMPLETION_ORIGIN_VERSION && completion_origins_added {
         internal_completions::classify_pending_legacy_completions(&transaction)?;
     }
     // Execution mode records how a generation was admitted and must remain

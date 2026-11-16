@@ -398,6 +398,15 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         updated_at: string;
     }>;
     deleteSshConfig: (configId: string) => Promise<void>;
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) => Promise<{
+        aliases: string[];
+        undiscoverable_patterns: number;
+        warnings: import("./openapi.generated.js").components["schemas"]["OpenSshAliasWarning"][];
+    }>;
     getMcpLibrary: (signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["McpLibraryEntry"][];
     }>;
@@ -1177,7 +1186,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     inputControlledTerminal: (session: string, id: string, body: import("./types.js").ControlledTerminalInputRequest, signal?: AbortSignal) => Promise<{
         error?: string | null;
-        outcome: import("./openapi.generated.js").components["schemas"] /** Resolves a saved configuration's credential and lists its models. */["InputDeliveryOutcome"];
+        outcome: import("./openapi.generated.js").components["schemas"]["InputDeliveryOutcome"];
     }>;
     listExecutions: (session: string, signal?: AbortSignal) => Promise<{
         executions: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"][];

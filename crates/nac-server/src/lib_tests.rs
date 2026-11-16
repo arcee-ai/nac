@@ -1092,6 +1092,8 @@ mod session_creation_overload;
 mod selection_questions;
 #[path = "tests/shell_commands.rs"]
 mod shell_commands;
+#[path = "tests/ssh_aliases.rs"]
+mod ssh_aliases;
 #[path = "tests/terminal_selection.rs"]
 mod terminal_selection;
 
