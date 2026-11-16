@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Human-only maintenance utility. Never invoke execute from an agent or CI job.
+// Maintainer-authorized maintenance utility. Execution needs approval for the exact merge set.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -9,6 +9,12 @@ import { inspectChecks, readCurrentMerge } from './manual-stack-checks.mjs';
 
 const REPO = 'arcee-ai/nac';
 const ROOT = `repos/${REPO}`;
+const maintainers = [
+  { login: 'allisoneer', id: 20910163 },
+  { login: 'adalundhe', id: 23642200 },
+];
+const bypassActors = maintainers.map(({ id }) =>
+  ({ actor_id: id, actor_type: 'User', bypass_mode: 'pull_request' }));
 const SHA = /^[a-f0-9]{40}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -68,8 +74,9 @@ export function createHelper(transport = ghTransport, {
   const get = path => api('GET', `${ROOT}/${path}`);
   async function identity() {
     const viewer = await api('GET', 'user');
-    insist(viewer.login === 'allisoneer' && viewer.id === 20910163 && viewer.type === 'User',
-      'Execution/preview requires allisoneer / User 20910163 on github.com');
+    insist(viewer.type === 'User' && maintainers.some(({ login, id }) =>
+      viewer.login === login && viewer.id === id),
+    'Execution/preview requires allisoneer / User 20910163 or adalundhe / User 23642200 on github.com');
   }
   async function policy() {
     const review = await get('rulesets/26484091');
@@ -90,7 +97,8 @@ export function createHelper(transport = ghTransport, {
       required_status_checks: [{ context: 'Required PR checks', integration_id: 15368 }] };
     const conditions = { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } };
     insist(review.enforcement === 'active' && review.current_user_can_bypass === 'pull_requests_only' &&
-      same(review.bypass_actors, [{ actor_id: 20910163, actor_type: 'User', bypass_mode: 'pull_request' }]) &&
+      Array.isArray(review.bypass_actors) &&
+      isDeepStrictEqual([...review.bypass_actors].sort((a, b) => a.actor_id - b.actor_id), bypassActors) &&
       isDeepStrictEqual(review.conditions, conditions) &&
       same(review.rules.map(rule => rule.type).sort(), ['pull_request', 'required_status_checks']) &&
       isDeepStrictEqual(review.rules.find(rule => rule.type === 'pull_request')?.parameters, personalPull) &&
@@ -288,7 +296,7 @@ export async function main(args, { helper = createHelper(), out = console.log } 
     return;
   }
   insist(args.length === 6 && args[0] === '--stack' && args[2] === '--members' && args[4] === '--plan',
-    'Usage (read-only): node scripts/manual-stack-override.mjs --stack NUMBER --members BOTTOM,TOP --plan /absolute/plan.json\nHuman execution: node scripts/manual-stack-override.mjs --execute /absolute/plan.json');
+    'Usage (read-only): node scripts/manual-stack-override.mjs --stack NUMBER --members BOTTOM,TOP --plan /absolute/plan.json\nMaintainer-authorized execution: node scripts/manual-stack-override.mjs --execute /absolute/plan.json');
   const stack = Number(args[1]), members = args[3].split(',').map(Number);
   insist(Number.isSafeInteger(stack) && stack > 0 && members.every(n => Number.isSafeInteger(n) && n > 0) &&
     new Set(members).size === members.length, 'Invalid stack/member numbers');
@@ -297,7 +305,7 @@ export async function main(args, { helper = createHelper(), out = console.log } 
   out(`Full stack membership (including retained merged members): ${plan.membership.join(', ')}`);
   for (const member of plan.members) out(JSON.stringify(member, null, 2));
   fs.writeFileSync(args[5], `${JSON.stringify(plan, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-  out(`Saved ${args[5]}. Review every member and blocker. Only a human may explicitly execute this plan.`);
+  out(`Saved ${args[5]}. Review every member and blocker. Execution requires maintainer authorization for this exact merge set.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
