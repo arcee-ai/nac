@@ -38,11 +38,11 @@ fn settle_background_child(path: &Path, child: &str, run_id: &str) -> Traditiona
     .child
 }
 
-/// Seeds the rows a dev (schema 40) store could hold, then removes the new
+/// Seeds the rows a dev (schema 50) store could hold, then removes the new
 /// provenance so the upgrade must rely only on durable relationship/receipt
 /// evidence.
 #[test]
-fn migration_41_classifies_only_pending_completions_with_durable_evidence() {
+fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
     let path = std::env::temp_dir()
         .join(format!(
             "nac-internal-completion-migration-{}",
@@ -154,7 +154,7 @@ fn migration_41_classifies_only_pending_completions_with_durable_evidence() {
              ALTER TABLE session_inbox DROP COLUMN completion_generation;
              ALTER TABLE session_inbox DROP COLUMN completion_session_id;
              ALTER TABLE session_inbox DROP COLUMN completion_source;
-             PRAGMA user_version = 40;",
+             PRAGMA user_version = 50;",
         )
         .unwrap();
     drop(connection);
@@ -171,7 +171,7 @@ fn migration_41_classifies_only_pending_completions_with_durable_evidence() {
         legacy
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        40
+        50
     );
     drop(legacy);
 

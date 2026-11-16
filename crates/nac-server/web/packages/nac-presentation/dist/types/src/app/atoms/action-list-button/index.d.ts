@@ -31,6 +31,8 @@ interface ActionListButtonProps {
     /** Null for a row with nowhere to go, which then takes no focus. */
     onClick?: (() => void) | null;
     className?: string;
+    /** Local metadata typography/tone; other consumers keep the compact default. */
+    metaClassName?: string;
 }
 /**
  * One row of the Insights list: a thread, a session, a tool call or a group of

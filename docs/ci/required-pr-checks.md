@@ -4,21 +4,42 @@
 NAC's **observed** ruleset 25983949. Live activation requires separate human
 authorization. No settings are changed by the tooling or this PR.
 
-The October 30 [nine-owner before snapshot](evidence/2026-10-30-required-check-before-nine-owners.json)
-shows active `main` on `~DEFAULT_BRANCH` (currently `dev`), no bypass actors,
-one approval, CODEOWNERS, last-push approval, resolved threads, and extra approval
-for unattributed changes. Stale-review dismissal is currently false. Existing
-merge methods, deletion/force-push protections, and inherited enterprise rules
-remain unchanged. [The intended plan](evidence/2026-10-30-required-check-plan-nine-owners.json)
-appends exactly one required-status-check rule: `Required PR checks`, GitHub
-Actions integration **15368**, strict current-base checks, enforced on creation.
-It updates that existing ruleset; it does not introduce a second review policy.
+On November 3, 2026, Allison authorized a native GitHub review-approval
+exception for only `allisoneer` (User **20910163**). The
+[observed ruleset readback](evidence/2026-11-03-review-exemption-rulesets.json)
+was independently verified at **20:33:38 UTC**:
 
-This snapshot records all nine designated owners' actual live permissions,
-including Crystalcareai (ID `162942000`, admin). It retains the **eight-owner
-CODEOWNERS actually served by dev** at `91fde731b6e5bf4097a37fbee854804859f22f95`.
-Crystalcareai's roster addition has not landed in that receipt. Permission to
-write alone is not proof of landed ownership or required-check activation.
+- Universal ruleset **25983949** remains active on `~DEFAULT_BRANCH` (`dev`),
+  with **no bypass actors**. It requires PRs and resolved review threads, retains
+  deletion/force-push protections and merge methods, and has zero required
+  approvals with CODEOWNERS, last-push and unattributed-extra approval disabled.
+- Review-only ruleset **26484091** has the same branch condition and preserves
+  the complete prior review policy: one approval, CODEOWNERS, last-push approval,
+  extra approval for unattributed changes, resolved threads and merge methods.
+  Stale-review dismissal remains false. Its sole bypass is User **20910163**, mode
+  `pull_request`; no team, role or broad administrator bypass is configured.
+- Inherited enterprise rules remain unchanged. No merge or direct-push probe was
+  performed. Configured approval bypass does not establish that conflicts,
+  drafts, requested changes or every other GitHub merge condition permit merging.
+
+This is Allison's human approval exception. It grants agents no merge authority,
+no authority to exercise bypass credentials, and no scanner-policy trust. Review
+requests and the nine-owner CODEOWNERS roster remain unchanged. All other users
+still require the preserved review policy. Universal PR/thread requirements and
+future required checks apply to Allison as well.
+
+**Live required-status-check activation remains separate and unperformed.**
+The planner validates both rulesets, then appends exactly one required-status-check
+rule only to no-bypass **25983949**: `Required PR checks`, GitHub Actions
+integration **15368**, strict current-base checks, enforced on creation. It never
+changes review-only **26484091** or any bypass list. This source update changes
+no live settings, CI/scanner policy, publisher trust or automation authority.
+
+The October 30 [nine-owner snapshot](evidence/2026-10-30-required-check-before-nine-owners.json)
+and [plan](evidence/2026-10-30-required-check-plan-nine-owners.json) describe the
+previous single-ruleset review policy. They remain dated historical evidence and
+cannot qualify the new split. The November receipt contains observed rulesets
+only, not a fresh full planner snapshot or completed platform qualification.
 
 The original [three-owner snapshot](evidence/2026-10-27-required-check-before.json)
 and [plan](evidence/2026-10-27-required-check-plan.json), plus the
@@ -33,8 +54,8 @@ and [plan](evidence/2026-10-30-required-check-plan-eight-owners-landed.json), al
 remain unchanged. The latter records the actual landing of the
 [Ada/Scott roster PR #470](https://github.com/arcee-ai/nac/pull/470).
 These older receipts lack Crystalcareai's verified identity and cannot qualify
-the nine-owner baseline. Refresh the nine-owner snapshot after this roster
-lands before qualification or activation.
+the nine-owner baseline. Capture a fresh full snapshot before qualification or
+activation.
 
 ALL-450's earlier bypass/review proposal is historical and must not be applied
 to current settings. ALL-450 remains a completed foundation milestone; ALL-506
@@ -92,9 +113,11 @@ node .github/scripts/pr-ruleset.mjs plan /tmp/nac-before.json > /tmp/nac-plan.js
 The snapshot captures repository merge methods, every repository/inherited
 ruleset, effective dev rules, classic protection, owner permissions, current dev
 revision, CODEOWNERS and check runs. `plan` preserves the existing writable
-ruleset fields and appends only the required-check rule. Unknown existing review
-parameters remain intact. An already-present status rule or changed target,
-branch condition, bypass policy or missing review protection requires rebaseline.
+universal ruleset fields and appends only the required-check rule. Both exact
+ruleset identities, branch conditions, the sole Allison User/PR-only bypass and
+complete review parameters are validated. Missing/moved rules, changed review
+parameters or bypass actors/modes fail closed. An already-present status rule
+requires a fresh reviewed baseline. Every other rule remains intact.
 No HTTP write command is implemented.
 
 The checked-in snapshot/plan are evidence of intent at capture time, not reusable
@@ -102,13 +125,12 @@ activation receipts. Refresh them before qualification. A real fixture receipt
 must bind both the exact proposed payload digest and full settings identity.
 Never fill its fields with local model output or copy an old successful receipt.
 
-Planner tests preserve the actual eight-owner CODEOWNERS in the observed
-nine-permission fixture. Positive activation cases explicitly model hypothetical
-nine-owner CODEOWNERS, a passing check, and qualification receipts as synthetic
-local data. Negatives prove that both the observed eight-owner and historical
-six-owner CODEOWNERS cannot activate, even with a synthetic complete receipt and
-passing check. These models do not certify roster landing, platform qualification,
-or required-check activation.
+Planner tests combine the exact November ruleset receipt with older snapshot
+metadata and explicitly synthetic effective rules, passing checks, CODEOWNERS
+and qualification receipts. These models test guards only; they do not certify
+current owner permissions, roster landing, platform behavior or activation. The
+historical eight-owner and six-owner CODEOWNERS cases still cannot activate,
+even with synthetic passing checks and a complete model receipt.
 
 ## Real safe-repository and actor matrix — unperformed
 
@@ -120,9 +142,12 @@ Do not attempt a deliberately red production merge to fill these gaps.
 
 With separately authorized fixture access, mirror the observed review and
 inherited protections plus the proposed status rule into the safe repository.
-Use an ordinary non-bypass actor's authentication for attempts. Record actor ID,
+Use an ordinary actor other than Allison for review-rejection attempts.
+Allison-specific cases require her separately authorized human participation.
+Record actor ID,
 PR/head/base SHAs, check-run ID/App, event, attempt time, actual API/UI rejection
-or success, and durable evidence URLs. Do not grant any bypass to run the matrix.
+or success, and durable evidence URLs. Mirror only the approved single-User
+PR-only review exception; do not add fixture actors to any bypass list.
 `qualificationCases` in `pr-ruleset.mjs` is the exact machine-checked case list:
 
 | Cases | Required platform evidence |
@@ -133,11 +158,13 @@ or success, and durable evidence URLs. Do not grant any bypass to run the matrix
 | Stale check/base; wrong App | Old-head/base success and same-name foreign-App success cannot authorize merge |
 | ALL-505 strict baseline | Fresh complete combined native amd64 image scan and unchanged-image rescan, fresh DB, zero unresolved/unapproved blockers; link full reports, not advisory historical green |
 | Each of the nine designated non-author approvals | Eligible approval works when all other protections pass |
-| Self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
-| Unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
+| Ordinary other-user self/outside-only/last-pusher approval | Cannot satisfy the preserved CODEOWNERS and last-push approval requirements |
+| Ordinary other-user unattributed changes and threads | Required extra approval remains effective; unresolved conversation blocks |
 | Requests/bot PRs | Author excluded; eligible owner requests preserved |
 | Two-layer gh-stack | Both immediate bases contain intended CODEOWNERS; each PR emits complete candidate-bound checks; record the intermediate-base protection gap, then qualify strict/review enforcement after retarget to dev |
-| Ordinary/automation bypass and direct push | No bypass; inherited deletion/force-push/transfer restrictions remain effective |
+| Ordinary other-user/automation bypass and direct push | No bypass; inherited deletion/force-push/transfer restrictions remain effective |
+| Allison review-approval bypass | Only User 20910163 can bypass reviewer/CODEOWNERS approval via a PR; record actual behavior without claiming every merge condition succeeds |
+| Allison checks, unresolved threads and direct push | Universal checks/thread requirements and PR requirement remain effective; review exception cannot bypass them |
 
 For the two-layer fixture, use the installed extension in the safe checkout:
 
@@ -151,8 +178,8 @@ gh stack view --json
 ```
 
 Capture both live PR bases, heads, diffs, requested reviewers and check runs.
-Verify the base branch's CODEOWNERS is authoritative for each PR. This exact
-ruleset targets only `~DEFAULT_BRANCH`: an upper PR targeting
+Verify the base branch's CODEOWNERS is authoritative for each PR. Both split
+rulesets target only `~DEFAULT_BRANCH`: an upper PR targeting
 `codex/fixture-lower` does **not** inherit its required checks or review rules.
 CODEOWNERS in that base and a green aggregate do not establish enforcement.
 Record that intermediate-base limitation explicitly; do not broaden branch
@@ -165,17 +192,20 @@ stack or another owner's branch may be rebased for this exercise. Successful
 fixture merges need their own explicit authorization; planner tests are not that
 authority. If unavailable, leave the exact successful-merge cases unperformed.
 
-The [current template](evidence/qualification-template.json) is deliberately
-marked `template-not-qualification`, with every case `unperformed`. It cannot
-pass the validator. Populate only real observed evidence after separate fixture
-authorization and human inspection; never change result fields to bypass a gate.
+The [October template](evidence/qualification-template.json) remains historical,
+marked `template-not-qualification`, with every case `unperformed`. Its old
+payload/baseline and actor case list cannot qualify the November split. Create a
+new receipt bound to a fresh full snapshot and current `qualificationCases`,
+using only real observed evidence after separate fixture authorization and human
+inspection; never change result fields to bypass a gate.
 
 The receipt schema is `schema_version: 1`, `kind: github-platform-qualification`,
 `fixture_repository`, `baseline_sha256`, `payload_sha256`, `completed_at`, and
 `cases`. Each exact case needs `name`, `result: passed`, `actor_id`, full
 `head_sha`, and a fixture-repository `evidence_url`. It expires after seven days.
-A human must inspect underlying actor/results evidence: schema checks cannot
-verify that a linked claim actually occurred.
+All `allisoneer-` cases require actor ID 20910163; `ordinary-` and automation
+bypass cases reject that ID. A human must inspect underlying actor/results
+evidence: schema checks cannot verify that a linked claim actually occurred.
 
 ## Administrator application, readback and rollback
 
@@ -221,7 +251,8 @@ observed after state and receipts separately from the intended plan.
 Rollback also needs separate human authorization. Refresh and rerun readback
 first; if anything else drifted, stop for a reviewed plan rather than overwriting
 it. A matching readback returns the original `rollback_ruleset`, which removes
-only this added status rule and retains the original review/no-bypass policy.
+only this added status rule and retains the universal no-bypass policy; the
+separate exact review policy and Allison-only exception remain unchanged.
 This is emergency protection rollback, not a report-only image mode or authority
 to merge vulnerable candidates. Keep strict scanner/report failures in place,
 preserve evidence, and repair the failed lane. Re-read/verify restored rules and

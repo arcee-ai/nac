@@ -9,6 +9,18 @@ use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 pub(crate) struct TaskPreparations {
     work: Arc<RwLock<()>>,
     pub(crate) git: TaskGit,
+    #[cfg(test)]
+    pub(crate) native_failure_before_receipt:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    pub(crate) source_resolution:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    pub(crate) scheduled_handoff:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
+    #[cfg(test)]
+    pub(crate) initial_input_wake:
+        std::sync::Mutex<Option<Arc<super::session_creation::CreationProjectionGate>>>,
 }
 
 impl TaskPreparations {

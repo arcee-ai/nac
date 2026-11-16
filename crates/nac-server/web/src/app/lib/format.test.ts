@@ -306,3 +306,13 @@ describe("numberUntitledSessions", () => {
     expect(sessionTitle(sessions[5].summary, numbered)).toBe(`${NEW_CHAT_TITLE} 1`);
   });
 });
+
+it("collapses only a complete heartbeat display envelope", () => {
+  expect(
+    displayPromptFromMessageText(
+      'Heartbeat check: "Local job"\n<nac_heartbeat>\nBound instructions and skills\n</nac_heartbeat>',
+    ),
+  ).toBe("Heartbeat check: Local job");
+  const literal = "Heartbeat check: Local job\n<nac_heartbeat>mention";
+  expect(displayPromptFromMessageText(literal)).toBe(literal);
+});

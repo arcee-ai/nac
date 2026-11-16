@@ -57,6 +57,7 @@ pub(crate) struct CapturedRequest {
 pub(crate) struct ScriptedServer {
     pub(crate) base_url: String,
     handle: thread::JoinHandle<Vec<CapturedRequest>>,
+    stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl ScriptedServer {
@@ -71,9 +72,42 @@ impl ScriptedServer {
         Self::start_observed_with_timeout(responses, Duration::from_secs(5), observer)
     }
 
+    /// Construction has its own bounded wait; responses use the caller's one
+    /// original deadline, shared with the lifecycle settlement being measured.
+    pub(crate) fn start_observed_armed<F>(
+        responses: Vec<ScriptedResponse>,
+        observer: F,
+    ) -> (Self, std::sync::mpsc::SyncSender<Instant>)
+    where
+        F: Fn(usize, &CapturedRequest) + Send + 'static,
+    {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        (
+            Self::start_observed_with_start(
+                responses,
+                Duration::from_secs(5),
+                Some(receiver),
+                observer,
+            ),
+            sender,
+        )
+    }
+
     pub(crate) fn start_observed_with_timeout<F>(
         responses: Vec<ScriptedResponse>,
         timeout: Duration,
+        observer: F,
+    ) -> Self
+    where
+        F: Fn(usize, &CapturedRequest) + Send + 'static,
+    {
+        Self::start_observed_with_start(responses, timeout, None, observer)
+    }
+
+    fn start_observed_with_start<F>(
+        responses: Vec<ScriptedResponse>,
+        timeout: Duration,
+        start: Option<std::sync::mpsc::Receiver<Instant>>,
         observer: F,
     ) -> Self
     where
@@ -84,14 +118,45 @@ impl ScriptedServer {
             .set_nonblocking(true)
             .expect("set scripted HTTP listener nonblocking");
         let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
         let handle = thread::spawn(move || {
-            let deadline = Instant::now() + timeout;
+            let armed = start.is_some();
+            let deadline = match start {
+                Some(receiver) => match receiver.recv_timeout(timeout) {
+                    Ok(deadline) => deadline,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Vec::new(),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        panic!("scripted HTTP construction was not armed within its budget")
+                    }
+                },
+                None => Instant::now() + timeout,
+            };
             let mut requests = Vec::with_capacity(responses.len());
             for (index, response) in responses.into_iter().enumerate() {
+                if armed {
+                    assert!(
+                        Instant::now() < deadline,
+                        "scripted HTTP response budget expired before request {}",
+                        index + 1
+                    );
+                }
                 let mut stream = loop {
                     match listener.accept() {
-                        Ok((stream, _)) => break stream,
+                        Ok((stream, _)) => {
+                            if armed {
+                                assert!(
+                                    Instant::now() < deadline,
+                                    "scripted HTTP response budget expired before request {}",
+                                    index + 1
+                                );
+                            }
+                            break stream;
+                        }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if stopped.load(std::sync::atomic::Ordering::Acquire) {
+                                return requests;
+                            }
                             assert!(
                                 Instant::now() < deadline,
                                 "timed out waiting for scripted HTTP request {}",
@@ -111,7 +176,11 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: Some(stop),
+        }
     }
 
     pub(crate) fn start_same_origin_redirect(
@@ -146,7 +215,11 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: None,
+        }
     }
 
     /// Binds a listener that treats every connection as unexpected: for
@@ -180,7 +253,21 @@ impl ScriptedServer {
             }
             requests
         });
-        Self { base_url, handle }
+        Self {
+            base_url,
+            handle,
+            stop: None,
+        }
+    }
+
+    /// Test-only bounded cleanup after an intentionally missing successor.
+    /// No request is manufactured and ordinary finish remains strict.
+    pub(crate) fn stop_and_finish(self) -> Vec<CapturedRequest> {
+        self.stop
+            .as_ref()
+            .expect("observed server has a stop handle")
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.handle.join().expect("scripted HTTP server thread")
     }
 
     pub(crate) fn finish(self) -> Vec<CapturedRequest> {
@@ -276,5 +363,51 @@ fn write_response(stream: &mut TcpStream, response: &ScriptedResponse) {
         ) {
             panic!("flush scripted HTTP response: {error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod armed_response_tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_request_waits_for_the_explicit_response_budget() {
+        let (server, arm) = ScriptedServer::start_observed_armed(
+            vec![ScriptedResponse::json("200 OK", "{}")],
+            |_, _| {},
+        );
+        let mut stream = TcpStream::connect(server.base_url.trim_start_matches("http://")).unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        stream.set_nonblocking(true).unwrap();
+        assert_eq!(
+            stream.read(&mut [0u8; 1]).unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        arm.send(Instant::now() + Duration::from_secs(5)).unwrap();
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(server.finish().len(), 1);
+    }
+
+    #[test]
+    fn an_expired_original_response_budget_accepts_no_request() {
+        let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (server, arm) =
+            ScriptedServer::start_observed_armed(vec![ScriptedResponse::json("200 OK", "{}")], {
+                let requests = requests.clone();
+                move |_, _| {
+                    requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            });
+        arm.send(Instant::now() - Duration::from_secs(1)).unwrap();
+        assert!(server.handle.join().is_err());
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

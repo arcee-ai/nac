@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
-import { requireComplete, requiredJobs } from "./pr-checks.mjs";
+import { requireComplete, requiredJobs, managedCallerJobs } from "./pr-checks.mjs";
 
 const require = createRequire(import.meta.url);
 const YAML = require("yaml"); // Already in the locked release-tooling graph.
@@ -35,7 +35,7 @@ test("PR and exact tag candidate source scans are direct mandatory aggregate/pub
   const sha = "a".repeat(40);
   const needs = Object.fromEntries(requiredJobs.map((job) => [job, { result: "success" }]));
   needs.prepare.outputs = { sha, run: "true" };
-  needs.managed = { result: "skipped" };
+  for (const job of managedCallerJobs) needs[job] = { result: "skipped" };
   requireComplete(needs, "false", sha);
   for (const result of ["failure", "skipped", "cancelled", "pending", undefined]) {
     needs["source-security"].result = result;

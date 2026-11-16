@@ -1,0 +1,206 @@
+{
+  "ticket": "ALL-582",
+  "baseline": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+  "date": "2026-11-04 America/Los_Angeles",
+  "qualification": {
+    "ordinary_pr_runs": 0,
+    "timing_gate": "unqualified",
+    "coverage_gate": "pending exact-candidate CI"
+  },
+  "strategies": [
+    {
+      "id": "S01",
+      "mechanism": "Git build identity fingerprint dependencies",
+      "revision": "56f743802ff62443291a831994ba95a1eb7d1e27",
+      "measurements": {
+        "strategy": "S01",
+        "base": "b95520ef73db6a0e17ab7b21a650001cf015ebd4",
+        "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+        "cpu_count": 18,
+        "toolchain": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+        "records": [
+          {
+            "strategy": "S01",
+            "variant": "baseline",
+            "attempt": 1,
+            "start_epoch": 1793837102.6379688,
+            "end_epoch": 1793837103.056094,
+            "seconds": 0.4181251525878906,
+            "cache": "cold dependency-free target",
+            "dirty": false,
+            "fresh": false,
+            "git_revision": "178087e0a07b7d6618b391e539428af249742059",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "baseline",
+            "attempt": 2,
+            "start_epoch": 1793837103.067901,
+            "end_epoch": 1793837103.218375,
+            "seconds": 0.15047407150268555,
+            "cache": "same-source warm target",
+            "dirty": true,
+            "fresh": false,
+            "git_revision": "178087e0a07b7d6618b391e539428af249742059",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "baseline",
+            "attempt": 3,
+            "start_epoch": 1793837103.227724,
+            "end_epoch": 1793837103.431699,
+            "seconds": 0.20397496223449707,
+            "cache": "same-source warm target",
+            "dirty": true,
+            "fresh": false,
+            "git_revision": "178087e0a07b7d6618b391e539428af249742059",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "baseline",
+            "attempt": 4,
+            "start_epoch": 1793837103.443205,
+            "end_epoch": 1793837103.638059,
+            "seconds": 0.1948537826538086,
+            "cache": "same-source warm target",
+            "dirty": true,
+            "fresh": false,
+            "git_revision": "178087e0a07b7d6618b391e539428af249742059",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "baseline",
+            "attempt": 5,
+            "start_epoch": 1793837103.64975,
+            "end_epoch": 1793837103.8248801,
+            "seconds": 0.17513012886047363,
+            "cache": "same-source warm target",
+            "dirty": true,
+            "fresh": false,
+            "git_revision": "178087e0a07b7d6618b391e539428af249742059",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "candidate",
+            "attempt": 1,
+            "start_epoch": 1793837103.949347,
+            "end_epoch": 1793837104.4581802,
+            "seconds": 0.5088331699371338,
+            "cache": "cold dependency-free target",
+            "dirty": false,
+            "fresh": false,
+            "git_revision": "9523fbe7a8dc76faebb7e0380c843dc46225f4b7",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "candidate",
+            "attempt": 2,
+            "start_epoch": 1793837104.4693272,
+            "end_epoch": 1793837104.490002,
+            "seconds": 0.020674705505371094,
+            "cache": "same-source warm target",
+            "dirty": false,
+            "fresh": true,
+            "git_revision": "9523fbe7a8dc76faebb7e0380c843dc46225f4b7",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "candidate",
+            "attempt": 3,
+            "start_epoch": 1793837104.499723,
+            "end_epoch": 1793837104.519819,
+            "seconds": 0.0200960636138916,
+            "cache": "same-source warm target",
+            "dirty": false,
+            "fresh": true,
+            "git_revision": "9523fbe7a8dc76faebb7e0380c843dc46225f4b7",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "candidate",
+            "attempt": 4,
+            "start_epoch": 1793837104.530476,
+            "end_epoch": 1793837104.551348,
+            "seconds": 0.020871877670288086,
+            "cache": "same-source warm target",
+            "dirty": false,
+            "fresh": true,
+            "git_revision": "9523fbe7a8dc76faebb7e0380c843dc46225f4b7",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          },
+          {
+            "strategy": "S01",
+            "variant": "candidate",
+            "attempt": 5,
+            "start_epoch": 1793837104.562416,
+            "end_epoch": 1793837104.5831769,
+            "seconds": 0.020760774612426758,
+            "cache": "same-source warm target",
+            "dirty": false,
+            "fresh": true,
+            "git_revision": "9523fbe7a8dc76faebb7e0380c843dc46225f4b7",
+            "command": "RUSTUP_TOOLCHAIN=1.98.0 cargo build --locked --offline -vv"
+          }
+        ],
+        "scope": "Dependency-free Cargo invalidation mechanism only; not whole NAC timing acceptance. No remote runner or paid compute consumed."
+      },
+      "cache": "dependency-free tiny Cargo probe, first build before warm repeats; no full-NAC cache claim",
+      "correctness": "real Cargo fingerprint tests for detached/symbolic/nested/unborn HEAD, packing/unpacking, linked worktrees and env/version changes",
+      "negative_control": "baseline missing packed-refs rebuild reproduced; exists-only guard fails freshness transitions",
+      "disposition": "retain pending full CI latency measurement"
+    },
+    {
+      "id": "S04",
+      "mechanism": "scope Docker identity ARGs after toolchain setup",
+      "revision": "1c419839f",
+      "runner": "local Apple arm64 Docker Desktop BuildKit; cached alpine base; --network=none",
+      "measurements": [
+        {
+          "shape": "early",
+          "candidate": "A",
+          "elapsed_s": 0.3929499170044437,
+          "status": 0,
+          "identity": "dev dev-A A"
+        },
+        {
+          "shape": "early",
+          "candidate": "B",
+          "elapsed_s": 0.23369583301246166,
+          "status": 0,
+          "identity": "dev dev-B B"
+        },
+        {
+          "shape": "late",
+          "candidate": "A",
+          "elapsed_s": 0.2149535840144381,
+          "status": 0,
+          "identity": "dev dev-A A"
+        },
+        {
+          "shape": "late",
+          "candidate": "B",
+          "elapsed_s": 0.1726700829458423,
+          "status": 0,
+          "identity": "dev dev-B B"
+        }
+      ],
+      "compute": "4 probe builds, sum wall time 1.014269416976585984 seconds; no paid runner cost",
+      "correctness": "changing A to B changes compiled identity in both variants; late ARG keeps preceding toolchain/COPY layers cached",
+      "negative_control": "static image contract rejects early ARG and missing revision consumption",
+      "disposition": "retain pending exact linux/amd64 image CI measurement"
+    }
+  ],
+  "limits": [
+    "Mechanism probe wall times are not end-to-end CI processing savings.",
+    "Hosted cache hits/misses, total compute/cost and cold-image qualification still pending.",
+    "S02 browser and S03 early-image DAG remain reserved, not counted as measured strategies."
+  ]
+}
