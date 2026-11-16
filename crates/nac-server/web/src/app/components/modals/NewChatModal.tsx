@@ -333,15 +333,11 @@ function NewChatForm({
       onClose={onClose}
       size={ModalSize.Wide}
       flush
-      className="h-[700px]"
+      className="h-[700px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
       title="New Chat"
-      subheader={
-        policy.orchestrationEnabled
-          ? "Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
-          : "Choose this chat's model. These settings apply to this chat without changing the project default."
-      }
       footer={
         <Button
+          className="min-h-11"
           variant={ButtonVariant.Primary}
           loading={busy}
           disabled={
@@ -357,21 +353,26 @@ function NewChatForm({
         </Button>
       }
     >
+      <p className="mb-6 text-small !leading-[22px] text-basic-secondary">
+        {policy.orchestrationEnabled
+          ? "Choose this chat's behavior and models. These settings apply to this chat without changing the project default."
+          : "Choose this chat's model. These settings apply to this chat without changing the project default."}
+      </p>
       {policy.orchestrationEnabled ? (
         <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
       ) : null}
       {inheritanceError ? (
-        <p role="alert" className="text-micro text-error-primary">
+        <p role="alert" className="text-small !leading-[22px] text-error-primary">
           The inherited settings could not be loaded. Reopen New Chat to refresh and review them.
         </p>
       ) : inheritancePending ? (
-        <div className="flex items-center gap-2 py-6 text-micro text-basic-muted" role="status">
+        <div className="flex items-center gap-2 py-6 text-small text-basic-secondary" role="status">
           <Loader size={LoaderSize.XSmall} />
           Loading the project's model settings…
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          <p className="text-micro text-basic-muted">
+        <div className="flex flex-col gap-6">
+          <p className="text-small !leading-[22px] text-basic-secondary">
             {defaultConfig
               ? "Inherited from the project default"
               : inherited

@@ -438,6 +438,10 @@ async fn connect_http_server(
 #[path = "transport/scope_upgrade_tests.rs"]
 mod scope_upgrade_tests;
 
+#[cfg(test)]
+#[path = "transport/response_bounds_tests.rs"]
+mod response_bounds_tests;
+
 pub(super) fn authorization_required(error: &(dyn std::error::Error + 'static)) -> bool {
     let mut current = Some(error);
     while let Some(source) = current {

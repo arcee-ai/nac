@@ -13,6 +13,7 @@ import {
   SwitchSize,
   TextArea,
 } from "@/app/atoms";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { ArgsEditor } from "@/app/components/modals/MCPServersModal/McpArgsEditor";
 import { EntryDetails } from "@/app/components/modals/MCPServersModal/McpEntryDetails";
@@ -79,6 +80,7 @@ export function McpServerForm({
   onClose,
   onSaved,
   onDeleted,
+  isCurrent = () => true,
   setFooter,
 }: {
   record: McpServerView | null;
@@ -93,9 +95,19 @@ export function McpServerForm({
   onClose: () => void;
   onSaved: (serverName: string) => void;
   onDeleted: () => void;
+  /** The selection/opening that owns this render, captured by each async request. */
+  isCurrent?: () => boolean;
   setFooter: (footer: ReactNode) => void;
 }) {
   const isMobile = useIsMobile();
+  const active = useRef(true);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const [requestError, setRequestError] = useState<string | null>(null);
   const toast = useToast();
   const createServer = useCreateMcpServer();
   const updateServer = useUpdateMcpServer();
@@ -178,9 +190,11 @@ export function McpServerForm({
   const save = async () => {
     const problem = validate();
     if (problem) {
+      setRequestError(problem);
       toast.error(problem);
       return;
     }
+    setRequestError(null);
     const headerMap = mapFromRows(headers);
     const envMap = mapFromRows(env);
     const helper = helperCommand.trim()
@@ -220,7 +234,7 @@ export function McpServerForm({
               : null,
           library_id: template?.id ?? null,
         });
-        onSaved(created.name);
+        if (active.current) onSaved(created.name);
         toast.success("MCP server saved.");
       } else {
         const updated = await updateServer.mutateAsync({
@@ -248,11 +262,13 @@ export function McpServerForm({
             header_helper: transport === "streamable_http" ? helper : null,
           },
         });
-        onSaved(updated.name);
+        if (active.current) onSaved(updated.name);
         toast.success("MCP server updated.");
       }
     } catch (error) {
-      toast.error(`Save failed: ${errorMessage(toRunError(error))}`);
+      const message = `Save failed: ${errorMessage(toRunError(error))}`;
+      if (active.current && isCurrent()) setRequestError(message);
+      toast.error(message);
     }
   };
 
@@ -260,7 +276,7 @@ export function McpServerForm({
     if (!record) return;
     try {
       await deleteServer.mutateAsync(record.name);
-      onDeleted();
+      if (active.current) onDeleted();
       toast.success("MCP server deleted.");
     } catch (error) {
       toast.error(`Delete failed: ${errorMessage(toRunError(error))}`);
@@ -289,9 +305,11 @@ export function McpServerForm({
           ? "A command is required to test."
           : null;
     if (problem) {
+      setRequestError(problem);
       toast.error(problem);
       return;
     }
+    setRequestError(null);
     setTools(null);
     try {
       const result = await testServer.mutateAsync({
@@ -325,17 +343,21 @@ export function McpServerForm({
         protocol,
       });
       if (!result.connected) {
-        toast.error(`Test failed: ${result.error ?? "connection failed"}`);
+        const message = `Test failed: ${result.error ?? "connection failed"}`;
+        if (active.current && isCurrent()) setRequestError(message);
+        toast.error(message);
         return;
       }
-      setTools(result.tools);
+      if (active.current && isCurrent()) setTools(result.tools);
       toast.success(
         `Connection succeeded: ${result.tools.length} tool${
           result.tools.length === 1 ? "" : "s"
         } found.`,
       );
     } catch (error) {
-      toast.error(`Test failed: ${errorMessage(toRunError(error))}`);
+      const message = `Test failed: ${errorMessage(toRunError(error))}`;
+      if (active.current && isCurrent()) setRequestError(message);
+      toast.error(message);
     }
   };
 
@@ -382,19 +404,19 @@ export function McpServerForm({
           disabled={operationBusy}
           onClick={() => void saveRef.current()}
         >
-          Save
+          {createServer.isPending || updateServer.isPending ? "Saving…" : "Save"}
         </FooterButton>
       </>,
     );
     return () => setFooter(null);
-  }, [isMobile, operationBusy, record, setFooter]);
+  }, [isMobile, operationBusy, createServer.isPending, updateServer.isPending, record, setFooter]);
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0">
       {onBack ? (
         <div className="flex items-center gap-1 shrink-0 border-b border-muted px-2 py-2">
           <Button
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.Ghost}
             content={ButtonContent.Icon}
             aria-label="Back to library"
@@ -407,309 +429,366 @@ export function McpServerForm({
           </span>
         </div>
       ) : null}
-      <div
-        className={cn(
-          "flex-1 overflow-auto p-4 flex flex-col gap-4 [&>*]:shrink-0",
-          isMobile && "pb-[88px]",
-        )}
+      <fieldset
+        disabled={createServer.isPending || updateServer.isPending || deleteServer.isPending}
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0"
       >
-        {libraryEntry ? <EntryDetails entry={libraryEntry} /> : null}
+        <div
+          className={cn(
+            "box-border flex min-h-0 w-full min-w-0 flex-1 flex-col gap-8 overflow-auto p-4 md:p-6 [&>*]:shrink-0",
+            isMobile && "pb-6",
+          )}
+        >
+          {libraryEntry ? <EntryDetails entry={libraryEntry} /> : null}
 
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex flex-col gap-1 flex-grow">
-            <FieldLabel label="Name" required />
+          <FormSection
+            title="Server details"
+            description="Name the connection and choose how it is used when a session starts."
+          >
             <Input
+              label="Name*"
+              aria-required="true"
+              aria-label="Server name"
               inputSize={isMobile ? InputSize.Large : InputSize.Medium}
               placeholder="my_server"
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-          </div>
-
-          <div className="md:pt-6">
-            <div className="flex gap-4 items-center px-4 py-2 rounded-md bg-elevation-sublevel-variant-A shadow-convex">
-              <FieldLabel
-                label="Enabled"
-                hint="Disabled servers are kept but not connected when a session starts."
-              />
-              <Switch
-                checked={enabled}
-                size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
-                onChange={setEnabled}
-              />
-              <FieldLabel
-                label="Required"
-                hint="Fail session admission when this enabled server cannot start."
-              />
-              <Switch
-                checked={required}
-                size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
-                onChange={setRequired}
-              />
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex min-h-11 items-center justify-between gap-4">
+                <span className="min-w-0">
+                  <span className="label-small text-basic-primary">Enabled</span>
+                  <span className="block text-small !leading-[22px] text-basic-secondary">
+                    Disabled servers are kept but not connected when a session starts.
+                  </span>
+                </span>
+                <span className="flex min-h-11 min-w-11 items-center justify-center">
+                  <Switch
+                    className="before:absolute before:-inset-3"
+                    aria-label="Enabled"
+                    checked={enabled}
+                    size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
+                    onChange={setEnabled}
+                  />
+                </span>
+              </label>
+              <label className="flex min-h-11 items-center justify-between gap-4">
+                <span className="min-w-0">
+                  <span className="label-small text-basic-primary">Required</span>
+                  <span className="block text-small !leading-[22px] text-basic-secondary">
+                    Fail session admission when this enabled server cannot start.
+                  </span>
+                </span>
+                <span className="flex min-h-11 min-w-11 items-center justify-center">
+                  <Switch
+                    className="before:absolute before:-inset-3"
+                    aria-label="Required"
+                    checked={required}
+                    size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
+                    onChange={setRequired}
+                  />
+                </span>
+              </label>
             </div>
-          </div>
-        </div>
-        <div className="flex flex-col gap-4 p-4 rounded-md bg-elevation-sublevel-variant-A shadow-convex">
-          <div className="flex flex-col gap-1">
-            <FieldLabel label="Transport" />
-            {/* Two choices, and which one is picked decides which half of the
+          </FormSection>
+          <FormSection
+            title="Connection"
+            description="Choose the transport and protocol, then supply the endpoint or command."
+          >
+            <div className="flex flex-col gap-1">
+              <FieldLabel label="Transport" />
+              {/* Two choices, and which one is picked decides which half of the
               form follows, so both stay visible instead of hiding behind a
               select's closed trigger. */}
-            <div className="flex gap-2">
-              {TRANSPORT_ITEMS.map((item) => (
-                <Button
-                  key={item.id}
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={transport === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
-                  content={ButtonContent.Text}
-                  aria-pressed={transport === item.id}
-                  onClick={() => setTransport(item.id)}
-                >
-                  {item.label}
-                </Button>
+              <div className="flex flex-wrap gap-2">
+                {TRANSPORT_ITEMS.map((item) => (
+                  <Button
+                    key={item.id}
+                    size={isMobile ? ButtonSize.Large : ButtonSize.Small}
+                    variant={
+                      transport === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary
+                    }
+                    content={ButtonContent.Text}
+                    className="max-md:min-w-0 max-md:max-w-full max-md:!h-auto max-md:min-h-11 max-md:!whitespace-normal max-md:!py-3"
+                    aria-pressed={transport === item.id}
+                    onClick={() => setTransport(item.id)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <FieldLabel
+                label="Protocol"
+                hint={PROTOCOL_ITEMS.find((item) => item.id === protocol)?.hint}
+              />
+              <div className="flex flex-wrap gap-2">
+                {PROTOCOL_ITEMS.map((item) => (
+                  <Button
+                    key={item.id}
+                    size={isMobile ? ButtonSize.Large : ButtonSize.Small}
+                    variant={protocol === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
+                    content={ButtonContent.Text}
+                    aria-pressed={protocol === item.id}
+                    onClick={() => setProtocol(item.id)}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {transport === "streamable_http" ? (
+              <>
+                <div className="flex flex-col gap-1">
+                  <FieldLabel label="URL" required />
+                  <Input
+                    aria-label="URL"
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    placeholder="https://example.com/mcp"
+                    value={url}
+                    onChange={(event) => setUrl(event.target.value)}
+                  />
+                </div>
+                <KvEditor
+                  label="Headers"
+                  hint="Sent with every request. Values may reference an environment variable as ${VAR_NAME}; stored literals never display again."
+                  keyPlaceholder="Authorization"
+                  rows={headers}
+                  onChange={setHeaders}
+                />
+                <div className="flex flex-col gap-1">
+                  <FieldLabel
+                    label="Bearer token environment variable"
+                    hint="The variable value is sent as a Bearer token without persisting it."
+                  />
+                  <Input
+                    aria-label="Bearer token environment variable"
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    placeholder="MCP_TOKEN"
+                    value={bearerTokenEnvVar}
+                    onChange={(event) => setBearerTokenEnvVar(event.target.value)}
+                  />
+                </div>
+                <KvEditor
+                  secret={false}
+                  label="Environment-backed headers"
+                  hint="Map each HTTP header name to the environment variable that supplies its value."
+                  keyPlaceholder="X-API-Key"
+                  rows={envHeaders}
+                  onChange={setEnvHeaders}
+                />
+                <div className="flex flex-col gap-1">
+                  <FieldLabel
+                    label="Header helper command"
+                    hint="Optional bounded command that prints a JSON object of same-origin request headers."
+                  />
+                  <Input
+                    aria-label="Header helper command"
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    placeholder="./refresh-mcp-headers"
+                    value={helperCommand}
+                    onChange={(event) => setHelperCommand(event.target.value)}
+                  />
+                </div>
+                {helperCommand.trim() ? (
+                  <>
+                    <ArgsEditor
+                      label="Header helper arguments"
+                      itemLabel="Header helper argument"
+                      rows={helperArgs}
+                      onChange={setHelperArgs}
+                    />
+                    <div className="flex flex-col gap-1">
+                      <FieldLabel label="Header helper working directory" />
+                      <Input
+                        aria-label="Header helper working directory"
+                        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                        value={helperCwd}
+                        onChange={(event) => setHelperCwd(event.target.value)}
+                      />
+                    </div>
+                    <KvEditor
+                      label="Header helper environment"
+                      hint="Stored literals remain write-only."
+                      keyPlaceholder="TOKEN"
+                      rows={helperEnv}
+                      onChange={setHelperEnv}
+                    />
+                    <div className="flex flex-col gap-1">
+                      <FieldLabel
+                        label="Header helper forwarded environment"
+                        hint="One variable name per line."
+                      />
+                      <TextArea
+                        aria-label="Header helper forwarded environment"
+                        textAreaClassName="min-h-[64px] font-mono"
+                        value={helperEnvVarsText}
+                        onChange={(event) => setHelperEnvVarsText(event.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <FieldLabel label="Header helper timeout (ms)" />
+                      <Input
+                        aria-label="Header helper timeout (ms)"
+                        inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                        type="number"
+                        min={100}
+                        max={600000}
+                        value={helperTimeout}
+                        onChange={(event) => setHelperTimeout(event.target.value)}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1">
+                  <FieldLabel label="Command" required />
+                  <Input
+                    aria-label="Command"
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    placeholder="npx"
+                    value={command}
+                    onChange={(event) => setCommand(event.target.value)}
+                  />
+                </div>
+                <ArgsEditor label="Arguments" itemLabel="Argument" rows={args} onChange={setArgs} />
+                <KvEditor
+                  label="Environment"
+                  hint="Set for the server process. Values may reference an environment variable as ${VAR_NAME}; stored literals never display again."
+                  keyPlaceholder="API_KEY"
+                  rows={env}
+                  onChange={setEnv}
+                />
+                <div className="flex flex-col gap-1">
+                  <FieldLabel
+                    label="Working directory"
+                    hint="Relative paths resolve from the workspace."
+                  />
+                  <Input
+                    aria-label="Working directory"
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    placeholder="packages/server"
+                    value={cwd}
+                    onChange={(event) => setCwd(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <FieldLabel
+                    label="Forward environment variables"
+                    hint="One existing host variable name per line."
+                  />
+                  <TextArea
+                    textAreaClassName="min-h-[64px] font-mono"
+                    aria-label="Forward environment variables"
+                    value={envVarsText}
+                    onChange={(event) => setEnvVarsText(event.target.value)}
+                  />
+                </div>
+              </>
+            )}
+          </FormSection>
+          <FormSection
+            title="Timeouts"
+            description="Optional limits in milliseconds. Leave blank to keep the defaults."
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                ["Startup timeout (ms)", startupTimeout, setStartupTimeout],
+                ["Catalog timeout (ms)", catalogTimeout, setCatalogTimeout],
+                ["Execution timeout (ms)", executionTimeout, setExecutionTimeout],
+              ].map(([label, value, setter]) => (
+                <div key={label as string} className="flex flex-col gap-1">
+                  <FieldLabel label={label as string} />
+                  <Input
+                    aria-label={label as string}
+                    inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    type="number"
+                    min={100}
+                    max={600000}
+                    value={value as string}
+                    onChange={(event) => (setter as (value: string) => void)(event.target.value)}
+                  />
+                </div>
               ))}
             </div>
-          </div>
+          </FormSection>
+          <FormSection
+            title="Connection status"
+            description="Test these values before saving, or manage the saved server connection."
+          >
+            {record ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-small !leading-[22px] text-basic-secondary break-words">
+                  {runtime?.sessions_blocked
+                    ? "Disconnected. Sessions won't use this server until you connect it."
+                    : `Runtime: ${runtime?.state ?? "disconnected"}`}
+                  {runtime?.error ? ` — ${runtime.error}` : ""}
+                </span>
+                {(["connect", "disconnect", "reload"] as const).map((action) => (
+                  <Button
+                    key={action}
+                    size={isMobile ? ButtonSize.Large : ButtonSize.Small}
+                    variant={ButtonVariant.Secondary}
+                    disabled={operationBusy}
+                    className="max-md:min-w-0 max-md:max-w-full max-md:!h-auto max-md:min-h-11 max-md:!whitespace-normal max-md:!py-3"
+                    onClick={() => void operate(action)}
+                  >
+                    {action[0].toUpperCase() + action.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
 
-          <div className="flex flex-col gap-1">
-            <FieldLabel
-              label="Protocol"
-              hint={PROTOCOL_ITEMS.find((item) => item.id === protocol)?.hint}
-            />
-            <div className="flex flex-wrap gap-2">
-              {PROTOCOL_ITEMS.map((item) => (
-                <Button
-                  key={item.id}
-                  size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
-                  variant={protocol === item.id ? ButtonVariant.Primary : ButtonVariant.Secondary}
-                  content={ButtonContent.Text}
-                  aria-pressed={protocol === item.id}
-                  onClick={() => setProtocol(item.id)}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {transport === "streamable_http" ? (
-            <>
-              <div className="flex flex-col gap-1">
-                <FieldLabel label="URL" required />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="https://example.com/mcp"
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                />
-              </div>
-              <KvEditor
-                label="Headers"
-                hint="Sent with every request. Values may reference an environment variable as ${VAR_NAME}; stored literals never display again."
-                keyPlaceholder="Authorization"
-                rows={headers}
-                onChange={setHeaders}
-              />
-              <div className="flex flex-col gap-1">
-                <FieldLabel
-                  label="Bearer token environment variable"
-                  hint="The variable value is sent as a Bearer token without persisting it."
-                />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="MCP_TOKEN"
-                  value={bearerTokenEnvVar}
-                  onChange={(event) => setBearerTokenEnvVar(event.target.value)}
-                />
-              </div>
-              <KvEditor
-                label="Environment-backed headers"
-                hint="Map each HTTP header name to the environment variable that supplies its value."
-                keyPlaceholder="X-API-Key"
-                rows={envHeaders}
-                onChange={setEnvHeaders}
-              />
-              <div className="flex flex-col gap-1">
-                <FieldLabel
-                  label="Header helper command"
-                  hint="Optional bounded command that prints a JSON object of same-origin request headers."
-                />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="./refresh-mcp-headers"
-                  value={helperCommand}
-                  onChange={(event) => setHelperCommand(event.target.value)}
-                />
-              </div>
-              {helperCommand.trim() ? (
-                <>
-                  <ArgsEditor
-                    label="Header helper arguments"
-                    itemLabel="Header helper argument"
-                    rows={helperArgs}
-                    onChange={setHelperArgs}
-                  />
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel label="Header helper working directory" />
-                    <Input
-                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                      value={helperCwd}
-                      onChange={(event) => setHelperCwd(event.target.value)}
-                    />
-                  </div>
-                  <KvEditor
-                    label="Header helper environment"
-                    hint="Stored literals remain write-only."
-                    keyPlaceholder="TOKEN"
-                    rows={helperEnv}
-                    onChange={setHelperEnv}
-                  />
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel
-                      label="Header helper forwarded environment"
-                      hint="One variable name per line."
-                    />
-                    <TextArea
-                      textAreaClassName="min-h-[64px] font-mono"
-                      value={helperEnvVarsText}
-                      onChange={(event) => setHelperEnvVarsText(event.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <FieldLabel label="Header helper timeout (ms)" />
-                    <Input
-                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                      type="number"
-                      min={100}
-                      max={600000}
-                      value={helperTimeout}
-                      onChange={(event) => setHelperTimeout(event.target.value)}
-                    />
-                  </div>
-                </>
+            {requestError ? (
+              <p role="alert" className="text-small !leading-[22px] text-error-primary break-words">
+                {requestError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              <Button
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
+                variant={ButtonVariant.Secondary}
+                disabled={operationBusy}
+                className="max-md:min-w-0 max-md:max-w-full max-md:!h-auto max-md:min-h-11 max-md:!whitespace-normal max-md:!py-3"
+                onClick={() => void test()}
+                content={ButtonContent.IconLeft}
+              >
+                <Icon iconName={IconName.Bolt} />
+                {testServer.isPending ? "Testing…" : "Test connection"}
+              </Button>
+              {tools ? (
+                <span className="text-small !leading-[22px] text-basic-secondary break-words">
+                  {tools.length} tool{tools.length === 1 ? "" : "s"} found
+                </span>
               ) : null}
-            </>
-          ) : (
-            <>
-              <div className="flex flex-col gap-1">
-                <FieldLabel label="Command" required />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="npx"
-                  value={command}
-                  onChange={(event) => setCommand(event.target.value)}
-                />
-              </div>
-              <ArgsEditor label="Arguments" itemLabel="Argument" rows={args} onChange={setArgs} />
-              <KvEditor
-                label="Environment"
-                hint="Set for the server process. Values may reference an environment variable as ${VAR_NAME}; stored literals never display again."
-                keyPlaceholder="API_KEY"
-                rows={env}
-                onChange={setEnv}
-              />
-              <div className="flex flex-col gap-1">
-                <FieldLabel
-                  label="Working directory"
-                  hint="Relative paths resolve from the workspace."
-                />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="packages/server"
-                  value={cwd}
-                  onChange={(event) => setCwd(event.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <FieldLabel
-                  label="Forward environment variables"
-                  hint="One existing host variable name per line."
-                />
-                <TextArea
-                  textAreaClassName="min-h-[64px] font-mono"
-                  value={envVarsText}
-                  onChange={(event) => setEnvVarsText(event.target.value)}
-                />
-              </div>
-            </>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {[
-              ["Startup timeout (ms)", startupTimeout, setStartupTimeout],
-              ["Catalog timeout (ms)", catalogTimeout, setCatalogTimeout],
-              ["Execution timeout (ms)", executionTimeout, setExecutionTimeout],
-            ].map(([label, value, setter]) => (
-              <div key={label as string} className="flex flex-col gap-1">
-                <FieldLabel label={label as string} />
-                <Input
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  type="number"
-                  min={100}
-                  max={600000}
-                  value={value as string}
-                  onChange={(event) => (setter as (value: string) => void)(event.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-
-          {record ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-small text-basic-muted">
-                {runtime?.sessions_blocked
-                  ? "Disconnected. Sessions won't use this server until you connect it."
-                  : `Runtime: ${runtime?.state ?? "disconnected"}`}
-                {runtime?.error ? ` — ${runtime.error}` : ""}
-              </span>
-              {(["connect", "disconnect", "reload"] as const).map((action) => (
-                <Button
-                  key={action}
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Secondary}
-                  disabled={operationBusy}
-                  onClick={() => void operate(action)}
-                >
-                  {action[0].toUpperCase() + action.slice(1)}
-                </Button>
+            </div>
+          </FormSection>
+          {record && transport === "streamable_http" ? (
+            <McpOAuthPanel serverName={record.name} endpoint={record.url ?? undefined} />
+          ) : null}
+          {tools && tools.length ? (
+            <div className="flex flex-col gap-1">
+              {tools.map((tool) => (
+                <div key={tool.name} className="flex flex-col gap-1 min-w-0">
+                  <span className="code code-small text-basic-primary break-words">
+                    {tool.name}
+                  </span>
+                  {tool.description ? (
+                    <span className="text-small !leading-[22px] text-basic-secondary break-words">
+                      {tool.description}
+                    </span>
+                  ) : null}
+                </div>
               ))}
             </div>
           ) : null}
-
-          <div className="flex items-center gap-2 justify-end">
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Secondary}
-              disabled={operationBusy}
-              onClick={() => void test()}
-              content={ButtonContent.IconLeft}
-            >
-              <Icon iconName={IconName.Bolt} />
-              {testServer.isPending ? "Testing…" : "Test connection"}
-            </Button>
-            {tools ? (
-              <span className="text-small text-basic-muted">
-                {tools.length} tool{tools.length === 1 ? "" : "s"} found
-              </span>
-            ) : null}
-          </div>
         </div>
-        {record && transport === "streamable_http" ? (
-          <McpOAuthPanel serverName={record.name} endpoint={record.url ?? undefined} />
-        ) : null}
-        {tools && tools.length ? (
-          <div className="flex flex-col gap-1">
-            {tools.map((tool) => (
-              <div key={tool.name} className="flex items-baseline gap-2 min-w-0">
-                <span className="code code-small text-basic-primary shrink-0">{tool.name}</span>
-                {tool.description ? (
-                  <span className="text-small text-basic-muted truncate">{tool.description}</span>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      </fieldset>
     </div>
   );
 }

@@ -148,7 +148,7 @@ test-source-size:
 	bash scripts/check-source-size.sh
 
 .PHONY: test-manual-stack-override
-## Exercise the human-only stack override without GitHub mutations
+## Exercise the maintainer-authorized stack override without GitHub mutations
 test-manual-stack-override:
 	node --test scripts/manual-stack-override.test.mjs scripts/manual-stack-admission.test.mjs
 
@@ -271,7 +271,8 @@ lint-workflows:
 
 ## Prove workflow/shell enforcement with real pinned tools and invalid fixtures
 test-workflow-lint:
-	node --test .github/scripts/workflow-lint.test.mjs
+	python3 -B .github/scripts/github-asset.test.py
+	node --test .github/scripts/workflow-lint.test.mjs .github/scripts/workflow-lint-tools.test.mjs .github/scripts/image-token-callers.test.mjs
 
 ## Lint frontend and production Rust targets
 lint:

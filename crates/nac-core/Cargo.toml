@@ -31,7 +31,7 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 anyhow.workspace = true
 async-trait = "0.1"
-rusqlite = { version = "0.32", features = ["bundled", "trace"] }
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "trace", "cache", "fallible_uint"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 libc.workspace = true
 portable-pty = "0.9"
