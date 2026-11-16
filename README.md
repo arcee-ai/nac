@@ -90,6 +90,19 @@ curl -fsSL https://raw.githubusercontent.com/arcee-ai/nac/main/scripts/uninstall
 
 Pull requests are welcome. A CLA-signing bot checks every PR against arcee-ai's [CLA](https://github.com/arcee-ai/mergekit/blob/main/CLA.md); comment `I have read the CLA Document and I hereby sign the CLA` on your PR to sign it (or `recheck` to re-run the check).
 
+Development happens on the remote's default branch, currently `dev`; `main`
+is not the integration branch. Ask the remote rather than trusting a local
+cache, because an older clone's `origin/HEAD` can still point at `main`:
+
+```sh
+git fetch origin
+git remote show origin | sed -n 's/.*HEAD branch: //p'   # prints: dev
+git switch dev                                           # or: git switch -c dev --track origin/dev
+```
+
+`git remote set-head origin --auto` refreshes the cached `origin/HEAD` if you
+want it to agree; it does not change any branch.
+
 The supported source workflow starts with one dependency setup per fresh
 worktree:
 
@@ -100,11 +113,23 @@ make dev
 
 `make dev` runs the Rust API at `http://127.0.0.1:3210` and the React app at
 `http://127.0.0.1:5173`, with Vite HMR and API proxying. Both process trees are
-supervised together; Ctrl-C or either process failing stops the other. Use
-`make build` to rebuild the committed frontend bundle and compile the complete
-production-embedded debug application, then `make run` to build and run that
-production-equivalent application from the current checkout. Set
-`RUN_BIND=127.0.0.1:4321` when the default port is already in use.
+supervised together; Ctrl-C or either process failing stops the other.
+
+If either port is taken, `make dev` stops before starting anything and names
+the address and the variable to change. It never stops or reuses the other
+process. Pick free ports instead; the Vite proxy follows `DEV_BIND`
+automatically, so open the app port:
+
+```sh
+DEV_BIND=127.0.0.1:4321 make dev                  # API moves; app stays on 5173
+DEV_BIND=127.0.0.1:4321 VITE_PORT=5174 make dev   # both move; open http://127.0.0.1:5174
+```
+
+Use `make build` to rebuild the committed frontend bundle and compile the
+complete production-embedded debug application, then `make run` to build and
+run that production-equivalent application from the current checkout. `make
+run` serves one port and uses `RUN_BIND`, not `DEV_BIND`: set
+`RUN_BIND=127.0.0.1:4321 make run` when the default port is already in use.
 
 For day-to-day use without replacing a stable installation, install the source
 build under its development name:
