@@ -17,6 +17,7 @@ export const queryKeys = {
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   sshConfigs: ["ssh-configs"] as const,
+  sshAliases: ["ssh-aliases"] as const,
   mcpLibrary: ["mcp-library"] as const,
   mcpServers: ["mcp-servers"] as const,
   mcpRuntime: ["mcp-runtime"] as const,
