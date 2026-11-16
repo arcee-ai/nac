@@ -3,10 +3,15 @@ import type {
   ProductNavigationRequest,
   ProductNavigationResolution,
 } from "@/app/types/api";
+import type {
+  NotificationSessionTarget,
+  SessionTargetOutcome,
+} from "../desktop-commands/sessionTarget";
 
 export interface ProductNavigationAdapter {
   currentSession(): string | null;
   open(resolution: ProductNavigationResolution): boolean;
+  openNotificationSessionTarget?(sessionId: string): void;
 }
 
 /** One runtime owns this explicit-action bridge. Nothing reads Markdown or
@@ -19,7 +24,10 @@ export class ProductNavigation {
       request: ProductNavigationRequest,
     ) => Promise<ProductNavigationResolution>,
     private readonly closed: () => boolean,
-    private readonly inspect?: (sessionId: string | null) => Promise<ProductContext>,
+    private readonly inspect?: (
+      sessionId: string | null,
+      signal?: AbortSignal,
+    ) => Promise<ProductContext>,
   ) {}
 
   connect(adapter: ProductNavigationAdapter): () => void {
@@ -36,6 +44,34 @@ export class ProductNavigation {
   close(): void {
     this.adapter = undefined;
     this.version++;
+  }
+
+  /** Reuse the normal full-chat lifecycle. It may resume already authorized
+   * durable intent; this request carries no new intent or permission action. */
+  async openNotificationSessionTarget(
+    target: NotificationSessionTarget,
+    signal: AbortSignal,
+    canNavigate: () => boolean,
+  ): Promise<SessionTargetOutcome> {
+    const adapter = this.adapter;
+    if (this.closed() || signal.aborted || !adapter?.openNotificationSessionTarget || !this.inspect)
+      return "stale";
+    if (!canNavigate()) return "deferred";
+    const version = ++this.version;
+    const source = adapter.currentSession();
+    const current = await this.inspect(target.session_id, signal);
+    if (
+      this.closed() ||
+      signal.aborted ||
+      this.version !== version ||
+      this.adapter !== adapter ||
+      adapter.currentSession() !== source
+    )
+      return "stale";
+    if (current.session?.session_id !== target.session_id) return "unavailable";
+    if (!canNavigate()) return "deferred";
+    adapter.openNotificationSessionTarget(target.session_id);
+    return "opened";
   }
 
   /** Call only for a user click or explicit navigation request. The server

@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -25,12 +26,12 @@ function evaluate(code,state) {
 }
 function project(value,required=requiredJobs) {
   assert.equal(required.filter(name=>name==='browser-apt').length,1);
-  const old=structuredClone(value);
+  const old=structuredClone(value);reverseAssetTokens(old);
   reverseAdmission(old);reverseParallelApt(old,aptProducerSteps);reverseElapsedEvidence(old);
   const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
-  // Same pre-admission full APT graph as the existing guard, no new digest.
+  // Full pre-admission APT graph plus the required startup-custody and native-auth fixture controls.
   assert.equal(createHash('sha256').update(JSON.stringify(sort(old))).digest('hex'),
-    'bc7d01b245f282223ddab9962cf6978955b9a897e8e95df1393892fd1dfd4ff2');
+    '9faf04f1f32d65e2249fbf855c8158e2b24faa652b34d9b370cd6f73542ac167');
 }
 
 test('strict split-only projection recovers the complete pre-admission APT graph',()=>project(actual));

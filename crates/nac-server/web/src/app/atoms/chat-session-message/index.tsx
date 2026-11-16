@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import { buttonVariants } from "../../ui/button";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 
@@ -32,13 +33,17 @@ const variantFills = {
   [ChatSessionMessageVariant.Success]: "var(--color-fill-success-primary)",
 } satisfies Record<ChatSessionMessageVariant, string>;
 
+export type ChatSessionMessageAction =
+  | { label: string; onClick: () => void }
+  | { label: string; href: string };
+
 interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   title: React.ReactNode;
   variant?: ChatSessionMessageVariant;
   /** Optional second line explaining the title. */
   children?: React.ReactNode;
   /** Optional way out of whatever the message reports. */
-  action?: { label: string; onClick: () => void };
+  action?: ChatSessionMessageAction;
 }
 
 /**
@@ -75,7 +80,20 @@ const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
         <p className="flex-1 min-w-0 header-sm break-words !my-0">{title}</p>
       </div>
       {children ? <div className="w-full text-small break-words">{children}</div> : null}
-      {action ? (
+      {action && "href" in action ? (
+        <a
+          href={action.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({
+            size: ButtonSize.Small,
+            variant: ButtonVariant.Primary,
+            content: ButtonContent.Text,
+          })}
+        >
+          {action.label}
+        </a>
+      ) : action ? (
         <Button
           size={ButtonSize.Small}
           variant={ButtonVariant.Primary}
