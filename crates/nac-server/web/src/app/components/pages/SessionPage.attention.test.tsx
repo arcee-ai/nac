@@ -21,7 +21,6 @@ vi.mock("@/app/components/inspector/SessionSideBox", () => ({ SessionSideBox: ()
 vi.mock("@/app/components/inspector/TopSingleSessionHeader", () => ({
   TopSingleSessionHeader: () => null,
 }));
-vi.mock("@/app/components/inspector/RightSidebarRail", () => ({ RightSidebarRail: () => null }));
 vi.mock("@/app/components/inspector/transcript/TranscriptModelProvider", () => ({
   TranscriptModelProvider: ({ children }: { children: ReactNode }) => children,
 }));

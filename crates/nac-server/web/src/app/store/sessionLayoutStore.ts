@@ -1,6 +1,6 @@
-// How the session screen splits between the side box and the chat, and which
-// row the side box points at. Kept outside the URL because both are viewing
-// preferences, not locations.
+// Whether the session's drawer is open (floating or docked beside the chat),
+// and which row its panels point at. Kept outside the URL because both are
+// viewing preferences, not locations; the route's `:panel` picks the content.
 
 import type { InsightsFilter } from "@/app/features/insights/model/types";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
@@ -27,6 +27,7 @@ interface SubagentPageReturn {
   context: InsightsReturnContext;
   expanded: boolean;
   collapsed: boolean;
+  drawerContent: DrawerContent;
 }
 
 interface SessionLayoutState {
@@ -45,17 +46,26 @@ interface SessionLayoutState {
 
   /** Unique fresh-visit source; exact child returns restore the saved parent source. */
   insightSelectionEpoch: number;
-  /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
+  /**
+   * The drawer is closed. Focus opens a session with no drawer, so this
+   * defaults to true; a header pill, the transcript or a desktop command
+   * opens it on the route's panel.
+   */
   collapsed: boolean;
   /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
   sidePanelAnimate: boolean;
   /**
-   * Project the collapsed preference belongs to. Null until the open session's
-   * project is known. Switching projects restores that project's stored rail.
+   * Project the open preference belongs to. Null until the open session's
+   * project is known. Only a store created with `rememberPerProject` restores
+   * a project's stored drawer; Focus's default never does.
    */
   sidePanelProjectId: string | null;
-  /** Side box lifted out of the row into a full-screen dialog. */
+  /** The floating drawer fills the window instead of its 560px column. */
   expanded: boolean;
+  /** The drawer docks as a column beside the chat instead of floating (⌘\). */
+  pinned: boolean;
+  /** What the open drawer holds: the route's panel, or the session goal. */
+  drawerContent: DrawerContent;
   /**
    * Whether a narrow panel is showing its list of rows. There is no room for
    * the list beside the detail at that width, so the panel opens on the row it
@@ -99,8 +109,18 @@ interface SessionLayoutState {
 }
 
 export type FileListing = "tree" | "changed";
+export type DrawerContent = "panel" | "goal";
+
 /** One presentation lifetime; hosted preferences are ephemeral. */
-export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "setItem">) {
+export function createSessionLayoutStore(
+  storage?: Pick<Storage, "getItem" | "setItem">,
+  {
+    rememberPerProject = false,
+  }: {
+    /** Restore each project's last drawer state. Off: every session opens quiet. */
+    rememberPerProject?: boolean;
+  } = {},
+) {
   const sessionLayoutStore = createStore<SessionLayoutState>({
     insightSelectionEpoch: 0,
     activeSessionId: null,
@@ -111,6 +131,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     sidePanelAnimate: true,
     sidePanelProjectId: null,
     expanded: false,
+    pinned: false,
+    drawerContent: "panel",
     panelList: false,
     selectedThread: null,
     selectedThreadEpisode: null,
@@ -157,6 +179,7 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   }
 
   function rememberCollapsed(collapsed: boolean): void {
+    if (!rememberPerProject) return;
     const projectId = getState().sidePanelProjectId;
     if (projectId == null) return;
     writeCollapsed(projectId, collapsed);
@@ -176,6 +199,10 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   function bindSidePanelProject(projectId: string): void {
     const current = getState().sidePanelProjectId;
     if (current === projectId) return;
+    if (!rememberPerProject) {
+      setState({ sidePanelProjectId: projectId });
+      return;
+    }
     const openedBeforeBind = current == null && !getState().collapsed;
     const collapsed = openedBeforeBind ? false : readCollapsed(projectId);
     const changed = getState().collapsed !== collapsed;
@@ -196,6 +223,10 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     // Already unbound: keep whatever the user did while the next project loaded.
     // Collapsing here would hide a Show-panel click from `openedBeforeBind`.
     if (getState().sidePanelProjectId == null) return;
+    if (!rememberPerProject) {
+      setState({ sidePanelProjectId: null });
+      return;
+    }
     setState({
       sidePanelProjectId: null,
       collapsed: true,
@@ -203,23 +234,44 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     });
   }
 
-  /**
-   * Show the side box as a dialog over the session, or put it back in the row.
-   * It always comes up on the row it has open rather than on a list of rows.
-   */
+  /** Let the floating drawer fill the window, or put it back in its column. */
   function toggleSidePanelExpanded(): void {
     const expanded = !getState().expanded;
     setState(expanded ? { expanded, panelList: false } : { expanded });
   }
 
-  /** Bring the side box up as a phone's dialog, on the list of its panel's rows. */
+  /** Open the drawer on its panel's list of rows (a phone shows lists first). */
   function openSidePanelList(): void {
-    setState({ expanded: true, panelList: true });
+    setState({ drawerContent: "panel", panelList: true });
+    applyCollapsed(false);
   }
 
-  /** Slide the side box down to its icon rail, or bring the panel back. */
+  /** Open the drawer when it is closed, close it when it is open. */
   function toggleSidePanelCollapsed(): void {
     applyCollapsed(!getState().collapsed);
+  }
+
+  /** Open the drawer on the given content; the route says which panel. */
+  function openDrawer(drawerContent: DrawerContent = "panel"): void {
+    if (getState().drawerContent !== drawerContent) setState({ drawerContent });
+    applyCollapsed(false);
+  }
+
+  /** Close the drawer, floating or docked. Pinning is kept for the next open. */
+  function closeDrawer(): void {
+    if (getState().expanded) setState({ expanded: false });
+    applyCollapsed(true);
+  }
+
+  /** ⌘\: dock the drawer beside the chat, or float it again. Opens it when closed. */
+  function toggleDrawerPinned(): void {
+    const state = getState();
+    if (state.collapsed) {
+      setState({ pinned: true, expanded: false });
+      applyCollapsed(false);
+      return;
+    }
+    setState({ pinned: !state.pinned, expanded: false });
   }
 
   /** Swap a narrow panel between its list of rows and the row it has open. */
@@ -232,16 +284,13 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   }
 
   /**
-   * Bring the side box back on screen when the chat points at one of its rows.
-   * On a phone there is no row to slide back into, so it comes up as the dialog.
+   * Open the drawer when the chat points at one of its rows. The argument is
+   * kept for callers from the two-column era; every width now opens the same
+   * drawer (a bottom sheet on a phone).
    */
-  function revealSidePanel(asDialog = false): void {
+  function revealSidePanel(_asDialog = false): void {
     // The chat has already picked the row, so a narrow panel opens on the detail.
-    setState({ panelList: false });
-    if (asDialog) {
-      if (!getState().expanded) setState({ expanded: true });
-      return;
-    }
+    setState({ panelList: false, drawerContent: "panel" });
     applyCollapsed(false);
   }
 
@@ -344,28 +393,41 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
 
   /** Save the panel before Open leaves for the child's own Insights/Files. */
   function rememberSubagentPage(parentSessionId: string, childSessionId: string): void {
-    const { expanded, collapsed } = getState();
+    const { expanded, collapsed, drawerContent } = getState();
     setState((state) => ({
       subagentPageReturns: new Map(state.subagentPageReturns).set(childSessionId, {
         parentSessionId,
         context: insightsContext(),
         expanded,
         collapsed,
+        drawerContent,
       }),
     }));
   }
 
-  /** Only the exact child→parent round trip may restore a saved parent panel. */
+  /**
+   * Only the exact child→parent round trip may restore a saved parent panel.
+   * Any other move to a new session closes a floating drawer: the next chat
+   * opens quiet. A docked drawer is a layout the user chose, so it stays.
+   */
   function activateSessionSelection(sessionId: string | null): void {
     const state = getState();
     if (state.activeSessionId === sessionId) return;
     const back = state.activeSessionId
       ? state.subagentPageReturns.get(state.activeSessionId)
       : null;
+    const arriving = state.activeSessionId != null;
     resetSessionSelection();
     setState({ activeSessionId: sessionId });
     if (back && back.parentSessionId === sessionId) {
-      setState({ ...back.context, expanded: back.expanded, collapsed: back.collapsed });
+      setState({
+        ...back.context,
+        expanded: back.expanded,
+        collapsed: back.collapsed,
+        drawerContent: back.drawerContent,
+      });
+    } else if (arriving && !state.pinned && !state.collapsed) {
+      setState({ collapsed: true, expanded: false, drawerContent: "panel" });
     }
   }
 
@@ -447,6 +509,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
   const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
   const useSidePanelAnimate = () => useStore((s) => s.sidePanelAnimate);
   const useSidePanelExpanded = () => useStore((s) => s.expanded);
+  const useDrawerPinned = () => useStore((s) => s.pinned);
+  const useDrawerContent = () => useStore((s) => s.drawerContent);
   const useSidePanelList = () => useStore((s) => s.panelList);
   const useSelectedThread = () => useStore((s) => s.selectedThread);
   const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
@@ -471,6 +535,9 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     toggleSidePanelExpanded,
     openSidePanelList,
     toggleSidePanelCollapsed,
+    openDrawer,
+    closeDrawer,
+    toggleDrawerPinned,
     showSidePanelList,
     toggleSidePanelList,
     revealSidePanel,
@@ -495,6 +562,8 @@ export function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "se
     useSidePanelCollapsed,
     useSidePanelAnimate,
     useSidePanelExpanded,
+    useDrawerPinned,
+    useDrawerContent,
     useSidePanelList,
     useSelectedThread,
     useSelectedThreadEpisode,
@@ -519,6 +588,9 @@ export const {
   toggleSidePanelExpanded,
   openSidePanelList,
   toggleSidePanelCollapsed,
+  openDrawer,
+  closeDrawer,
+  toggleDrawerPinned,
   showSidePanelList,
   toggleSidePanelList,
   revealSidePanel,
@@ -543,6 +615,8 @@ export const {
   useSidePanelCollapsed,
   useSidePanelAnimate,
   useSidePanelExpanded,
+  useDrawerPinned,
+  useDrawerContent,
   useSidePanelList,
   useSelectedThread,
   useSelectedThreadEpisode,

@@ -56,14 +56,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("session side box tabs", () => {
-  it("shows the behavior panels without a Sessions tab and keeps the collapse control", () => {
+  it("shows the behavior panels without a Sessions tab and heads the drawer with its controls", () => {
     const onPanelChange = vi.fn();
+    const onClose = vi.fn();
+    const onTogglePinned = vi.fn();
     render(
       <SessionSideBox
         sessionId="session-a"
         snapshot={snapshot}
         panel="files"
         onPanelChange={onPanelChange}
+        onClose={onClose}
+        onTogglePinned={onTogglePinned}
       />,
     );
 
@@ -71,8 +75,14 @@ describe("session side box tabs", () => {
     expect(screen.getByRole("tab", { name: "Subagents" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Files" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("files")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Subagents" }));
+    expect(onPanelChange).toHaveBeenCalledWith("delegated");
+    fireEvent.click(screen.getByRole("button", { name: "Dock drawer" }));
+    expect(onTogglePinned).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Expand panel" }));
+    expect(sessionLayoutStore.getState().expanded).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
-    expect(sessionLayoutStore.getState().collapsed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the phone body without the wide tab row", () => {
@@ -88,6 +98,7 @@ describe("session side box tabs", () => {
 
     expect(screen.getByText("files")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Hide panel" })).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("tab", { name: "Sessions" })).toBeNull();
   });
 
