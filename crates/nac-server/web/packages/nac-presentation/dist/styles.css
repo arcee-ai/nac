@@ -1,8 +1,8 @@
-/* Toasts rise from the bottom edge and settle; nothing else moves. */
+/* Toasts drop in from the top edge and settle; nothing else moves. */
 [data-nac-runtime]:is(.nac-toast), [data-nac-runtime] .nac-toast {
   container-type: inline-size;
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(-8px) scale(0.98);
   transition:
     opacity 160ms ease-out,
     transform 160ms ease-out;
@@ -756,6 +756,10 @@
 
 [data-nac-runtime]:is(.top-\[calc\(4px\+env\(safe-area-inset-top\)\)\]), [data-nac-runtime] .top-\[calc\(4px\+env\(safe-area-inset-top\)\)\] {
     top: calc(4px + env(safe-area-inset-top));
+  }
+
+[data-nac-runtime]:is(.top-\[calc\(10px\+env\(safe-area-inset-top\)\)\]), [data-nac-runtime] .top-\[calc\(10px\+env\(safe-area-inset-top\)\)\] {
+    top: calc(10px + env(safe-area-inset-top));
   }
 
 [data-nac-runtime]:is(.top-\[calc\(var\(--header-height\)\+4px\)\]), [data-nac-runtime] .top-\[calc\(var\(--header-height\)\+4px\)\] {

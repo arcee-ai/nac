@@ -4669,7 +4669,7 @@ function us({ title: e, pinned: t = !1, isMobile: n = !1, onPin: r, onRename: i,
 // src/app/lib/markdownChunk.ts
 var ds = null, fs = !1;
 function ps() {
-	return ds ??= import("./markdown-renderer-S1LUDNDc.js").then((e) => e.t).then((e) => (fs = !0, e)), ds;
+	return ds ??= import("./markdown-renderer-DcKWTFmW.js").then((e) => e.t).then((e) => (fs = !0, e)), ds;
 }
 function ms() {
 	return fs;

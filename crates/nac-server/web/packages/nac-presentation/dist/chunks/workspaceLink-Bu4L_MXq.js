@@ -7446,7 +7446,7 @@ function RE({ toasts: e, removeToast: t }) {
 		"aria-label": "Notifications",
 		"aria-live": "polite",
 		"aria-relevant": "additions",
-		className: "fixed inset-x-0 bottom-[calc(20px+env(safe-area-inset-bottom))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none",
+		className: "fixed inset-x-0 top-[calc(10px+env(safe-area-inset-top))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none",
 		children: e.map((e) => /* @__PURE__ */ ae("div", {
 			className: "pointer-events-none flex w-full justify-center",
 			children: /* @__PURE__ */ ae(c, {
