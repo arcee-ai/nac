@@ -139,6 +139,13 @@ fn ada41_42_and_mixed43_keep_origins_nulls_questions_receipts_and_atomicity() {
         // origin columns are present. Its exact receipt proves no unique intent.
         let unknown = seed_child(&path, "old-producer");
         let conn = open_runtime_connection(&path).unwrap();
+        // Schema 51's producer records origins itself; restore the old row.
+        conn.execute(
+            "UPDATE session_inbox SET completion_source=NULL,
+            completion_session_id=NULL,completion_generation=NULL WHERE id=?1",
+            [unknown],
+        )
+        .unwrap();
         conn.execute_batch(DROP_OURS).unwrap();
         if version == 43 {
             task_followups::create_tables(&conn).unwrap();
