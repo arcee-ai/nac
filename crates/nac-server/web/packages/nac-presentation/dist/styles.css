@@ -7261,6 +7261,10 @@
   [data-nac-runtime]:is(.btn-large.btn-icon), [data-nac-runtime] .btn-large.btn-icon, [data-nac-runtime]:is(.btn-large.btn-icon-left), [data-nac-runtime] .btn-large.btn-icon-left, [data-nac-runtime]:is(.btn-large.btn-icon-right), [data-nac-runtime] .btn-large.btn-icon-right, [data-nac-runtime]:is(.btn-large.btn-text), [data-nac-runtime] .btn-large.btn-text {
     height: 44px;
   }
+
+  [data-nac-runtime]:is(.btn-large.btn-icon), [data-nac-runtime] .btn-large.btn-icon {
+    min-width: 44px;
+  }
 }
 
 [data-nac-runtime]:is(.btn.btn-tertiary), [data-nac-runtime] .btn.btn-tertiary, [data-nac-runtime]:is(.btn.btn-tertiary-destructive), [data-nac-runtime] .btn.btn-tertiary-destructive, [data-nac-runtime]:is(.btn.btn-tertiary-accent), [data-nac-runtime] .btn.btn-tertiary-accent {

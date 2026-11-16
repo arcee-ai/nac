@@ -15337,7 +15337,7 @@ function Ng({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 						onClick: d,
 						children: "Compact"
 					}) : null,
-					p.onQueue ? /* @__PURE__ */ Z(V, {
+					p.onQueue && p.mode !== "stop" ? /* @__PURE__ */ Z(V, {
 						type: "button",
 						size: n ? z.Large : z.Medium,
 						variant: L.Secondary,
@@ -17370,13 +17370,13 @@ function rv({ revision: e, panel: t }) {
 					}),
 					/* @__PURE__ */ Q("span", {
 						className: "flex shrink-0 items-center gap-1.5 type-meta tabular",
-						children: [/* @__PURE__ */ Q("span", {
+						children: [e.additions || !e.deletions ? /* @__PURE__ */ Q("span", {
 							className: "text-success-primary",
 							children: ["+", e.additions]
-						}), /* @__PURE__ */ Q("span", {
+						}) : null, e.deletions ? /* @__PURE__ */ Q("span", {
 							className: "text-error-primary",
 							children: ["−", e.deletions]
-						})]
+						}) : null]
 					})
 				]
 			}), c > 0 ? /* @__PURE__ */ Z("button", {
