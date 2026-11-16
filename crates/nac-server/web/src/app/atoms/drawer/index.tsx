@@ -90,7 +90,8 @@ export default function Drawer({
             // Desktop leaves the 52px page header live, so its pills switch
             // panels (and its ⋯ menu stays reachable) while a drawer is open.
             isMobile ? "" : "top-[var(--header-height)] bg-transparent",
-            shown ? "opacity-100" : "opacity-0",
+            // A closing drawer never intercepts the click that follows it.
+            shown ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         />
         <SheetContent
@@ -109,6 +110,7 @@ export default function Drawer({
           className={cn(
             "z-[61] flex flex-col overflow-hidden bg-elevation-level-1 text-basic-primary shadow-2xl outline-none",
             "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",
+            !shown && "pointer-events-none",
             isMobile
               ? cn(
                   "inset-x-0 bottom-0 max-h-[92dvh] min-h-[40dvh] rounded-t-sheet pb-[env(safe-area-inset-bottom)]",
