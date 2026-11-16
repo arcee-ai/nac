@@ -497,9 +497,16 @@ async function leaveSettings(j: Journey, press: Press) {
 
 /** Opens one Settings section (`#/settings/<section>`) by its nav label. */
 async function settingsSection(j: Journey, label: RegExp, press: Press) {
-  const onSettings =
+  const listed =
     (await settingsNav(j).isVisible()) ||
     (await j.root.getByRole("textbox", { name: "Search settings" }).isVisible());
+  // A phone's pushed section page shows neither: its "‹ Settings" leads to the list.
+  const sectionBack = j.root
+    .getByRole("button", { name: "Settings", exact: true })
+    .filter({ hasText: "Settings" });
+  const pushed = !listed && /#\/settings\//.test(j.page.url()) && (await sectionBack.isVisible());
+  if (pushed) await press(sectionBack.first());
+  const onSettings = listed || pushed;
   if (!onSettings) {
     if (j.width < 768) {
       const menu = await openPhoneMenu(j, press);

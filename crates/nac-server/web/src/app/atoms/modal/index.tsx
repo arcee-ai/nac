@@ -129,6 +129,16 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
 }) => {
   const isMobile = useIsMobile();
   const cardRef = useRef<HTMLDivElement>(null);
+  // A phone footer floats over the body; when its pills wrap (narrow or zoomed
+  // screens) the body's run-out grows with it so nothing hides underneath.
+  const [footerNode, setFooterNode] = useState<HTMLElement | null>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  useEffect(() => {
+    if (!footerNode || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => setFooterHeight(footerNode.offsetHeight));
+    observer.observe(footerNode);
+    return () => observer.disconnect();
+  }, [footerNode]);
   const previousPathnameRef = useRef("");
   const location = useLocation();
 
@@ -374,12 +384,18 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
                   isMobile && footer && MOBILE_FOOTER_CLEARANCE,
                   bodyClassName,
                 )}
+                style={
+                  isMobile && footer && footerHeight > 72
+                    ? { paddingBottom: `calc(${footerHeight + 16}px)` }
+                    : undefined
+                }
               >
                 {children}
               </div>
             </div>
             {footer ? (
               <footer
+                ref={isMobile ? setFooterNode : undefined}
                 className={cn(
                   "modal-footer flex items-center justify-end",
                   isMobile
