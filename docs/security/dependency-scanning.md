@@ -183,3 +183,28 @@ are parsed only, never installed or executed. Infrastructure-negative tests
 also cover partial findings plus logged errors, unexpected statuses, missing
 scanner, malformed reports, empty inventories, broad/malformed config,
 missing/expired/malformed/PR-authored policy, and installer checksum mismatch.
+
+Scanner control data is committed under `.github/scripts/fixtures/security/` as
+`Cargo.lock.fixture` and `package-lock.json.fixture`, outside GitHub's canonical
+[Cargo/npm manifest names](https://docs.github.com/en/code-security/reference/supply-chain-security/dependency-graph-supported-package-ecosystems).
+Tests copy the exact reviewed bytes into isolated
+OS temporary workspaces under the three production input paths before parsing.
+Digest and directory-inventory assertions guard against changed controls or
+accidentally committed canonical fixture lockfiles. The bundled npm controls
+continue to query exact safe/vulnerable child identities through the supplemental
+inventory. No vulnerable graph is installed or executed.
+
+After human landing, reconcile the dependency graph against the exact current
+default-branch SHA, not the PR head: record the repository's default branch and
+its ref SHA, enumerate that commit's tree, and verify all three production
+lockfiles remain while no canonical Cargo/npm manifest exists under the fixture
+directory. Fetch the dependency graph SBOM and all Dependabot alert pages;
+record each alert's number, state, advisory, package and manifest path. The old
+fixture paths must leave the graph, while the actual production inputs remain
+inventoried. Retain the seven original alert identities (49, 50, 51, 48, 53, 54,
+55) and compare their returned states without dismissing them. Re-read the
+branch ref after collection; if it changed, repeat against the new exact SHA.
+GitHub graph/alert reconciliation and downstream Vanta synchronization can lag
+landing; retain pending discrepancies and later service readback rather than
+claiming immediate closure or clearing Vanta assets. A local test pass or PR
+publication does not establish hosted graph reconciliation or deployed security.

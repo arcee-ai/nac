@@ -441,6 +441,22 @@ export interface components {
     GitIdentityResponse: { email: string; name: string };
     GoalStatus: "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
     HealthResponse: { status: string };
+    HeartbeatAttentionResult: {
+      occurrence_id: string;
+      outcome: components["schemas"]["HeartbeatOutcome"];
+      run_id?: string | null;
+      schedule_id: string;
+      seen: boolean;
+      sequence: number;
+    };
+    HeartbeatOutcome:
+      | "unchanged"
+      | "meaningful"
+      | "finished"
+      | "needs_human_action"
+      | "failed"
+      | "interrupted"
+      | "unknown";
     InboxDelivery: "steer" | "queue";
     InboxItemResponse: {
       cancelled_at?: string | null;
@@ -605,6 +621,9 @@ export interface components {
     ManagedSessionSummary: {
       active: boolean;
       active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
+      attention_revision?: number;
+      attention_updated_at?: string | null;
+      heartbeat_results?: components["schemas"]["HeartbeatAttentionResult"][];
       lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
       summary: components["schemas"]["SessionSummarySnapshot"];
       workspace_diff?: components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1126,6 +1145,11 @@ export interface components {
       response_durations_ms?: (number | null)[] | null;
       token_usages?: (components["schemas"]["TokenUsage"] | null)[] | null;
       unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
+    };
+    RevealWorkspacePathRequest: {
+      expected_path_root: string;
+      expected_workspace_root: string;
+      path: string;
     };
     RevertSessionRequest: { message_idx: number };
     RevertSessionResponse: {
@@ -1838,7 +1862,7 @@ export interface components {
       path: string;
       sections: components["schemas"]["WorkspaceDiffSection"][];
     };
-    WorkspaceFileList: { files: string[]; truncated: boolean };
+    WorkspaceFileList: { files: string[]; path_root?: string | null; truncated: boolean };
     WorkspaceRevisionChanges: {
       changed_files: components["schemas"]["ChangedFileStat"][];
       error?: string | null;
