@@ -33,6 +33,10 @@ pub enum TelemetryKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum TelemetryName {
+    #[serde(rename = "nac.mcp.oauth.callback.listening")]
+    McpOAuthCallbackListening,
+    #[serde(rename = "nac.mcp.oauth.callback.state_rejected")]
+    McpOAuthCallbackStateRejected,
     #[serde(rename = "nac.store.operation.duration")]
     StoreOperationDuration,
     #[serde(rename = "nac.store.connection.active")]
@@ -62,6 +66,8 @@ pub enum TelemetryName {
 impl TelemetryName {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::McpOAuthCallbackListening => "nac.mcp.oauth.callback.listening",
+            Self::McpOAuthCallbackStateRejected => "nac.mcp.oauth.callback.state_rejected",
             Self::StoreOperationDuration => "nac.store.operation.duration",
             Self::StoreConnectionActive => "nac.store.connection.active",
             Self::PersistenceQueueActive => "nac.persistence.queue.active",
@@ -881,4 +887,39 @@ fn bounded_route(value: &str) -> String {
     } else {
         "/other".to_string()
     }
+}
+
+/// Content-free transport-independent observation of one local OAuth owner.
+#[derive(Clone, Copy)]
+pub enum OAuthCallbackObservation {
+    Listening,
+    StateRejected,
+}
+
+pub fn observe_oauth_callback(owner: u64, stage: OAuthCallbackObservation) {
+    let (name, outcome) = match stage {
+        OAuthCallbackObservation::Listening => (
+            TelemetryName::McpOAuthCallbackListening,
+            TelemetryOutcome::Started,
+        ),
+        OAuthCallbackObservation::StateRejected => (
+            TelemetryName::McpOAuthCallbackStateRejected,
+            TelemetryOutcome::Error,
+        ),
+    };
+    global_record(Observation {
+        name,
+        kind: TelemetryKind::Diagnostic,
+        operation: None,
+        activity: None,
+        route: None,
+        outcome: Some(outcome),
+        duration_us: None,
+        value: None,
+        pid: None,
+        cpu_time_us: None,
+        resident_memory_bytes: None,
+        error: None,
+        correlation: Correlation::default().with_generation(owner),
+    });
 }

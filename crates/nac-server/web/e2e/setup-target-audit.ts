@@ -30,7 +30,7 @@ export async function auditSetupTargets(root: Locator, info: TestInfo, state: st
     body: JSON.stringify(settled),
     contentType: "application/json",
   });
-  const controls = root.locator("button, input:not([type=hidden]), textarea, summary");
+  const controls = root.locator("button, a[href], input:not([type=hidden]), textarea, summary");
   const measurements = [];
   const failures: string[] = [];
   for (let index = 0; index < (await controls.count()); index += 1) {
@@ -69,22 +69,22 @@ export async function auditSetupTargets(root: Locator, info: TestInfo, state: st
         return hit === node || (hit !== null && node.contains(hit));
       });
       const overlaps = padded
-        ? [...(owner ?? document).querySelectorAll("button, input, textarea, summary")].filter(
-            (other) => {
-              if (other === node || node.contains(other) || other.contains(node)) return false;
-              const otherBox = other.getBoundingClientRect();
-              return (
-                otherBox.width > 0 &&
-                otherBox.height > 0 &&
-                Math.min(target.x + target.width, otherBox.right) -
-                  Math.max(target.x, otherBox.left) >
-                  0.5 &&
-                Math.min(target.y + target.height, otherBox.bottom) -
-                  Math.max(target.y, otherBox.top) >
-                  0.5
-              );
-            },
-          ).length
+        ? [
+            ...(owner ?? document).querySelectorAll("button, a[href], input, textarea, summary"),
+          ].filter((other) => {
+            if (other === node || node.contains(other) || other.contains(node)) return false;
+            const otherBox = other.getBoundingClientRect();
+            return (
+              otherBox.width > 0 &&
+              otherBox.height > 0 &&
+              Math.min(target.x + target.width, otherBox.right) -
+                Math.max(target.x, otherBox.left) >
+                0.5 &&
+              Math.min(target.y + target.height, otherBox.bottom) -
+                Math.max(target.y, otherBox.top) >
+                0.5
+            );
+          }).length
         : 0;
       return {
         name:

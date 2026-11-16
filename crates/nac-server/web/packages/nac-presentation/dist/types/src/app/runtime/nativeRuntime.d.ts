@@ -4,8 +4,9 @@ import { NacClient } from "../services/nacClient";
 import { createNativeApi } from "../services/api";
 import { type SessionStreamHandlers, type SessionStreamOptions } from "../services/eventStream";
 import { createPresentationStores } from "./presentationStores";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
+import { type NativeDirectoryPort } from "../features/setup/localFolder";
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
     owner: string;
@@ -28,10 +29,16 @@ export interface NativeRuntimeOptions {
     storage?: Pick<Storage, "getItem" | "setItem">;
     /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
     draftStorage?: PromptDraftStorage;
+    /** Same-engine native document recovery; conservative restriction, never input authority. */
+    requireTerminalAcknowledgement?: boolean;
+    /** Optional durable text namespace; never replaces the live request/stream scope. */
+    draftPersistenceBinding?: PromptDraftPersistenceBinding;
     assets?: NativePresentationAssets;
     eventSource?: SessionStreamOptions["eventSource"];
     /** Hosted reads default to no replay; standalone retains its one retry. */
     queryRetry?: false | 1;
+    /** Host-local folder information only; Rust retains project admission. */
+    nativeDirectory?: NativeDirectoryPort;
 }
 export declare class NativeRuntime {
     readonly id: number;
@@ -43,6 +50,7 @@ export declare class NativeRuntime {
     readonly stores: ReturnType<typeof createPresentationStores>;
     readonly queryClient: QueryClient;
     readonly terminalInputRecovery: TerminalInputRecovery;
+    readonly nativeDirectory: NativeDirectoryPort | undefined;
     private readonly controller;
     private readonly disposers;
     private readonly listeners;
@@ -60,5 +68,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation" | "nativeDirectory">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

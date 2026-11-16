@@ -1,3 +1,4 @@
+import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -46,7 +47,7 @@ test("ordinary test-granularity shards execute the inventoried exclusion while p
 });
 
 function verifyGranularity(value) {
-  const before = structuredClone(value);
+  const before = structuredClone(value); reverseAssetTokens(before);
   // Authenticate and reverse the later relay before the historical S02 guard.
   reverseBrowserApt(before);
   for (const step of [
@@ -60,7 +61,7 @@ function verifyGranularity(value) {
   const sort = v => Array.isArray(v) ? v.map(sort) : v && typeof v === "object"
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)])) : v;
   assert.equal(createHash("sha256").update(JSON.stringify(sort(before))).digest("hex"),
-    "beacdd86c42e8783b7a44f35ed784eedd7dd5add6710373f16517952d5f02027",
+    "8e48b71c0b261aa0f4ddb0aa96500311d777e9a643d7eaa6650ab0123dac9983",
     "exact canonical workflow at3769e2aa11d2c36de75305355f167c921b2b81e8, including S12/provenance/S17");
 }
 

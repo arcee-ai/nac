@@ -8,3 +8,5 @@ crates/nac-server/web/src/app/types/openapi.generated.ts linguist-generated=true
 crates/nac-server/web/packages/nac-client/src/openapi.generated.ts linguist-generated=true
 crates/nac-server/web/packages/nac-client/src/surface.generated.ts linguist-generated=true
 crates/nac-core/src/guide/pack.json linguist-generated=true
+# Preserve the byte-identical upstream security patch, including blank context lines.
+docker/managed/packages/curl-multi-done.patch -whitespace

@@ -23,6 +23,11 @@
         "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",
         "actionlint"
       ]
+    },
+    "release_asset_ids": {
+      "1.7.12": {
+        "linux-x64": 384924896
+      }
     }
   },
   "shellcheck": {
@@ -49,6 +54,11 @@
         "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f",
         "shellcheck-v0.11.0/shellcheck"
       ]
+    },
+    "release_asset_ids": {
+      "0.11.0": {
+        "linux-x64": 336391469
+      }
     }
   }
 }

@@ -60,6 +60,7 @@ function mount(value: NativeRuntime, snapshot: SessionSnapshotResponse) {
 
 function snapshotWith(changed: ChangedFileStat[]): SessionSnapshotResponse {
   return {
+    metadata: { session_id: SESSION, workspace_host_path: "/workspace" },
     workspace: {
       branch: "main",
       changed_files: changed,
