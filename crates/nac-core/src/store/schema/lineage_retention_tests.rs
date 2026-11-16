@@ -135,6 +135,10 @@ fn ada41_42_and_mixed43_keep_origins_nulls_questions_receipts_and_atomicity() {
         let unknown = seed_child(&path, "old-producer");
         let conn = open_runtime_connection(&path).unwrap();
         conn.execute_batch(DROP_OURS).unwrap();
+        // Schema 52 installs the question table; only Ada42 histories keep it,
+        // rebuilt below from the pinned DDL.
+        conn.execute_batch("DROP TABLE selection_questions;")
+            .unwrap();
         if version == 43 {
             task_followups::create_tables(&conn).unwrap();
             native_task_launches::create_tables(&conn).unwrap();
