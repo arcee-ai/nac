@@ -37,7 +37,8 @@ function fixture() {
           "actor_id": 20910163,
           "actor_type": "User",
           "bypass_mode": "pull_request"
-        }
+        },
+        { "actor_id": 23642200, "actor_type": "User", "bypass_mode": "pull_request" }
       ],
       "conditions": {
         "ref_name": {
@@ -664,7 +665,8 @@ test('complete base trees reject changed modes, blobs, extra and missing paths',
 });
 
 test('wrong login, numeric identity, type and expanded bypass each cause zero mutations', async () => {
-  for (const changes of [{ login: 'another' }, { id: 1 }, { type: 'Bot' }]) {
+  for (const changes of [{ login: 'another' }, { id: 1 }, { type: 'Bot' },
+    { login: 'adalundhe' }, { id: 23642200 }]) {
     const f = fixture(), plan = await f.preview();
     Object.assign(f.viewer, changes);
     await assert.rejects(f.helper.execute(plan), /requires allisoneer/);
@@ -675,6 +677,42 @@ test('wrong login, numeric identity, type and expanded bypass each cause zero mu
   f.review.bypass_actors[0].bypass_mode = 'always';
   await assert.rejects(f.helper.execute(plan), /bypass policy differs/);
   assert.equal(f.writes().length, 0);
+});
+
+test('Allison and Ada can preview and execute the same guarded stack flow', async () => {
+  for (const viewer of [
+    { login: 'allisoneer', id: 20910163, type: 'User' },
+    { login: 'adalundhe', id: 23642200, type: 'User' },
+  ]) {
+    const f = fixture(); f.viewer = viewer;
+    // GitHub may return the same actor set in either order.
+    if (viewer.login === 'adalundhe') f.review.bypass_actors.reverse();
+    const plan = await f.preview();
+    assert.equal(f.writes().length, 0);
+    assert.deepEqual(await f.helper.execute(plan), { landed: [11, 12], remaining: [] });
+    assert.equal(f.writes().length, 2);
+  }
+});
+
+test('Ada identity and capability retain policy, checks and conversation admission', async () => {
+  for (const change of [
+    f => { f.viewer.id = 1; },
+    f => { f.viewer.type = 'Bot'; },
+    f => { f.review.current_user_can_bypass = 'never'; },
+    f => { f.review.bypass_actors.pop(); },
+    f => { f.review.bypass_actors[1].bypass_mode = 'always'; },
+    f => { f.review.bypass_actors[1].actor_type = 'Team'; },
+    f => { f.checks[0].status = 'in_progress'; },
+    f => { f.checks[1].conclusion = 'failure'; },
+    f => { f.unresolved = true; },
+    f => { f.prs[0].mergeable = false; },
+  ]) {
+    const f = fixture();
+    f.viewer = { login: 'adalundhe', id: 23642200, type: 'User' };
+    const plan = await f.preview(); change(f);
+    await assert.rejects(f.helper.execute(plan));
+    assert.equal(f.writes().length, 0);
+  }
 });
 
 test('exact lowest requests, returned UUID, pending to merged and unchanged automatic rebase', async () => {
@@ -866,6 +904,8 @@ test('personal PR capability never relaxes hard boundaries or quality gates', as
     ['non-strict checks', f => { f.review.rules[1].parameters.strict_required_status_checks_policy = false; }],
     ['create enforcement waived', f => { f.review.rules[1].parameters.do_not_enforce_on_create = true; }],
     ['extra personal actor', f => f.review.bypass_actors.push({ actor_id: 1, actor_type: 'User', bypass_mode: 'pull_request' })],
+    ['missing Ada exception', f => f.review.bypass_actors.pop()],
+    ['missing Allison exception', f => f.review.bypass_actors.shift()],
     ['wrong personal actor', f => { f.review.bypass_actors[0].actor_id = 1; }],
     ['always personal bypass', f => { f.review.bypass_actors[0].bypass_mode = 'always'; }],
     ['personal review weakened', f => { f.review.rules[0].parameters.require_code_owner_review = false; }],
