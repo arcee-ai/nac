@@ -14,6 +14,7 @@ import {
 } from "../../../../packages/nac-client/src/index";
 import { createTerminalRenderer } from "./xtermAdapter";
 import { observeHumanTerminalInput } from "./humanInput";
+import type { TerminalLinkMode } from "./terminalLinkMode";
 
 type Adapter = Awaited<ReturnType<typeof createTerminalRenderer>>;
 export interface TerminalControls {
@@ -27,6 +28,7 @@ interface TerminalPorts {
   api: UserTerminalApi & Partial<ExecutionApi & TerminalControlApi>;
   source?: ExecutionStatus;
   readonly?: boolean;
+  linkMode?: TerminalLinkMode;
   inputControl?: Pick<InputControlStatus, "controller" | "revision" | "frozen"> | null;
   inputPaused?: boolean;
   sessionId: string;
@@ -36,6 +38,7 @@ interface TerminalPorts {
   previousFailure: {
     current: boolean;
     readonly available?: boolean;
+    readonly observationOnly?: boolean;
     subscribe?: (listener: () => void) => () => void;
   };
   controls: (value: TerminalControls | null) => void;
@@ -69,6 +72,10 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
     if (!active()) release();
     else Effect.runSync(Scope.addFinalizer(scope, Effect.sync(release)));
   };
+  const createRenderer = () =>
+    ports.linkMode === "native-visible-anchor"
+      ? createTerminalRenderer(ports.host, { linkMode: ports.linkMode })
+      : createTerminalRenderer(ports.host);
   let adapter: Adapter | undefined;
   let connected = false;
   let processAlive = false;
@@ -94,7 +101,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
 
   const observe = Effect.gen(function* () {
     adapter = yield* operation("renderer", () =>
-      createTerminalRenderer(ports.host).then((created) => {
+      createRenderer().then((created) => {
         // Dynamic import is not cancellable. A late acquisition must release itself.
         own(created.dispose);
         abort.signal.throwIfAborted();
@@ -305,7 +312,7 @@ export function openTerminalObservation(ports: TerminalPorts): () => void {
       ports.notice(
         "Input delivery was not confirmed. Check the shell before enabling fresh input.",
       );
-    if (ports.previousFailure.available === false)
+    if (ports.previousFailure.available === false && !ports.previousFailure.observationOnly)
       ports.notice(
         "Input recovery storage is full. Acknowledge earlier failures, then reconnect before typing in another terminal.",
       );

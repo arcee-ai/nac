@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +13,9 @@ import type {
   ManagedUpgradeReleaseIdentity,
   ManagedUpgradeSnapshot,
 } from "@/app/features/managed/upgrade";
-import { api } from "@/app/services/api";
+import { api, ApiError } from "@/app/services/api";
+import type { ManagedHostStatus } from "@/app/types/api";
+import { ManagedStatusPanel } from "./ManagedStatusPanel";
 
 const current: ManagedUpgradeReleaseIdentity = {
   release_id: "0-1-4",
@@ -406,4 +408,181 @@ describe("ManagedUpgradePanel", () => {
     expect(await screen.findByText("Upgrade failed")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry upgrade to latest beta" })).toBeTruthy();
   });
+});
+
+const host: ManagedHostStatus = {
+  managed: true,
+  ready: false,
+  version: "0.1.4",
+  schema_version: 25,
+  product_version: "0.1.4",
+  build_id: "fixture-build",
+  build_track: "stable",
+  source_revision: "fixture-source",
+  supported_schema_version: 25,
+  minimum_migratable_schema_version: 25,
+  migration_state: "current",
+  maintenance_state: "idle",
+  logical_host_id: "fixture-host",
+  public_hostname: "host.example.test",
+  repository_root: "/repositories",
+  model_ready: false,
+  model: {
+    backend: "arcee-api",
+    display_name: "Managed Arcee",
+    id: "model-id",
+    endpoint: "https://model.example.test/v1",
+  },
+  github_status: "not-configured",
+  secret_count: 1,
+  project_count: 2,
+  session_count: 0,
+  checks: [{ name: "model", ready: false, detail: "Credential is not configured" }],
+};
+
+it("keeps a paused initial host read checking and preserves settled status semantics", async () => {
+  let resolve!: (value: ManagedHostStatus) => void;
+  const pending = new Promise<ManagedHostStatus>((done) => {
+    resolve = done;
+  });
+  const get = vi.spyOn(api, "getManagedStatus").mockReturnValue(pending);
+  const writes = [
+    vi.spyOn(api, "startManagedClone"),
+    vi.spyOn(api, "startManagedGitHubLogin"),
+    vi.spyOn(api, "cancelManagedGitHubLogin"),
+    vi.spyOn(api, "disconnectManagedGitHub"),
+    vi.spyOn(api, "putManagedSecret"),
+    vi.spyOn(api, "deleteManagedSecret"),
+  ];
+  const wasOnline = onlineManager.isOnline();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  act(() => onlineManager.setOnline(false));
+  const view = render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ManagedStatusPanel />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  try {
+    expect(client.getQueryState(managedQueryKeys.hostStatus)).toMatchObject({
+      status: "pending",
+      fetchStatus: "paused",
+      data: undefined,
+      error: null,
+    });
+    expect(get).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("Checking managed host");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(fakes.snapshot).not.toHaveBeenCalled();
+    expect(
+      [...writes, fakes.start, fakes.cancelClone].every((write) => write.mock.calls.length === 0),
+    ).toBe(true);
+
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(get).toHaveBeenCalledOnce());
+    expect(screen.getByRole("status").textContent).toContain("Checking managed host");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => resolve(host));
+    expect(await screen.findByText("fixture-host")).toBeTruthy();
+    const readiness = screen.getByRole("region", { name: "Readiness" });
+    expect(within(readiness).getByText("Needs attention")).toBeTruthy();
+    expect(screen.getByText("Credential is not configured")).toBeTruthy();
+    expect(await screen.findByText("2 accepted releases ahead")).toBeTruthy();
+
+    const ready = {
+      ...host,
+      ready: true,
+      model_ready: true,
+      checks: [{ name: "model", ready: true, detail: "Model is available" }],
+    };
+    get.mockResolvedValue(ready);
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: managedQueryKeys.hostStatus });
+    });
+    expect(await screen.findByText("Model is available")).toBeTruthy();
+    expect(within(readiness).getByText("Ready")).toBeTruthy();
+    expect(screen.getByText("model-id")).toBeTruthy();
+    for (const code of [404, 403]) {
+      get.mockRejectedValue(
+        new ApiError(
+          code,
+          "GET",
+          "/managed/status",
+          code === 403
+            ? "invalid model configuration: private denial detail"
+            : "Host is unavailable",
+          "status-refresh",
+        ),
+      );
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: managedQueryKeys.hostStatus });
+      });
+      if (code === 403) await screen.findByText(/Access to this managed host was denied/);
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("Last known status is shown below");
+      if (code === 403) {
+        expect(alert.textContent).toContain("Access to this managed host was denied");
+        expect(alert.textContent).not.toMatch(/model configuration|private denial detail/i);
+      }
+      expect(screen.getByText("fixture-host")).toBeTruthy();
+      expect(screen.getByText("/repositories")).toBeTruthy();
+      expect(within(readiness).getByText("Ready")).toBeTruthy();
+      expect(screen.queryByText("Checking managed host…")).toBeNull();
+      expect(client.getQueryData(managedQueryKeys.hostStatus)).toEqual(ready);
+      expect(screen.getByRole("button", { name: "Upgrade to latest beta" })).toBeTruthy();
+      expect(
+        [...writes, fakes.start, fakes.cancelClone].every((write) => write.mock.calls.length === 0),
+      ).toBe(true);
+    }
+  } finally {
+    resolve(host);
+    view.unmount();
+    client.clear();
+    act(() => onlineManager.setOnline(wasOnline));
+    get.mockRestore();
+    writes.forEach((write) => write.mockRestore());
+  }
+});
+
+it("keeps a paused initial upgrade read checking until an authoritative snapshot", async () => {
+  let resolve!: (value: ManagedUpgradeSnapshot) => void;
+  const pending = new Promise<ManagedUpgradeSnapshot>((done) => {
+    resolve = done;
+  });
+  fakes.snapshot.mockReturnValue(pending);
+  const wasOnline = onlineManager.isOnline();
+  act(() => onlineManager.setOnline(false));
+  const view = mount();
+  try {
+    expect(client?.getQueryState(managedQueryKeys.upgrade)).toMatchObject({
+      status: "pending",
+      fetchStatus: "paused",
+      data: undefined,
+      error: null,
+    });
+    expect(fakes.snapshot).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("Checking upgrade status");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByTestId("managed-upgrade-unavailable")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(fakes.start).not.toHaveBeenCalled();
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(fakes.snapshot).toHaveBeenCalledOnce());
+    expect(screen.getByRole("status").textContent).toContain("Checking upgrade status");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => resolve(snapshot()));
+    expect(await screen.findByText("2 accepted releases ahead")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(client?.getQueryState(managedQueryKeys.upgrade)).toMatchObject({
+      status: "success",
+      fetchStatus: "idle",
+    });
+    expect(fakes.start).not.toHaveBeenCalled();
+  } finally {
+    resolve(snapshot());
+    view.unmount();
+    client?.clear();
+    act(() => onlineManager.setOnline(wasOnline));
+  }
 });

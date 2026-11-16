@@ -124,7 +124,8 @@ impl SessionService {
         #[cfg(any(test, feature = "test-support"))]
         self.wait_child_terminal_release_for_test().await;
 
-        self.settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
+        let goal_attention = self
+            .settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
         let durable_goal_failure = if self.metadata.behavior
             != sessions::SessionBehavior::Orchestrator
@@ -148,6 +149,8 @@ impl SessionService {
 
         let run_id = finishing_run.snapshot.run_id.clone();
         let client_id = finishing_run.snapshot.client_id.clone();
+        let attention_success =
+            matches!(&outcome, RunOutcome::Completed(..)) && persistence_error.is_none();
         let terminal_event = match (outcome, persistence_error) {
             (RunOutcome::Completed(_, _), Some(error)) => SessionEvent::RunFailed {
                 message: format!("run completed, but failed to persist session snapshot: {error}"),
@@ -185,8 +188,38 @@ impl SessionService {
             return false;
         }
         if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if let Err(error) = self.start_next_direct_inbox_item().await {
-                eprintln!("nac: failed to promote direct inbox after run settlement: {error:#}");
+            let selection =
+                if attention_success && goal_attention.known && goal_attention.goal.is_none() {
+                    self.select_direct_continuation_after_settlement(&run_id)
+                        .await
+                } else {
+                    self.select_next_direct_inbox_item().await
+                };
+            match selection {
+                Ok(selection) => {
+                    #[cfg(any(test, feature = "test-support"))]
+                    // Selection has returned: no store transaction, operation
+                    // lease, inbox wake lock or attention hub lock is held.
+                    // The nonshipping owner accepts only actual Idle/IdleUnverified.
+                    let publication = self
+                        .wait_attention_publication_for_test(&run_id, &selection.disposition)
+                        .await;
+                    self.publish_attention_completion(
+                        &run_id,
+                        attention_success,
+                        goal_attention,
+                        selection.disposition,
+                    );
+                    #[cfg(any(test, feature = "test-support"))]
+                    if let Some(publication) = publication {
+                        publication.publication_attempted();
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "nac: failed to promote direct inbox after run settlement: {error:#}"
+                    );
+                }
             }
         }
         true
@@ -224,9 +257,13 @@ impl SessionService {
         usage: Option<crate::model::TokenUsage>,
         disposition: crate::store::GoalRunDisposition,
         failure: Option<&crate::run_failure::RunFailure>,
-    ) {
+    ) -> attention::GoalAttentionSettlement {
+        let mut receipt = attention::GoalAttentionSettlement {
+            known: true,
+            goal: None,
+        };
         if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return;
+            return receipt;
         }
         if let Some(session_id) = self.metadata.session_id.clone() {
             let path = self.metadata.store_path.clone();
@@ -236,7 +273,7 @@ impl SessionService {
                 .as_ref()
                 .map_or(0, crate::model::TokenUsage::billable_tokens);
             match crate::store::spawn_blocking_store_caller(move || {
-                crate::store::settle_session_goal_run_with_failure(
+                crate::store::settle_session_goal_run_with_provenance(
                     &path,
                     &session_id,
                     &owned_run_id,
@@ -248,13 +285,38 @@ impl SessionService {
             })
             .await
             {
-                Ok(Ok(_)) => {}
+                Ok(Ok((goal, last_run))) => {
+                    if let Some(goal) = goal {
+                        receipt.known = goal.accounting_run_id.is_none();
+                        if last_run.as_deref() != Some(run_id.as_str()) {
+                            // A completed row can outlive its run. Do not adopt it
+                            // for a later request; unfinished/conflicting goals
+                            // remain unknown rather than becoming goal-free.
+                            receipt.known &= goal.status == crate::store::GoalStatus::Complete
+                                && last_run.is_some()
+                                && goal.continuation_run_id.is_none()
+                                && goal.next_attempt_at_epoch_ms.is_none();
+                        } else {
+                            match u64::try_from(goal.version) {
+                                Ok(version) => {
+                                    receipt.goal = Some(crate::events::AttentionGoal {
+                                        id: goal.goal_id,
+                                        version,
+                                    });
+                                }
+                                Err(_) => receipt.known = false,
+                            }
+                        }
+                    }
+                }
                 Ok(Err(error)) | Err(error) => {
+                    receipt.known = false;
                     eprintln!("nac: failed to settle durable goal for run {run_id}: {error:#}");
                 }
             }
         }
         self.agent.lock().await.end_goal_run(run_id);
+        receipt
     }
 
     pub(super) async fn settle_traditional_child_run(
@@ -578,14 +640,20 @@ impl SessionService {
             .flatten()
     }
 
-    pub(super) fn run_inbox_item_id(&self, run_id: &SessionRunId) -> Option<i64> {
+    pub(super) fn run_inbox_prompt(&self, run_id: &SessionRunId) -> Option<RunInboxPrompt> {
         let guard = self.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_ref() else {
             return None;
         };
-        (&active_run.snapshot.run_id == run_id)
-            .then_some(active_run.inbox_item_id)
-            .flatten()
+        if &active_run.snapshot.run_id != run_id {
+            return None;
+        }
+        debug_assert_eq!(
+            active_run.inbox_item_id,
+            active_run.inbox_prompt.as_ref().map(RunInboxPrompt::id),
+            "admitted run must retain its exact inbox prompt identity"
+        );
+        active_run.inbox_prompt.clone()
     }
 
     pub(super) fn set_run_task(&self, run_id: &SessionRunId, task: JoinHandle<()>) {
@@ -665,6 +733,16 @@ impl SessionService {
         let goal_final_billable_tokens = completed_usage
             .as_ref()
             .map_or(0, crate::model::TokenUsage::billable_tokens);
+        let heartbeat_settlement = {
+            let operation = self.lock_active_operation();
+            matches!(operation.as_ref(),Some(ActiveSessionOperation::Run(run)) if run.heartbeat && run.snapshot.run_id==active_run.run_id)
+                .then(||crate::store::HeartbeatRunSettlement{
+                    tokens_used:completed_usage.as_ref().map(crate::model::TokenUsage::billable_tokens),
+                    duration_ms:completed_duration_ms.unwrap_or_default(),
+                    terminal_at_epoch_ms:now_epoch_ms(),
+                    needs_human_action:self.heartbeat_context.as_ref().is_some_and(|context|context.needs_human_action()),
+                })
+        };
         {
             let snapshot = self.session_snapshot.lock().await;
             if snapshot.is_none() {
@@ -745,6 +823,7 @@ impl SessionService {
             });
         }
         update.finished_run_result = run_result;
+        update.heartbeat_settlement = heartbeat_settlement;
         let saved_session_id = update.session_id.clone();
         let store_path = self.metadata.store_path.clone();
         crate::store::spawn_blocking_store_caller(move || {

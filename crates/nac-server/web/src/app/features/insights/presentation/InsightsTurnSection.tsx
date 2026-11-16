@@ -63,7 +63,12 @@ function EntryRows({
     <>
       <ActionListButton
         {...view}
+        className={cn(
+          "!h-auto !py-2 !text-sm !leading-5",
+          size === ActionListButtonSize.Large ? "!min-h-12" : "!min-h-9",
+        )}
         size={size}
+        metaClassName="text-xs leading-4 text-basic-tertiary"
         selected={controller.entrySelected(entry)}
         shown={controller.entryShown(entry)}
         expanded={children ? expanded : undefined}
@@ -75,7 +80,12 @@ function EntryRows({
             <ActionListButton
               key={segment.key}
               {...controller.segmentView(segment)}
+              className={cn(
+                "!h-auto !py-2 !text-sm !leading-5",
+                size === ActionListButtonSize.Large ? "!min-h-12" : "!min-h-9",
+              )}
               size={size}
+              metaClassName="text-xs leading-4 text-basic-tertiary"
               selected={controller.segmentSelected(entry, segment)}
               shown={controller.segmentShown(entry, segment)}
               onClick={controller.segmentAction(entry, segment)}
@@ -109,8 +119,8 @@ export const InsightsTurnSection = memo(function InsightsTurnSection({
     <div className="flex flex-col [&>*]:shrink-0">
       <h3
         className={cn(
-          "truncate text-basic-muted",
-          large ? "px-2 pt-6 pb-2 text-micro" : "px-1 pt-4 pb-1 text-[11px] leading-[14px]",
+          "truncate text-basic-tertiary",
+          large ? "px-2 pt-6 pb-2 text-xs leading-4" : "px-2 pt-4 pb-2 text-xs leading-4",
         )}
       >
         {heading}

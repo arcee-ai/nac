@@ -3,8 +3,14 @@ set -eu
 # Curl retains the existing Wolfi capabilities and restores Debian's NTLM/SCP/SFTP.
 # Only this build SDK switches headers; the final image keeps its OpenSSL3 SDK.
 apk del openssl-dev
-apk add --no-cache openssl-4.0-dev libssh2-dev brotli-dev libpsl-dev zstd-dev \
+# A cached SDK may have older runtime SONAMEs than current dev symlinks.
+# Upgrade dependencies with the dev packages so shared HTTP libraries resolve.
+apk add --upgrade --no-cache openssl-4.0-dev libssh2-dev brotli-dev libpsl-dev zstd-dev \
     nghttp2-dev nghttp3-dev ngtcp2-dev
+for shared in /usr/lib/libnghttp2.so /usr/lib/libnghttp3.so \
+    /usr/lib/libngtcp2.so /usr/lib/libngtcp2_crypto_ossl.so; do
+    test -e "$shared" || { echo "missing shared HTTP dependency: $shared" >&2; exit 1; }
+done
 mkdir -p /work/curl /packages/libcurl-openssl4/usr/lib /packages/curl/usr/bin
 tar -xJf /work/downloads/curl.tar.xz -C /work/curl --strip-components=1
 cd /work/curl

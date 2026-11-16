@@ -162,10 +162,8 @@ for (const [name, viewport, mobile] of [
     if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Parent chat" }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
-    await showSubagents(page, mobile);
+    // Parent return restores the exact open panel and selected child's composer.
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
-    // A phone reopens the panel on its list; the row brings back its composer.
-    if (mobile) await olderRow.click();
     await expect(draft).toHaveValue("E2E_PANEL_CONTINUATION continue from the panel");
 
     const starts: string[] = [];
@@ -190,8 +188,7 @@ for (const [name, viewport, mobile] of [
     await expect(childDraft).toHaveValue("");
     await expect(childDraft).toBeEnabled();
     await page.getByRole("button", { name: "Parent chat" }).click();
-    await showSubagents(page, mobile);
-    if (mobile) await olderRow.click();
+    await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     // A running composer has no background switch; its Steer field is the only one on the page.
     const steer = page.getByRole("textbox", { name: "Send a message" });
     await expect(steer).toHaveValue("");

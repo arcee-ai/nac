@@ -9,6 +9,7 @@ import {
   InputSize,
   TextArea,
 } from "@/app/atoms";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { FieldLabel } from "@/app/components/modals/ConfigRow";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
@@ -184,16 +185,13 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
   };
 
   return (
-    <div className="flex flex-col gap-3 p-4 rounded-md bg-elevation-sublevel-variant-A shadow-convex">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-medium text-basic-primary">OAuth</div>
-          <div className="text-small text-basic-muted">
-            Authorization Code with PKCE. Tokens and callback state stay in protected local storage.
-          </div>
-        </div>
-        <span className="text-small text-basic-muted">{statusLabel(status)}</span>
-      </div>
+    <FormSection
+      title="OAuth"
+      description="Authorization Code with PKCE. Tokens and callback state stay in protected local storage."
+    >
+      <p role="status" className="label-small text-basic-primary">
+        {statusLabel(status)}
+      </p>
 
       {status === "needs_configuration" || editing ? (
         <>
@@ -201,7 +199,8 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
             <div className="flex flex-col gap-1 md:col-span-2">
               <FieldLabel label="Client registration" required />
               <select
-                className="h-10 rounded-md border border-border-subtle bg-elevation-surface px-3 text-small text-basic-primary"
+                aria-label="Client registration"
+                className="h-11 rounded-md border border-border-subtle bg-elevation-surface px-3 text-small text-basic-primary"
                 value={registrationType}
                 onChange={(event) =>
                   setRegistrationType(
@@ -220,6 +219,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
                   <FieldLabel label="Client ID credential" required />
                   <Input
                     inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    aria-label="Client ID credential"
                     value={clientIdCredential}
                     placeholder="SLACK_MCP_CLIENT_ID"
                     onChange={(event) => setClientIdCredential(event.target.value)}
@@ -232,6 +232,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
                   />
                   <Input
                     inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                    aria-label="Client secret credential"
                     value={clientSecretCredential}
                     placeholder="SLACK_MCP_CLIENT_SECRET"
                     onChange={(event) => setClientSecretCredential(event.target.value)}
@@ -244,6 +245,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
                 <FieldLabel label="Client metadata URL" required />
                 <Input
                   inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  aria-label="Client metadata URL"
                   value={clientMetadataUrl}
                   placeholder="https://nac.example.com/.well-known/oauth-client.json"
                   onChange={(event) => setClientMetadataUrl(event.target.value)}
@@ -255,6 +257,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
                 <FieldLabel label="Client name" hint="Sent to the authorization server." />
                 <Input
                   inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+                  aria-label="Client name"
                   value={clientName}
                   onChange={(event) => setClientName(event.target.value)}
                 />
@@ -265,6 +268,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
             <FieldLabel label="Scopes" hint="One scope per line." />
             <TextArea
               textAreaClassName="min-h-[64px] font-mono text-small"
+              aria-label="Scopes"
               value={scopes}
               onChange={(event) => setScopes(event.target.value)}
             />
@@ -276,6 +280,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
             />
             <TextArea
               textAreaClassName="min-h-[72px] font-mono text-small"
+              aria-label="Authorization metadata override"
               value={metadataOverride}
               placeholder={
                 registrationType === "client_metadata"
@@ -287,7 +292,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
           </div>
           <div className="flex justify-end">
             <Button
-              size={ButtonSize.Medium}
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
               variant={ButtonVariant.Secondary}
               content={ButtonContent.Text}
               disabled={busy}
@@ -302,7 +307,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
       {status && status !== "needs_configuration" && status !== "connecting" && !editing ? (
         <div className="flex justify-end">
           <Button
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.Ghost}
             content={ButtonContent.Text}
             disabled={busy}
@@ -316,7 +321,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
       {status === "needs_authorization" || status === "failed" ? (
         <div className="flex justify-end">
           <Button
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             disabled={busy}
@@ -329,7 +334,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
 
       {authorizationUrl ? (
         <a
-          className="text-small text-accent-primary underline self-end"
+          className="flex min-h-11 items-center text-small text-accent-primary underline self-start break-all"
           href={authorizationUrl}
           target="_blank"
           rel="noreferrer"
@@ -339,7 +344,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
       ) : null}
 
       {status === "connected" ? (
-        <div className="text-small text-basic-muted">
+        <div className="text-small !leading-[22px] text-basic-secondary">
           Log out deletes the tokens NAC saved on this computer, and sessions stop sending requests
           to this server until you authenticate again. It does not revoke NAC&apos;s access at the
           provider.{" "}
@@ -361,7 +366,7 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
       {status === "connected" || status === "connecting" ? (
         <div className="flex justify-end">
           <Button
-            size={ButtonSize.Medium}
+            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.SecondaryDestructive}
             content={ButtonContent.Text}
             disabled={busy}
@@ -372,7 +377,11 @@ export function McpOAuthPanel({ serverName, endpoint }: { serverName: string; en
         </div>
       ) : null}
 
-      {message ? <div className="text-small text-error-primary">{message}</div> : null}
-    </div>
+      {message ? (
+        <div role="alert" className="text-small !leading-[22px] text-error-primary break-words">
+          {message}
+        </div>
+      ) : null}
+    </FormSection>
   );
 }
