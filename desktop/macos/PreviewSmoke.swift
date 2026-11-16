@@ -1,13 +1,14 @@
 import AppKit
 import WebKit
 
-/// Compiled only for `preview.sh smoke`. There is no script message bridge.
+/// Instrumentation compiled only for `preview.sh smoke`; UI commands use the production bridge.
 @MainActor
 final class PreviewSmoke {
     private unowned let app: PreviewApp
     private let destination: URL
     private let scenario: String
     private var evidence: [String: Any] = [:]
+    private(set) var offline: OfflineNetworkFence?
     private var passed = false
     private var cleanupError: String?
     private var pausedFirstLoad = false
@@ -17,8 +18,7 @@ final class PreviewSmoke {
         let args = CommandLine.arguments
         destination = URL(fileURLWithPath: args[args.firstIndex(of: "--smoke-output")! + 1])
         scenario = args[args.firstIndex(of: "--smoke-scenario")! + 1]
-        // Attribute decoy requests to this fixture on a shared interactive host.
-        app.webView.customUserAgent = "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+        if let view = app.webView { configure(view) }
         let observer = #"""
         window.__previewEvidence = {errors: [], partial: false, deltas: []};
         addEventListener('error', e => __previewEvidence.errors.push(String(e.message)));
@@ -40,13 +40,46 @@ final class PreviewSmoke {
             source: observer, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
 
+    /// Each recovery view keeps the fixture classification before its first load.
+    func configure(_ view: WKWebView) {
+        if scenario == "external-navigation-recording" { ExternalNavigationSmoke.installObserver(in: view) }
+        view.customUserAgent = scenario == "external-auth"
+            ? "NACExternalAuthWK/ALL348 AppleWebKit/605.1.15"
+            : "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+    }
+
     func start() {
         evidence["app_pid"] = getpid()
         evidence["scenario"] = scenario
+        if scenario == "offline-api-key" { evidence["offline_phase"] = "await_workspace" }
         write()
         Task {
             do {
-                if ["normal", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                if scenario == "offline-api-key" {
+                    try await wait("owned offline workspace", timeout: 60) { self.offline != nil && self.app.baseURL != nil }
+                    guard let offline else { throw PreviewError.message("Offline fence was not installed") }
+                    evidence["offline_phase"] = "offline_journey"
+                    recordOfflineDiagnostic()
+                    evidence["offline_provider"] = try await OfflineProviderSmoke(app: app, fence: offline).run()
+                } else if scenario.hasPrefix("workspace-") {
+                    try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
+                } else if scenario == "external-navigation-recording" {
+                    evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if scenario == "external-auth" {
+                    evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if ["commands", "commands-input"].contains(scenario) {
+                    evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
+                        trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
+                } else if ["paths-xctest", "paths-failure-xctest"].contains(scenario) {
+                    let paths = try await NativePathSmoke.awaitBridge(app: app) { self.recordOwnership() }
+                    evidence["native_paths"] = try await NativePathSmoke(app: app, paths: paths).run(failure: scenario == "paths-failure-xctest") { record in
+                        record.forEach { self.evidence[$0] = $1 }
+                        self.write()
+                    }
+                } else if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
@@ -75,7 +108,7 @@ final class PreviewSmoke {
                     }
                     if scenario != "stale-launch" {
                         try await journey()
-                        if scenario != "normal" { try await lifecycle() }
+                        if !["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { try await lifecycle() }
                     }
                 }
                 else if ["parent-loss-startup", "channel-loss-startup", "parent-loss-initialization", "channel-loss-initialization"].contains(scenario) {
@@ -110,8 +143,10 @@ final class PreviewSmoke {
                         try await waitJS("loaded production workspace", "return !!document.querySelector('[role=dialog]');")
                         kill(app.engine.pid, SIGTERM)
                     }
-                    try await wait("native failure state", timeout: 65) { self.app.failure != nil }
-                    let message = app.failure!
+                    try await wait("native failure/recovery state", timeout: 65) {
+                        self.app.failure != nil || (scenario == "engine-exit" && self.app.recovery.needsRecovery && !self.app.recovery.busy)
+                    }
+                    let message = app.failure ?? "The bundled engine stopped; explicit recovery is required."
                     let expected: String
                     switch scenario {
                     case "missing": expected = "missing or not executable"
@@ -123,6 +158,9 @@ final class PreviewSmoke {
                     }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
                     guard app.engine.receipt == nil else { throw PreviewError.message("Failed launch retained active identity") }
+                    guard (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false else {
+                        throw PreviewError.message("Failure retained the native command bridge")
+                    }
                     guard app.baseURL == nil || scenario == "engine-exit" else {
                         throw PreviewError.message("Unverified engine activated the workspace")
                     }
@@ -138,10 +176,17 @@ final class PreviewSmoke {
                 }
                 passed = true
             } catch {
-                evidence["error"] = String(describing: error)
-                evidence["engine_log"] = app.engine.log
-                if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                if scenario == "offline-api-key" {
+                    evidence["offline_failure_phase"] = evidence["offline_phase"]
+                    recordOfflineDiagnostic()
+                    evidence["error"] = "Offline qualification failed; no network/credential payload retained"
+                } else {
+                    evidence["error"] = String(describing: error)
+                    evidence["engine_log"] = app.engine.log
+                    if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                }
             }
+            offline?.close()
             evidence["engine_pid"] = app.engine.pid
             evidence["profile"] = app.profile?.root.path
             evidence["base_url"] = app.baseURL?.absoluteString
@@ -179,6 +224,19 @@ final class PreviewSmoke {
     }
 
     func beforeLaunch(_ profile: PreviewProfile) async throws {
+        if OfflineProviderPolicy.selected() {
+            guard offline == nil, app.baseURL == nil, app.engine.pid == 0, let view = app.webView else {
+                throw PreviewError.message("Offline fence admission is not pre-launch")
+            }
+            evidence["offline_phase"] = "fence_admission"
+            recordOfflineDiagnostic()
+            offline = try OfflineNetworkFence(provider: app.provider, view: view)
+            evidence["offline_phase"] = "prelaunch_controls"
+            recordOfflineDiagnostic()
+            try await offline!.initialControls()
+            evidence["offline_phase"] = "prelaunch_controls_passed"
+            recordOfflineDiagnostic()
+        }
         if scenario.hasSuffix("initialization") {
             try await wait("startup store barrier") {
                 FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("startup-go").path)
@@ -261,7 +319,7 @@ final class PreviewSmoke {
             try await wait("runner kills owning app", timeout: 70) { false }
         } else if scenario == "channel-loss-active" {
             app.engine.loseChannel()
-            try await wait("runtime channel loss") { self.app.failure != nil }
+            try await wait("runtime channel loss") { self.app.failure != nil || self.app.recovery.needsRecovery }
             guard app.engine.receipt == nil else { throw PreviewError.message("Channel loss retained active identity") }
             try captureNative()
         } else {
@@ -317,11 +375,111 @@ final class PreviewSmoke {
             throw PreviewError.message("Reload did not expose the persisted assistant transcript")
         }
         evidence["persisted_assistant_message"] = true
+        try await settleReloadCapture(sessionID: sessionID)
         try await captureWeb("persisted-chat.png")
+        if ["ci-terminal", "ci-terminal-xctest"].contains(scenario) {
+            let ready: (([String: Any]) -> Void)? = scenario == "ci-terminal-xctest" ? { fields in
+                self.evidence.merge(fields) { _, new in new }
+                self.recordOwnership()
+                self.write()
+            } : nil
+            evidence["trusted_terminal"] = try await CITerminal.run(app: app, sessionID: sessionID, externalReady: ready) {
+                try await self.captureWeb("trusted-terminal.png")
+            }
+        }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
         try await wait("second provider request") { self.app.provider.responseCount == 2 }
         evidence["close_with_active_run"] = true
+    }
+
+    // Fixture observations only: wait for the shared transcript owner to reveal
+    // its content and finish its fade, rather than changing its loading policy.
+    private static let captureReadiness = #"""
+    const matches = () => location.origin === new URL(expectedOrigin).origin
+      && location.hash.split('/')[2] === expectedSession;
+    if (phase === 'bind') {
+      if (!matches() || window.__previewReloading) return {ready:false, reason:'document'};
+      const binding = {token:documentToken, document, href:location.href,
+        fontsReady:false, paintReady:false, framesPending:false};
+      window.__previewCapture = binding;
+      Promise.all([document.fonts.ready, document.fonts.load('16px Inter')]).then(
+        () => { binding.fontsReady = true; }, () => { binding.fontFailed = true; });
+      return {ready:false, reason:'bound'};
+    }
+    const binding = window.__previewCapture;
+    const visible = element => {
+      if (!(element instanceof Element) || !element.isConnected) return false;
+      const r = element.getBoundingClientRect();
+      if (![r.left,r.top,r.right,r.bottom,r.width,r.height].every(Number.isFinite)
+          || r.width <= 0 || r.height <= 0 || r.right <= 0 || r.bottom <= 0
+          || r.left >= innerWidth || r.top >= innerHeight) return false;
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility !== 'visible'
+            || Number(style.opacity) !== 1) return false;
+      }
+      return true;
+    };
+    const inspect = () => {
+      if (!matches() || window.__previewReloading || !binding
+          || window.__previewCapture !== binding || binding.token !== documentToken
+          || binding.document !== document || binding.href !== location.href)
+        return {ready:false, reason:'document'};
+      if (!binding.fontsReady || binding.fontFailed || document.fonts.status !== 'loaded'
+          || !document.fonts.check('16px Inter')) return {ready:false, reason:'fonts'};
+      const answers = [...document.querySelectorAll('p')]
+        .filter(node => node.textContent === expectedAnswer);
+      const inputs = [...document.querySelectorAll('[role=combobox][aria-label=Message]')];
+      if (answers.length !== 1 || inputs.length !== 1)
+        return {ready:false, reason:'content', answers:answers.length, inputs:inputs.length};
+      const loading = [...document.querySelectorAll('[role=status][aria-label="Loading conversation"]')]
+        .some(node => node.parentElement?.contains(answers[0]));
+      if (loading) return {ready:false, reason:'loading'};
+      if (!visible(answers[0]) || !visible(inputs[0])) return {ready:false, reason:'layout'};
+      return {ready:true, reason:'settled'};
+    };
+    const state = inspect();
+    if (!state.ready) {
+      if (binding) binding.paintReady = false;
+      return state;
+    }
+    if (binding.paintReady) return state;
+    if (!binding.framesPending) {
+      binding.framesPending = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        binding.framesPending = false;
+        binding.paintReady = inspect().ready;
+      }));
+    }
+    return {ready:false, reason:'frames'};
+    """#
+
+    private func settleReloadCapture(sessionID: String) async throws {
+        let view = app.webView!
+        guard let base = app.baseURL, let incarnation = app.engine.receipt?.incarnation else {
+            throw PreviewError.message("Reload capture lost its owned engine")
+        }
+        let token = UUID().uuidString
+        func observe(_ phase: String) async throws -> [String: Any] {
+            guard app.webView === view, app.engine.receipt?.incarnation == incarnation else {
+                throw PreviewError.message("Reload capture lost its owned document")
+            }
+            let value = try await view.callAsyncJavaScript(Self.captureReadiness,
+                arguments: ["phase": phase, "expectedSession": sessionID,
+                            "expectedOrigin": base.absoluteString, "expectedAnswer": FixtureProvider.answer,
+                            "documentToken": token], in: nil, contentWorld: .page)
+            guard let facts = value as? [String: Any] else {
+                throw PreviewError.message("Reload capture readiness was malformed")
+            }
+            return facts
+        }
+        _ = try await observe("bind")
+        try await wait("settled persisted transcript capture") {
+            let facts = try await observe("probe")
+            self.evidence["persisted_capture_readiness"] = facts
+            return facts["ready"] as? Bool == true
+        }
     }
 
     private func sendPrompt(_ prompt: String) async throws {
@@ -347,13 +505,33 @@ final class PreviewSmoke {
         while Date() < end {
             recordOwnership()
             if try await condition() { return }
-            if app.failure != nil && scenario == "normal" { throw PreviewError.message(app.failure!) }
+            if app.failure != nil && ["normal", "ci-terminal", "ci-terminal-xctest"].contains(scenario) { throw PreviewError.message(app.failure!) }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         throw PreviewError.message("Timed out waiting for \(label)")
     }
 
+    // Only closed fixture stage names, booleans and the existing redacted counts.
+    // A false observation never asserts that an engine was never launched.
+    private func recordOfflineDiagnostic() {
+        guard scenario == "offline-api-key" else { return }
+        let previous = evidence["offline_diagnostic"] as? [String: Any] ?? [:]
+        let next: [String: Any] = [
+            "phase": evidence["offline_phase"] as? String ?? "await_workspace",
+            "network_stage": offline?.diagnosticStage ?? "not_created",
+            "fence_created": offline != nil,
+            "startup_failure_observed": app.failure != nil,
+            "engine_pid_observed_positive": previous["engine_pid_observed_positive"] as? Bool == true || app.engine.pid > 0,
+            "ready_receipt_observed": previous["ready_receipt_observed"] as? Bool == true || app.engine.receipt != nil,
+            "network_observations": offline?.policy.snapshot ?? [:]]
+        if !NSDictionary(dictionary: previous).isEqual(to: next) {
+            evidence["offline_diagnostic"] = next
+            write()
+        }
+    }
+
     private func recordOwnership() {
+        recordOfflineDiagnostic()
         let root = app.profile?.root.path
         guard evidence["engine_pid"] as? Int32 != app.engine.pid || evidence["profile"] as? String != root else { return }
         evidence["engine_pid"] = app.engine.pid
@@ -387,12 +565,14 @@ final class PreviewSmoke {
     }
     func cleanupFailed(_ error: Error) { cleanupError = String(describing: error) }
     func didCleanUp() {
-        evidence["engine_log_after_shutdown"] = app.engine.log
+        if scenario != "offline-api-key" { evidence["engine_log_after_shutdown"] = app.engine.log }
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["identity_retired"] = app.engine.receipt == nil
+        evidence["commands_retired"] = (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false
         evidence["cleanup_error"] = cleanupError
         evidence["passed"] = passed && cleanupError == nil && evidence["profile_removed"] as? Bool == true
+            && evidence["commands_retired"] as? Bool == true
         write()
     }
     private func write() {

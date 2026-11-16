@@ -8,6 +8,7 @@ import {
   Modal,
   ModalSize,
 } from "@/app/atoms";
+import { FormSection } from "@/app/components/modals/FormSection";
 import { useManagedUpgrade } from "@/app/features/managed/controller/useManagedUpgrade";
 import {
   managedUpgradeActionLabel,
@@ -27,47 +28,40 @@ export function ManagedUpgradePanel() {
   const snapshot = upgrade.snapshot;
   const requiresFreshSnapshot = managedUpgradeRequiresFreshSnapshot(snapshot.error);
 
-  if (snapshot.isLoading) {
+  if (snapshot.isPending) {
     return (
-      <section
-        aria-labelledby="managed-upgrade-heading"
-        className="rounded-lg border border-basic p-4"
-      >
-        <h2 id="managed-upgrade-heading" className="label-medium text-basic-primary">
-          Managed NAC upgrade
-        </h2>
-        <div className="mt-3">
-          <Loader size={LoaderSize.Small} />
+      <FormSection title="Managed NAC upgrade" className="border-t border-basic pt-6">
+        <div role="status" className="flex items-center gap-3 text-small text-basic-secondary">
+          <Loader size={LoaderSize.Small} /> Checking upgrade status…
         </div>
-      </section>
+      </FormSection>
     );
   }
 
   if (!snapshot.data || requiresFreshSnapshot) {
     const recovery = managedUpgradeRecovery(snapshot.error);
     return (
-      <section
-        aria-labelledby="managed-upgrade-heading"
-        className="rounded-lg border border-basic p-4"
-        data-testid="managed-upgrade-unavailable"
-      >
-        <h2 id="managed-upgrade-heading" className="label-medium text-basic-primary">
-          Managed NAC upgrade
-        </h2>
-        <p className="mt-1 text-small text-error-primary">{recovery.message}</p>
-        {recovery.retryLabel ? (
-          <Button
-            className="mt-3"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Secondary}
-            content={ButtonContent.Text}
-            onClick={() => void snapshot.refetch()}
-            loading={snapshot.isFetching}
-          >
-            {recovery.retryLabel}
-          </Button>
-        ) : null}
-      </section>
+      <div data-testid="managed-upgrade-unavailable">
+        <FormSection title="Managed NAC upgrade" className="border-t border-basic pt-6">
+          <p role="alert" className="text-small !leading-[22px] text-error-primary">
+            {recovery.message}
+          </p>
+          {recovery.retryLabel ? (
+            <div>
+              <Button
+                className="min-h-11"
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Secondary}
+                content={ButtonContent.Text}
+                onClick={() => void snapshot.refetch()}
+                loading={snapshot.isFetching}
+              >
+                {recovery.retryLabel}
+              </Button>
+            </div>
+          ) : null}
+        </FormSection>
+      </div>
     );
   }
 
@@ -79,97 +73,94 @@ export function ManagedUpgradePanel() {
     acceptedTarget && !sameManagedRelease(acceptedTarget, preview.latest_beta);
 
   return (
-    <section
-      aria-labelledby="managed-upgrade-heading"
-      className="rounded-lg border border-basic p-4"
-      data-testid="managed-upgrade"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 id="managed-upgrade-heading" className="label-medium text-basic-primary">
-            Managed NAC upgrade
-          </h2>
-          <p className="mt-1 text-small text-basic-tertiary">
-            {managedUpgradeDistanceLabel(preview.distance?.accepted_releases ?? null)}
-          </p>
-        </div>
-        {canStart ? (
-          <Button
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Primary}
-            content={ButtonContent.Text}
-            onClick={upgrade.requestStart}
-          >
-            {operation?.state === "failed"
-              ? "Retry upgrade to latest beta"
-              : "Upgrade to latest beta"}
-          </Button>
-        ) : !preview.upgrade_available && !active ? (
-          <span className="rounded-full bg-success-secondary px-3 py-1 text-small text-success-primary">
-            Up to date
-          </span>
-        ) : null}
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <ReleaseIdentity label="Current" release={preview.current} />
-        <ReleaseIdentity label="Latest beta" release={preview.latest_beta} />
-        {showAcceptedTarget ? (
-          <ReleaseIdentity
-            label="Accepted target"
-            release={acceptedTarget}
-            className="lg:col-span-2"
-          />
-        ) : null}
-      </div>
-
-      {operation ? (
-        <OperationStatus
-          operation={operation}
-          settlements={upgrade.settlements}
-          onSettle={(blocker) => void upgrade.requestSettlement(blocker)}
-        />
-      ) : null}
-
-      <Modal
-        open={upgrade.confirmationOpen}
-        onClose={upgrade.cancelStart}
-        title="Upgrade Managed NAC?"
-        size={ModalSize.Small}
-        footer={
-          <>
+    <div data-testid="managed-upgrade">
+      <FormSection
+        title="Managed NAC upgrade"
+        description={managedUpgradeDistanceLabel(preview.distance?.accepted_releases ?? null)}
+        className="border-t border-basic pt-6"
+        action={
+          canStart ? (
             <Button
-              variant={ButtonVariant.Tertiary}
-              content={ButtonContent.Text}
-              onClick={upgrade.cancelStart}
-              disabled={upgrade.startPending}
-            >
-              Cancel
-            </Button>
-            <Button
+              className="min-h-11"
+              size={ButtonSize.Small}
               variant={ButtonVariant.Primary}
               content={ButtonContent.Text}
-              onClick={() => void upgrade.confirmStart()}
-              loading={upgrade.startPending}
+              onClick={upgrade.requestStart}
             >
-              Start upgrade
+              {operation?.state === "failed"
+                ? "Retry upgrade to latest beta"
+                : "Upgrade to latest beta"}
             </Button>
-          </>
+          ) : !preview.upgrade_available && !active ? (
+            <span className="rounded-full bg-success-secondary px-3 py-1 text-small text-success-primary">
+              Up to date
+            </span>
+          ) : null
         }
       >
-        <p className="text-small text-basic-secondary">
-          Upgrade from <strong>{preview.current.product_version}</strong> to the exact accepted
-          latest beta, <strong>{preview.latest_beta.product_version}</strong>. Active work must
-          finish or be explicitly stopped before this host is replaced. The page may disconnect
-          briefly while NAC starts and verifies the replacement.
-        </p>
-        {upgrade.startError ? (
-          <p role="alert" className="mt-3 text-small text-error-primary">
-            {upgrade.startError}
-          </p>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ReleaseIdentity label="Current" release={preview.current} />
+          <ReleaseIdentity label="Latest beta" release={preview.latest_beta} />
+          {showAcceptedTarget ? (
+            <ReleaseIdentity
+              label="Accepted target"
+              release={acceptedTarget}
+              className="lg:col-span-2"
+            />
+          ) : null}
+        </div>
+
+        {operation ? (
+          <OperationStatus
+            operation={operation}
+            settlements={upgrade.settlements}
+            onSettle={(blocker) => void upgrade.requestSettlement(blocker)}
+          />
         ) : null}
-      </Modal>
-    </section>
+
+        <Modal
+          open={upgrade.confirmationOpen}
+          onClose={upgrade.cancelStart}
+          title="Upgrade Managed NAC?"
+          size={ModalSize.Small}
+          bodyClassName="pb-32 md:pb-4"
+          footer={
+            <div className="flex w-full flex-wrap justify-end gap-2">
+              <Button
+                className="min-h-11"
+                variant={ButtonVariant.Tertiary}
+                content={ButtonContent.Text}
+                onClick={upgrade.cancelStart}
+                disabled={upgrade.startPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="min-h-11"
+                variant={ButtonVariant.Primary}
+                content={ButtonContent.Text}
+                onClick={() => void upgrade.confirmStart()}
+                loading={upgrade.startPending}
+              >
+                Start upgrade
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-small text-basic-secondary">
+            Upgrade from <strong>{preview.current.product_version}</strong> to the exact accepted
+            latest beta, <strong>{preview.latest_beta.product_version}</strong>. Active work must
+            finish or be explicitly stopped before this host is replaced. The page may disconnect
+            briefly while NAC starts and verifies the replacement.
+          </p>
+          {upgrade.startError ? (
+            <p role="alert" className="mt-3 text-small text-error-primary">
+              {upgrade.startError}
+            </p>
+          ) : null}
+        </Modal>
+      </FormSection>
+    </div>
   );
 }
 
@@ -183,10 +174,10 @@ function ReleaseIdentity({
   className?: string;
 }) {
   return (
-    <div className={`min-w-0 rounded-lg bg-elevation-level-2 p-3 ${className}`}>
+    <div className={`min-w-0 border-l border-basic pl-4 ${className}`}>
       <p className="label-small text-basic-secondary">{label}</p>
       <p className="mt-1 label-medium text-basic-primary">{release.product_version}</p>
-      <dl className="mt-2 grid grid-cols-[auto,minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
+      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
         <dt className="text-basic-tertiary">Release</dt>
         <dd className="code-small break-all text-basic-primary">{release.release_id}</dd>
         <dt className="text-basic-tertiary">Source</dt>
@@ -214,7 +205,7 @@ function OperationStatus({
   const succeeded = operation.state === "succeeded";
   return (
     <div
-      className={`mt-4 rounded-lg border p-4 ${
+      className={`mt-2 border-l-2 pl-4 ${
         failed ? "border-error-primary" : succeeded ? "border-success-primary" : "border-basic"
       }`}
       aria-live="polite"
@@ -226,10 +217,12 @@ function OperationStatus({
             {managedUpgradePhaseLabel(operation.state)}
           </p>
           {operation.message ? (
-            <p className="mt-1 text-small text-basic-tertiary">{operation.message}</p>
+            <p className="mt-1 text-small !leading-[22px] text-basic-secondary">
+              {operation.message}
+            </p>
           ) : null}
         </div>
-        <span className="code-small break-all text-basic-muted">{operation.operation_id}</span>
+        <span className="code-small break-all text-basic-secondary">{operation.operation_id}</span>
       </div>
 
       {blockers.length > 0 ? (
@@ -239,26 +232,30 @@ function OperationStatus({
             {blockers.map((blocker) => {
               const settlement = settlements[blocker.selection_key];
               return (
-                <li key={blocker.selection_key} className="rounded-lg bg-elevation-level-2 p-3">
+                <li key={blocker.selection_key} className="border-t border-basic py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-small text-basic-primary">{blocker.message}</p>
                       {!blocker.actionable ? (
-                        <p className="mt-1 text-small text-basic-tertiary">
+                        <p className="mt-1 text-small !leading-[22px] text-basic-secondary">
                           Wait for this work to finish safely.
                         </p>
                       ) : settlement === "settling" ? (
-                        <p className="mt-1 text-small text-basic-tertiary">
+                        <p className="mt-1 text-small !leading-[22px] text-basic-secondary">
                           Stop requested. Waiting for cleanup to finish.
                         </p>
                       ) : settlement === "failed" ? (
-                        <p role="alert" className="mt-1 text-small text-error-primary">
+                        <p
+                          role="alert"
+                          className="mt-2 text-small !leading-[22px] text-error-primary"
+                        >
                           The stop request failed. Refresh status or try again.
                         </p>
                       ) : null}
                     </div>
                     {blocker.actionable ? (
                       <Button
+                        className="min-h-11"
                         size={ButtonSize.Small}
                         variant={ButtonVariant.SecondaryDestructive}
                         content={ButtonContent.Text}
@@ -273,7 +270,7 @@ function OperationStatus({
                             : managedUpgradeActionLabel(blocker.action)}
                       </Button>
                     ) : (
-                      <span className="rounded-full border border-basic px-2 py-1 text-small text-basic-tertiary">
+                      <span className="text-small !leading-[22px] text-basic-secondary">
                         Wait only
                       </span>
                     )}

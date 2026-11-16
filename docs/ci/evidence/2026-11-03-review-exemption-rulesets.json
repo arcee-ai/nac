@@ -1,0 +1,177 @@
+[
+  {
+    "id": 2955537,
+    "name": "Protect default branch",
+    "target": "branch",
+    "source_type": "Enterprise",
+    "source": "arcee-ai",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      }
+    ],
+    "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkR",
+    "created_at": "2024-12-12T11:16:33.502-08:00",
+    "updated_at": "2025-02-05T16:09:12.383-08:00",
+    "current_user_can_bypass": "never",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955537"
+      },
+      "html": {
+        "href": "https://github.com/arcee-ai/nac/rules/2955537"
+      }
+    }
+  },
+  {
+    "id": 2955527,
+    "name": "Viability and Transfer Restriction",
+    "target": "repository",
+    "source_type": "Enterprise",
+    "source": "arcee-ai",
+    "enforcement": "active",
+    "conditions": {},
+    "rules": [
+      {
+        "type": "repository_transfer"
+      }
+    ],
+    "node_id": "RRS_lACoQnVzaW5lc3POAAQOiM4ALRkH",
+    "created_at": "2024-12-12T11:14:46.664-08:00",
+    "updated_at": "2024-12-12T11:14:46.664-08:00",
+    "current_user_can_bypass": "never",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/2955527"
+      }
+    }
+  },
+  {
+    "id": 26484091,
+    "name": "NAC review approvals (Allison PR-only exception)",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "arcee-ai/nac",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 1,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": true,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": true,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      }
+    ],
+    "node_id": "RRS_lACqUmVwb3NpdG9yec5HLlLZzgGUHXs",
+    "created_at": "2026-11-03T12:32:02.929-08:00",
+    "updated_at": "2026-11-03T12:32:02.962-08:00",
+    "bypass_actors": [
+      {
+        "actor_id": 20910163,
+        "actor_type": "User",
+        "bypass_mode": "pull_request"
+      }
+    ],
+    "current_user_can_bypass": "pull_requests_only",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/26484091"
+      },
+      "html": {
+        "href": "https://github.com/arcee-ai/nac/rules/26484091"
+      }
+    }
+  },
+  {
+    "id": 25983949,
+    "name": "main",
+    "target": "branch",
+    "source_type": "Repository",
+    "source": "arcee-ai/nac",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      }
+    },
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "type": "pull_request",
+        "parameters": {
+          "required_approving_review_count": 0,
+          "dismiss_stale_reviews_on_push": false,
+          "required_reviewers": [],
+          "require_code_owner_review": false,
+          "dismissal_restriction": {
+            "enabled": false,
+            "allowed_actors": []
+          },
+          "require_last_push_approval": false,
+          "required_review_thread_resolution": true,
+          "require_extra_approval_for_unattributed_changes": false,
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ]
+        }
+      }
+    ],
+    "node_id": "RRS_lACqUmVwb3NpdG9yec5HLlLZzgGMe80",
+    "created_at": "2026-10-27T11:48:29.042-07:00",
+    "updated_at": "2026-11-03T12:33:35.827-08:00",
+    "bypass_actors": [],
+    "current_user_can_bypass": "never",
+    "_links": {
+      "self": {
+        "href": "https://api.github.com/repos/arcee-ai/nac/rulesets/25983949"
+      },
+      "html": {
+        "href": "https://github.com/arcee-ai/nac/rules/25983949"
+      }
+    }
+  }
+]

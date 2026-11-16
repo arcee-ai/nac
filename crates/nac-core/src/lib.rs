@@ -14,6 +14,9 @@ pub mod managed_fault_fixture;
 mod mcp;
 pub mod model;
 pub mod orchestration_control;
+pub mod peer_goal_control;
+pub mod task_followups;
+pub mod task_launch_control;
 
 /// Named, reusable model setups the launch UI offers instead of asking for a
 /// backend, model and base URL every time.
@@ -53,11 +56,13 @@ pub mod mcp_configurations {
     pub use crate::mcp::{
         acquire_mcp_configuration_write_lease, begin_mcp_oauth_authorization, clear_mcp_oauth,
         complete_mcp_oauth_authorization, configure_mcp_oauth, delete_mcp_oauth_profile,
-        delete_mcp_server_configuration, embedded_library_entries, fail_mcp_oauth_authorization,
+        delete_mcp_server_configuration, discard_mcp_oauth_pending_authorization,
+        embedded_library_entries, fail_mcp_oauth_authorization, fail_mcp_oauth_callback,
         fetch_smithery_library_entries, has_mcp_oauth_profile, insert_mcp_server_configuration,
         list_mcp_server_configurations, load_mcp_defaults, load_mcp_server_configuration,
         load_mcp_server_configuration_snapshot, mcp_config_path, mcp_error_requires_authorization,
-        mcp_oauth_callback_is_retryable, mcp_oauth_pending_authorization_url, mcp_oauth_status,
+        mcp_oauth_authorization_is_current, mcp_oauth_callback_is_retryable,
+        mcp_oauth_completion_is_pending, mcp_oauth_pending_authorization_url, mcp_oauth_status,
         merge_library_entries, probe_mcp_server, rename_mcp_oauth_profile,
         set_mcp_oauth_redirect_uri, update_mcp_server_configuration,
         update_mcp_server_configuration_at_revision, McpConfigurationWriteLease,
@@ -66,7 +71,8 @@ pub mod mcp_configurations {
         McpProbeResult, McpProbedTool, McpProtocolSelection, McpRuntimeManager, McpRuntimeState,
         McpRuntimeStatus, McpServerConfig, McpServerConfigurationRecord,
         McpServerConfigurationStoreError, McpToolApproval, McpToolMetadata, McpTransportConfig,
-        MCP_OAUTH_CALLBACK_PATH, MCP_OAUTH_REDIRECT_URI, MCP_OAUTH_STATE_TTL, MCP_TRANSPORT_STDIO,
+        SessionMcpRefreshState, SessionMcpRefreshStatus, MCP_OAUTH_CALLBACK_PATH,
+        MCP_OAUTH_REDIRECT_URI, MCP_OAUTH_STATE_TTL, MCP_TRANSPORT_STDIO,
         MCP_TRANSPORT_STREAMABLE_HTTP,
     };
 }

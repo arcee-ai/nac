@@ -94,13 +94,14 @@ export function CommitPopover({
       sticky
       placement={PopoverPlacement.BottomRight}
       size={PopoverSize.Medium}
-      sheetClassName="gap-1 px-4"
+      sheetClassName="gap-3 px-4"
       content={
         <>
           <TextArea
             autoFocus
             rows={3}
             textAreaSize={TextAreaSize.Small}
+            aria-label="Commit message"
             placeholder="Commit message"
             value={message}
             onChange={(event) => setMessage(event.target.value)}
@@ -114,7 +115,7 @@ export function CommitPopover({
             }}
           />
 
-          <div className="flex items-center gap-2 p-1 label-micro text-basic-muted">
+          <div className="flex items-center gap-2 p-1 text-xs leading-4 text-basic-tertiary">
             <span className="flex-1 min-w-0 truncate">
               Staging {plural(changed.length, "file")}
             </span>
@@ -123,11 +124,14 @@ export function CommitPopover({
           </div>
 
           {commit.error ? (
-            <div className="p-1 label-micro text-error-primary">{errorMessage(commit.error)}</div>
+            <div className="p-1 text-sm leading-5 text-error-primary">
+              {errorMessage(commit.error)}
+            </div>
           ) : null}
 
           <Button
             size={ButtonSize.Medium}
+            className="max-md:!min-h-11"
             variant={ButtonVariant.Secondary}
             disabled={!message.trim()}
             loading={commit.isPending}
@@ -139,10 +143,11 @@ export function CommitPopover({
       }
     >
       {isMobile ? (
-        // A phone's list header draws it as the 40px primary pill beside the
+        // A phone's list header draws it as a 44px primary pill beside the
         // listing pills, not as the toolbar's flat 24px button.
         <StickyButton
-          className="shrink-0"
+          className="shrink-0 !h-11"
+          buttonClassName="!h-11 !min-w-11"
           variant={ButtonVariant.Primary}
           disabled={Boolean(reason)}
           aria-expanded={open}

@@ -14,6 +14,15 @@ Build NAC with `npm --prefix crates/nac-server/web run build`, then `npm pack
 --ignore-scripts` at the repository root. Pin the exact source revision and npm
 integrity. The package is private; this does not authorize publication.
 
+For a reproducible handoff, run
+`node crates/nac-server/web/scripts/presentation-artifact.mjs --output /absolute/evidence/directory`
+from the source repository after committing the normal build outputs. It
+preserves the root tarball and `artifact.json` with revision, SHA256, npm
+integrity, exports, assets/fonts, per-file hashes and toolchain/startup graphs.
+The receiving packed E2E fixture accepts `NAC_PRESENTATION_TARBALL` to test those
+exact bytes instead of repacking a different checkout. This artifact receipt
+does not itself qualify visual journeys or signed hosted consumption.
+
 The caller owns authentication, stream construction, the DOM mount, router and
 asset hosting. Copy the paths in `presentation/assets.json` from the packed
 artifact to static storage preserving their paths; set `assets.mathjaxFontUrl`

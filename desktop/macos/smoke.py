@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual AppKit/WKWebView acceptance; requires an interactive Aqua session."""
 import hashlib
+from ci_paths_budget import check as budget_check, timeout_options
 import json
 import os
 import plistlib
@@ -21,7 +22,7 @@ RECEIPT_FAILURES = ('malformed', 'truncated', 'missing-receipt', 'duplicate', 'o
                     'wrong-version', 'wrong-build', 'wrong-source', 'wrong-track',
                     'wrong-store', 'wrong-incarnation', 'wrong-endpoint')
 SCENARIOS = ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout',
-             'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES
+             'migration-failure', 'bind-conflict', 'commands', 'commands-input') + RECEIPT_FAILURES + CASES
 
 
 def session_lock_state():
@@ -47,19 +48,22 @@ def cleanup_failed_case(evidence, relocated):
     if not evidence.exists():
         raise RuntimeError('No ownership record; inspect app launch diagnostics before cleanup')
     record = json.loads(evidence.read_text())
+    budget_check()
     helper = record.get('app_helper_pid')
     if helper and alive(helper):
-        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True).strip()
+        command = subprocess.check_output(['/bin/ps', '-p', str(helper), '-o', 'command='], text=True, **timeout_options()).strip()
         if command != '/bin/sleep ' + record.get('app_helper_argument', ''):
             raise RuntimeError('Refusing cleanup of an unrelated app helper')
+        budget_check()
         os.kill(helper, signal.SIGTERM)
     for key, executable in [('engine_pid', relocated / 'Contents/Resources/nac-web'),
                             ('app_pid', relocated / 'Contents/MacOS/NACPreview')]:
+        budget_check()
         pid = record.get(key, 0)
         if not pid:
             continue
         command = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'command='],
-                                 capture_output=True, text=True).stdout
+                                 capture_output=True, text=True, **timeout_options()).stdout
         if not command:
             continue
         if str(executable) not in command:
@@ -68,21 +72,24 @@ def cleanup_failed_case(evidence, relocated):
             raise RuntimeError(f'Refusing cleanup of unowned engine group {pid}')
         send = (lambda sig: os.killpg(pid, sig)) if key == 'engine_pid' else (lambda sig: os.kill(pid, sig))
         try:
+            budget_check()
             send(signal.SIGTERM)
             deadline = time.monotonic() + (25 if key == 'engine_pid' else 3)
             while time.monotonic() < deadline:
+                budget_check()
                 state = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'stat='],
-                                       capture_output=True, text=True).stdout.strip()
+                                       capture_output=True, text=True, **timeout_options()).stdout.strip()
                 if not state or state.startswith('Z'):
                     break
                 time.sleep(0.05)
+            budget_check()
             send(signal.SIGKILL)
         except ProcessLookupError:
             pass
         except PermissionError:
             # Darwin can report EPERM for an already dead process group. Never
             # hide a permission failure while any group member can still run.
-            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True)
+            rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,pgid=,stat='], text=True, **timeout_options())
             members = [line.split() for line in rows.splitlines()]
             live = [row for row in members if len(row) == 3 and
                     int(row[1 if key == 'engine_pid' else 0]) == pid and not row[2].startswith('Z')]
@@ -91,6 +98,7 @@ def cleanup_failed_case(evidence, relocated):
     root = Path(record.get('profile', '/missing-ownership-record'))
     if (root.name.startswith('nac-mac-preview-') and not root.is_symlink()
             and root.resolve().parent == Path(tempfile.gettempdir()).resolve()):
+        budget_check()
         if root.exists():
             shutil.rmtree(root)
 
@@ -99,8 +107,9 @@ def main():
     app, output = map(lambda value: Path(value).resolve(), sys.argv[1:])
     output.mkdir(parents=True, exist_ok=True)
     selection = os.environ.get('NAC_MAC_SMOKE_SCENARIOS')
-    scenarios = tuple(selection.split(',')) if selection else SCENARIOS
-    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(SCENARIOS)
+    available = SCENARIOS + (('ci-terminal',) if os.environ.get('NAC_MAC_CI_TERMINAL') == '1' else ())
+    scenarios = tuple(selection.split(',')) if selection else available
+    assert scenarios and len(set(scenarios)) == len(scenarios) and set(scenarios) <= set(available)
     metadata = {
         'requested_scenarios': scenarios,
         'full_scenario_run': scenarios == SCENARIOS,
@@ -154,9 +163,22 @@ def main():
     thread.start()
     results = []
     try:
-        with tempfile.TemporaryDirectory(prefix='nac-mac-relocation-') as temporary:
+        temporary = Path(tempfile.mkdtemp(prefix='nac-mac-relocation-'))
+        actors_settled = True
+        process = None
+        evidence = None
+        try:
             relocated = Path(temporary) / 'Moved folder with spaces' / app.name
             shutil.copytree(app, relocated)
+            command_driver = None
+            if 'commands-input' in scenarios:
+                command_driver = Path(temporary) / 'CommandInputDriver'
+                with (output / 'command-driver-build.log').open('w') as log:
+                    subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5',
+                                    '-framework', 'AppKit', '-framework', 'CoreGraphics',
+                                    '-framework', 'IOKit', '-framework', 'CryptoKit',
+                                    'desktop/macos/CommandInputDriver.swift', '-o', str(command_driver)],
+                                   check=True, timeout=90, stdout=log, stderr=subprocess.STDOUT)
             engine = relocated / 'Contents/Resources/nac-web'
             saved = engine.with_name('saved-engine')
             engine.rename(saved)
@@ -164,7 +186,13 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
-                    if scenario in ('normal', 'engine-exit', 'migration-failure') + CASES:
+                    driver = None
+                    if scenario == 'commands-input':
+                        # A previous failed run may have left a terminal phase or
+                        # acknowledgement in this owned evidence directory.
+                        for name in ('commands-input-phase.json', 'commands-input-ack.json'):
+                            (output / name).unlink(missing_ok=True)
+                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal', 'commands', 'commands-input') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)
@@ -187,24 +215,37 @@ def main():
                     started = time.monotonic()
                     session_before = session_lock_state()
                     with (output / f'{scenario}.log').open('w') as log:
-                        process = subprocess.Popen(['/usr/bin/open', '-n', '-W', '-a', str(relocated),
+                        actors_settled = False
+                        process = None
+                        launch = ['/usr/bin/open', '-n', '-W', '-a', str(relocated),
                             '--stdout', str(output / f'{scenario}-app.log'),
                             '--stderr', str(output / f'{scenario}-app.log'),
                             '--env', 'NAC_HOME=/DO-NOT-USE-PERSONAL-NAC',
                             '--env', 'NAC_MANAGED_CONFIG=/DO-NOT-INHERIT',
                             '--env', 'OPENAI_API_KEY=must-not-reach-engine', '--args',
-                            '--smoke-output', str(evidence), '--smoke-scenario', scenario],
+                            '--smoke-output', str(evidence), '--smoke-scenario', scenario]
+                        if scenario == 'commands-input':
+                            launch.append('--commands-external')
+                        process = subprocess.Popen(launch,
                             cwd='/', stdout=log, stderr=log, start_new_session=True,
                             env={**os.environ, 'NAC_HOME': '/DO-NOT-USE-PERSONAL-NAC',
                                  'NAC_MANAGED_CONFIG': '/DO-NOT-INHERIT',
                                  'OPENAI_API_KEY': 'must-not-reach-engine'})
-                        try:
+                        if scenario == 'commands-input':
+                            with (output / 'command-driver.log').open('w') as driver_log:
+                                driver = subprocess.Popen([str(command_driver), str(output),
+                                                           str(relocated), metadata['source_head']],
+                                                          cwd='/', stdout=driver_log,
+                                                          stderr=subprocess.STDOUT, start_new_session=True)
+                                code = process.wait(timeout=115)
+                                try:
+                                    driver_code = driver.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    # Preserve the app's receipt as the primary
+                                    # failure; the owned driver is reaped below.
+                                    driver_code = None
+                        else:
                             code = process.wait(timeout=115)
-                        except subprocess.TimeoutExpired:
-                            cleanup_failed_case(evidence, relocated)
-                            process.terminate()
-                            process.wait(timeout=5)
-                            raise RuntimeError(f'{scenario}: app exceeded bounded smoke timeout; inspect {output}')
                     control_result = control.finish()
                     result = json.loads(evidence.read_text())
                     result['session_before'] = session_before
@@ -222,6 +263,10 @@ def main():
                     result['relocated_app'] = str(relocated)
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
                     assert (code == 0 or scenario.startswith('parent-loss')) and result.get('passed'), f'{scenario} failed: {result}'
+                    if scenario == 'commands-input':
+                        if driver_code != 0:
+                            raise RuntimeError('External OS command driver did not accept the app result; see command-driver.log')
+                        assert result['commands']['input']['source'] == 'external-public-OS-driver', result
                     assert result['engine_reaped'] and result['profile_removed'], result
                     if not scenario.startswith('parent-loss'):
                         assert result['identity_retired'], result
@@ -233,6 +278,7 @@ def main():
                     assert not Path(result['profile']).exists(), result
                     assert all(result.get('profile') != prior.get('profile') for prior in results), result
                     assert not contacted, 'Preview contacted the unrelated default-port server'
+                    actors_settled = True
                     results.append({'scenario': scenario, 'passed': True,
                                     'profile': result['profile'],
                                     'visible_paint_qualified': result['visible_paint_qualified'],
@@ -240,9 +286,63 @@ def main():
                     print(json.dumps(results[-1]), flush=True)
                     if scenario != 'missing':
                         engine.unlink()
+            except BaseException as failure:
+                if not actors_settled:
+                    try:
+                        record = json.loads(evidence.read_text())
+                        # A partial receipt cannot establish actor settlement.
+                        # A failed episode with no engine identity stays in custody.
+                        if (not isinstance(record, dict)
+                                or type(record.get('app_pid')) is not int or record['app_pid'] <= 0
+                                or type(record.get('engine_pid')) is not int or record['engine_pid'] <= 0):
+                            raise RuntimeError('Incomplete smoke actor ownership; settlement is unproven')
+                        cleanup_failed_case(evidence, relocated)
+                        actors_settled = True
+                    except BaseException as error:
+                        failure.add_note(f'Smoke actor cleanup unproven: {error}')
+                raise
             finally:
-                engine.unlink(missing_ok=True)
-                saved.rename(engine)
+                failure = sys.exception()
+                try:
+                    if driver is not None and driver.poll() is None:
+                        driver.terminate()
+                        try:
+                            driver.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            driver.kill()
+                            driver.wait(timeout=5)
+                    # This handle is ours even when app/engine authority is unknown.
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                except BaseException as error:
+                    actors_settled = False
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Owned LaunchServices wrapper cleanup failed: {error}')
+        finally:
+            failure = sys.exception()
+            if not actors_settled:
+                diagnostic = f'Smoke cleanup unproven; retained app root {temporary}; evidence {evidence}'
+                if failure is not None:
+                    failure.add_note(diagnostic)
+                try:
+                    print(diagnostic, file=sys.stderr)
+                except BaseException as error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Retention notice could not be written: {error}')
+            else:
+                try:
+                    shutil.rmtree(temporary)
+                except BaseException as error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f'Relocation cleanup failed; retained root {temporary}: {error}')
     finally:
         done.set()
         thread.join(timeout=1)

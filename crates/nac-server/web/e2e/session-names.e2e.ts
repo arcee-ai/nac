@@ -162,6 +162,64 @@ async function tokens(page: Page, theme: string) {
   }, theme);
 }
 
+test.describe("passive session-name hints", () => {
+  test.use({ hasTouch: false });
+
+  test("an open name hint leaves covered sibling navigation clickable", async ({
+    harness,
+    page,
+    request,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const project = await createProject(request, harness, { name: "Passive name hints" });
+    const ids: string[] = [];
+    for (const name of names.slice(0, 2)) {
+      const id = await createSession(request, harness, "direct", project);
+      await rename(request, harness.baseUrl, id, name);
+      ids.push(id);
+    }
+    await page.goto(`${harness.baseUrl}/#/session/${ids[0]}/files`);
+    const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+    if (await show.isVisible()) await show.click();
+    const sidebar = page.locator("[data-sidebar]");
+    const candidates = await Promise.all(
+      names.slice(0, 2).map(async (name, index) => {
+        const row = sidebar.getByRole("button", { name: `${name}, Direct`, exact: true });
+        await expect(row).toBeVisible();
+        const box = await row.boundingBox();
+        expect(box).not.toBeNull();
+        return { row, name, id: ids[index], box: box! };
+      }),
+    );
+    candidates.sort((a, b) => a.box.y - b.box.y);
+    const [hovered, target] = candidates;
+    await hovered.row.hover();
+    const hint = page.getByRole("tooltip");
+    await expect(hint).toHaveText(hovered.name);
+    const preview = await hint.boundingBox();
+    expect(preview).not.toBeNull();
+    const x = target.box.x + target.box.width / 2;
+    const y = target.box.y + target.box.height / 2;
+    // Exercise a genuinely covered target, rather than a hover elsewhere on the page.
+    expect(x).toBeGreaterThanOrEqual(preview!.x);
+    expect(x).toBeLessThan(preview!.x + preview!.width);
+    expect(y).toBeGreaterThanOrEqual(preview!.y);
+    expect(y).toBeLessThan(preview!.y + preview!.height);
+    expect(
+      await target.row.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const hit = node.ownerDocument.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        );
+        return hit === node || (hit != null && node.contains(hit));
+      }),
+    ).toBe(true);
+    await target.row.click();
+    await expect(page).toHaveURL(new RegExp(`/session/${target.id}/insights$`));
+  });
+});
+
 for (const width of [1440, 768, 390])
   for (const theme of ["dark", "light"]) {
     test.describe(`input mode ${width} ${theme}`, () => {

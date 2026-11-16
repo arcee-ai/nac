@@ -95,6 +95,8 @@ type TooltipContentProps = Omit<
   "onEscapeKeyDown"
 > & {
   container?: HTMLElement | null;
+  /** A noninteractive hint must not intercept input through its positioning wrapper. */
+  nonInteractive?: boolean;
 };
 
 function TooltipContent({
@@ -102,23 +104,27 @@ function TooltipContent({
   sideOffset = 8,
   collisionPadding = 8,
   container,
+  nonInteractive = false,
   ref,
   ...props
 }: TooltipContentProps) {
   const target = usePresentationPortalTarget();
   const parts = React.useContext(TooltipPartsContext);
   const composedRef = React.useMemo(() => composeRefs(ref, parts?.content), [ref, parts]);
+  const content = (
+    <TooltipPrimitive.Content
+      data-slot="tooltip-content"
+      sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
+      className={cn("z-[200]", className)}
+      {...props}
+      ref={composedRef}
+      onEscapeKeyDown={keepOpen}
+    />
+  );
   return (
     <TooltipPrimitive.Portal container={container ?? target}>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        collisionPadding={collisionPadding}
-        className={cn("z-[200]", className)}
-        {...props}
-        ref={composedRef}
-        onEscapeKeyDown={keepOpen}
-      />
+      {nonInteractive ? <div className="pointer-events-none">{content}</div> : content}
     </TooltipPrimitive.Portal>
   );
 }

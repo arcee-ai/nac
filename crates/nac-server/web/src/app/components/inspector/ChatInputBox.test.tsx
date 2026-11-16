@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -359,6 +359,60 @@ afterEach(() => {
   cleanup();
   resetRuntime("session");
   vi.unstubAllGlobals();
+});
+
+describe("responsive Session settings target", () => {
+  it.each([false, true])("keeps the settings action and draft on mobile=%s", async (phone) => {
+    mobile = phone;
+    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
+    try {
+      const textarea = composer({ behavior: "direct" });
+      type(textarea, "Unsent draft before opening settings");
+      const button = screen.getByRole("button", { name: "Session settings" });
+      for (const token of ["!size-11", "!min-h-11", "!min-w-11"])
+        expect(button.classList.contains(token)).toBe(phone);
+      expect(button.classList.contains("btn-small")).toBe(true);
+      expect(button.querySelector("svg")?.getAttribute("width")).toBe("16");
+      fireEvent.click(button);
+      const dialog = await screen.findByRole("dialog", { name: "Session settings" });
+      await waitFor(() => expect(readConfig).toHaveBeenCalled());
+      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "Session settings" })).toBeNull(),
+      );
+      expect(textarea.value).toBe("Unsent draft before opening settings");
+      expect(fakes.submitRun).not.toHaveBeenCalled();
+    } finally {
+      readConfig.mockRestore();
+    }
+  });
+
+  it("preserves the focused action and draft through mobile and desktop resize", async () => {
+    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
+    try {
+      const textarea = composer({ behavior: "direct" });
+      type(textarea, "Unsent draft survives responsive target changes");
+      const button = screen.getByRole("button", { name: "Session settings" });
+      act(() => button.focus());
+      resizeComposer(true);
+      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
+      expect(button.classList.contains("!size-11")).toBe(true);
+      expect(document.activeElement).toBe(button);
+      resizeComposer(false);
+      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
+      expect(button.classList.contains("!size-11")).toBe(false);
+      expect(document.activeElement).toBe(button);
+      expect(textarea.value).toBe("Unsent draft survives responsive target changes");
+      fireEvent.click(button);
+      expect(await screen.findByRole("dialog", { name: "Session settings" })).toBeTruthy();
+      await waitFor(() => expect(readConfig).toHaveBeenCalled());
+      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
+      expect(fakes.submitRun).not.toHaveBeenCalled();
+    } finally {
+      readConfig.mockRestore();
+    }
+  });
 });
 
 describe("responsive Enter behavior", () => {
@@ -1261,6 +1315,60 @@ describe("human command composer integration", () => {
 });
 
 describe("primary composer draft lifetime", () => {
+  it("shows the shared review owner while pending and clears only the accepted revision", async () => {
+    const response = Promise.withResolvers<unknown>();
+    fakes.submitRun.mockReturnValueOnce(response.promise);
+    const textarea = composer();
+    type(textarea, "original");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledOnce());
+    expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+      "Sending message",
+    );
+    type(textarea, "newer draft");
+    await act(async () =>
+      response.resolve({
+        status: "accepted",
+        requestId: "request",
+        response: { run_id: "run", client_id: null },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull(),
+    );
+    expect(textarea.value).toBe("newer draft");
+    expect(fakes.submitRun).toHaveBeenCalledOnce();
+  });
+
+  it("retains unconfirmed primary text for explicit review across remount without resending", async () => {
+    fakes.submitRun.mockResolvedValueOnce({
+      status: "uncertain",
+      requestId: "unknown",
+      error: new TypeError("response lost"),
+    });
+    const textarea = composer();
+    type(textarea, "review this message");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+        "delivery is unconfirmed",
+      ),
+    );
+    expect(textarea.value).toBe("review this message");
+    cleanup();
+    const returned = composer();
+    expect(screen.getByRole("region", { name: "Message delivery" }).textContent).toContain(
+      "review this message",
+    );
+    expect(
+      (screen.getByRole("button", { name: "Restore to composer" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    type(returned, "");
+    fireEvent.click(screen.getByRole("button", { name: "Restore to composer" }));
+    expect(returned.value).toBe("review this message");
+    expect(fakes.submitRun).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
+  });
   it("restores independent exact text across session remounts without sending", () => {
     const text = "  雪🙂\n\n!echo untouched  \n";
     type(composer(), text);

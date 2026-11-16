@@ -145,6 +145,26 @@ fn assert_future_store_contents(
     );
 }
 
+fn assert_future_cause(error: anyhow::Error, future_version: i64) {
+    let expected = format!("unsupported store schema version {future_version}; this build supports versions {MINIMUM_MIGRATABLE_SCHEMA_VERSION} through {STORE_SCHEMA_VERSION}");
+    assert_eq!(error.to_string(), expected);
+    let contextual = error.context("future-schema-caller-context");
+    let cause = contextual
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<StoreFutureSchemaError>())
+        .expect("the actual future-schema cause must survive caller context");
+    assert_eq!(cause.found_version(), future_version);
+    assert_eq!(
+        cause.minimum_supported_version(),
+        MINIMUM_MIGRATABLE_SCHEMA_VERSION
+    );
+    assert_eq!(cause.maximum_supported_version(), STORE_SCHEMA_VERSION);
+    assert_eq!(cause.to_string(), expected);
+    assert!(anyhow!(expected)
+        .downcast_ref::<StoreFutureSchemaError>()
+        .is_none());
+}
+
 #[test]
 fn every_future_schema_refusal_preserves_database_and_sidecars_exactly() {
     assert_eq!(MINIMUM_MIGRATABLE_SCHEMA_VERSION, 0);
@@ -158,15 +178,16 @@ fn every_future_schema_refusal_preserves_database_and_sidecars_exactly() {
             match action {
                 "initialize" => {
                     let error = initialize(&path).unwrap_err();
-                    assert!(error.to_string().contains(&format!(
-                        "unsupported store schema version {future_version}"
-                    )));
+                    assert_future_cause(error, future_version);
                 }
                 "normal-open" => {
                     let error = crate::store::list_projects(&path).unwrap_err();
-                    assert!(error.to_string().contains(&format!(
-                        "unsupported store schema version {future_version}"
-                    )));
+                    match error {
+                        crate::store::ProjectStoreError::Store(error) => {
+                            assert_future_cause(error, future_version);
+                        }
+                        other => panic!("normal open lost its store failure: {other}"),
+                    }
                 }
                 "migration-status" => assert_eq!(
                     migration_status(&path),
@@ -179,9 +200,7 @@ fn every_future_schema_refusal_preserves_database_and_sidecars_exactly() {
                 ),
                 "readiness" => {
                     let error = check_readiness(&path).unwrap_err();
-                    assert!(error.to_string().contains(&format!(
-                        "unsupported store schema version {future_version}"
-                    )));
+                    assert_future_cause(error, future_version);
                 }
                 _ => unreachable!(),
             }

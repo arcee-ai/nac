@@ -25,6 +25,7 @@ export function SessionLinkButton({
   return (
     <InsightLinkButton
       label={link.title || "Open session"}
+      className="!h-auto !min-h-9 !px-2 !py-2 max-md:!min-h-11"
       onClick={() => context.openSubagent(link.rowKey)}
     />
   );
