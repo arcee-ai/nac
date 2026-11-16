@@ -1,7 +1,7 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { A as r, D as i, k as a, n as o } from "./RuntimeContext-BntTaIwR.js";
+import { A as r, D as i, k as a, n as o } from "./RuntimeContext-YYDoO8cR.js";
 import { a as s } from "./PresentationBoundary-DgJz1GXw.js";
-import { _r as c, ar as l, n as u, o as d, r as f, t as p, vr as m } from "./PerfProfiler-vuoOuTq6.js";
+import { n as c, o as l, or as u, r as d, t as f, vr as p, yr as m } from "./PerfProfiler-BJdJ5GDN.js";
 import { N as h, i as g, r as _ } from "./Toast-y4mFgUIo.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
@@ -6524,7 +6524,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-L2oIVkTM.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-BHg4TNUN.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
@@ -6561,18 +6561,18 @@ function bl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function xl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: f } = o(), p = re(), g = ne(), _ = h(), v = d(), y = ee(), b = m(g.pathname), x = b ? y.getQueryData(l.sessionSnapshot(b)) : void 0, S = u(e, [
+	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: d } = o(), f = re(), g = ne(), _ = h(), v = l(), y = ee(), b = m(g.pathname), x = b ? y.getQueryData(u.sessionSnapshot(b)) : void 0, S = c(e, [
 		x?.workspace?.host_root,
 		x?.metadata.workspace_host_path,
 		x?.metadata.cwd
 	]), C = (e) => {
-		b && (r(null), i("tree"), a(e), s(_), p(c.session(b, "files")));
+		b && (r(null), i("tree"), a(e), s(_), f(p.session(b, "files")));
 	};
 	return S.kind === "workspace" && b ? /* @__PURE__ */ A("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), f.openWorkspacePath(b, S.path).catch((e) => {
+			e.preventDefault(), d.openWorkspacePath(b, S.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || v.error(`Could not open file: ${t}`), C(S.path);
 			});
@@ -6645,7 +6645,7 @@ var Cl = Sl(!0), wl = Sl(!1);
 function Tl({ source: e, streaming: t }) {
 	let n = al(e), r = t ? Cl : wl, i = /* @__PURE__ */ A(Ha, {
 		remarkPlugins: ml,
-		urlTransform: f,
+		urlTransform: d,
 		components: r,
 		children: n.source
 	});
@@ -6668,7 +6668,7 @@ function El({ source: e, components: t }) {
 	return /* @__PURE__ */ A(Ha, {
 		remarkPlugins: i.remark,
 		rehypePlugins: i.rehype,
-		urlTransform: f,
+		urlTransform: d,
 		components: c,
 		children: e
 	});
@@ -6697,7 +6697,7 @@ var Al = D(function({ children: e, streaming: t = !1 }) {
 	let [n, r] = k(t);
 	t && !n && r(!0);
 	let a = t || n && !kl(e);
-	return /* @__PURE__ */ A(p, {
+	return /* @__PURE__ */ A(f, {
 		id: "markdown",
 		children: a ? el(e).map((e, t) => /* @__PURE__ */ A(Dl, { source: e }, t)) : /* @__PURE__ */ A(Tl, {
 			source: e,
