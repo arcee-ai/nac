@@ -10,6 +10,7 @@ durable direct-session work.
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)
 - [Retained isolated tasks](retained-tasks.md)
+- [Retained interval tasks](interval-tasks.md)
 - [Session behaviors](session-behaviors.md)
 - [Direct-session permissions](permissions.md)
 - [Recent terminal activity](terminal-history.md)

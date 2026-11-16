@@ -602,6 +602,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     listSessions: (options?: ListSessionsOptions, signal?: AbortSignal) => Promise<{
         active: boolean;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
+        attention_revision?: number;
+        attention_updated_at?: string | null;
+        heartbeat_results?: import("./openapi.generated.js").components["schemas"]["HeartbeatAttentionResult"][];
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         summary: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"];
         workspace_diff?: import("./openapi.generated.js").components["schemas"]["WorkspaceDiffTotals"] | null;
@@ -1053,6 +1056,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     getWorkspaceFiles: (id: string, revision: number | null, signal?: AbortSignal) => Promise<{
         files: string[];
+        path_root?: string | null;
         truncated: boolean;
     }>;
     getWorkspaceFile: (id: string, path: string, revision: number | null, signal?: AbortSignal) => Promise<{
@@ -1064,6 +1068,11 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     /** Ask nac-web to open a local workspace path with the OS default handler. */
     openWorkspacePath: (id: string, path: string) => Promise<{
+        fell_back_to_parent: boolean;
+        opened: string;
+    }>;
+    /** Explicit existing Local target only; never opens a missing parent. */
+    revealWorkspacePath: (id: string, path: string, expectedWorkspaceRoot: string, expectedPathRoot: string, signal?: AbortSignal) => Promise<{
         fell_back_to_parent: boolean;
         opened: string;
     }>;
@@ -1168,7 +1177,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     inputControlledTerminal: (session: string, id: string, body: import("./types.js").ControlledTerminalInputRequest, signal?: AbortSignal) => Promise<{
         error?: string | null;
-        outcome: import("./openapi.generated.js").components["schemas"]["InputDeliveryOutcome"];
+        outcome: import("./openapi.generated.js").components["schemas"] /** Resolves a saved configuration's credential and lists its models. */["InputDeliveryOutcome"];
     }>;
     listExecutions: (session: string, signal?: AbortSignal) => Promise<{
         executions: import("./openapi.generated.js").components["schemas"]["ExecutionStatus"][];

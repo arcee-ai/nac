@@ -1,6 +1,6 @@
 use super::*;
 
-/// Schema 41 records which owned relationship generation admitted an inbox
+/// Schema 51 records which owned relationship generation admitted an inbox
 /// row. Columns are additive and NULL for every other row, so existing
 /// readers and person/automation input keep their meaning.
 pub(super) fn ensure_columns(connection: &Connection) -> Result<()> {

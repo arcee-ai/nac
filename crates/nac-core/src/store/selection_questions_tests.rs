@@ -125,7 +125,7 @@ fn inbox_has_completion_columns(connection: &Connection) -> bool {
 }
 
 /// A direct parent with background children whose settled runs leave pending
-/// internal completions (ALL-557, schema 41) in the parent's inbox.
+/// internal completions (ALL-557, schema 51) in the parent's inbox.
 fn seed_child_completions(path: &Path, children: &[&str]) -> Vec<i64> {
     insert_test_session(path, "parent");
     for child in children {
@@ -178,10 +178,10 @@ fn child_origin(child: &str) -> Option<InternalCompletionOrigin> {
 }
 
 #[test]
-fn fresh_store_is_created_at_42_with_completion_origins_and_questions() {
+fn fresh_store_is_created_at_52_with_completion_origins_and_questions() {
     let path = temp_store("fresh");
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 42);
+    assert_eq!(user_version(&connection), 52);
     assert!(inbox_has_completion_columns(&connection));
     assert_question_table(&connection);
     let schema = schema_objects(&connection);
@@ -191,11 +191,11 @@ fn fresh_store_is_created_at_42_with_completion_origins_and_questions() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// Schema 40 is dev before both ALL-557 (41) and ALL-559 (42): no completion
+/// Schema 50 is dev before both ALL-557 (51) and ALL-559 (52): no completion
 /// provenance columns and no question table. One open walks both steps.
 #[test]
-fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
-    let path = temp_store("from-40");
+fn dev_v50_store_walks_51_then_52_without_touching_existing_rows() {
+    let path = temp_store("from-50");
     let [completion] = seed_child_completions(&path, &["child"])[..] else {
         unreachable!()
     };
@@ -214,7 +214,7 @@ fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
                  ALTER TABLE session_inbox DROP COLUMN completion_session_id;
                  ALTER TABLE session_inbox DROP COLUMN completion_source;
                  DROP TABLE selection_questions;
-                 PRAGMA user_version = 40;",
+                 PRAGMA user_version = 50;",
             )
             .unwrap();
         assert!(!inbox_has_completion_columns(&connection));
@@ -223,14 +223,14 @@ fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
 
     initialize(&path).unwrap();
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 42);
+    assert_eq!(user_version(&connection), 52);
     assert!(inbox_has_completion_columns(&connection));
     assert_question_table(&connection);
     assert_eq!(table_rows(&connection, "traditional_children"), before);
     let schema = schema_objects(&connection);
     let inbox = table_rows(&connection, "session_inbox");
     drop(connection);
-    // The 41 step classified the pending completion from durable evidence and
+    // The 51 step classified the pending completion from durable evidence and
     // changed nothing else; ordinary input is untouched.
     assert_eq!(
         load_session_inbox_item(&path, "parent", completion).unwrap(),
@@ -247,7 +247,7 @@ fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
     // Re-opening the migrated store is idempotent.
     initialize(&path).unwrap();
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 42);
+    assert_eq!(user_version(&connection), 52);
     assert_eq!(schema_objects(&connection), schema);
     assert_eq!(table_rows(&connection, "session_inbox"), inbox);
     drop(connection);
@@ -257,18 +257,18 @@ fn dev_v40_store_walks_41_then_42_without_touching_existing_rows() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// A store already opened by ALL-557 at schema 41 must still gain the question
-/// table: 42 is a distinct step, so the stored-version early return cannot
-/// skip it. The 41 data, including its one-time legacy classification, is
+/// A store already opened by ALL-557 at schema 51 must still gain the question
+/// table: 52 is a distinct step, so the stored-version early return cannot
+/// skip it. The 51 data, including its one-time legacy classification, is
 /// final and is not revisited.
 #[test]
-fn schema_41_store_gains_the_question_table_and_keeps_completion_rows() {
-    let path = temp_store("from-41");
+fn schema_51_store_gains_the_question_table_and_keeps_completion_rows() {
+    let path = temp_store("from-51");
     let ids = seed_child_completions(&path, &["child-a", "child-b"]);
     {
         let connection = Connection::open(&path).unwrap();
-        // child-b's row stands for one the 41 classification left ordinary
-        // (for example, conflicting evidence); reaching 42 must not re-run it.
+        // child-b's row stands for one the 51 classification left ordinary
+        // (for example, conflicting evidence); reaching 52 must not re-run it.
         connection
             .execute(
                 "UPDATE session_inbox SET completion_source = NULL,
@@ -280,7 +280,7 @@ fn schema_41_store_gains_the_question_table_and_keeps_completion_rows() {
         connection
             .execute_batch(
                 "DROP TABLE selection_questions;
-                 PRAGMA user_version = 41;",
+                 PRAGMA user_version = 51;",
             )
             .unwrap();
     }
@@ -297,7 +297,7 @@ fn schema_41_store_gains_the_question_table_and_keeps_completion_rows() {
 
     initialize(&path).unwrap();
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 42);
+    assert_eq!(user_version(&connection), 52);
     assert_question_table(&connection);
     assert_eq!(tables.map(|table| table_rows(&connection, table)), before);
     let schema = schema_objects(&connection);
@@ -312,7 +312,7 @@ fn schema_41_store_gains_the_question_table_and_keeps_completion_rows() {
 
     initialize(&path).unwrap();
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 42);
+    assert_eq!(user_version(&connection), 52);
     assert_eq!(schema_objects(&connection), schema);
     assert_eq!(tables.map(|table| table_rows(&connection, table)), before);
     drop(connection);

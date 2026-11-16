@@ -35,7 +35,7 @@ pub struct TerminalSession {
     root_start_time: u64,
     #[cfg(unix)]
     process_group_id: Option<libc::pid_t>,
-    _model_slave: Option<Box<dyn portable_pty::SlavePty + Send>>,
+    model_slave: Option<Box<dyn portable_pty::SlavePty + Send>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     collector_state: CollectorState,
     user_owned: bool,
@@ -330,7 +330,7 @@ impl TerminalSession {
             root_start_time,
             #[cfg(unix)]
             process_group_id,
-            _model_slave: model_slave,
+            model_slave,
             master,
             collector_state,
             user_owned,
@@ -458,6 +458,7 @@ impl TerminalSession {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.exit_code.is_some() {
+            self.model_slave.take();
             self.alive.store(false, Ordering::SeqCst);
             return;
         }
@@ -477,6 +478,9 @@ impl TerminalSession {
         };
         if let Ok(Some(status)) = child.try_wait() {
             self.exit_code = Some(status.exit_code() as i32);
+            // Keep live model PTYs open, but release our extra slave once
+            // this exact root is reaped so the collector can commit EOF.
+            self.model_slave.take();
             #[cfg(unix)]
             {
                 // Never retain an id after reaping. If the pre-reap ownership

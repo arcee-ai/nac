@@ -436,7 +436,7 @@ export function Transcript({
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-[72px] px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-8",
+          "pointer-events-none absolute inset-x-0 top-3 px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-8",
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
@@ -450,7 +450,7 @@ export function Transcript({
       {showInitialPrompts ? (
         <div
           className={cn(
-            "absolute inset-x-0 top-[72px] flex overflow-auto px-4 md:top-[90px] md:px-8",
+            "absolute inset-x-0 top-3 flex overflow-auto px-4 md:top-[90px] md:px-8",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
             fade,
           )}
@@ -461,13 +461,13 @@ export function Transcript({
         </div>
       ) : null}
       <div ref={scrollRef} className={cn("h-full overflow-auto", fade, !revealed && "invisible")}>
-        {/* The phone has the fixed top bar over this scroll region, so its
-            first message has to clear it. Wider layouts float the session
-            header over this scroll, and the first message starts under it. */}
+        {/* The phone header reserves its own height, leaving only a gap here.
+            Wider layouts still float the session header over this scroll,
+            so the first message keeps its existing clearance. */}
         <div
           ref={contentRef}
           className={cn(
-            "flex flex-col pt-[72px] md:pt-[90px] [&>*]:shrink-0 px-4 md:px-8",
+            "flex flex-col pt-3 md:pt-[90px] [&>*]:shrink-0 px-4 md:px-8",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it. A long
             // draft, the goal editor or queued messages make the composer

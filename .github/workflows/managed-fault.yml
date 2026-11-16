@@ -1,0 +1,67 @@
+name: Managed NAC fault fixture
+
+on:
+  workflow_call:
+    inputs:
+      cold_caches:
+        description: Explicit PR/manual cache-miss measurement; acceptance work is unchanged
+        type: boolean
+        required: false
+        default: false
+      source_sha:
+        description: Immutable candidate from the caller's preparation job
+        required: true
+        type: string
+    outputs:
+      fault_receipt:
+        description: Complete successful fixture bound to this candidate, repository, run and attempt
+        value: ${{ jobs.fault.outputs.fault_receipt }}
+
+permissions:
+  contents: read
+
+jobs:
+  fault:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    outputs:
+      fault_receipt: ${{ steps.receipt.outputs.fault_receipt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - name: Bind checkout to the prepared source
+        id: candidate
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          test "$sha" = "$EXPECTED_SHA"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0 # 1.98.0
+        with:
+          components: clippy
+      - name: Install Node LTS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.22.1
+      - name: Cache managed fault compilation
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          prefix-key: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
+          key: managed-fault
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Run every private managed fault fixture check
+        id: fixture
+        run: make test-managed-fault-fixture
+      - name: Retain only complete same-attempt fixture evidence
+        id: receipt
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+          CHECKOUT_SHA: ${{ steps.candidate.outputs.sha }}
+          FIXTURE_RESULT: ${{ steps.fixture.outcome }}
+        run: node .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import {
   Button,
@@ -126,6 +127,9 @@ export function PermissionControls({
   poll = true,
   compact = false,
 }: PermissionControlsProps) {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const requestedPermission = searchParams.get("permission_request");
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const queue = usePermissionQueue(sessionId, direct, requesterLabel, {
     poll,
@@ -159,20 +163,40 @@ export function PermissionControls({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [deletingGrant, setDeletingGrant] = useState<string | null>(null);
   const [authorizingReview, setAuthorizingReview] = useState<string | null>(null);
-  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<{ scope: string; key: string } | null>(
+    null,
+  );
+  const selectionScope = `${sessionId}:${location.key}`;
   const identity = JSON.stringify(requests.map((entry) => entry.key));
   // Each newly observed ask gets one automatic presentation. Closing the
   // dialog records that exact request set; a later request changes the
   // identity and opens it again without effect-driven state synchronization.
-  const open = manuallyOpen || Boolean(requests.length && identity !== dismissedRequests);
+  const exactRequestKey = requestedPermission
+    ? `request:${selectionScope}:${requestedPermission}`
+    : null;
+  const open =
+    manuallyOpen ||
+    (exactRequestKey
+      ? dismissedRequests !== exactRequestKey
+      : Boolean(requests.length && identity !== dismissedRequests));
   const close = () => {
-    setDismissedRequests(identity);
+    setDismissedRequests(exactRequestKey ?? identity);
     setManuallyOpen(false);
   };
 
   if (!direct) return null;
 
-  const selected = requests.find((entry) => entry.key === selectedRequest) ?? requests[0] ?? null;
+  const selected =
+    requests.find(
+      (entry) => selectedRequest?.scope === selectionScope && entry.key === selectedRequest.key,
+    ) ??
+    (requestedPermission
+      ? requests.find(
+          (entry) =>
+            entry.scope.sessionId === sessionId && entry.request.id === requestedPermission,
+        )
+      : requests[0]) ??
+    null;
   const active = selected?.request ?? null;
   const requester = selected?.scope.label ?? requesterLabel ?? "this session";
   const requestUnavailable = selected?.scope.query.isError || selected?.scope.query.isPending;
@@ -394,6 +418,12 @@ export function PermissionControls({
               </div>
             ) : null,
           )}
+          {requestedPermission && !selected && (
+            <p role="status" className="text-small text-basic-secondary">
+              This permission request is no longer pending or is unavailable. Refresh the task to
+              inspect its current state.
+            </p>
+          )}
           {requests.length ? (
             <section aria-label="Pending permission requests" className="flex flex-col gap-2">
               <div className="tag-label uppercase text-basic-tertiary">
@@ -408,7 +438,7 @@ export function PermissionControls({
                   className="!h-auto min-h-9 min-w-0 !py-2"
                   aria-pressed={entry.key === selected?.key}
                   disabled={busy}
-                  onClick={() => setSelectedRequest(entry.key)}
+                  onClick={() => setSelectedRequest({ scope: selectionScope, key: entry.key })}
                 >
                   <span className="min-w-0 flex-1 whitespace-normal text-left [overflow-wrap:anywhere]">
                     {entry.scope.label} ({entry.scope.sessionId}): {entry.request.tool}

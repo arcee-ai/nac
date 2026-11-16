@@ -58,6 +58,7 @@ fn finish_parent_run(path: &Path, run_id: &str) {
         "parent",
         run_id,
         RunTerminalDisposition::Completed,
+        None,
     )
     .unwrap();
     transaction.commit().unwrap();

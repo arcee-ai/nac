@@ -83,6 +83,12 @@ pub struct LaunchModelDefaults {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ManagedSessionSummary {
+    #[serde(default)]
+    pub attention_revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention_updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub heartbeat_results: Vec<nac_core::store::HeartbeatAttentionResult>,
     pub summary: SessionSummarySnapshot,
     /// Delegated sessions remain addressable by id, but clients use lineage
     /// to keep them out of primary chat navigation and enforce ownership UI.
