@@ -107,9 +107,12 @@ function LiveInboxProvider({ children }: { children: ReactNode }) {
 
   const current = sessionIdFromPath(pathname);
   const openNext = useCallback(() => {
-    const row = nextNeedsYou(model, current ?? undefined);
+    const root = current
+      ? (fleet.sessions.get(current)?.lineage?.root_session_id ?? current)
+      : undefined;
+    const row = nextNeedsYou(model, root);
     if (row) open(row);
-  }, [model, current, open]);
+  }, [model, current, fleet.sessions, open]);
 
   useKeyboardShortcuts([
     { keys: NEXT_NEEDS_YOU_KEYS, onTrigger: openNext, enabled: model.badge > 0 },

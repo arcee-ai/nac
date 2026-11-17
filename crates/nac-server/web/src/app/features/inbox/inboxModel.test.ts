@@ -93,6 +93,26 @@ describe("needs you", () => {
     });
   });
 
+  it("advances from the exact child targeted by a rolled-up row", () => {
+    const model = derive(
+      [session("a"), session("a-child", { parentId: "a" }), session("b")],
+      [
+        facts("a-child", { pending: [{ kind: "question", request_id: "child-q" }] }),
+        facts("b", { pending: [{ kind: "question", request_id: "b-q" }] }),
+      ],
+      {
+        firstSeen: new Map([
+          [decisionKey("a-child", { kind: "question", request_id: "child-q" }), 1],
+          [decisionKey("b", { kind: "question", request_id: "b-q" }), 2],
+        ]),
+      },
+    );
+    expect(nextNeedsYou(model)?.target.sessionId).toBe("a-child");
+    expect(nextNeedsYou(model, "a-child")?.target.sessionId).toBe("b");
+    expect(nextNeedsYou(model, "a")?.target.sessionId).toBe("b");
+    expect(nextNeedsYou(model, "b")?.target.sessionId).toBe("a-child");
+  });
+
   it("orders oldest waiting first and points at the oldest decision in a row", () => {
     const firstSeen = new Map([
       [decisionKey("a", { kind: "permission", request_id: "late" }), NOW - 1000],

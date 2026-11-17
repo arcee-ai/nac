@@ -41,6 +41,11 @@ export interface FleetAttentionResult extends FleetAttentionState {
 const INITIAL_RETRY_MS = 1000;
 const MAX_RETRY_MS = 30_000;
 
+interface PollSnapshot {
+  snapshot: FleetAttentionSnapshot;
+  startedAt: number;
+}
+
 export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAttentionResult {
   const runtime = useNativeRuntime();
   const { api, client } = runtime;
@@ -49,6 +54,9 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
   const streaming = enabled && (options.stream ?? true);
   const [state, dispatch] = useReducer(applyFleetAttention, emptyFleetAttention);
   const pollStarts = useRef(0);
+  // Query data may outlive the request/effect that delivered it. Keep request
+  // provenance with it so a delayed poll cannot replace a newer stream epoch.
+  const streamBaseline = useRef({ scope: projectId ?? null, at: 0 });
   const [pollReceipt, setPollReceipt] = useState({ scope: projectId ?? null, version: 0 });
   const [outage, setOutage] = useState<{ scope: string | null; version: number } | null>(null);
   const streamPath = `/attention/stream${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`;
@@ -72,13 +80,14 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
   );
 
   // Polling is the baseline and the fallback; it pauses while the stream is live.
-  const poll = useQuery<FleetAttentionSnapshot>({
+  const poll = useQuery<PollSnapshot>({
     queryKey: queryKeys.fleetAttention(projectId ?? null),
     queryFn: async ({ signal }) => {
       const version = ++pollStarts.current;
+      const startedAt = performance.now();
       const snapshot = await api.fleetAttention(projectId, signal);
       if (!signal.aborted) setPollReceipt({ scope: projectId ?? null, version });
-      return snapshot;
+      return { snapshot, startedAt };
     },
     enabled,
     refetchInterval: stream === "live" ? false : (options.pollMs ?? FLEET_ATTENTION_POLL_MS),
@@ -88,7 +97,13 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
   const refetchPoll = poll.refetch;
 
   useEffect(() => {
-    if (poll.data) dispatch({ kind: "snapshot", ...poll.data, scope: projectId ?? null });
+    const baseline = streamBaseline.current;
+    if (
+      poll.data &&
+      (baseline.scope !== (projectId ?? null) || poll.data.startedAt >= baseline.at)
+    ) {
+      dispatch({ kind: "snapshot", ...poll.data.snapshot, scope: projectId ?? null });
+    }
   }, [poll.data, projectId]);
 
   useEffect(() => {
@@ -143,6 +158,9 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
           return;
         }
         delay = INITIAL_RETRY_MS;
+        if (frame.kind === "snapshot") {
+          streamBaseline.current = { scope: projectId ?? null, at: performance.now() };
+        }
         dispatch({ ...frame, scope: projectId ?? null });
         setOutage(null);
         setStream("live");

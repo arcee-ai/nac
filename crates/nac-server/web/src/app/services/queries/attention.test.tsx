@@ -312,6 +312,38 @@ describe("useFleetAttention", () => {
     await waitFor(() => expect(hook.result.current.status).toBe("polling"));
   });
 
+  it("keeps a new stream epoch when an older poll completes after its baseline", async () => {
+    const delayed = Promise.withResolvers<{
+      epoch: string;
+      revision: number;
+      sessions: FleetAttentionSession[];
+    }>();
+    vi.spyOn(api, "fleetAttention").mockReturnValue(delayed.promise);
+    const { hook, sources } = harness();
+    await waitFor(() => expect(sources).toHaveLength(1));
+    act(() => sources[0].frame({ kind: "snapshot", epoch: "e2", revision: 1, sessions: [] }));
+    await act(async () =>
+      delayed.resolve({
+        epoch: "e1",
+        revision: 999,
+        sessions: [entry("old", 999, { pending: [permission("old-request")] })],
+      }),
+    );
+    act(() =>
+      sources[0].frame({
+        kind: "changes",
+        epoch: "e2",
+        revision: 2,
+        upserts: [entry("new", 2, { pending: [permission("new-request")] })],
+        removed: [],
+      }),
+    );
+    expect(hook.result.current.epoch).toBe("e2");
+    expect([...hook.result.current.sessions.keys()]).toEqual(["new"]);
+    expect(hook.result.current.sessions.get("new")?.pending).toEqual([permission("new-request")]);
+    expect(hook.result.current.status).toBe("live");
+  });
+
   it("polls without holding a stream when asked to", async () => {
     const poll = vi.spyOn(api, "fleetAttention").mockResolvedValue({
       epoch: "e1",

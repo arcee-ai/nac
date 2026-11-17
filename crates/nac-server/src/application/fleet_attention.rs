@@ -135,8 +135,7 @@ impl FleetAttentionHub {
         manager: &SessionManager,
     ) -> Result<Arc<FleetAttentionView>, FleetAttentionUnavailable> {
         self.read_store(manager).await?;
-        let live = live(manager).await;
-        self.publish(&live);
+        self.publish_live(manager).await;
         let view = Arc::clone(&self.0.sender.borrow());
         match view.unavailable {
             Some(reason) => Err(reason),
@@ -275,7 +274,17 @@ impl FleetAttentionHub {
 
     /// Merge the latest accepted census with current owners. Unchanged entries
     /// keep their `Arc` and revision; any change advances the fleet revision.
-    fn publish(&self, live: &HashMap<String, Option<AttentionServiceSnapshot>>) {
+    async fn publish_live(&self, manager: &SessionManager) {
+        let active = manager.inner.active_sessions.read().await;
+        self.publish(|| {
+            active
+                .iter()
+                .map(|(id, service)| (id.clone(), service.passive_attention_snapshot()))
+                .collect()
+        });
+    }
+
+    fn publish(&self, sample: impl FnOnce() -> HashMap<String, Option<AttentionServiceSnapshot>>) {
         let cache = lock(&self.0.store);
         if cache.unavailable.is_some() || self.0.stopped.load(Ordering::SeqCst) {
             return;
@@ -283,6 +292,9 @@ impl FleetAttentionHub {
         let Some(census) = cache.census.as_ref() else {
             return;
         };
+        // Sample and publish under one lock. Neither a census await nor another
+        // publication can let older live identities overwrite a newer view.
+        let live = sample();
         self.0.sender.send_if_modified(|current| {
             let revision = current.revision + 1;
             let mut changed = current.unavailable.is_some();
@@ -379,7 +391,7 @@ async fn run(hub: FleetAttentionHub, manager: Weak<SessionManagerInner>) {
             last_census = Instant::now();
             let _ = hub.read_store(&manager).await;
         }
-        hub.publish(&current);
+        hub.publish_live(&manager).await;
         drop(manager);
         tokio::select! {
             hint = hints.changed() => {

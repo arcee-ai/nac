@@ -135,10 +135,10 @@ async function nacWorkspaceProbe(config) {
     // Keep the same probe usable against the retained pre-Focus baseline.
     if (oldEntry()) oldEntry().click();
     else {
-    if (sessionMenu().getAttribute('aria-expanded') !== 'true') sessionMenu().click();
-    (await wait(() => [...document.querySelectorAll('[role=dialog] button')].find(button =>
-      /^Terminal(?![A-Za-z])/.test(button.textContent.trim()) && !button.disabled),
-    'Session menu Terminal row')).click();
+      if (sessionMenu().getAttribute('aria-expanded') !== 'true') sessionMenu().click();
+      (await wait(() => [...document.querySelectorAll('[role=dialog] button')].find(button =>
+        /^Terminal(?![A-Za-z])/.test(button.textContent.trim()) && !button.disabled),
+      'Session menu Terminal row')).click();
     }
   }
   await wait(region, 'terminal panel');

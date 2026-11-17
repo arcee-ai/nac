@@ -264,6 +264,8 @@ export function deriveInbox({
 /** The first session that needs the user, oldest-waiting first. */
 export function nextNeedsYou(model: InboxModel, after?: string): InboxRow | null {
   if (model.needsYou.length === 0) return null;
-  const index = after ? model.needsYou.findIndex((row) => row.sessionId === after) : -1;
+  const index = after
+    ? model.needsYou.findIndex((row) => row.sessionId === after || row.target.sessionId === after)
+    : -1;
   return model.needsYou[(index + 1) % model.needsYou.length] ?? null;
 }

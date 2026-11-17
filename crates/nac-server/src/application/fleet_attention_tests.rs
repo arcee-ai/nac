@@ -77,7 +77,7 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
     let request = Uuid::new_v4();
     let mut live = HashMap::new();
     live.insert("parent".to_owned(), Some(owner(vec![request])));
-    hub.publish(&live);
+    hub.publish(|| live.clone());
     let first = view(&hub);
     assert_eq!(first.revision, 1);
     let parent = &first.entries["parent"].facts;
@@ -117,13 +117,13 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
     assert!(child.operation.is_none());
 
     // Republishing identical facts changes nothing at all.
-    hub.publish(&live);
+    hub.publish(|| live.clone());
     assert_eq!(view(&hub).revision, 1);
 
     // Resolution removes the stale identity on the next record; the untouched
     // child keeps its entry and revision.
     live.insert("parent".to_owned(), Some(owner(Vec::new())));
-    hub.publish(&live);
+    hub.publish(|| live.clone());
     let second = view(&hub);
     assert_eq!(second.revision, 2);
     assert!(second.entries["parent"].facts.attention.pending.is_empty());
@@ -136,7 +136,7 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
 
     // An owner leaving this process is unknown, not "nothing pending".
     live.remove("parent");
-    hub.publish(&live);
+    hub.publish(|| live.clone());
     let third = view(&hub);
     let parent = &third.entries["parent"].facts;
     assert_eq!(
@@ -153,7 +153,7 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
 #[test]
 fn deletion_and_project_filters_are_explicit_removals() {
     let hub = hub_with(vec![stored("a", true), stored("b", true)], Some("project"));
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     let before = view(&hub);
     assert_eq!(delta(&before, &before, Some("project")).upserts.len(), 0);
     let other = delta(
@@ -171,7 +171,7 @@ fn deletion_and_project_filters_are_explicit_removals() {
         metadata: vec![stored("a", true)],
         topology: HashMap::new(),
     }));
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     let after = view(&hub);
     let change = delta(&before, &after, Some("project"));
     // "a" left the project (topology now absent); "b" was deleted.
@@ -184,7 +184,7 @@ fn deletion_and_project_filters_are_explicit_removals() {
 #[test]
 fn unavailable_census_survives_live_publication_until_a_new_successful_read() {
     let hub = hub_with(vec![stored("a", true)], None);
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert_eq!(
         hub.accept_census(2, Err(FleetAttentionUnavailable::Capacity)),
         Err(FleetAttentionUnavailable::Capacity)
@@ -196,7 +196,7 @@ fn unavailable_census_survives_live_publication_until_a_new_successful_read() {
     let revision = view(&hub).revision;
     let _ = hub.accept_census(3, Err(FleetAttentionUnavailable::Capacity));
     assert_eq!(view(&hub).revision, revision);
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert_eq!(
         view(&hub).unavailable,
         Some(FleetAttentionUnavailable::Capacity)
@@ -210,7 +210,7 @@ fn unavailable_census_survives_live_publication_until_a_new_successful_read() {
         }),
     )
     .unwrap();
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert!(view(&hub).unavailable.is_none());
     assert!(view(&hub).revision > revision);
 }
@@ -218,7 +218,7 @@ fn unavailable_census_survives_live_publication_until_a_new_successful_read() {
 #[test]
 fn census_success_failure_and_shutdown_share_one_ordered_frontier() {
     let hub = hub_with(vec![stored("a", true)], None);
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     let _ = hub.accept_census(3, Err(FleetAttentionUnavailable::Store));
     assert_eq!(
         hub.accept_census(
@@ -230,7 +230,7 @@ fn census_success_failure_and_shutdown_share_one_ordered_frontier() {
         ),
         Err(FleetAttentionUnavailable::Store)
     );
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert_eq!(
         view(&hub).unavailable,
         Some(FleetAttentionUnavailable::Store)
@@ -247,7 +247,7 @@ fn census_success_failure_and_shutdown_share_one_ordered_frontier() {
         hub.accept_census(4, Err(FleetAttentionUnavailable::Capacity)),
         Ok(())
     );
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert!(view(&hub).unavailable.is_none());
     assert!(view(&hub).entries.contains_key("b"));
     hub.stop();
@@ -261,9 +261,46 @@ fn census_success_failure_and_shutdown_share_one_ordered_frontier() {
         ),
         Err(FleetAttentionUnavailable::Store)
     );
-    hub.publish(&HashMap::new());
+    hub.publish(HashMap::new);
     assert_eq!(
         view(&hub).unavailable,
         Some(FleetAttentionUnavailable::Store)
     );
+}
+
+#[test]
+fn owner_sampling_and_publication_cannot_overtake_each_other() {
+    let hub = hub_with(vec![stored("parent", true)], None);
+    let request = Uuid::new_v4();
+    let (sampled, entered) = std::sync::mpsc::channel();
+    let (release, resume) = std::sync::mpsc::channel();
+    let first = hub.clone();
+    let older = std::thread::spawn(move || {
+        first.publish(|| {
+            sampled.send(()).unwrap();
+            resume.recv().unwrap();
+            HashMap::from([("parent".into(), Some(owner(vec![request])))])
+        });
+    });
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let second = hub.clone();
+    let (published, result) = std::sync::mpsc::channel();
+    let newer = std::thread::spawn(move || {
+        second.publish(|| HashMap::from([("parent".into(), Some(owner(Vec::new())))]));
+        published.send(()).unwrap();
+    });
+    // The newer sample cannot publish between sampling and publication of the
+    // older one. Once it does publish, the resolved identity stays resolved.
+    assert!(result.recv_timeout(Duration::from_millis(50)).is_err());
+    release.send(()).unwrap();
+    older.join().unwrap();
+    newer.join().unwrap();
+    result.recv_timeout(Duration::from_secs(5)).unwrap();
+    let final_view = view(&hub);
+    assert_eq!(final_view.revision, 2);
+    assert!(final_view.entries["parent"]
+        .facts
+        .attention
+        .pending
+        .is_empty());
 }
