@@ -1051,6 +1051,8 @@ mod managed_delivery;
 #[cfg(feature = "managed-fault-fixture")]
 #[path = "tests/managed_fault_fixture.rs"]
 mod managed_fault_fixture;
+#[path = "tests/managed_gate_order.rs"]
+mod managed_gate_order;
 #[path = "tests/managed_load.rs"]
 mod managed_load;
 #[path = "tests/managed_topology.rs"]

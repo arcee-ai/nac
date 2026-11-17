@@ -1,5 +1,5 @@
-use anyhow::{anyhow, ensure, Context, Result};
-use std::path::PathBuf;
+use anyhow::{anyhow, Result};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub(crate) use nac_credential_store::{
@@ -50,29 +50,22 @@ pub(super) fn with_arcee_auth_lock<T>(operation: impl FnOnce() -> Result<T>) -> 
     result
 }
 
-/// How long a Codex or Arcee token refresh, sign-in or logout waits for
-/// another NAC process that holds the same credential lock, unless
-/// config.toml sets `[auth] lock_timeout_ms`.
+/// How long a Codex token refresh, sign-in or logout, or an Arcee token
+/// refresh, waits for another NAC process that holds the same credential
+/// lock, unless config.toml sets `[auth] lock_timeout_ms`.
 pub(super) const DEFAULT_CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_millis(15_000);
 /// Same bounds as the MCP timeouts in config.toml.
 const MIN_CREDENTIAL_LOCK_TIMEOUT_MS: u64 = 100;
 const MAX_CREDENTIAL_LOCK_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
-#[derive(Debug, Default, serde::Deserialize)]
-struct AuthConfigFile {
-    #[serde(default)]
-    auth: AuthConfigSection,
-}
-
-#[derive(Debug, Default, serde::Deserialize)]
-struct AuthConfigSection {
-    lock_timeout_ms: Option<u64>,
-}
-
-/// Resolves the credential lock wait from config.toml. The read is async so
-/// a caller never blocks a Tokio worker, and it takes no config lease. A
-/// missing config file or `[auth]` section keeps the default; an
-/// out-of-range value is an error rather than being silently ignored.
+/// Resolves the credential lock wait from config.toml. The read is async, so
+/// a caller never blocks a Tokio worker, and it takes no config lease.
+///
+/// Sign-in and token refresh must keep working when the rest of config.toml
+/// is broken, so a missing, unreadable or unparseable file, or one without
+/// `[auth] lock_timeout_ms`, keeps the default; an unreadable or unparseable
+/// file also prints a warning. Only an explicit `lock_timeout_ms` that isn't
+/// an integer within the bounds is an error, and its message names the key.
 pub(super) async fn credential_lock_timeout() -> Result<Duration> {
     let Some(path) = crate::paths::nac_config_path() else {
         return Ok(DEFAULT_CREDENTIAL_LOCK_TIMEOUT);
@@ -83,23 +76,49 @@ pub(super) async fn credential_lock_timeout() -> Result<Duration> {
             return Ok(DEFAULT_CREDENTIAL_LOCK_TIMEOUT);
         }
         Err(error) => {
-            return Err(error).with_context(|| format!("failed to read config {}", path.display()));
+            eprintln!(
+                "warning: could not read {} ({error}); using the default {} ms credential lock wait",
+                path.display(),
+                DEFAULT_CREDENTIAL_LOCK_TIMEOUT.as_millis()
+            );
+            return Ok(DEFAULT_CREDENTIAL_LOCK_TIMEOUT);
         }
     };
-    credential_lock_timeout_from_config(&raw)
-        .with_context(|| format!("invalid config {}", path.display()))
+    credential_lock_timeout_from_config(&raw, &path)
 }
 
-fn credential_lock_timeout_from_config(raw: &str) -> Result<Duration> {
-    let config: AuthConfigFile = toml::from_str(raw).context("failed to parse config")?;
-    let Some(milliseconds) = config.auth.lock_timeout_ms else {
+fn credential_lock_timeout_from_config(raw: &str, path: &Path) -> Result<Duration> {
+    let config = match raw.parse::<toml::Table>() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!(
+                "warning: could not parse {} ({}); using the default {} ms credential lock wait",
+                path.display(),
+                error.message(),
+                DEFAULT_CREDENTIAL_LOCK_TIMEOUT.as_millis()
+            );
+            return Ok(DEFAULT_CREDENTIAL_LOCK_TIMEOUT);
+        }
+    };
+    let Some(value) = config
+        .get("auth")
+        .and_then(|auth| auth.get("lock_timeout_ms"))
+    else {
         return Ok(DEFAULT_CREDENTIAL_LOCK_TIMEOUT);
     };
-    ensure!(
-        (MIN_CREDENTIAL_LOCK_TIMEOUT_MS..=MAX_CREDENTIAL_LOCK_TIMEOUT_MS).contains(&milliseconds),
-        "auth.lock_timeout_ms must be between {MIN_CREDENTIAL_LOCK_TIMEOUT_MS} and {MAX_CREDENTIAL_LOCK_TIMEOUT_MS} milliseconds"
-    );
-    Ok(Duration::from_millis(milliseconds))
+    value
+        .as_integer()
+        .and_then(|milliseconds| u64::try_from(milliseconds).ok())
+        .filter(|milliseconds| {
+            (MIN_CREDENTIAL_LOCK_TIMEOUT_MS..=MAX_CREDENTIAL_LOCK_TIMEOUT_MS).contains(milliseconds)
+        })
+        .map(Duration::from_millis)
+        .ok_or_else(|| {
+            anyhow!(
+                "auth.lock_timeout_ms in {} must be an integer between {MIN_CREDENTIAL_LOCK_TIMEOUT_MS} and {MAX_CREDENTIAL_LOCK_TIMEOUT_MS} milliseconds",
+                path.display()
+            )
+        })
 }
 
 #[cfg(test)]
