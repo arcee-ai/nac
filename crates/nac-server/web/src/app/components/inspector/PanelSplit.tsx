@@ -53,6 +53,7 @@ function panelListWidthLimit(width: number): number {
 export function PanelSplit({
   list,
   listToolbar,
+  listHeader,
   listClassName,
   listTitle,
   title,
@@ -69,6 +70,12 @@ export function PanelSplit({
    * trailing pills of a phone's.
    */
   listToolbar?: ReactNode;
+  /**
+   * What the list is showing, kept in view above its rows rather than
+   * scrolling away with them. A phone has no fixed room under its floating
+   * header, so there it leads the rows instead.
+   */
+  listHeader?: ReactNode;
   /** Insets of the desktop list column, for a panel drawn with its own. */
   listClassName?: string;
   /** What the list is of, titling its screen below the desktop width. */
@@ -181,6 +188,7 @@ export function PanelSplit({
               phoneListToolbarInFlow ? "pt-2" : "pt-16",
             )}
           >
+            {listHeader}
             {list}
           </div>
         </PanelPhoneScreen>
@@ -205,10 +213,11 @@ export function PanelSplit({
   // same place in both layouts: crossing the breakpoint keeps it mounted, so a
   // live terminal in it is neither reattached nor unfocused.
   const listScreen = compact && showList;
+  // The side box paints the one surface; the columns are divided, not layered.
   return (
     <div ref={containerRef} className={cn("flex flex-1 min-h-0 w-full", compact && "flex-col")}>
       {compact && !showList ? (
-        <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex items-center gap-[10px] h-12 pl-4 pr-2 shrink-0 border-b border-muted">
           <span className="min-w-0 truncate header-sm text-basic-primary">{title}</span>
           {titleAction}
           <span className="flex-1" />
@@ -226,8 +235,8 @@ export function PanelSplit({
         </div>
       ) : null}
       {listScreen ? (
-        <div className="flex flex-col flex-1 min-h-0 bg-elevation-ground">
-          <div className="flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex items-center gap-2 h-12 px-2 shrink-0 border-b border-muted">
             <Button
               className="shrink-0"
               size={ButtonSize.Medium}
@@ -244,6 +253,7 @@ export function PanelSplit({
               <span className="min-w-0 truncate label-small text-basic-primary">{listTitle}</span>
             )}
           </div>
+          {listHeader ? <div className="shrink-0 px-2 pt-2">{listHeader}</div> : null}
           <div className="flex flex-col flex-1 min-h-0 overflow-auto pt-2 px-2 [&>*]:shrink-0">
             {list}
           </div>
@@ -255,20 +265,18 @@ export function PanelSplit({
         <div
           hidden={listScreen}
           inert={listScreen}
-          className={cn(
-            "flex-col flex-1 min-w-0 min-h-0 bg-elevation-ground",
-            listScreen ? "hidden" : "flex",
-          )}
+          className={cn("flex-col flex-1 min-w-0 min-h-0", listScreen ? "hidden" : "flex")}
         >
           {children}
         </div>
       )}
       {compact ? null : (
         <div
-          className="relative flex flex-col shrink-0 min-h-0 border-l border-muted bg-elevation-ground"
+          className="relative flex flex-col shrink-0 min-h-0 border-l border-muted"
           style={{ width: listWidth }}
         >
           {listToolbar}
+          {listHeader ? <div className="shrink-0 px-2 pt-3">{listHeader}</div> : null}
           <div
             className={cn(
               "flex flex-col flex-1 min-h-0 overflow-auto px-2 py-4 [&>*]:shrink-0",
@@ -354,11 +362,19 @@ export function PanelRow({
  * — so the columns and the divider are already where the rows will land, and
  * arriving data fills the panel instead of rebuilding it.
  */
-export function PanelLoading({ listTitle }: { listTitle?: string }) {
+export function PanelLoading({
+  listTitle,
+  listHeader,
+}: {
+  listTitle?: string;
+  /** What is being loaded, when the panel can already say so. */
+  listHeader?: ReactNode;
+}) {
   const isMobile = useIsMobile();
   return (
     <PanelSplit
       listTitle={listTitle}
+      listHeader={listHeader}
       list={
         <div className="px-1">
           <ShimmerLoader rows={2} rowClassName="h-7" />
