@@ -37,7 +37,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
     let child = crate::store::begin_traditional_child_run(
         &path,
         "child",
-        "child-run",
+        "all612-private-fixture-run",
         TraditionalChildExecutionMode::Background,
     )
     .unwrap();
@@ -53,7 +53,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
             &Message::User {
                 content: "durable prompt".into(),
             },
-            "child-run",
+            "all612-private-fixture-run",
         )
         .unwrap();
     writer
@@ -78,7 +78,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
     crate::store::clear_active_run(
         &transaction,
         "child",
-        "child-run",
+        "all612-private-fixture-run",
         crate::store::RunTerminalDisposition::Completed,
         None,
     )
@@ -96,7 +96,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let control = serde_json::json!({"nonce": nonce, "boundary": "child-read", "session_id": "child", "run_id": "child-run", "generation": child.generation, "expires_unix_ms": now + 10_000});
+    let control = serde_json::json!({"nonce": nonce, "boundary": "child-read", "session_id": "child", "run_id": "all612-private-fixture-run", "generation": child.generation, "expires_unix_ms": now + 10_000});
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -106,7 +106,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
     file.write_all(serde_json::to_string(&control).unwrap().as_bytes())
         .unwrap();
     drop(file);
-    let run = SessionRunId::from_stored("child-run".into());
+    let run = SessionRunId::from_stored("all612-private-fixture-run".into());
     parts
         .service
         .settle_traditional_child_run(
@@ -131,7 +131,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
     )
     .unwrap();
     assert_eq!(reached["session_id"], "child");
-    assert_eq!(reached["run_id"], "child-run");
+    assert_eq!(reached["run_id"], "all612-private-fixture-run");
     assert_eq!(reached["generation"], child.generation);
     assert_eq!(reached["after_successful_sqlite_commit"], false);
     drop(parts);
@@ -155,7 +155,10 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
         crate::store::load_traditional_child_terminal_receipt(&path, "child", child.generation)
             .unwrap()
             .unwrap();
-    assert_eq!(receipt.run_id.as_deref(), Some("child-run"));
+    assert_eq!(
+        receipt.run_id.as_deref(),
+        Some("all612-private-fixture-run")
+    );
     assert_eq!(
         receipt.status,
         crate::store::TraditionalChildStatus::Completed

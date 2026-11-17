@@ -130,19 +130,19 @@ test("early reusable fault job runs the complete unchanged fixture before emitti
   }
 });
 
-test("real Make fixture retains all three test filters and clippy; each failure prevents receipt emission", t => {
+test("real Make fixture retains all four test filters and clippy; each failure prevents receipt emission", t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-fault-wiring-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const fakeCargo = path.join(root, "cargo.mjs");
   fs.writeFileSync(fakeCargo, `#!${process.execPath}\nimport fs from 'node:fs';\nconst file=process.env.CARGO_CALLS;\nconst calls=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):[];\ncalls.push(process.argv.slice(2));fs.writeFileSync(file,JSON.stringify(calls));\nif(calls.length===Number(process.env.FAIL_COMMAND_INDEX))process.exit(1);\n`);
   fs.chmodSync(fakeCargo, 0o755);
   const fixture = YAML.parse(fs.readFileSync(".github/workflows/managed-fault.yml", "utf8")).jobs.fault.steps.find(s => s.id === "fixture").run;
-  for (let failed = 0; failed <= 4; failed++) {
+  for (let failed = 0; failed <= 5; failed++) {
     const calls = path.join(root, `calls-${failed}.json`);
     const output = path.join(root, `receipt-${failed}`);
     const result = spawnSync("bash", ["-e", "-c", `${fixture}\nnode .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"`], { env: { ...env, CARGO: fakeCargo, CARGO_CALLS: calls, FAIL_COMMAND_INDEX: String(failed), GITHUB_OUTPUT: output }, encoding: "utf8" });
     const commands = JSON.parse(fs.readFileSync(calls, "utf8"));
-    assert.equal(commands.length, failed || 4);
+    assert.equal(commands.length, failed || 5);
     if (failed) {
       assert.notEqual(result.status, 0);
       assert.equal(fs.existsSync(output), false, "a failed fixture cannot emit reusable evidence");
@@ -153,6 +153,7 @@ test("real Make fixture retains all three test filters and clippy; each failure 
       assert.deepEqual(commands, [
         ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "managed_fault_fixture::tests"],
         ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "private_fixture_ack_failure_follows_real_commit_and_replay_is_once"],
+        ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "private_child_read_fault_retains_generation_for_exactly_once_settlement"],
         ["test", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "private_monitor_fault_is_generation_scoped_once_and_subsequent_read_recovers"],
         ["clippy", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--lib", "--bins", "--", "-D", "warnings"],
       ]);

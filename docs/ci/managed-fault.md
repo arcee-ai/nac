@@ -6,8 +6,9 @@ with clippy and Node 24.22.1, uses matching dev/test symbol profiles, and retain
 the trusted-main/dev-push-only compiler cache write boundary. It never replaces
 the ordinary quality graph or runs a second full `make ci` as early work.
 
-The unchanged Make target executes both core fault filters, the server monitor
-fault filter, and feature-enabled server clippy with warnings denied. A failure
+The Make target executes the core control, commit-ack and child-settlement
+fault filters, the legacy server monitor fault filter, and feature-enabled
+server clippy with warnings denied. A failure
 in any command fails the job. Receipt production follows the fixture under the
 default successful-steps condition, requires its explicit successful outcome,
 and separately binds the actual checkout SHA to preparation.
@@ -73,7 +74,7 @@ permission or PR cache-write privilege supplies a substitute.
 
 `node --test .github/scripts/pr-managed-fault.test.mjs` checks the real CLI's
 schema, identity and retry negatives; mandatory early workflow wiring; and the
-unchanged Make recipe using a fake Cargo executable. Each of the four commands
+Make recipe using a fake Cargo executable. Each of the five commands
 has a failure control proving that no receipt is emitted afterward. These local
 controls do not claim the Rust fixture executed or hosted timing improved.
 Observed candidate preparation, setup, scheduling and late-join overhead remain
