@@ -670,6 +670,20 @@ pub(super) fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &P
     git_effective_cwd_before(tokens, command_index, tokens.len(), cwd)
 }
 
+// Newly admitted Git forms execute without inherited repository redirects or
+// command-scoped configuration, on the already-selected backend.
+fn git_environment_prefix(tokens: &[String]) -> Option<(usize, &'static str)> {
+    if !super::resource_projection::newly_permitted_git_segment(tokens) {
+        return None;
+    }
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    Some((
+        command_index,
+        r#"/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM $(for nac_git_var in ${!GIT_CONFIG_KEY_@} ${!GIT_CONFIG_VALUE_@}; do builtin printf '%s\n' -u "$nac_git_var"; done) "#,
+    ))
+}
+
 pub(crate) fn bind_authorized_shell_command(
     command: &str,
     cwd: &Path,
@@ -703,9 +717,19 @@ pub(crate) fn bind_authorized_shell_command(
     let cwd = lexical_normalize(cwd);
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (tokens, spans) in segments.iter().zip(spans) {
+        let git_environment_prefix = git_environment_prefix(tokens);
         let mut canonical_by_requested = Vec::<(PathBuf, String)>::new();
         for (index, span) in spans.iter().enumerate() {
             let Some((option, requested)) = shell_path_candidate(tokens, index) else {
+                if let Some((_, prefix)) =
+                    git_environment_prefix.filter(|(command_index, _)| *command_index == index)
+                {
+                    replacements.push((
+                        span.start,
+                        span.end,
+                        format!("{prefix}{}", &command[span.start..span.end]),
+                    ));
+                }
                 continue;
             };
             let requested = shell_path_requested_path(tokens, index, requested, &cwd);
@@ -729,7 +753,14 @@ pub(crate) fn bind_authorized_shell_command(
                     format!("{option}={canonical}")
                 }
             });
-            replacements.push((span.start, span.end, shell_quote(&bound)));
+            let prefix = git_environment_prefix
+                .filter(|(command_index, _)| *command_index == index)
+                .map_or("", |(_, prefix)| prefix);
+            replacements.push((
+                span.start,
+                span.end,
+                format!("{prefix}{}", shell_quote(&bound)),
+            ));
         }
     }
     if authorized_paths.next().is_some() {

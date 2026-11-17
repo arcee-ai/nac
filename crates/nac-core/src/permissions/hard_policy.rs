@@ -18,6 +18,11 @@ pub(super) fn hard_shell_denial_inner(
         return Some(if name == "indirect stateful shell assignment" {
             "indirect stateful shell assignments are blocked because they can mutate dynamic-loader hooks without disclosing the target variable"
                 .to_string()
+        } else if name == "GIT_CONFIG" || name.starts_with("GIT_CONFIG_") {
+            "Git environment configuration is blocked because it can execute hidden commands"
+                .to_string()
+        } else if name.starts_with("GIT_") {
+            format!("Git environment override '{name}' is blocked because it can redirect repository resources")
         } else if matches!(name, "RSYNC_RSH" | "RSYNC_CONNECT_PROG") {
             "rsync executable environment hooks are blocked because they can conceal commands"
                 .to_string()
@@ -183,6 +188,9 @@ pub(super) fn hard_shell_denial_inner(
             && args[0] == "-b"
             && !args[1].is_empty()
             && !args[1].starts_with('-');
+        if simple_branch && git_checkout_has_alternate_target(tokens, subcommand_index) {
+            return Some("Git checkout branch creation with alternate repository or worktree options is unsupported".to_string());
+        }
         if matches!(operation, "clean" | "reset" | "restore")
             || operation == "checkout" && !simple_branch
         {
@@ -207,6 +215,33 @@ pub(super) fn hard_shell_denial_inner(
         }
     }
     None
+}
+
+fn git_checkout_has_alternate_target(tokens: &[String], subcommand_index: usize) -> bool {
+    let mut index = 1;
+    while index < subcommand_index {
+        let option = tokens[index].as_str();
+        if option == "-C" {
+            index += 2;
+            continue;
+        }
+        if matches!(
+            option,
+            "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--bare"
+        ) || [
+            "--git-dir=",
+            "--work-tree=",
+            "--namespace=",
+            "--super-prefix=",
+        ]
+        .iter()
+        .any(|prefix| option.starts_with(prefix))
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 // These operations have no nested Git command grammar. Other operations may
@@ -675,14 +710,33 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         "DYLD_INSERT_LIBRARIES",
         "DYLD_LIBRARY_PATH",
         "DYLD_FRAMEWORK_PATH",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
     ];
+    let protected = |name: &str| {
+        HOOKS.contains(&name)
+            || name.starts_with("GIT_CONFIG_KEY_")
+            || name.starts_with("GIT_CONFIG_VALUE_")
+    };
 
     let mut leading = 0;
     while let Some(name) = tokens
         .get(leading)
         .and_then(|token| shell_environment_assignment_name(token))
     {
-        if HOOKS.contains(&name) {
+        if protected(name) {
             return Some(name);
         }
         leading += 1;
@@ -694,7 +748,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
     if let Some(name) = tokens[leading..command_index]
         .iter()
         .filter_map(|token| environment_assignment_name(token))
-        .find(|name| HOOKS.contains(name))
+        .find(|name| protected(name))
     {
         return Some(name);
     }
@@ -726,7 +780,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
                     .filter(|target| !target.is_empty())
             };
             if let Some(target) = target {
-                return HOOKS.contains(&target).then_some(target);
+                return protected(target).then_some(target);
             }
             if option == "--" || !option.starts_with('-') {
                 break;
@@ -764,7 +818,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         return effective[1..]
             .iter()
             .filter_map(|operand| shell_environment_assignment_name(operand))
-            .find(|name| HOOKS.contains(name));
+            .find(|name| protected(name));
     }
     if command == "read" {
         let mut index = 1;
@@ -786,7 +840,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         }
         return effective[index..]
             .iter()
-            .find(|name| HOOKS.contains(&name.as_str()))
+            .find(|name| protected(name.as_str()))
             .map(String::as_str);
     }
 
@@ -819,5 +873,5 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
             shell_environment_assignment_name(token)
                 .or_else(|| valid_environment_name(token).then_some(token.as_str()))
         })
-        .find(|name| HOOKS.contains(name))
+        .find(|name| protected(name))
 }

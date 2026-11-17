@@ -47,6 +47,9 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "git --version",
             "env git -C repo log --grep checkout",
             "git checkout -b topic",
+            "env git -C repo checkout -b topic",
+            "git -C --work-tree checkout -b topic",
+            "printf 'GIT_WORK_TREE=not-an-assignment'",
             "git checkout -b reset",
             "git branch reset",
             "git -c core.quotepath=false status",
@@ -57,6 +60,14 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
                 "{command}: {resources:?}"
             );
         }
+        let command = "env git -C repo checkout -b topic";
+        let resources = shell_resources(command, cwd, backend);
+        let bound = bind_authorized_shell_command(command, cwd, &resources).unwrap();
+        assert!(bound.starts_with("env /usr/bin/env -u GIT_DIR "), "{bound}");
+        assert!(
+            bound.ends_with("git -C /workspace/repo checkout -b topic"),
+            "{bound}"
+        );
         for command in [
             "git reset --hard",
             "git -C repo clean -fd",
@@ -64,6 +75,23 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "git checkout -- reset",
             "git checkout -B topic",
             "git checkout -b topic HEAD~1",
+            "git --git-dir=/other/repo --work-tree=/other/tree checkout -b topic",
+            "git -C repo --work-tree /other/tree checkout -b topic",
+            "GIT_WORK_TREE=/other/tree git checkout -b topic",
+            "env GIT_DIR=/other/repo GIT_INDEX_FILE=/other/index git checkout -b topic",
+            "export GIT_WORK_TREE=/other/tree; git checkout -b topic",
+            "cd repo; git checkout -b topic",
+            "source settings; git checkout -b topic",
+            "cd repo; git add -- checkout",
+            "env -C repo git checkout -b topic",
+            "env --chdir=repo git checkout -b topic",
+            "env -iCrepo git checkout -b topic",
+            "command -p git checkout -b topic",
+            "env -P/usr/bin git checkout -b topic",
+            "exec -a git-status git checkout -b topic",
+            "cd repo; git -c core.quotepath=false status -- file",
+            "source settings; git -c core.quotepath=false status",
+            "GIT_DIR=/other/repo; export GIT_DIR; git checkout -b topic",
             "git bisect reset",
             "git submodule foreach git reset --hard",
             "git branch -D reset",
@@ -147,13 +175,16 @@ async fn git_dash_c_and_separator_preserve_canonical_operand_binding() {
         .await
         .unwrap();
     let canonical_repo = repo.canonicalize().unwrap();
-    assert_eq!(
-        bind_authorized_shell_command(command, &root.canonicalize().unwrap(), &canonical).unwrap(),
-        format!(
+    let bound =
+        bind_authorized_shell_command(command, &root.canonicalize().unwrap(), &canonical).unwrap();
+    assert!(bound.starts_with("/usr/bin/env -u GIT_DIR "), "{bound}");
+    assert!(
+        bound.ends_with(&format!(
             "git -C {} add -- {}",
             canonical_repo.display(),
             canonical_repo.join("checkout").display()
-        )
+        )),
+        "{bound}"
     );
     let command = "git -C alias add -- --output=checkout";
     let resources = shell_resources(command, &root, &backend);
