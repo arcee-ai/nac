@@ -1,3 +1,4 @@
+import { reverseDirectEvidence } from "./direct-evidence-wiring.mjs";
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -20,7 +21,7 @@ const hash=v=>createHash('sha256').update(JSON.stringify(sort(v))).digest('hex')
 // composed with the required startup-custody and native-auth fixture controls.
 const parentHash='f799f1ec07a7600fa690d9f31c9c87e8bee082926cadc6cf06ce91a157ec0567';
 function validate(value) {
-  const old=structuredClone(value);reverseAssetTokens(old);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
+  const old=structuredClone(value);reverseDirectEvidence(old, "stable-release");reverseAssetTokens(old);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');
   for(const role of ['browser-shards','browser-proof']) {
     const job=value.jobs[role];assert.deepEqual(job.needs,['prepare','browser-binary','browser-apt']);

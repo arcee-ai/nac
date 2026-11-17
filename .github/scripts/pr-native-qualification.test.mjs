@@ -1,3 +1,4 @@
+import { reverseDirectEvidence } from "./direct-evidence-wiring.mjs";
 import {reverseNativeQualification, reverseNativeApp, nativeOrdinary} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -107,6 +108,7 @@ test("ordinary PR push tag and default dispatch keep the complete existing graph
 test("ordinary workflow semantics permissions steps contexts and release gates remain exact", () => {
   const stable = read("stable-release");
   reverseNativeQualification(stable);
+  reverseDirectEvidence(stable, "stable-release");
   assert.equal(createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
     "0568ebceb223a768301b443c50b13b41ae62d75d08a33b1569306ae51d981f28",
     "reversing qualification wiring retains the combined ordinary graph, including the reviewed auth fixture step");
