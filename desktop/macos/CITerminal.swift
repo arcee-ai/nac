@@ -13,6 +13,24 @@ enum CITerminal {
     static let command = "printf '" + marker.utf8.map { String(format: "\\%03o", Int($0)) }.joined()
         + "' > ci-native-input.txt; cat ci-native-input.txt"
 
+    // One bounded setup step through Focus's ordinary Session menu. This opens
+    // only the panel; shell creation and trusted OS input remain separate below.
+    private static let openPanelStep = #"""
+    const panel = document.querySelector('[aria-label="Session terminal"]');
+    if (panel?.getClientRects().length) return true;
+    const dialog = document.querySelector('[role="dialog"][aria-label="Session"]');
+    if (dialog) {
+        const terminal = [...dialog.querySelectorAll('button')].find(button =>
+            !button.disabled && [...button.querySelectorAll('span')].some(label =>
+                label.textContent.trim() === 'Terminal'));
+        terminal?.click();
+        return false;
+    }
+    const menu = document.querySelector('button[aria-label="Session menu"], button[aria-label="Open panel"]');
+    if (menu && !menu.disabled && menu.getAttribute('aria-expanded') !== 'true') menu.click();
+    return false;
+    """#
+
     static func run(app: PreviewApp, sessionID: String,
                     externalReady: (([String: Any]) -> Void)? = nil,
                     snapshot: () async throws -> Void) async throws -> [String: Any] {
@@ -37,12 +55,11 @@ enum CITerminal {
             throw PreviewError.message("Timed out waiting for CI terminal \(label)")
         }
         _ = try await js("location.hash = '/session/\(sessionID)/terminal'; return true;")
-        // The route selects the panel; the header's Terminal pill opens the
-        // session drawer on it (a pill press toggles, so only a closed one).
+        // The route selects the panel without opening its drawer. Use the same
+        // Session menu and Terminal row as the production Electron/browser paths.
         try await wait("panel controls") {
-            (try await js("return !!document.querySelector('button[aria-label=\"Terminal\"][aria-expanded]') || !!document.querySelector('[aria-label=\"Session terminal\"]');")) as? Bool == true
+            (try await js(openPanelStep)) as? Bool == true
         }
-        _ = try await js("if (!document.querySelector('[aria-label=\"Session terminal\"]')) document.querySelector('button[aria-label=\"Terminal\"][aria-expanded=\"false\"]')?.click(); return true;")
         try await wait("terminal list control") {
             (try await js("""
             const panel=document.querySelector('[aria-label="Session terminal"]');

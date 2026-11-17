@@ -26,18 +26,47 @@ SCENARIOS = ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeo
 
 
 def session_lock_state():
-    """Read only the lock bit; never collect the console users' identities."""
+    """Observe published lock bits only; this does not prove captured paint."""
     try:
         tree = plistlib.loads(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a']))
         nodes = list(tree) if isinstance(tree, list) else [tree]
-        values = []
+        values, malformed = [], False
         while nodes:
             node = nodes.pop()
             if not isinstance(node, dict):
+                malformed = True
                 continue
-            values.extend(row['CGSSessionScreenIsLocked'] for row in node.get('IOConsoleUsers', [])
-                          if isinstance(row, dict) and 'CGSSessionScreenIsLocked' in row)
-            nodes.extend(node.get('IORegistryEntryChildren', []))
+            if 'IOConsoleLocked' in node:
+                value = node['IOConsoleLocked']
+                if type(value) is bool:
+                    values.append(value)
+                else:
+                    malformed = True
+            rows = node.get('IOConsoleUsers', [])
+            if not isinstance(rows, list):
+                malformed = True
+                rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    malformed = True
+                elif 'CGSSessionScreenIsLocked' in row:
+                    value = row['CGSSessionScreenIsLocked']
+                    if type(value) is bool:
+                        values.append(value)
+                    else:
+                        malformed = True
+            children = node.get('IORegistryEntryChildren', [])
+            if isinstance(children, list):
+                nodes.extend(children)
+            else:
+                malformed = True
+        # Hosted Aqua may omit the optional CGS flags while explicitly publishing
+        # Root.IOConsoleLocked=false. Any positive locked fact still wins, and
+        # missing/malformed facts never turn into an unlocked observation.
+        if any(values):
+            return dict(observed=True, locked=True)
+        if malformed:
+            return dict(observed=False, locked=None)
         return dict(observed=bool(values), locked=any(values) if values else None)
     except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException):
         return dict(observed=False, locked=None)
