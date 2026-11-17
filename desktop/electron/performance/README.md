@@ -12,6 +12,24 @@ This owner runs a bounded development comparison of the **normal packaged**
 Swift/WKWebView and Electron apps. It does not replace ALL-636/637's controlled
 hardware qualification, frozen budgets or broader release gate.
 
+For an observer-off/on diagnostic, `observe.py` passively samples one already
+launched disposable normal app with the same coalition and process collector:
+
+```sh
+python3 desktop/electron/performance/observe.py \
+  --bundle "$PWD/target/electron-review/NAC Electron.app" \
+  --pid EXACT_LIVE_APP_PID --engine-pid EXACT_OWNED_ENGINE_PID \
+  --label off-visible --seconds 10 --output "$PWD/target/observer-off-visible"
+```
+
+Use a new output directory for each of `off-visible`, `on-visible`, `off-hidden`
+and `on-hidden`. Record the normal LaunchServices launch, native visibility,
+notification setting and subscription counts alongside the samples. A debugger
+launch can lack LaunchServices coalition metadata; that is a failed observation,
+not a zero-resource sample. The collector never launches, controls or stops the
+app. The caller must prove ordinary protected Quit and exact child/helper cleanup
+separately. Short diagnostic cells do not freeze budgets or certify parity.
+
 Both arms must contain the byte-identical optimized `nac-web`, which embeds the
 same committed production React assets. The comparator checks the engine hash
 before launching either app. The existing Swift builder compiles its shell with
