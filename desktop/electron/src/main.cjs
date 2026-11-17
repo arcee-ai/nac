@@ -9,6 +9,7 @@ const { options, selectConfiguration } = require("./configuration.cjs");
 const { validIdentity } = require("./protocol.cjs");
 const { createNativeAdapters } = require("./native.cjs");
 const { installMenus } = require("./menus.cjs");
+const { installWindowVisibility } = require("./window-visibility.cjs");
 
 app.enableSandbox();
 // Test/developer-selected shell storage must be bound before Chromium helpers
@@ -28,13 +29,14 @@ if (process.env.NAC_ELECTRON_DATA_HOME !== undefined) {
   }
 }
 const lifecycle = new Lifecycle();
-let window, native, engine, configuration, launchOptions, identity, schema;
+let window, native, windowVisibility, engine, configuration, launchOptions, identity, schema;
 let profileInitialized = false,
   bundleVerified = false;
 const securedSessions = new WeakSet();
 let approvedExit = false,
   startupPromise = null,
   failure = null,
+  failureEpisode = null,
   failureDialog = false,
   cleanupPromise = null;
 const resources = app.isPackaged
@@ -45,10 +47,12 @@ const executable =
     ? path.resolve(process.env.NAC_ELECTRON_ENGINE)
     : path.join(resources, "nac-web");
 function reopen() {
+  app.show();
   if (window && !window.isDestroyed()) {
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
+    windowVisibility?.refresh();
   }
 }
 function status(message) {
@@ -61,7 +65,7 @@ function status(message) {
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
     ) +
     "</p>";
-  void window.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  void window.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html)).catch(() => {});
 }
 function createWindow(partition) {
   window = new BrowserWindow({
@@ -100,18 +104,27 @@ function createWindow(partition) {
     onConnectionLost: () =>
       fail(new Error("The engine connection was lost. Choose Retry after shutdown completes.")),
   });
-  window.on("close", (event) => {
+  const ownedNative = native;
+  const visibility = installWindowVisibility({
+    window: ownedWindow,
+    native: ownedNative,
+    app,
+    isCurrent: () => window === ownedWindow && native === ownedNative,
+  });
+  windowVisibility = visibility;
+  ownedWindow.on("close", (event) => {
     if (approvedExit) return;
     event.preventDefault();
-    if (lifecycle.canHide) {
-      native?.cancelPending();
-      window.hide();
+    if (window === ownedWindow && lifecycle.canHide) {
+      ownedNative.cancelPending();
+      ownedWindow.hide();
+      // AppKit can deduplicate hide when this window was already occluded.
+      // The explicit close operation must still publish its current fact.
+      visibility.refresh();
     }
   });
-  window.on("show", () => native?.setVisible(true));
-  window.on("hide", () => native?.setVisible(false));
   window.webContents.on("render-process-gone", () => {
-    if (lifecycle.phase === "running")
+    if (window === ownedWindow && lifecycle.phase === "running")
       fail(
         new Error(
           "The workspace renderer exited. Choose Retry after the original engine has stopped.",
@@ -119,7 +132,7 @@ function createWindow(partition) {
       );
   });
   window.webContents.on("did-fail-load", (_event, code) => {
-    if (code !== -3 && lifecycle.phase === "running")
+    if (window === ownedWindow && code !== -3 && lifecycle.phase === "running")
       fail(
         new Error(
           "The bundled workspace could not load. Choose Retry after its engine has stopped.",
@@ -127,6 +140,8 @@ function createWindow(partition) {
       );
   });
   window.on("closed", () => {
+    visibility.dispose();
+    if (windowVisibility === visibility) windowVisibility = null;
     if (window === ownedWindow) {
       native?.dispose();
       native = null;
@@ -141,52 +156,86 @@ function createWindow(partition) {
 async function fail(error) {
   if (failure || !["running", "confirming"].includes(lifecycle.phase)) return;
   failure = error;
-  native?.cancelPending();
+  const episode = { error, window, engine, retired: false, settlement: null };
+  failureEpisode = episode;
   const retiring = native;
+  retiring?.cancelPending();
   native = null;
-  try {
-    await retiring?.retire();
-  } finally {
-    retiring?.dispose();
-  }
-  const stop = engine?.stop();
-  if (window && !window.isDestroyed()) {
-    approvedExit = true;
-    window.destroy();
-    approvedExit = false;
-  }
-  await stop;
-  if (!["running", "confirming"].includes(lifecycle.phase)) return;
-  await presentFailure();
+  episode.settlement = (async () => {
+    try {
+      await retiring?.retire();
+    } finally {
+      retiring?.dispose();
+      episode.retired = true;
+    }
+    if (
+      failureEpisode === episode &&
+      lifecycle.phase === "running" &&
+      window === episode.window &&
+      !episode.engine?.exited
+    )
+      status("The workspace connection was lost. Waiting for the owned engine to finish cleanup…");
+    await episode.engine?.stop();
+  })();
+  await episode.settlement;
+  if (failureEpisode === episode && failure === error) await presentFailure();
 }
 async function presentFailure() {
   if (failureDialog || !failure || lifecycle.phase !== "running") return;
+  const error = failure,
+    episode = failureEpisode;
   failureDialog = true;
-  const result = await dialog.showMessageBox({
-    type: "error",
-    title: "NAC could not open this store",
-    message: failure.message,
-    detail: bundleVerified
-      ? "Retry starts a fresh owned engine with the same configuration only after the previous child has exited. No input is replayed."
-      : "Quit and relaunch with valid arguments and a matching complete app bundle. No engine was started.",
-    buttons: bundleVerified ? ["Cancel", "Retry"] : ["Close"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-  });
-  failureDialog = false;
-  if (result.response === 1 && lifecycle.phase === "running" && (!engine || engine.exited))
-    setImmediate(() => void retry());
+  try {
+    if (episode?.retired && window === episode.window && !episode.engine?.exited)
+      status("The workspace connection was lost. Waiting for the owned engine to finish cleanup…");
+    await episode?.settlement;
+    if (failure !== error || failureEpisode !== episode || lifecycle.phase !== "running") return;
+    // The native Quit choice has now settled. Until that point its exact
+    // BrowserWindow stays alive even when the document/engine have retired.
+    if (episode?.window && window === episode.window && !window.isDestroyed()) {
+      approvedExit = true;
+      window.destroy();
+      approvedExit = false;
+    }
+    const result = await dialog.showMessageBox({
+      type: "error",
+      title: "NAC could not open this store",
+      message: error.message,
+      detail: bundleVerified
+        ? "Retry starts a fresh owned engine with the same configuration only after the previous child has exited. No input is replayed."
+        : "Quit and relaunch with valid arguments and a matching complete app bundle. No engine was started.",
+      buttons: bundleVerified ? ["Cancel", "Retry"] : ["Close"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (
+      result.response === 1 &&
+      failure === error &&
+      failureEpisode === episode &&
+      lifecycle.phase === "running" &&
+      (!engine || engine.exited)
+    )
+      setImmediate(() => {
+        if (failure === error && failureEpisode === episode) void retry();
+      });
+  } catch {
+    // A dismissed native error dialog keeps the same failure available from
+    // Dock/reopen or explicit Retry; it never starts a successor engine.
+  } finally {
+    failureDialog = false;
+  }
 }
 async function retry() {
   if (
     !bundleVerified ||
     startupPromise ||
-    !["running", "confirming"].includes(lifecycle.phase) ||
+    lifecycle.phase !== "running" ||
     (engine && !engine.exited)
   )
     return;
   failure = null;
+  failureEpisode = null;
   const launch = lifecycle.beginLaunch();
   if (!launch) return;
   startupPromise = (async () => {
@@ -255,6 +304,7 @@ function waitForCleanup(token) {
   cleanupPromise?.then(() => clearTimeout(timer));
 }
 async function beginStop(token) {
+  const failed = failureEpisode;
   cleanupPromise = (async () => {
     const retiring = native;
     native = null;
@@ -265,6 +315,9 @@ async function beginStop(token) {
     }
     if (window && !window.isDestroyed())
       status("Stopping the owned engine and waiting for cleanup…");
+    // A concurrent failure already captured the native adapter before it
+    // cleared the public slot. Join its original retirement and owned stop.
+    await failed?.settlement;
     await startupPromise;
     const owned = engine;
     await owned?.stop();
@@ -293,17 +346,24 @@ async function requestQuit() {
   }
   if (decision.kind !== "confirm") return;
   reopen();
-  const result = await dialog.showMessageBox(window ?? undefined, {
-    type: "question",
-    title: "Quit NAC?",
-    message: "Quit NAC?",
-    detail:
-      "Work may still be running, waiting for approval, or using an open terminal. Some command outcomes may be unknown. Stop and Quit stops this app’s engine and waits for cleanup. Closing the window keeps work running.",
-    buttons: ["Cancel", "Stop and Quit"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-  });
+  let result;
+  try {
+    result = await dialog.showMessageBox(window ?? undefined, {
+      type: "question",
+      title: "Quit NAC?",
+      message: "Quit NAC?",
+      detail:
+        "Work may still be running, waiting for approval, or using an open terminal. Some command outcomes may be unknown. Stop and Quit stops this app’s engine and waits for cleanup. Closing the window keeps work running.",
+      buttons: ["Cancel", "Stop and Quit"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+  } catch {
+    // A rejected/dismissed sheet is Cancel, never implicit Stop or a stranded
+    // confirming transaction. The original choice token fences late callbacks.
+    result = { response: 0 };
+  }
   const answer = lifecycle.answer(decision.transaction, result.response === 1);
   if (answer.kind === "stop") void beginStop(answer.token);
   else if (answer.kind === "cancel" && failure) void presentFailure();

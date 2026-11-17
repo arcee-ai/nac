@@ -106,6 +106,10 @@ export const test = base.extend<{ candidate: Candidate }>({
     try {
       expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(!!packaged);
       page = await app.firstWindow({ timeout: 15000 });
+      page.on("response", (response) => {
+        if (response.status() >= 400 && diagnostics.length < 40)
+          diagnostics.push(`http ${response.status()}: ${new URL(response.url()).pathname}`);
+      });
       await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+/);
       await expect(page.getByText("No projects yet", { exact: true })).toBeVisible();
       const endpoint = new URL(page.url()).origin;
@@ -195,6 +199,25 @@ export const test = base.extend<{ candidate: Candidate }>({
       await use(candidate);
     } finally {
       if (info.status !== info.expectedStatus) {
+        const windowFacts = await app
+          .evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows().map((window) => ({
+              visible: window.isVisible(),
+              focused: window.isFocused(),
+              bounds: window.getBounds(),
+            })),
+          )
+          .catch(() => []);
+        const documentFacts = await page
+          ?.evaluate(() => ({
+            focused: document.hasFocus(),
+            visibility: document.visibilityState,
+            viewport: [innerWidth, innerHeight],
+            hash: location.hash,
+            hiddenSections: document.querySelectorAll('section[style*="display: none"]').length,
+          }))
+          .catch(() => null);
+        console.log("Window/document facts", JSON.stringify({ windowFacts, documentFacts }));
         const state = await app
           .evaluate(({ app }) =>
             process

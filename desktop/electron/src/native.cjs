@@ -4,6 +4,7 @@ const { externalURL, installNavigation } = require('./navigation.cjs');
 const { folderPicker, folderExecutable } = require('./folder.cjs');
 const { installMenus } = require('./menus.cjs');
 const { randomUUID } = require('node:crypto');
+const { workspaceVisible } = require('./window-visibility.cjs');
 
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const integer = value => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
@@ -63,7 +64,7 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
     if (message.kind === 'bound') {
       if (!exact(message, [...common, 'challenge']) || state.bound || retiring || message.challenge !== state.challenge) return;
       state.bound = true;
-      send('activate', { visible: window.isVisible() });
+      send('activate', { visible: workspaceVisible(window, app) });
       return;
     }
     if (message.kind === 'retired') {
@@ -88,10 +89,10 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
       case 'external_link':
         if (!exact(message, [...common, 'request', 'url']) || !integer(message.request) || message.request <= state.externalSequence) break;
         state.externalSequence = message.request;
-        if (!state.uiReady || !window.isVisible() || !window.isFocused() || picker || !externalURL(message.url, origin)) break;
+        if (!state.uiReady || !workspaceVisible(window, app) || !window.isFocused() || picker || !externalURL(message.url, origin)) break;
         // No URL/state/token diagnostics. An explicit Open link remains retry.
         Promise.resolve(shell.openExternal(message.url)).catch(() => {
-          if (current(state) && window.isVisible()) void dialog.showMessageBox(window, {
+          if (current(state) && workspaceVisible(window, app)) void dialog.showMessageBox(window, {
             type: 'error', message: 'Could not open your browser',
             detail: 'Use the sign-in Open link in NAC to try again, or cancel the pending sign-in.', buttons: ['OK'],
           });
@@ -104,7 +105,7 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
         if (!exact(message, [...common, 'request', 'initialPath']) || !integer(message.request) || message.request <= state.directorySequence ||
           typeof message.initialPath !== 'string' || message.initialPath.includes('\0') || Buffer.byteLength(message.initialPath) > 16384) break;
         state.directorySequence = message.request;
-        if (!state.uiReady || !window.isVisible() || !window.isFocused() || picker) { send('directory', { request: message.request, path: null }, state); break; }
+        if (!state.uiReady || !workspaceVisible(window, app) || !window.isFocused() || picker) { send('directory', { request: message.request, path: null }, state); break; }
         const operation = chooseFolder(message.initialPath.startsWith('/') ? message.initialPath : '');
         const flight = { operation, state, request: message.request, cancelled: false };
         picker = flight;
@@ -112,7 +113,7 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
           if (picker !== flight) return;
           picker = null;
           if (current(state)) send('directory', { request: flight.request,
-            path: !flight.cancelled && window.isVisible() && typeof selected === 'string' ? selected : null }, state);
+            path: !flight.cancelled && workspaceVisible(window, app) && typeof selected === 'string' ? selected : null }, state);
         }, () => {
           if (picker === flight) picker = null;
           if (current(state)) send('directory', { request: flight.request, path: null }, state);
@@ -125,7 +126,7 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
   const native = {
     command(action) {
       const state = document;
-      if (!state || !current(state) || !state.uiReady || !window.isVisible() || !window.isFocused() || picker || commandFlight ||
+      if (!state || !current(state) || !state.uiReady || !workspaceVisible(window, app) || !window.isFocused() || picker || commandFlight ||
         !['newSession', 'settings', 'projects'].includes(action) || request >= 2147483647) return false;
       const number = ++request;
       const timer = setTimeout(() => { if (commandFlight?.request === number) commandFlight = null; }, 1500);
@@ -138,7 +139,7 @@ function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation
       if (!visible) cancelPending();
       if (document && current(document)) send('visible', { visible: visible === true });
     },
-    visibilityChanged() { native.setVisible(window.isVisible()); },
+    visibilityChanged() { native.setVisible(workspaceVisible(window, app)); },
     cancelPending,
     async retire() {
       if (retiring || disposed) return false;

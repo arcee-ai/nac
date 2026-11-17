@@ -25,8 +25,14 @@ function folderPicker(initialPath, executable = folderExecutable(process.resourc
         const selected = value.path;
         if (Object.keys(value).length !== 1 || (selected !== null &&
           (typeof selected !== 'string' || !path.isAbsolute(selected) || selected.includes('\0') ||
-           Buffer.byteLength(selected) > 16384 || !fs.lstatSync(selected).isDirectory()))) { settle(null); return; }
-        settle(selected);
+           Buffer.byteLength(selected) > 16384))) { settle(null); return; }
+        if (selected === null) { settle(null); return; }
+        // Like Rust's ordinary local folder browser, resolve directory aliases
+        // before returning form data. This grants no resource authority: Rust
+        // revalidates the submitted project and retains its no-follow tools.
+        const canonical = fs.realpathSync(selected);
+        if (Buffer.byteLength(canonical) > 16384 || !fs.lstatSync(canonical).isDirectory()) { settle(null); return; }
+        settle(canonical);
       } catch { settle(null); }
     });
   });

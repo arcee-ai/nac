@@ -20,9 +20,10 @@ function fixture() {
     mainFrame: frame, session, getURL: () => origin + '/', isDestroyed: () => false,
     setWindowOpenHandler(value) { this.popup = value; },
   });
-  const window = { webContents: contents, isVisible: () => true, isFocused: () => true };
+  const window = { webContents: contents, isVisible: () => true, isMinimized: () => false, isFocused: () => true };
   const ipcMain = new EventEmitter();
-  const electron = { ipcMain, app: { isPackaged: false }, shell: { openExternal: value => { opened.push(value); return Promise.resolve(); } }, dialog: {} };
+  const app = { isPackaged: false, isHidden: () => false };
+  const electron = { ipcMain, app, shell: { openExternal: value => { opened.push(value); return Promise.resolve(); } }, dialog: {} };
   const native = createNativeAdapters({ window, endpoint: origin, incarnation, electron,
     pickFolder(initial) {
       let resolve;
@@ -39,7 +40,7 @@ function fixture() {
     send('bound', { challenge: messages.at(-1).challenge });
     send('ui_ready');
   };
-  return { native, send, ready, messages, opened, picks, contents, window, frame, ipcMain };
+  return { native, app, send, ready, messages, opened, picks, contents, window, frame, ipcMain };
 }
 
 test('exact main frame, origin and fresh document bind every native operation', () => {
@@ -126,5 +127,20 @@ test('scripted popups, raw navigation, downloads and permission requests fail cl
   assert.equal(denied, 4);
   f.contents.session.permission(f.contents, 'camera', allowed => assert.equal(allowed, false));
   assert.equal(f.contents.session.check(), false);
+  f.native.dispose();
+});
+
+test("initial activation and later visibility share app-hidden and minimized facts", () => {
+  const f = fixture();
+  f.app.isHidden = () => true;
+  f.ready();
+  assert.equal(f.messages.find((message) => message.kind === "activate").visible, false);
+  f.app.isHidden = () => false;
+  f.window.isMinimized = () => true;
+  f.native.visibilityChanged();
+  assert.equal(f.messages.at(-1).visible, false);
+  f.window.isMinimized = () => false;
+  f.native.visibilityChanged();
+  assert.equal(f.messages.at(-1).visible, true);
   f.native.dispose();
 });
