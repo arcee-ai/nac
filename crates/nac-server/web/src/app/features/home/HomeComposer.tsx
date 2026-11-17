@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Icon, IconName, Loader, LoaderSize, Tooltip } from "@/app/atoms";
@@ -9,6 +9,7 @@ import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { ManagedSessionSummary, ProjectRecord, SessionBehavior } from "@/app/types/api";
 
 import { defaultBehavior } from "./behaviors";
@@ -17,9 +18,6 @@ import { BehaviorPicker, IsolatedToggle, ProjectPicker } from "./ComposerPickers
 import { modelChipLabel, useInheritedModel, type ModelOverride } from "./modelChoice";
 import { ModelOverrideModal } from "./ModelOverrideModal";
 import { useStartSession } from "./useStartSession";
-
-/** The unsent hero draft survives leaving Home and coming back (one presentation). */
-let heldDraft = "";
 
 const MAX_TITLE = 120;
 
@@ -84,7 +82,9 @@ export function HomeComposer({
     null;
   const projectId = project?.project_id ?? null;
 
-  const [prompt, setPrompt] = useState(heldDraft);
+  const draft = useNativeRuntime().stores.homeDraftStore;
+  const prompt = draft.usePrompt();
+  const setPrompt = draft.update;
   const [behavior, setBehavior] = useState<SessionBehavior>(() => defaultBehavior(policy));
   // An override belongs to the project it was chosen for; another project
   // inherits its own model.
@@ -105,10 +105,6 @@ export function HomeComposer({
   const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
   const useIsolation = isolated && isolationAvailable;
   const starter = useStartSession();
-
-  useEffect(() => {
-    heldDraft = prompt;
-  }, [prompt]);
 
   // "New session" from anywhere (sidebar, ⌘⇧O, a project's +) lands here.
   const focusToken = (location.state as { focusComposer?: number } | null)?.focusComposer;
@@ -137,6 +133,7 @@ export function HomeComposer({
       return;
     }
     const text = prompt;
+    const revision = draft.get().revision;
     const started = await starter.start({
       projectId,
       behavior: effectiveBehavior,
@@ -144,8 +141,7 @@ export function HomeComposer({
       model: override,
     });
     if (started) {
-      heldDraft = "";
-      setPrompt("");
+      draft.acknowledge(revision);
     }
   };
 
@@ -283,13 +279,13 @@ export function HomeComposer({
           onClose={() => setIsolatedTask(null)}
           onExistingCheckout={() => {
             const text = isolatedTask.prompt;
+            const revision = draft.get().revision;
             setIsolatedTask(null);
             void starter
               .start({ projectId, behavior: "direct", prompt: text, model: override })
               .then((started) => {
                 if (started) {
-                  heldDraft = "";
-                  setPrompt("");
+                  draft.acknowledge(revision);
                 }
               });
           }}

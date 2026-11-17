@@ -32,6 +32,10 @@ const preferenceKeys = new Set([
   "nac.chatTabs",
   "nac.sessionNavigation",
   "nac.sidebar.open",
+  "nac.sidebar.view",
+  "nac.sidebar.collapsed-projects",
+  "nac.inbox.read.v1",
+  "nac.transcriptDensity",
 ]);
 const byteLimit = 8 * 1024 * 1024;
 const record = (value: unknown): value is Record<string, unknown> =>

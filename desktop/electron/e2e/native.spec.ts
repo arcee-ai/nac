@@ -1,4 +1,5 @@
 import { test, expect, root, type Candidate } from './fixture';
+import { openSettingsSection } from '../../../crates/nac-server/web/e2e/settings-focus';
 import { execFileSync, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
@@ -41,13 +42,13 @@ test('native menu commands enter existing React flows and retain editor/modal gu
     desktop: ['connect', 'connectLifetime', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog', { name: 'Configurations', exact: true })).toBeVisible();
+  await expect(c.page.getByRole('main', { name: 'Models & providers', exact: true })).toBeVisible();
   await c.page.keyboard.press('Escape');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(c.page.getByRole('main', { name: 'Models & providers', exact: true })).toHaveCount(0);
   await focusWorkspace(c);
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(c.page.getByRole('main', { name: 'Models & providers', exact: true })).toHaveCount(0);
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
   await focusWorkspace(c);
   await menu(c, 'New Chat');
@@ -55,7 +56,7 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog', { name: 'Configurations', exact: true })).toHaveCount(0);
+  await expect(c.page.getByRole('main', { name: 'Models & providers', exact: true })).toHaveCount(0);
   await expect(projectForm).toBeVisible();
   await c.page.keyboard.press('Escape');
   const project = await c.project();
@@ -65,7 +66,7 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(composer).toBeVisible();
   await composer.fill('Retained editor draft');
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(c.page.getByRole('main', { name: 'Models & providers', exact: true })).toHaveCount(0);
   await expect(composer).toHaveValue('Retained editor draft');
   await focusWorkspace(c);
   await menu(c, 'Projects…');
@@ -149,7 +150,7 @@ test('shared provider device sign-in requires a deliberate native browser handof
   await expect(c.page.getByText('No projects yet', { exact: true })).toBeVisible();
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  const dialog = c.page.getByRole('dialog', { name: 'Configurations', exact: true });
+  const dialog = c.page.getByRole('main', { name: 'Models & providers', exact: true });
   await expect(dialog).toBeVisible();
   const draft = dialog.getByRole('textbox', { name: 'Configuration name', exact: true });
   await draft.fill('Electron draft survives sign-in');
@@ -273,8 +274,7 @@ test('shared MCP OAuth UI preserves Rust PKCE success denial wrong-state and can
         },
       });
       await c.page.reload();
-      await c.page.getByRole('button', { name: /^MCP servers/ }).first().click();
-      const dialog = c.page.getByRole('dialog', { name: 'MCP servers', exact: true });
+      const dialog = await openSettingsSection(c.page, 'MCP servers');
       await dialog.getByRole('button', { name: 'external-auth-fixture', exact: true }).click();
       await dialog.getByRole('button', { name: 'Authenticate', exact: true }).click();
       await expect(dialog.getByRole('status')).toHaveText('Waiting for authorization');

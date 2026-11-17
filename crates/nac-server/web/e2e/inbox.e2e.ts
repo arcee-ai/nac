@@ -155,3 +155,57 @@ test("the Inbox says so when nothing needs you, and the switch remembers its cho
     "true",
   );
 });
+
+test("the Inbox preserves an exact question identity through navigation and stale links", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const session = await createDirectSession(request, harness);
+  await renameSession(page, harness.baseUrl, session, "Choose output format");
+  harness.provider.enqueue(
+    "inbox-question",
+    { token: "INBOX_QUESTION_TOKEN" },
+    {
+      kind: "function_call",
+      name: "request_question",
+      callId: "inbox-question-call",
+      stream: "request",
+      arguments: {
+        request_id: "inbox-format",
+        text: "Which public output format?",
+        choices: ["JSON", "CSV"],
+        responder_class: "human_decision",
+      },
+    },
+  );
+  await page.goto(`${harness.baseUrl}/#/session/${session}/insights`);
+  await page.getByRole("combobox", { name: "Message", exact: true }).fill("INBOX_QUESTION_TOKEN");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Which public output format?", { exact: true })).toBeVisible();
+  const questions = await (
+    await request.get(`${harness.baseUrl}/sessions/${session}/questions`)
+  ).json();
+  const exact = questions.find((entry: { status: string }) => entry.status === "pending").request
+    .request_id;
+  await page.goto(`${harness.baseUrl}/`);
+  await page.getByRole("tab", { name: /^Inbox/ }).click();
+  await page
+    .getByRole("group", { name: "Inbox", exact: true })
+    .getByRole("button", { name: "Choose output format, Question waiting", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`question_request=${encodeURIComponent(exact)}$`));
+  await expect(
+    page.getByRole("dialog", { name: "Question from the agent", exact: true }),
+  ).toContainText("Which public output format?");
+  await page.goto(
+    `${harness.baseUrl}/#/session/${session}/insights?question_request=retired-question`,
+  );
+  await expect(page.getByText(/This task question is no longer pending/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send answer", exact: true })).toHaveCount(0);
+  expect(
+    (await (await request.get(`${harness.baseUrl}/sessions/${session}/questions`)).json())[0]
+      .status,
+  ).toBe("pending");
+  harness.provider.assertConsumed();
+});

@@ -8,11 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { draftPrompt, sendPrompt } from "@/app/store/composerStore";
-import { purgeAll, get as getDraft } from "@/app/store/promptDraftStore";
+import {
+  draftPrompt,
+  sendPrompt,
+  scheduleFirstPrompt,
+  cancelFirstPrompt,
+} from "@/app/store/composerStore";
+import { purgeAll, get as getDraft, update as updateDraft } from "@/app/store/promptDraftStore";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
-import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
+import { resetRuntime, syncRunFromSnapshot, setStreamStatus } from "@/app/store/runtimeStore";
 import type {
   InboxItem,
   ManagedSessionSummary,
@@ -260,6 +265,7 @@ function pending<T>(): Promise<T> {
 
 beforeEach(() => {
   purgeAll();
+  cancelFirstPrompt("session");
   resetRuntime("session");
   mobile = false;
   mediaListeners.clear();
@@ -1615,3 +1621,42 @@ it.each(["send", "steer", "queue", "compact", "shell"] as const)(
     expect(getDraft("b").text).toBe("separate draft");
   },
 );
+
+it.each(["/goal describe the scheduler", "/compact", "! explain this command"])(
+  "delivers Home's literal %s only after the owning interactive stream is live",
+  async (text) => {
+    const draft = updateDraft("session", text);
+    scheduleFirstPrompt("session", draft);
+    composer({ behavior: "direct" });
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    act(() => setStreamStatus("live"));
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledOnce());
+    expect(fakes.submitRun).toHaveBeenCalledWith("session", text);
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+    expect(getDraft("session").text).toBe("");
+  },
+);
+
+it("leaves a newer edit unsent when a queued Home draft has been replaced", async () => {
+  const draft = updateDraft("session", "original intent");
+  scheduleFirstPrompt("session", draft);
+  updateDraft("session", "newer edit");
+  composer({ behavior: "direct" });
+  act(() => setStreamStatus("live"));
+  await act(async () => {});
+  expect(fakes.submitRun).not.toHaveBeenCalled();
+  expect(getDraft("session").text).toBe("newer edit");
+});
+
+it("cancels an undispatched Home intent on leaving without losing its draft or replaying it on return", async () => {
+  const draft = updateDraft("session", "waiting for connection");
+  scheduleFirstPrompt("session", draft);
+  composer({ behavior: "direct" });
+  cleanup();
+  await act(async () => {});
+  act(() => setStreamStatus("live"));
+  composer({ behavior: "direct" });
+  expect(fakes.submitRun).not.toHaveBeenCalled();
+  expect(getDraft("session").text).toBe("waiting for connection");
+});

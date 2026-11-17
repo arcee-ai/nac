@@ -1,5 +1,5 @@
 import { n as e } from "./rolldown-runtime-QGRDbDUS.js";
-import { S as t, T as n, _ as r, c as i, g as a, s as o, v as s, x as c, y as l } from "./PresentationBoundary-DDOQGn0M.js";
+import { S as t, T as n, _ as r, c as i, g as a, s as o, v as s, x as c, y as l } from "./PresentationBoundary-BAUfAcJZ.js";
 import { createContext as u, useCallback as d, useContext as f, useMemo as p, useSyncExternalStore as m } from "react";
 import { QueryClient as h, hashKey as g } from "@tanstack/react-query";
 // src/app/features/product-context/navigation.ts
@@ -1697,35 +1697,40 @@ function en() {
 }
 // src/app/store/composerStore.ts
 var tn = /* @__PURE__ */ e({
+	cancelFirstPrompt: () => pn,
 	consumeDraftRequests: () => cn,
 	consumePromptRequests: () => on,
 	createComposerStore: () => nn,
 	draftPrompt: () => sn,
 	release: () => rn,
+	scheduleFirstPrompt: () => un,
 	sendPrompt: () => an,
-	shellIntents: () => ln
+	shellIntents: () => ln,
+	takeFirstPrompt: () => fn,
+	useFirstPrompt: () => dn
 });
 function nn(e) {
 	let t = K({
 		pending: null,
-		draft: null
-	}, "composer"), n = t.getState(), r = en();
-	function i(e) {
+		draft: null,
+		firstPrompt: null
+	}, "composer"), n = t.getState(), r = en(), i = !1;
+	function a(e) {
 		t.setState({ pending: e });
 	}
-	function a(e) {
+	function o(e) {
 		return t.subscribe(() => {
 			let { pending: n } = t.getState();
 			n !== null && (t.setState({ pending: null }), e(n));
 		});
 	}
-	function o(e, n) {
+	function s(e, n) {
 		t.setState({ draft: {
 			sessionId: e,
 			text: n
 		} });
 	}
-	function s(e, n) {
+	function c(e, n) {
 		let r = () => {
 			let { draft: r } = t.getState();
 			r && r.sessionId === e && (t.setState({ draft: null }), n(r.text));
@@ -1734,20 +1739,34 @@ function nn(e) {
 	}
 	return {
 		release: () => {
-			r.release(), t.setState(n);
+			i = !0, r.release(), t.setState(n);
 		},
 		shellIntents: r,
-		sendPrompt: i,
-		consumePromptRequests: a,
-		draftPrompt: o,
-		consumeDraftRequests: s
+		scheduleFirstPrompt(e, n) {
+			i || t.setState({ firstPrompt: {
+				sessionId: e,
+				draft: n
+			} });
+		},
+		useFirstPrompt: (e) => t.useStore((t) => t.firstPrompt?.sessionId === e ? t.firstPrompt.draft : null),
+		takeFirstPrompt(e, n) {
+			let r = t.getState().firstPrompt;
+			return i || r?.sessionId !== e || r.draft !== n ? !1 : (t.setState({ firstPrompt: null }), !0);
+		},
+		cancelFirstPrompt(e) {
+			t.getState().firstPrompt?.sessionId === e && t.setState({ firstPrompt: null });
+		},
+		sendPrompt: a,
+		consumePromptRequests: o,
+		draftPrompt: s,
+		consumeDraftRequests: c
 	};
 }
-var { release: rn, sendPrompt: an, consumePromptRequests: on, draftPrompt: sn, consumeDraftRequests: cn, shellIntents: ln } = nn(q), un = "Command timed out after";
-function dn(e) {
-	return e.completion_status == null ? e.command_status == null ? e.is_error || e.content_preview.startsWith(un) : e.is_error || e.command_status !== "completed" : e.completion_status !== "success";
+var { release: rn, sendPrompt: an, consumePromptRequests: on, draftPrompt: sn, consumeDraftRequests: cn, shellIntents: ln, scheduleFirstPrompt: un, useFirstPrompt: dn, takeFirstPrompt: fn, cancelFirstPrompt: pn } = nn(q), mn = "Command timed out after";
+function hn(e) {
+	return e.completion_status == null ? e.command_status == null ? e.is_error || e.content_preview.startsWith(mn) : e.is_error || e.command_status !== "completed" : e.completion_status !== "success";
 }
-function fn(e, t) {
+function gn(e, t) {
 	switch (e.type) {
 		case "tool_call_started": {
 			let t = e.key_arg_preview || e.args_preview;
@@ -1762,7 +1781,7 @@ function fn(e, t) {
 			};
 		}
 		case "tool_call_finished": {
-			let t = dn(e), n = e.completion_status === "timed_out" ? "◷" : e.completion_status === "cancelled" ? "■" : t ? "✕" : "✓";
+			let t = hn(e), n = e.completion_status === "timed_out" ? "◷" : e.completion_status === "cancelled" ? "■" : t ? "✕" : "✓";
 			return {
 				key: `result-${e.call_id}`,
 				text: `${n} ${e.name}: ${e.content_preview}`,
@@ -1809,14 +1828,14 @@ function fn(e, t) {
 		default: return null;
 	}
 }
-function pn(e) {
+function _n(e) {
 	let t = [];
 	return (e ?? []).forEach((e, n) => {
-		let r = fn(e, n);
+		let r = gn(e, n);
 		r && t.push(r);
 	}), t;
 }
-function mn(e, t) {
+function vn(e, t) {
 	if (!t.length) return e;
 	if (!e.length) return t;
 	let n = new Set(e.map((e) => e.key)), r = -1, i = -1;
@@ -1828,12 +1847,12 @@ function mn(e, t) {
 		...t.slice(i + 1)
 	];
 }
-function hn(e) {
+function yn(e) {
 	let t = /* @__PURE__ */ new Map();
 	for (let n of e) for (let e of n.events) t.set(e.id, e.event);
 	return [...t.entries()].sort(([e], [t]) => e - t).map(([, e]) => e);
 }
-function gn(e) {
+function bn(e) {
 	let t = [], n = /* @__PURE__ */ new Map();
 	for (let r of e) if (r.key.startsWith("call-")) {
 		let e = r.key.slice(5), i = {
@@ -1866,7 +1885,7 @@ function gn(e) {
 	});
 	return t;
 }
-function _n(e, t) {
+function xn(e, t) {
 	if (!e) return !1;
 	let n = /* @__PURE__ */ new Set();
 	for (let e of t) e.key.startsWith("result-") && n.add(e.key.slice(7));
@@ -1874,45 +1893,45 @@ function _n(e, t) {
 	return !0;
 }
 // src/app/store/runtimeStore.ts
-var vn = /* @__PURE__ */ e({
-	applyAssistantDelta: () => Dn,
-	applyEnvelope: () => Pn,
-	captureRuntimeActivation: () => Sn,
-	clearRuntimeThreads: () => wn,
-	createRuntimeStore: () => yn,
-	finishRunCancel: () => Nn,
-	getRuntimeState: () => er,
-	liftSessionSpend: () => Tn,
-	pushLocalEvent: () => An,
-	release: () => bn,
-	requestRunCancel: () => jn,
-	resetRuntime: () => Cn,
-	restoreRunCancel: () => Mn,
-	runtimeStore: () => xn,
-	setOptimisticUserPrompt: () => En,
-	setStreamStatus: () => On,
-	syncRunFromSnapshot: () => kn,
-	useActivity: () => Ln,
-	useCancelArmed: () => In,
-	useFinishedToolCalls: () => Wn,
-	useLastElapsedMs: () => Yn,
-	useLiveEvents: () => Vn,
-	useLiveThreads: () => Un,
-	useModelRetryAttempt: () => Bn,
-	useOptimisticUserPrompt: () => $n,
-	usePrimaryToolEvents: () => Gn,
-	useRunError: () => Rn,
-	useRunFailure: () => zn,
-	useRunStartedAt: () => Jn,
-	useRunUsage: () => Kn,
-	useRunning: () => Fn,
-	useSessionSpend: () => qn,
-	useStreamReasoning: () => Qn,
-	useStreamStatus: () => Hn,
-	useStreamText: () => Zn,
-	useWorkspaceEpoch: () => Xn
+var Sn = /* @__PURE__ */ e({
+	applyAssistantDelta: () => jn,
+	applyEnvelope: () => Rn,
+	captureRuntimeActivation: () => En,
+	clearRuntimeThreads: () => On,
+	createRuntimeStore: () => Cn,
+	finishRunCancel: () => Ln,
+	getRuntimeState: () => ir,
+	liftSessionSpend: () => kn,
+	pushLocalEvent: () => Pn,
+	release: () => wn,
+	requestRunCancel: () => Fn,
+	resetRuntime: () => Dn,
+	restoreRunCancel: () => In,
+	runtimeStore: () => Tn,
+	setOptimisticUserPrompt: () => An,
+	setStreamStatus: () => Mn,
+	syncRunFromSnapshot: () => Nn,
+	useActivity: () => Vn,
+	useCancelArmed: () => Bn,
+	useFinishedToolCalls: () => Jn,
+	useLastElapsedMs: () => $n,
+	useLiveEvents: () => Gn,
+	useLiveThreads: () => qn,
+	useModelRetryAttempt: () => Wn,
+	useOptimisticUserPrompt: () => rr,
+	usePrimaryToolEvents: () => Yn,
+	useRunError: () => Hn,
+	useRunFailure: () => Un,
+	useRunStartedAt: () => Qn,
+	useRunUsage: () => Xn,
+	useRunning: () => zn,
+	useSessionSpend: () => Zn,
+	useStreamReasoning: () => nr,
+	useStreamStatus: () => Kn,
+	useStreamText: () => tr,
+	useWorkspaceEpoch: () => er
 });
-function yn(e) {
+function Cn(e) {
 	let t = K({
 		sessionId: null,
 		running: !1,
@@ -2121,7 +2140,7 @@ function yn(e) {
 	function A(e, t) {
 		if (!e) return;
 		k += 1;
-		let n = fn(t, k);
+		let n = gn(t, k);
 		n && s((t) => {
 			let r = t.threads[e] ?? x(e), i = [...r.log, n].slice(-200);
 			return { threads: {
@@ -2256,7 +2275,7 @@ function yn(e) {
 				}), "none";
 			}
 			case "tool_call_finished": {
-				let n = dn(t);
+				let n = hn(t);
 				A(t.thread_name, t), t.thread_name || P(t), b({
 					seq: e,
 					kind: "tool",
@@ -2411,34 +2430,34 @@ function yn(e) {
 		getRuntimeState: c
 	};
 }
-var { release: bn, runtimeStore: xn, captureRuntimeActivation: Sn, resetRuntime: Cn, clearRuntimeThreads: wn, liftSessionSpend: Tn, setOptimisticUserPrompt: En, applyAssistantDelta: Dn, setStreamStatus: On, syncRunFromSnapshot: kn, pushLocalEvent: An, requestRunCancel: jn, restoreRunCancel: Mn, finishRunCancel: Nn, applyEnvelope: Pn, useRunning: Fn, useCancelArmed: In, useActivity: Ln, useRunError: Rn, useRunFailure: zn, useModelRetryAttempt: Bn, useLiveEvents: Vn, useStreamStatus: Hn, useLiveThreads: Un, useFinishedToolCalls: Wn, usePrimaryToolEvents: Gn, useRunUsage: Kn, useSessionSpend: qn, useRunStartedAt: Jn, useLastElapsedMs: Yn, useWorkspaceEpoch: Xn, useStreamText: Zn, useStreamReasoning: Qn, useOptimisticUserPrompt: $n, getRuntimeState: er } = yn(q), tr = /* @__PURE__ */ new Map();
-function nr(e) {
-	let t = tr.get(e);
+var { release: wn, runtimeStore: Tn, captureRuntimeActivation: En, resetRuntime: Dn, clearRuntimeThreads: On, liftSessionSpend: kn, setOptimisticUserPrompt: An, applyAssistantDelta: jn, setStreamStatus: Mn, syncRunFromSnapshot: Nn, pushLocalEvent: Pn, requestRunCancel: Fn, restoreRunCancel: In, finishRunCancel: Ln, applyEnvelope: Rn, useRunning: zn, useCancelArmed: Bn, useActivity: Vn, useRunError: Hn, useRunFailure: Un, useModelRetryAttempt: Wn, useLiveEvents: Gn, useStreamStatus: Kn, useLiveThreads: qn, useFinishedToolCalls: Jn, usePrimaryToolEvents: Yn, useRunUsage: Xn, useSessionSpend: Zn, useRunStartedAt: Qn, useLastElapsedMs: $n, useWorkspaceEpoch: er, useStreamText: tr, useStreamReasoning: nr, useOptimisticUserPrompt: rr, getRuntimeState: ir } = Cn(q), ar = /* @__PURE__ */ new Map();
+function or(e) {
+	let t = ar.get(e);
 	return t || (t = {
 		now: Date.now(),
 		listeners: /* @__PURE__ */ new Set(),
 		timer: null
-	}, tr.set(e, t)), t;
+	}, ar.set(e, t)), t;
 }
-function rr(e, t) {
-	let n = nr(e);
+function sr(e, t) {
+	let n = or(e);
 	return n.listeners.add(t), n.timer ??= setInterval(() => {
 		n.now = Date.now(), n.listeners.forEach((e) => e());
 	}, e), () => {
 		n.listeners.delete(t), n.listeners.size === 0 && n.timer && (clearInterval(n.timer), n.timer = null);
 	};
 }
-function ir(e) {
-	return nr(e).now;
+function cr(e) {
+	return or(e).now;
 }
 // src/app/hooks/useNow.ts
-var ar = () => () => {}, or = () => 0;
-function sr(e = 1e3, t = !0) {
-	let n = d((n) => t ? rr(e, n) : ar(), [e, t]), r = d(() => t ? ir(e) : 0, [e, t]);
-	return m(n, r, t ? r : or);
+var lr = () => () => {}, ur = () => 0;
+function dr(e = 1e3, t = !0) {
+	let n = d((n) => t ? sr(e, n) : lr(), [e, t]), r = d(() => t ? cr(e) : 0, [e, t]);
+	return m(n, r, t ? r : ur);
 }
 // src/app/lib/providers.ts
-var cr = {
+var fr = {
 	"openai-responses": "OpenAI Responses",
 	"openai-chat-completions": "OpenAI Chat Completions",
 	"chatgpt-codex-responses": "ChatGPT Codex Responses",
@@ -2448,7 +2467,7 @@ var cr = {
 	"together-chat": "Together Chat",
 	"arcee-auth": "Arcee API (Sign in)",
 	"arcee-api": "Arcee API (Key)"
-}, lr = [
+}, pr = [
 	"arcee-api",
 	"arcee-auth",
 	"openai-responses",
@@ -2459,11 +2478,11 @@ var cr = {
 	"fireworks-chat",
 	"together-chat"
 ];
-function ur(e) {
-	let t = lr.indexOf(e);
-	return t === -1 ? lr.length : t;
+function mr(e) {
+	let t = pr.indexOf(e);
+	return t === -1 ? pr.length : t;
 }
-var dr = /* @__PURE__ */ new Set([
+var hr = /* @__PURE__ */ new Set([
 	"openai-responses",
 	"openai-chat-completions",
 	"anthropic-messages",
@@ -2472,70 +2491,70 @@ var dr = /* @__PURE__ */ new Set([
 	"together-chat",
 	"arcee-api"
 ]);
-function fr(e) {
-	return dr.has(e);
+function gr(e) {
+	return hr.has(e);
 }
-var pr = {
+var _r = {
 	"arcee-auth": "arcee",
 	"chatgpt-codex-responses": "codex"
 };
-function mr(e) {
-	return pr[e] ?? null;
+function vr(e) {
+	return _r[e] ?? null;
 }
-var hr = {
+var yr = {
 	arcee: "Arcee",
 	codex: "ChatGPT"
 };
-function gr(e) {
-	return hr[e];
+function br(e) {
+	return yr[e];
 }
-function _r(e) {
-	return e in cr;
+function xr(e) {
+	return e in fr;
 }
-function vr(e) {
+function Sr(e) {
 	let t = (e ?? "").trim();
-	return t ? _r(t) ? cr[t] : t : "";
+	return t ? xr(t) ? fr[t] : t : "";
 }
-function yr(e) {
+function Cr(e) {
 	let t = /* @__PURE__ */ new Set();
 	for (let n of e) {
 		let e = (n ?? "").trim();
 		e && t.add(e);
 	}
-	let n = lr.filter((e) => t.has(e)), r = Array.from(t).filter((e) => !_r(e)).sort();
+	let n = pr.filter((e) => t.has(e)), r = Array.from(t).filter((e) => !xr(e)).sort();
 	return [...n, ...r];
 }
 // src/app/store/sessionFiltersStore.ts
-var br = /* @__PURE__ */ e({
+var wr = /* @__PURE__ */ e({
 	RANGE_ANY: () => "any",
-	RANGE_ITEMS: () => wr,
+	RANGE_ITEMS: () => Or,
 	SORT_DEFAULT: () => $,
-	SORT_ITEMS: () => Cr,
-	createSessionFiltersStore: () => xr,
-	hasActiveFilters: () => Nr,
-	pruneUnavailableFacets: () => Rr,
-	release: () => Sr,
-	resetFilters: () => Mr,
-	sessionFiltersStore: () => Tr,
-	setCreatedRange: () => Or,
-	setModifiedRange: () => kr,
-	setQuery: () => Er,
-	setSort: () => Dr,
-	toggleEnv: () => Ar,
-	toggleProvider: () => jr,
-	useCreatedRange: () => Vr,
-	useFilterQuery: () => zr,
-	useIsDefaultSort: () => Gr,
-	useModifiedRange: () => Hr,
-	useSelectedEnvs: () => Ur,
-	useSelectedProviders: () => Wr,
-	useSessionEnvs: () => Lr,
-	useSessionProviders: () => Ir,
-	useSort: () => Br,
-	useVisibleProjectItems: () => Fr,
-	useVisibleSessions: () => Pr
+	SORT_ITEMS: () => Dr,
+	createSessionFiltersStore: () => Tr,
+	hasActiveFilters: () => Lr,
+	pruneUnavailableFacets: () => Hr,
+	release: () => Er,
+	resetFilters: () => Ir,
+	sessionFiltersStore: () => kr,
+	setCreatedRange: () => Mr,
+	setModifiedRange: () => Nr,
+	setQuery: () => Ar,
+	setSort: () => jr,
+	toggleEnv: () => Pr,
+	toggleProvider: () => Fr,
+	useCreatedRange: () => Gr,
+	useFilterQuery: () => Ur,
+	useIsDefaultSort: () => Yr,
+	useModifiedRange: () => Kr,
+	useSelectedEnvs: () => qr,
+	useSelectedProviders: () => Jr,
+	useSessionEnvs: () => Vr,
+	useSessionProviders: () => Br,
+	useSort: () => Wr,
+	useVisibleProjectItems: () => zr,
+	useVisibleSessions: () => Rr
 }), $ = "default";
-function xr(e) {
+function Tr(e) {
 	let n = [
 		{
 			id: $,
@@ -2623,7 +2642,7 @@ function xr(e) {
 		updated_desc: (e, t) => l(t.updated_at) - l(e.updated_at)
 	};
 	function O(e) {
-		let n = h(), r = sr(i);
+		let n = h(), r = dr(i);
 		return p(() => {
 			let i = s(e), a = n.query.trim().toLowerCase(), o = e.filter(({ summary: e }) => !(!E(e, a, i) || !T(e.created_at, n.createdRange, r) || !T(e.updated_at, n.modifiedRange, r) || n.envs.length > 0 && !n.envs.includes(c(e)) || n.providers.length > 0 && !n.providers.includes(e.backend)));
 			if (n.sort === "title_asc") o.sort((e, n) => t(e.summary, i).localeCompare(t(n.summary, i), void 0, { sensitivity: "base" }));
@@ -2662,7 +2681,7 @@ function xr(e) {
 		};
 	}
 	function N(e) {
-		let t = h(), n = sr(i);
+		let t = h(), n = dr(i);
 		return p(() => {
 			let r = s(A(e)), i = t.query.trim().toLowerCase(), a = (e) => t.envs.length > 0 && !t.envs.includes(c(e)) ? !1 : t.providers.length === 0 || t.providers.includes(e.backend), o = t.envs.length > 0 || t.providers.length > 0, u = e.filter((e) => {
 				let { createdAt: s, updatedAt: c } = M(e);
@@ -2690,7 +2709,7 @@ function xr(e) {
 		]);
 	}
 	function P(e) {
-		return p(() => yr(e.map(({ summary: e }) => e.backend)), [e]);
+		return p(() => Cr(e.map(({ summary: e }) => e.backend)), [e]);
 	}
 	function F(e) {
 		return p(() => {
@@ -2737,60 +2756,60 @@ function xr(e) {
 		useIsDefaultSort: () => h((e) => e.sort === $)
 	};
 }
-var { release: Sr, SORT_ITEMS: Cr, RANGE_ITEMS: wr, sessionFiltersStore: Tr, setQuery: Er, setSort: Dr, setCreatedRange: Or, setModifiedRange: kr, toggleEnv: Ar, toggleProvider: jr, resetFilters: Mr, hasActiveFilters: Nr, useVisibleSessions: Pr, useVisibleProjectItems: Fr, useSessionProviders: Ir, useSessionEnvs: Lr, pruneUnavailableFacets: Rr, useFilterQuery: zr, useSort: Br, useCreatedRange: Vr, useModifiedRange: Hr, useSelectedEnvs: Ur, useSelectedProviders: Wr, useIsDefaultSort: Gr } = xr(q), Kr = /* @__PURE__ */ e({
-	activateSessionSelection: () => bi,
-	bindSidePanelProject: () => Xr,
-	closeDrawer: () => ri,
-	createSessionLayoutStore: () => qr,
-	leaveFocusedSidePanel: () => $r,
-	openDrawer: () => ni,
-	openSidePanelList: () => ei,
-	release: () => Jr,
-	rememberInsightListPosition: () => Ci,
-	rememberInsightsReturn: () => xi,
-	rememberSubagentPage: () => wi,
-	resetSessionSelection: () => yi,
-	restoreInsightsReturn: () => Si,
-	revealSidePanel: () => si,
-	selectFile: () => hi,
-	selectFileListing: () => _i,
-	selectInsight: () => li,
-	selectInsightsFilter: () => di,
-	selectRevision: () => mi,
-	selectSubagent: () => pi,
-	selectThread: () => ci,
-	selectWorkset: () => fi,
-	sessionLayoutStore: () => Yr,
-	setSidePanelAnimate: () => vi,
-	showSidePanelList: () => ai,
-	toggleDrawerPinned: () => ii,
-	toggleFolder: () => gi,
-	toggleInsightGroup: () => ui,
-	toggleSidePanelCollapsed: () => ti,
-	toggleSidePanelExpanded: () => Qr,
-	toggleSidePanelList: () => oi,
-	unbindSidePanelProject: () => Zr,
-	useDrawerContent: () => Ai,
-	useDrawerPinned: () => ki,
-	useExpandedInsightGroups: () => Ii,
-	useFileListing: () => Ui,
-	useInsightFocusNonce: () => Fi,
-	useInsightsFilter: () => Li,
-	useInsightsReturn: () => Ti,
-	useSelectedFile: () => Vi,
-	useSelectedInsight: () => Pi,
-	useSelectedRevision: () => Bi,
-	useSelectedSubagent: () => zi,
-	useSelectedThread: () => Mi,
-	useSelectedThreadEpisode: () => Ni,
-	useSelectedWorkset: () => Ri,
-	useSidePanelAnimate: () => Di,
-	useSidePanelCollapsed: () => Ei,
-	useSidePanelExpanded: () => Oi,
-	useSidePanelList: () => ji,
-	useToggledFolders: () => Hi
+var { release: Er, SORT_ITEMS: Dr, RANGE_ITEMS: Or, sessionFiltersStore: kr, setQuery: Ar, setSort: jr, setCreatedRange: Mr, setModifiedRange: Nr, toggleEnv: Pr, toggleProvider: Fr, resetFilters: Ir, hasActiveFilters: Lr, useVisibleSessions: Rr, useVisibleProjectItems: zr, useSessionProviders: Br, useSessionEnvs: Vr, pruneUnavailableFacets: Hr, useFilterQuery: Ur, useSort: Wr, useCreatedRange: Gr, useModifiedRange: Kr, useSelectedEnvs: qr, useSelectedProviders: Jr, useIsDefaultSort: Yr } = Tr(q), Xr = /* @__PURE__ */ e({
+	activateSessionSelection: () => wi,
+	bindSidePanelProject: () => ei,
+	closeDrawer: () => si,
+	createSessionLayoutStore: () => Zr,
+	leaveFocusedSidePanel: () => ri,
+	openDrawer: () => oi,
+	openSidePanelList: () => ii,
+	release: () => Qr,
+	rememberInsightListPosition: () => Di,
+	rememberInsightsReturn: () => Ti,
+	rememberSubagentPage: () => Oi,
+	resetSessionSelection: () => Ci,
+	restoreInsightsReturn: () => Ei,
+	revealSidePanel: () => di,
+	selectFile: () => yi,
+	selectFileListing: () => xi,
+	selectInsight: () => pi,
+	selectInsightsFilter: () => hi,
+	selectRevision: () => vi,
+	selectSubagent: () => _i,
+	selectThread: () => fi,
+	selectWorkset: () => gi,
+	sessionLayoutStore: () => $r,
+	setSidePanelAnimate: () => Si,
+	showSidePanelList: () => li,
+	toggleDrawerPinned: () => ci,
+	toggleFolder: () => bi,
+	toggleInsightGroup: () => mi,
+	toggleSidePanelCollapsed: () => ai,
+	toggleSidePanelExpanded: () => ni,
+	toggleSidePanelList: () => ui,
+	unbindSidePanelProject: () => ti,
+	useDrawerContent: () => Pi,
+	useDrawerPinned: () => Ni,
+	useExpandedInsightGroups: () => Bi,
+	useFileListing: () => qi,
+	useInsightFocusNonce: () => zi,
+	useInsightsFilter: () => Vi,
+	useInsightsReturn: () => ki,
+	useSelectedFile: () => Gi,
+	useSelectedInsight: () => Ri,
+	useSelectedRevision: () => Wi,
+	useSelectedSubagent: () => Ui,
+	useSelectedThread: () => Ii,
+	useSelectedThreadEpisode: () => Li,
+	useSelectedWorkset: () => Hi,
+	useSidePanelAnimate: () => ji,
+	useSidePanelCollapsed: () => Ai,
+	useSidePanelExpanded: () => Mi,
+	useSidePanelList: () => Fi,
+	useToggledFolders: () => Ki
 });
-function qr(e, { rememberPerProject: t = !1 } = {}) {
+function Zr(e, { rememberPerProject: t = !1 } = {}) {
 	let n = K({
 		insightSelectionEpoch: 0,
 		activeSessionId: null,
@@ -3093,19 +3112,19 @@ function qr(e, { rememberPerProject: t = !1 } = {}) {
 		useFileListing: () => s((e) => e.fileListing)
 	};
 }
-var { release: Jr, sessionLayoutStore: Yr, bindSidePanelProject: Xr, unbindSidePanelProject: Zr, toggleSidePanelExpanded: Qr, leaveFocusedSidePanel: $r, openSidePanelList: ei, toggleSidePanelCollapsed: ti, openDrawer: ni, closeDrawer: ri, toggleDrawerPinned: ii, showSidePanelList: ai, toggleSidePanelList: oi, revealSidePanel: si, selectThread: ci, selectInsight: li, toggleInsightGroup: ui, selectInsightsFilter: di, selectWorkset: fi, selectSubagent: pi, selectRevision: mi, selectFile: hi, toggleFolder: gi, selectFileListing: _i, setSidePanelAnimate: vi, resetSessionSelection: yi, activateSessionSelection: bi, rememberInsightsReturn: xi, restoreInsightsReturn: Si, rememberInsightListPosition: Ci, rememberSubagentPage: wi, useInsightsReturn: Ti, useSidePanelCollapsed: Ei, useSidePanelAnimate: Di, useSidePanelExpanded: Oi, useDrawerPinned: ki, useDrawerContent: Ai, useSidePanelList: ji, useSelectedThread: Mi, useSelectedThreadEpisode: Ni, useSelectedInsight: Pi, useInsightFocusNonce: Fi, useExpandedInsightGroups: Ii, useInsightsFilter: Li, useSelectedWorkset: Ri, useSelectedSubagent: zi, useSelectedRevision: Bi, useSelectedFile: Vi, useToggledFolders: Hi, useFileListing: Ui } = qr(q), Wi = /* @__PURE__ */ e({
-	createSessionNavigationStore: () => Gi,
-	markSessionViewed: () => Zi,
-	pruneSessionNavigation: () => Qi,
-	release: () => Ki,
-	restoreSessionNavigation: () => qi,
-	serializeSessionNavigation: () => Ji,
-	sessionNavigationStore: () => Yi,
-	toggleSessionNavigationPin: () => Xi,
-	useSessionNavigationPins: () => $i,
-	useSessionViewedAt: () => ea
+var { release: Qr, sessionLayoutStore: $r, bindSidePanelProject: ei, unbindSidePanelProject: ti, toggleSidePanelExpanded: ni, leaveFocusedSidePanel: ri, openSidePanelList: ii, toggleSidePanelCollapsed: ai, openDrawer: oi, closeDrawer: si, toggleDrawerPinned: ci, showSidePanelList: li, toggleSidePanelList: ui, revealSidePanel: di, selectThread: fi, selectInsight: pi, toggleInsightGroup: mi, selectInsightsFilter: hi, selectWorkset: gi, selectSubagent: _i, selectRevision: vi, selectFile: yi, toggleFolder: bi, selectFileListing: xi, setSidePanelAnimate: Si, resetSessionSelection: Ci, activateSessionSelection: wi, rememberInsightsReturn: Ti, restoreInsightsReturn: Ei, rememberInsightListPosition: Di, rememberSubagentPage: Oi, useInsightsReturn: ki, useSidePanelCollapsed: Ai, useSidePanelAnimate: ji, useSidePanelExpanded: Mi, useDrawerPinned: Ni, useDrawerContent: Pi, useSidePanelList: Fi, useSelectedThread: Ii, useSelectedThreadEpisode: Li, useSelectedInsight: Ri, useInsightFocusNonce: zi, useExpandedInsightGroups: Bi, useInsightsFilter: Vi, useSelectedWorkset: Hi, useSelectedSubagent: Ui, useSelectedRevision: Wi, useSelectedFile: Gi, useToggledFolders: Ki, useFileListing: qi } = Zr(q), Ji = /* @__PURE__ */ e({
+	createSessionNavigationStore: () => Yi,
+	markSessionViewed: () => ta,
+	pruneSessionNavigation: () => na,
+	release: () => Xi,
+	restoreSessionNavigation: () => Zi,
+	serializeSessionNavigation: () => Qi,
+	sessionNavigationStore: () => $i,
+	toggleSessionNavigationPin: () => ea,
+	useSessionNavigationPins: () => ra,
+	useSessionViewedAt: () => ia
 });
-function Gi(e) {
+function Yi(e) {
 	let t = "nac.sessionNavigation", n = () => ({
 		pinned: /* @__PURE__ */ new Set(),
 		lastViewedAt: {}
@@ -3183,42 +3202,42 @@ function Gi(e) {
 		useSessionViewedAt: (e) => p((t) => t.lastViewedAt[e])
 	};
 }
-var { release: Ki, restoreSessionNavigation: qi, serializeSessionNavigation: Ji, sessionNavigationStore: Yi, toggleSessionNavigationPin: Xi, markSessionViewed: Zi, pruneSessionNavigation: Qi, useSessionNavigationPins: $i, useSessionViewedAt: ea } = Gi(q), ta = /* @__PURE__ */ e({
-	createSidebarLayoutStore: () => ua,
-	release: () => da,
-	revealGroup: () => Oa,
-	setColumnOpen: () => ga,
-	setOrganize: () => ba,
-	setOverlayOpen: () => va,
-	setSidebarOffset: () => ma,
-	setView: () => Sa,
-	storeOpen: () => pa,
-	storedOpen: () => fa,
-	toggleParentExpanded: () => Ea,
-	toggleProjectCollapsed: () => wa,
-	useCollapsedProjects: () => Ta,
-	useColumnOpen: () => _a,
-	useExpandedParents: () => Da,
-	useOrganize: () => xa,
-	useOverlayOpen: () => ya,
-	useRevealedGroups: () => ka,
-	useSidebarOffset: () => ha,
-	useView: () => Ca
-}), na = "nac.sidebar.open", ra = "nac.sidebar.organize", ia = "nac.sidebar.view", aa = "nac.sidebar.collapsed-projects";
-function oa(e, t) {
+var { release: Xi, restoreSessionNavigation: Zi, serializeSessionNavigation: Qi, sessionNavigationStore: $i, toggleSessionNavigationPin: ea, markSessionViewed: ta, pruneSessionNavigation: na, useSessionNavigationPins: ra, useSessionViewedAt: ia } = Yi(q), aa = /* @__PURE__ */ e({
+	createSidebarLayoutStore: () => ma,
+	release: () => ha,
+	revealGroup: () => Ma,
+	setColumnOpen: () => ba,
+	setOrganize: () => wa,
+	setOverlayOpen: () => Sa,
+	setSidebarOffset: () => va,
+	setView: () => Ea,
+	storeOpen: () => _a,
+	storedOpen: () => ga,
+	toggleParentExpanded: () => Aa,
+	toggleProjectCollapsed: () => Oa,
+	useCollapsedProjects: () => ka,
+	useColumnOpen: () => xa,
+	useExpandedParents: () => ja,
+	useOrganize: () => Ta,
+	useOverlayOpen: () => Ca,
+	useRevealedGroups: () => Na,
+	useSidebarOffset: () => ya,
+	useView: () => Da
+}), oa = "nac.sidebar.open", sa = "nac.sidebar.organize", ca = "nac.sidebar.view", la = "nac.sidebar.collapsed-projects";
+function ua(e, t) {
 	try {
 		return e?.getItem(t) ?? null;
 	} catch {
 		return null;
 	}
 }
-function sa(e, t, n) {
+function da(e, t, n) {
 	try {
 		e?.setItem(t, n);
 	} catch {}
 }
-function ca(e) {
-	let t = oa(e, aa);
+function fa(e) {
+	let t = ua(e, la);
 	if (!t) return [];
 	try {
 		let e = JSON.parse(t);
@@ -3227,17 +3246,17 @@ function ca(e) {
 		return [];
 	}
 }
-function la(e, t) {
+function pa(e, t) {
 	return e.includes(t) ? e.filter((e) => e !== t) : [...e, t];
 }
-function ua(e) {
-	let t = oa(e, na), n = oa(e, ia), r = {
+function ma(e) {
+	let t = ua(e, oa), n = ua(e, ca), r = {
 		offset: 0,
 		columnOpen: t === "1" || t !== "0" && null,
 		overlayOpen: !1,
 		organize: "project",
 		view: n === "inbox" ? "inbox" : "sessions",
-		collapsedProjects: ca(e),
+		collapsedProjects: fa(e),
 		expandedParents: [],
 		revealedGroups: []
 	}, { getState: i, setState: a, useStore: o } = K(r, "sidebar-layout");
@@ -3248,7 +3267,7 @@ function ua(e) {
 		return o((e) => e.offset);
 	}
 	function l(t) {
-		a({ columnOpen: t }), sa(e, na, t ? "1" : "0");
+		a({ columnOpen: t }), da(e, oa, t ? "1" : "0");
 	}
 	let u = () => o((e) => e.columnOpen), d = () => i().columnOpen, f = (e) => l(e);
 	function p(e) {
@@ -3256,20 +3275,20 @@ function ua(e) {
 	}
 	let m = () => o((e) => e.overlayOpen);
 	function h(t) {
-		a({ organize: t }), sa(e, ra, t);
+		a({ organize: t }), da(e, sa, t);
 	}
 	let g = () => o((e) => e.organize);
 	function _(t) {
-		a({ view: t }), sa(e, ia, t);
+		a({ view: t }), da(e, ca, t);
 	}
 	let v = () => o((e) => e.view);
 	function y(t) {
-		let n = la(i().collapsedProjects, t);
-		a({ collapsedProjects: n }), sa(e, aa, JSON.stringify(n));
+		let n = pa(i().collapsedProjects, t);
+		a({ collapsedProjects: n }), da(e, la, JSON.stringify(n));
 	}
 	let b = () => o((e) => e.collapsedProjects);
 	function x(e) {
-		a({ expandedParents: la(i().expandedParents, e) });
+		a({ expandedParents: pa(i().expandedParents, e) });
 	}
 	let S = () => o((e) => e.expandedParents);
 	function C(e) {
@@ -3301,16 +3320,16 @@ function ua(e) {
 		useRevealedGroups: () => o((e) => e.revealedGroups)
 	};
 }
-var { release: da, storedOpen: fa, storeOpen: pa, setSidebarOffset: ma, useSidebarOffset: ha, setColumnOpen: ga, useColumnOpen: _a, setOverlayOpen: va, useOverlayOpen: ya, setOrganize: ba, useOrganize: xa, setView: Sa, useView: Ca, toggleProjectCollapsed: wa, useCollapsedProjects: Ta, toggleParentExpanded: Ea, useExpandedParents: Da, revealGroup: Oa, useRevealedGroups: ka } = ua(q), Aa = /* @__PURE__ */ e({
-	createSshConnectionStore: () => ja,
-	markSshConnected: () => Pa,
-	markSshDisconnected: () => Fa,
-	release: () => Ma,
-	sshTargetFromSummary: () => La,
-	sshTargetKey: () => Na,
-	useSshConnectionStatus: () => Ia
+var { release: ha, storedOpen: ga, storeOpen: _a, setSidebarOffset: va, useSidebarOffset: ya, setColumnOpen: ba, useColumnOpen: xa, setOverlayOpen: Sa, useOverlayOpen: Ca, setOrganize: wa, useOrganize: Ta, setView: Ea, useView: Da, toggleProjectCollapsed: Oa, useCollapsedProjects: ka, toggleParentExpanded: Aa, useExpandedParents: ja, revealGroup: Ma, useRevealedGroups: Na } = ma(q), Pa = /* @__PURE__ */ e({
+	createSshConnectionStore: () => Fa,
+	markSshConnected: () => Ra,
+	markSshDisconnected: () => za,
+	release: () => Ia,
+	sshTargetFromSummary: () => Va,
+	sshTargetKey: () => La,
+	useSshConnectionStatus: () => Ba
 });
-function ja(e) {
+function Fa(e) {
 	function t(e) {
 		return [
 			e.ssh_host.trim(),
@@ -3354,10 +3373,157 @@ function ja(e) {
 		sshTargetFromSummary: s
 	};
 }
-var { release: Ma, sshTargetKey: Na, markSshConnected: Pa, markSshDisconnected: Fa, useSshConnectionStatus: Ia, sshTargetFromSummary: La } = ja(q);
-// src/app/runtime/presentationStores.ts
-function Ra(e, t, n, r) {
+var { release: Ia, sshTargetKey: La, markSshConnected: Ra, markSshDisconnected: za, useSshConnectionStatus: Ba, sshTargetFromSummary: Va } = Fa(q), Ha = "nac.inbox.read.v1", Ua = 500;
+function Wa(e, t) {
+	try {
+		let t = e?.getItem(Ha);
+		if (t) {
+			let e = JSON.parse(t);
+			if (typeof e.since == "number" && e.runs && typeof e.runs == "object") return {
+				since: e.since,
+				runs: { ...e.runs }
+			};
+		}
+	} catch {}
+	let n = {
+		since: t,
+		runs: {}
+	};
+	return Ga(e, n), n;
+}
+function Ga(e, t) {
+	try {
+		e?.setItem(Ha, JSON.stringify(t));
+	} catch {}
+}
+function Ka(e, t = Date.now()) {
+	let n = K(Wa(e, t), "inbox-read"), r = /* @__PURE__ */ new Map(), i = !1, a = (t) => {
+		if (i) return;
+		let r = Object.entries(t), a = r.length > Ua ? Object.fromEntries(r.slice(-500)) : t, o = {
+			...n.getState(),
+			runs: a
+		};
+		n.setState(o), Ga(e, o);
+	};
 	return {
+		firstSeen: r,
+		release() {
+			i = !0, r.clear(), n.setState({
+				since: t,
+				runs: {}
+			});
+		},
+		useReadState: () => n.useStore(),
+		getState: n.getState,
+		markRead(e, t) {
+			if (n.getState().runs[e] === t) return;
+			let r = { ...n.getState().runs };
+			delete r[e], r[e] = t, a(r);
+		},
+		markAllRead(e) {
+			if (e.length === 0) return;
+			let t = { ...n.getState().runs };
+			for (let n of e) delete t[n.sessionId], t[n.sessionId] = n.runId;
+			a(t);
+		}
+	};
+}
+var qa = Ka(q);
+// src/app/features/home/homeDraftStore.ts
+function Ja() {
+	let e = K({
+		text: "",
+		revision: 0
+	}, "home-draft"), t = !1;
+	return {
+		get: e.getState,
+		usePrompt: () => e.useStore((e) => e.text),
+		update(n) {
+			t || e.setState({
+				text: n,
+				revision: e.getState().revision + 1
+			});
+		},
+		acknowledge(n) {
+			!t && e.getState().revision === n && e.setState({
+				text: "",
+				revision: n + 1
+			});
+		},
+		release() {
+			t = !0, e.setState({
+				text: "",
+				revision: e.getState().revision + 1
+			});
+		}
+	};
+}
+var Ya = Ja();
+// src/app/features/command-palette/commandSurfaceStore.ts
+function Xa() {
+	let e = K({
+		surface: null,
+		sidebarAvailable: !1
+	}, "command-surfaces"), t = /* @__PURE__ */ new Set(), n = !1, r = (t) => {
+		n || e.setState({ surface: t });
+	};
+	return {
+		openCommandPalette: () => r("palette"),
+		openShortcutSheet: () => r("shortcuts"),
+		closeCommandSurfaces: () => r(null),
+		useCommandSurface: () => e.useStore((e) => e.surface),
+		useSidebarToggleAvailable: () => e.useStore((e) => e.sidebarAvailable),
+		registerSidebarToggle(r) {
+			return n ? () => {} : (t.add(r), e.setState({ sidebarAvailable: !0 }), () => {
+				t.delete(r), e.setState({ sidebarAvailable: t.size > 0 });
+			});
+		},
+		requestSidebarToggle() {
+			let e = [...t].at(-1);
+			return n || !e ? !1 : (e(), !0);
+		},
+		release() {
+			n = !0, t.clear(), e.setState({
+				surface: null,
+				sidebarAvailable: !1
+			});
+		}
+	};
+}
+var Za = Xa(), Qa = "nac.transcriptDensity";
+function $a(e) {
+	try {
+		return e?.getItem(Qa) === "detailed" ? "detailed" : "compact";
+	} catch {
+		return "compact";
+	}
+}
+function eo(e) {
+	let t = K({ density: $a(e) }, "transcriptDensity"), n = !1, r = (r) => {
+		if (!n) {
+			t.setState({ density: r });
+			try {
+				e?.setItem(Qa, r);
+			} catch {}
+		}
+	};
+	return {
+		useTranscriptDensity: () => t.useStore((e) => e.density),
+		setTranscriptDensity: r,
+		toggleTranscriptDensity: () => r(t.getState().density === "compact" ? "detailed" : "compact"),
+		release() {
+			n = !0, t.setState({ density: "compact" });
+		}
+	};
+}
+var to = eo(q);
+// src/app/runtime/presentationStores.ts
+function no(e, t, n, r) {
+	return {
+		inboxReadStore: Ka(e),
+		homeDraftStore: Ja(),
+		commandSurfaceStore: Xa(),
+		transcriptDensityStore: eo(e),
 		promptDraftStore: Tt(t, n, r),
 		panelWidth: Me(e),
 		threadLogHeight: Ve(e),
@@ -3365,15 +3531,19 @@ function Ra(e, t, n, r) {
 		attentionStore: $e(e),
 		chatTabsStore: lt(e),
 		composerStore: nn(e),
-		runtimeStore: yn(e),
-		sessionFiltersStore: xr(e),
-		sessionLayoutStore: qr(e),
-		sessionNavigationStore: Gi(e),
-		sidebarLayoutStore: ua(e),
-		sshConnectionStore: ja(e)
+		runtimeStore: Cn(e),
+		sessionFiltersStore: Tr(e),
+		sessionLayoutStore: Zr(e),
+		sessionNavigationStore: Yi(e),
+		sidebarLayoutStore: ma(e),
+		sshConnectionStore: Fa(e)
 	};
 }
-var za = {
+var ro = {
+	inboxReadStore: qa,
+	homeDraftStore: Ya,
+	commandSurfaceStore: Za,
+	transcriptDensityStore: to,
 	promptDraftStore: vt,
 	panelWidth: De,
 	threadLogHeight: Le,
@@ -3381,19 +3551,19 @@ var za = {
 	attentionStore: Qe,
 	chatTabsStore: ct,
 	composerStore: tn,
-	runtimeStore: vn,
-	sessionFiltersStore: br,
-	sessionLayoutStore: Kr,
-	sessionNavigationStore: Wi,
-	sidebarLayoutStore: ta,
-	sshConnectionStore: Aa
+	runtimeStore: Sn,
+	sessionFiltersStore: wr,
+	sessionLayoutStore: Xr,
+	sessionNavigationStore: Ji,
+	sidebarLayoutStore: aa,
+	sshConnectionStore: Pa
 };
-function Ba(e) {
+function io(e) {
 	e.runtimeStore.resetRuntime(null);
 	for (let t of Object.values(e)) t.release();
 }
 // src/app/runtime/requestLifetime.ts
-function Va(e, t) {
+function ao(e, t) {
 	return e.throwIfAborted(), new Promise((n, r) => {
 		let i = () => r(e.reason);
 		e.addEventListener("abort", i, { once: !0 }), Promise.resolve().then(() => (e.throwIfAborted(), t())).then((t) => {
@@ -3403,7 +3573,7 @@ function Va(e, t) {
 		});
 	});
 }
-function Ha(e) {
+function oo(e) {
 	if (e instanceof y) return e;
 	if (e instanceof Error && e.name === "ApiError" && "status" in e && typeof e.status == "number" && "method" in e && typeof e.method == "string" && "path" in e && typeof e.path == "string" && "requestId" in e && typeof e.requestId == "string") {
 		let t = new y(e.status, e.method, e.path, "", e.requestId);
@@ -3411,7 +3581,7 @@ function Ha(e) {
 	}
 	return e;
 }
-var Ua = class extends D {
+var so = class extends D {
 	source;
 	lifetime;
 	constructor(e, t) {
@@ -3432,7 +3602,7 @@ var Ua = class extends D {
 		return this.source.newRequestId();
 	}
 	streamContext() {
-		return Va(this.lifetime, () => this.source.streamContext());
+		return ao(this.lifetime, () => this.source.streamContext());
 	}
 	async admit(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime, i = n.requestId ?? this.source.newRequestId();
@@ -3442,7 +3612,7 @@ var Ua = class extends D {
 			reason: "aborted"
 		};
 		try {
-			return await Va(r, () => this.source.admit(e, t, {
+			return await ao(r, () => this.source.admit(e, t, {
 				...n,
 				requestId: i,
 				signal: r
@@ -3453,19 +3623,19 @@ var Ua = class extends D {
 				requestId: i,
 				error: e
 			};
-			throw Ha(e);
+			throw oo(e);
 		}
 	}
 	request(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime;
-		return Va(r, () => this.source.request(e, t, {
+		return ao(r, () => this.source.request(e, t, {
 			...n,
 			signal: r
 		})).catch((e) => {
-			throw Ha(e);
+			throw oo(e);
 		});
 	}
-}, Wa = class {
+}, co = class {
 	limit;
 	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
@@ -3531,14 +3701,14 @@ var Ua = class extends D {
 			t.listeners.clear();
 		}
 	}
-}, Ga = /* @__PURE__ */ new WeakMap();
-function Ka(e) {
+}, lo = /* @__PURE__ */ new WeakMap();
+function uo(e) {
 	if (e.terminalInputRecovery) return e.terminalInputRecovery;
-	let t = Ga.get(e);
-	return t || (t = new Wa(), Ga.set(e, t)), t;
+	let t = lo.get(e);
+	return t || (t = new co(), lo.set(e, t)), t;
 }
 // src/app/features/setup/localFolder.ts
-function qa(e, t) {
+function fo(e, t) {
 	if (e) return { async chooseDirectory(n, r) {
 		let i = new AbortController(), a = () => i.abort();
 		(r.aborted || t.aborted) && a(), r.addEventListener("abort", a, { once: !0 }), t.addEventListener("abort", a, { once: !0 });
@@ -3551,10 +3721,10 @@ function qa(e, t) {
 		}
 	} };
 }
-function Ja(e, t, n, r) {
+function po(e, t, n, r) {
 	return t && n === "directory" && !r ? e : void 0;
 }
-function Ya(e, t, n) {
+function mo(e, t, n) {
 	let r = new AbortController();
 	return {
 		cancel: () => r.abort(),
@@ -3566,8 +3736,8 @@ function Ya(e, t, n) {
 	};
 }
 // src/app/runtime/nativeRuntime.ts
-var Xa = /* @__PURE__ */ new WeakMap(), Za = 0, Qa = class {
-	id = ++Za;
+var ho = /* @__PURE__ */ new WeakMap(), go = 0, _o = class {
+	id = ++go;
 	scope;
 	client;
 	assets;
@@ -3585,7 +3755,7 @@ var Xa = /* @__PURE__ */ new WeakMap(), Za = 0, Qa = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.terminalInputRecovery = new Wa(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new co(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -3594,8 +3764,8 @@ var Xa = /* @__PURE__ */ new WeakMap(), Za = 0, Qa = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = qa(e.nativeDirectory, this.controller.signal), this.stores = Ra(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new Ua(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
-		this.api = ue(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Xa.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = fo(e.nativeDirectory, this.controller.signal), this.stores = no(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new so(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = ue(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, ho.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {
@@ -3630,26 +3800,26 @@ var Xa = /* @__PURE__ */ new WeakMap(), Za = 0, Qa = class {
 		if (!this.isClosed()) {
 			this.controller.abort(new DOMException("Native runtime was closed.", "AbortError")), this.terminalInputRecovery.close(), this.productNavigation.close();
 			for (let e of this.disposers) e();
-			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), Ba(this.stores);
+			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), io(this.stores);
 			for (let e of this.listeners) e();
 		}
 	}
 };
-function $a(e) {
-	return new Qa(e);
+function vo(e) {
+	return new _o(e);
 }
-var eo = {
+var yo = {
 	api: de,
 	client: M,
-	stores: za,
+	stores: ro,
 	events: (e, t) => Ee(e, t)
 };
-function to(e) {
-	return Xa.get(e) ?? eo;
+function bo(e) {
+	return ho.get(e) ?? yo;
 }
 // src/app/runtime/RuntimeContext.ts
-var no = u(null);
-function ro() {
-	return f(no) ?? eo;
+var xo = u(null);
+function So() {
+	return f(xo) ?? yo;
 }
-export { ve as A, Pe as C, he as D, q as E, L as F, R as I, te as L, fe as M, oe as N, ge as O, ae as P, y as R, Ae as S, K as T, gn as _, to as a, pn as b, Ka as c, gr as d, mr as f, sr as g, fr as h, $a as i, pe as j, _e as k, lr as l, ur as m, ro as n, Ja as o, vr as p, Qa as r, Ya as s, no as t, _r as u, hn as v, je as w, _n as x, mn as y, x as z };
+export { pe as A, Ae as C, ge as D, he as E, R as F, te as I, y as L, oe as M, ae as N, _e as O, L as P, x as R, xn as S, je as T, dr as _, bo as a, vn as b, uo as c, xr as d, br as f, gr as g, mr as h, vo as i, fe as j, ve as k, Za as l, Sr as m, So as n, po as o, vr as p, _o as r, mo as s, xo as t, pr as u, bn as v, Pe as w, _n as x, yn as y };

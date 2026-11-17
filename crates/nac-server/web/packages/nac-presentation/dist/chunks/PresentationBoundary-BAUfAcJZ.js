@@ -299,7 +299,7 @@ function X() {
 	}, l = (t) => {
 		if (t.key !== "Escape" || t.isComposing) return;
 		let n = e.at(-1), r = n && i(n);
-		n && r?.ownsKeyboard(t.target) && (n.restoreFocus = !0, r.onEscape?.());
+		n && r?.ownsKeyboard(t.target) && (n.restoreFocus = !0, r.onEscape?.(t));
 	}, u = () => {
 		for (let t of e) t.pressedInside = !1;
 	}, d = (t) => {

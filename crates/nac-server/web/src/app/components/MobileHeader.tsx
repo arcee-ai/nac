@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { Icon, IconName, Logo } from "@/app/atoms";
 import { MobileMenu } from "@/app/components/LeftSidebar/MobileMenu";
-import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
+import { useCommandSurfaceControls } from "@/app/features/command-palette/paletteSignal";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 
@@ -25,6 +25,7 @@ const TARGET = cn(
  * replaces it there.
  */
 export function MobileHeader() {
+  const { openCommandPalette } = useCommandSurfaceControls();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);

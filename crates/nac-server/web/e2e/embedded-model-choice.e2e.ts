@@ -475,11 +475,6 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
   request,
 }) => {
   const projectId = await createProject(request, harness);
-  harness.provider.enqueue(
-    "converged-first-run",
-    { token: "ALL_CONVERGED_FIRST_SESSION" },
-    { kind: "text", text: "converged first session", stream: "request" },
-  );
   const onHome = new RegExp(`/#/\\?project=${encodeURIComponent(projectId)}$`);
   const sessionsOf = async () => {
     const sessions = await request.get(
@@ -503,12 +498,51 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
     ]);
     expect(await sessionsOf()).toHaveLength(0);
 
-    // Once one tab starts the session, the project route converges on it everywhere.
-    const firstSessionId = await startSessionFromHome(page, "ALL_CONVERGED_FIRST_SESSION");
-    await second.goto(`${harness.baseUrl}/#/project/${projectId}`);
-    await expect(second).toHaveURL(new RegExp(`/session/${firstSessionId}/insights$`));
+    // Hold both real creates at the same admission boundary. Each tab still
+    // believes this project has no primary session when it sends first_chat.
+    let releaseCreates!: () => void;
+    const createsReady = new Promise<void>((resolve) => {
+      releaseCreates = resolve;
+    });
+    const creates: unknown[] = [];
+    for (const tab of [page, second]) {
+      await tab.route(`${harness.baseUrl}/sessions`, async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        creates.push(route.request().postDataJSON());
+        await createsReady;
+        await route.continue();
+      });
+      // A known first-run rejection must retain each distinct prompt without
+      // replay. Session admission itself remains the real server transaction.
+      await tab.route("**/sessions/*/runs", (route) =>
+        route.fulfill({ status: 409, json: { error: "session is busy with a local operation" } }),
+      );
+    }
+    const rejected = [page, second].map((tab) =>
+      tab.waitForResponse(
+        (response) =>
+          /\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname) &&
+          response.request().method() === "POST",
+      ),
+    );
+    const starts = [
+      startSessionFromHome(page, "FIRST_TAB_PROMPT"),
+      startSessionFromHome(second, "SECOND_TAB_PROMPT"),
+    ];
+    await expect.poll(() => creates.length).toBe(2);
+    releaseCreates();
+    for (const body of creates)
+      expect(body).toMatchObject({ first_chat: true, first_chat_same_behavior: false });
+    const [firstSessionId, otherSessionId] = await Promise.all(starts);
+    expect(otherSessionId).toBe(firstSessionId);
     expect(await sessionsOf()).toHaveLength(1);
-    await waitForRunIdle(request, harness, firstSessionId);
+    for (const reply of await Promise.all(rejected)) expect(reply.status()).toBe(409);
+    await expect(page.getByRole("combobox", { name: "Message", exact: true })).toHaveValue(
+      "FIRST_TAB_PROMPT",
+    );
+    await expect(second.getByRole("combobox", { name: "Message", exact: true })).toHaveValue(
+      "SECOND_TAB_PROMPT",
+    );
 
     const deleted = await request.delete(`${harness.baseUrl}/projects/${projectId}`);
     expect(deleted.ok()).toBe(true);

@@ -48,7 +48,10 @@ export function useInbox(): InboxContextValue {
 /** The session route for a row, at the exact request when there is one. */
 export function inboxHref(target: InboxTarget): string {
   const base = routes.session(target.sessionId);
-  return target.permissionRequestId
-    ? `${base}?permission_request=${encodeURIComponent(target.permissionRequestId)}`
-    : base;
+  const params = new URLSearchParams();
+  if (target.permissionRequestId) params.set("permission_request", target.permissionRequestId);
+  if (target.questionRequestId) params.set("question_request", target.questionRequestId);
+  if (target.reviewId) params.set("review_request", target.reviewId);
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }

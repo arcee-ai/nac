@@ -61,6 +61,8 @@ export interface InboxTarget {
     sessionId: string;
     /** The exact permission request to focus on arrival. */
     permissionRequestId?: string;
+    questionRequestId?: string;
+    reviewId?: string;
 }
 export interface InboxRow {
     key: string;

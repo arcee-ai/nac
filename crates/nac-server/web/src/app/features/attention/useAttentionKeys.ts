@@ -41,7 +41,7 @@ export function useAttentionKeys(
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.isComposing) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (!ownsKeyboard(event.target) || layers.modalDepth() > 0) return;
+      if (!ownsKeyboard(event.target) || layers.openDepth() > 0) return;
       if (!isAttentionKeyTarget(event.target)) return;
       if (latest.current(event.key, event)) event.preventDefault();
     };

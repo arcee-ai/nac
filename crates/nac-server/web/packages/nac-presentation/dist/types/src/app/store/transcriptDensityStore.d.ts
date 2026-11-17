@@ -5,6 +5,17 @@
  * Approvals, questions and errors are never hidden by either.
  */
 export type TranscriptDensity = "compact" | "detailed";
-export declare function useTranscriptDensity(): TranscriptDensity;
-export declare function setTranscriptDensity(density: TranscriptDensity): void;
-export declare function toggleTranscriptDensity(): void;
+type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
+export declare function createTranscriptDensityStore(storage?: PreferenceStorage): {
+    useTranscriptDensity: () => TranscriptDensity;
+    setTranscriptDensity: (density: TranscriptDensity) => void;
+    toggleTranscriptDensity: () => void;
+    release(): void;
+};
+export declare const standaloneTranscriptDensityStore: {
+    useTranscriptDensity: () => TranscriptDensity;
+    setTranscriptDensity: (density: TranscriptDensity) => void;
+    toggleTranscriptDensity: () => void;
+    release(): void;
+};
+export {};

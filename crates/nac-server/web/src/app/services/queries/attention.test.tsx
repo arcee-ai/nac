@@ -277,9 +277,39 @@ describe("useFleetAttention", () => {
     await waitFor(() => expect(sources).toHaveLength(2), { timeout: 3000 });
     act(() => sources[1].frame({ kind: "unavailable", reason: "capacity" }));
     expect(sources[1].closed).toBe(true);
-    expect(hook.result.current.status).toBe("polling");
-    // The last known sessions stay visible while polling continues.
+    expect(hook.result.current.status).toBe("unavailable");
+    await waitFor(() => expect(hook.result.current.status).toBe("polling"));
+    // A fresh successful poll reestablishes health; cached rows alone cannot.
     expect(hook.result.current.sessions.get("a")).toBeDefined();
+  });
+
+  it("does not let a poll started before an unavailable frame restore cached health", async () => {
+    const stale = Promise.withResolvers<{
+      epoch: string;
+      revision: number;
+      sessions: FleetAttentionSession[];
+    }>();
+    const fresh =
+      Promise.withResolvers<typeof stale.promise extends Promise<infer T> ? T : never>();
+    const snapshot = { epoch: "e1", revision: 1, sessions: [entry("a", 1)] };
+    const poll = vi
+      .spyOn(api, "fleetAttention")
+      .mockResolvedValueOnce(snapshot)
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValue(fresh.promise);
+    const { hook, sources } = harness();
+    await waitFor(() => expect(hook.result.current.sessions.get("a")).toBeDefined());
+    act(() => sources[0].frame({ kind: "snapshot", ...snapshot }));
+    act(() => sources[0].fail());
+    await waitFor(() => expect(poll).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(sources).toHaveLength(2), { timeout: 3000 });
+    act(() => sources[1].frame({ kind: "unavailable", reason: "store" }));
+    expect(hook.result.current.status).toBe("unavailable");
+    await act(async () => stale.resolve(snapshot));
+    await waitFor(() => expect(poll.mock.calls.length).toBeGreaterThanOrEqual(3));
+    expect(hook.result.current.status).toBe("unavailable");
+    await act(async () => fresh.resolve({ ...snapshot, revision: 3 }));
+    await waitFor(() => expect(hook.result.current.status).toBe("polling"));
   });
 
   it("polls without holding a stream when asked to", async () => {

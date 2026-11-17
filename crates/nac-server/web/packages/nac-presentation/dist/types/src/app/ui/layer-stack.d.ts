@@ -17,7 +17,7 @@ export interface LayerHandlers {
     /** Trigger area of a panel: pressing it is not an outside press. */
     anchor?: RefObject<HTMLElement | null>;
     /** Absent: the layer swallows Escape without closing, so nothing below it closes either. */
-    onEscape?: () => void;
+    onEscape?: (event: KeyboardEvent) => void;
     /** Panels only. Absent: presses outside the panel pass on to the layer below it. */
     onOutsidePress?: () => void;
     inertBackground: boolean;

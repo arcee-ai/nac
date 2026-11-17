@@ -72,6 +72,7 @@ function mount(
   requesterLabel?: string,
   compact = false,
   open = state.requests.length > 0,
+  search = "",
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -79,7 +80,7 @@ function mount(
   client.setQueryData(queryKeys.sessionPermissions(SESSION_ID), state);
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/session/${SESSION_ID}/insights${search}`]}>
         <ToastProvider>
           <PermissionControls
             sessionId={SESSION_ID}
@@ -122,6 +123,50 @@ afterEach(() => {
 });
 
 describe("direct permission controls", () => {
+  it("opens an exact review link without substituting other pending decisions", async () => {
+    const review = (
+      id: string,
+      display: string,
+    ): NonNullable<PermissionStateResponse["reviews"]>[number] => ({
+      id,
+      session_id: SESSION_ID,
+      call_id: id,
+      tool: "exec_command",
+      backend: "local",
+      resources: [{ action: "execute", resource: display, display }],
+      user_authorized_retry: false,
+      reviewer: "fixture",
+      outcome: "rejected",
+      code: "review_rejected",
+      created_at_epoch_ms: 1,
+    });
+    const state: PermissionStateResponse = {
+      ...pendingState(),
+      approval_mode: "review",
+      reviews: [review("newer", "unrelated command"), review("exact", "exact blocked command")],
+      authorizable_review_ids: ["newer", "exact"],
+    };
+    fakes.getPermissions.mockResolvedValue(state);
+    mount(state, undefined, false, false, "?review_request=exact");
+    expect(await screen.findByRole("dialog", { name: "Permissions" })).toBeTruthy();
+    expect(screen.getByText("exact blocked command")).toBeTruthy();
+    expect(screen.queryByText("unrelated command")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Authorize retry" }));
+    await waitFor(() =>
+      expect(fakes.authorizePermissionReviewRetry).toHaveBeenCalledWith(SESSION_ID, "exact"),
+    );
+  });
+
+  it("reports a stale exact review instead of offering a replacement action", async () => {
+    const state = pendingState();
+    fakes.getPermissions.mockResolvedValue(state);
+    mount(state, undefined, false, false, "?review_request=gone");
+    expect(await screen.findByText(/This automatic review is no longer available/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Authorize retry" })).toBeNull();
+  });
+
   it.each([
     ["manual", "Manual", "Permissions"],
     ["auto_approve", "Approve all", "Auto-approve on — open permissions"],

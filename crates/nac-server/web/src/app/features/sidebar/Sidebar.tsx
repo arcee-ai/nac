@@ -16,7 +16,7 @@ import {
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { useSidebarCommands } from "@/app/components/LeftSidebar/useSidebarCommands";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
-import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
+import { useCommandSurfaceControls } from "@/app/features/command-palette/paletteSignal";
 import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
@@ -73,6 +73,7 @@ function NavRow({
 
 /** Everything inside the sidebar surface; mode-independent. */
 function SidebarBody({ onHide }: { onHide: () => void }) {
+  const { openCommandPalette } = useCommandSurfaceControls();
   const commands = useSidebarCommands();
   const navigate = useNavigate();
   const { pathname } = useLocation();

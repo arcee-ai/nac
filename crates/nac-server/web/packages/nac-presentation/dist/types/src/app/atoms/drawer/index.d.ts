@@ -2,6 +2,7 @@ import React from "react";
 export interface DrawerProps {
     open: boolean;
     onClose: () => void;
+    onEscape?: (event: KeyboardEvent) => void;
     /** Accessible name and visible heading. */
     title: React.ReactNode;
     /** Plain-text name when `title` is not a string. */
@@ -25,4 +26,4 @@ export interface DrawerProps {
  * scrim, keeps global shortcuts live (layer "sheet"), and returns focus where
  * it came from through the shared layer stack.
  */
-export default function Drawer({ open, onClose, title, label, headerActions, expanded, onToggleExpanded, onPin, bare, className, bodyClassName, children, }: DrawerProps): React.JSX.Element | null;
+export default function Drawer({ open, onClose, onEscape, title, label, headerActions, expanded, onToggleExpanded, onPin, bare, className, bodyClassName, children, }: DrawerProps): React.JSX.Element | null;

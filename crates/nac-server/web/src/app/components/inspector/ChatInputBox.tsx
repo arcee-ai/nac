@@ -184,6 +184,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const {
     useSessionSpend,
     useRunning,
+    useStreamStatus,
     useRunUsage,
     useCancelArmed,
     pushLocalEvent,
@@ -227,6 +228,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   // A message the field is not editing rests on one truncated line.
   const collapsed = !focused && value !== "";
   const running = useRunning(sessionId);
+  const streamStatus = useStreamStatus();
   const stopping = useCancelArmed(sessionId);
   const toast = useToast();
   const actions = useSessionActions();
@@ -627,12 +629,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
    * unsent draft survives being overtaken by one.
    */
   const submit = useCallback(
-    async (requestedText?: string, requestedDelivery?: InboxDelivery) => {
+    async (requestedText?: string, requestedDelivery?: InboxDelivery, firstPrompt = false) => {
       const text = requestedText ?? value;
-      const input = shellInput(text);
-      const prompt = input.kind === "prompt" ? input.prompt.trim() : text.trim();
+      const input = firstPrompt ? { kind: "prompt" as const, prompt: text } : shellInput(text);
+      const prompt = firstPrompt
+        ? text
+        : input.kind === "prompt"
+          ? input.prompt.trim()
+          : text.trim();
       if (!prompt || busy) return;
-      const fromField = requestedText === undefined || requestedDelivery !== undefined;
+      const fromField =
+        firstPrompt || requestedText === undefined || requestedDelivery !== undefined;
       const submittedDraft = drafts.get(sessionId);
       const current = captureRuntimeActivation(sessionId);
       const clearField = () => {
@@ -677,7 +684,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           return;
         }
         let definitions = commandDefinitions;
-        if (text.trimStart().startsWith("/") && definitions === undefined) {
+        if (!firstPrompt && text.trimStart().startsWith("/") && definitions === undefined) {
           const result = await refetchCommands();
           if (!current()) return;
           definitions = result.data;
@@ -687,7 +694,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
           }
         }
 
-        const command = definitions ? submittedSlashCommand(text, definitions) : null;
+        const command =
+          !firstPrompt && definitions ? submittedSlashCommand(text, definitions) : null;
         if (command?.command === "compact") {
           try {
             await compactSession.mutateAsync(sessionId);
@@ -780,6 +788,40 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       submitRun,
     ],
   );
+
+  // Home's create-and-send intent belongs to this exact draft and may run only
+  // after the real session stream establishes an interactive approval owner.
+  const { useFirstPrompt, takeFirstPrompt, cancelFirstPrompt } = runtime.stores.composerStore;
+  const firstPrompt = useFirstPrompt(sessionId);
+  const firstPromptActivation = useRef<{ sessionId: string; token: object } | null>(null);
+  useEffect(() => {
+    const token = {};
+    firstPromptActivation.current = { sessionId, token };
+    return () =>
+      queueMicrotask(() => {
+        if (
+          firstPromptActivation.current?.sessionId !== sessionId ||
+          firstPromptActivation.current.token === token
+        )
+          cancelFirstPrompt(sessionId);
+      });
+  }, [sessionId, cancelFirstPrompt]);
+  useEffect(() => {
+    if (!firstPrompt || streamStatus !== "live" || !ownershipKnown || busy) return;
+    if (runtime.stores.runtimeStore.getRuntimeState().sessionId !== sessionId) return;
+    if (!takeFirstPrompt(sessionId, firstPrompt)) return;
+    if (drafts.get(sessionId) === firstPrompt) void submit(undefined, undefined, true);
+  }, [
+    firstPrompt,
+    streamStatus,
+    ownershipKnown,
+    busy,
+    sessionId,
+    takeFirstPrompt,
+    drafts,
+    submit,
+    runtime,
+  ]);
 
   // A starter prompt goes out on its own; it is already a whole instruction,
   // and the field is where it would otherwise have to be confirmed.

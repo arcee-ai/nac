@@ -1,12 +1,7 @@
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { COMMAND_PALETTE_KEYS, SHORTCUT_SHEET_KEYS } from "@/app/lib/shortcuts";
 import { CommandPalette } from "./CommandPalette";
-import {
-  closeCommandSurfaces,
-  openCommandPalette,
-  openShortcutSheet,
-  useCommandSurface,
-} from "./paletteSignal";
+import { useCommandSurfaceControls } from "./paletteSignal";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 /**
@@ -15,6 +10,8 @@ import { ShortcutSheet } from "./ShortcutSheet";
  * presentation, inside every provider, so it is available on every route.
  */
 export function CommandSurfaces() {
+  const { useCommandSurface, openCommandPalette, openShortcutSheet, closeCommandSurfaces } =
+    useCommandSurfaceControls();
   const surface = useCommandSurface();
   useKeyboardShortcuts([
     { keys: COMMAND_PALETTE_KEYS, onTrigger: openCommandPalette },

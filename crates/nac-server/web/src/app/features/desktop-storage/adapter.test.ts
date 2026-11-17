@@ -47,6 +47,25 @@ afterEach(() => {
 });
 
 describe("desktop presentation storage adapter", () => {
+  it("admits and restores Focus preferences through the exact native storage port", async () => {
+    const values = {
+      "nac.sidebar.view": "inbox",
+      "nac.sidebar.collapsed-projects": '["project"]',
+      "nac.inbox.read.v1": '{"since":1000,"runs":{"session":"run"}}',
+      "nac.transcriptDensity": "detailed",
+    };
+    const port = native();
+    Object.assign(port.bootstrap.values.preferences, values);
+    const storage = (await openDesktopStorage(port, endpoint))!;
+    for (const [key, value] of Object.entries(values)) {
+      expect(storage.preferences.getItem(key)).toBe(value);
+      storage.preferences.setItem(key, value);
+    }
+    expect(port.messages.map((message) => message.key)).toEqual(Object.keys(values));
+    expect(() => storage.preferences.setItem("nac.permission", "allow")).toThrow();
+    storage.close();
+  });
+
   it("preserves ordinary callers and catches storage acquisition and operation failures", async () => {
     expect(await openDesktopStorage(undefined, endpoint)).toBeUndefined();
     const forbidden = Object.defineProperty({}, "localStorage", {

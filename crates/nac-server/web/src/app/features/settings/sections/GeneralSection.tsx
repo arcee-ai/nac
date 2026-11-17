@@ -1,10 +1,11 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { IconName, KeyboardShortcut } from "@/app/atoms";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { routes } from "@/app/lib/routes";
 import { COMMAND_PALETTE_KEYS, SHORTCUT_SHEET_KEYS } from "@/app/lib/shortcuts";
 import { useTheme } from "@/app/providers/ThemeProvider";
 import { useMcpServers, useModelConfigs, useSshConfigs } from "@/app/services/queries";
-import { useTranscriptDensity } from "@/app/store/transcriptDensityStore";
+
 import { SettingsGroup, SettingsLinkRow, SettingsRow } from "../SettingsRows";
 
 const THEME_LABEL = { system: "System", light: "Light", dark: "Dark" } as const;
@@ -23,6 +24,7 @@ function count(value: number | undefined, one: string, many: string): string {
 export function GeneralSection() {
   const managed = useManagedHost();
   const { theme = "system" } = useTheme();
+  const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
   const { data: models } = useModelConfigs();
   const { data: mcp } = useMcpServers();

@@ -1,4 +1,4 @@
-import { a as e, i as t, n, o as r, r as i } from "./PresentationBoundary-DDOQGn0M.js";
+import { a as e, i as t, n, o as r, r as i } from "./PresentationBoundary-BAUfAcJZ.js";
 import * as a from "react";
 import { createContext as o, createElement as s, forwardRef as c, useCallback as l, useContext as u, useEffect as d, useInsertionEffect as f, useLayoutEffect as p, useMemo as m, useRef as h, useState as g, useSyncExternalStore as _ } from "react";
 import { Fragment as v, jsx as y, jsxs as b } from "react/jsx-runtime";
@@ -7961,27 +7961,27 @@ function Mp(e) {
 	if (!t) throw Error(`${e} must be rendered inside Dialog`);
 	return t;
 }
-function Np({ open: e, defaultOpen: t = !1, onOpenChange: n, layer: r = "modal", inertBackground: i = r === "modal", closeOnEscape: o = !0, children: s }) {
-	let [c, l] = a.useState(t), u = e ?? c, d = (t) => {
-		e === void 0 && l(t), n?.(t);
-	}, f = () => d(!1), p = a.useRef(null), m = $f({
-		open: u,
+function Np({ open: e, defaultOpen: t = !1, onOpenChange: n, layer: r = "modal", inertBackground: i = r === "modal", closeOnEscape: o = !0, onEscape: s, children: c }) {
+	let [l, u] = a.useState(t), d = e ?? l, f = (t) => {
+		e === void 0 && u(t), n?.(t);
+	}, p = () => f(!1), m = a.useRef(null), h = $f({
+		open: d,
 		kind: r,
-		content: p,
+		content: m,
 		inertBackground: i,
-		onEscape: o ? f : void 0
+		onEscape: o ? s ?? p : void 0
 	});
 	return /* @__PURE__ */ y(jp.Provider, {
 		value: {
-			layer: m,
-			content: p,
-			close: f
+			layer: h,
+			content: m,
+			close: p
 		},
 		children: /* @__PURE__ */ y(rl, {
-			open: u,
-			onOpenChange: d,
+			open: d,
+			onOpenChange: f,
 			modal: !1,
-			children: s
+			children: c
 		})
 	});
 }

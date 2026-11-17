@@ -10,32 +10,43 @@ export type TranscriptDensity = "compact" | "detailed";
 
 const KEY = "nac.transcriptDensity";
 
-function read(): TranscriptDensity {
+function read(storage: PreferenceStorage | undefined): TranscriptDensity {
   try {
-    return standalonePreferenceStorage.getItem(KEY) === "detailed" ? "detailed" : "compact";
+    return storage?.getItem(KEY) === "detailed" ? "detailed" : "compact";
   } catch {
     return "compact";
   }
 }
 
-const densityStore = createStore<{ density: TranscriptDensity }>(
-  { density: read() },
-  "transcriptDensity",
+type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
+
+export function createTranscriptDensityStore(storage?: PreferenceStorage) {
+  const densityStore = createStore<{ density: TranscriptDensity }>(
+    { density: read(storage) },
+    "transcriptDensity",
+  );
+  let closed = false;
+  const setTranscriptDensity = (density: TranscriptDensity) => {
+    if (closed) return;
+    densityStore.setState({ density });
+    try {
+      storage?.setItem(KEY, density);
+    } catch {
+      /* Preferences are optional. */
+    }
+  };
+  return {
+    useTranscriptDensity: () => densityStore.useStore((state) => state.density),
+    setTranscriptDensity,
+    toggleTranscriptDensity: () =>
+      setTranscriptDensity(densityStore.getState().density === "compact" ? "detailed" : "compact"),
+    release() {
+      closed = true;
+      densityStore.setState({ density: "compact" });
+    },
+  };
+}
+
+export const standaloneTranscriptDensityStore = createTranscriptDensityStore(
+  standalonePreferenceStorage,
 );
-
-export function useTranscriptDensity(): TranscriptDensity {
-  return densityStore.useStore((state) => state.density);
-}
-
-export function setTranscriptDensity(density: TranscriptDensity): void {
-  densityStore.setState({ density });
-  try {
-    standalonePreferenceStorage.setItem(KEY, density);
-  } catch {
-    // Preference storage is best-effort.
-  }
-}
-
-export function toggleTranscriptDensity(): void {
-  setTranscriptDensity(densityStore.getState().density === "compact" ? "detailed" : "compact");
-}

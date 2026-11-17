@@ -529,7 +529,12 @@ async function settingsSection(j: Journey, label: RegExp, press: Press) {
     }
   }
   // Wide screens list sections in a side nav; narrower ones push from a list.
-  await press(j.root.getByRole("link", { name: label }).first());
+  const link = j.root.getByRole("link", { name: label }).first();
+  // Managed capability changes arrive on the existing 15-second status poll.
+  // Wait for that product observation, rather than racing a 10-second locator
+  // timeout against the optional section's next ordinary refresh.
+  await expect(link).toBeVisible({ timeout: 25_000 });
+  await press(link);
 }
 
 /**

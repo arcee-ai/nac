@@ -153,13 +153,17 @@ export function SessionDrawer({
       {presence.mounted ? (
         <aside
           aria-label={title}
+          aria-hidden={!docked || undefined}
+          inert={!docked}
           className={cn(
             "relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground",
             "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",
             presence.shown ? "w-[var(--drawer-width)]" : "w-0",
           )}
           onKeyDown={(event) => {
-            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing)
+              return;
+            if (event.target instanceof Element && event.target.closest(".xterm")) return;
             event.preventDefault();
             drawer.close();
           }}
@@ -173,6 +177,11 @@ export function SessionDrawer({
       <Drawer
         open={drawer.open && !docked}
         onClose={drawer.close}
+        onEscape={(event) => {
+          if (event.target instanceof Element && event.target.closest(".xterm")) return;
+          if (!isMobile && drawer.expanded) drawer.toggleExpanded();
+          else drawer.close();
+        }}
         title={title}
         bare
         expanded={drawer.expanded}

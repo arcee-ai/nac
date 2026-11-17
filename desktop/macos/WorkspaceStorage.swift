@@ -156,7 +156,9 @@ final class WorkspaceStorage {
         if namespace == "drafts" { return key == profile.draftKey }
         guard namespace == "preferences", key.utf8.count <= 512 else { return false }
         return ["nac-panel-list-width", "nac-thread-log-height-ratio", "nac.last-light-model",
-                "nac.chatTabs", "nac.sessionNavigation", "nac.sidebar.open"].contains(key) ||
+                "nac.chatTabs", "nac.sessionNavigation", "nac.sidebar.open",
+                "nac.sidebar.view", "nac.sidebar.collapsed-projects", "nac.inbox.read.v1",
+                "nac.transcriptDensity"].contains(key) ||
             key.hasPrefix("nac.rightSidebar.collapsed.")
     }
 
