@@ -102,7 +102,7 @@ impl SessionService {
             match self.active_threads.cancel_and_drain(steering_store).await {
                 Ok(records) => self.emit_steering_expired_async(records).await,
                 Err(error) => {
-                    eprintln!("nac: failed to expire cancelled worker steering: {error:#}")
+                    eprintln!("nac: failed to expire cancelled worker steering: {error:#}");
                 }
             }
         }
