@@ -790,3 +790,50 @@ async fn callback_broker_change_panic_retires_only_observation_and_preserves_rea
     drop(parts);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[tokio::test]
+async fn passive_snapshot_reads_operation_and_broker_without_touching_the_native_slot() {
+    let (mut parts, path) = crate::session_service::tests::test_direct_active_service(
+        "attention-passive",
+        "session",
+        ModelClient::new_for_test(),
+    );
+    parts.service.permission_broker = Some(Arc::new(crate::permissions::PermissionBroker::new(
+        path.clone(),
+        "session".into(),
+        crate::permissions::PermissionBackend::Local,
+        parts.service.config_version.unwrap(),
+        vec![],
+    )));
+    // Without any installed observer, the passive read installs nothing.
+    let idle = parts.service.passive_attention_snapshot().unwrap();
+    assert_eq!(idle.operation, AttentionOperation::Idle);
+    assert!(idle.settled.is_none());
+    assert!(matches!(
+        &idle.broker,
+        Some(AttentionBrokerSnapshot { state: AttentionBrokerState::Current { permissions, authorizable_reviews }, .. })
+            if permissions.is_empty() && authorizable_reviews.is_empty()
+    ));
+    assert!(!parts.service.attention_enabled());
+    // With the single native slot occupied, reads neither publish to it nor
+    // replace or retire it.
+    let observer = Arc::new(Observer::default());
+    let registration = parts
+        .service
+        .install_attention_observer(observer.clone())
+        .unwrap();
+    let published = observer.0.lock().unwrap().len();
+    let active = parts.service.try_begin_run(None, "work").unwrap();
+    let published = observer.0.lock().unwrap().len().max(published);
+    let running = parts.service.passive_attention_snapshot().unwrap();
+    assert_eq!(
+        running.operation,
+        AttentionOperation::Run(active.run_id.to_string())
+    );
+    assert_eq!(observer.0.lock().unwrap().len(), published);
+    assert!(observer.1.lock().unwrap().is_empty());
+    assert!(parts.service.attention_enabled());
+    drop(active);
+    parts.service.remove_attention_observer(registration);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

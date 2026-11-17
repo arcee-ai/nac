@@ -253,6 +253,72 @@ correlation |command| crate::telemetry::Correlation::session(command.session.as_
 port public;
 }
 
+/// The two distinct delegated topologies, kept separate (never a worker role).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionLineageKind {
+    TraditionalChild,
+    ManagedOrchestrator,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionLineage {
+    pub kind: AttentionLineageKind,
+    pub parent_session_id: String,
+    pub root_session_id: String,
+}
+
+/// Identity-only placement for every session: owning project and parent link.
+/// Descriptions, titles and configuration never enter this read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionTopology {
+    pub session_id: String,
+    pub project_id: Option<String>,
+    pub lineage: Option<AttentionLineage>,
+}
+
+coordinated_command! {
+/// One read transaction with a fixed number of statements, independent of the
+/// session count. Rows absent from `sessions` are never synthesized.
+pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
+    let mut connection = open_initialized_read_connection(path)?;
+    let tx = connection.transaction()?;
+    let mut lineage = HashMap::new();
+    for (table, child, kind) in [
+        ("traditional_children", "child_session_id", AttentionLineageKind::TraditionalChild),
+        ("managed_orchestrators", "orchestrator_session_id", AttentionLineageKind::ManagedOrchestrator),
+    ] {
+        let mut statement = tx.prepare(&format!(
+            "SELECT {child},parent_session_id,root_session_id FROM {table}"
+        ))?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        for row in rows {
+            let (session, parent_session_id, root_session_id) = row?;
+            lineage.insert(session, AttentionLineage { kind, parent_session_id, root_session_id });
+        }
+    }
+    let mut statement = tx.prepare(
+        "SELECT s.session_id,p.project_id FROM sessions s
+         LEFT JOIN session_projects p ON p.session_id=s.session_id ORDER BY s.session_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut output = Vec::new();
+    for row in rows {
+        let (session_id, project_id) = row?;
+        let lineage = lineage.remove(&session_id);
+        output.push(AttentionTopology { session_id, project_id, lineage });
+    }
+    Ok(output)
+}
+command ReadAttentionTopology {}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
+
 #[cfg(test)]
 #[path = "attention_tests.rs"]
 mod tests;
