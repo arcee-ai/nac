@@ -161,14 +161,29 @@ describe("sidebar session tree", () => {
     ).toBe("page");
   });
 
-  it("keeps explicit row actions and offers assignment for unassigned sessions", () => {
+  it("keeps row actions in one options menu and offers a project move for unassigned sessions", () => {
     mount([session("loose", "Loose ends", { project_id: null })]);
-    fireEvent.click(screen.getByRole("button", { name: "Delete Loose ends" }));
+    const choose = (name: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "Loose ends options" }));
+      const menu = screen.getByRole("menu", { name: "Loose ends options" });
+      fireEvent.click(within(menu).getByRole("menuitem", { name }));
+    };
+    choose("Delete Loose ends");
     expect(fakes.remove).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "Assign Loose ends to a project" }));
+    choose("Move to project");
     expect(fakes.assign).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "Rename Loose ends" }));
+    choose("Rename Loose ends");
     expect(fakes.rename).toHaveBeenCalledOnce();
+    choose("Pin Loose ends");
+    expect(fakes.togglePin).toHaveBeenCalledOnce();
+  });
+
+  it("offers no project move for a session that already has a project", () => {
+    mount([session("a", "Fix the parser")]);
+    fireEvent.click(screen.getByRole("button", { name: "Fix the parser options" }));
+    const menu = screen.getByRole("menu", { name: "Fix the parser options" });
+    expect(within(menu).queryByRole("menuitem", { name: "Move to project" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "View full name" })).toBeTruthy();
   });
 
   it("starts a new session in a project through the shared project action", () => {

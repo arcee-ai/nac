@@ -41,6 +41,41 @@ for (const grouped of [false, true]) {
     await page.getByRole("button", { name: "Open the menu", exact: true }).click();
     const menu = page.getByRole("dialog", { name: "Menu", exact: true });
     await expect(menu).toBeVisible();
+
+    // Each chat row has one "⋯" options menu, a 44px target that opens a sheet
+    // of 44px actions; Escape closes only that sheet and returns to its trigger.
+    const options = menu.getByRole("button", { name: "Current chat options", exact: true });
+    const optionsBox = await options.boundingBox();
+    expect(optionsBox!.width).toBeGreaterThanOrEqual(44);
+    expect(optionsBox!.height).toBeGreaterThanOrEqual(44);
+    await options.click();
+    const rowMenu = page.getByRole("menu", { name: "Current chat options", exact: true });
+    await expect(rowMenu).toBeVisible();
+    const items = rowMenu.getByRole("menuitem");
+    await expect(items.first()).toBeFocused();
+    const names = await items.evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label") ?? node.textContent),
+    );
+    expect(names).toEqual([
+      "Rename Current chat",
+      "Pin Current chat",
+      ...(grouped ? [] : ["Move to project"]),
+      "View full name",
+      "Delete Current chat",
+    ]);
+    for (const box of await items.evaluateAll((nodes) =>
+      nodes.map(
+        (node) => node.getBoundingClientRect().toJSON() as { height: number; right: number },
+      ),
+    )) {
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.right).toBeLessThanOrEqual(390);
+    }
+    await page.keyboard.press("Escape");
+    await expect(rowMenu).toBeHidden();
+    await expect(menu).toBeVisible();
+    await expect(options).toBeFocused();
+
     await menu
       .getByRole("button", { name: /^Current chat(?:,|$)/ })
       .first()

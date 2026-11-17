@@ -341,21 +341,27 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await expect(menu).toHaveAttribute("data-modal-open", "true");
   }
   if (!phone) await revealDesktopSidebar(right);
-  const pin = (phone ? menu : right).getByRole("button", { name: /^Pin / }).first();
-  // Compact navigation reveals its row actions on hover or keyboard focus.
-  // A clipped sr-only button can satisfy Playwright's visibility geometry.
-  await recordSessionAction(pin, info, `${label}-pin-before-hover`);
+  // A row's actions live in its one "⋯" menu; Pin is an item there. On touch
+  // the trigger is always exposed (no hover needed) as a 44px target.
+  const options = (phone ? menu : right)
+    .locator("[data-session-row]")
+    .getByRole("button", { name: / options$/ })
+    .first();
+  const pin = right.getByRole("menuitem", { name: /^(Pin|Unpin) / });
+  await recordSessionAction(options, info, `${label}-pin-before-hover`);
   if (phone) {
-    await pin.tap({ timeout: 5000 });
+    await options.tap({ timeout: 5000 });
     // At effective 195px, an ordinary tap may use the visible part of a
     // partly clipped button. Preserve that input oracle and report its center.
-    expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-tap`));
+    expectExposedRowAction(await recordSessionAction(options, info, `${label}-pin-after-tap`));
+    await pin.tap({ timeout: 5000 });
   } else {
-    await pin.locator("xpath=ancestor::*[@data-session-row][1]").hover();
-    const geometry = await recordSessionAction(pin, info, `${label}-pin-after-hover`);
+    await options.locator("xpath=ancestor::*[@data-session-row][1]").hover();
+    const geometry = await recordSessionAction(options, info, `${label}-pin-after-hover`);
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);
     await capture(page, info, `${label}-packed-pin-target`);
+    await options.click({ timeout: 5000 });
     await pin.click({ timeout: 5000 });
   }
   const notifications = right.getByRole("region", { name: "Notifications", exact: true });
@@ -654,14 +660,18 @@ test("packed retired responses, timers and shortcuts stay within their binding",
       writes += 1;
       await route.fulfill({ status: 503, json: { error: "Local lifetime notification" } });
     });
-    const pin = right.getByRole("button", { name: /^Pin / }).first();
-    await recordSessionAction(pin, info, "lifetime-pin-before-hover");
-    await pin.locator("xpath=ancestor::*[@data-session-row][1]").hover();
-    const geometry = await recordSessionAction(pin, info, "lifetime-pin-after-hover");
+    const options = right
+      .locator("[data-session-row]")
+      .getByRole("button", { name: / options$/ })
+      .first();
+    await recordSessionAction(options, info, "lifetime-pin-before-hover");
+    await options.locator("xpath=ancestor::*[@data-session-row][1]").hover();
+    const geometry = await recordSessionAction(options, info, "lifetime-pin-after-hover");
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);
     await capture(page, info, "lifetime-packed-pin-target");
-    await pin.click();
+    await options.click();
+    await right.getByRole("menuitem", { name: /^(Pin|Unpin) / }).click();
     const notices = right.getByRole("region", { name: "Notifications", exact: true });
     await expect(notices.getByRole("alert")).toContainText("Local lifetime notification");
     await expect(

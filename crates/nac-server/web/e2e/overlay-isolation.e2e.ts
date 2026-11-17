@@ -203,7 +203,8 @@ test("touch-emulated phone and 200-percent layout equivalent preserve reduced-mo
         expect(environment.coarsePointer).toBe(true);
       }
       for (const action of ["Rename", "Delete"]) {
-        const opener = page.getByRole("button", { name: `${action} ${title}`, exact: true });
+        // Row actions live in the row's ⋯ menu; focus returns to that trigger.
+        const opener = page.getByRole("button", { name: `${title} options`, exact: true }).first();
         if (!(await opener.isVisible())) {
           // Phones reach the session list from Home's header menu.
           const menu = page.getByRole("button", { name: "Open the menu", exact: true });
@@ -222,6 +223,12 @@ test("touch-emulated phone and 200-percent layout equivalent preserve reduced-mo
           await opener.focus();
           await opener.click();
         }
+        const item = page
+          .getByRole("menu", { name: `${title} options`, exact: true })
+          .getByRole("menuitem", { name: `${action} ${title}`, exact: true });
+        await expect(item).toBeVisible();
+        if (scenario.hasTouch) await item.tap();
+        else await item.click();
         const dialog = page.getByRole(action === "Rename" ? "dialog" : "alertdialog", {
           name: `${action} session`,
           exact: true,

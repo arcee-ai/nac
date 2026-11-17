@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createProject, createSession, expect, test } from "./harness";
-import { openPhoneMenu, showSidebar } from "./nav-focus-helpers";
+import { openPhoneMenu, openSessionRowAction, showSidebar } from "./nav-focus-helpers";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires isolated pilot fixtures");
 test.use({ orchestration: "0" });
@@ -59,11 +59,16 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     else await showSidebar(page);
     for (const theme of ["dark", "light"]) {
       for (const action of ["Rename", "Delete"]) {
-        const opener = page.getByRole("button", { name: `${action} ${title}`, exact: true });
+        // Row actions live in the row's "⋯" menu; focus returns to that trigger.
+        const opener = page.getByRole("button", { name: `${title} options`, exact: true });
         if (viewport.width < 768 && !(await opener.isVisible())) await openPhoneMenu(page);
         await expect(opener).toBeVisible();
         await opener.focus();
         await opener.click();
+        await page
+          .getByRole("menu", { name: `${title} options`, exact: true })
+          .getByRole("menuitem", { name: `${action} ${title}`, exact: true })
+          .click();
         const dialog = page.getByRole(action === "Delete" && !baseline ? "alertdialog" : "dialog", {
           name: `${action} session`,
           exact: true,
@@ -131,19 +136,24 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
   if (!baseline) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${harness.baseUrl}/?pilotJourney=1#/session/${id}/files`);
-    const rename = page.getByRole("button", { name: `Rename ${title}`, exact: true });
+    const sidebar = page.locator('[data-sidebar="true"]');
+    // The row's one "⋯" trigger is keyboard-reachable, shown on focus and described.
+    const rename = sidebar.getByRole("button", { name: `${title} options`, exact: true });
+    const openRename = async () =>
+      (await openSessionRowAction(sidebar, page, title, `Rename ${title}`)).action.click();
     await rename.focus();
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
     await expect(rename).toBeFocused();
+    await expect(rename).toHaveCSS("opacity", "1");
     // Focusing a row action scrolls the project's session list for as long as
     // its 500ms height transition runs; the hint has to outlast that.
     await page.waitForTimeout(600);
-    await expect(page.getByRole("tooltip", { name: "Rename chat", exact: true })).toBeVisible();
-    await expect(rename).toHaveAccessibleDescription("Rename chat");
+    await expect(page.getByRole("tooltip", { name: "Session options", exact: true })).toBeVisible();
+    await expect(rename).toHaveAccessibleDescription("Session options");
     await page.keyboard.press("Escape");
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await rename.click();
+    await openRename();
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     const field = dialog.getByRole("textbox", { name: "Title", exact: true });
     await field.fill("x".repeat(121));
@@ -153,7 +163,7 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     await expect(field).toHaveValue("x".repeat(121));
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(rename).toBeFocused();
-    await rename.click();
+    await openRename();
     await expect(field).toHaveValue(title);
     const reopenedCapture = info.outputPath("candidate-rename-reopened.png");
     await page.screenshot({ path: reopenedCapture, animations: "disabled", caret: "hide" });
@@ -207,7 +217,7 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     expect(writes).toEqual(["PUT"]);
     // The list deliberately remains at its old snapshot while the accepted
     // response is already authoritative for the modal's next open and save.
-    await rename.click();
+    await openRename();
     await expect(field).toHaveValue("Pilot renamed");
     await expect(dialog.getByRole("checkbox")).toBeChecked();
     const acceptedCapture = info.outputPath("candidate-saved-rename-reopened.png");
@@ -230,15 +240,18 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     expect(writes).toEqual(["PUT", "PUT"]);
     holdStaleList = false;
     await page.reload();
-    const remove = page.getByRole("button", { name: "Delete Pilot renamed again", exact: true });
+    const renamed = "Pilot renamed again";
+    const remove = sidebar.getByRole("button", { name: `${renamed} options`, exact: true });
+    const openDelete = async () =>
+      (await openSessionRowAction(sidebar, page, renamed, `Delete ${renamed}`)).action.click();
     await remove.focus();
-    await remove.click();
+    await openDelete();
     const alert = page.getByRole("alertdialog", { name: "Delete session", exact: true });
     await expect(alert).toHaveAccessibleDescription(/cannot be undone/);
     await alert.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(remove).toBeFocused();
     expect(writes).toEqual(["PUT", "PUT"]);
-    await remove.click();
+    await openDelete();
     await alert.getByRole("button", { name: "Delete session", exact: true }).dblclick();
     await expect(alert).toHaveCount(0);
     await expect(remove).toHaveCount(0);
@@ -273,8 +286,12 @@ for (const mobile of [false, true]) {
     await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
     if (mobile) await openPhoneMenu(page);
     else await showSidebar(page);
-    const opener = page.getByRole("button", { name: `Rename ${title}`, exact: true });
+    // Keyboard: Enter on the row's "⋯" opens its menu on Rename; Enter again opens it.
+    const opener = page.getByRole("button", { name: `${title} options`, exact: true });
+    const rename = page.getByRole("menuitem", { name: `Rename ${title}`, exact: true });
     await opener.focus();
+    await page.keyboard.press("Enter");
+    await expect(rename).toBeFocused();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     const field = dialog.getByRole("textbox", { name: "Title", exact: true });
@@ -302,6 +319,8 @@ for (const mobile of [false, true]) {
       await page.waitForTimeout(350);
       await opener.focus();
       await page.keyboard.press("Enter");
+      await expect(rename).toBeFocused();
+      await page.keyboard.press("Enter");
       await expect(field).toHaveValue("  Pending title  ");
       await expect(field).toHaveAttribute("readonly", "");
       await expect(dialog.getByRole("checkbox")).toBeChecked();
@@ -320,7 +339,7 @@ for (const mobile of [false, true]) {
       expect((await accepted).ok()).toBe(true);
       await expect(dialog).toHaveCount(0);
       await expect(
-        page.getByRole("button", { name: "Rename Pending title", exact: true }),
+        page.getByRole("button", { name: "Pending title options", exact: true }),
       ).toBeVisible();
       expect(writes).toHaveLength(1);
     } finally {

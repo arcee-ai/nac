@@ -14,7 +14,12 @@ import {
   waitForRunIdle,
 } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
-import { escapeRegExp, openPhoneMenu, showSidebar } from "./nav-focus-helpers";
+import {
+  escapeRegExp,
+  openPhoneMenu,
+  openSessionRowAction,
+  showSidebar,
+} from "./nav-focus-helpers";
 
 const prefix = "Investigate the same long session prefix and preserve all navigation cues — ";
 const names = [prefix + "Alpha 雪🙂", prefix + "Beta λ🚀", "unbroken".repeat(15)];
@@ -80,7 +85,8 @@ async function fits(page: Page, overlay: Locator) {
     true,
   );
 }
-async function viewName(page: Page, trigger: Locator, name: string) {
+/** `returnTo`: where focus lands after Escape (a menu item hands it back to its "⋯" trigger). */
+async function viewName(page: Page, trigger: Locator, name: string, returnTo = trigger) {
   if (page.viewportSize()!.width < 768) await trigger.tap();
   else await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Full session name", exact: true });
@@ -115,7 +121,12 @@ async function viewName(page: Page, trigger: Locator, name: string) {
   ).toBe(name);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(trigger).toBeFocused();
+  await expect(returnTo).toBeFocused();
+}
+/** Discloses a sidebar or phone-menu row's full name through its "⋯" menu. */
+async function viewRowName(page: Page, navigation: Locator, title: string, name = title) {
+  const { trigger, action } = await openSessionRowAction(navigation, page, title, "View full name");
+  await viewName(page, action, name, trigger);
 }
 async function capture(page: Page, info: TestInfo, name: string) {
   await page.evaluate(async () => {
@@ -296,15 +307,15 @@ for (const width of [1440, 768, 390])
             await page.keyboard.press("Escape");
             await expect(page.getByRole("tooltip")).toHaveCount(0);
             await row.focus();
+            // Tab reaches the row's "⋯" trigger; back on the row, the hint returns.
             await page.keyboard.press("Tab");
+            await expect(
+              page.getByRole("button", { name: `${name} options`, exact: true }),
+            ).toBeFocused();
             await page.keyboard.press("Shift+Tab");
-            await expect(page.getByRole("tooltip")).toContainText(name);
+            await expect(page.getByRole("tooltip").filter({ hasText: name })).toBeVisible();
             await page.keyboard.press("Escape");
-            await viewName(
-              page,
-              row.locator("..").getByRole("button", { name: "View full name", exact: true }),
-              name,
-            );
+            await viewRowName(page, navigation, name);
           }
         } else {
           navigation = await openPhoneMenu(page);
@@ -315,27 +326,16 @@ for (const width of [1440, 768, 390])
         const row = visibleRows.last();
         await expect(row).toBeVisible();
         if (width >= 768) await row.hover();
-        const rowAction = row
-          .locator("..")
-          .getByRole("button", { name: "View full name", exact: true });
-        await viewName(page, rowAction, names[1]);
+        await viewRowName(page, navigation, names[1]);
         const unbroken = navigation
           .locator("button[aria-label]")
           .filter({ hasText: names[2] })
           .last();
         if (width >= 768) await unbroken.hover();
-        await viewName(
-          page,
-          unbroken.locator("..").getByRole("button", { name: "View full name", exact: true }),
-          names[2],
-        );
+        await viewRowName(page, navigation, names[2]);
         const fallbackRow = navigation.getByRole("button", { name: /^New Session(?:,|$)/ }).last();
         if (width >= 768) await fallbackRow.hover();
-        await viewName(
-          page,
-          fallbackRow.locator("..").getByRole("button", { name: "View full name", exact: true }),
-          "New Session",
-        );
+        await viewRowName(page, navigation, "New Session");
         if (width < 768) {
           await page.keyboard.press("Escape");
           await expect(navigation).toBeHidden();
@@ -346,12 +346,12 @@ for (const width of [1440, 768, 390])
         if (width < 768) {
           await openPhoneMenu(page);
           await navigation
-            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}`) })
+            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}(?:,|$)`) })
             .last()
             .click();
         } else {
           await navigation
-            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}`) })
+            .getByRole("button", { name: new RegExp(`^${escapeRegExp(names[2])}(?:,|$)`) })
             .click();
         }
         await expect(page).toHaveURL(new RegExp(`/session/${ids[2]}/`));
@@ -619,22 +619,23 @@ test("full names at real 200 percent browser zoom", async ({ harness, request },
         await page.keyboard.press("Escape");
         // 200% zoom makes every width a phone: Home's menu holds the session tree.
         const menu = await openPhoneMenu(page);
-        const row = menu.getByRole("button", {
-          name: new RegExp(`^${escapeRegExp(names[0])}(?:,|$)`),
-        });
-        const action = row
-          .locator("..")
-          .getByRole("button", { name: "View full name", exact: true });
-        for (const control of [
+        // The row's one "⋯" trigger and every item of the sheet it opens fit.
+        const {
+          trigger,
+          menu: rowMenu,
           action,
-          menu.getByRole("button", { name: `Rename ${names[0]}`, exact: true }),
-          menu.getByRole("button", { name: `Delete ${names[0]}`, exact: true }),
+        } = await openSessionRowAction(menu, page, names[0], "View full name");
+        for (const control of [
+          trigger,
+          action,
+          rowMenu.getByRole("menuitem", { name: `Rename ${names[0]}`, exact: true }),
+          rowMenu.getByRole("menuitem", { name: `Delete ${names[0]}`, exact: true }),
         ]) {
           await control.scrollIntoViewIfNeeded();
           await expect(control).toBeInViewport({ ratio: 1 });
           await fits(page, control);
         }
-        await viewName(page, action, names[0]);
+        await viewName(page, action, names[0], trigger);
         await page.keyboard.press("Escape");
         await expect(menu).toBeHidden();
         await page.goto(`${harness.baseUrl}/#/session/${id}/files`);

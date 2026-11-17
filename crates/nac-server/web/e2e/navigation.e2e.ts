@@ -9,7 +9,12 @@ import {
   waitForRunIdle,
   startForegroundChild,
 } from "./harness";
-import { openPhoneMenu, openPhonePanel } from "./nav-focus-helpers";
+import {
+  openPhoneMenu,
+  openPhonePanel,
+  openSessionRowAction,
+  sessionRowMenu,
+} from "./nav-focus-helpers";
 import { ScriptGate } from "./scripted-provider";
 
 test.use({ orchestration: "0" });
@@ -152,7 +157,10 @@ test("project navigation, overflow, phone actions and notification feedback", as
   };
   const notify = async () => {
     const menu = page.getByRole("dialog", { name: "Menu", exact: true });
-    await menu.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true }).click();
+    // Row actions live in the row's "⋯" menu (a bottom sheet on phones).
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Rename ${LONG_TITLE}`)
+    ).action.click();
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Session presentation saved", { exact: true })).toBeVisible();
@@ -160,7 +168,9 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.route(endpoint, async (route) =>
       route.fulfill({ status: 503, json: { error: "Navigation fixture could not update pin" } }),
     );
-    await menu.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }).click();
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Unpin ${LONG_TITLE}`)
+    ).action.click();
     await expect(page.getByText(/Failed to update pin: Navigation fixture/)).toBeVisible();
     await page.unroute(endpoint);
   };
@@ -200,8 +210,17 @@ test("project navigation, overflow, phone actions and notification feedback", as
         await settleCapture(page, selected);
         await page.mouse.move(0, 0);
         await capture(`${version}-${width}-navigation-dark`);
-        const rename = nav.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
-        await rename.focus();
+        // Keyboard: the row's "⋯" trigger opens its menu on the first item (Rename).
+        const { trigger: options, menu: rowMenu } = sessionRowMenu(nav, page, LONG_TITLE);
+        const rename = rowMenu.getByRole("menuitem", { name: `Rename ${LONG_TITLE}`, exact: true });
+        await options.focus();
+        if (!before && width === 390) {
+          const box = await options.boundingBox();
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Enter");
+        await expect(rename).toBeFocused();
         if (!before && width === 390) {
           const box = await rename.boundingBox();
           expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -213,8 +232,8 @@ test("project navigation, overflow, phone actions and notification feedback", as
           LONG_TITLE,
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(rename).toBeFocused();
-        await settleCapture(page, rename);
+        await expect(options).toBeFocused();
+        await settleCapture(page, options);
         await capture(`${version}-${width}-keyboard-focus`);
         const runningRow = nav.getByRole("button", { name: "Review cache inputs 1", exact: true });
         await runningRow.focus();
@@ -222,10 +241,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
         await capture(`${version}-${width}-running-navigation`);
         if (phone) {
           await notify();
-          await settleCapture(
-            page,
-            nav.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }),
-          );
+          await settleCapture(page, options);
           await capture(`${version}-${width}-notification-stack`);
           await nav.getByRole("button", { name: LONG_TITLE, exact: true }).click();
           await expect(nav).toBeHidden();
@@ -277,7 +293,9 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.getByRole("button", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Open the menu", exact: true }).click();
     const menu = page.getByRole("dialog", { name: "Menu", exact: true });
-    await menu.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true }).click();
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Rename ${LONG_TITLE}`)
+    ).action.click();
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
@@ -286,7 +304,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.route(`${harness.baseUrl}/sessions/${ids[0]}/presentation`, async (route) =>
       route.fulfill({ status: 503, json: { error: "Navigation fixture could not update pin" } }),
     );
-    const pin = menu.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true });
+    const pin = (await openSessionRowAction(menu, page, LONG_TITLE, `Unpin ${LONG_TITLE}`)).action;
     await pin.click();
     await expect(page.getByRole("alert").filter({ hasText: "Failed to update pin" })).toBeVisible();
     await capture("after-390-notification-stack-reduced-motion");
@@ -402,8 +420,17 @@ test("phone navigation and project actions remain reachable at real 200 percent 
         const menu = await openPhoneMenu(page);
         const row = menu.getByRole("button", { name: LONG_TITLE, exact: true });
         await row.focus();
-        const rename = menu.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
-        await rename.focus();
+        // The row's "⋯" trigger (after its subagent pill) opens its menu on Rename.
+        const { trigger: options, menu: rowMenu } = sessionRowMenu(menu, page, LONG_TITLE);
+        const rename = rowMenu.getByRole("menuitem", { name: `Rename ${LONG_TITLE}`, exact: true });
+        await options.focus();
+        const trigger = await options.boundingBox();
+        if (!before) {
+          expect(trigger!.width).toBeGreaterThanOrEqual(44);
+          expect(trigger!.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Enter");
+        await expect(rename).toBeFocused();
         await page.evaluate(() =>
           (
             globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
@@ -436,7 +463,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
           LONG_TITLE,
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(rename).toBeFocused();
+        await expect(options).toBeFocused();
         // Search is the command palette: its session rows keep a readable title.
         await menu.getByRole("button", { name: "Search", exact: true }).click();
         const search = page.getByRole("dialog", { name: "Command palette", exact: true });
