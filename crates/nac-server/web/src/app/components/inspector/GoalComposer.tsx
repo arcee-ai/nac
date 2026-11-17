@@ -2,13 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   Badge,
-  BadgeColor,
   Button,
   ButtonContent,
   ButtonSize,
   ButtonVariant,
   Icon,
   IconName,
+  Input,
+  InputSize,
   Modal,
   RangeInput,
   StickyButton,
@@ -24,6 +25,10 @@ import {
   ComposerInlineButton,
   ComposerInlineSlot,
 } from "@/app/components/inspector/composer/ComposerFrame";
+import {
+  goalBadgeColor as badgeColor,
+  goalStatusLabel as statusLabel,
+} from "@/app/features/goals/status";
 import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -34,28 +39,50 @@ const GOAL_HINT =
   "Direct-session work that continues across ordinary turns until completed, blocked, paused or limited.";
 const OBJECTIVE_PLACEHOLDER = "Describe the concrete output";
 
+/** The slider's range is a convenience; the number field takes any amount. */
 const BUDGET_MIN = 100;
 const BUDGET_MAX = 1_000_000;
 const BUDGET_STEP = 100;
 const BUDGET_DEFAULT = 9_600;
 
+const BUDGET_EXPLANATION =
+  "The total billable tokens all of this goal's runs may use, cached reads and writes included. When usage reaches it, the goal stops as budget limited. It is not the model's context size and not a cost guarantee.";
+
 /** How far the objective grows before it scrolls, as the message field does. */
 const MAX_HEIGHT_PX = 180;
 
-function statusLabel(status: GoalStatus): string {
-  const label = status.replaceAll("_", " ");
-  return label.charAt(0).toUpperCase() + label.slice(1);
+/** Where the slider's knob sits for an amount, which may lie outside its range. */
+function sliderPosition(value: number): number {
+  return Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, value));
 }
 
-function badgeColor(status: GoalStatus): BadgeColor {
-  if (status === "active") return BadgeColor.Green;
-  if (status === "complete") return BadgeColor.Gray;
-  return BadgeColor.Yellow;
+/** What the amount field accepts: larger values cannot be sent exactly. */
+const BUDGET_INPUT_RULE = `a whole number of tokens up to ${Number.MAX_SAFE_INTEGER.toLocaleString("en-US")}`;
+
+/**
+ * A typed amount as a whole number of tokens, or null when it is not one. The
+ * server owns which amounts are allowed and says so when it refuses one.
+ */
+function parseBudget(text: string): number | null {
+  const digits = text.replace(/[\s,_]/g, "");
+  if (!/^\d+$/.test(digits)) return null;
+  const value = Number(digits);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
-function clampBudget(value: number): number {
-  const snapped = Math.round(value / BUDGET_STEP) * BUDGET_STEP;
-  return Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, snapped));
+/** A stored amount as written, grouped, for one the field cannot send exactly. */
+function storedAmountLabel(text: string): string {
+  const digits = text.replace(/[\s,_]/g, "");
+  return /^\d+$/.test(digits) ? BigInt(digits).toLocaleString("en-US") : text;
+}
+
+/** Whether a stored goal still holds the fields an edit was started from. */
+function sameEditableFields(left: SessionGoalRecord, right: SessionGoalRecord): boolean {
+  return (
+    left.goal_id === right.goal_id &&
+    left.objective === right.objective &&
+    left.token_budget === right.token_budget
+  );
 }
 
 function usageLabel(goal: SessionGoalRecord): string {
@@ -64,10 +91,13 @@ function usageLabel(goal: SessionGoalRecord): string {
 
 /**
  * The objective and token budget being written, seeded from the stored goal
- * each time an editor opens on it. The budget switch off means no limit; on
- * means the slider value. An update leaves the budget alone until the user
- * changes it, so a stored figure the slider cannot hold survives an objective
- * edit.
+ * each time an editor opens on it. The budget switch off means no limit and
+ * hides the amount; on means the typed amount, which the slider can also set
+ * up to its convenience maximum. An update leaves the budget alone until the
+ * user changes it, so a stored figure the slider cannot hold survives an
+ * objective edit. Edits are versioned against the goal the editor loaded: if
+ * its objective or budget changed elsewhere, the server rejects the stale edit
+ * instead of overwriting it.
  */
 function useGoalDraft(sessionId: string, open: boolean) {
   const goalQuery = useSessionGoal(sessionId, open);
@@ -78,24 +108,38 @@ function useGoalDraft(sessionId: string, open: boolean) {
   const goal = goalQuery.data ?? null;
   const [objective, setObjective] = useState("");
   const [budgetOn, setBudgetOn] = useState(false);
-  const [budgetAmount, setBudgetAmount] = useState(BUDGET_DEFAULT);
+  const [budgetText, setBudgetText] = useState(String(BUDGET_DEFAULT));
   const [budgetEdited, setBudgetEdited] = useState(false);
+  const [objectiveEdited, setObjectiveEdited] = useState(false);
+  /** The goal this edit started from, null when the editor opened empty. */
+  const [base, setBase] = useState<SessionGoalRecord | null>(null);
   const [seeded, setSeeded] = useState(false);
 
   // During render, so an editor never paints the draft it was last closed on.
+  // Whatever the user typed while the goal loaded stays; the rest is seeded.
   const loaded = open && !goalQuery.isPending;
   if (seeded !== loaded) {
     setSeeded(loaded);
     if (loaded) {
-      setObjective(goal?.objective ?? "");
-      setBudgetOn(goal?.token_budget != null);
-      setBudgetAmount(goal?.token_budget ?? BUDGET_DEFAULT);
+      setBase(goal);
+      if (!objectiveEdited) setObjective(goal?.objective ?? "");
+      if (!budgetEdited) {
+        setBudgetOn(goal?.token_budget != null);
+        setBudgetText(String(goal?.token_budget ?? BUDGET_DEFAULT));
+      }
+    } else {
+      setObjectiveEdited(false);
       setBudgetEdited(false);
     }
   }
 
   const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
   const editingExisting = goal != null && goal.status !== "complete";
+  // An update omits a budget the user has not touched, so only an amount that
+  // will be sent is checked: a stored one the field cannot send exactly still
+  // survives an objective edit.
+  const budgetAmount = parseBudget(budgetText);
+  const budgetInvalid = budgetOn && budgetAmount === null && (budgetEdited || !editingExisting);
   const trimmed = objective.trim();
   const tokenBudget = budgetOn ? budgetAmount : null;
   const changed =
@@ -114,19 +158,30 @@ function useGoalDraft(sessionId: string, open: boolean) {
       toast.error("Goal objective is required.");
       return false;
     }
+    if (budgetInvalid) {
+      toast.error(`Enter the token budget as ${BUDGET_INPUT_RULE}.`);
+      return false;
+    }
+    // Edit the goal the editor loaded. Run accounting bumps the version on its
+    // own, so the current version is used only while the objective and budget
+    // are still what the editor loaded; otherwise the loaded version lets the
+    // server's version check refuse the stale overwrite.
+    const target =
+      base == null ? null : goal != null && sameEditableFields(goal, base) ? goal : base;
     try {
-      if (editingExisting) {
-        await updateGoal.mutateAsync({
+      let saved: SessionGoalRecord;
+      if (target != null && editingExisting) {
+        saved = await updateGoal.mutateAsync({
           sessionId,
-          goalId: goal.goal_id,
+          goalId: target.goal_id,
           payload: {
-            expected_version: goal.version,
+            expected_version: target.version,
             objective: trimmed,
             ...(budgetEdited ? { token_budget: tokenBudget } : {}),
           },
         });
       } else {
-        await createGoal.mutateAsync({
+        saved = await createGoal.mutateAsync({
           sessionId,
           payload: {
             objective: trimmed,
@@ -134,6 +189,9 @@ function useGoalDraft(sessionId: string, open: boolean) {
           },
         });
       }
+      setBase(saved);
+      setBudgetEdited(false);
+      setObjectiveEdited(false);
       return true;
     } catch (error) {
       fail(editingExisting ? "Unable to update goal" : "Unable to create goal", error);
@@ -162,10 +220,12 @@ function useGoalDraft(sessionId: string, open: boolean) {
         goalId: goal.goal_id,
         expectedVersion: goal.version,
       });
+      setBase(null);
       setObjective("");
       setBudgetOn(false);
-      setBudgetAmount(BUDGET_DEFAULT);
+      setBudgetText(String(BUDGET_DEFAULT));
       setBudgetEdited(false);
+      setObjectiveEdited(false);
     } catch (error) {
       fail("Unable to clear goal", error);
     }
@@ -175,9 +235,14 @@ function useGoalDraft(sessionId: string, open: boolean) {
     goalQuery,
     goal,
     objective,
-    setObjective,
+    setObjective: (value: string) => {
+      setObjectiveEdited(true);
+      setObjective(value);
+    },
     budgetOn,
+    budgetText,
     budgetAmount,
+    budgetInvalid,
     busy,
     editingExisting,
     changed,
@@ -188,10 +253,13 @@ function useGoalDraft(sessionId: string, open: boolean) {
       setBudgetEdited(true);
       setBudgetOn(checked);
     },
+    typeBudget: (text: string) => {
+      setBudgetEdited(true);
+      setBudgetText(text);
+    },
     slideBudget: (value: number) => {
       setBudgetEdited(true);
-      setBudgetAmount(value);
-      setBudgetOn(true);
+      setBudgetText(String(value));
     },
   };
 }
@@ -260,26 +328,68 @@ function BudgetSwitch({ draft }: { draft: GoalDraft }) {
         onChange={draft.toggleBudget}
       />
       <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
+      {draft.budgetOn ? null : (
+        <span className="label-micro shrink-0 text-basic-muted">No token limit</span>
+      )}
     </div>
   );
 }
 
-function BudgetRange({ draft, className }: { draft: GoalDraft; className: string }) {
+/** The typed amount beside the slider, which sets it up to its convenience maximum. */
+function BudgetRange({
+  draft,
+  className,
+  large = false,
+}: {
+  draft: GoalDraft;
+  className: string;
+  large?: boolean;
+}) {
   return (
     <div className={cn("flex min-w-0 flex-1 items-center", className)}>
+      <Input
+        className={cn("shrink-0", large ? "w-40" : "w-[132px]")}
+        inputSize={large ? InputSize.Medium : InputSize.Small}
+        inputMode="numeric"
+        aria-label="Token budget amount"
+        aria-invalid={draft.budgetInvalid}
+        validation={draft.budgetInvalid}
+        isDisabled={draft.busy}
+        value={draft.budgetText}
+        onChange={(event) => draft.typeBudget(event.target.value)}
+      />
       <RangeInput
         className="min-w-0 flex-1"
-        smallKnob
+        smallKnob={!large}
         min={BUDGET_MIN}
         max={BUDGET_MAX}
         step={BUDGET_STEP}
-        value={clampBudget(draft.budgetAmount)}
+        value={sliderPosition(draft.budgetAmount ?? BUDGET_MIN)}
         disabled={draft.busy}
-        label="Token budget"
+        label="Token budget slider"
         onChange={draft.slideBudget}
       />
-      <span className="code code-small shrink-0 text-right font-medium !leading-4 text-btn-secondary">
-        {draft.budgetAmount}
+    </div>
+  );
+}
+
+/** What an enabled budget counts, and the amount as it will be sent. */
+function BudgetNote({ draft, className }: { draft: GoalDraft; className?: string }) {
+  const { budgetAmount, budgetInvalid } = draft;
+  return (
+    <div className={cn("flex flex-col gap-1", className)}>
+      <p className="text-micro text-basic-secondary">{BUDGET_EXPLANATION}</p>
+      <span
+        role={budgetInvalid ? "alert" : undefined}
+        className={cn("text-micro", budgetInvalid ? "text-error-primary" : "text-basic-muted")}
+      >
+        {budgetInvalid
+          ? `Enter ${BUDGET_INPUT_RULE}.`
+          : budgetAmount === null
+            ? `${storedAmountLabel(draft.budgetText)} tokens, kept as stored.`
+            : budgetAmount > BUDGET_MAX
+              ? `${budgetAmount.toLocaleString()} tokens, above the slider's range and kept as entered.`
+              : `${budgetAmount.toLocaleString()} tokens.`}
       </span>
     </div>
   );
@@ -309,7 +419,7 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
   useEffect(() => field.current?.focus(), []);
 
   const trimmed = draft.objective.trim();
-  const corner = cornerAction(goal, busy || !trimmed);
+  const corner = cornerAction(goal, busy || !trimmed || draft.budgetInvalid);
   const createAndClose = async () => {
     if (await draft.save()) onClose();
   };
@@ -369,7 +479,7 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
                 size={ButtonSize.Small}
                 variant={ButtonVariant.Primary}
                 className="!rounded-full"
-                disabled={busy || !trimmed || !draft.changed}
+                disabled={busy || !trimmed || !draft.changed || draft.budgetInvalid}
                 onClick={() => void (draft.editingExisting ? draft.save() : createAndClose())}
               >
                 {goal.status === "complete" ? "Replace" : "Update"}
@@ -379,15 +489,23 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
           </div>
           <div className="flex items-center gap-4 px-3 py-2">
             <BudgetSwitch draft={draft} />
-            <BudgetRange draft={draft} className="gap-2" />
+            {draft.budgetOn ? <BudgetRange draft={draft} className="gap-2" /> : null}
           </div>
+          {draft.budgetOn ? <BudgetNote draft={draft} className="px-3 pb-2" /> : null}
         </>
       ) : (
-        <div className="flex items-center gap-4 py-1 pr-1 pl-3">
-          <BudgetSwitch draft={draft} />
-          <BudgetRange draft={draft} className="gap-3" />
-          {closeButton}
-        </div>
+        <>
+          <div className="flex items-center gap-4 py-1 pr-1 pl-3">
+            <BudgetSwitch draft={draft} />
+            {draft.budgetOn ? (
+              <BudgetRange draft={draft} className="gap-3" />
+            ) : (
+              <span className="flex-1" />
+            )}
+            {closeButton}
+          </div>
+          {draft.budgetOn ? <BudgetNote draft={draft} className="px-3 pb-2" /> : null}
+        </>
       )}
       <div className="flex items-end">
         <textarea
@@ -497,7 +615,7 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
             ) : null}
             <StickyButton
               variant={ButtonVariant.Primary}
-              disabled={busy}
+              disabled={busy || draft.budgetInvalid}
               onClick={() => void submit()}
             >
               {draft.editingExisting ? "Update" : goal ? "Replace" : "Submit"}
@@ -556,21 +674,14 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
                 onChange={draft.toggleBudget}
               />
             </div>
-            <div className="flex items-center gap-3">
-              <RangeInput
-                className="min-w-0 flex-1"
-                min={BUDGET_MIN}
-                max={BUDGET_MAX}
-                step={BUDGET_STEP}
-                value={clampBudget(draft.budgetAmount)}
-                disabled={busy}
-                label="Token budget"
-                onChange={draft.slideBudget}
-              />
-              <span className="code code-large w-16 shrink-0 truncate text-right font-medium !leading-5 text-btn-secondary">
-                {draft.budgetAmount}
-              </span>
-            </div>
+            {draft.budgetOn ? (
+              <>
+                <BudgetRange draft={draft} className="gap-3" large />
+                <BudgetNote draft={draft} />
+              </>
+            ) : (
+              <p className="text-small text-basic-muted">No token limit</p>
+            )}
           </section>
         </>
       )}

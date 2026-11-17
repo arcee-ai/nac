@@ -16,7 +16,7 @@ pub struct ThreadEventWriter {
 }
 
 pub(crate) enum ThreadEventConnection {
-    Local(StoreConnection),
+    Local(Box<StoreConnection>),
     Coordinated(std::sync::Arc<StoreCoordinator>),
 }
 
@@ -75,9 +75,9 @@ impl ThreadEventWriter {
         if let Some(owner) = super::coordinator::owner_for(&self.store_path)? {
             return Ok(ThreadEventConnection::Coordinated(owner));
         }
-        Ok(ThreadEventConnection::Local(open_runtime_connection(
-            &self.store_path,
-        )?))
+        Ok(ThreadEventConnection::Local(Box::new(
+            open_runtime_connection(&self.store_path)?,
+        )))
     }
 
     pub fn append(&self, session_id: &str, thread_name: &str, event_json: &str) -> Result<()> {
