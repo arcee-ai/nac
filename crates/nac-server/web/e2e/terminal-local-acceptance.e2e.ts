@@ -204,7 +204,9 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       "  if select.select([0],[],[],0.1)[0]: data+=os.read(0,4096)",
       "finally:",
       " termios.tcsetattr(0,termios.TCSANOW,saved); sys.stdout.write('\\x1b[?2004l'); sys.stdout.flush()",
-      "open('paste_bytes.json','w').write(json.dumps(list(data)))",
+      "with open('paste_bytes.json.tmp','w') as target:",
+      " target.write(json.dumps(list(data)))",
+      "os.replace('paste_bytes.json.tmp','paste_bytes.json')",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
