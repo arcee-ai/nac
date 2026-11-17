@@ -114,7 +114,43 @@ test(
   async () => {
     const f = await fixture();
     const { engine, ready } = start({ ...f, executable: path.join(f.directory, "absent") });
+    const channel = engine.child.stdio[3],
+      custody = engine.child.stdio[4];
+    channel.pause();
+    custody.pause();
+    let buffered;
+    const terminalBuffered = new Promise((resolve) => {
+      // Retain the listener until explicit resume; removing a once-listener
+      // would let the existing data handler consume and ACK the queued fact.
+      buffered = resolve;
+      custody.on("readable", buffered);
+    });
+    // Keep the rejection observed even if a preceding wire assertion fails.
+    void ready.catch(() => {});
     try {
+      // The terminal fact is buffered, but no receipt or EOF ACK has reached
+      // Engine. Probe the actual socket without consuming bytes: the failed
+      // spawn must retain its launch peer until that exact ACK, independent
+      // of which native descriptor Node would otherwise service first.
+      await terminalBuffered;
+      assert.equal(engine.custodySettled, false);
+      const probe = spawn(
+        "python3",
+        [
+          "-c",
+          "import socket,sys\ns=socket.socket(fileno=3)\ntry: s.recv(1,socket.MSG_PEEK|socket.MSG_DONTWAIT)\nexcept BlockingIOError: sys.exit(0)\nsys.exit(1)",
+        ],
+        { stdio: ["ignore", "pipe", "pipe", channel] },
+      );
+      const [probeCode, probeSignal] = await once(probe, "close");
+      assert.equal(probeSignal, null);
+      assert.equal(probeCode, 0, "launch peer must remain open until the failed fact is ACKed");
+      assert.equal(engine.custodySettled, false);
+      assert.equal(engine.helperClosed, false);
+      assert.equal(engine.failed, false);
+      custody.off("readable", buffered);
+      custody.resume();
+      channel.resume();
       await assert.rejects(ready, (error) => error.code === "engine_spawn");
       await engine.stop();
       assert.equal(engine.custodySettled, true);
@@ -124,6 +160,9 @@ test(
       assert.equal(engine.child.exitCode, 70);
       assert.equal(engine.enginePid, 0);
     } finally {
+      custody.off("readable", buffered);
+      custody.resume();
+      channel.resume();
       await engine.stop();
       fs.rmSync(f.directory, { recursive: true, force: true });
     }
