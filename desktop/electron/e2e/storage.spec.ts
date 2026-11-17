@@ -111,6 +111,39 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
   await stop(c.app);
   const next = await launch(c);
   try {
+    const successor = await next.app.evaluate(({ app }) =>
+      process
+        .getBuiltinModule("module")
+        .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+        .getState(),
+    );
+    expect(successor.enginePid).toBeGreaterThan(0);
+    expect(successor.storage.checkpointPid).toBeGreaterThan(0);
+    const custody = Number(
+      execFileSync("/bin/ps", ["-p", String(successor.enginePid), "-o", "ppid="], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    expect(
+      execFileSync("/bin/ps", ["-p", String(custody), "-o", "ppid=,comm="], {
+        encoding: "utf8",
+      }).trim(),
+    ).toMatch(new RegExp(`^${next.app.process().pid}\\s+.*\\/engine-launcher$`));
+    expect(
+      execFileSync(
+        "/bin/ps",
+        ["-p", String(successor.storage.checkpointPid), "-o", "ppid=,comm="],
+        {
+          encoding: "utf8",
+        },
+      ).trim(),
+    ).toMatch(new RegExp(`^${next.app.process().pid}\\s+.*\\/checkpoint-helper$`));
+    c.ownedPids.push(
+      next.app.process().pid,
+      successor.enginePid,
+      custody,
+      successor.storage.checkpointPid,
+    );
     expect(new URL(next.page.url()).origin).not.toBe(c.endpoint);
     const restored = await next.page.evaluate(async () =>
       (window as any).__nacDesktopStorage.open(),
