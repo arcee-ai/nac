@@ -1,7 +1,7 @@
 use super::*;
 use crate::permissions::{PermissionBackend, PermissionBroker, PermissionEffect, PermissionRule};
 use crate::terminal::TerminalManager;
-use crate::tools::{execute_tool, ThreadCancellation};
+use crate::tools::{execute_tool, RunCancellation};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,7 +68,7 @@ async fn launch(runtime: &ToolRuntime, command: &str, secrets: Vec<String>) -> S
             &runtime.backend,
             nac_contracts::CommandEnvironmentSnapshot::from_parts(Default::default(), secrets),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -731,7 +731,7 @@ async fn durable_child_and_copied_fork_provenance_never_supply_a_terminal_read_c
 async fn legacy_worker_read_accepts_schema_valid_decimal_offsets_without_changing_page_shape() {
     let mut runtime = crate::tools::test_runtime();
     runtime.allowed_tools = Some(Arc::new(
-        crate::tools::WORKER_TOOL_NAMES
+        crate::tools::CODING_TOOL_NAMES
             .iter()
             .map(|name| (*name).into())
             .collect(),

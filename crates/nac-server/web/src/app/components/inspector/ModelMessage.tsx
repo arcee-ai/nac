@@ -188,6 +188,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
           return (
             <WorkFoldView
               key={entry.key}
+              turnKey={turn.key}
               fold={entry}
               active={active}
               turnDurationMs={turn.durationMs}

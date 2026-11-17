@@ -126,7 +126,7 @@ async fn one_shot_cancellation_returns_when_the_command_root_leaves_its_group() 
     let manager = TerminalManager::new();
     let root = EscapingRoot::new();
     let (command, backend) = (root.command(), local_backend());
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let call = manager.exec_one_shot(
         &command,
         None,

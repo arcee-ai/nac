@@ -294,10 +294,10 @@ pub(super) fn test_picker_service(label: &str) -> SessionServiceParts {
     let store_path = test_store_path(label);
     let client = ModelClient::new_for_test();
     let agent = test_agent(client.clone(), store_path.clone(), None);
-    SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Picker { store_path },
+        session: RuntimeSession::Picker { store_path },
         sandbox_status: "off".to_string(),
         agents_md_status: "off".to_string(),
         workspace_display: "/repo".to_string(),
@@ -352,10 +352,10 @@ pub(crate) fn test_direct_active_service_at(
             snapshot
         }
     };
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -398,10 +398,10 @@ pub(super) fn test_active_service_with_skills(
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -478,10 +478,10 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: "has-sandbox-sandboxed".to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -623,10 +623,10 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: "destroy-preserves-worktree".to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -798,10 +798,10 @@ pub(super) fn test_compaction_service(
         ..crate::model::TokenUsage::default()
     })];
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,

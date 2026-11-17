@@ -145,7 +145,7 @@ async fn authorize(
             "exec_command",
             resources,
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await
 }
@@ -715,7 +715,7 @@ async fn cancellation_during_review_denies() {
         .await
         .unwrap();
     record_intent(&path, "session-a", "work on the project");
-    let cancellation = crate::tools::ThreadCancellation::default();
+    let cancellation = crate::tools::RunCancellation::default();
     let task = {
         let broker = Arc::clone(&broker);
         let cancellation = cancellation.clone();
@@ -941,7 +941,7 @@ async fn a_retry_authorization_returns_unless_a_verdict_settles_the_action() {
     for abandon in [false, true] {
         let (gated, _release) = GatedReviewer::new();
         broker.set_reviewer(Arc::clone(&gated) as Arc<dyn PermissionReviewer>);
-        let cancellation = crate::tools::ThreadCancellation::default();
+        let cancellation = crate::tools::RunCancellation::default();
         let task = {
             let broker = Arc::clone(&broker);
             let cancellation = cancellation.clone();

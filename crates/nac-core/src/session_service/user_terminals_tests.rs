@@ -129,10 +129,10 @@ fn fixture_with_policy(
     );
     snapshot.behavior = sessions::SessionBehavior::Direct;
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: "direct-terminal".into(),
             store_path,
             snapshot,
@@ -817,7 +817,7 @@ async fn eviction_after_existing_launch_resolution_never_reanimates_its_handle()
                     &backend,
                     CommandEnvironmentSnapshot::empty(),
                     None,
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
                 .unwrap();

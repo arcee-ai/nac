@@ -1,9 +1,7 @@
 use super::*;
 
 impl SessionService {
-    pub fn from_orchestrator_run_config(
-        mut run_config: OrchestratorRunConfig,
-    ) -> SessionServiceParts {
+    pub fn from_session_run_config(mut run_config: SessionRunConfig) -> SessionServiceParts {
         let behavior = run_config.session.behavior();
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
@@ -14,16 +12,16 @@ impl SessionService {
             .map(str::to_owned);
         let response_timing =
             ResponseTimingSnapshot::from_session_snapshot(match &run_config.session {
-                OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
-                OrchestratorSession::Picker { .. } => None,
+                RuntimeSession::Active { snapshot, .. } => Some(snapshot),
+                RuntimeSession::Picker { .. } => None,
             });
         let config_version = match &run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => Some(snapshot.config_version),
-            OrchestratorSession::Picker { .. } => None,
+            RuntimeSession::Active { snapshot, .. } => Some(snapshot.config_version),
+            RuntimeSession::Picker { .. } => None,
         };
         let project_id = match &run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => snapshot.project_id.clone(),
-            OrchestratorSession::Picker { .. } => None,
+            RuntimeSession::Active { snapshot, .. } => snapshot.project_id.clone(),
+            RuntimeSession::Picker { .. } => None,
         };
 
         let event_bus =
@@ -77,6 +75,7 @@ impl SessionService {
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
+        let run_admission = run_config.agent.run_admission_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();
@@ -137,6 +136,7 @@ impl SessionService {
             attention: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_threads,
+            run_admission,
             skills,
             mcp,
             terminal_manager,

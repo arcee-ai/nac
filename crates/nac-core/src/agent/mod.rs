@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use tokio::sync::{watch, Mutex};
-use tokio::task::JoinSet;
 
 use crate::events::{AgentEvent, AssistantStreamDelta, EventSink, SessionRunId};
 use crate::mcp::McpRegistry;
@@ -162,7 +161,7 @@ pub struct Agent {
     thread_name: Option<String>,
     mcp_observation: Option<McpObservation>,
     mcp_mounts: Arc<crate::mcp::SessionMcpMounts>,
-    steering_dispatch_id: Option<String>,
+    current_run_id: Option<String>,
     appended_steering_ids: HashSet<i64>,
     /// Top-level transcript log sink (DB-direct transcript workset, see
     /// store/transcript.rs). Present for persistent primary agents with a
@@ -189,7 +188,7 @@ pub struct Agent {
     /// cleared only after its result is adopted. If the run task is aborted,
     /// cancellation waits on the transcript writer and reloads whichever
     /// durable outcome actually won.
-    steering_append_pending: bool,
+    prompt_commit_pending: bool,
     /// User-facing notice set only when restore repaired a validly encoded
     /// non-contiguous transcript tail.
     transcript_recovery_warning: Option<String>,
@@ -291,7 +290,7 @@ impl Agent {
                 let image_read = client.supports_image_tool_results();
                 (
                     render_worker_system_prompt(&cwd),
-                    tools::worker_tool_definitions(image_read),
+                    tools::coding_tool_definitions(image_read),
                 )
             }
             AgentMode::Orchestrator => (
@@ -304,7 +303,7 @@ impl Agent {
             AgentMode::Direct => match traditional_child.as_ref() {
                 Some(child) => (
                     render_general_child_system_prompt(&cwd, &child.description),
-                    tools::worker_tool_definitions(client.supports_image_tool_results()),
+                    tools::coding_tool_definitions(client.supports_image_tool_results()),
                 ),
                 None => (
                     if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
@@ -442,6 +441,7 @@ impl Agent {
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
+        let run_admission = Arc::new(crate::tools::RunAdmission::default());
         let agent = Self {
             client,
             mode,
@@ -461,7 +461,10 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
-                active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
+                active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::new(Arc::clone(
+                    &run_admission,
+                ))),
+                run_admission,
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
@@ -469,7 +472,7 @@ impl Agent {
                 mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
-                command_cancellation: crate::tools::ThreadCancellation::default(),
+                command_cancellation: crate::tools::RunCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
                 light_client: config.light_client,
@@ -492,14 +495,14 @@ impl Agent {
             thread_name: config.thread_name,
             mcp_observation,
             mcp_mounts,
-            steering_dispatch_id: config.dispatch_id,
+            current_run_id: config.dispatch_id,
             appended_steering_ids: HashSet::new(),
             transcript_log,
             committed_log_len,
             pending_log_end: None,
             unacknowledged_log_message: None,
             direct_inbox_append_start: None,
-            steering_append_pending: false,
+            prompt_commit_pending: false,
             transcript_recovery_warning: None,
             recovered_run_failure: None,
             last_usage: None,
@@ -690,7 +693,7 @@ impl Agent {
         self.direct_primary.then(|| {
             let mut runtime = self.tool_runtime.clone();
             // Human shell ownership must not observe the model run's cancel token.
-            runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+            runtime.command_cancellation = crate::tools::RunCancellation::default();
             // Shell capabilities do not use imported tools. Keeping a registry
             // here would pin replaced MCP connections for the terminal's lifetime.
             runtime.mcp = None;
@@ -705,7 +708,7 @@ impl Agent {
             "human shell commands require a direct primary"
         );
         let mut runtime = self.tool_runtime.clone();
-        runtime.command_cancellation = crate::tools::ThreadCancellation::default();
+        runtime.command_cancellation = crate::tools::RunCancellation::default();
         runtime.mcp = None;
         runtime.mcp_tools = Arc::new(HashMap::new());
         Ok((runtime, self.client.clone()))
@@ -920,7 +923,7 @@ impl Agent {
                 delta_sink,
             );
             let cancellation = self.command_cancellation();
-            let turn = if self.mode == AgentMode::Worker && self.steering_dispatch_id.is_some() {
+            let turn = if self.mode == AgentMode::Worker && self.current_run_id.is_some() {
                 // Native workers acknowledge host cancellation on a separate
                 // stdin thread. Interrupt provider I/O too, so normal cleanup
                 // and the CLI's final telemetry receipt run before host reap.
@@ -1224,15 +1227,15 @@ impl Agent {
         }
     }
 
-    pub(crate) fn command_cancellation(&self) -> crate::tools::ThreadCancellation {
+    pub(crate) fn command_cancellation(&self) -> crate::tools::RunCancellation {
         self.tool_runtime.command_cancellation.clone()
     }
 
     /// Install a fresh cancellation scope for one top-level run. Persistent
     /// direct sessions reuse the agent across turns, so a cancelled command
     /// token must never poison the next run.
-    pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::ThreadCancellation {
-        let cancellation = crate::tools::ThreadCancellation::default();
+    pub(crate) fn begin_run_cancellation(&mut self) -> crate::tools::RunCancellation {
+        let cancellation = crate::tools::RunCancellation::default();
         self.tool_runtime.command_cancellation = cancellation.clone();
         cancellation
     }
@@ -1313,12 +1316,16 @@ impl Agent {
         Some(broker)
     }
 
-    pub fn active_threads_handle(&self) -> Arc<crate::tools::ActiveThreadRegistry> {
+    pub(crate) fn run_admission_handle(&self) -> Arc<crate::tools::RunAdmission> {
+        Arc::clone(&self.tool_runtime.run_admission)
+    }
+
+    pub fn active_threads_handle(&self) -> Arc<crate::tools::WorkerDispatchRegistry> {
         Arc::clone(&self.tool_runtime.active_threads)
     }
 
-    pub fn set_steering_dispatch_id(&mut self, dispatch_id: Option<String>) {
-        self.steering_dispatch_id = dispatch_id;
+    pub fn set_current_run_id(&mut self, dispatch_id: Option<String>) {
+        self.current_run_id = dispatch_id;
         self.appended_steering_ids.clear();
     }
 
@@ -1691,7 +1698,7 @@ impl Agent {
     /// next restore re-normalizes the stale tail.
     pub async fn normalize_dangling_tail(&mut self) -> Result<()> {
         self.reconcile_unacknowledged_message().await?;
-        if self.direct_inbox_append_start.is_some() || self.steering_append_pending {
+        if self.direct_inbox_append_start.is_some() || self.prompt_commit_pending {
             return self.reload_transcript_from_store().await;
         }
         if self.durable_log_has_rows_past_own_commits().await? {
@@ -1721,7 +1728,7 @@ impl Agent {
     /// logs while the resulting transcript remains valid provider history.
     pub async fn append_cancellation_marker_preserving_tools(&mut self) -> Result<()> {
         self.reconcile_unacknowledged_message().await?;
-        if self.direct_inbox_append_start.is_some() || self.steering_append_pending {
+        if self.direct_inbox_append_start.is_some() || self.prompt_commit_pending {
             // A direct steer delivery transaction may have committed after
             // the run task was aborted. Its User row and delivered inbox state
             // are one durable fact; adopt the row before adding cancellation.
@@ -1828,7 +1835,7 @@ impl Agent {
             return Ok(0);
         };
         let dispatch_id = self
-            .steering_dispatch_id
+            .current_run_id
             .clone()
             .ok_or_else(|| anyhow!("steering dispatch id is unavailable"))?;
         let thread_name = self.thread_name.clone();

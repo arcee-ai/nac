@@ -41,21 +41,24 @@ mod task_followups;
 mod task_launch;
 mod task_questions;
 pub(crate) use task_discovery::url_component;
+mod run_admission;
+mod run_cancellation;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;
 pub mod thread;
-mod thread_lifecycle;
 pub(crate) mod user_terminal;
 pub(crate) mod web;
+mod worker_dispatch;
 pub mod workset;
 pub mod write;
 
+pub(crate) use run_admission::RunAdmission;
+pub(crate) use run_cancellation::RunCancellation;
 use runtime_context::shared_workspace_gate;
 pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
-pub use thread_lifecycle::ActiveThreadRegistry;
-pub(crate) use thread_lifecycle::ThreadCancellation;
+pub use worker_dispatch::WorkerDispatchRegistry;
 
 #[derive(Debug)]
 pub struct ToolResult {
@@ -160,7 +163,7 @@ impl kernel::NativeTool for ReadTool {
     }
 }
 
-pub(crate) const WORKER_TOOL_NAMES: [&str; 8] = [
+pub(crate) const CODING_TOOL_NAMES: [&str; 8] = [
     "read",
     "write",
     "edit",
@@ -181,7 +184,7 @@ pub(crate) const PRODUCT_CONTEXT_TOOL_NAMES: [&str; 2] =
     reason = "static product capabilities are registered and collision checked"
 )]
 pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
-    worker_tool_registry(false)
+    native_tool_registry(false)
         .expect("product tools register without collisions")
         .snapshot(PRODUCT_CONTEXT_TOOL_NAMES)
         .expect("product tools are registered")
@@ -276,7 +279,7 @@ pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 36] = [
     "orchestrator_cancel",
 ];
 
-fn worker_tool_registry(
+fn native_tool_registry(
     image_read: bool,
 ) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
     let registry = kernel::ToolRegistry::builder()
@@ -336,11 +339,11 @@ fn worker_tool_registry(
     clippy::expect_used,
     reason = "the static first-party tool registry and worker capability list are collision-checked"
 )]
-pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    worker_tool_registry(image_read)
+pub fn coding_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+    native_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| {
-            WORKER_TOOL_NAMES.contains(&descriptor.name())
+            CODING_TOOL_NAMES.contains(&descriptor.name())
                 && !GOAL_TOOL_NAMES.contains(&descriptor.name())
         })
         .definitions()
@@ -351,7 +354,7 @@ pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     reason = "the static first-party tool registry and direct capability list are collision-checked"
 )]
 pub fn direct_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    worker_tool_registry(image_read)
+    native_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot(DIRECT_TOOL_NAMES)
         .expect("built-in direct capability selection must be complete")
@@ -375,7 +378,7 @@ pub(crate) fn direct_tool_definitions_with_web(
     reason = "the static direct-with-orchestrator capability list is covered by registry tests"
 )]
 pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let snapshot = worker_tool_registry(image_read)
+    let snapshot = native_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
         .expect("direct-with-orchestrator capability selection must be complete");
@@ -412,7 +415,7 @@ fn is_complete_direct_capability(name: &str) -> bool {
     reason = "the static first-party tool registry is collision-checked during construction"
 )]
 pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission> {
-    worker_tool_registry(false)
+    native_tool_registry(false)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| is_complete_direct_capability(descriptor.name()))
         .admission(name)
@@ -534,7 +537,7 @@ pub async fn execute_tool_with_context(
         .await;
     }
 
-    let direct = worker_tool_registry(client.supports_image_tool_results())
+    let direct = native_tool_registry(client.supports_image_tool_results())
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| is_complete_direct_capability(descriptor.name()));
     if direct.contains(name) {
@@ -582,15 +585,17 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     let backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: workspace_cwd.clone(),
     });
+    let run_admission = Arc::new(RunAdmission::default());
     ToolRuntime {
         product_context: None,
-        command_cancellation: crate::tools::ThreadCancellation::default(),
+        command_cancellation: crate::tools::RunCancellation::default(),
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
         worker_executable: None,
-        active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
+        active_threads: Arc::new(WorkerDispatchRegistry::new(Arc::clone(&run_admission))),
+        run_admission,
         event_sink: EventSink::none(),
         backend,
         mcp: None,

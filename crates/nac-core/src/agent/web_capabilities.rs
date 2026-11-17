@@ -146,7 +146,7 @@ fn parent_for(store: &Path, session: &str) -> Result<Option<String>> {
 }
 
 fn resolve_direct_credential() -> Result<Option<String>> {
-    match crate::worker_credentials::managed_exa_api_key() {
+    match crate::managed_native_credentials::managed_exa_api_key() {
         Some(credential) => Ok(Some(credential)),
         None => crate::model::resolve_named_api_key(crate::model::EXA_API_KEY_ENV),
     }
@@ -163,7 +163,8 @@ mod tests {
         if std::env::var_os("NAC_MANAGED_DIRECT_WEB_HELPER").is_none() {
             return;
         }
-        crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
+        crate::managed_native_credentials::capture_managed_native_credentials_from_environment()
+            .unwrap();
         assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
         let nac_home = std::path::PathBuf::from(std::env::var_os("NAC_HOME").unwrap());
         std::fs::create_dir_all(&nac_home).unwrap();
@@ -195,7 +196,7 @@ mod tests {
             Some(CANARY)
         );
         assert_eq!(
-            crate::worker_credentials::ManagedWorkerNativeCredentials::from_process_environment()
+            crate::managed_native_credentials::ManagedNativeCredentials::from_process_environment()
                 .unwrap()
                 .into_exa_api_key()
                 .as_deref(),

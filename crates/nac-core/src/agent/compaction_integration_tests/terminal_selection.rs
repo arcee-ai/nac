@@ -109,7 +109,7 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     );
     agent.messages = original.iter().map(|(_, m)| m.clone()).collect();
     store_agent_snapshot(&path, &agent);
-    agent.set_steering_dispatch_id(Some("ordinary-1".into()));
+    agent.set_current_run_id(Some("ordinary-1".into()));
     agent.send("current question").await.unwrap();
     let first_checkpoint =
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
@@ -148,7 +148,7 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
         ),
         first
     );
-    restored.set_steering_dispatch_id(Some("ordinary-2".into()));
+    restored.set_current_run_id(Some("ordinary-2".into()));
     restored.send("another question").await.unwrap();
     let checkpoints =
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(

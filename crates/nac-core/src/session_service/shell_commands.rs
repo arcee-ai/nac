@@ -1,13 +1,13 @@
 //! Admission and effect ownership for independently submitted human commands.
 use super::*;
 use crate::store::TranscriptLogWriter;
-use crate::tools::{kernel::ToolCallContext, ThreadCancellation, ToolRuntime};
+use crate::tools::{kernel::ToolCallContext, RunCancellation, ToolRuntime};
 use anyhow::Context;
 use std::sync::atomic::Ordering;
 
 pub(super) struct ActiveShellCommand {
     pub(super) snapshot: ShellCommandSnapshot,
-    cancellation: ThreadCancellation,
+    cancellation: RunCancellation,
 }
 
 impl ActiveShellCommand {

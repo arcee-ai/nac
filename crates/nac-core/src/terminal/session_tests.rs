@@ -85,7 +85,7 @@ async fn kill_removes_background_jobs_from_pty_shell() {
         .enqueue_input(
             b"sh -c 'sleep 30 & echo NAC_CHILD:$!; wait'\r",
             ticket,
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .unwrap();
     super::super::input::await_receipt(receipt).await.unwrap();

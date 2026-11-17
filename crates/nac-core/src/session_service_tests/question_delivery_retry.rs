@@ -318,10 +318,10 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
         },
     )
     .unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: id.into(),
             store_path: path.clone(),
             snapshot,

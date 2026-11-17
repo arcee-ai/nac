@@ -1,5 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { memo, useId, useMemo, useState } from "react";
+import { memo, use, useId, useMemo, useState } from "react";
 
 import { Icon, IconName } from "@/app/atoms";
 import { NativeTaskLinks } from "@/app/features/insights/transcript/NativeTaskLink";
@@ -9,6 +9,8 @@ import {
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
 import { cn } from "@/app/lib/cn";
+import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
+import { FoldChoicesContext } from "./foldChoices";
 
 import {
   foldSegments,
@@ -34,12 +36,14 @@ const FOCUS_RING =
  */
 export const WorkFoldView = memo(function WorkFoldView({
   fold,
+  turnKey,
   active,
   turnDurationMs,
   selectedGroupId,
   interactive,
 }: {
   fold: WorkFold;
+  turnKey: string;
   /** The turn is still producing output. */
   active: boolean;
   /** Wall-clock time of the run behind the turn, once it finished. */
@@ -51,7 +55,10 @@ export const WorkFoldView = memo(function WorkFoldView({
   const listId = useId();
   const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
-  const [toggled, setToggled] = useState<boolean | null>(null);
+  const choices = use(FoldChoicesContext);
+  const sessionId = useTranscriptSessionId();
+  const choiceKey = JSON.stringify([sessionId, turnKey, fold.key]);
+  const [toggled, setToggled] = useState<boolean | null>(() => choices?.get(choiceKey) ?? null);
   const { openGroup } = useInsightsNavigation();
   const open = toggled ?? density === "detailed";
 
@@ -83,7 +90,10 @@ export const WorkFoldView = memo(function WorkFoldView({
           aria-expanded={open}
           aria-current={selected ? "true" : undefined}
           aria-controls={open || pinned.length > 0 ? listId : undefined}
-          onClick={() => setToggled(!open)}
+          onClick={() => {
+            choices?.set(choiceKey, !open);
+            setToggled(!open);
+          }}
           className={cn(
             "group/fold -ml-1.5 inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 max-md:min-h-11",
             "type-body-chrome transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] hover:text-basic-primary",

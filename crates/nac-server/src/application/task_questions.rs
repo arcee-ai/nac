@@ -102,7 +102,7 @@ impl nac_core::session_service::TaskQuestionAnswerPort for NativeQuestionAnswers
 }
 pub(crate) fn bind_native(
     manager: &SessionManager,
-    config: &mut nac_core::runtime::OrchestratorRunConfig,
+    config: &mut nac_core::runtime::SessionRunConfig,
 ) {
     config.set_task_question_answer_port(std::sync::Arc::new(NativeQuestionAnswers {
         manager: std::sync::Arc::downgrade(&manager.inner),

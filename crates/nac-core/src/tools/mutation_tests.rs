@@ -463,7 +463,7 @@ async fn cancelled_lock_waiter_cannot_publish_after_the_lock_is_released() {
     let held = acquire_path_lock(&path.canonicalize().unwrap(), None)
         .await
         .unwrap();
-    let cancellation = crate::tools::ThreadCancellation::default();
+    let cancellation = crate::tools::RunCancellation::default();
     let task_cancellation = cancellation.clone();
     let task_path = path.clone();
     let mutation = tokio::spawn(async move {
@@ -1057,7 +1057,7 @@ fn remote_native_mutation_keeps_the_open_parent_across_a_late_swap() {
 
 #[test]
 fn worker_definitions_advertise_revisioned_batched_contract() {
-    let definitions = crate::tools::worker_tool_definitions(false);
+    let definitions = crate::tools::coding_tool_definitions(false);
     let edit = definitions
         .iter()
         .find(|definition| definition.function.name == "edit")

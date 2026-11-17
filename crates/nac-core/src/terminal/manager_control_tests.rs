@@ -56,7 +56,7 @@ async fn retained_agent_and_human_handoff_keep_exact_process_and_literal_adapter
         .write_stdin_prepared(&name, "echo stale<RET>", 1, 100, None, Some(&prepared))
         .await
         .is_err());
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     assert!(manager
         .write_controlled_human_input(&name, 1, b"wrong\n", &cancellation)
         .await
@@ -216,7 +216,7 @@ async fn initial_protocol_keeps_browser_recovery_but_shared_protocol_freezes_ser
         let manager = TerminalManager::for_direct();
         let backend = backend();
         let name = manager.user_terminal_name(uuid::Uuid::new_v4());
-        let cancellation = ThreadCancellation::default();
+        let cancellation = RunCancellation::default();
         manager
             .create_user_terminal(
                 name.clone(),
@@ -252,16 +252,11 @@ async fn initial_protocol_keeps_browser_recovery_but_shared_protocol_freezes_ser
         let write = tokio::spawn(async move {
             if legacy {
                 owner
-                    .write_user_input(&handle, b"once", &ThreadCancellation::default())
+                    .write_user_input(&handle, b"once", &RunCancellation::default())
                     .await
             } else {
                 owner
-                    .write_controlled_human_input(
-                        &handle,
-                        1,
-                        b"once",
-                        &ThreadCancellation::default(),
-                    )
+                    .write_controlled_human_input(&handle, 1, b"once", &RunCancellation::default())
                     .await
             }
         });
@@ -366,11 +361,11 @@ async fn actual_retained_agent_root_exit_fences_queued_writer_without_manager_re
             .ticket(session.output_id(), InputController::Agent)
             .unwrap();
         let first = session
-            .enqueue_input(b"in-flight", ticket.clone(), &ThreadCancellation::default())
+            .enqueue_input(b"in-flight", ticket.clone(), &RunCancellation::default())
             .unwrap();
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         let queued = session
-            .enqueue_input(b"after-root-exit", ticket, &ThreadCancellation::default())
+            .enqueue_input(b"after-root-exit", ticket, &RunCancellation::default())
             .unwrap();
         (first, queued, native)
     };

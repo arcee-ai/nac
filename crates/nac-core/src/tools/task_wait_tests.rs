@@ -784,7 +784,7 @@ async fn observes_existing_approval_without_becoming_an_approver_or_answering_it
                     "read",
                     &[PermissionResource::new("read", "/outside")],
                     &ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })

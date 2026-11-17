@@ -49,7 +49,7 @@ impl ProductContextPort for BoundProductContext {
 impl SessionManager {
     pub(crate) fn bind_product_context(
         &self,
-        config: &mut nac_core::runtime::OrchestratorRunConfig,
+        config: &mut nac_core::runtime::SessionRunConfig,
     ) -> Result<()> {
         config.bind_product_context(|session| {
             Arc::new(BoundProductContext {

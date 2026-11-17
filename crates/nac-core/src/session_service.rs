@@ -22,7 +22,7 @@ pub use crate::events::{
     SessionEventSubscription, SessionRunId, SessionSubscriptionId, SubmittedUserMessageSnapshot,
 };
 use crate::run_failure::FAILED_RUN_RECOVERY_DIAGNOSTIC as FAILED_RUN_WARNING;
-use crate::runtime::{OrchestratorRunConfig, OrchestratorSession};
+use crate::runtime::{RuntimeSession, SessionRunConfig};
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
 use crate::store::RunInboxPrompt;
@@ -671,7 +671,8 @@ pub struct SessionService {
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
-    active_threads: Arc<crate::tools::ActiveThreadRegistry>,
+    active_threads: Arc<crate::tools::WorkerDispatchRegistry>,
+    run_admission: Arc<crate::tools::RunAdmission>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
@@ -755,7 +756,7 @@ struct ActiveRunState {
     /// `None` until the task captures it — an early cancel then diffs
     /// against the run-end count, which is exact when nothing was appended.
     transcript_baseline: Option<usize>,
-    command_cancellation: crate::tools::ThreadCancellation,
+    command_cancellation: crate::tools::RunCancellation,
     inbox_item_id: Option<i64>,
     inbox_prompt: Option<RunInboxPrompt>,
     review_intent: Option<String>,
@@ -787,7 +788,7 @@ struct CancellingRun {
     snapshot: ActiveRunSnapshot,
     task: Option<JoinHandle<()>>,
     transcript_baseline: Option<usize>,
-    command_cancellation: crate::tools::ThreadCancellation,
+    command_cancellation: crate::tools::RunCancellation,
 }
 
 impl Drop for CancellingRun {

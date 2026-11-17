@@ -534,10 +534,10 @@ async fn store_backed_snapshot_is_live_during_a_real_run() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,

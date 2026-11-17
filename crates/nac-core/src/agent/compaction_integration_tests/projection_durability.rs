@@ -54,7 +54,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::System {
             content: "canonical system".to_string(),
@@ -262,7 +262,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),

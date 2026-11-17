@@ -29,10 +29,10 @@ async fn shared_store_peer_process_helper() {
         return;
     }
 
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id,
             store_path,
             snapshot,
@@ -146,10 +146,10 @@ async fn shared_store_recovery_after_peer_crash_preserves_committed_transcript()
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -422,10 +422,10 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
         None,
         BTreeMap::new(),
     );
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: snapshot.session_id.clone(),
             store_path,
             snapshot,
@@ -513,10 +513,10 @@ async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
         None,
         BTreeMap::new(),
     );
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: snapshot.session_id.clone(),
             store_path,
             snapshot,
@@ -573,10 +573,10 @@ async fn subscribe_agent_events_filters_agent_envelopes() {
         None,
         BTreeMap::new(),
     );
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -683,10 +683,10 @@ async fn mark_run_finishing_clears_submitted_user_message_before_persistence() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -1028,10 +1028,10 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
     snapshot.last_response_duration_ms = Some(123);
     snapshot.response_durations_ms = Some(vec![Some(123)]);
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -1210,10 +1210,10 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -1414,10 +1414,10 @@ async fn finish_run_without_active_session_snapshot_emits_completion_without_sav
     let store_path = test_store_path("picker_noop");
     let client = ModelClient::new_for_test();
     let agent = test_agent(client.clone(), store_path.clone(), None);
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Picker {
+        session: RuntimeSession::Picker {
             store_path: store_path.clone(),
         },
         sandbox_status: "off".to_string(),

@@ -251,7 +251,7 @@ impl EffectiveSandboxOptions {
     clippy::large_enum_variant,
     reason = "the construction contract preserves owned state for all session modes without boxing"
 )]
-pub(crate) enum OrchestratorSession {
+pub(crate) enum RuntimeSession {
     Active {
         session_id: String,
         store_path: PathBuf,
@@ -262,7 +262,7 @@ pub(crate) enum OrchestratorSession {
     },
 }
 
-impl OrchestratorSession {
+impl RuntimeSession {
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::Active { session_id, .. } => Some(session_id),
@@ -291,10 +291,10 @@ impl OrchestratorSession {
     }
 }
 
-pub struct OrchestratorRunConfig {
+pub struct SessionRunConfig {
     pub(crate) agent: Agent,
     pub(crate) client: ModelClient,
-    pub(crate) session: OrchestratorSession,
+    pub(crate) session: RuntimeSession,
     pub(crate) sandbox_status: String,
     pub(crate) agents_md_status: String,
     pub(crate) workspace_display: String,
@@ -306,7 +306,7 @@ pub struct OrchestratorRunConfig {
     pub(crate) resume_base_cwd: PathBuf,
 }
 
-impl OrchestratorRunConfig {
+impl SessionRunConfig {
     /// Bind host observations to the exact session selected by construction.
     pub fn bind_product_context(
         &mut self,
@@ -349,7 +349,7 @@ pub struct ResumePickerRunConfig {
     reason = "run-state variants own construction inputs and avoid heap indirection on the hot path"
 )]
 pub enum RunState {
-    Orchestrator { run_config: OrchestratorRunConfig },
+    Session { run_config: SessionRunConfig },
     ResumePicker(ResumePickerRunConfig),
     ManagedWorker(ManagedWorkerRunConfig),
 }

@@ -18,7 +18,7 @@ impl TerminalManager {
         yield_ms: u64,
         max_output: usize,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
     ) -> CommandOutput {
         self.exec_one_shot_with_environment(
             cmd,
@@ -47,7 +47,7 @@ impl TerminalManager {
         yield_ms: u64,
         max_output: usize,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
         extra_envs: &[(String, String)],
     ) -> CommandOutput {
         self.exec_one_shot_sanitized(
@@ -82,12 +82,12 @@ impl TerminalManager {
         yield_ms: u64,
         max_output: usize,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
         extra_envs: &[(String, String)],
         environment: nac_contracts::CommandEnvironmentSnapshot,
     ) -> CommandOutput {
         let start = Instant::now();
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+        if cancellation.is_some_and(RunCancellation::is_cancelled) {
             return CommandOutput {
                 timeout_ms: yield_ms,
                 termination_status: None,
@@ -267,7 +267,7 @@ impl TerminalManager {
         let stdout = child.stdout.take().expect("piped stdout is present");
         let stderr = child.stderr.take().expect("piped stderr is present");
         let (sender, mut receiver) = mpsc::channel(PIPE_CHANNEL_CHUNKS);
-        let reader_shutdown = ThreadCancellation::default();
+        let reader_shutdown = RunCancellation::default();
         let mut stdout_reader = tokio::spawn(read_chunks(
             stdout,
             OutputStream::Stdout,
@@ -306,7 +306,7 @@ impl TerminalManager {
                 }
             }
 
-            if execution.cancelled() || cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            if execution.cancelled() || cancellation.is_some_and(RunCancellation::is_cancelled) {
                 status = CommandStatus::Cancelled;
                 break;
             }

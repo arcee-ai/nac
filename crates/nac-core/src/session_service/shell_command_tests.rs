@@ -104,10 +104,10 @@ fn test_direct_active_service_at(
     } else {
         sessions::create_session(&path, &snapshot).unwrap();
     }
-    let service = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let service = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.into(),
             store_path: path.clone(),
             snapshot,

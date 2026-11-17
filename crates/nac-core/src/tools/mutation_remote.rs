@@ -464,7 +464,7 @@ pub(crate) async fn execute_remote(payload: Value, runtime: &ToolRuntime) -> Too
 pub(crate) async fn execute_remote_cancellable(
     payload: Value,
     runtime: &ToolRuntime,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     let args = vec![
         "-I".to_string(),
@@ -486,7 +486,7 @@ pub(crate) async fn execute_remote_cancellable(
         .unwrap_or_default()
         .to_string();
     loop {
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+        if cancellation.is_some_and(RunCancellation::is_cancelled) {
             return error_tool_result(MutationError::precondition(
                 "cancelled",
                 format!("remote file mutation cancelled before execution: {path_display}"),

@@ -188,6 +188,36 @@ describe("delegated work", () => {
     expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
   });
 
+  it("groups this chat's running and settled agents without navigating on selection", async () => {
+    const client = mount("direct-with-orchestrator");
+    act(() =>
+      client.setQueryData(queryKeys.traditionalChildren("parent"), [
+        child,
+        {
+          ...child,
+          child_session_id: "failed",
+          description: "Failed audit",
+          status: "failed",
+          failure: "Broken",
+        },
+        { ...child, child_session_id: "idle", description: "Idle audit", status: "idle" },
+      ]),
+    );
+    expect(screen.getByText("Agents in this chat")).toBeTruthy();
+    expect(screen.getByText("Active (1)")).toBeTruthy();
+    expect(screen.getByText("Finished")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Idle audit" })).toBeTruthy();
+    expect(screen.getAllByText("Idle").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("button", { name: "Failed audit" }).getAttribute("aria-description"),
+    ).toContain("Failed");
+    fireEvent.click(screen.getByRole("button", { name: "Failed audit" }));
+    expect(screen.getByTestId("location").textContent).toBe("/sessions/parent");
+    expect(screen.getByRole("button", { name: "Failed audit" }).getAttribute("aria-current")).toBe(
+      "true",
+    );
+  });
+
   it("navigates from a delegated row to its transcript", () => {
     mount("direct");
 
@@ -331,6 +361,7 @@ it("does not claim there are no subagents while the lists are loading", async ()
 
   expect(await screen.findByText("Loading subagents…")).toBeTruthy();
   expect(screen.queryByText("No subagents yet")).toBeNull();
+  expect(screen.queryByText(/Active \(/)).toBeNull();
 });
 
 describe("selection and drafts", () => {
@@ -878,6 +909,20 @@ describe("load state in the narrow list", () => {
     expect(screen.queryByText("No subagents yet")).toBeNull();
   });
 
+  it("does not claim a total while the managed list is pending or failed", async () => {
+    listOrchestrators.mockReturnValueOnce(new Promise(() => {}));
+    const client = mount("direct-with-orchestrator", false);
+    await screen.findByRole("button", { name: "Review permissions" });
+    expect(screen.getByText("Loading remaining subagents…")).toBeTruthy();
+    expect(screen.queryByText(/Active \(/)).toBeNull();
+    listOrchestrators.mockRejectedValue(new Error("503"));
+    // A second parent gets a failed managed list while retaining its child rows.
+    client.show("other");
+    expect(await screen.findByText(/Some subagents could not be loaded/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
+    expect(screen.queryByText(/Active \(/)).toBeNull();
+  });
+
   it("keeps loaded rows when a later poll fails", async () => {
     const client = mount("direct");
     listChildren.mockRejectedValue(new Error("503"));
@@ -889,6 +934,7 @@ describe("load state in the narrow list", () => {
 
     expect(client.getQueryState(queryKeys.traditionalChildren("parent"))?.status).toBe("error");
     expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await screen.findByText(/Showing available agents/)).toBeTruthy();
+    expect(screen.queryByText(/Active \(/)).toBeNull();
   });
 });

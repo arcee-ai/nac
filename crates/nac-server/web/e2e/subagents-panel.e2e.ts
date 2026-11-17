@@ -1,7 +1,16 @@
 import type { Page } from "@playwright/test";
 
 import { waitForDelegatedInput } from "./delegation-observation";
-import { createSession, expect, showSubagents, startForegroundChild, test } from "./harness";
+import {
+  createSession,
+  expandSidePanel,
+  expect,
+  showSubagents,
+  startForegroundChild,
+  test,
+  waitForRunIdle,
+} from "./harness";
+import { dockSessionDrawer, hideSessionDrawer } from "./focus-embedded-helpers";
 import { ScriptGate } from "./scripted-provider";
 
 /** The narrow list: a dialog of its own on a phone, the panel's own column on a tablet. */
@@ -10,6 +19,80 @@ function subagentList(page: Page, mobile: boolean) {
     ? page.getByRole("dialog", { name: "Subagents", exact: true })
     : page.locator("body");
 }
+
+test("keeps the parent conversation while selecting siblings, closing and focusing the panel", async ({
+  harness,
+  page,
+  request,
+}, testInfo) => {
+  harness.provider.enqueue(
+    "parent-conversation",
+    { token: "E2E_PANEL_PARENT" },
+    { kind: "text", text: "Parent conversation remains visible" },
+  );
+  for (const [token, text] of [
+    ["E2E_PANEL_FIRST", "First child conversation"],
+    ["E2E_PANEL_SECOND", "Second child conversation"],
+  ] as const) {
+    harness.provider.enqueue(token, { token }, { kind: "text", text });
+  }
+  const parentId = await createSession(request, harness, "direct");
+  const run = await request.post(`${harness.baseUrl}/sessions/${parentId}/runs`, {
+    data: { prompt: "E2E_PANEL_PARENT" },
+  });
+  expect(run.status()).toBe(202);
+  await waitForRunIdle(request, harness, parentId);
+  for (const [title, token] of [
+    ["First child", "E2E_PANEL_FIRST"],
+    ["Second child", "E2E_PANEL_SECOND"],
+  ] as const) {
+    expect((await startForegroundChild(request, harness, parentId, title, token)).ok()).toBe(true);
+  }
+  harness.provider.assertConsumed();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  const parent = page.getByText("Parent conversation remains visible", { exact: true });
+  await expect(parent).toBeVisible();
+  const parentDraft = page.getByRole("combobox", { name: "Message", exact: true });
+  await parentDraft.fill("Parent draft stays here");
+  await dockSessionDrawer(page);
+  await showSubagents(page, false);
+  const panel = page.getByRole("complementary").filter({
+    has: page.getByRole("tablist", { name: "Session panels" }),
+  });
+  await expect(panel.getByText("Agents in this chat")).toBeVisible();
+  await expect(panel.getByText("Active (0)")).toBeVisible();
+  await expect(panel.getByText("Finished", { exact: true })).toBeVisible();
+  for (const [title, text] of [
+    ["First child", "First child conversation"],
+    ["Second child", "Second child conversation"],
+  ] as const) {
+    await panel.getByRole("button", { name: title, exact: true }).click();
+    await expect(panel.getByText(text, { exact: true })).toBeVisible();
+    await expect(parent).toBeVisible();
+    await expect(parentDraft).toHaveValue("Parent draft stays here");
+    await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+  }
+  await testInfo.attach("parent-and-selected-sibling", {
+    body: await page.screenshot({ animations: "disabled" }),
+    contentType: "image/png",
+  });
+
+  await hideSessionDrawer(page);
+  await expect(parent).toBeVisible();
+  await expect(parentDraft).toHaveValue("Parent draft stays here");
+  await showSubagents(page, false);
+  await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
+  await expandSidePanel(page);
+  await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Exit full width", exact: true }).click();
+  await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
+  await hideSessionDrawer(page);
+  await expect(parent).toBeVisible();
+  await expect(parentDraft).toHaveValue("Parent draft stays here");
+  await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+});
 
 for (const [name, viewport, mobile] of [
   ["tablet", { width: 1024, height: 900 }, false],
@@ -77,14 +160,14 @@ for (const [name, viewport, mobile] of [
     await expect(row).toBeVisible();
     await expect(alert).toHaveCount(0);
 
-    // A failed poll keeps the rows it already has.
+    // A failed poll keeps the rows it already has and explains that the list may be incomplete.
     failing = true;
     const failedBefore = failures;
     await expect.poll(() => failures, { timeout: 10_000 }).toBeGreaterThan(failedBefore + 1);
     await expect(row).toBeVisible();
     await expect(
-      page.getByRole("alert").filter({ hasText: "Subagents could not be loaded" }),
-    ).toHaveCount(0);
+      list.getByRole("alert").filter({ hasText: "Showing available agents" }),
+    ).toBeVisible();
     await expect(page.getByText("No subagents yet", { exact: true })).toHaveCount(0);
     harness.provider.assertConsumed();
   });

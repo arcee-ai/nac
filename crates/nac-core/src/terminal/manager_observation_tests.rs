@@ -326,7 +326,7 @@ async fn catalog_observes_existing_human_retained_agent_and_active_pipes_without
             &backend,
             nac_contracts::CommandEnvironmentSnapshot::empty(),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -556,7 +556,7 @@ async fn natural_human_exit_is_observed_without_archival_or_process_refresh() {
             &backend,
             nac_contracts::CommandEnvironmentSnapshot::empty(),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -625,7 +625,7 @@ async fn ordinary_pty_line_endings_do_not_expose_control_bearing_launch_secrets(
             &backend,
             environment,
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();

@@ -18,10 +18,11 @@ async fn managed_native_credential_mcp_isolation_helper() {
     let root = PathBuf::from(root);
     fs::create_dir_all(&root).unwrap();
     if env::var_os("NAC_LOCAL_MCP_NATIVE_KEY").is_none() {
-        crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
+        crate::managed_native_credentials::capture_managed_native_credentials_from_environment()
+            .unwrap();
         assert!(env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
         assert_eq!(
-            crate::worker_credentials::managed_exa_api_key().as_deref(),
+            crate::managed_native_credentials::managed_exa_api_key().as_deref(),
             Some(MANAGED_EXA_CANARY)
         );
     } else {

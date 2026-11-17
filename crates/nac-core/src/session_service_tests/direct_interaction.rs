@@ -183,10 +183,10 @@ async fn pausing_a_goal_invalidates_its_persisted_retry_wake() {
         None,
         None,
     );
-    let restarted = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let restarted = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,
@@ -1340,7 +1340,7 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
         prompt_commit,
         settlement: watch::channel(false).0,
         transcript_baseline: None,
-        command_cancellation: crate::tools::ThreadCancellation::default(),
+        command_cancellation: crate::tools::RunCancellation::default(),
         inbox_item_id: None,
         inbox_prompt: None,
         review_intent: None,
@@ -1708,7 +1708,7 @@ fn public_submission_rejects_stale_config_revision() {
 }
 
 #[test]
-fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
+fn from_session_run_config_exposes_metadata_and_init_snapshot() {
     let store_path = test_store_path("active_init");
     let client = ModelClient::new_for_test();
     let session_id = "session-1".to_string();
@@ -1730,10 +1730,10 @@ fn from_orchestrator_run_config_exposes_metadata_and_init_snapshot() {
     snapshot.previous_response_duration_ms = Some(100);
     snapshot.response_durations_ms = Some(vec![Some(100), Some(200)]);
 
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
