@@ -64,7 +64,7 @@ export declare const queryKeys: {
     }];
     threadEventsRoot: (id: string) => readonly ["session", string, "thread-events"];
     threadEvents: (id: string, threadName: string) => readonly ["session", string, "thread-events", string];
-    toolCallContent: (id: string, callId: string, blockKey: string) => readonly ["session", string, "tool-call", string, string];
+    toolCallContent: (id: string, callId: string, blockKey: string, occurrence?: string) => readonly ["session", string, "tool-call", string, string, string];
     sessionConfig: (id: string) => readonly ["session", string, "config"];
     sessionPermissions: (id: string) => readonly ["session", string, "permissions"];
     sessionGoal: (id: string) => readonly ["session", string, "goal"];

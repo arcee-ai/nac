@@ -259,7 +259,10 @@ export function createNacApi(nacClient, options = {}) {
             const query = params.toString();
             return request("GET", `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/events${query ? `?${query}` : ""}`, { signal: options.signal });
         },
-        getToolCallContent: (id, callId, signal) => request("GET", `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}`, { signal }),
+        getToolCallContent: (id, callId, signal, occurrence) => {
+            const query = occurrence ? `?${new URLSearchParams({ occurrence })}` : "";
+            return request("GET", `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}${query}`, { signal });
+        },
         getWorkspaceDiff: (id, path, { stage = "all", context = 3, revision, signal } = {}) => {
             const params = new URLSearchParams({
                 path,

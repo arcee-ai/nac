@@ -15,6 +15,7 @@ const TOOL_STATUSES: Record<ToolPresentationStatus, ActionStatus> = {
   "timed-out": "failed",
   cancelled: "failed",
   interrupted: "failed",
+  unknown: "ready",
 };
 
 const THREAD_STATUSES: Record<ThreadState, ActionStatus> = {

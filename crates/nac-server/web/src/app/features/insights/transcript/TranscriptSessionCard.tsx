@@ -1,24 +1,21 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { memo } from "react";
-import { useHref, useLinkClickHandler } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
+import { memo, useContext } from "react";
 
-import { SubagentCardStatus, SubagentTranscriptCard } from "@/app/atoms";
+import { SubagentCardStatus } from "@/app/atoms";
 import { cardStatus, type CardStatus } from "@/app/features/delegation/presentation/cardStatus";
 import type { InsightSessionEntry } from "@/app/features/insights/model/types";
 import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
-import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
-import { routes } from "@/app/lib/routes";
+import { DelegationInvocationResult } from "@/app/features/insights/transcript/DelegationInvocationResult";
+import {
+  InsightsNavigationContext,
+  useInsightsNavigation,
+} from "@/app/features/insights/useInsightsNavigation";
 import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
 import { queryKeys } from "@/app/services/queries/keys";
 import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
 
 type LaunchedRecord = TraditionalChildRecord | ManagedOrchestratorRecord;
-
-const LINEAGE = {
-  "spawn-agent": "traditional-child",
-  "spawn-orchestrator": "managed-orchestrator",
-} as const;
 
 function recordId(record: LaunchedRecord): string {
   return "child_session_id" in record ? record.child_session_id : record.orchestrator_session_id;
@@ -66,6 +63,38 @@ interface CardState extends CardStatus {
   title: string;
   /** The launch resolved to one of the parent's own sessions, which may be opened. */
   sessionId: string | null;
+}
+
+/** Keep every target visible until the parent-owned session has been verified. */
+export function TranscriptSessionGroup({
+  entries,
+  interactive,
+}: {
+  entries: InsightSessionEntry[];
+  interactive: boolean;
+}) {
+  const parentId = useTranscriptSessionId();
+  const navigation = useContext(InsightsNavigationContext);
+  const { records, failed } = useLaunchedRecords(entries[0], parentId);
+  const verified =
+    interactive &&
+    parentId !== null &&
+    parentId === navigation.sessionId &&
+    navigation.panels.includes("delegated") &&
+    !failed &&
+    !!launchedRecord(records, entries[0].presentation.spawnedSessionId);
+  return (
+    <div>
+      {entries.map((entry, index) => (
+        <TranscriptSessionCard
+          key={entry.id}
+          entry={entry}
+          interactive={interactive}
+          showTarget={!verified || index === 0}
+        />
+      ))}
+    </div>
+  );
 }
 
 /** A call that waits for approval or did not go through, as Insights shows it. */
@@ -116,31 +145,72 @@ function cardState(
 export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   entry,
   interactive,
+  showTarget = true,
 }: {
   entry: InsightSessionEntry;
   interactive: boolean;
+  showTarget?: boolean;
 }) {
   const parentId = useTranscriptSessionId();
   const { records, failed } = useLaunchedRecords(entry, parentId);
   const state = cardState(entry, records, failed);
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
-  const sessionRoute = routes.session(state.sessionId ?? "");
-  const sessionHref = useHref(sessionRoute);
-  const followSessionLink = useLinkClickHandler<HTMLAnchorElement>(sessionRoute);
-  // The row key is built from the report, which resolved to this very session.
-  const rowKey = interactive && state.sessionId !== null ? entry.rowKey : null;
+  const navigation = useContext(InsightsNavigationContext);
+  const canNavigate =
+    interactive && parentId === navigation.sessionId && navigation.panels.includes("delegated");
+  const rowKey = canNavigate && state.sessionId !== null ? entry.rowKey : null;
+  const availability =
+    canNavigate && !state.sessionId && entry.presentation.spawnedSessionId
+      ? failed
+        ? "Session unavailable"
+        : records === undefined
+          ? "Checking session…"
+          : "Session not found"
+      : null;
+  // A successful background launch acknowledges the call, not completion of the child.
+  const action =
+    entry.presentation.delegationContinuation === undefined
+      ? "Delegation"
+      : entry.presentation.delegationContinuation
+        ? "Continue"
+        : "Start";
+  const status =
+    entry.presentation.status === "unknown"
+      ? `${action} · ${entry.presentation.statusLabel}`
+      : entry.status === "ready"
+        ? `${action} requested`
+        : `${action} · ${entry.presentation.statusLabel}`;
   return (
-    <SubagentTranscriptCard
-      title={state.title}
-      status={state.status}
-      statusLabel={state.label}
-      error={entry.status === "failed" ? entry.presentation.resultPreview : null}
-      lineage={LINEAGE[entry.action]}
-      showBehaviorIcon={showBehaviorIcon}
-      onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
-      sessionHref={rowKey ? sessionHref : null}
-      onSessionLinkClick={followSessionLink}
-    />
+    <div className="min-w-0 py-1">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 type-meta text-basic-secondary">
+        {!showTarget ? null : rowKey ? (
+          <button
+            type="button"
+            aria-label={`Open ${state.title} in Subagents`}
+            onClick={() => openSubagent(rowKey)}
+            className="btn btn-small btn-icon-right btn-secondary max-w-full min-w-0 cursor-pointer max-md:min-h-11"
+          >
+            <span className="min-w-0 truncate">{state.title}</span>
+            <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+          </button>
+        ) : (
+          <span className="min-w-0 break-words font-medium text-basic-primary">{state.title}</span>
+        )}
+        <span>
+          {entry.action === "spawn-agent" ? "Subagent" : "Managed orchestrator"} · {status}
+        </span>
+        {availability ? <span>{availability}</span> : null}
+        {entry.status === "failed" && entry.presentation.resultPreview ? (
+          <span>{entry.presentation.resultPreview}</span>
+        ) : null}
+      </div>
+      {parentId ? (
+        <DelegationInvocationResult
+          sessionId={parentId}
+          blockKey={entry.id}
+          tool={entry.presentation}
+        />
+      ) : null}
+    </div>
   );
 });

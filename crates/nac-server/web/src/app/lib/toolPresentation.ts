@@ -10,7 +10,8 @@ export type ToolPresentationStatus =
   | "error"
   | "timed-out"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "unknown";
 
 export interface ToolPresentation {
   callId: string;
@@ -35,8 +36,19 @@ export interface ToolPresentation {
    * consumers must resolve it against the delegation queries before trusting it.
    */
   spawnedSessionId?: string;
+  /** Server-issued occurrence for a specific retained assistant row. */
+  occurrence?: string;
+  /** Whether a delegation call addressed an existing session. */
+  delegationContinuation?: boolean;
+  /** A live turn can still commit its result with the rest of its tool batch. */
+  resultMayBePending?: boolean;
   /** Native launch identity hint; consumers validate it against passive session inventory. */
-  launchedTask?: { sessionId: string; projectId: string; callerId: string; title: string };
+  launchedTask?: {
+    sessionId: string;
+    projectId: string;
+    callerId: string;
+    title: string;
+  };
 }
 
 type ToolStarted = Extract<AgentEvent, { type: "tool_call_started" }>;
@@ -70,15 +82,38 @@ export function collectToolResults(
   assistantIndex: number,
 ): Map<string, ToolResultRecord> {
   const results = new Map<string, ToolResultRecord>();
+  const ambiguous = new Set<string>();
   for (let index = assistantIndex + 1; index < messages.length; index += 1) {
     const message = messages[index];
     if (message.role === "tool") {
-      results.set(message.tool_call_id, toolResultRecord(message.content));
+      if (results.has(message.tool_call_id) || ambiguous.has(message.tool_call_id)) {
+        results.delete(message.tool_call_id);
+        ambiguous.add(message.tool_call_id);
+      } else {
+        results.set(message.tool_call_id, toolResultRecord(message.content));
+      }
       continue;
     }
     if (message.role === "assistant" || message.role === "user") break;
   }
   return results;
+}
+
+/** IDs repeated among result rows cannot be paired to one call. */
+export function ambiguousToolResultIds(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): Set<string> {
+  const seen = new Set<string>();
+  const ambiguous = new Set<string>();
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "assistant" || message.role === "user") break;
+    if (message.role !== "tool") continue;
+    if (seen.has(message.tool_call_id)) ambiguous.add(message.tool_call_id);
+    seen.add(message.tool_call_id);
+  }
+  return ambiguous;
 }
 
 export function assistantTurnCancelled(
@@ -136,6 +171,7 @@ const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
   "timed-out": "Timed out",
   cancelled: "Cancelled",
   interrupted: "Interrupted",
+  unknown: "Outcome unavailable",
 };
 
 const CANCELLED_MARKER = "[tool call cancelled by user]";
@@ -274,6 +310,8 @@ export function presentToolCall({
   active,
   awaitingApproval,
   turnCancelled,
+  occurrence,
+  ambiguousResult,
 }: {
   call: ToolCall;
   events?: ToolEventPair;
@@ -285,37 +323,66 @@ export function presentToolCall({
   /** Canonical pending permission state correlated by the backend call id. */
   awaitingApproval?: boolean;
   turnCancelled: boolean;
+  occurrence?: string | null;
+  ambiguousResult?: boolean;
 }): ToolPresentation {
-  const rawName = events?.started?.name ?? events?.finished?.name ?? call.function?.name ?? "tool";
+  // Lifecycle events are indexed only by provider call ID, which can be reused
+  // across turns. A delegation occurrence must use its own transcript batch.
+  const delegation = SPAWNED_SESSION_FIELDS.has(call.function?.name ?? "");
+  const occurrenceDelegation = !!occurrence && delegation;
+  const correlatedEvents =
+    occurrenceDelegation || (delegation && ambiguousResult) ? undefined : events;
+  const rawName =
+    correlatedEvents?.started?.name ??
+    correlatedEvents?.finished?.name ??
+    call.function?.name ??
+    "tool";
   const name = bounded(rawName, NAME_LIMIT) || "tool";
+  const delegatedStatus = occurrenceDelegation ? parseObject(resultText)?.status : undefined;
   let status: ToolPresentationStatus;
-  if (events?.finished) status = statusFromFinished(events.finished);
+  if (delegation && ambiguousResult) status = "unknown";
+  else if (correlatedEvents?.finished) status = statusFromFinished(correlatedEvents.finished);
   else if (resultText?.startsWith(CANCELLED_MARKER) || (turnCancelled && !hasResult)) {
     status = "cancelled";
   } else if (resultText?.trim() === INTERRUPTED_MARKER) status = "interrupted";
+  else if (delegatedStatus === "failed") status = "error";
+  else if (delegatedStatus === "cancelled") status = "cancelled";
+  else if (delegatedStatus === "interrupted") status = "interrupted";
+  else if (occurrenceDelegation && resultText?.startsWith("Error:")) status = "error";
   else if (hasResult) status = "success";
   else if (active && awaitingApproval) status = "awaiting-approval";
-  else if (active && events?.started) status = "running";
+  else if (active && correlatedEvents?.started) status = "running";
   else if (active) status = "pending";
   else status = "interrupted";
 
-  let resultPreview = bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  let resultPreview = bounded(correlatedEvents?.finished?.content_preview, PREVIEW_LIMIT) || null;
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
-  if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
-  if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
+  if (!resultPreview && status === "cancelled" && (!occurrenceDelegation || !hasResult))
+    resultPreview = "No result was retained.";
+  if (!resultPreview && status === "interrupted" && (!occurrenceDelegation || !hasResult))
+    resultPreview = "No result was recorded.";
 
   const presentation: ToolPresentation = {
     callId: call.id,
     name,
     label: toolLabel(name),
-    summary: bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) || null,
+    summary: bounded(correlatedEvents?.started?.key_arg_preview, PREVIEW_LIMIT) || null,
     resultPreview,
     status,
     statusLabel: STATUS_LABELS[status],
   };
-  const durationMs = events?.finished?.execution_duration_ms;
+  if (occurrenceDelegation && occurrence) presentation.occurrence = occurrence;
+  const durationMs = correlatedEvents?.finished?.execution_duration_ms;
   if (durationMs != null && Number.isFinite(durationMs) && durationMs >= 0) {
     presentation.durationMs = durationMs;
+  }
+  const field = SPAWNED_SESSION_FIELDS.get(name);
+  if (field) presentation.resultMayBePending = active && !hasResult && !ambiguousResult;
+  const args = field ? parseObject(call.function?.arguments) : null;
+  if (field && args) {
+    const value = args[field];
+    if (value == null) presentation.delegationContinuation = false;
+    else if (sessionId(value)) presentation.delegationContinuation = true;
   }
   const spawnedSessionId = spawnedSession(name, call, resultText);
   if (spawnedSessionId) presentation.spawnedSessionId = spawnedSessionId;

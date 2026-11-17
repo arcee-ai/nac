@@ -67,6 +67,45 @@ describe("work fold sentence", () => {
 });
 
 describe("work fold layout", () => {
+  it("groups only adjacent resolved calls to the same child within one turn", () => {
+    const session = (id: string, rowKey: `child:${string}` | null): ModelTurnItem => ({
+      kind: "session",
+      id,
+      action: "spawn-agent",
+      rowKey,
+      title: "Audit",
+      status: "ready",
+      presentation: {
+        callId: id,
+        name: "subagent",
+        label: "Subagent",
+        summary: null,
+        resultPreview: null,
+        status: "success",
+        statusLabel: "Succeeded",
+      },
+    });
+    const a = session("a", "child:one");
+    const b = session("b", "child:one");
+    const text: ModelTurnItem = {
+      kind: "block",
+      block: { kind: "text", key: "note", text: "Between" },
+    };
+    const c = session("c", "child:one");
+    const other = session("other", "child:two");
+    const unknown = session("unknown", null);
+    const layout = layoutModelTurn([a, b, text, c, other, unknown]);
+    expect(layout.map((item) => item.kind)).toEqual([
+      "session-group",
+      "block",
+      "session",
+      "session",
+      "session",
+    ]);
+    expect(layout[0]).toMatchObject({ kind: "session-group", entries: [a, b] });
+    expect(layout[2]).toEqual(c);
+  });
+
   it("folds groups and the prose between them, keeping the answer and sessions in the open", () => {
     const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
       kind: "group",

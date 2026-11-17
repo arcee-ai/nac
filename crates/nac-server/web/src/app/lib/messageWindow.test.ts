@@ -138,6 +138,31 @@ describe("raw message windows", () => {
     ]);
   });
 
+  it("keeps occurrence tokens aligned across pagination and rejects replaced rows", () => {
+    const current = snapshot([user("u-4"), assistant("a-5")], 4, 6);
+    current.tool_call_occurrences = [null, "log:session:store:10:digest1:11"];
+    const incoming = page([assistant("a-5"), user("u-6")], 5, 7);
+    incoming.tool_call_occurrences = ["log:session:store:10:digest2:12", null];
+    const merged = mergeMessageTail(current, incoming);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind !== "accepted") return;
+    expect(merged.snapshot.tool_call_occurrences).toEqual([
+      null,
+      "log:session:store:10:digest2:12",
+      null,
+    ]);
+    const older = page([assistant("a-3")], 3, 7);
+    older.tool_call_occurrences = ["blob:session:digest:3"];
+    expect(prependMessagePage(merged.snapshot, older, 4)?.tool_call_occurrences).toEqual([
+      "blob:session:digest:3",
+      null,
+      "log:session:store:10:digest2:12",
+      null,
+    ]);
+    incoming.tool_call_occurrences = ["log:session:store:20:digest3:21", null];
+    expect(mergeMessageTail(current, incoming).kind).toBe("snapshot-required");
+  });
+
   it("prepends only the page that still joins the captured cursor", () => {
     const current = snapshot([user("u-4"), assistant("a-5")], 4, 6);
     const older = page([system("s-2"), user("u-3")], 2, 6);

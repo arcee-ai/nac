@@ -23,6 +23,10 @@ export interface WorkFold {
 }
 /** A turn as the transcript lays it out: the fold where its work began, then everything else. */
 export type TurnLayoutItem = WorkFold | InsightSessionEntry | {
+    kind: "session-group";
+    key: string;
+    entries: InsightSessionEntry[];
+} | {
     kind: "block";
     key: string;
     block: ModelTurnBlock;

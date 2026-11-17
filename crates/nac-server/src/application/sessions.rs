@@ -372,6 +372,19 @@ impl<'a> SessionStateApplication<'a> {
             .await
     }
 
+    pub(crate) async fn tool_call_content_at(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        occurrence: Option<&str>,
+    ) -> Result<Option<ToolCallContent>> {
+        self.manager
+            .attach_session(session_id)
+            .await?
+            .tool_call_content_at(call_id, occurrence)
+            .await
+    }
+
     pub(crate) async fn direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
         self.manager
             .validate_operation_session(

@@ -31,6 +31,7 @@ export interface WorkFold {
 export type TurnLayoutItem =
   | WorkFold
   | InsightSessionEntry
+  | { kind: "session-group"; key: string; entries: InsightSessionEntry[] }
   | { kind: "block"; key: string; block: ModelTurnBlock };
 
 function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
@@ -70,6 +71,29 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
       return;
     }
     if (item.kind === "session") {
+      // Only adjacent calls with the same resolved identity may share a
+      // control. Intervening prose or work remains in its original position.
+      const previous = items[index - 1];
+      const last = layout.at(-1);
+      if (
+        item.rowKey &&
+        previous?.kind === "session" &&
+        previous.rowKey === item.rowKey &&
+        previous.action === item.action
+      ) {
+        if (last?.kind === "session-group") {
+          last.entries.push(item);
+          return;
+        }
+        if (last?.kind === "session") {
+          layout[layout.length - 1] = {
+            kind: "session-group",
+            key: last.id,
+            entries: [last, item],
+          };
+          return;
+        }
+      }
       layout.push(item);
       return;
     }

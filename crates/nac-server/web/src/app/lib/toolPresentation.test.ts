@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectToolResults,
   indexToolEvents,
   presentToolCall,
   type ToolPresentationStatus,
@@ -53,6 +54,15 @@ function present(name: string, events: AgentEvent[], active = false) {
 }
 
 describe("tool presentation mapper", () => {
+  it("does not pair duplicate results within a single assistant batch", () => {
+    const messages: Parameters<typeof collectToolResults>[0] = [
+      { role: "assistant", content: null, tool_calls: [call("subagent")] },
+      { role: "tool", tool_call_id: "call-subagent", content: "first" },
+      { role: "tool", tool_call_id: "call-subagent", content: "second" },
+    ];
+    expect(collectToolResults(messages, 0).has("call-subagent")).toBe(false);
+  });
+
   it("uses product vocabulary across direct tool families", () => {
     const cases = [
       ["read", "Read file"],
@@ -76,6 +86,53 @@ describe("tool presentation mapper", () => {
         summary: "safe preview",
         status: "running",
       });
+    }
+  });
+
+  it("keeps a finished call pending while its live batch has not recorded a result", () => {
+    const input = {
+      call: call("subagent"),
+      events: { finished: finished("subagent") },
+      hasResult: false,
+      resultText: null,
+      resultHasImage: false,
+      active: true,
+      turnCancelled: false,
+    };
+    expect(presentToolCall(input)).toMatchObject({ status: "success", resultMayBePending: true });
+    expect(presentToolCall({ ...input, active: false })).toMatchObject({
+      resultMayBePending: false,
+    });
+    expect(presentToolCall({ ...input, hasResult: true })).toMatchObject({
+      resultMayBePending: false,
+    });
+  });
+
+  it("does not apply a later reused call ID's lifecycle event to a delegation occurrence", () => {
+    const input = {
+      call: call("subagent"),
+      events: { finished: finished("subagent", { content_preview: "later result" }) },
+      hasResult: true,
+      resultText: "Error: foreground subagent failed: private detail",
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+      occurrence: "log:parent:1:2",
+    };
+    const earlier = presentToolCall(input);
+    const later = presentToolCall({ ...input, occurrence: "log:parent:3:4", resultText: "ok" });
+    expect(earlier).toMatchObject({ status: "error", resultPreview: null });
+    expect(later).toMatchObject({ status: "success", resultPreview: null });
+    expect(JSON.stringify(earlier)).not.toContain("private detail");
+    expect(JSON.stringify(earlier)).not.toContain("later result");
+    for (const [childStatus, expected] of [
+      ["failed", "error"],
+      ["cancelled", "cancelled"],
+      ["interrupted", "interrupted"],
+    ] as const) {
+      expect(
+        presentToolCall({ ...input, resultText: JSON.stringify({ status: childStatus }) }),
+      ).toMatchObject({ status: expected, resultPreview: null });
     }
   });
 
@@ -217,6 +274,7 @@ describe("tool durations and spawned sessions", () => {
     );
 
     expect(presentation.spawnedSessionId).toBe(CHILD_ID);
+    expect(presentation.delegationContinuation).toBe(false);
     expect(JSON.stringify(presentation)).not.toContain("Fixed the race.");
   });
 
@@ -238,6 +296,9 @@ describe("tool durations and spawned sessions", () => {
   });
 
   it("takes a continued session from the arguments before any result exists", () => {
+    expect(launch("subagent", { child_session_id: CHILD_ID }, null).delegationContinuation).toBe(
+      true,
+    );
     expect(launch("subagent", { child_session_id: CHILD_ID }, null).spawnedSessionId).toBe(
       CHILD_ID,
     );

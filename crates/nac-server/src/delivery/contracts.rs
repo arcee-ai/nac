@@ -706,6 +706,8 @@ pub(crate) fn selection_message_references(
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MessagesPageResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_occurrences: Vec<Option<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<TerminalSelectionMessageReference>,
     pub messages: Vec<Message>,
     pub created_at: Vec<Option<String>>,
@@ -733,6 +735,8 @@ pub struct MessageCycleMetadata {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SessionSnapshotResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_occurrences: Vec<Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<TerminalSelectionMessageReference>,
     #[serde(flatten)]
@@ -783,6 +787,7 @@ impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetad
 impl From<MessagesPageSnapshot> for MessagesPageResponse {
     fn from(page: MessagesPageSnapshot) -> Self {
         Self {
+            tool_call_occurrences: page.tool_call_occurrences,
             terminal_selection_attributions: selection_message_references(
                 page.terminal_selection_attributions,
                 &page.messages,

@@ -384,6 +384,7 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     message_cycle?: import("../../types/openapi.generated").components["schemas"]["MessageCycleMetadata"] | null;
     message_page?: import("../../types/openapi.generated").components["schemas"]["MessagePageMetadata"] | null;
     terminal_selection_attributions?: import("../../types/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
+    tool_call_occurrences?: (string | null)[];
 }>, Error>;
 export declare function useLoadOlderMessages(id: string): import("@tanstack/react-query").UseMutationResult<boolean, Error, void, unknown>;
 export declare function useThreadEventPages(id: string | null, threadName: string | null): import("@tanstack/react-query").UseInfiniteQueryResult<InfiniteData<{
@@ -436,6 +437,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     message_cycle?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessageCycleMetadata"] | null;
     message_page?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessagePageMetadata"] | null;
     terminal_selection_attributions?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TerminalSelectionMessageReference"][];
+    tool_call_occurrences?: (string | null)[];
 }, Error, {
     allow_insecure_http?: import("../../types/openapi.generated").components["schemas"]["RequestField_bool_bool"];
     api_key_env?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];

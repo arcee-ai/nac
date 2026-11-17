@@ -380,6 +380,7 @@ async fn mcp_filtered_read_then_actual_revert_selects_exact_snapshot_and_log_bou
 fn mcp_transcript_rejects_inconsistent_canonical_projection_metadata() {
     for indices in [vec![], vec![1], vec![1, 2, 3], vec![2, 2], vec![3, 1]] {
         let page = MessagesPageSnapshot {
+            tool_call_occurrences: Vec::new(),
             canonical_message_indices: indices,
             messages: vec![user("one"), user("two")],
             created_at: vec![None, None],
