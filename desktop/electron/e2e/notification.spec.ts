@@ -627,3 +627,162 @@ test("healthy checkpoint with invalid native notifications permits explicit menu
         .toBe(false);
   }
 });
+
+test("notification clicks preserve a focused retained draft and consume unretained-editor and IME deferrals without replay", async ({
+  candidate: c,
+}) => {
+  await installNativeDouble(c.app);
+  await expect
+    .poll(async () => (await state(c)).notifications?.loaded)
+    .toBe(true);
+  const project = await c.project();
+  const source = await c.session("direct", project);
+  const target = await c.session("direct", project);
+  await c.page.evaluate((id) => {
+    location.hash = `/session/${id}/files`;
+  }, source);
+  const composer = c.page.getByRole("combobox", { name: "Message" });
+  await expect(composer).toBeVisible();
+  const draft =
+    "  Retained private draft 雪\nNever submit from a notification.  ";
+  await composer.fill(draft);
+  await expect(composer).toHaveAttribute("data-nac-retained-draft", "");
+  const draftIsSaved = () =>
+    checkpoint(c)
+      .then((saved) =>
+        Object.values(saved.values.drafts).some((raw: any) =>
+          JSON.parse(raw).drafts.some(
+            (entry: string[]) => entry[0] === source && entry[1] === draft,
+          ),
+        ),
+      )
+      .catch(() => false);
+  await expect.poll(draftIsSaved).toBe(true);
+  await menu(c, "notifications-enable", true);
+  await expect
+    .poll(
+      async () => (await state(c)).notifications.observer?.projectionAvailable,
+    )
+    .toBe(true);
+
+  const completeWhileHidden = async (index: number, token: string) => {
+    await closeWorkspace(c);
+    c.provider.enqueue(
+      `notification-editor-${index}`,
+      { token },
+      {
+        kind: "text",
+        text: `Private notification target ${index}.`,
+        stream: "request",
+      },
+    );
+    await c.api(`/sessions/${target}/runs`, { prompt: token });
+    await expect
+      .poll(async () => (await nativeSubmissions(c)).length)
+      .toBe(index + 1);
+    await expect
+      .poll(
+        async () => (await checkpoint(c)).native.notifications.receipts.length,
+      )
+      .toBe(0);
+    await c.app.evaluate((_electron, index) => {
+      const probe = (globalThis as any).__notificationProbe;
+      probe.handles.get(probe.submissions[index].id).emit("click");
+    }, index);
+    await expect
+      .poll(() =>
+        c.app.evaluate(
+          () => (globalThis as any).__notificationProbe.targetAcks.length,
+        ),
+      )
+      .toBe(index + 1);
+    return c.app.evaluate(
+      () => (globalThis as any).__notificationProbe.targetAcks.at(-1).outcome,
+    );
+  };
+  const refuseLateReplay = async (index: number) => {
+    await c.page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await c.app.evaluate((_electron, index) => {
+      const probe = (globalThis as any).__notificationProbe;
+      probe.handles.get(probe.submissions[index].id).emit("click");
+    }, index);
+    expect(await c.page.evaluate(() => location.hash)).toContain(
+      `/session/${source}`,
+    );
+    expect(
+      await c.app.evaluate(
+        () => (globalThis as any).__notificationProbe.targetAcks.length,
+      ),
+    ).toBe(index + 1);
+    await expect(composer).toHaveValue(draft);
+    expect(await draftIsSaved()).toBe(true);
+  };
+
+  await composer.focus();
+  expect(
+    await c.page.evaluate(() =>
+      document.activeElement?.hasAttribute("data-nac-retained-draft"),
+    ),
+  ).toBe(true);
+  expect(await completeWhileHidden(0, "NOTIFICATION_RETAINED_EDITOR")).toBe(
+    "opened",
+  );
+  await expect
+    .poll(() => c.page.evaluate(() => location.hash))
+    .toContain(`/session/${target}`);
+  expect(await draftIsSaved()).toBe(true);
+  expect(c.provider.requests).toHaveLength(1);
+  await c.page.evaluate((id) => {
+    location.hash = `/session/${id}/files`;
+  }, source);
+  await expect(composer).toHaveValue(draft);
+
+  // A private DOM fixture isolates the ordinary unretained input guard without
+  // introducing a modal, which would independently forbid navigation.
+  await c.page.evaluate(() => {
+    const editor = document.createElement("input");
+    editor.id = "notification-unretained-editor";
+    editor.value = "Private unretained editor text";
+    document.body.append(editor);
+    editor.focus();
+  });
+  expect(await c.page.evaluate(() => document.activeElement?.id)).toBe(
+    "notification-unretained-editor",
+  );
+  expect(await completeWhileHidden(1, "NOTIFICATION_UNRETAINED_EDITOR")).toBe(
+    "deferred",
+  );
+  expect(await c.page.evaluate(() => location.hash)).toContain(
+    `/session/${source}`,
+  );
+  expect(
+    await c.page.locator("#notification-unretained-editor").inputValue(),
+  ).toBe("Private unretained editor text");
+  await c.page.evaluate(() =>
+    document.getElementById("notification-unretained-editor")!.remove(),
+  );
+  await composer.focus();
+  await refuseLateReplay(1);
+  expect(c.provider.requests).toHaveLength(2);
+
+  // Synthetic composition events exercise the existing guard only; this is
+  // separate from native IME/input qualification.
+  await composer.dispatchEvent("compositionstart", { bubbles: true });
+  expect(await completeWhileHidden(2, "NOTIFICATION_IME_EDITOR")).toBe(
+    "deferred",
+  );
+  expect(await c.page.evaluate(() => location.hash)).toContain(
+    `/session/${source}`,
+  );
+  await composer.dispatchEvent("compositionend", { bubbles: true });
+  await composer.focus();
+  await refuseLateReplay(2);
+  expect(c.provider.requests).toHaveLength(3);
+  expect(await nativeSubmissions(c)).toHaveLength(3);
+  c.provider.assertConsumed();
+});
