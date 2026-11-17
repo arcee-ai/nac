@@ -13,7 +13,10 @@ const script = swift.match(/static let disabledMcpFixtureScript = #"""\n([\s\S]*
 const form = `<div><div><div><div class="label-small">Name*</div></div><div class="flex text-left flex-col gap-1"><div class="input-wrapper relative w-full h-fit"><input placeholder="my_server" value="wk_disabled_fixture"></div></div></div>
   <div><div><div><div class="label-small">Enabled</div></div><button id="enabled" aria-label="Enabled" role="switch" aria-checked="true"></button>
   <div><div class="label-small">Required</div></div><button id="required" aria-label="Required" role="switch" aria-checked="true"></button></div></div></div>`;
-const dialog = body => `<div role="dialog" aria-label="MCP servers" data-modal-open="true">${body}</div>`;
+// Settings › MCP servers: the page region and the manager's SettingsSurface
+// section share the name; only the surface owns the form.
+const surface = body => `<section aria-label="MCP servers" data-settings-surface="true">${body}</section>`;
+const dialog = body => `<main aria-label="MCP servers">${surface(body)}</main>`;
 
 function fixture(html = dialog(form)) {
   const dom = new JSDOM('<style>*{opacity:1;visibility:visible}</style>' + html, { runScripts: 'outside-only' });
@@ -43,9 +46,10 @@ test('only the owned Enabled switch changes despite unrelated/inert checked swit
 for (const [name, html] of [
   ['wrong fixture', dialog(form.replace('wk_disabled_fixture', 'other'))],
   ['two owned forms', dialog(form + form)],
-  ['two active dialogs', dialog(form) + dialog(form)],
-  ['inactive dialog', dialog(form).replace('data-modal-open="true"', '')],
-  ['hidden dialog', dialog(form).replace('role="dialog"', 'hidden role="dialog"')],
+  ['two active surfaces', dialog(form) + dialog(form)],
+  ['unmarked surface', dialog(form).replace(' data-settings-surface="true"', '')],
+  ['page region only', `<main aria-label="MCP servers">${form}</main>`],
+  ['hidden surface', dialog(form).replace('<section aria-label', '<section hidden aria-label')],
   ['inert control', dialog(form.replace('id="enabled"', 'id="enabled" inert'))],
   ['hidden control', dialog(form.replace('id="enabled"', 'id="enabled" aria-hidden="true"'))],
   ['disabled control', dialog(form.replace('id="enabled"', 'id="enabled" disabled'))],
@@ -71,12 +75,12 @@ test('an ignored click cannot satisfy the disabled readback', () => {
   } finally { f.close(); }
 });
 
-// Modal uses a 150ms fade. The maintained waitJS may probe repeatedly; it
-// must not click until the exact owned surface is visible, or re-enable it.
-test('opening modal waits for full visibility before its one idempotent disable', () => {
+// The section may still be fading in. The maintained waitJS may probe
+// repeatedly; it must not click until the exact owned surface is visible.
+test('opening section waits for full visibility before its one idempotent disable', () => {
   const f = fixture(dialog(form));
   try {
-    const modal = f.document.querySelector('[role=dialog]');
+    const modal = f.document.querySelector('[data-settings-surface]');
     modal.style.opacity = '0.5';
     assert.throws(() => f.probe(true));
     assert.deepEqual(f.clicks, []);

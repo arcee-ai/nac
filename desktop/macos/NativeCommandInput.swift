@@ -91,25 +91,36 @@ final class NativeCommandInput {
         try await value(text)
         try external?.verified("redo")
         let beforeSettings = commands.smokeSnapshot["dispatches"] as! Int
+        let sessionHash = try await js("return location.hash") as? String ?? ""
         try await drive("settings", external: external) { try await self.key(43, flags: .maskCommand) }
-        try await dialog("Configurations", visible: true)
+        try await settingsPage(visible: true)
         guard commands.smokeSnapshot["dispatches"] as? Int == beforeSettings + 1 else {
             throw PreviewError.message("Native Settings was not dispatched once")
         }
         try external?.verified("settings")
-        try await drive("close-settings", composer: false, external: external) { try await self.key(53, composer: false) }
-        try await dialog("Configurations", visible: false)
+        // Settings is a full page; Escape outside a field leaves it for the
+        // session it was opened from and hands the composer its focus back.
+        try await drive("close-settings", target: Self.settingsTarget, external: external) { try await self.key(53, target: Self.settingsTarget) }
+        try await settingsPage(visible: false)
         try await composerFocus()
         try external?.verified("close-settings")
         let beforeNew = commands.smokeSnapshot["dispatches"] as! Int
         try await drive("new-session", external: external) { try await self.key(45, flags: .maskCommand) }
-        try await dialog("New Chat", visible: true)
+        try await homeComposer()
         guard commands.smokeSnapshot["dispatches"] as? Int == beforeNew + 1 else {
             throw PreviewError.message("Native New Session was not dispatched once")
         }
         try external?.verified("new-session")
-        try await drive("close-new-session", composer: false, external: external) { try await self.key(53, composer: false) }
-        try await dialog("New Chat", visible: false)
+        // New Session opens Home's composer; there is no layer to dismiss. The
+        // trusted Escape keeps its phase and must leave that view intact; the
+        // fixture then returns to the session and gives its composer focus.
+        try await drive("close-new-session", target: Self.homeTarget, external: external) { try await self.key(53, target: Self.homeTarget) }
+        try await homeComposer()
+        _ = try await js("history.back(); return true")
+        try await wait("session route after New Session") {
+            try await self.js("return location.hash === expected && !!document.querySelector('[role=combobox][aria-label=Message]')", arguments: ["expected": sessionHash]) as? Bool == true
+        }
+        _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         try await composerFocus()
         try external?.verified("close-new-session")
         let events = try await js("return __commandInputEvidence") as? [[String: Any]] ?? []
@@ -190,13 +201,14 @@ final class NativeCommandInput {
             throw PreviewError.message("Console locked or ownership unknown; fixture input stopped")
         }
     }
-    private func drive(_ phase: String, composer: Bool = true, external: ExternalCommandFixture?,
+    private static let composerTarget = "return document.hasFocus() && document.activeElement?.getAttribute('aria-label') === 'Message'"
+    // The Settings page keeps Escape unless a field, list, menu or layer has focus.
+    private static let settingsTarget = "return document.hasFocus() && location.hash.startsWith('#/settings/') && !document.activeElement?.closest('input,textarea,select,[contenteditable=\"\"],[contenteditable=\"true\"],[role=menu],[role=listbox],[role=combobox],[role=dialog]')"
+    private static let homeTarget = "return document.hasFocus() && document.activeElement?.id === 'home-composer'"
+    private func drive(_ phase: String, target: String? = nil, external: ExternalCommandFixture?,
                        operation: () async throws -> Void) async throws {
         try requireFocus()
-        let target = composer
-            ? "return document.hasFocus() && document.activeElement?.getAttribute('aria-label') === 'Message'"
-            : "return document.hasFocus() && !!document.activeElement?.closest('[role=dialog]')"
-        guard try await js(target) as? Bool == true else { throw PreviewError.message("Fixture DOM input target lost focus") }
+        guard try await js(target ?? Self.composerTarget) as? Bool == true else { throw PreviewError.message("Fixture DOM input target lost focus") }
         if let external {
             try external.ready(phase)
             try await wait("external OS driver: \(phase)", timeout: 30) { try external.acknowledged() }
@@ -204,11 +216,8 @@ final class NativeCommandInput {
             try await operation()
         }
     }
-    private func key(_ code: CGKeyCode, flags: CGEventFlags = [], composer: Bool = true) async throws {
-        let target = composer
-            ? "return document.hasFocus() && document.activeElement?.getAttribute('aria-label') === 'Message'"
-            : "return document.hasFocus() && !!document.activeElement?.closest('[role=dialog]')"
-        guard try await js(target) as? Bool == true else { throw PreviewError.message("Fixture DOM input target lost focus") }
+    private func key(_ code: CGKeyCode, flags: CGEventFlags = [], target: String? = nil) async throws {
+        guard try await js(target ?? Self.composerTarget) as? Bool == true else { throw PreviewError.message("Fixture DOM input target lost focus") }
         try pair(code, flags: flags)
     }
     private func pair(_ code: CGKeyCode, flags: CGEventFlags = [], text: String? = nil) throws {
@@ -249,9 +258,16 @@ final class NativeCommandInput {
     private func composerFocus() async throws {
         try await wait("native keyboard focus return") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
     }
-    private func dialog(_ title: String, visible: Bool) async throws {
-        try await wait("native keyboard dialog") {
-            try await self.js("return [...document.querySelectorAll('[role=dialog]')].some(d => d.textContent.includes(title)) === visible && (!visible || !!document.activeElement?.closest('[role=dialog]'))", arguments: ["title": title, "visible": visible]) as? Bool == true
+    /// Native Settings opens the Settings page on Models & providers, not a dialog.
+    private func settingsPage(visible: Bool) async throws {
+        try await wait("native keyboard Settings page") {
+            try await self.js("const shown = location.hash === '#/settings/models' && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length); return shown === visible && (!visible || !document.querySelector('[role=dialog]'))", arguments: ["visible": visible]) as? Bool == true
+        }
+    }
+    /// Native New Session lands on Home's composer with its textbox focused.
+    private func homeComposer() async throws {
+        try await wait("native keyboard Home composer") {
+            try await self.js("const f = document.getElementById('home-composer'); return location.hash.startsWith('#/?project=') && !!f && document.activeElement === f && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?')") as? Bool == true
         }
     }
     private func js(_ source: String, arguments: [String: Any] = [:]) async throws -> Any {

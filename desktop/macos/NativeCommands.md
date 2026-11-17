@@ -2,8 +2,9 @@
 
 `NativeCommands` supplies AppKit menus. Workspace actions are `newSession`,
 `settings` and `projects`. React's existing sidebar/product navigation owners
-open the shared UI. New Session opens a dialog; the command never submits a
-session or sends terminal input. Edit selectors use AppKit's current responder
+open the shared UI. New Session opens Home's composer for the current project
+and Settings opens the Settings page; neither command submits a session or
+sends terminal input. Edit selectors use AppKit's current responder
 chain. The bridge does not read/write the pasteboard or synthesize input events.
 
 The optional `DesktopCommandPort` is injected at presentation composition.

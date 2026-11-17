@@ -66,12 +66,11 @@ final class ExternalNavigationSmoke {
 
     func run() async throws -> [String: Any] {
         try await wait("verified loaded workspace") { self.currentDocument != nil }
-        try await wait("production create-chat control") {
-            try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Create chat'&&!b.disabled)") as? Bool == true
-        }
-        _ = try await js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Create chat').click();return true")
-        try await wait("production session composer") {
-            try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true
+        // The fixture project opens Home's composer (the one new-session flow),
+        // a settled non-modal view. Starting a session always sends a first run,
+        // which this zero-inference recording must not do, so it stays on Home.
+        try await wait("production Home composer") {
+            try await self.js("const f=document.getElementById('home-composer');return !!f&&!f.disabled&&[...f.labels].some(l=>l.textContent.trim()==='What should we work on?')&&!document.querySelector('[role=dialog]')") as? Bool == true
         }
         try await wait("current live document") { self.currentDocument != nil }
         guard let expected = currentDocument, let origin = app.baseURL else {
@@ -161,16 +160,22 @@ final class ExternalNavigationSmoke {
         // MCP picker/form. Selecting a template neither saves nor connects it.
         // DOM driving establishes a category, never trusted physical input.
         let beforeBlank = actions.count
+        // MCP servers is a Settings section: the sidebar's Settings gear, then the section link.
+        try await wait("shared Settings navigation") {
+            try await self.js("return !!document.querySelector('button[aria-label=Settings]')") as? Bool == true
+        }
+        _ = try await js("document.querySelector('button[aria-label=Settings]').click();return true")
+        let mcpEntry = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a')||[])].find(a=>a.textContent.trim()==='MCP servers')"
         try await wait("shared MCP navigation") {
-            try await self.js("return !!document.querySelector('button[aria-label^=\"MCP servers\"]')") as? Bool == true
+            try await self.js("return !!\(mcpEntry)") as? Bool == true
         }
-        _ = try await js("document.querySelector('button[aria-label^=\"MCP servers\"]').click();return true")
+        _ = try await js("\(mcpEntry).click();return true")
         try await wait("embedded Exa catalog entry") {
-            try await self.js("return [...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] button')].some(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa'))") as? Bool == true
+            try await self.js("return [...document.querySelectorAll('section[data-settings-surface=\"true\"][aria-label=\"MCP servers\"] button')].some(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa'))") as? Bool == true
         }
-        _ = try await js("[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] button')].find(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa')).click();return true")
+        _ = try await js("[...document.querySelectorAll('section[data-settings-surface=\"true\"][aria-label=\"MCP servers\"] button')].find(b=>!b.disabled&&[...b.querySelectorAll('span')].some(s=>s.textContent.trim()==='exa')).click();return true")
         try await wait("rendered shared MCP Docs anchor") {
-            try await self.js("const a=[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs');return !!a&&a.href==='https://docs.exa.ai/reference/exa-mcp'&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
+            try await self.js("const a=[...document.querySelectorAll('section[data-settings-surface=\"true\"][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs');return !!a&&a.href==='https://docs.exa.ai/reference/exa-mcp'&&a.target==='_blank'&&a.getBoundingClientRect().width>0&&a.getBoundingClientRect().height>0") as? Bool == true
         }
         let catalogStub = try await js("return window.__nacRecordingCatalog") as? [String: Any] ?? [:]
         guard let catalogRequests = catalogStub["requests"] as? Int, (1...8).contains(catalogRequests),
@@ -178,7 +183,7 @@ final class ExternalNavigationSmoke {
               catalogStub["thumbnailOmitted"] as? Bool == true else {
             throw PreviewError.message("Recording catalog stub did not serve the existing Exa template")
         }
-        _ = try await js("[...document.querySelectorAll('[role=dialog][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs').click();return true")
+        _ = try await js("[...document.querySelectorAll('section[data-settings-surface=\"true\"][aria-label=\"MCP servers\"] a')].find(a=>a.textContent.trim()==='Docs').click();return true")
         try await wait("one rendered target-blank link action") { self.actions.count > beforeBlank }
         try record("rendered-target-blank-link", expected: expected, origin: origin)
         guard actions.count == beforeBlank + 1, actions.last?["popup"] as? Bool == true,

@@ -66,7 +66,9 @@ const path = require('node:path');
 const {JSDOM} = createRequire(path.resolve(path.dirname(process.argv[2]),
   '../../crates/nac-server/web/package.json'))('jsdom');
 const section=(state='Connected',extra='')=>`<section aria-labelledby="oauth-title"><h3 id="oauth-title">OAuth</h3><p role="status">${state}</p><button>Log out</button>${extra}</section>`;
-const dialog=(body=section(),name='external-auth-fixture')=>`<div role="dialog" aria-label="MCP servers" data-modal-open="true"><input aria-label="Server name" value="${name}">${body}</div>`;
+// Settings › MCP servers: the page region and the section's manager surface share the name.
+const dialog=(body=section(),name='external-auth-fixture')=>`<main aria-label="MCP servers"><section aria-label="MCP servers" data-settings-surface="true"><input aria-label="Server name" value="${name}">${body}</section></main>`;
+const owner='<section aria-label="MCP servers"';
 const evaluate=(html,value)=>{
  const dom=new JSDOM('<style>*{opacity:1;visibility:visible}</style>'+html,{runScripts:'outside-only'});
  dom.window.HTMLElement.prototype.getBoundingClientRect=function(){return new dom.window.DOMRect(0,0,100,20);};
@@ -80,14 +82,15 @@ for(const [name,html] of [
  ['wrongstate',dialog(section('Waiting for authorization'))],['checking',dialog(section('Checking authorization'))],
  ['substring',dialog(section('Connected eventually'))],['foreignglobal',dialog(section('Ready to connect'))+'<div>Connected</div>'],
  ['foreignserver',dialog(section(),'other')],['nodocument',''],['duplicateowner',dialog()+dialog()],
- ['inactiveowner',dialog().replace('data-modal-open="true"','data-modal-open="false"')],
- ['hiddenowner',dialog().replace('role="dialog"','hidden role="dialog"')],
- ['coveredowner',dialog().replace('role="dialog"','data-covered role="dialog"')],
- ['fadedowner',dialog().replace('role="dialog"','style="opacity:.5" role="dialog"')],
+ ['inactiveowner',dialog().replace('data-settings-surface="true"','data-settings-surface="false"')],
+ ['regiononly',dialog().replace(' data-settings-surface="true"','')],
+ ['hiddenowner',dialog().replace(owner,'<section hidden aria-label="MCP servers"')],
+ ['coveredowner',dialog().replace(owner,'<section data-covered aria-label="MCP servers"')],
+ ['fadedowner',dialog().replace(owner,'<section style="opacity:.5" aria-label="MCP servers"')],
  ['duplicatestatus',dialog(section('Connected','<p role="status">Connected</p>'))],
  ['hiddenstatus',dialog(section().replace('<p role="status"','<p hidden role="status"'))],
  ['wrongsection',dialog(section().replace('>OAuth<','>Other<'))],
- ['duplicatename',dialog().replace('<section','<input aria-label="Server name" value="external-auth-fixture"><section')],
+ ['duplicatename',dialog().replace('<section aria-labelledby','<input aria-label="Server name" value="external-auth-fixture"><section aria-labelledby')],
 ]){assert.equal(evaluate(html,'Connected').actual,false,name);rows.push({case:name,proposed:false});}
 console.log(rows.length+' actual scoped OAuth status controls passed; four paragraph cases fail the old span/div selector.');
 }

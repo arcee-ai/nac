@@ -11,8 +11,12 @@ const expected = {kind:'file', id:'session', path:'workspace.ts', content:'expor
 const state = {path:expected.path, content:expected.content, binary:false, too_large:false};
 const composer = '<textarea role="combobox" aria-label="Message"></textarea>';
 const row = '<button title="workspace.ts" aria-pressed="true">workspace.ts</button>';
-const header = '<div class="header-sm"><span title="workspace.ts">workspace.ts</span></div>';
-const code = '<div><span>1</span><span class="code">export const workspaceFileFixture = 351;</span></div>';
+// Focus's desktop pane header (type-strong) and shared DiffLineRow: gutter
+// (optional spoken Added/Deleted, then the number), aria-hidden sign, code.
+const header = '<div class="type-strong"><span title="workspace.ts">workspace.ts</span><span></span></div>';
+const code = '<div><span><span>1</span></span><span aria-hidden="true"></span><span class="code">export const workspaceFileFixture = 351;</span></div>';
+const added = code.replace('<span><span>1</span></span><span aria-hidden="true"></span>',
+  '<span><span class="sr-only">Added </span><span>1</span></span><span aria-hidden="true">+</span>');
 const pane = header + '<div class="overflow-auto">' + code + '</div>';
 function fixture(html = row + pane, hash = '#/session/session/files', chat = '') {
   const dom = new JSDOM('<style>*{opacity:1;visibility:visible}.overflow-auto{overflow:auto}</style>' + composer + '<section>' + chat + '</section><div id=panel><div id=detail>' + html + '</div></div>', {
@@ -57,7 +61,8 @@ function check(html, api=state, hash) {
 }
 test('plain and untracked diff panes bind the selected file API and visible highlighted line', () => {
   for (const content of [code,
-    '<div><div><span>@@</span><span class="code">@@ -0,0 +1 @@</span></div>' + code + '</div>']) {
+    '<div><div><span aria-hidden="true">⋯</span><span class="code">@@ -0,0 +1 @@</span></div>' + code + '</div>',
+    '<div><div><span aria-hidden="true">⋯</span><span class="code">@@ -0,0 +1 @@</span></div>' + added + '</div>']) {
     const result = check(row + header + '<div class="overflow-auto">' + content + '</div>');
     assert.equal(result.ready,true); assert.equal(result.file_api_bound,true);
     assert.equal(result.detail_count,1);
@@ -77,7 +82,10 @@ test('wrong route, file selection or detail identity fails even with matching co
     row + pane.replace('title="workspace.ts"','title="other.ts"'),row + pane + pane,
     row + pane.replace('= 351','= 352'),row + '<div inert>' + pane + '</div>',
     row + pane.replace('class="overflow-auto"','class="overflow-auto" style="opacity:0"'),
-    row + pane.replace(code,'Loading file…' + code)]) assert.equal(check(html).ready,false);
+    row + pane.replace(code,'Loading file…' + code),
+    row + pane.replace('class="type-strong"','class="header-sm"'),
+    row + pane.replace('<span aria-hidden="true"></span>',''),
+    row + pane.replace('<span><span>1</span></span>','<span><span>one</span></span>')]) assert.equal(check(html).ready,false);
 });
 test('stale, missing, binary, oversized or foreign API content cannot qualify', () => {
   for (const api of [null,{}, {...state,path:'other.ts'},{...state,content:'old'},
@@ -243,7 +251,7 @@ test('actual Files action rechecks readiness without click retry', () => {
 });
 
 
-const hunk = '<div><span>@@</span><span class="code">-0,0 +1,1</span></div>';
+const hunk = '<div><span aria-hidden="true">⋯</span><span class="code">@@ -0,0 +1,1 @@</span></div>';
 function gitFixture(html = header + '<div class="overflow-auto">' + hunk + code + '</div>', hash = '#/session/session/files', chat = '') {
   const f = fixture(html,hash,chat);
   f.window.document.querySelector('#panel').insertAdjacentHTML('beforeend',
@@ -302,10 +310,11 @@ test('actual Git hunk and exact file source must share one selected visible owne
     header+'<div class="overflow-auto">'+hunk+'</div>',
     header+'<div class="overflow-auto">'+code+'</div><section>'+hunk+'</section>',
     header.replace('title="workspace.ts"','title="foreign.ts"')+'<div class="overflow-auto">'+hunk+code+'</div>',
-    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span hidden>')+code+'</div>',
-    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span inert>')+code+'</div>',
-    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span data-covered>')+code+'</div>',
-    header+'<div class="overflow-auto">'+hunk.replace('<span>','<span data-top="-30">')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span class="code">','<span class="code" hidden>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span class="code">','<span class="code" inert>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span class="code">','<span class="code" data-covered>')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace('<span class="code">','<span class="code" data-top="-30">')+code+'</div>',
+    header+'<div class="overflow-auto">'+hunk.replace(' @@</span>','</span>')+code+'</div>',
     header+'<div class="overflow-auto" data-clip-width="20">'+hunk+code+'</div>',
     header+'<div class="overflow-auto">'+hunk.replace('-0,0 +1,1','not a hunk')+code+'</div>',
     header+'<div class="overflow-auto">'+hunk+code+'</div>'+header+'<div class="overflow-auto">'+hunk+code+'</div>',

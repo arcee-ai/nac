@@ -11,11 +11,16 @@ final class NativeCommandSmoke {
     init(app: PreviewApp, commands: NativeCommands) { self.app = app; self.commands = commands }
 
     func run(trustedInput: Bool = false, captures: URL? = nil) async throws -> [String: Any] {
-        try await wait("production create-chat UI") {
-            try await self.js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled)") as? Bool == true
+        // Home's composer is the one new-session flow; Start session sends the
+        // typed prompt as the session's first run, then opens the session.
+        try await wait("production Home composer") {
+            try await self.js("const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?')") as? Bool == true
         }
-        _ = try await js("document.querySelectorAll('button').forEach(b => { if (b.textContent.trim() === 'Create chat') b.click() }); return true")
-        try await wait("session composer") { try await self.js("return !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
+        _ = try await js("const f = document.getElementById('home-composer'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(f, 'Native command fixture session'); f.dispatchEvent(new Event('input', {bubbles: true})); return true")
+        try await wait("production Start session") {
+            try await self.js("const b = document.querySelector('button[aria-label=\"Start session\"]'); if (!b || b.disabled) return false; b.click(); return true") as? Bool == true
+        }
+        try await wait("session composer") { try await self.js("return /^#\\/session\\//.test(location.hash) && !!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
         _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         try await wait("current document UI command owner") { self.commands.smokeSnapshot["ready"] as? Bool == true }
         try await retirementBoundary(captures: captures)
@@ -30,20 +35,27 @@ final class NativeCommandSmoke {
             inputEvidence = try await NativeCommandInput(app: app, commands: commands).run(externalDirectory: external ? captures : nil)
         }
         let first = commands.smokeSnapshot
+        let sessionHash = try await js("return location.hash") as! String
         try perform(menu: "NAC", title: "Settings…")
-        try await dialog("Configurations", visible: true)
+        try await settingsPage()
         try await capture("settings", trustedInput: trustedInput, directory: captures)
         guard delta("dispatches", first) == 1 else { throw PreviewError.message("Settings was not dispatched once") }
-        try await closeDialog()
+        // Settings is a routed page: its Back returns to the same session and
+        // hands the composer its focus again, as closing the dialog did.
+        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Back' && b.getClientRects().length)?.click(); return true")
+        try await sessionRoute(sessionHash)
         try await wait("composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
         let beforeNew = commands.smokeSnapshot
         try perform(menu: "File", title: "New Session")
-        try await dialog("New Chat", visible: true)
+        try await homeComposer()
         try await capture("new-chat", trustedInput: trustedInput, directory: captures)
         guard delta("dispatches", beforeNew) == 1 else { throw PreviewError.message("New Session was not dispatched once") }
-        try await closeDialog()
+        // New Session opens Home's composer, not a layer: go back to the
+        // session and give its composer the focus again.
+        _ = try await js("history.back(); return true")
+        try await sessionRoute(sessionHash)
+        _ = try await js("document.querySelector('[role=combobox][aria-label=Message]').focus(); return true")
         try await wait("second composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
-        let sessionHash = try await js("return location.hash") as! String
         let beforeProjects = commands.smokeSnapshot
         try perform(menu: "View", title: "Projects")
         try await wait("shared Projects navigation") { try await self.js("return location.hash === '#/'") as? Bool == true }
@@ -51,9 +63,7 @@ final class NativeCommandSmoke {
             throw PreviewError.message("Projects navigation duplicated dispatch or retired a same-document bridge")
         }
         _ = try await js("history.back(); return true")
-        try await wait("session route restored") {
-            try await self.js("return location.hash === expected && !!document.querySelector('[role=combobox][aria-label=Message]')", arguments: ["expected": sessionHash]) as? Bool == true
-        }
+        try await sessionRoute(sessionHash)
         guard NSApp.isActive, app.window.isKeyWindow else { throw PreviewError.message("Fixture lost its foreground window") }
         let otherWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 120), styleMask: [.titled], backing: .buffered, defer: false)
         otherWindow.isReleasedWhenClosed = false
@@ -250,15 +260,22 @@ final class NativeCommandSmoke {
         }
         menu.performActionForItem(at: index)
     }
-    private func dialog(_ title: String, visible: Bool) async throws {
-        try await wait("dialog \(title)") {
-            try await self.js("return [...document.querySelectorAll('[role=dialog]')].some(d => d.textContent.includes(title)) === visible",
-                              arguments: ["title": title, "visible": visible]) as? Bool == true
+    /// The shared Settings command opens the Settings page on Models & providers.
+    private func settingsPage() async throws {
+        try await wait("Settings Models & providers page") {
+            try await self.js("return location.hash === '#/settings/models' && !document.querySelector('[role=dialog]') && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length)") as? Bool == true
         }
     }
-    private func closeDialog() async throws {
-        _ = try await js("document.querySelector('[role=dialog] button[aria-label=Close]')?.click(); return true")
-        try await wait("dialog closed") { try await self.js("return !document.querySelector('[role=dialog]')") as? Bool == true }
+    /// The shared New Session command opens Home's composer for the session's project.
+    private func homeComposer() async throws {
+        try await wait("Home composer for the session's project") {
+            try await self.js("const f = document.getElementById('home-composer'); return location.hash.startsWith('#/?project=') && !!f && document.activeElement === f && !document.querySelector('[role=dialog]')") as? Bool == true
+        }
+    }
+    private func sessionRoute(_ expected: String) async throws {
+        try await wait("session route \(expected)") {
+            try await self.js("return location.hash === expected && !!document.querySelector('[role=combobox][aria-label=Message]')", arguments: ["expected": expected]) as? Bool == true
+        }
     }
     private func js(_ source: String, arguments: [String: Any] = [:]) async throws -> Any {
         try await app.webView.callAsyncJavaScript(source, arguments: arguments, in: nil, contentWorld: .page) ?? NSNull()

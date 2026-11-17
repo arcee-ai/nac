@@ -16,11 +16,13 @@ extension WorkspaceSmoke {
       const r=e.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     };
-    const dialogs=[...document.querySelectorAll('[role=dialog][aria-label="MCP servers"][data-modal-open="true"]')].filter(visible);
-    if (dialogs.length !== 1) throw Error('Expected one visible owned MCP dialog');
+    // Settings › MCP servers renders the manager into a SettingsSurface
+    // section (data-settings-surface) inside the page region of the same name.
+    const dialogs=[...document.querySelectorAll('section[aria-label="MCP servers"][data-settings-surface="true"]')].filter(visible);
+    if (dialogs.length !== 1) throw Error('Expected one visible owned MCP settings surface');
     const names=[...dialogs[0].querySelectorAll('input[placeholder="my_server"]')].filter(visible);
     if (names.length !== 1 || names[0].value !== 'wk_disabled_fixture') throw Error('Expected the owned MCP fixture form');
-    // Input/InputWrapper add nested divs. The unique owned active dialog
+    // Input/InputWrapper add nested divs. The unique owned active surface
     // already scopes this form; do not infer its row from a fixed depth.
     const labels=[...dialogs[0].querySelectorAll('.label-small')].filter(e => e.textContent.trim() === 'Enabled' && visible(e));
     const controls=[...dialogs[0].querySelectorAll('[role="switch"][aria-label="Enabled"]')].filter(visible);
@@ -35,22 +37,26 @@ extension WorkspaceSmoke {
 
     func directJourney() async {
         await check("orchestration-opt-in") {
-            try await self.require("Direct-only policy or behavior choices changed", "return !(await (await fetch('/ui-config')).json()).orchestration_enabled && document.querySelectorAll('[role=radio]').length === 0;")
-            return "NAC_ORCHESTRATION=0, no behavior radio group"
+            try await self.require("Direct-only policy or behavior choices changed", "return !(await (await fetch('/ui-config')).json()).orchestration_enabled && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
+            return "NAC_ORCHESTRATION=0, no behavior chip on Home's composer"
         }
         await check("direct") {
-            try await self.createChat("direct")
-            try await self.send("WK_RICH")
+            try await self.createChat("direct", prompt: "WK_RICH")
             try await self.waitJS("rich streamed answer", "return document.body.innerText.includes('WK_RICH_COMPLETE');")
             try await self.idle()
-            return "Production Create chat/Send; immutable behavior read back from Rust"
+            return "Production Home composer/Start session (first prompt WK_RICH); immutable behavior read back from Rust"
         }
         await check("managed-disabled") {
             try await self.require("Managed host unexpectedly enabled", "return (await fetch('/managed/status')).status === 404 && ![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Add repository');")
-            try await self.button("Managed host")
-            try await self.waitJS("unconfigured managed status", "return document.body.innerText.includes('Managed host status is unavailable.');")
-            try await self.button("Close")
-            return "Existing Managed host status entry is inert/unconfigured (404); no Add repository action"
+            // Managed host is a Settings section listed only on a managed host;
+            // a direct link to it falls back to General while unconfigured.
+            try await self.button("Settings")
+            try await self.waitJS("Settings sections without Managed host", "const nav=document.querySelector('nav[aria-label=\"Settings sections\"]'); const names=[...(nav?.querySelectorAll('a') || [])].map(a => a.textContent.trim()); return location.hash.startsWith('#/settings/') && names.includes('Models & providers') && !names.includes('Managed host');")
+            _ = try await self.js("location.hash = '#/settings/managed'; return true;")
+            try await self.waitJS("unconfigured Managed host route falls back", "return location.hash === '#/settings/general' && !document.querySelector('main[aria-label=\"Managed host\"]');")
+            try await self.button("Back")
+            try await self.waitJS("session after Settings", "return location.hash.startsWith('#/session/' + \(self.quote(self.sessionID)) + '/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
+            return "Managed host Settings section is absent and its route inert while unconfigured (404); no Add repository action"
         }
         await check("markdown-math") {
             try await self.waitJS("table, formula and highlighted code", "return !!document.querySelector('table') && !!document.querySelector('mjx-container') && !!document.querySelector('pre span[style]');")
@@ -88,27 +94,27 @@ extension WorkspaceSmoke {
             return "Tailwind production layout, oklch, dynamic viewport units, :has and measured bounds"
         }
         await check("settings") {
-            try await self.button("Session settings")
+            try await self.sessionAction("Session settings")
             try await self.waitJS("loaded settings form", "return !!document.querySelector('input[aria-label=\"Session title\"]');")
             try await self.fill("input[aria-label='Session title']", "WK settings saved")
             try await self.button("Save")
             try await self.waitJS("settings saved", "return !document.querySelector('[role=dialog]') && document.body.innerText.includes('WK settings saved');")
-            try await self.button("Session settings")
+            try await self.sessionAction("Session settings")
             try await self.waitJS("settings readback", "return document.querySelector('input[aria-label=\"Session title\"]')?.value === 'WK settings saved';")
             try await self.button("Close")
             return "Production settings Save and reopened title readback"
         }
         await check("provider") {
-            try await self.button("Configurations")
+            try await self.settingsSection("Models & providers")
             try await self.waitJS("saved dummy provider", "return document.querySelector('input[aria-label=\"Configuration name\"]')?.value === 'Mac preview — deterministic local fixture';")
             try await self.fill("input[aria-label='Configuration name']", "WK local fixture configuration")
             try await self.button("Save")
             try await self.waitJS("provider configuration readback", "return (await (await fetch('/model-configs')).json()).configurations.some(c => c.name === 'WK local fixture configuration') && !document.body.innerText.includes('preview-dummy-only');")
-            try await self.button("Close")
+            try await self.leaveSettings()
             return "Saved dummy local provider renamed through production configuration form; no vendor-auth claim"
         }
         await check("mcp") {
-            try await self.button("MCP servers")
+            try await self.settingsSection("MCP servers")
             try await self.button("Custom server")
             try await self.fill("input[placeholder='my_server']", "wk_disabled_fixture")
             try await self.button("Stdio")
@@ -123,7 +129,7 @@ extension WorkspaceSmoke {
             try await self.waitJS("local MCP tool discovery", "return document.body.innerText.includes('1 tool found') && document.body.innerText.includes('wk_fixture_echo');")
             try await self.button("Save")
             try await self.waitJS("saved MCP configuration", "return (await (await fetch('/mcp_library/servers')).json()).servers.some(s => s.name === 'wk_disabled_fixture' && s.enabled === false);")
-            try await self.button("Close")
+            try await self.leaveSettings()
             return "Production outgoing MCP test discovers one inert owned stdio tool, then saves disabled configuration; no OAuth/vendor-auth claim"
         }
         await check("overlays-focus") { try await self.overlayJourney() }
@@ -139,7 +145,17 @@ extension WorkspaceSmoke {
         }
         await check("files") {
             try await self.navigate("files")
-            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Show panel\"]');")) as? Bool == true { try await self.button("Show panel") }
+            // Panels open in the session drawer: the Session menu opens it on
+            // Insights, then its Files tab. Docking (1280px) lays it beside the
+            // chat as the old side column was, outside any dialog layer.
+            if (try? await self.js("return ![...document.querySelectorAll('[role=tab][aria-label=\"Files\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length);")) as? Bool == true {
+                try await self.sessionAction("Insights")
+                try await self.button("Files")
+            }
+            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Dock drawer\"]');")) as? Bool == true {
+                try await self.button("Dock drawer")
+                try await self.waitJS("docked Files panel", "return !!document.querySelector('aside[aria-label=\"Files\"] [role=tab][aria-label=\"Files\"][aria-selected=\"true\"]') && ![...document.querySelectorAll('[role=dialog]')].some(d => d.querySelector('[role=tablist][aria-label=\"Session panels\"]'));")
+            }
             try await self.button("All files")
             let fileRow = """
             if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
@@ -164,13 +180,32 @@ extension WorkspaceSmoke {
             try await self.waitJS("highlighted source file", "return document.body.innerText.includes('export const workspaceFileFixture = 351;');")
             try await self.snapshot("files.png", expecting: .file(id: self.sessionID, path: "workspace.ts",
                 content: "export const workspaceFileFixture = 351;\n"))
-            return "Production Files list opens actual isolated workspace.ts"
+            return "Production drawer Files list opens actual isolated workspace.ts"
         }
         await check("git") {
-            try await self.require("Git branch unavailable", "return [...document.querySelectorAll('button')].some(b => (b.getAttribute('aria-label') || b.textContent).includes('Branch: main'));")
+            // The branch picker is a Details row of the header's Session menu:
+            // open it just long enough to read that row, then shut it again.
+            let branch = """
+            const trigger = document.querySelector('button[aria-label="Session menu"]');
+            if (!trigger) return false;
+            const menu = () => document.querySelector('[role=dialog][aria-label="Session"]');
+            const opened = !menu();
+            if (opened) trigger.click();
+            let found = false;
+            for (let i = 0; i < 40 && !found; i++) {
+              await new Promise(resolve => setTimeout(resolve, 50));
+              found = [...(menu()?.querySelectorAll('button') || [])].some(b => (b.getAttribute('aria-label') || '').includes('Branch: main'));
+            }
+            if (opened && menu()) trigger.click();
+            return found;
+            """
+            try await self.require("Git branch unavailable", branch)
             try await self.require("Git changed-file receipt missing", "const r=await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/workspace/diff?path=workspace.ts&stage=all&context=3'); if(!r.ok)return false; return JSON.stringify(await r.json()).includes('workspaceFileFixture');")
             try await self.navigate("files")
-            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Show panel\"]');")) as? Bool == true { try await self.button("Show panel") }
+            if (try? await self.js("return ![...document.querySelectorAll('[role=tab][aria-label=\"Files\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length);")) as? Bool == true {
+                try await self.sessionAction("Insights")
+                try await self.button("Files")
+            }
             try await self.button("Diff of changed files")
             let gitRow = """
             if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
@@ -197,7 +232,7 @@ extension WorkspaceSmoke {
             const panes = [...document.querySelectorAll('span[title="workspace.ts"]')].filter(title => {
               if (title.closest('button,[inert],[role=dialog]')) return false;
               const header = title.parentElement, scroller = header?.nextElementSibling;
-              if (!header?.classList.contains('header-sm') || !scroller?.classList.contains('overflow-auto')) return false;
+              if (!header?.classList.contains('type-strong') || !scroller?.classList.contains('overflow-auto')) return false;
               const panel = scroller.parentElement?.parentElement;
               if (panel?.querySelectorAll('button[title="workspace.ts"][aria-pressed="true"]').length !== 1 ||
                   !panel.querySelector('button[aria-label="Diff of changed files"][aria-pressed="true"]')) return false;
@@ -239,11 +274,12 @@ extension WorkspaceSmoke {
                 return true;
               };
               const rows = [...scroller.querySelectorAll('div')];
-              return rows.some(row => row.children.length === 2 && row.firstElementChild.matches('span') &&
-                  row.firstElementChild.textContent.trim() === '@@' && visible(row.firstElementChild) &&
-                  row.lastElementChild.matches('span.code') &&
-                  /^-[0-9]+,[0-9]+ [+][0-9]+,[0-9]+(?: .*)?$/.test(row.lastElementChild.textContent.trim())) &&
-                rows.some(row => row.children.length === 2 && row.lastElementChild.matches('span.code') &&
+              // A hunk row is an aria-hidden gutter mark and its "@@ … @@" code
+              // line; a source row is gutter, aria-hidden sign column and code.
+              return rows.some(row => row.children.length === 2 && row.firstElementChild.matches('span[aria-hidden="true"]') &&
+                  row.lastElementChild.matches('span.code') && visible(row.lastElementChild) &&
+                  /^@@ -[0-9]+,[0-9]+ [+][0-9]+,[0-9]+ @@(?: .*)?$/.test(row.lastElementChild.textContent.trim())) &&
+                rows.some(row => row.children.length === 3 && row.lastElementChild.matches('span.code') &&
                   row.lastElementChild.textContent === 'export const workspaceFileFixture = 351;');
             });
             return panes.length === 1;
@@ -258,7 +294,7 @@ extension WorkspaceSmoke {
         await check("approvals") {
             _ = try WorkspaceFixture.requireExternalReadTarget()
             try await self.send("WK_APPROVAL")
-            try await self.waitJS("real Rust approval request", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Allow once') && document.body.innerText.includes('approval.txt');")
+            try await self.waitJS("real Rust approval request", "return [...document.querySelectorAll('[role=dialog][aria-label=\"Permission required\"] button')].some(b => (\(Self.buttonName))(b) === 'Allow once') && document.body.innerText.includes('Approval needed') && document.body.innerText.includes('approval.txt');")
             // Keep the POSIX canonical identity bound before model invocation.
             // Use the stored POSIX spelling directly for the exact-match target.
             let path = try WorkspaceFixture.requireExternalReadTarget()
@@ -269,7 +305,7 @@ extension WorkspaceSmoke {
             try await self.button("Allow once")
             try await self.waitJS("approval settlement", "return document.body.innerText.includes('WK_APPROVAL_COMPLETE');")
             try await self.idle()
-            return "Scripted provider requests read outside workspace; production Allow once, normal Rust authorization"
+            return "Scripted provider requests read outside workspace; production approval card Allow once, normal Rust authorization"
         }
         if checks["approvals"]?["status"] as? String == "pass" {
             await check("goals") {
@@ -298,11 +334,37 @@ extension WorkspaceSmoke {
             guard let projectID = try await self.js("return (await (await fetch('/projects')).json()).projects.find(p => p.name === 'Disposable Mac preview')?.project_id;") as? String else {
                 throw PreviewError.message("Missing owned fixture project")
             }
-            try await self.button("All projects")
+            try await self.button("Home")
             try await self.snapshot("projects.png", expecting: .project(id: projectID, title: "Disposable Mac preview"))
-            return "Actual production projects route and seeded local project"
+            return "Actual production Home route and seeded local project tile"
         }
         checks["links"] = ["status": "unavailable", "executed": false, "detail": "Markdown renders internal/source and safe external anchors; actual external native handoff not qualified by this preview. ALL-346/348 integration remains separate."]
+    }
+
+    /// Opens one action of the session header's Session menu (⋯) popover.
+    /// A pressed trigger toggles, so it is pressed only while the menu is shut.
+    func sessionAction(_ item: String, rememberAs: String? = nil) async throws {
+        try await waitJS("Session menu trigger", "return !!document.querySelector('button[aria-label=\"Session menu\"]:not(:disabled)');")
+        let remember = rememberAs.map { "window[\(quote($0))]=b;" } ?? ""
+        _ = try await js("const b=document.querySelector('button[aria-label=\"Session menu\"]'); \(remember) if (b.getAttribute('aria-expanded') !== 'true') { b.focus(); b.click(); } return true;")
+        let entry = "[...(document.querySelector('[role=dialog][aria-label=\"Session\"]')?.querySelectorAll('button') || [])].find(b => (\(Self.buttonName))(b) === \(quote(item)) && !b.disabled)"
+        try await waitJS("Session menu action \(item)", "return !!(\(entry));")
+        _ = try await js("\(entry).click(); return true;")
+    }
+
+    /// Opens a Settings section: the sidebar's Settings gear, then its link.
+    func settingsSection(_ label: String) async throws {
+        try await button("Settings")
+        let entry = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a') || [])].find(a => a.textContent.trim() === \(quote(label)))"
+        try await waitJS("Settings section \(label) link", "return location.hash.startsWith('#/settings/') && !!(\(entry));")
+        _ = try await js("\(entry).click(); return true;")
+        try await waitJS("Settings section \(label)", "return [...document.querySelectorAll('main[aria-label]')].some(e => e.getAttribute('aria-label') === \(quote(label)) && e.getClientRects().length);")
+    }
+
+    /// Settings' Back returns to the session it was opened from.
+    func leaveSettings() async throws {
+        try await button("Back")
+        try await waitJS("session after Settings", "return location.hash.startsWith('#/session/' + \(quote(sessionID)) + '/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
     }
 
     func overlayJourney() async throws -> String {
@@ -310,9 +372,12 @@ extension WorkspaceSmoke {
         for collapsed in [false, true] {
             if collapsed { try await button("Hide sidebar") }
             record(["overlay_layout_in_progress": collapsed ? "collapsed" : "expanded"])
-            try await button("Configurations", rememberAs: "__wkModalOpener")
-            try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog]');")
-            try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+            // Settings is a page now. Session settings, from the header's
+            // Session menu, is the ordinary production modal in both sidebar
+            // layouts; the menu row hands its focus return to the menu trigger.
+            try await sessionAction("Session settings", rememberAs: "__wkModalOpener")
+            try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog][aria-label=\"Session settings\"]');")
+            try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog][aria-label=\"Session settings\"]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
             _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
             try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
             try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
@@ -325,7 +390,7 @@ extension WorkspaceSmoke {
             record(["overlay_layouts": layouts])
             if collapsed { try await button("Show sidebar") }
         }
-        return "Expanded sidebar + collapsed rail: modal/model-popover bounds, inertness, synthetic Escape and exact focus return; real keyboard/VoiceOver separate"
+        return "Expanded + hidden sidebar: Session settings modal/model-popover bounds, inertness, synthetic Escape and exact focus return; real keyboard/VoiceOver separate"
     }
 
     func resizeJourney() async throws -> String {

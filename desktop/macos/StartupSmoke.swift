@@ -215,7 +215,13 @@ final class StartupSmoke {
 
     private func commandJourney() async throws {
         if scenario.contains("mcp") {
-            _ = try await js("document.querySelector('button[aria-label^=\"MCP servers\"]').click(); return true;")
+            // MCP servers is a Settings section: the sidebar's Settings gear,
+            // then the section link (the shell has no MCP button).
+            try await waitJS("shared Settings navigation", "return !!document.querySelector('button[aria-label=Settings]');")
+            _ = try await js("document.querySelector('button[aria-label=Settings]').click(); return true;")
+            let mcpEntry = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a') || [])].find(a => a.textContent.trim() === 'MCP servers')"
+            try await waitJS("shared Settings sections", "return !!(\(mcpEntry));")
+            _ = try await js("\(mcpEntry).click(); return true;")
             try await waitJS("shared MCP library", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Custom server');")
             _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Custom server').click(); return true;")
             try await waitJS("MCP transport choices", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Stdio');")

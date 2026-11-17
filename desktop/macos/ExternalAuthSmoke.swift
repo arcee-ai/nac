@@ -26,13 +26,24 @@ final class ExternalAuthSmoke {
     }
 
     // Fixture preparation only. A ready WK document alone does not mean the
-    // asynchronous Create chat navigation and its modal teardown have settled.
+    // asynchronous Start session navigation (create, first run, open) has settled.
     private static let sessionReadyScript = #"""
     const composer=document.querySelector('[role=combobox][aria-label=Message]');
     const bounds=composer?.getBoundingClientRect();
     return /^#\/session\/[^/]+(?:\/|$)/.test(location.hash) &&
       (!expectedRoute || location.hash===expectedRoute) &&
       !!bounds && bounds.width>0 && bounds.height>0 && !document.querySelector('[role=dialog]');
+    """#
+
+    // Home's composer is the one new-session flow; starting always sends its
+    // prompt as the first run. A null prompt only probes the labelled field.
+    private static let homeComposerScript = #"""
+    const field=document.getElementById('home-composer');
+    if (!field || field.disabled || ![...field.labels].some(l=>l.textContent.trim()==='What should we work on?')) return false;
+    if (prompt === null) return true;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,prompt);
+    field.dispatchEvent(new Event('input',{bubbles:true}));
+    return field.value === prompt;
     """#
 
     private static let seedScript = #"""
@@ -63,10 +74,15 @@ final class ExternalAuthSmoke {
 
     func run() async throws -> [String: Any] {
         try await wait("verified loaded workspace") { self.currentDocument != nil }
-        try await wait("loaded production create-chat control") {
-            try await self.js("return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled)") as? Bool == true
+        try await wait("loaded production Home composer") {
+            try await self.js(Self.homeComposerScript, arguments: ["prompt": NSNull()]) as? Bool == true
         }
-        try await clickButton("Create chat")
+        guard try await js(Self.homeComposerScript, arguments: ["prompt": "External auth fixture session"]) as? Bool == true else {
+            throw PreviewError.message("Home composer did not take the first prompt")
+        }
+        try await wait("enabled production Start session control") {
+            try await self.js("const b=document.querySelector('button[aria-label=\"Start session\"]');if(!b||b.disabled)return false;b.click();return true") as? Bool == true
+        }
         try await wait("created session route and production composer") {
             try await self.js(Self.sessionReadyScript, arguments: ["expectedRoute": ""]) as? Bool == true
         }
@@ -187,7 +203,7 @@ final class ExternalAuthSmoke {
                   currentDocument != nil else {
                 throw PreviewError.message("External sign-in replaced the verified workspace")
             }
-            try await closePanel()
+            try await closePanel(sessionRoute)
             _ = try await js("const r=await fetch('/mcp_library/servers/external-auth-fixture/oauth/logout',{method:'POST'}); if(!r.ok)throw new Error('Fixture logout rejected');return true")
         }
         let evidence = try await fixtureEvidence()
@@ -211,20 +227,35 @@ final class ExternalAuthSmoke {
             "fixture": fixture.absoluteString, "credential": credential])
     }
 
+    // MCP servers is a Settings section: the sidebar's Settings gear, then the
+    // section link. The page mounts a fresh section, as reopening the dialog did.
+    private static let mcpEntry = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a')||[])].find(a=>a.textContent.trim()==='MCP servers')"
+
     private func openPanel() async throws {
-        try await wait("MCP navigation") {
-            try await self.js("return !!document.querySelector('button[aria-label^=\"MCP servers\"]')") as? Bool == true
+        try await wait("Settings navigation") {
+            try await self.js("return !!document.querySelector('button[aria-label=Settings]')") as? Bool == true
         }
-        _ = try await js("document.querySelector('button[aria-label^=\"MCP servers\"]').click();return true")
+        _ = try await js("document.querySelector('button[aria-label=Settings]').click();return true")
+        try await wait("MCP navigation") {
+            try await self.js("return !!\(Self.mcpEntry)") as? Bool == true
+        }
+        _ = try await js("\(Self.mcpEntry).click();return true")
+        try await wait("MCP servers settings section") {
+            try await self.js("return location.hash==='#/settings/mcp'&&!!document.querySelector('main[aria-label=\"MCP servers\"] section[data-settings-surface=\"true\"][aria-label=\"MCP servers\"]')") as? Bool == true
+        }
         try await text("external-auth-fixture")
         try await wait("configured OAuth controls") {
             try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Authenticate'&&!b.disabled)") as? Bool == true
         }
     }
 
-    private func closePanel() async throws {
-        _ = try await js("document.querySelector('[role=dialog] button[aria-label=Close]')?.click();return true")
-        try await wait("closed MCP dialog") { try await self.js("return !document.querySelector('[role=dialog]')") as? Bool == true }
+    /// Settings' Back returns to the created session it was opened from, so
+    /// the next openPanel mounts a fresh MCP section as reopening the dialog did.
+    private func closePanel(_ route: String) async throws {
+        try await clickButton("Back")
+        try await wait("left MCP settings for the created session") {
+            try await self.js(Self.sessionReadyScript, arguments: ["expectedRoute": route]) as? Bool == true
+        }
     }
 
     private func clickButton(_ title: String) async throws {
@@ -241,7 +272,7 @@ final class ExternalAuthSmoke {
       }
       const rect=e.getBoundingClientRect();return rect.width>0 && rect.height>0;
     };
-    const dialogs=[...document.querySelectorAll('[role="dialog"][aria-label="MCP servers"][data-modal-open="true"]')].filter(visible);
+    const dialogs=[...document.querySelectorAll('section[aria-label="MCP servers"][data-settings-surface="true"]')].filter(visible);
     if (dialogs.length!==1) return false;
     const owner=dialogs[0];
     const names=[...owner.querySelectorAll('input[aria-label="Server name"]')].filter(visible);

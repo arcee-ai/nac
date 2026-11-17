@@ -19,7 +19,9 @@ class NativePathFixtureTests(unittest.TestCase):
 const assert = require('node:assert/strict');
 const install = new Function('origin','run','source','app_pid','launch','view','documentID', SCRIPT);
 class ElementStub {
-  constructor(text='Reveal in Finder', disabled=false) { this.textContent=text; this.disabled=disabled; }
+  // Focus's control is icon-only: its name is the aria-label, its text empty.
+  constructor(label='Reveal in Finder', disabled=false, text='') { this.label=label; this.textContent=text; this.disabled=disabled; }
+  getAttribute(name) { assert.equal(name,'aria-label'); return this.label; }
   closest(selector) { assert.equal(selector,'button'); return this; }
 }
 globalThis.Element = ElementStub;
@@ -42,6 +44,7 @@ let descriptor=Object.getOwnPropertyDescriptor(window,'__nac347Fixture');
 assert.equal(descriptor.writable,false); assert.equal(descriptor.configurable,false);
 assert.throws(()=>install(...args), /already installed/); assert.equal(state.handlers.length,1);
 state.click(false); state.click(true,new ElementStub('Other button')); state.click(true,new ElementStub('Reveal in Finder',true));
+state.click(true,new ElementStub(null,false,'Other button')); state.click(true,new ElementStub('Other button',false,'Reveal in Finder'));
 state.click(true,{}); assert.equal(window.__nac347Fixture().count,0);
 state.click();
 first=window.__nac347Fixture();

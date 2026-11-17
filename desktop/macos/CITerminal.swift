@@ -37,10 +37,12 @@ enum CITerminal {
             throw PreviewError.message("Timed out waiting for CI terminal \(label)")
         }
         _ = try await js("location.hash = '/session/\(sessionID)/terminal'; return true;")
+        // The route selects the panel; the header's Terminal pill opens the
+        // session drawer on it (a pill press toggles, so only a closed one).
         try await wait("panel controls") {
-            (try await js("return !!document.querySelector('[aria-label=\"Show panel\"]') || !!document.querySelector('[aria-label=\"Session terminal\"]');")) as? Bool == true
+            (try await js("return !!document.querySelector('button[aria-label=\"Terminal\"][aria-expanded]') || !!document.querySelector('[aria-label=\"Session terminal\"]');")) as? Bool == true
         }
-        _ = try await js("document.querySelector('[aria-label=\"Show panel\"]')?.click(); return true;")
+        _ = try await js("if (!document.querySelector('[aria-label=\"Session terminal\"]')) document.querySelector('button[aria-label=\"Terminal\"][aria-expanded=\"false\"]')?.click(); return true;")
         try await wait("terminal list control") {
             (try await js("""
             const panel=document.querySelector('[aria-label="Session terminal"]');

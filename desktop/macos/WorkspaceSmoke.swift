@@ -52,7 +52,8 @@ final class WorkspaceSmoke {
         }
         // Do not preempt the preview's 30s engine watchdog. Initial document
         // and UI configuration reads also need their normal bounded window.
-        try await waitJS("fixture configuration", "return !!document.querySelector('[role=dialog]');", timeout: 60)
+        // The seeded project opens Home's composer, the one new-session flow.
+        try await waitJS("fixture configuration", Self.homeComposerScript, timeout: 60)
         guard let profile = app.profile else { throw PreviewError.message("Missing isolated profile") }
         // Create and bind the canonical owned file before any fixture model read.
         try WorkspaceFixture.prepareExternalReadTarget(in: profile.root)
@@ -65,8 +66,7 @@ final class WorkspaceSmoke {
                             "window_occlusion_visible": app.window.occlusionState.contains(.visible),
                             "window_key": app.window.isKeyWindow, "application_active": NSApp.isActive]])
         if scenario == "workspace-manual" {
-            try await createChat("direct")
-            try await send("WK_RICH")
+            try await createChat("direct", prompt: "WK_RICH")
             try await idle()
             record(["manual_stage_ready": true,
                     "manual_evidence": "Awaiting operator observations; no physical input or accessibility pass inferred"])
@@ -124,8 +124,12 @@ final class WorkspaceSmoke {
         return String(decoding: data, as: UTF8.self).dropFirst().dropLast().description
     }
 
+    // A button's name: its aria-label, else its text without aria-hidden
+    // decoration such as a drawn shortcut (Allow once ⏎, New session ⌘N).
+    static let buttonName = "b => b.getAttribute('aria-label') || (() => { const c = b.cloneNode(true); c.querySelectorAll('[aria-hidden=\"true\"]').forEach(e => e.remove()); return c.textContent.trim(); })()"
+
     func button(_ name: String, rememberAs: String? = nil) async throws {
-        let predicate = "b => (b.getAttribute('aria-label') || b.textContent.trim()) === \(quote(name)) && !b.disabled && b.getClientRects().length && !b.closest('[inert]')"
+        let predicate = "b => (\(Self.buttonName))(b) === \(quote(name)) && !b.disabled && b.getClientRects().length && !b.closest('[inert]')"
         try await waitJS("button \(name)", "return [...document.querySelectorAll('button')].some(\(predicate));")
         // A focus assertion must retain the exact chosen opener before its
         // activation changes inertness or mounts another matching control.
@@ -157,12 +161,25 @@ final class WorkspaceSmoke {
         """)
     }
 
-    func createChat(_ behavior: String) async throws {
+    static let homeComposerScript = "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');"
+
+    /// Home's composer is the one new-session flow: the behavior chip, then
+    /// the first prompt; Start session creates the session and sends it.
+    func createChat(_ behavior: String, prompt: String) async throws {
+        try await waitJS("Home composer", Self.homeComposerScript)
         if behavior != "direct" {
-            let text = behavior == "orchestrator" ? "NAC orchestrator" : "Direct + NAC orchestration"
-            _ = try await js("const r = [...document.querySelectorAll('[role=radio]')].find(e => e.textContent.includes(\(quote(text)))); if (!r) throw Error('Missing behavior choice'); r.click(); return true;")
+            let text = behavior == "orchestrator" ? "Orchestrator" : "Agent + Orchestrator"
+            let chip = "document.querySelector('button[aria-label^=\"Behavior: \"]')"
+            if (try await js("const c = \(chip); if (!c) throw Error('Missing behavior choice'); return c.getAttribute('aria-label') !== 'Behavior: ' + \(quote(text));")) as? Bool == true {
+                _ = try await js("\(chip).click(); return true;")
+                let item = "[...document.querySelectorAll('[role=menu][aria-label=\"Session behavior\"] [role=menuitemradio]')].find(r => r.querySelector('.type-label')?.textContent.trim() === \(quote(text)))"
+                try await waitJS("behavior choice \(text)", "return !!(\(item));")
+                _ = try await js("\(item).click(); return true;")
+            }
+            try await waitJS("chosen behavior \(text)", "return \(chip)?.getAttribute('aria-label') === 'Behavior: ' + \(quote(text)) && !document.querySelector('[role=menu][aria-label=\"Session behavior\"]');")
         }
-        try await button("Create chat")
+        try await fill("#home-composer", prompt)
+        try await button("Start session")
         try await waitJS("production session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         sessionID = try await js("return location.hash.split('/')[2];") as! String
         try await require("Immutable behavior differs", "return (await (await fetch('/sessions/' + \(quote(sessionID)))).json()).metadata.behavior === \(quote(behavior));")
@@ -260,33 +277,36 @@ final class WorkspaceSmoke {
       const resourcePredicates = (Array.isArray(request?.resources) ? request.resources : []).slice(0,8).map(r => ({
         action:r?.action === 'read', resource:r?.resource === expected.text, display:r?.display === expected.text
       }));
-      const dialogs = [...document.querySelectorAll('[data-nac-overlays] [role="dialog"]')];
-      const dialog = dialogs.length === 1 ? dialogs[0] : null;
-      const heading = dialog && document.getElementById(dialog.getAttribute('aria-labelledby'));
-      const queue = dialog?.querySelector('[aria-label="Pending permission requests"]');
-      const entries = [...(queue?.querySelectorAll('button') || [])];
-      const selected = entries.length === 1 && entries[0].getAttribute('aria-pressed') === 'true' ? entries[0] : null;
+      // Focus asks for approval in a non-modal card above the composer, one
+      // request at a time: role dialog (aria-modal false) named "Permission
+      // required", its visible "Approval needed" label and the tool question.
+      // The card names no session id; the route and broker bind ownership.
+      const cards = [...document.querySelectorAll('[data-nac-content] [role="dialog"][aria-label="Permission required"]')];
+      const dialog = cards.length === 1 && cards[0].getAttribute('aria-modal') === 'false' ? cards[0] : null;
+      const name = b => b.getAttribute('aria-label') || (() => { const c = b.cloneNode(true);
+        c.querySelectorAll('[aria-hidden="true"]').forEach(e => e.remove()); return c.textContent.trim(); })();
+      const labels = [...(dialog?.querySelectorAll('span') || [])].filter(e => e.textContent.trim() === 'Approval needed');
+      const heading = labels.length === 1 ? labels[0] : null;
+      const question = dialog?.querySelector('h3') || null;
       const access = dialog?.querySelector('[aria-label="Requested access"]');
-      const allow = [...(dialog?.querySelectorAll('button') || [])].find(b => b.textContent.trim() === 'Allow once');
-      const selection = heading?.textContent.trim() === 'Permission required' &&
-        selected?.textContent.includes('(' + expected.id + '): read') &&
-        access?.textContent.includes('(' + expected.id + ')') && access?.textContent.includes(expected.text);
-      const enabled = allow && !allow.disabled && !allow.closest('[inert]') && selected && !selected.disabled;
-      const surfaces = [dialog, heading, selected, access, allow].map(inspect);
+      const allow = [...(dialog?.querySelectorAll('button') || [])].find(b => name(b) === 'Allow once');
+      const requester = !!dialog?.textContent.includes('read requested by this session is paused before execution.');
+      const selection = !!heading && question?.textContent.trim() === 'Read file?' && requester &&
+        access?.textContent.includes(expected.text);
+      const enabled = allow && !allow.disabled && !allow.closest('[inert]') && !dialog.closest('[inert]');
+      const surfaces = [dialog, heading, question, access, allow].map(inspect);
       const visible = surfaces.every(s => s.visible);
       const reason = !route ? 'requested route not current' : !owned ? 'owned pending read no longer current' :
-        !selection ? 'approval dialog does not match owned request' : !enabled ? 'approval control unavailable' :
-        !visible ? 'approval dialog not fully visible' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
+        !selection ? 'approval card does not match owned request' : !enabled ? 'approval control unavailable' :
+        !visible ? 'approval card not fully visible' : document.visibilityState !== 'visible' ? 'document not visible' : 'ready';
       return {ready:reason === 'ready', reason, expected, hash, visibility:document.visibilityState,
         loadingConversation:loading, permission_request_id:request?.id || null, surfaces,
         approval_predicates:{...ownedPredicates, owned:!!owned, route,
-          one_dialog:dialogs.length === 1, title:heading?.textContent.trim() === 'Permission required',
-          one_selected:!!selected, selected_owner_tool:!!selected?.textContent.includes('(' + expected.id + '): read'),
-          access_owner:!!access?.textContent.includes('(' + expected.id + ')'),
+          one_card:cards.length === 1, non_modal:!!dialog, label:!!heading,
+          question:question?.textContent.trim() === 'Read file?', requester,
           access_path:!!access?.textContent.includes(expected.text), selection:!!selection,
           allow_enabled:!!allow && !allow.disabled, allow_not_inert:!!allow && !allow.closest('[inert]'),
-          selected_enabled:!!selected && !selected.disabled, enabled:!!enabled, visible,
-          document_visible:document.visibilityState === 'visible'},
+          enabled:!!enabled, visible, document_visible:document.visibilityState === 'visible'},
         resource_predicates:resourcePredicates};
     }
     if (expected.kind === 'rich') {
@@ -429,9 +449,13 @@ final class WorkspaceSmoke {
       const panes = [...document.querySelectorAll('span[title]')].flatMap(title => {
         if (title.getAttribute('title') !== expected.path || title.closest('button,[inert],[role=dialog]')) return [];
         const header = title.parentElement, scroller = header?.nextElementSibling;
-        if (!header?.classList.contains('header-sm') || !scroller?.classList.contains('overflow-auto')) return [];
-        const code = [...scroller.querySelectorAll('div')].filter(row => row.children.length === 2 &&
-          row.firstElementChild.tagName === 'SPAN' && /^\d+$/.test(row.firstElementChild.textContent.trim()) &&
+        // Focus's pane header is type-strong; each shared DiffLineRow is the
+        // gutter (an optional spoken Added/Deleted, then the number), an
+        // aria-hidden sign column and the code.
+        if (!header?.classList.contains('type-strong') || !scroller?.classList.contains('overflow-auto')) return [];
+        const code = [...scroller.querySelectorAll('div')].filter(row => row.children.length === 3 &&
+          row.firstElementChild.tagName === 'SPAN' && /^(?:(?:Added|Deleted) )?\d+$/.test(row.firstElementChild.textContent.trim()) &&
+          row.children[1].getAttribute('aria-hidden') === 'true' &&
           row.lastElementChild.matches('span.code')).map(row => row.lastElementChild)
           .filter(e => e.textContent === expected.content.replace(/\n$/, ''));
         return code.filter(e => fileVisible(e) && fileVisible(title) && fileVisible(scroller) &&

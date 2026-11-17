@@ -168,13 +168,19 @@ enum NativePathJourney {
             try require(XCTWaiter.wait(for: [filled], timeout: 10) == .completed,
                         "Unique selected folder did not reach the normal create-project form")
         }
-        // The disposable preview starts in its seeded project's normal first-
-        // chat form. Finish that UI before opening another project.
-        try click(app.webViews.buttons["Create chat"])
+        // The disposable preview opens Home's composer for its seeded project
+        // (no first-chat dialog). Its project chip's menu offers Add project…,
+        // which opens the normal create-project form.
+        let home = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "What should we work on?")).firstMatch
+        try require(home.waitForExistence(timeout: 30), "Initial fixture Home composer did not open")
         let composer = app.webViews.descendants(matching: .any).matching(identifier: "Message").firstMatch
-        try require(composer.waitForExistence(timeout: 30), "Initial fixture chat did not open")
-        let project = app.webViews.buttons["New Project"]
-        try click(project)
+        func openCreateProject() throws {
+            try click(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Project: ")).firstMatch)
+            try click(app.webViews.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", "Add project…")).firstMatch)
+        }
+        try openCreateProject()
         try require(folderButton.waitForExistence(timeout: 10), "Normal create-project form unavailable")
         let original = folderButton.label
         try click(app.webViews.buttons["SSH"])
@@ -198,7 +204,7 @@ enum NativePathJourney {
         try navigatePanel(app: app, sheet: sheet, initialPath: initialPath, folder: folder, authorize: authorize)
         try require(sheet.waitForNonExistence(timeout: 15), "Document replacement retained the old native panel")
         try phases.wait(.documentReloaded, observe: observePhase)
-        try click(project)
+        try openCreateProject()
         try require(folderButton.waitForExistence(timeout: 10) && folderButton.label == original,
                     "A retired native panel filled the replacement form")
         try chooseFolder()
@@ -213,7 +219,11 @@ enum NativePathJourney {
         try chooseFolder()
         try click(create)
         try require(composer.waitForExistence(timeout: 30), "Normal project/first-chat creation did not finish")
-        try click(app.webViews.buttons["Files"])
+        // Session panels open in a drawer: the header's Session menu opens it
+        // on Insights, then the drawer's Files tab selects the Files panel.
+        try click(app.webViews.buttons["Session menu"])
+        try click(app.webViews.buttons["Insights"])
+        try click(app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Files")).firstMatch)
         let file = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", revealLeaf)).firstMatch
         try click(file)
         let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
@@ -309,10 +319,14 @@ enum NativePathJourney {
         try validate(scope, initialPath: initialPath, folder: folder, operation: "pending-engine-failure")
         let phases = PhaseCursor(scope)
         try phases.wait(.ready, observe: observePhase)
-        try click(app.webViews.buttons["Create chat"])
-        let composer = app.webViews.descendants(matching: .any).matching(identifier: "Message").firstMatch
-        try require(composer.waitForExistence(timeout: 30), "Initial failure fixture chat did not open")
-        try click(app.webViews.buttons["New Project"])
+        // Home's composer for the seeded project; its project chip's menu
+        // opens the normal create-project form (no first-chat dialog).
+        let home = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "What should we work on?")).firstMatch
+        try require(home.waitForExistence(timeout: 30), "Initial failure fixture Home composer did not open")
+        try click(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Project: ")).firstMatch)
+        try click(app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Add project…")).firstMatch)
         try click(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose Working Folder")).firstMatch)
         let sheet = app.sheets.firstMatch
         try require(sheet.waitForExistence(timeout: 10), "Failure test did not open an actual NSOpenPanel")
