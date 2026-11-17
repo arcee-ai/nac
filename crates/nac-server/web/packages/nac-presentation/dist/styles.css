@@ -2400,6 +2400,10 @@
     scroll-margin-top: calc(var(--spacing) * 20);
   }
 
+[data-nac-runtime]:is(.scroll-py-4), [data-nac-runtime] .scroll-py-4 {
+    scroll-padding-block: calc(var(--spacing) * 4);
+  }
+
 [data-nac-runtime]:is(.scroll-pb-32), [data-nac-runtime] .scroll-pb-32 {
     scroll-padding-bottom: calc(var(--spacing) * 32);
   }

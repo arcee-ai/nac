@@ -10202,7 +10202,7 @@ function $p({ title: e, label: t, status: n, updatedAt: r, now: i, active: a, de
 				onFocus: w,
 				onMouseLeave: T,
 				onBlur: T,
-				className: V("flex h-full min-w-0 flex-1 items-center gap-2 text-left outline-none", "after:absolute after:inset-0 after:rounded-md", "focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[var(--f-focus)]"),
+				className: V("flex min-w-0 flex-1 items-center gap-2 self-stretch text-left outline-none", "after:absolute after:inset-0 after:rounded-md", "focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[var(--f-focus)]"),
 				style: { paddingLeft: 10 + o * Jp },
 				children: [
 					/* @__PURE__ */ Q("span", {
@@ -10732,7 +10732,7 @@ function bm({ open: e, onClose: t }) {
 		onClose: t,
 		title: "Menu",
 		inertOnPhone: !0,
-		bodyClassName: "p-0 [&>*]:shrink-0",
+		bodyClassName: "scroll-py-4 p-0 [&>*]:shrink-0",
 		children: [/* @__PURE__ */ $("nav", {
 			"aria-label": "Menu",
 			className: "flex flex-col gap-px border-b border-muted px-2 py-2",
