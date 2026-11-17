@@ -206,7 +206,13 @@ final class DeviceAuthSmoke {
                     evidence["start_command_issued"] = false
                 } else {
                     let browserBefore = try await browserObservations()
-                    try await click("Sign in with Arcee", inCard: true)
+                    // The card heading exists while /auth is still checking.
+                    // Wait and click in the same turn; a successful click ends
+                    // this wait, so the sign-in command is never replayed.
+                    try await wait("ready Arcee sign-in action") {
+                        try await self.js(Self.clickScript,
+                            arguments: ["title": "Sign in with Arcee", "inCard": true]) as? Bool == true
+                    }
                     evidence["start_command_issued"] = true
                     try await wait("provider prompt or result") {
                         let text = try await self.cardText()
@@ -308,14 +314,16 @@ final class DeviceAuthSmoke {
         try await js("const section=document.querySelector('section[aria-label=\"Provider connections\"]');const card=[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in'));return card?.textContent||''") as? String ?? ""
     }
 
+    private static let clickScript = #"""
+    const section=document.querySelector('section[aria-label="Provider connections"]');
+    const root=inCard?[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in')):document;
+    const control=[...root?.querySelectorAll('button,a[href]')||[]].find(b=>b.textContent.trim()===title&&!b.disabled);
+    control?.click();return !!control;
+    """#
+
     private func click(_ title: String, inCard: Bool = false) async throws {
-        let found = try await js(#"""
-        const section=document.querySelector('section[aria-label="Provider connections"]');
-        const root=inCard?[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in')):document;
-        const control=[...root?.querySelectorAll('button,a[href]')||[]].find(b=>b.textContent.trim()===title&&!b.disabled);
-        control?.click();return !!control;
-        """#, arguments: ["title": title, "inCard": inCard]) as? Bool
-        guard found == true else { throw PreviewError.message("Device fixture UI control unavailable") }
+        let found = try await js(Self.clickScript, arguments: ["title": title, "inCard": inCard]) as? Bool
+        guard found == true else { throw PreviewError.message("Device fixture UI control unavailable: \(title)") }
     }
 
     private func signedIn() async throws -> Bool {
