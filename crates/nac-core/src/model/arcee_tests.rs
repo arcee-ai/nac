@@ -1194,6 +1194,11 @@ async fn unknown_refresh_client_preserves_durable_credentials() {
         .expect_err("an unrecognized client cannot refresh");
         assert_eq!(fs::read(&auth_path).unwrap(), original);
         assert!(error.to_string().contains("invalid_client"));
+        let failure = run_failure_of(error);
+        assert_eq!(failure.kind, RunFailureKind::Authentication);
+        assert!(!failure.transient);
+        assert!(failure.summary.contains("client registration"));
+        assert!(!failure.summary.contains("Sign in again"));
 
         let token = refresh_locked_with(
             &no_redirect_client().unwrap(),
