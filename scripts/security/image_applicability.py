@@ -11,6 +11,7 @@ import json
 import re
 
 import image_applicability_curl_release
+import image_applicability_subject_mismatch
 
 
 POLICY_PATH = ".github/security/image-applicability.json"
@@ -220,16 +221,19 @@ def evidence_for(rule, evidence, observations, now):
             require({"vulnerable_control", "fixed_control", "provenance"} <= set(artifacts),
                     "missing regression artifacts")
     else:
-        exact(proof, {"kind", "affected_applications"}, "absence proof")
-        require(proof["kind"] == "application-absence" and
-                isinstance(proof["affected_applications"], list) and proof["affected_applications"],
-                "missing affected application scope")
-        for application in proof["affected_applications"]:
-            identity(application, "affected application")
-        require(len(set(proof["affected_applications"])) == len(proof["affected_applications"]),
-                "duplicate affected application")
-        require({"complete_filesystem", "complete_consumers", "provenance"} <= set(artifacts),
-                "absence requires complete filesystem and consumer artifacts")
+        if isinstance(proof, dict) and proof.get("kind") == "official-subject-mismatch":
+            image_applicability_subject_mismatch.validate(rule, record, evidence)
+        else:
+            exact(proof, {"kind", "affected_applications"}, "absence proof")
+            require(proof["kind"] == "application-absence" and
+                    isinstance(proof["affected_applications"], list) and proof["affected_applications"],
+                    "missing affected application scope")
+            for application in proof["affected_applications"]:
+                identity(application, "affected application")
+            require(len(set(proof["affected_applications"])) == len(proof["affected_applications"]),
+                    "duplicate affected application")
+            require({"complete_filesystem", "complete_consumers", "provenance"} <= set(artifacts),
+                    "absence requires complete filesystem and consumer artifacts")
     return record
 
 
