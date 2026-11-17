@@ -37,7 +37,7 @@ class UpstreamTests(unittest.TestCase):
         original = coverage()
         targets = upstream.upstream_targets(original)
         self.assertEqual(targets, {
-            "krb5": "cpe:2.3:a:mit:kerberos_5:1.22.2:*:*:*:*:*:*:*",
+            "krb5": "cpe:2.3:a:mit:kerberos_5:1.22.3:*:*:*:*:*:*:*",
             "curl": "cpe:2.3:a:haxx:curl:8.23.0:*:*:*:*:*:*:*",
             "sasl": "cpe:2.3:a:cyrusimap:cyrus-sasl:2.1.28:*:*:*:*:*:*:*",
             "gcc_headers": "cpe:2.3:a:gnu:gcc:16.2.0:*:*:*:*:*:*:*",
@@ -93,7 +93,7 @@ class UpstreamTests(unittest.TestCase):
         for change in (lambda x: x.update(matches=None),
                        lambda x: x["descriptor"].update(name="other"),
                        lambda x: x["distro"].update(name="wolfi"),
-                       lambda x: x["matches"][0]["artifact"].update(version="1.22.3"),
+                       lambda x: x["matches"][0]["artifact"].update(version="1.22.2"),
                        lambda x: x["matches"][0]["artifact"].update(cpes=["cpe:wrong"]),
                        lambda x: x["matches"][0]["vulnerability"].update(severity="unrecognized")):
             value = report(targets)
