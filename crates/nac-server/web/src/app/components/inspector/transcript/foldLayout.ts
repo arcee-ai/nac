@@ -42,22 +42,11 @@ function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
 
 /**
  * Lays a partitioned model turn out as the transcript shows it. Reasoning and
- * tool groups fold at the place the first of them appeared, and
- * so does prose the model wrote between them ("Let me look at the tests").
- * Launched sessions, thread waves and the prose after the last group stay in
- * the open, in their order: they are what the turn has to say.
+ * tool groups fold at the place they appeared. Prose remains in the open in
+ * its original position, including when later activity arrives: moving it into
+ * a fold would discard the reader's selection and could hide visible text.
  */
 export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem[] {
-  // A later group across a session or wave must not pull prose into an
-  // otherwise empty fold before that boundary.
-  const followingGroup: boolean[] = [];
-  let groupAhead = false;
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (item.kind === "session" || blockOf(item)?.kind === "wave") groupAhead = false;
-    followingGroup[index] = groupAhead;
-    if (item.kind === "group") groupAhead = true;
-  }
   const layout: TurnLayoutItem[] = [];
   let fold: WorkFold | null = null;
   const openFold = (key: string): WorkFold => {
@@ -114,16 +103,8 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
     }
     const block = blockOf(item);
     if (!block) return;
-    if (block.kind === "text" && followingGroup[index] && block.text.trim()) {
-      openFold(block.key).steps.push({
-        kind: "note",
-        key: block.key,
-        text: block.text,
-      });
-      return;
-    }
     layout.push({ kind: "block", key: block.key, block });
-    if (block.kind === "wave") fold = null;
+    fold = null;
   });
   return layout;
 }

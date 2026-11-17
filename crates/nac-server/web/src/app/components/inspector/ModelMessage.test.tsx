@@ -15,6 +15,82 @@ afterEach(() => {
 });
 
 describe("transcript topology badge navigation", () => {
+  it("keeps visible prose and its selection in place when later work arrives and settles", () => {
+    const props = {
+      model: "model",
+      selectedThreadEpisode: null,
+      onSelectThread: vi.fn(),
+    };
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "thought-1",
+          text: "Thinking",
+          durationMs: null,
+          streaming: true,
+        },
+        { kind: "text", key: "text-1", text: "I will check the tests." },
+      ],
+    };
+    const view = render(<ModelMessage {...props} turn={turn} active />);
+    const prose = screen.getByText("I will check the tests.");
+    const range = document.createRange();
+    range.selectNodeContents(prose);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const later: ModelTurn = {
+      ...turn,
+      blocks: [...turn.blocks, { kind: "tool", key: "tool-1", name: "read_file", pending: true }],
+    };
+    view.rerender(<ModelMessage {...props} turn={later} active />);
+    expect(screen.getByText("I will check the tests.")).toBe(prose);
+    expect(selection.toString()).toBe("I will check the tests.");
+    view.rerender(<ModelMessage {...props} turn={later} active={false} />);
+    expect(screen.getByText("I will check the tests.")).toBe(prose);
+    expect(selection.toString()).toBe("I will check the tests.");
+    selection.removeAllRanges();
+  });
+
+  it("remembers a primary nested row when the outer fold is closed and reopened", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "thought-1",
+          text: "Kept thought",
+          durationMs: null,
+          streaming: true,
+        },
+      ],
+    };
+    render(
+      <ModelMessage
+        turn={turn}
+        model="model"
+        active
+        selectedThreadEpisode={null}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    const fold = screen.getByRole("button", { name: "Thinking…" });
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole("button", { name: "Thinking…", expanded: false }));
+    expect(screen.getByText("Kept thought")).toBeTruthy();
+    fireEvent.click(fold);
+    fireEvent.click(fold);
+    expect(screen.getByText("Kept thought")).toBeTruthy();
+  });
+
   it("uses one live disclosure for reasoning and retains reader choices as it settles", () => {
     const turn: ModelTurn = {
       kind: "model",

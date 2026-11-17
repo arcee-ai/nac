@@ -61,7 +61,9 @@ export const WorkFoldView = memo(function WorkFoldView({
   const listId = useId();
   const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
-  const choices = use(FoldChoicesContext);
+  const inheritedChoices = use(FoldChoicesContext);
+  const [localChoices] = useState(() => new Map<string, boolean>());
+  const choices = inheritedChoices ?? localChoices;
   const sessionId = useTranscriptSessionId();
   const choiceKey = JSON.stringify([sessionId, turnKey, fold.key]);
   const [toggled, setToggled] = useState<boolean | null>(() => choices?.get(choiceKey) ?? null);
@@ -87,60 +89,100 @@ export const WorkFoldView = memo(function WorkFoldView({
     step.kind === "segment" &&
     step.segment.kind === "tool" &&
     step.segment.presentation?.launchedTask
-      ? [{ key: step.key, groupId: step.groupId, task: step.segment.presentation.launchedTask }]
+      ? [
+          {
+            key: step.key,
+            groupId: step.groupId,
+            task: step.segment.presentation.launchedTask,
+          },
+        ]
       : [],
   );
   const selected = selectedGroupId !== null && fold.groupIds.includes(selectedGroupId);
   const firstGroup = fold.groupIds[0];
 
   return (
-    <div className="flex w-full min-w-0 flex-col" data-work-fold>
-      <div className="flex min-w-0 items-center gap-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-current={selected ? "true" : undefined}
-          aria-controls={open || pinned.length > 0 ? listId : undefined}
-          onClick={() => {
-            choices?.set(choiceKey, !open);
-            setToggled(!open);
-          }}
-          className={cn(
-            "group/fold -ml-1.5 inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 max-md:min-h-11",
-            "type-body-chrome transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
-            selected ? "text-basic-primary" : "text-basic-tertiary",
-            FOCUS_RING,
-          )}
-        >
-          <Icon
-            iconName={IconName.Right}
-            size={16}
-            aria-hidden
+    <FoldChoicesContext value={choices}>
+      <div className="flex w-full min-w-0 flex-col" data-work-fold>
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-current={selected ? "true" : undefined}
+            aria-controls={open || pinned.length > 0 ? listId : undefined}
+            onClick={() => {
+              choices?.set(choiceKey, !open);
+              setToggled(!open);
+            }}
             className={cn(
-              "shrink-0 !text-current transition-transform duration-150 ease-out motion-reduce:transition-none",
-              open && "rotate-90",
+              "group/fold -ml-1.5 inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 max-md:min-h-11",
+              "type-body-chrome transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
+              selected ? "text-basic-primary" : "text-basic-tertiary",
+              FOCUS_RING,
             )}
-          />
-          <span className="min-w-0 text-left max-md:line-clamp-2 md:truncate">
-            {label}
-            {failedCount > 0 && !active ? (
-              <span className="text-error-primary"> · {failedCount} failed</span>
-            ) : null}
-          </span>
-        </button>
-        {active && runStartedAt != null && runStartedAt > 0 ? (
-          <ElapsedClock since={runStartedAt} />
-        ) : null}
-      </div>
+          >
+            <Icon
+              iconName={IconName.Right}
+              size={16}
+              aria-hidden
+              className={cn(
+                "shrink-0 !text-current transition-transform duration-150 ease-out motion-reduce:transition-none",
+                open && "rotate-90",
+              )}
+            />
+            <span className="min-w-0 text-left max-md:line-clamp-2 md:truncate">
+              {label}
+              {failedCount > 0 && !active ? (
+                <span className="text-error-primary"> · {failedCount} failed</span>
+              ) : null}
+            </span>
+          </button>
+          {active && runStartedAt != null && runStartedAt > 0 ? (
+            <ElapsedClock since={runStartedAt} />
+          ) : null}
+        </div>
 
-      {open ? (
-        <div className="flex min-w-0 flex-col pt-1">
+        {open ? (
+          <div className="flex min-w-0 flex-col pt-1">
+            <ol
+              id={listId}
+              aria-label="Steps"
+              className="ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2"
+            >
+              {fold.steps.map((step) => (
+                <WorkStepRow
+                  key={step.key}
+                  step={step}
+                  streaming={active}
+                  interactive={interactive}
+                  choiceKey={JSON.stringify([sessionId, turnKey, fold.key, step.key])}
+                />
+              ))}
+            </ol>
+            {interactive && firstGroup ? (
+              <div className="pl-[14px] pt-1">
+                <button
+                  type="button"
+                  aria-controls={INSIGHTS_DETAIL_ID}
+                  onClick={(event) => openGroup(firstGroup, undefined, openOptionsFor(event))}
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1 rounded-pill px-2 type-meta text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11",
+                    FOCUS_RING,
+                  )}
+                >
+                  Open in Insights
+                  <Icon iconName={IconName.External} size={12} aria-hidden />
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : pinned.length > 0 ? (
           <ol
             id={listId}
-            aria-label="Steps"
-            className="ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2"
+            aria-label="Steps that need attention"
+            className="ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2 pt-1"
           >
-            {fold.steps.map((step) => (
+            {pinned.map((step) => (
               <WorkStepRow
                 key={step.key}
                 step={step}
@@ -150,46 +192,14 @@ export const WorkFoldView = memo(function WorkFoldView({
               />
             ))}
           </ol>
-          {interactive && firstGroup ? (
-            <div className="pl-[14px] pt-1">
-              <button
-                type="button"
-                aria-controls={INSIGHTS_DETAIL_ID}
-                onClick={(event) => openGroup(firstGroup, undefined, openOptionsFor(event))}
-                className={cn(
-                  "inline-flex h-7 items-center gap-1 rounded-pill px-2 type-meta text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11",
-                  FOCUS_RING,
-                )}
-              >
-                Open in Insights
-                <Icon iconName={IconName.External} size={12} aria-hidden />
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : pinned.length > 0 ? (
-        <ol
-          id={listId}
-          aria-label="Steps that need attention"
-          className="ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2 pt-1"
-        >
-          {pinned.map((step) => (
-            <WorkStepRow
-              key={step.key}
-              step={step}
-              streaming={active}
-              interactive={interactive}
-              choiceKey={JSON.stringify([sessionId, turnKey, fold.key, step.key])}
-            />
-          ))}
-        </ol>
-      ) : null}
+        ) : null}
 
-      {interactive && launched.length > 0 ? (
-        <div className="flex flex-col items-start gap-1 pt-2">
-          <NativeTaskLinks candidates={launched} />
-        </div>
-      ) : null}
-    </div>
+        {interactive && launched.length > 0 ? (
+          <div className="flex flex-col items-start gap-1 pt-2">
+            <NativeTaskLinks candidates={launched} />
+          </div>
+        ) : null}
+      </div>
+    </FoldChoicesContext>
   );
 });
