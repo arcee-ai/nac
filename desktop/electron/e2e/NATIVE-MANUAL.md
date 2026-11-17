@@ -47,16 +47,18 @@ app only:
    to the recorded bundle. Recheck liveness before every CUA attachment. Do not
    call `getApp`, `getAXState` or any app-opening inspection after Quit: those
    calls can relaunch an exited app with a normal personal profile.
-2. Use the native File/New Chat flow from the project-list screen to open New
-   Project. Name it exactly `folderProjectName` from the receipt. Keep Local,
-   open the normal folder picker, choose `selectedFolder` (spaces and Unicode),
+2. On Home, open the composer's project chip and choose **Add project…** to
+   open New Project (File/New Chat opens Home's composer, not the form). Name
+   it exactly `folderProjectName` from the receipt. Keep Local, open the
+   normal folder picker, choose `selectedFolder` (spaces and Unicode),
    select the seeded model if needed, and create the project. The controller
    independently checks the resulting Rust project record and selected cwd.
    The picker is the already-live nested **NAC Folder Picker.app**, with identifier
    `ai.arcee.nac.electron.folder-picker.dev` for this dev candidate. Independently
    bind its executable, parent PID and birth before CUA attachment. Do not launch
    that helper bundle yourself or inspect it after cancellation/selection exit.
-3. Open the seeded **Native acceptance workspace** chat and select Files. If
+3. Open the seeded **Native acceptance workspace** chat, then the header's
+   **Session menu** (⋯) and its **Files** panel row. If
    the **Files source** status describes a captured revision, select **Back to
    working tree** first and wait for the working-tree source to finish loading.
    Choose **All** (accessible name **All files**) and the exact `revealLeaf`.
@@ -66,13 +68,14 @@ app only:
    observe Finder showing that unique selected leaf. The controller never calls
    `showItemInFolder` or the reveal API. This observation must be recorded by the
    native actor; a controller receipt alone is not Finder evidence.
-4. Open the existing MCP servers UI, select **native-browser-fixture**, and
-   click **Authenticate**, then **Continue OAuth authorization**. The real system
-   browser opens the local fixture page and returns to Rust's callback. Observe
-   the browser page and the NAC **Connected** status. This uses dummy local
-   credentials and the existing server PKCE/callback owner; it is not vendor
-   authentication qualification. The controller independently requires a real
-   external-page browser observation with no NAC bridge and one PKCE exchange.
+4. Open **Settings › MCP servers** (Settings…, then MCP servers), select
+   **native-browser-fixture**, and click **Authenticate**, then **Continue
+   OAuth authorization**. The real system browser opens the local fixture page
+   and returns to Rust's callback. Observe the browser page and the NAC
+   **Connected** status. This uses dummy local credentials and the existing
+   server PKCE/callback owner; it is not vendor authentication qualification.
+   The controller independently requires a real external-page browser
+   observation with no NAC bridge and one PKCE exchange.
 5. Read `status.json`. It must report `folderProjectCreated`, `browserObserved`
    and `pkceSucceeded` true. Exercise ordinary Cmd-Q/Cancel and verify the app
    and private engine remain. Then use ordinary Quit/Stop and Quit. Independently
