@@ -388,6 +388,27 @@ async fn history_wake_read_to_wait_gap_retains_dirty() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_wait_sender_drop_releases_original_observation() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let f = Fixture::new().await;
+    let feed = f.open().await;
+    let live = f.live();
+    let generation = live.state.lock().unwrap().generation;
+    let (gate, release) = f.wait_gate();
+    let task = reading(feed);
+    reached(&gate.reached).await;
+    // The sole sender is owned by the test scope: cancellation or unwind must
+    // release its barrier without a timer or a replacement subscription.
+    drop(release);
+    f.commit("sender-dropped", 0).await;
+    dirty_after(&live, generation).await;
+    let value = result(task).await;
+    drop(live);
+    f.finish().await;
+    exact(value, "sender-dropped", "S4_SENDER_DROP_EXPECTED");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_wake_coalescing_and_spurious_hints_return_to_pending() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let f = Fixture::new().await;

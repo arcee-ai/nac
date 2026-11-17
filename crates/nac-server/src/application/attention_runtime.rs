@@ -286,7 +286,9 @@ impl NativeAttentionSubscription {
             gate.reached.notify_one();
             let resume = gate.resume.lock().unwrap().take();
             if let Some(resume) = resume {
-                let _ = tokio::time::timeout(Duration::from_secs(5), resume).await;
+                // The test owns release. Sender drop also releases this wait
+                // on cancellation/unwind; elapsed time must not open the gate.
+                let _ = resume.await;
             }
         }
     }
