@@ -317,7 +317,7 @@ async fn prepared_git_policy_binds_cwd_and_denies_before_execution() {
     assert!(prepared
         .permission_resources()
         .iter()
-        .any(|r| r.resource == repo.display().to_string()));
+        .any(|r| r.resource == repo.canonicalize().unwrap().display().to_string()));
     assert!(prepared
         .permission_resources()
         .iter()
