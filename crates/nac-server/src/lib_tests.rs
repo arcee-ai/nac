@@ -1026,6 +1026,8 @@ fn stalled_then_scripted_direct_response() -> (
 
 #[path = "tests/catalog.rs"]
 mod catalog;
+#[path = "tests/child_description_continuation.rs"]
+mod child_description_continuation;
 #[path = "tests/child_input_origin.rs"]
 mod child_input_origin;
 #[path = "tests/child_review_retry.rs"]
@@ -1062,6 +1064,8 @@ mod mcp_oauth;
 mod persistence_load;
 #[path = "tests/presentation.rs"]
 mod presentation;
+#[path = "tests/project_folders.rs"]
+mod project_folder_routes;
 #[path = "tests/projects.rs"]
 mod project_routes;
 #[path = "tests/recovery.rs"]

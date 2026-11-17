@@ -1,4 +1,4 @@
-import type { ProductContext, ProductNavigationRequest, ProductNavigationResolution } from "../../types/api";
+import type { ProductContext, ProductNavigationRequest, ProductNavigationResolution } from "@/app/types/api";
 import type { NotificationSessionTarget, SessionTargetOutcome } from "../desktop-commands/sessionTarget";
 export interface ProductNavigationAdapter {
     currentSession(): string | null;
