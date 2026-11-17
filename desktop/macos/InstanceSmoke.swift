@@ -120,7 +120,14 @@ final class InstanceSmoke {
             var failureBinding: ViewBinding?
             do {
                 if scenario == "conflict" { try await conflictJourney() }
-                else { try await workspaceJourney() }
+                else {
+                    #if ELECTRON_PERFORMANCE
+                    if scenario == "performance" { try await performanceJourney() }
+                    else { try await workspaceJourney() }
+                    #else
+                    try await workspaceJourney()
+                    #endif
+                }
                 try await command("finish")
                 try requireActiveView()
                 evidence["passed"] = true
@@ -154,6 +161,26 @@ final class InstanceSmoke {
     }
 
     func prepareForStop() { retiring = true; activeView = nil }
+
+    #if ELECTRON_PERFORMANCE
+    private func performanceJourney() async throws {
+        try await readyWorkspace()
+        guard let binding = activeView,
+              let option = CommandLine.arguments.firstIndex(of: "--instance-performance"),
+              option + 1 < CommandLine.arguments.count else {
+            throw InstanceFixtureError("Missing disposable performance configuration")
+        }
+        let view = try requireCurrentView(binding)
+        evidence["performance"] = try await WorkspaceProbe.run(
+            view: view, configuration: URL(fileURLWithPath: CommandLine.arguments[option + 1]),
+            requireCurrent: { [weak self] in
+                guard let self else { throw InstanceViewChanged() }
+                _ = try self.requireCurrentView(binding)
+            })
+        try requireActiveView()
+        publish("performance-ready")
+    }
+    #endif
 
     private func workspaceJourney() async throws {
         try await readyWorkspace()

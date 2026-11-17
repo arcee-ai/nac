@@ -126,6 +126,11 @@ if [[ "$mode" == auth-build ]]; then
 fi
 if [[ "$mode" == instance-* ]]; then
     sources+=(desktop/macos/InstanceSmoke.swift)
+    if [[ "${NAC_MAC_PERFORMANCE:-0}" == 1 ]]; then
+        sources+=(desktop/electron/performance/WorkspaceProbe.swift)
+        flags+=(-D ELECTRON_PERFORMANCE)
+        cp desktop/electron/performance/workspace-probe.cjs "$app/Contents/Resources/performance-workspace-probe.cjs"
+    fi
     flags+=(-D PREVIEW_SMOKE -D INSTANCE_SMOKE)
 fi
 if [[ "$mode" == lifecycle-* ]]; then

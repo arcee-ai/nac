@@ -1,0 +1,370 @@
+{
+  "record_kind": "native_layer_tree_and_sample",
+  "status": "attribution_admitted_profiling_overhead_not_budget_data",
+  "shared_probe_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+  "native_start": {
+    "focused": true,
+    "visible": true,
+    "hidden": false,
+    "accessibilityEnabled": true,
+    "rendererPid": 39600,
+    "accessibilityEvents": [
+      {
+        "enabled": true,
+        "at": 1794617915562
+      }
+    ],
+    "minimized": false,
+    "throttle": true,
+    "displayId": 1,
+    "displayBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1512,
+      "height": 982
+    },
+    "scaleFactor": 2,
+    "frequency": 120.0006103515625,
+    "contentBounds": {
+      "x": 116,
+      "y": 123,
+      "width": 1280,
+      "height": 800
+    },
+    "counters": {
+      "blurs": 0,
+      "hides": 0
+    },
+    "disablingSwitches": [
+      [
+        "disable-background-timer-throttling",
+        false
+      ],
+      [
+        "disable-renderer-backgrounding",
+        false
+      ],
+      [
+        "disable-frame-rate-limit",
+        false
+      ]
+    ]
+  },
+  "native_end": {
+    "focused": true,
+    "visible": true,
+    "hidden": false,
+    "accessibilityEnabled": true,
+    "rendererPid": 39600,
+    "accessibilityEvents": [
+      {
+        "enabled": true,
+        "at": 1794617915562
+      }
+    ],
+    "minimized": false,
+    "throttle": true,
+    "displayId": 1,
+    "displayBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1512,
+      "height": 982
+    },
+    "scaleFactor": 2,
+    "frequency": 120.0006103515625,
+    "contentBounds": {
+      "x": 116,
+      "y": 123,
+      "width": 1280,
+      "height": 800
+    },
+    "counters": {
+      "blurs": 0,
+      "hides": 0
+    },
+    "disablingSwitches": [
+      [
+        "disable-background-timer-throttling",
+        false
+      ],
+      [
+        "disable-renderer-backgrounding",
+        false
+      ],
+      [
+        "disable-frame-rate-limit",
+        false
+      ]
+    ]
+  },
+  "sample": {
+    "status": "sampled",
+    "pid": 39600,
+    "birth_before": {
+      "pid": 39600,
+      "valid": true,
+      "birth_sec": 1794617887,
+      "birth_usec": 273041,
+      "ppid": 39588,
+      "cpu_ns": 11647487125,
+      "physical_footprint_bytes": 268224240,
+      "resident_bytes": 410271744,
+      "package_idle_wakeups": 26,
+      "interrupt_wakeups": 1084
+    },
+    "birth_after": {
+      "pid": 39600,
+      "valid": true,
+      "birth_sec": 1794617887,
+      "birth_usec": 273041,
+      "ppid": 39588,
+      "cpu_ns": 13883092625,
+      "physical_footprint_bytes": 240518944,
+      "resident_bytes": 389939200,
+      "package_idle_wakeups": 26,
+      "interrupt_wakeups": 1171
+    },
+    "elapsed_ms": 2624,
+    "command": "sample exact-renderer-pid 2 1 -file private-output; no-mayDie,60s completion bound",
+    "symbol_limit": "Vendor framework is stripped; many frames resolve only to nearest exported names plus large offsets. Do not treat these as exact C++function names."
+  },
+  "typing_layers": [
+    {
+      "width": 0,
+      "height": 0,
+      "drawsContent": true,
+      "scroll_rect_count": 0,
+      "reasons": {
+        "compositingReasons": [],
+        "compositingReasonIds": []
+      }
+    },
+    {
+      "width": 2560,
+      "height": 1600,
+      "drawsContent": false,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Is for the visual viewport.",
+          "Is a scrollable overflow element using accelerated scrolling."
+        ],
+        "compositingReasonIds": [
+          "Viewport",
+          "OverflowScrolling"
+        ]
+      }
+    },
+    {
+      "width": 2560,
+      "height": 1600,
+      "drawsContent": false,
+      "scroll_rect_count": 0,
+      "reasons": {
+        "compositingReasons": [
+          "Is a scrollable overflow element using accelerated scrolling."
+        ],
+        "compositingReasonIds": [
+          "OverflowScrolling"
+        ]
+      }
+    },
+    {
+      "width": 2560,
+      "height": 1600,
+      "drawsContent": true,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Is the document.rootScroller.",
+          "Is a scrollable overflow element using accelerated scrolling."
+        ],
+        "compositingReasonIds": [
+          "RootScroller",
+          "OverflowScrolling"
+        ]
+      }
+    },
+    {
+      "width": 1888,
+      "height": 1600,
+      "drawsContent": false,
+      "scroll_rect_count": 0,
+      "reasons": {
+        "compositingReasons": [
+          "Is a scrollable overflow element using accelerated scrolling."
+        ],
+        "compositingReasonIds": [
+          "OverflowScrolling"
+        ]
+      }
+    },
+    {
+      "width": 112,
+      "height": 1600,
+      "drawsContent": true,
+      "scroll_rect_count": 2,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 1888,
+      "height": 168212,
+      "drawsContent": false,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 1984,
+      "height": 324,
+      "drawsContent": true,
+      "scroll_rect_count": 10,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 1264,
+      "height": 167016,
+      "drawsContent": false,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Has a trivial 3d transform.",
+          "Has backface-visibility: hidden."
+        ],
+        "compositingReasonIds": [
+          "Trivial3DTransform",
+          "BackfaceVisibilityHidden"
+        ]
+      }
+    },
+    {
+      "width": 1264,
+      "height": 166930,
+      "drawsContent": true,
+      "scroll_rect_count": 3478,
+      "reasons": {
+        "compositingReasons": [
+          "Has an active accelerated opacity animation or transition."
+        ],
+        "compositingReasonIds": [
+          "ActiveOpacityAnimation"
+        ]
+      }
+    },
+    {
+      "width": 268,
+      "height": 34,
+      "drawsContent": true,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Has an active accelerated opacity animation or transition."
+        ],
+        "compositingReasonIds": [
+          "ActiveOpacityAnimation"
+        ]
+      }
+    },
+    {
+      "width": 1896,
+      "height": 489,
+      "drawsContent": true,
+      "scroll_rect_count": 2,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 2,
+      "height": 39,
+      "drawsContent": true,
+      "scroll_rect_count": 0,
+      "reasons": {
+        "compositingReasons": [
+          "Is a caret in an editor."
+        ],
+        "compositingReasonIds": [
+          "Caret"
+        ]
+      }
+    },
+    {
+      "width": 776,
+      "height": 1816,
+      "drawsContent": true,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 1896,
+      "height": 150,
+      "drawsContent": true,
+      "scroll_rect_count": 1,
+      "reasons": {
+        "compositingReasons": [
+          "Overlaps other composited content."
+        ],
+        "compositingReasonIds": [
+          "Overlap"
+        ]
+      }
+    },
+    {
+      "width": 2560,
+      "height": 1600,
+      "drawsContent": false,
+      "scroll_rect_count": 0,
+      "reasons": {
+        "compositingReasons": [
+          "Is for the visual viewport."
+        ],
+        "compositingReasonIds": [
+          "Viewport"
+        ]
+      }
+    }
+  ],
+  "artifacts": {
+    "packet.json": {
+      "sha256": "861f669111e189c4afa4c072a1f5902b114fc8a4d5c2c46f0d07725db6abe3c9",
+      "bytes": 832219
+    },
+    "renderer-native-sample.txt": {
+      "sha256": "e39f8e5c8053c0cee53f723babad8b53df2560e0c024e3d2b3115755b43c3b7e",
+      "bytes": 496194
+    }
+  }
+}

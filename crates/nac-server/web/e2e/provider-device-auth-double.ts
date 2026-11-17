@@ -23,10 +23,14 @@ export class ProviderDeviceAuthDouble {
   private held: Array<() => void> = [];
   private holding = false;
 
-  private constructor(private readonly baseUrl: string) {}
+  private constructor(private readonly verificationUri: string) {}
 
-  static async install(page: Page, baseUrl: string): Promise<ProviderDeviceAuthDouble> {
-    const double = new ProviderDeviceAuthDouble(baseUrl);
+  static async install(
+    page: Page,
+    baseUrl: string,
+    verificationUri = `${baseUrl}/health`,
+  ): Promise<ProviderDeviceAuthDouble> {
+    const double = new ProviderDeviceAuthDouble(verificationUri);
     await page.route(`${baseUrl}/auth`, (route) => double.list(route));
     await page.route(new RegExp(`^${escape(baseUrl)}/auth/(arcee|codex)(/.*)?$`), (route) =>
       double.account(route),
@@ -93,7 +97,7 @@ export class ProviderDeviceAuthDouble {
         json: {
           provider,
           login_id: `${provider}-e2e-login`,
-          verification_uri: `${this.baseUrl}/health`,
+          verification_uri: this.verificationUri,
           user_code: FAKE_DEVICE_CODE,
           expires_in_secs: 600,
         },
