@@ -105,7 +105,7 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
   c.provider.enqueue(
     "focus-preference-completion",
     { token: "FOCUS_PREFERENCE_COMPLETION" },
-    { kind: "text", text: "The cold-launch preference fixture finished.", stream: true },
+    { kind: "text", text: "The cold-launch preference fixture finished." },
   );
   // Keep Home open so observing this completion cannot mark it read implicitly.
   const started = await c.api(`/sessions/${session}/runs`, {
@@ -138,7 +138,7 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
   c.provider.enqueue(
     "focus-preference-unread-completion",
     { token: "FOCUS_PREFERENCE_UNREAD_COMPLETION" },
-    { kind: "text", text: "This outcome stays unread across cold launch.", stream: true },
+    { kind: "text", text: "This outcome stays unread across cold launch." },
   );
   const unreadStarted = await c.api(`/sessions/${unreadSession}/runs`, {
     prompt: "FOCUS_PREFERENCE_UNREAD_COMPLETION",
