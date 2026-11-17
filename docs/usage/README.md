@@ -9,6 +9,7 @@ durable direct-session work.
 - [AGENTS.md Files](agents-md.md)
 - [Skills](skills.md)
 - [Sandbox](sandbox.md)
+- [Terminal output and command deadlines](terminal-output.md)
 - [Retained isolated tasks](retained-tasks.md)
 - [Retained interval tasks](interval-tasks.md)
 - [Direct sessions](session-behaviors.md)

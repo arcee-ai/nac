@@ -8,6 +8,7 @@ Detailed documentation for nac. The [root README](../README.md) has install, aut
   - [AGENTS.md Files](usage/agents-md.md)
   - [Skills](usage/skills.md)
   - [Sandbox](usage/sandbox.md)
+  - [Terminal output and command deadlines](usage/terminal-output.md)
   - [Direct sessions](usage/session-behaviors.md)
   - [Direct-session permissions](usage/permissions.md)
   - [Durable direct goals](usage/direct-goals.md)
