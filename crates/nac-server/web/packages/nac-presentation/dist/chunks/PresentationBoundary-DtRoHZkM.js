@@ -298,6 +298,7 @@ function Y() {
 			t.delete(e);
 		}),
 		modalDepth: () => e.filter((e) => a(e) === "modal").length,
+		openDepth: () => e.filter((e) => a(e) !== "hint").length,
 		isTop: (e, t = !1) => s((e) => t || a(e) !== "hint")?.token === e,
 		hasModalAbove: (t) => {
 			let n = e.findIndex((e) => e.token === t);
