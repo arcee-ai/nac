@@ -278,6 +278,9 @@ pub fn last_transcript_log_user_prompt(
     .map_err(Into::into)
 }
 
+/// One transcript-log row: its row id, transcript `idx` and message.
+pub(crate) type TranscriptLogRow = (i64, u64, Message);
+
 /// Dedicated path-backed writer/reader for the transcript log. Connections
 /// are checked out only for the duration of each operation. All methods are
 /// synchronous and the writer is Send + Sync, so every method is usable inside
@@ -848,6 +851,90 @@ impl TranscriptLogWriter {
         Ok(self
             .read_tail_window(session_id, blob_len, 0, usize::MAX)?
             .1)
+    }
+
+    /// Whether the log holds an entry at or past `from_idx`. Rowid order is
+    /// append (= `idx`) order under the module invariants, so the newest row
+    /// answers it without decoding the rest of the log.
+    pub fn has_entries_from(&self, session_id: &str, from_idx: u64) -> Result<bool> {
+        coordinate_writer!(self, Result<bool>, {
+            session_id: String = session_id.to_owned(),
+            from_idx: u64 = from_idx,
+        }, call |command| command.writer.has_entries_from(&command.session_id, command.from_idx),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let connection = open_runtime_connection(&self.store_path)?;
+        Ok(tail_len_of(&connection, session_id, from_idx)? > 0)
+    }
+
+    /// Up to `limit` log rows with a row id above `after_row_id`, oldest
+    /// first, as `(row id, idx, message)`, plus the number of rows at or
+    /// below `after_row_id` from the same read snapshot. Row ids are never
+    /// reused, so a reader that holds every row up to `after_row_id` sees a
+    /// smaller count exactly when some of them were deleted.
+    pub(crate) fn read_rows_after(
+        &self,
+        session_id: &str,
+        after_row_id: i64,
+        limit: usize,
+    ) -> Result<(u64, Vec<TranscriptLogRow>)> {
+        coordinate_writer!(self, Result<(u64, Vec<TranscriptLogRow>)>, {
+            session_id: String = session_id.to_owned(),
+            after_row_id: i64 = after_row_id,
+            limit: usize = limit,
+        }, call |command| command.writer.read_rows_after(&command.session_id, command.after_row_id, command.limit),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let snapshot =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+        let retained: i64 = snapshot.query_row(
+            "SELECT COUNT(*)
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2 AND id <= ?3",
+            params![session_id, ORCHESTRATOR_STEERING_TARGET, after_row_id],
+            |row| row.get(0),
+        )?;
+        let mut statement = snapshot.prepare(
+            "SELECT id, event_json
+             FROM thread_events
+             WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
+             ORDER BY id ASC
+             LIMIT ?4",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id,
+                ORCHESTRATOR_STEERING_TARGET,
+                after_row_id,
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let (id, event_json) = row?;
+            let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
+                anyhow!(
+                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                )
+            })?;
+            let message: Message =
+                serde_json::from_str(&entry.message_json).with_context(|| {
+                    format!("thread_events row {id} holds an undecodable transcript message")
+                })?;
+            entries.push((id, entry.idx, message));
+        }
+        let retained = u64::try_from(retained).context("transcript log row count was negative")?;
+        Ok((retained, entries))
     }
 
     /// Read a window of the log tail relative to a snapshot blob of
