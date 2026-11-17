@@ -130,6 +130,7 @@ impl SessionService {
             reconciled_recovery_run_id: Arc::new(StdMutex::new(None)),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
+            tool_call_index: Arc::default(),
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             published_operation: Arc::new(StdMutex::new(None)),
