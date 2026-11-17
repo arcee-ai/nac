@@ -155,6 +155,24 @@ describe("work fold layout", () => {
     ]);
     expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block", "fold"]);
   });
+
+  it("does not label prose before a wave as thought because work follows the wave", () => {
+    const layout = layoutModelTurn([
+      { kind: "block", block: { kind: "text", key: "note", text: "Starting a thread." } },
+      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      {
+        kind: "group",
+        id: "later",
+        group: {
+          id: "later",
+          segments: [read("read", "a.ts")],
+          status: "ready",
+          durationMs: null,
+        },
+      },
+    ]);
+    expect(layout.map((entry) => entry.kind)).toEqual(["block", "block", "fold"]);
+  });
 });
 
 describe("live status line", () => {

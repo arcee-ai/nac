@@ -48,10 +48,16 @@ function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
  * the open, in their order: they are what the turn has to say.
  */
 export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem[] {
-  let lastGroup = -1;
-  items.forEach((item, index) => {
-    if (item.kind === "group") lastGroup = index;
-  });
+  // A later group across a session or wave must not pull prose into an
+  // otherwise empty fold before that boundary.
+  const followingGroup: boolean[] = [];
+  let groupAhead = false;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "session" || blockOf(item)?.kind === "wave") groupAhead = false;
+    followingGroup[index] = groupAhead;
+    if (item.kind === "group") groupAhead = true;
+  }
   const layout: TurnLayoutItem[] = [];
   let fold: WorkFold | null = null;
   const openFold = (key: string): WorkFold => {
@@ -105,7 +111,7 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
     }
     const block = blockOf(item);
     if (!block) return;
-    if (block.kind === "text" && index < lastGroup && block.text.trim()) {
+    if (block.kind === "text" && followingGroup[index] && block.text.trim()) {
       openFold(block.key).steps.push({
         kind: "note",
         key: block.key,

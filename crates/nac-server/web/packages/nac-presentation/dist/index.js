@@ -18548,58 +18548,59 @@ function ry(e) {
 	return e.kind === "group" || e.kind === "session" ? null : "block" in e ? e.block : null;
 }
 function iy(e) {
-	let t = -1;
-	e.forEach((e, n) => {
-		e.kind === "group" && (t = n);
-	});
-	let n = [], r = null, i = (e) => (r || (r = {
+	let t = [], n = !1;
+	for (let r = e.length - 1; r >= 0; --r) {
+		let i = e[r];
+		(i.kind === "session" || ry(i)?.kind === "wave") && (n = !1), t[r] = n, i.kind === "group" && (n = !0);
+	}
+	let r = [], i = null, a = (e) => (i || (i = {
 		kind: "fold",
 		key: `fold:${e}`,
 		groupIds: [],
 		steps: []
-	}, n.push(r)), r);
-	return e.forEach((a, o) => {
-		if (a.kind === "group") {
-			let e = i(a.id);
-			e.groupIds.push(a.id);
-			for (let t of a.group.segments) e.steps.push({
+	}, r.push(i)), i);
+	return e.forEach((n, o) => {
+		if (n.kind === "group") {
+			let e = a(n.id);
+			e.groupIds.push(n.id);
+			for (let t of n.group.segments) e.steps.push({
 				kind: "segment",
 				key: t.key,
-				groupId: a.id,
+				groupId: n.id,
 				segment: t
 			});
 			return;
 		}
-		if (a.kind === "session") {
-			let t = e[o - 1], i = n.at(-1);
-			if (a.rowKey && t?.kind === "session" && t.rowKey === a.rowKey && t.action === a.action) {
-				if (i?.kind === "session-group") {
-					i.entries.push(a);
+		if (n.kind === "session") {
+			let t = e[o - 1], a = r.at(-1);
+			if (n.rowKey && t?.kind === "session" && t.rowKey === n.rowKey && t.action === n.action) {
+				if (a?.kind === "session-group") {
+					a.entries.push(n);
 					return;
 				}
-				if (i?.kind === "session") {
-					n[n.length - 1] = {
+				if (a?.kind === "session") {
+					r[r.length - 1] = {
 						kind: "session-group",
-						key: i.id,
-						entries: [i, a]
+						key: a.id,
+						entries: [a, n]
 					};
 					return;
 				}
 			}
-			n.push(a), r = null;
+			r.push(n), i = null;
 			return;
 		}
-		let s = ry(a);
-		s && (s.kind === "text" && o < t && s.text.trim() ? i(s.key).steps.push({
+		let s = ry(n);
+		s && (s.kind === "text" && t[o] && s.text.trim() ? a(s.key).steps.push({
 			kind: "note",
 			key: s.key,
 			text: s.text
-		}) : (n.push({
+		}) : (r.push({
 			kind: "block",
 			key: s.key,
 			block: s
-		}), s.kind === "wave" && (r = null)));
-	}), n;
+		}), s.kind === "wave" && (i = null)));
+	}), r;
 }
 function ay(e) {
 	return e.steps.flatMap((e) => e.kind === "segment" ? [e.segment] : []);
