@@ -203,7 +203,7 @@ fn calendar_schema50_real49_preserves_rows_feed_sequences_and_retained_owners() 
     drop(conn);
     initialize(&f.path).unwrap();
     let mut conn = open_runtime_connection(&f.path).unwrap();
-    assert_eq!(version(&conn), 50);
+    assert_eq!(version(&conn), STORE_SCHEMA_VERSION);
     assert_eq!(
         facts(&conn).1,
         before.1,
@@ -403,7 +403,7 @@ fn calendar_schema50_lock_time_current_preserves_facts_catalog_and_commit_hook()
                 drop(conn);
                 initialize(&f.path).unwrap();
                 let conn = Connection::open(&f.path).unwrap();
-                assert_eq!(version(&conn), 50);
+                assert_eq!(version(&conn), STORE_SCHEMA_VERSION);
                 *expected.borrow_mut() = Some(physical_state(&conn));
             },
             || {
@@ -428,7 +428,7 @@ fn calendar_schema50_lock_time_current_preserves_facts_catalog_and_commit_hook()
             result.unwrap();
         }
         assert!(preflight.get());
-        assert_eq!(locked_version.get(), 50);
+        assert_eq!(locked_version.get(), STORE_SCHEMA_VERSION);
         assert_eq!(commits.get(), 1, "the locked path retains before_commit");
         let conn = Connection::open(&f.path).unwrap();
         assert_eq!(

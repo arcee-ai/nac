@@ -276,7 +276,7 @@ pub async fn run_codex_auth_action(action: CodexAuthAction) -> Result<()> {
     match action {
         CodexAuthAction::Login => codex_auth_login().await,
         CodexAuthAction::Status => codex_auth_status(),
-        CodexAuthAction::Logout => codex_auth_logout(),
+        CodexAuthAction::Logout => codex_auth_logout().await,
     }
 }
 
@@ -530,10 +530,11 @@ pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAut
 }
 
 /// Removes the stored credential, reporting whether there was one to remove.
-pub fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
+/// Codex removal waits for an in-flight refresh without blocking the executor.
+pub async fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
     match provider {
         ManagedAuthProvider::Arcee => arcee::arcee_auth_remove(),
-        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove(),
+        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove().await,
     }
 }
 
