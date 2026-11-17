@@ -98,7 +98,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
           onOpenAutoFocus={(event) => event.preventDefault()}
           style={{ zIndex }}
           className={cn(
-            "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain",
+            "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[min(75dvh,calc(100%-16px))] overflow-y-auto overscroll-contain",
             "rounded-t-sheet bg-elevation-level-2 pt-1 pb-[calc(12px+env(safe-area-inset-bottom))] shadow-2xl",
             "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none [&>*]:shrink-0",
             down ? "translate-y-full" : "translate-y-0",

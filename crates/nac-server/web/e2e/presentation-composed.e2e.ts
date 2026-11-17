@@ -582,7 +582,11 @@ async function inspectorComposed(j: Journey, id: string) {
     .toBeLessThanOrEqual(2);
   if (j.width < 768) {
     await activate(j, openList);
-    await activate(j, j.root.getByRole("tab", { name: "Insights", exact: true }));
+    // A phone's panel sheet heads itself without a tab strip: "Open list"
+    // already returns to the Insights list it belongs to.
+    const insightsTab = j.root.getByRole("tab", { name: "Insights", exact: true });
+    if (await insightsTab.count()) await activate(j, insightsTab);
+    else await expect(j.root.getByRole("dialog", { name: "Insights", exact: true })).toBeVisible();
     const selected = j.root.getByRole("button", { name: `${childTitle}, Check`, exact: true });
     await expect(selected).toBeVisible();
     await activate(j, selected);

@@ -469,6 +469,14 @@ function settingsNav(j: Journey) {
   return j.root.getByRole("navigation", { name: "Settings sections", exact: true });
 }
 
+/** On screen inside this presentation (not a sheet still sliding out past its edge). */
+async function onScreenInRoot(j: Journey, control: Locator): Promise<boolean> {
+  if (!(await control.isVisible())) return false;
+  const [box, root] = await Promise.all([control.boundingBox(), j.root.boundingBox()]);
+  if (!box || !root) return false;
+  return box.x >= root.x - 0.5 && box.x + box.width <= root.x + root.width + 0.5;
+}
+
 /** Leaves the full-page Settings takeover through its own back controls. */
 async function leaveSettings(j: Journey, press: Press) {
   for (let step = 0; step < 3; step += 1) {
@@ -480,7 +488,7 @@ async function leaveSettings(j: Journey, press: Press) {
     const onSettings =
       (await settingsNav(j).isVisible()) ||
       (await j.root.getByRole("textbox", { name: "Search settings" }).isVisible());
-    if (!onSettings && (await sectionBack.first().isVisible())) {
+    if (!onSettings && (await onScreenInRoot(j, sectionBack.first()))) {
       // A pushed section page (below 1024px): "‹ Settings" returns to the list.
       await press(sectionBack.first());
       await expect(sectionBack).toHaveCount(0);
@@ -504,7 +512,7 @@ async function settingsSection(j: Journey, label: RegExp, press: Press) {
   const sectionBack = j.root
     .getByRole("button", { name: "Settings", exact: true })
     .filter({ hasText: "Settings" });
-  const pushed = !listed && /#\/settings\//.test(j.page.url()) && (await sectionBack.isVisible());
+  const pushed = !listed && (await onScreenInRoot(j, sectionBack.first()));
   if (pushed) await press(sectionBack.first());
   const onSettings = listed || pushed;
   if (!onSettings) {

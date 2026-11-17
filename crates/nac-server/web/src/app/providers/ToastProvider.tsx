@@ -90,9 +90,10 @@ function ToastContainer({
       aria-label="Notifications"
       aria-live="polite"
       aria-relevant="additions"
-      // Top centre, in the header's quiet middle: a passing remark that never
-      // sits over the composer, a sheet's last row, or the home indicator.
-      className="fixed inset-x-0 top-[calc(10px+env(safe-area-inset-top))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none"
+      // Top centre, just below the 52–56px page header: a passing remark that
+      // never covers header controls, the composer, a sheet's last row, or the
+      // home indicator.
+      className="fixed inset-x-0 top-[calc(64px+env(safe-area-inset-top))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none"
     >
       {toasts.map((toast) => (
         <div key={toast.id} className="pointer-events-none flex w-full justify-center">

@@ -113,7 +113,9 @@ export default function Drawer({
             !shown && "pointer-events-none",
             isMobile
               ? cn(
-                  "inset-x-0 bottom-0 max-h-[92dvh] min-h-[40dvh] rounded-t-sheet pb-[env(safe-area-inset-bottom)]",
+                  // `%` resolves against the containing block: the viewport for the
+                  // app, the presentation root when packed into a host page.
+                  "inset-x-0 bottom-0 max-h-[min(92dvh,calc(100%-16px))] min-h-[min(40dvh,50%)] rounded-t-sheet pb-[env(safe-area-inset-bottom)]",
                   shown ? "translate-y-0" : "translate-y-full",
                 )
               : cn(
