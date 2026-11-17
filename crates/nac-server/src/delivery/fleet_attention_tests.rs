@@ -543,5 +543,90 @@ fn wire_entry_carries_exact_question_review_and_permission_identities_only() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn held_fleet_stream_finishes_before_graceful_http_and_store_drain() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let fixture = fixture().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let forced = Arc::new(AtomicUsize::new(0));
+    let force_receipt = forced.clone();
+    let mut server = tokio::spawn(crate::delivery::server::serve_listener_with_shutdown(
+        listener,
+        None,
+        fixture.manager.clone(),
+        async move {
+            let _ = shutdown_rx.await;
+        },
+        Duration::from_secs(5),
+        move || {
+            force_receipt.fetch_add(1, Ordering::SeqCst);
+        },
+    ));
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut response = tokio::net::TcpStream::connect(address).await.unwrap();
+    response
+        .write_all(
+            format!(
+                "GET /attention/stream HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut initial = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !String::from_utf8_lossy(&initial).contains("snapshot") {
+            let mut chunk = [0; 4096];
+            let count = response.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            initial.extend_from_slice(&chunk[..count]);
+        }
+    })
+    .await
+    .unwrap();
+    assert!(String::from_utf8_lossy(&initial).starts_with("HTTP/1.1 200"));
+    shutdown_tx.send(()).unwrap();
+    let drained = tokio::time::timeout(Duration::from_secs(3), async {
+        response.read_to_end(&mut Vec::new()).await.unwrap();
+        (&mut server).await.unwrap().unwrap();
+    })
+    .await;
+    // Release this exact connection even when the regression times out.
+    drop(response);
+    if drained.is_err() {
+        let _ = tokio::time::timeout(Duration::from_secs(4), &mut server).await;
+        server.abort();
+    }
+    assert!(
+        drained.is_ok(),
+        "passive stream held graceful shutdown open"
+    );
+    assert_eq!(forced.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.manager.inner.fleet_attention.stream_count(), 0);
+    assert!(!fixture.manager.inner.fleet_attention.refresher_running());
+    assert_eq!(
+        fixture
+            .manager
+            .inner
+            .fleet_attention
+            .snapshot(&fixture.manager)
+            .await
+            .err(),
+        Some(crate::application::fleet_attention::FleetAttentionUnavailable::Store)
+    );
+    assert!(matches!(
+        fixture
+            .manager
+            .inner
+            .fleet_attention
+            .subscribe(&fixture.manager)
+            .await,
+        Err(crate::application::fleet_attention::FleetAttentionSubscribeError::Unavailable(_))
+    ));
+    fixture.finish().await;
+}
+
 #[path = "fleet_attention_child_tests.rs"]
 mod child;

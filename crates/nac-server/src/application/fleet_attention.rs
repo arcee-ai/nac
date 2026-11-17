@@ -18,7 +18,7 @@ use nac_core::{
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, Weak,
     },
     time::{Duration, Instant},
@@ -85,12 +85,14 @@ struct StoreCensus {
 struct StoreCache {
     ticket: u64,
     census: Option<Arc<StoreCensus>>,
+    unavailable: Option<FleetAttentionUnavailable>,
 }
 
 struct Inner {
     sender: watch::Sender<Arc<FleetAttentionView>>,
     store: Mutex<StoreCache>,
     tickets: AtomicU64,
+    stopped: AtomicBool,
     // Stream admission and refresher lifetime share this lock.
     refresher: Mutex<Option<JoinHandle<()>>>,
 }
@@ -110,6 +112,7 @@ impl Default for FleetAttentionHub {
             sender,
             store: Mutex::new(StoreCache::default()),
             tickets: AtomicU64::new(0),
+            stopped: AtomicBool::new(false),
             refresher: Mutex::new(None),
         }))
     }
@@ -131,11 +134,7 @@ impl FleetAttentionHub {
         &self,
         manager: &SessionManager,
     ) -> Result<Arc<FleetAttentionView>, FleetAttentionUnavailable> {
-        let census = self.read_store(manager).await;
-        if let Err(reason) = census {
-            self.mark_unavailable(reason);
-            return Err(reason);
-        }
+        self.read_store(manager).await?;
         let live = live(manager).await;
         self.publish(&live);
         let view = Arc::clone(&self.0.sender.borrow());
@@ -152,6 +151,11 @@ impl FleetAttentionHub {
     ) -> Result<FleetAttentionStream, FleetAttentionSubscribeError> {
         let receiver = {
             let mut refresher = lock(&self.0.refresher);
+            if self.0.stopped.load(Ordering::SeqCst) {
+                return Err(FleetAttentionSubscribeError::Unavailable(
+                    FleetAttentionUnavailable::Store,
+                ));
+            }
             if self.0.sender.receiver_count() >= FLEET_ATTENTION_MAX_STREAMS {
                 return Err(FleetAttentionSubscribeError::Busy);
             }
@@ -182,6 +186,9 @@ impl FleetAttentionHub {
     }
 
     async fn read_store(&self, manager: &SessionManager) -> Result<(), FleetAttentionUnavailable> {
+        if self.0.stopped.load(Ordering::SeqCst) {
+            return Err(FleetAttentionUnavailable::Store);
+        }
         let ticket = self.0.tickets.fetch_add(1, Ordering::SeqCst) + 1;
         let path = manager.inner.store_path.clone();
         let census = nac_core::store::spawn_blocking_store_caller(move || {
@@ -207,14 +214,48 @@ impl FleetAttentionHub {
             Ok(StoreCensus { metadata, topology })
         })
         .await
-        .map_err(|_| FleetAttentionUnavailable::Store)??;
+        .unwrap_or(Err(FleetAttentionUnavailable::Store));
+        self.accept_census(ticket, census)
+    }
+
+    fn accept_census(
+        &self,
+        ticket: u64,
+        census: Result<StoreCensus, FleetAttentionUnavailable>,
+    ) -> Result<(), FleetAttentionUnavailable> {
         let mut cache = lock(&self.0.store);
-        // A slower older census never replaces a newer accepted one.
+        if self.0.stopped.load(Ordering::SeqCst) {
+            return Err(FleetAttentionUnavailable::Store);
+        }
+        // Failures and successes share one frontier: a late result may neither
+        // restore stale health nor invalidate a newer successful census.
         if ticket > cache.ticket {
             cache.ticket = ticket;
-            cache.census = Some(Arc::new(census));
+            match census {
+                Ok(census) => {
+                    cache.census = Some(Arc::new(census));
+                    cache.unavailable = None;
+                }
+                Err(reason) => {
+                    cache.unavailable = Some(reason);
+                    self.mark_unavailable(reason);
+                }
+            }
         }
-        Ok(())
+        cache.unavailable.map_or(Ok(()), Err)
+    }
+
+    /// Serving shutdown retires passive streams before HTTP graceful drain.
+    /// Admission and publication use the same locks, so an in-flight census
+    /// cannot reopen a stopped hub.
+    pub(crate) fn stop(&self) {
+        let mut refresher = lock(&self.0.refresher);
+        self.0.stopped.store(true, Ordering::SeqCst);
+        if let Some(task) = refresher.take() {
+            task.abort();
+        }
+        let _cache = lock(&self.0.store);
+        self.mark_unavailable(FleetAttentionUnavailable::Store);
     }
 
     fn mark_unavailable(&self, reason: FleetAttentionUnavailable) {
@@ -235,7 +276,11 @@ impl FleetAttentionHub {
     /// Merge the latest accepted census with current owners. Unchanged entries
     /// keep their `Arc` and revision; any change advances the fleet revision.
     fn publish(&self, live: &HashMap<String, Option<AttentionServiceSnapshot>>) {
-        let Some(census) = lock(&self.0.store).census.clone() else {
+        let cache = lock(&self.0.store);
+        if cache.unavailable.is_some() || self.0.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(census) = cache.census.as_ref() else {
             return;
         };
         self.0.sender.send_if_modified(|current| {
@@ -332,9 +377,7 @@ async fn run(hub: FleetAttentionHub, manager: Weak<SessionManagerInner>) {
         if rereads > 0 || last_census.elapsed() >= STORE_RESYNC {
             rereads = rereads.saturating_sub(1);
             last_census = Instant::now();
-            if let Err(reason) = hub.read_store(&manager).await {
-                hub.mark_unavailable(reason);
-            }
+            let _ = hub.read_store(&manager).await;
         }
         hub.publish(&current);
         drop(manager);

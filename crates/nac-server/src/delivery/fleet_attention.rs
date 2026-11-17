@@ -267,6 +267,10 @@ pub(crate) async fn stream(
     let project = query.project_id;
     Ok(Sse::new(async_stream::stream! {
         let mut last: Arc<FleetAttentionView> = Arc::clone(&subscription.receiver.borrow_and_update());
+        if let Some(reason) = last.unavailable {
+            yield event(&last, &FleetAttentionFrame::Unavailable { reason: unavailable_dto(reason) });
+            return;
+        }
         yield event(&last, &FleetAttentionFrame::Snapshot {
             epoch: last.epoch.to_string(),
             revision: last.revision,
