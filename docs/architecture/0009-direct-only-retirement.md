@@ -20,7 +20,7 @@ The earlier designs contributed useful ideas: generation-bound settlement,
 explicit ownership, isolated parallel work, and durable completion delivery remain
 valuable in direct and child workflows. The old execution topology is not required
 to preserve them. The last pre-removal source revision for this preparation is
-`265cecc9ad2ce6579d0105db39234a8f0251aedb`. Later cutover work must record the
+`1ef2d6fbcdbea6c3675fc2b2facaf906cfd06594`. Later cutover work must record the
 actual last pre-removal revision when known.
 
 This supersedes support/opt-in claims for the retired topologies in ADRs 0001
