@@ -1,6 +1,82 @@
 use super::*;
 
 #[tokio::test]
+async fn direct_run_emits_balanced_runtime_activity() {
+    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
+    use crate::telemetry::{self, RuntimeActivity, TelemetryName};
+
+    // Activity counters cover the whole process, including runs with no test
+    // recorder. Isolate this assertion from other parallel agent tests.
+    const CHILD_ENV: &str = "NAC_DIRECT_ACTIVITY_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "agent::tests::direct_run_emits_balanced_runtime_activity",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return;
+    }
+    let _lock = telemetry::test_recorder_lock();
+    let exporter = std::sync::Arc::new(telemetry::InMemoryExporter::default());
+    let recorder = telemetry::TelemetryRecorder::bounded(
+        exporter.clone(),
+        telemetry::RuntimeMetadata::sqlite(
+            "test",
+            "test",
+            crate::store::schema_version(),
+            None,
+            None,
+        ),
+        1024,
+    );
+    let _guard = telemetry::install_test_recorder(recorder.clone());
+    let root = std::env::temp_dir().join(format!("nac_direct_activity_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let response = serde_json::json!({
+        "status": "completed",
+        "output": [{"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "done"}
+        ]}]
+    })
+    .to_string();
+    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
+    let mut agent = test_agent(&root, &server.base_url, AgentMode::Direct);
+    assert_eq!(
+        agent.send("exercise direct activity").await.unwrap(),
+        "done"
+    );
+    assert_eq!(server.finish().len(), 1);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while recorder.stats().exported < recorder.stats().accepted {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let values: Vec<_> = exporter
+        .events()
+        .into_iter()
+        .filter(|event| {
+            event.name == TelemetryName::RuntimeActivityActive
+                && event.activity == Some(RuntimeActivity::Direct)
+        })
+        .filter_map(|event| event.value)
+        .collect();
+    assert_eq!(values, vec![1, 0]);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn managed_worker_cancellation_interrupts_blocked_model_io() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
     let root = std::env::temp_dir().join(format!("nac_cancelled_model_{}", uuid::Uuid::new_v4()));
@@ -79,11 +155,15 @@ async fn managed_worker_model_io_completes_without_cancellation() {
 }
 
 fn managed_worker_test_agent(root: &std::path::Path, base_url: &str) -> Agent {
+    test_agent(root, base_url, AgentMode::Worker)
+}
+
+fn test_agent(root: &std::path::Path, base_url: &str, mode: AgentMode) -> Agent {
     Agent::with_config(
         ModelClient::new_for_test_server(base_url.to_string()),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
+            mode,
             session_behavior: None,
             store_path: root.join("store.db"),
             session_id: None,
