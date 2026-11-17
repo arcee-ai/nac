@@ -52,10 +52,6 @@
       "url": "https://web.mit.edu/Kerberos/dist/krb5/1.22/krb5-1.22.3.tar.gz",
       "sha256": "fe90af8441ad9fa9b064b8e53077cefb782a96f8a68276b031dc54af1789ff0b"
     },
-    "krb5-ticket-info.patch": {
-      "url": "https://github.com/krb5/krb5/commit/62196e2b269159a5465f5b8d0ed7cf6f29c3282a.patch",
-      "sha256": "5cacda3418777f7d3c890b302a09678dc3c7fdca2ecadfa362f28ad7f59954e8"
-    },
     "krb5-negoex.patch": {
       "url": "https://github.com/krb5/krb5/commit/2e75f0d9362fb979f5fc92829431a590a130929f.patch",
       "sha256": "315459527894fd9ecf47a8654f910d9bf96594ad6bc4f7e13fab2ca8214d4e7e"
@@ -63,10 +59,6 @@
     "krb5-autoconf.patch": {
       "url": "https://github.com/krb5/krb5/commit/b7290e0cab5b7e39cd4aa7c098beb18a886d4a1d.patch",
       "sha256": "b610016e2837bedbe9ebf7030ae1e40f7821d1ecb487af71c4a4cf867687f06f"
-    },
-    "krb5-c23.patch": {
-      "url": "https://github.com/krb5/krb5/commit/ad4dcf1856dadc4b352b5c8ff08e51c7290fb41f.patch",
-      "sha256": "de952714a74db2c65618abd0fa0fb70b0a836a2cd3390ac0ff77ecec2d8fd43e"
     },
     "curl.tar.xz": {
       "url": "https://curl.se/download/curl-8.23.0.tar.xz",
