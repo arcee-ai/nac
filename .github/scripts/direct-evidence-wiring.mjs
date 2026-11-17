@@ -21,14 +21,18 @@ export function reverseDirectEvidence(workflow, name) {
     const lane = steps.find(step => step.name === 'Preserve source, size, and lifecycle contracts on every PR');
     assert.deepEqual(lane, {
       name: 'Preserve source, size, and lifecycle contracts on every PR',
-      run: 'rm -rf target/managed-load target/direct-load\nmake test-nac-guide\nmake test-source-size test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n',
+      run: 'make test-nac-guide\nmake test-source-size test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n',
     });
+    const clearIndex = removeExact(steps, {
+      name: 'Clear cached load evidence', id: 'evidence_cleanup', run: 'rm -rf target/managed-load target/direct-load',
+    });
+    assert.ok(clearIndex > steps.findIndex(step => step.uses?.startsWith('Swatinem/rust-cache@')));
+    assert.equal(clearIndex, steps.indexOf(lane));
     const removed = removeExact(steps, {
-      name: 'Retain managed and direct load evidence', if: 'always()', uses: upload,
+      name: 'Retain managed and direct load evidence', if: "always() && steps.evidence_cleanup.outcome == 'success'", uses: upload,
       with: { name: 'load-evidence-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path: 'target/managed-load\ntarget/direct-load\n', 'retention-days': 14, 'if-no-files-found': 'warn' },
     });
     assert.equal(removed, steps.indexOf(lane) + 1);
-    lane.run = lane.run.replace('rm -rf target/managed-load target/direct-load\n', '');
     return;
   }
   assert.ok(name === 'managed-fault' || name === 'managed-quality');
@@ -36,14 +40,14 @@ export function reverseDirectEvidence(workflow, name) {
   const fixture = steps.find(step => step.run === 'make test-managed-fault-fixture');
   assert.ok(fixture, 'private fixture must remain');
   const clear = name === 'managed-fault'
-    ? { name: 'Clear cached private candidate evidence', run: `rm -f ${path}` }
-    : { name: 'Clear cached private candidate evidence', if: full, run: `rm -f ${path}` };
+    ? { name: 'Clear cached private candidate evidence', id: 'evidence_cleanup', run: `rm -f ${path}` }
+    : { name: 'Clear cached private candidate evidence', id: 'evidence_cleanup', if: full, run: `rm -f ${path}` };
   const clearIndex = removeExact(steps, clear);
   assert.equal(clearIndex, steps.indexOf(fixture));
   const artifact = name === 'managed-fault'
-    ? { name: 'Retain private candidate fault evidence', if: 'always()', uses: upload,
+    ? { name: 'Retain private candidate fault evidence', if: "always() && steps.evidence_cleanup.outcome == 'success'", uses: upload,
         with: { name: 'private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path, 'if-no-files-found': 'warn', 'retention-days': 14 } }
-    : { name: 'Retain standalone private candidate evidence', if: `always() && (${full})`, uses: upload,
+    : { name: 'Retain standalone private candidate evidence', if: `always() && steps.evidence_cleanup.outcome == 'success' && (${full})`, uses: upload,
         with: { name: 'standalone-private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path, 'if-no-files-found': 'warn', 'retention-days': 14 } };
   const artifactIndex = removeExact(steps, artifact);
   if (name === 'managed-fault') {

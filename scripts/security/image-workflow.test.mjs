@@ -167,7 +167,7 @@ test('quality reusable retains full fallback, current-attempt validation and man
   assert.ok(steps.indexOf(clear) < steps.indexOf(fault));
   const artifact = steps.find(s => s.name === 'Retain standalone private candidate evidence');
   assert.equal(artifact.with.path, 'target/direct-load/private-candidate-child-read.json');
-  assert.equal(artifact.if, "always() && (steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full')");
+  assert.equal(artifact.if, "always() && steps.evidence_cleanup.outcome == 'success' && (steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full')");
   assert.ok(steps.indexOf(artifact) > steps.indexOf(fault));
   const faultMode = steps.find(s => s.id === 'fault-mode');
   assert.equal(faultMode.env.FAULT_RECEIPT, '${{ inputs.fault_receipt }}');

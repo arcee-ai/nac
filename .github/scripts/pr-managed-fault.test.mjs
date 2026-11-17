@@ -125,7 +125,7 @@ test("early reusable fault job runs the complete unchanged fixture before emitti
   assert.deepEqual(job.steps[evidence].env, { EXPECTED_SHA: "${{ inputs.source_sha }}", CHECKOUT_SHA: "${{ steps.candidate.outputs.sha }}", FIXTURE_RESULT: "${{ steps.fixture.outcome }}" });
   assert.match(job.steps.find(s => s.id === "candidate").run, /test "\$sha" = "\$EXPECTED_SHA"/);
   const artifact = job.steps.find(s => s.uses?.startsWith("actions/upload-artifact@"));
-  assert.equal(artifact.if, "always()");
+  assert.equal(artifact.if, "always() && steps.evidence_cleanup.outcome == 'success'");
   assert.equal(artifact.with.path, "target/direct-load/private-candidate-child-read.json");
   assert.ok(job.steps.indexOf(artifact) > evidence);
   for (const step of job.steps) {
