@@ -472,7 +472,11 @@ function settingsNav(j: Journey) {
 /** On screen inside this presentation (not a sheet still sliding out past its edge). */
 async function onScreenInRoot(j: Journey, control: Locator): Promise<boolean> {
   if (!(await control.isVisible())) return false;
-  const [box, root] = await Promise.all([control.boundingBox(), j.root.boundingBox()]);
+  // A sheet finishing its exit can unmount between the two reads: gone is off screen.
+  const [box, root] = await Promise.all([
+    control.boundingBox({ timeout: 1000 }).catch(() => null),
+    j.root.boundingBox(),
+  ]);
   if (!box || !root) return false;
   return box.x >= root.x - 0.5 && box.x + box.width <= root.x + root.width + 0.5;
 }
