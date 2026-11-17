@@ -41,21 +41,22 @@ mod task_followups;
 mod task_launch;
 mod task_questions;
 pub(crate) use task_discovery::url_component;
+mod run_admission;
+mod run_cancellation;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;
 pub mod thread;
-mod thread_lifecycle;
 pub(crate) mod user_terminal;
 pub(crate) mod web;
 pub mod workset;
 pub mod write;
 
+pub use run_admission::RunAdmission;
+pub(crate) use run_cancellation::RunCancellation;
 use runtime_context::shared_workspace_gate;
 pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
-pub use thread_lifecycle::ActiveThreadRegistry;
-pub(crate) use thread_lifecycle::ThreadCancellation;
 
 #[derive(Debug)]
 pub struct ToolResult {
@@ -336,7 +337,7 @@ fn worker_tool_registry(
     clippy::expect_used,
     reason = "the static first-party tool registry and worker capability list are collision-checked"
 )]
-pub fn worker_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
+pub fn coding_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     worker_tool_registry(image_read)
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| {
@@ -584,13 +585,13 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     });
     ToolRuntime {
         product_context: None,
-        command_cancellation: crate::tools::ThreadCancellation::default(),
+        command_cancellation: crate::tools::RunCancellation::default(),
         config_cwd: workspace_cwd.clone(),
         workspace_cwd,
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
         worker_executable: None,
-        active_threads: Arc::new(crate::tools::ActiveThreadRegistry::default()),
+        active_threads: Arc::new(crate::tools::RunAdmission::default()),
         event_sink: EventSink::none(),
         backend,
         mcp: None,

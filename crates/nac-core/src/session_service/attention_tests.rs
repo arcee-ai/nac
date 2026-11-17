@@ -345,7 +345,7 @@ async fn actual_permission_bridge_rejects_older_callbacks_and_optout_does_not_ho
                         "command:[curl][private.example]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -477,7 +477,7 @@ async fn real_review_retry_restores_only_before_enqueue_and_stays_removed_after_
                 "command:[mkdir][private]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(matches!(
@@ -768,7 +768,7 @@ async fn callback_broker_change_panic_retires_only_observation_and_preserves_rea
                         "command:[curl][private.example]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })

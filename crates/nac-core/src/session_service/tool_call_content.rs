@@ -464,7 +464,8 @@ fn exact_secrets(
             .map_err(|_| anyhow::anyhow!("tool call content could not be redacted safely"))?,
         None => nac_contracts::CommandEnvironmentSnapshot::empty(),
     };
-    secrets.extend_redactions(crate::worker_credentials::captured_managed_native_redactions());
+    secrets
+        .extend_redactions(crate::managed_native_credentials::captured_managed_native_redactions());
     Ok(secrets)
 }
 

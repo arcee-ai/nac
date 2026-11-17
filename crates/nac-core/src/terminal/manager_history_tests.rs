@@ -56,7 +56,7 @@ async fn cancellation_after_registration_before_spawn_removes_only_the_unstarted
     pending.started();
     let pending_id = manager.execution_catalog().await[0].id.clone();
     let held_spawn = manager.one_shot_spawn_gate.lock().await;
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let task_manager = manager.clone();
     let task_cancellation = cancellation.clone();
     let task = tokio::spawn(async move {
@@ -330,7 +330,7 @@ async fn human_and_model_pty_history_use_one_identity_without_advancing_model_pr
             &backend(),
             nac_contracts::CommandEnvironmentSnapshot::empty(),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();

@@ -64,7 +64,7 @@ fn orchestrator_agent(store_path: PathBuf, session_id: &str, server_url: Option<
         Some(session_id),
         AgentMode::Orchestrator,
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent
 }
 
@@ -219,7 +219,7 @@ async fn worker_send_never_writes_transcript_log_rows() {
         Some("session"),
         AgentMode::Worker,
     );
-    worker.set_steering_dispatch_id(Some("dispatch".to_string()));
+    worker.set_current_run_id(Some("dispatch".to_string()));
 
     assert_eq!(worker.send("hello").await.unwrap(), "worker answer");
     server.finish();
@@ -971,7 +971,7 @@ async fn fenced_prompt_lost_ack_replays_before_adopting_the_user_turn() {
             .run_id,
         "prompt-run"
     );
-    assert!(!agent.steering_append_pending);
+    assert!(!agent.prompt_commit_pending);
     assert!(agent.pending_log_end.is_none());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -996,7 +996,7 @@ async fn fenced_prompt_persistent_uncertainty_never_requests_a_new_logical_run()
         .unwrap();
     assert!(!failure.transient);
     assert_eq!(agent.committed_log_len, 1);
-    assert!(agent.steering_append_pending);
+    assert!(agent.prompt_commit_pending);
     assert_eq!(agent.pending_log_end, Some(2));
     assert_eq!(read_log(&path, "session").len(), 1);
     agent
@@ -1005,7 +1005,7 @@ async fn fenced_prompt_persistent_uncertainty_never_requests_a_new_logical_run()
         .unwrap();
     assert_eq!(agent.messages.len(), 2);
     assert_eq!(agent.committed_log_len, 2);
-    assert!(!agent.steering_append_pending);
+    assert!(!agent.prompt_commit_pending);
     assert!(agent.pending_log_end.is_none());
     assert_eq!(read_log(&path, "session").len(), 1);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1042,7 +1042,7 @@ async fn fenced_prompt_failed_reload_retains_canonical_input_on_retry() {
         }
         assert_eq!(agent.committed_log_len, 1);
         assert_eq!(agent.pending_log_end, Some(2));
-        assert!(agent.steering_append_pending);
+        assert!(agent.prompt_commit_pending);
         connection
             .execute_batch("ALTER TABLE unavailable_events RENAME TO thread_events")
             .unwrap();
@@ -1061,7 +1061,7 @@ async fn fenced_prompt_failed_reload_retains_canonical_input_on_retry() {
         assert!(
             matches!(&agent.messages[1], Message::User { content, .. } if content == "retain this prompt")
         );
-        assert!(!agent.steering_append_pending);
+        assert!(!agent.prompt_commit_pending);
         assert!(agent.pending_log_end.is_none());
         assert!(crate::store::load_run_recovery(&path, "session")
             .unwrap()
@@ -1120,7 +1120,7 @@ async fn fenced_prompt_definitive_error_clears_pending_state() {
     assert_eq!(agent.messages.len(), 1);
     assert_eq!(agent.committed_log_len, 1);
     assert!(read_log(&path, "session").is_empty());
-    assert!(!agent.steering_append_pending);
+    assert!(!agent.prompt_commit_pending);
     assert!(agent.pending_log_end.is_none());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1755,7 +1755,7 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
         _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
     }
     drop(commit);
-    assert!(agent.steering_append_pending);
+    assert!(agent.prompt_commit_pending);
     assert_eq!(agent.messages.len(), from_idx);
 
     blocker.execute_batch("ROLLBACK").unwrap();
@@ -1763,7 +1763,7 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
         .append_cancellation_marker_preserving_tools()
         .await
         .unwrap();
-    assert!(!agent.steering_append_pending);
+    assert!(!agent.prompt_commit_pending);
     assert!(agent.messages.iter().all(|message| {
         !matches!(message, Message::User { content } if content == "steer while cancelling")
     }));

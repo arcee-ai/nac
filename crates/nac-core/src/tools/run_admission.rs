@@ -1,277 +1,54 @@
 use super::*;
 
-#[derive(Default)]
-struct ThreadCancellationState {
-    cancelled: AtomicBool,
-    activity: Notify,
-    mutation_gate: StdMutex<()>,
-}
+#[path = "worker_dispatch.rs"]
+mod worker_dispatch;
+use worker_dispatch::{ActiveThreadDispatchState, WorkerDispatches};
 
-#[derive(Clone, Default)]
-pub(crate) struct ThreadCancellation {
-    state: Arc<ThreadCancellationState>,
-    parent: Option<Arc<ThreadCancellation>>,
-}
-
-impl ThreadCancellation {
-    /// Create a cancellation domain that can be stopped independently while
-    /// still observing the owning run's stop signal.
-    pub(crate) fn child(&self) -> Self {
-        Self {
-            state: Arc::new(ThreadCancellationState::default()),
-            parent: Some(Arc::new(self.clone())),
-        }
-    }
-
-    pub(crate) fn cancel(&self) {
-        // Synchronous process creation and terminal writes take this same
-        // short-lived gate for their final check plus mutation. Whichever side
-        // acquires it first defines the boundary: after cancellation wins, no
-        // new PTY or terminal input can pass an earlier observation.
-        let _mutation = self
-            .state
-            .mutation_gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !self.state.cancelled.swap(true, Ordering::AcqRel) {
-            self.state.activity.notify_waiters();
-        }
-    }
-
-    /// A final mutation gate can be held by an admitted caller awaiting SQL.
-    /// Cancellation owns one local obligation and waits off the runtime.
-    pub(crate) async fn cancel_async(&self) {
-        loop {
-            let cancellation = self.clone();
-            match crate::store::spawn_blocking_store_caller(move || cancellation.cancel()).await {
-                Err(error)
-                    if matches!(
-                        error.downcast_ref::<crate::store::PersistenceAdmissionError>(),
-                        Some(crate::store::PersistenceAdmissionError::CallerOverloaded)
-                    ) =>
-                {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-                Err(error) => {
-                    eprintln!("nac: cancellation gate task failed: {error:#}");
-                    break;
-                }
-                Ok(()) => break,
-            }
-        }
-    }
-
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.state.cancelled.load(Ordering::Acquire)
-            || self
-                .parent
-                .as_deref()
-                .is_some_and(ThreadCancellation::is_cancelled)
-    }
-
-    pub(crate) fn run_if_active<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
-        let mut lineage = Vec::new();
-        let mut current = Some(self);
-        while let Some(cancellation) = current {
-            lineage.push(cancellation);
-            current = cancellation.parent.as_deref();
-        }
-        let _guards = lineage
-            .iter()
-            .rev()
-            .map(|cancellation| {
-                cancellation
-                    .state
-                    .mutation_gate
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-            })
-            .collect::<Vec<_>>();
-        (!lineage
-            .iter()
-            .any(|cancellation| cancellation.state.cancelled.load(Ordering::Acquire)))
-        .then(operation)
-    }
-
-    pub(crate) async fn cancelled(&self) {
-        loop {
-            let notified = self.state.activity.notified();
-            if self.is_cancelled() {
-                return;
-            }
-            if let Some(parent) = self.parent.as_deref() {
-                tokio::select! {
-                    () = notified => {}
-                    () = Box::pin(parent.cancelled()) => {}
-                }
-            } else {
-                notified.await;
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ActiveThreadDispatchState {
-    Pending,
-    Running,
-}
-
-struct ActiveThreadDispatch {
-    dispatch_id: String,
-    state: ActiveThreadDispatchState,
-}
-
-struct ActiveThreadState {
-    dispatches: HashMap<String, ActiveThreadDispatch>,
-    cancellation: ThreadCancellation,
+struct RunAdmissionState {
+    workers: WorkerDispatches,
+    cancellation: RunCancellation,
     accepting: bool,
     run_id: Option<String>,
 }
 
-impl Default for ActiveThreadState {
+impl Default for RunAdmissionState {
     fn default() -> Self {
         Self {
-            dispatches: HashMap::new(),
-            cancellation: ThreadCancellation::default(),
+            workers: WorkerDispatches::default(),
+            cancellation: RunCancellation::default(),
             accepting: true,
             run_id: None,
         }
     }
 }
 
-pub struct ActiveThreadRegistry {
-    state: StdMutex<ActiveThreadState>,
+pub struct RunAdmission {
+    state: StdMutex<RunAdmissionState>,
     activity: Notify,
 }
 
-impl Default for ActiveThreadRegistry {
+impl Default for RunAdmission {
     fn default() -> Self {
         Self {
-            state: StdMutex::new(ActiveThreadState::default()),
+            state: StdMutex::new(RunAdmissionState::default()),
             activity: Notify::new(),
         }
     }
 }
 
-impl ActiveThreadRegistry {
-    pub fn names(&self) -> Vec<String> {
-        self.lock().dispatches.keys().cloned().collect()
-    }
-
-    pub fn is_active(&self, thread_name: &str) -> bool {
-        self.lock().dispatches.contains_key(thread_name)
-    }
-
+impl RunAdmission {
     pub(crate) fn run_id(&self) -> Option<String> {
         self.lock().run_id.clone()
     }
 
     pub fn begin_run(&self, run_id: &str) -> bool {
         let mut state = self.lock();
-        if !state.dispatches.is_empty() {
+        if !state.workers.entries.is_empty() {
             return false;
         }
-        state.cancellation = ThreadCancellation::default();
+        state.cancellation = RunCancellation::default();
         state.accepting = true;
         state.run_id = Some(run_id.to_string());
-        true
-    }
-
-    pub fn mark(&self, thread_name: &str, dispatch_id: &str) -> bool {
-        let mut state = self.lock();
-        if !state.accepting || state.dispatches.contains_key(thread_name) {
-            return false;
-        }
-        state.dispatches.insert(
-            thread_name.to_string(),
-            ActiveThreadDispatch {
-                dispatch_id: dispatch_id.to_string(),
-                state: ActiveThreadDispatchState::Pending,
-            },
-        );
-        true
-    }
-
-    pub(crate) fn start(&self, thread_name: &str, dispatch_id: &str) -> Option<ThreadCancellation> {
-        let mut state = self.lock();
-        if !state.accepting || state.cancellation.is_cancelled() {
-            return None;
-        }
-        let dispatch = state.dispatches.get_mut(thread_name)?;
-        if dispatch.dispatch_id != dispatch_id
-            || dispatch.state != ActiveThreadDispatchState::Pending
-        {
-            return None;
-        }
-        dispatch.state = ActiveThreadDispatchState::Running;
-        Some(state.cancellation.clone())
-    }
-
-    pub fn queue(
-        &self,
-        store_path: &Path,
-        session_id: &str,
-        thread_name: &str,
-        instruction: &str,
-        expected_run_id: Option<&str>,
-        origin: crate::store::InputOrigin,
-    ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
-        let state = self.lock();
-        if expected_run_id.is_some() && state.run_id.as_deref() != expected_run_id {
-            return Ok(None);
-        }
-        let Some(dispatch) = state.dispatches.get(thread_name) else {
-            return Ok(None);
-        };
-        match origin {
-            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering(
-                store_path,
-                session_id,
-                thread_name,
-                &dispatch.dispatch_id,
-                instruction,
-            ),
-            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering(
-                store_path,
-                session_id,
-                thread_name,
-                &dispatch.dispatch_id,
-                instruction,
-            ),
-        }
-        .map(Some)
-    }
-
-    #[cfg(test)]
-    pub fn close(
-        &self,
-        store_path: &Path,
-        session_id: &str,
-        thread_name: &str,
-        dispatch_id: &str,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        if !self.close_local(thread_name, dispatch_id) {
-            return Ok(Vec::new());
-        }
-        crate::store::expire_thread_steering(store_path, session_id, dispatch_id)
-    }
-
-    /// Mandatory process-local completion cannot depend on persistence admission.
-    /// Match the exact dispatch before notifying cancellation waiters.
-    pub(crate) fn close_local(&self, thread_name: &str, dispatch_id: &str) -> bool {
-        let mut state = self.lock();
-        if state
-            .dispatches
-            .get(thread_name)
-            .map(|dispatch| dispatch.dispatch_id.as_str())
-            != Some(dispatch_id)
-        {
-            return false;
-        }
-        state.dispatches.remove(thread_name);
-        drop(state);
-        self.activity.notify_waiters();
         true
     }
 
@@ -284,12 +61,14 @@ impl ActiveThreadRegistry {
             state.accepting = false;
             let cancellation = state.cancellation.clone();
             let targets = state
-                .dispatches
+                .workers
+                .entries
                 .values()
                 .map(|dispatch| dispatch.dispatch_id.clone())
                 .collect::<Vec<_>>();
             state
-                .dispatches
+                .workers
+                .entries
                 .retain(|_, dispatch| dispatch.state == ActiveThreadDispatchState::Running);
             (cancellation, targets)
         };
@@ -329,7 +108,7 @@ impl ActiveThreadRegistry {
 
         loop {
             let notified = self.activity.notified();
-            if self.lock().dispatches.is_empty() {
+            if self.lock().workers.entries.is_empty() {
                 break;
             }
             notified.await;
@@ -351,7 +130,8 @@ impl ActiveThreadRegistry {
         state.accepting = false;
         state.cancellation.cancel();
         let targets = state
-            .dispatches
+            .workers
+            .entries
             .iter()
             .map(|(name, dispatch)| (name.clone(), dispatch.dispatch_id.clone()))
             .collect::<Vec<_>>();
@@ -363,11 +143,12 @@ impl ActiveThreadRegistry {
                 &dispatch_id,
             )?);
             if state
-                .dispatches
+                .workers
+                .entries
                 .get(&name)
                 .is_some_and(|dispatch| dispatch.dispatch_id == dispatch_id)
             {
-                state.dispatches.remove(&name);
+                state.workers.entries.remove(&name);
             }
         }
         state.run_id = None;
@@ -376,7 +157,7 @@ impl ActiveThreadRegistry {
         Ok(expired)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ActiveThreadState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, RunAdmissionState> {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -387,9 +168,20 @@ impl ActiveThreadRegistry {
 mod active_thread_registry_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn direct_run_binding_retires_before_successor_admission() {
+        let admission = RunAdmission::default();
+        assert!(admission.begin_run("run-1"));
+        assert_eq!(admission.run_id().as_deref(), Some("run-1"));
+        admission.cancel_and_drain(None).await.unwrap();
+        assert_eq!(admission.run_id(), None);
+        assert!(admission.begin_run("run-2"));
+        assert_eq!(admission.run_id().as_deref(), Some("run-2"));
+    }
+
     #[test]
     fn child_cancellation_is_local_and_parent_cancellation_propagates() {
-        let parent = ThreadCancellation::default();
+        let parent = RunCancellation::default();
         let first = parent.child();
         let second = parent.child();
         first.cancel();
@@ -402,7 +194,7 @@ mod active_thread_registry_tests {
 
     #[test]
     fn parent_and_child_share_the_final_synchronous_admission_gate() {
-        let parent = ThreadCancellation::default();
+        let parent = RunCancellation::default();
         let child = parent.child();
         assert_eq!(child.run_if_active(|| 7), Some(7));
         parent.cancel();
@@ -411,7 +203,7 @@ mod active_thread_registry_tests {
 
     #[tokio::test]
     async fn cancellation_drains_running_dispatches_and_rejects_pending_work() {
-        let registry = Arc::new(ActiveThreadRegistry::default());
+        let registry = Arc::new(RunAdmission::default());
         assert!(registry.begin_run("run-1"));
         assert!(registry.mark("a", "dispatch-a"));
         assert!(registry.mark("b", "dispatch-b"));
@@ -452,7 +244,7 @@ mod active_thread_registry_tests {
 
     #[test]
     fn stale_close_cannot_remove_same_name_replacement() {
-        let registry = ActiveThreadRegistry::default();
+        let registry = RunAdmission::default();
         assert!(registry.begin_run("run-1"));
         assert!(registry.mark("worker", "dispatch-old"));
         let missing = Path::new("/store/does/not/exist");
@@ -476,7 +268,7 @@ mod active_thread_registry_tests {
         let store = root.join("store.db");
         crate::store::initialize(&store).unwrap();
         crate::store::insert_test_session(&store, "session");
-        let registry = ActiveThreadRegistry::default();
+        let registry = RunAdmission::default();
 
         assert!(registry.begin_run("run-1"));
         assert!(registry.mark("worker", "dispatch-1"));

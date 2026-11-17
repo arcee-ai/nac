@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::tools::{
-    remote_file_lock_busy, ThreadCancellation, ToolResult, ToolRuntime,
+    remote_file_lock_busy, RunCancellation, ToolResult, ToolRuntime,
     REMOTE_FILE_LOCK_RETRY_INTERVAL,
 };
 
@@ -359,7 +359,7 @@ pub(crate) async fn edit_local_cancellable(
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_local(
         path,
@@ -378,7 +378,7 @@ pub(crate) async fn edit_local_bound_cancellable(
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_local_bound(
         path,
@@ -407,7 +407,7 @@ pub(crate) async fn write_local_cancellable(
     path_display: String,
     content: String,
     expected_revision: Option<String>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_local(
         path,
@@ -426,7 +426,7 @@ pub(crate) async fn write_local_bound_cancellable(
     path_display: String,
     content: String,
     expected_revision: Option<String>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_local_bound(
         path,
@@ -445,7 +445,7 @@ pub(crate) async fn edit_mounted_cancellable(
     path_display: String,
     expected_revision: String,
     edits: Vec<EditSpec>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_mounted(
         root,
@@ -485,7 +485,7 @@ pub(crate) async fn write_mounted_cancellable(
     path_display: String,
     content: String,
     expected_revision: Option<String>,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     mutate_mounted(
         root,
@@ -647,9 +647,9 @@ async fn mutate_local(
     path: PathBuf,
     path_display: String,
     request: MutationRequest,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
-    if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+    if cancellation.is_some_and(RunCancellation::is_cancelled) {
         return error_tool_result(MutationError::precondition(
             "cancelled",
             format!("file mutation cancelled before path resolution: {path_display}"),
@@ -672,7 +672,7 @@ async fn mutate_local_bound(
     path: PathBuf,
     path_display: String,
     request: MutationRequest,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     #[cfg(test)]
     wait_at_bound_local_open_gate(&path);
@@ -722,7 +722,7 @@ async fn mutate_mounted(
     relative: PathBuf,
     path_display: String,
     request: MutationRequest,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> ToolResult {
     #[cfg(unix)]
     {
@@ -1542,9 +1542,9 @@ impl Drop for TempCleanup {
 
 async fn acquire_path_lock(
     target: &Path,
-    cancellation: Option<&ThreadCancellation>,
+    cancellation: Option<&RunCancellation>,
 ) -> io::Result<File> {
-    if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+    if cancellation.is_some_and(RunCancellation::is_cancelled) {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
             "file mutation cancelled before lock acquisition",

@@ -14,14 +14,14 @@ pub struct ToolRuntime {
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub worker_executable: Option<PathBuf>,
-    pub active_threads: Arc<ActiveThreadRegistry>,
+    pub active_threads: Arc<RunAdmission>,
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,
     pub(crate) mcp_tools: Arc<HashMap<String, McpToolCapture>>,
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
-    pub command_cancellation: ThreadCancellation,
+    pub command_cancellation: RunCancellation,
     pub thread_timeout_secs: u64,
     /// Accumulated worker token usage from thread dispatches.  The agent
     /// loop reads and resets this after each tool-execution round so worker
@@ -115,8 +115,9 @@ impl ToolRuntime {
     ) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
         let mut snapshot = self.command_environment_snapshot().await?;
         if self.command_environment.is_some() {
-            snapshot
-                .extend_redactions(crate::worker_credentials::captured_managed_native_redactions());
+            snapshot.extend_redactions(
+                crate::managed_native_credentials::captured_managed_native_redactions(),
+            );
         }
         Ok(snapshot)
     }

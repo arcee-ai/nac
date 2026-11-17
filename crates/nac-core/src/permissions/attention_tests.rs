@@ -1,6 +1,6 @@
 use super::*;
 use crate::events::{AttentionBrokerState, SessionEventBus};
-use crate::tools::{kernel::ToolCallContext, ThreadCancellation};
+use crate::tools::{kernel::ToolCallContext, RunCancellation};
 
 pub(crate) struct Recorder {
     broker: Weak<PermissionBroker>,
@@ -55,7 +55,7 @@ fn ask(broker: &Arc<PermissionBroker>) -> tokio::task::JoinHandle<AuthorizationO
                     "command:[curl][example.com]",
                 )],
                 &ToolCallContext::default(),
-                &ThreadCancellation::default(),
+                &RunCancellation::default(),
             )
             .await
     })
@@ -278,7 +278,7 @@ async fn real_ask_racing_atomic_install_is_in_the_baseline_or_a_newer_callback()
                         "command:[curl][example.com]",
                     )],
                     &ToolCallContext::default(),
-                    &ThreadCancellation::default(),
+                    &RunCancellation::default(),
                 )
                 .await
         })

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::terminal::{
     CommandStatus, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
-use crate::tools::{ThreadCancellation, ToolResult, ToolRuntime};
+use crate::tools::{RunCancellation, ToolResult, ToolRuntime};
 use crate::types::{FunctionDef, ToolDefinition};
 
 pub fn exec_command_definition() -> ToolDefinition {
@@ -86,7 +86,7 @@ pub async fn execute_exec_command(args: &Value, runtime: &ToolRuntime) -> ToolRe
 pub(crate) async fn execute_exec_command_with_cancellation(
     args: &Value,
     runtime: &ToolRuntime,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> ToolResult {
     match execute_exec_command_inner(args, runtime, cancellation).await {
         Ok((content, is_error)) => ToolResult {
@@ -107,7 +107,7 @@ pub(crate) async fn execute_exec_command_with_cancellation(
 async fn execute_exec_command_inner(
     args: &Value,
     runtime: &ToolRuntime,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> Result<(String, bool)> {
     if cancellation.is_cancelled() {
         return Err(anyhow!(
@@ -198,7 +198,7 @@ pub async fn execute_write_stdin(args: &Value, runtime: &ToolRuntime) -> ToolRes
 pub(crate) async fn execute_write_stdin_with_cancellation(
     args: &Value,
     runtime: &ToolRuntime,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
     ticket: Option<&crate::terminal::InputTicket>,
 ) -> ToolResult {
     let result: Result<_> = async {

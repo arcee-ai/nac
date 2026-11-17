@@ -46,7 +46,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::User {
             content: "old".to_string(),
@@ -251,7 +251,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = messages.into();
     store_agent_snapshot(&store_path, &agent);
     agent.restore_compaction_checkpoint().unwrap();
@@ -348,7 +348,7 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::User {
             content: "old".to_string(),

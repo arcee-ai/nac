@@ -1,14 +1,15 @@
 use std::collections::HashSet;
 use std::io::BufRead;
 
-use crate::tools::ThreadCancellation;
+use crate::tools::RunCancellation;
 use anyhow::Result;
 
 use crate::agent::Agent;
+use crate::managed_native_credentials::ManagedNativeCredentials;
 use crate::skills::SkillRegistry;
 use crate::store::{self, WorkerContext};
 use crate::types::Message;
-use crate::worker_credentials::{ManagedWorkerCredentialReceiver, ManagedWorkerNativeCredentials};
+use crate::worker_credentials::ManagedWorkerCredentialReceiver;
 
 pub(crate) const MANAGED_WORKER_HISTORY_READY: &str = "__NAC_HISTORY_READY__";
 pub(crate) const MANAGED_WORKER_CANCEL_ACK: &str = "__NAC_CANCEL_ACK__";
@@ -85,7 +86,7 @@ pub fn build_preloaded_skill_messages(
 }
 
 fn spawn_cancellation_listener(
-    command_cancellation: ThreadCancellation,
+    command_cancellation: RunCancellation,
     ready: Option<std::sync::mpsc::Sender<()>>,
     completion: Option<(
         crate::worker_protocol::Completion,
@@ -144,7 +145,7 @@ pub async fn run_managed_worker(
 
 async fn run_managed_worker_with_credentials(
     run_config: ManagedWorkerRunConfig,
-    credentials: ManagedWorkerNativeCredentials,
+    credentials: ManagedNativeCredentials,
 ) -> Result<()> {
     let mut completion = crate::worker_protocol::Completion {
         session_id: run_config.session_id.clone(),
@@ -182,7 +183,7 @@ async fn run_managed_worker_with_credentials(
 
 async fn produce_worker_response(
     run_config: ManagedWorkerRunConfig,
-    credentials: ManagedWorkerNativeCredentials,
+    credentials: ManagedNativeCredentials,
 ) -> Result<String> {
     let ManagedWorkerRunConfig {
         mut agent, action, ..
@@ -281,7 +282,7 @@ mod tests {
 
         let answer = produce_worker_response(
             run_config,
-            ManagedWorkerNativeCredentials::for_test(Some(credential)),
+            ManagedNativeCredentials::for_test(Some(credential)),
         )
         .await
         .unwrap();
@@ -328,7 +329,7 @@ mod tests {
         let Some(mode) = std::env::var_os("NAC_CANCELLATION_LISTENER_HELPER") else {
             return;
         };
-        let cancellation = ThreadCancellation::default();
+        let cancellation = RunCancellation::default();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         spawn_cancellation_listener(cancellation.clone(), Some(ready_tx), None);
         ready_rx

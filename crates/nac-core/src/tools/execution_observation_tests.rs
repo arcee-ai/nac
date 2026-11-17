@@ -1,7 +1,7 @@
 use super::*;
 use crate::permissions::{PermissionBackend, PermissionBroker, PermissionEffect, PermissionRule};
 use crate::terminal::TerminalManager;
-use crate::tools::{execute_tool, ThreadCancellation};
+use crate::tools::{execute_tool, RunCancellation};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,7 +68,7 @@ async fn launch(runtime: &ToolRuntime, command: &str, secrets: Vec<String>) -> S
             &runtime.backend,
             nac_contracts::CommandEnvironmentSnapshot::from_parts(Default::default(), secrets),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();

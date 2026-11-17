@@ -20,10 +20,10 @@ async fn finish_run_persists_snapshot_before_completion_event() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -342,10 +342,10 @@ async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
             |row| row.get(0),
         )
         .unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -442,10 +442,10 @@ async fn recovered_session_continues_without_model_bookkeeping_and_clears_warnin
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -544,10 +544,10 @@ async fn finish_run_persists_token_usage() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -661,10 +661,10 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,
@@ -931,10 +931,10 @@ async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
         BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot,

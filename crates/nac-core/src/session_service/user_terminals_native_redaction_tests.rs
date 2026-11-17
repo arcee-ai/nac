@@ -117,7 +117,8 @@ fn native_exa_redaction_process_helper() {
     };
     // Before creating any NAC runtime/service, privately capture this child-only
     // synthetic credential and remove its ambient environment value.
-    crate::worker_credentials::capture_managed_native_credentials_from_environment().unwrap();
+    crate::managed_native_credentials::capture_managed_native_credentials_from_environment()
+        .unwrap();
     assert!(std::env::var_os(crate::model::EXA_API_KEY_ENV).is_none());
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

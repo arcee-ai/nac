@@ -42,8 +42,10 @@ and rich results. Individual families own their native operation and tests.
   policy/revalidation, invocation, collision and ordering contracts.
 - `runtime_context.rs` — construction-time backend, environment, terminal,
   redaction, and workspace capabilities.
-- `terminal_tools.rs` and `thread_lifecycle.rs` — process-tool adapter and run
-  generation/cancellation admission.
+- `terminal_tools.rs`, `run_admission.rs` and `run_cancellation.rs` — process-tool
+  adapter, generation-bound admission, and nested cancellation/mutation fencing.
+  `worker_dispatch.rs` retains worker bookkeeping under the same admission lock
+  for ordered draining.
 - `mcp_adapter.rs` — dynamic imported capability adapter.
 - `discovery.rs` and `discovery/` — glob/grep orchestration and traversal.
 - `mutation.rs`, `mutation_remote.rs`, `mutation_tests.rs` — local/remote edit

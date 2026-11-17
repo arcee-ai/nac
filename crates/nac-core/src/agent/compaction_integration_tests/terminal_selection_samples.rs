@@ -45,7 +45,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
         .active_checkpoint_for_test()
         .unwrap()
         .id;
-    agent.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(
         agent.send("ordinary question").await.unwrap(),
         "first ordinary answer"
@@ -67,7 +67,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
             .context_estimate,
         120
     );
-    agent.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(
         agent.send("next ordinary question").await.unwrap(),
         "second ordinary answer"
@@ -160,7 +160,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
             .context_estimate
             > 1_000
     );
-    fork.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    fork.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(
         fork.send("fork asks explicitly").await.unwrap(),
         "fork ordinary answer"

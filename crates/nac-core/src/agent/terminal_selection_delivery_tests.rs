@@ -68,7 +68,7 @@ async fn terminal_selection_active_steer_delivery_is_literal_with_no_skill_or_co
         panic!("control preparation unavailable")
     };
     assert!(control.agent_prompt.contains("EXPANSION_MUST_NOT_RUN"));
-    agent.set_steering_dispatch_id(Some(run));
+    agent.set_current_run_id(Some(run));
     agent.send("ordinary first prompt").await.unwrap();
     assert_eq!(
         agent

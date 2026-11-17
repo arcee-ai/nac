@@ -1,9 +1,7 @@
 use super::*;
 
 impl SessionService {
-    pub fn from_orchestrator_run_config(
-        mut run_config: OrchestratorRunConfig,
-    ) -> SessionServiceParts {
+    pub fn from_session_run_config(mut run_config: SessionRunConfig) -> SessionServiceParts {
         let behavior = run_config.session.behavior();
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
@@ -14,16 +12,16 @@ impl SessionService {
             .map(str::to_owned);
         let response_timing =
             ResponseTimingSnapshot::from_session_snapshot(match &run_config.session {
-                OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
-                OrchestratorSession::Picker { .. } => None,
+                RuntimeSession::Active { snapshot, .. } => Some(snapshot),
+                RuntimeSession::Picker { .. } => None,
             });
         let config_version = match &run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => Some(snapshot.config_version),
-            OrchestratorSession::Picker { .. } => None,
+            RuntimeSession::Active { snapshot, .. } => Some(snapshot.config_version),
+            RuntimeSession::Picker { .. } => None,
         };
         let project_id = match &run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => snapshot.project_id.clone(),
-            OrchestratorSession::Picker { .. } => None,
+            RuntimeSession::Active { snapshot, .. } => snapshot.project_id.clone(),
+            RuntimeSession::Picker { .. } => None,
         };
 
         let event_bus =

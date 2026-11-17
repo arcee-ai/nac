@@ -4,7 +4,7 @@ async fn pipe_reader_shutdown_preserves_queued_output_and_closes_channel() {
 
     let (mut writer, reader) = tokio::io::duplex(64);
     let (sender, mut receiver) = mpsc::channel(1);
-    let shutdown = ThreadCancellation::default();
+    let shutdown = RunCancellation::default();
     let handle = tokio::spawn(read_chunks(
         reader,
         OutputStream::Stdout,
@@ -464,7 +464,7 @@ async fn remote_cleanup_observes_local_transport_already_stopped() {
         &root,
     );
     let manager = TerminalManager::new();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let command_manager = manager.clone();
     let command_backend = Arc::clone(&remote_backend);
     let command_cancellation = cancellation.clone();
@@ -784,7 +784,7 @@ async fn run_one_shot_with_pidfd_failure(cancel: bool) -> CommandOutput {
          printf parent-output; printf parent-error >&2; sleep 30",
         pidfile = pidfile.display()
     );
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let task_cancellation = cancellation.clone();
     let task_manager = manager.clone();
     let task_backend = backend();
@@ -926,7 +926,7 @@ async fn one_shot_closed_pipes_still_time_out() {
 #[tokio::test]
 async fn one_shot_closed_pipes_still_cancel() {
     let manager = TerminalManager::new();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let task_manager = manager.clone();
     let task_backend = backend();
     let task_cancellation = cancellation.clone();
@@ -1035,7 +1035,7 @@ async fn noisy_producer_never_retains_more_than_the_configured_cap() {
 #[tokio::test]
 async fn explicit_cancellation_is_structured_and_stops_late_side_effects() {
     let manager = TerminalManager::new();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let path = std::env::temp_dir().join(format!("nac-command-cancel-{}", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let command = format!("sleep 1; printf late > {}", path.display());
@@ -1146,7 +1146,7 @@ while True:
 #[tokio::test]
 async fn cancellation_before_spawn_never_starts_the_command() {
     let manager = TerminalManager::new();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     cancellation.cancel();
     let path =
         std::env::temp_dir().join(format!("nac-command-pre-cancel-{}", uuid::Uuid::new_v4()));
@@ -1170,7 +1170,7 @@ async fn cancellation_before_spawn_never_starts_the_command() {
 #[tokio::test]
 async fn cancellation_wins_while_one_shot_waits_before_final_spawn() {
     let manager = TerminalManager::new();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let marker = std::env::temp_dir().join(format!(
         "nac-command-cancelled-final-spawn-{}",
         uuid::Uuid::new_v4()
@@ -1215,7 +1215,7 @@ async fn pty_cancellation_stops_waiting_and_late_side_effects() {
         .create("pty-cancel".to_string(), "bash", None, 120, 40, &backend)
         .await
         .unwrap();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let path = std::env::temp_dir().join(format!("nac-pty-cancel-{}", uuid::Uuid::new_v4()));
     let command = format!("sleep 1; printf late > {}<RET>", path.display());
     let task_manager = manager.clone();
@@ -1526,7 +1526,7 @@ async fn cancelled_create_cannot_spawn_before_manager_ownership() {
 async fn cancellation_wins_while_create_waits_before_final_spawn() {
     let manager = TerminalManager::for_direct();
     let backend = backend();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let marker =
         std::env::temp_dir().join(format!("nac-cancelled-create-{}", uuid::Uuid::new_v4()));
     let held_admission = manager.create_gate.lock().await;
@@ -1563,7 +1563,7 @@ async fn cancellation_wins_while_create_waits_before_final_spawn() {
 async fn cancellation_wins_while_terminal_input_waits_for_final_ownership() {
     let manager = TerminalManager::for_direct();
     let backend = backend();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let marker = std::env::temp_dir().join(format!("nac-cancelled-input-{}", uuid::Uuid::new_v4()));
     let command = format!("read value; printf %s \"$value\" > {}", marker.display());
     manager
@@ -1608,7 +1608,7 @@ async fn cancellation_wins_while_terminal_input_waits_for_final_ownership() {
 async fn cancellation_wins_while_retention_waits_for_final_ownership() {
     let manager = TerminalManager::for_direct();
     let backend = backend();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let name = manager.next_session_name();
     manager
         .create(name.clone(), "sleep 30", None, 120, 40, &backend)
@@ -1702,7 +1702,7 @@ async fn direct_cancellation_stops_foreground_and_preserves_retained_terminal() 
         .await
         .unwrap();
     manager.retain(&retained).await.unwrap();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     cancellation.cancel();
     assert!(manager
         .write_stdin(&foreground, "", 10, 100, Some(&cancellation))
@@ -1899,7 +1899,7 @@ async fn assert_remote_backend_output_contract(backend: Arc<ExecutionBackend>) {
         .await;
     assert_eq!(counter.stdout_preview, "1");
 
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let cancellation_marker = format!("/tmp/nac-command-cancel-{}", uuid::Uuid::new_v4());
     let task_manager = manager.clone();
     let task_backend = Arc::clone(&backend);

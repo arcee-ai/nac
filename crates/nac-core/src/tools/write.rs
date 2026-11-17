@@ -9,8 +9,7 @@ use crate::tools::mutation::{
     write_local_bound_cancellable, write_local_cancellable, write_mounted_cancellable,
 };
 use crate::tools::{
-    kernel, resolve_workspace_path, shared_workspace_gate, ThreadCancellation, ToolResult,
-    ToolRuntime,
+    kernel, resolve_workspace_path, shared_workspace_gate, RunCancellation, ToolResult, ToolRuntime,
 };
 use crate::types::{FunctionDef, ToolDefinition};
 
@@ -137,7 +136,7 @@ pub async fn execute(args: Value, runtime: &ToolRuntime) -> ToolResult {
 async fn execute_with_cancellation(
     args: Value,
     runtime: &ToolRuntime,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> ToolResult {
     let path = match required_string(&args, "path") {
         Ok(path) => path,

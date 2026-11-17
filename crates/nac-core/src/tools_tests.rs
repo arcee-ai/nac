@@ -1,12 +1,12 @@
 use super::{
-    direct_tool_definitions, kernel, worker_tool_definitions, worker_tool_registry, ReadTool,
+    coding_tool_definitions, direct_tool_definitions, kernel, worker_tool_registry, ReadTool,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
 
 #[test]
 fn every_worker_receives_complete_glob_and_grep_definitions_once() {
-    let definitions = worker_tool_definitions(false);
+    let definitions = coding_tool_definitions(false);
     for name in ["glob", "grep"] {
         let matches: Vec<_> = definitions
             .iter()
@@ -105,7 +105,7 @@ async fn model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot() 
 #[test]
 fn read_description_advertises_images_only_when_supported() {
     let description = |image_read| {
-        worker_tool_definitions(image_read)
+        coding_tool_definitions(image_read)
             .into_iter()
             .find(|definition| definition.function.name == "read")
             .unwrap()
@@ -162,7 +162,7 @@ fn exec_binding_rewrites_authorized_paths_and_workdir_into_the_invocation() {
 
 #[test]
 fn direct_registries_preserve_exact_topology_capabilities() {
-    let worker = worker_tool_definitions(false)
+    let worker = coding_tool_definitions(false)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();

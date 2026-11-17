@@ -99,6 +99,7 @@ mod terminal;
 mod tool_content;
 mod tools;
 pub use tools::shared_workspace_gate_for;
+mod managed_native_credentials;
 pub mod traditional_children;
 pub mod types;
 pub mod upgrade;

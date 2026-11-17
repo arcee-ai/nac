@@ -24,7 +24,7 @@ pub async fn build_resume_picker_config(
 }
 
 fn record_run_failure_recovery(
-    run_config: &mut OrchestratorRunConfig,
+    run_config: &mut SessionRunConfig,
     recovery: store::ActiveRunReconciliation,
 ) {
     let recovered = match recovery {
@@ -49,7 +49,7 @@ fn record_run_failure_recovery(
 pub async fn build_resume_config(
     options: ResumeOptions,
     config: &NacConfig,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     if options.last && options.session_id.is_some() {
         anyhow::bail!("resume accepts either a session id or --last, not both");
     }
@@ -98,7 +98,7 @@ pub async fn build_resume_config_for_session(
     resume_base_cwd: PathBuf,
     worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
@@ -131,7 +131,7 @@ pub async fn build_resume_config_for_session_attachment(
     worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
 ) -> Result<(
-    OrchestratorRunConfig,
+    SessionRunConfig,
     bool,
     Option<sessions::SessionOperationLease>,
 )> {
@@ -213,7 +213,7 @@ pub async fn build_resume_config_for_session_with_lease(
     worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
     model: ResumeModelOptions,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
         owner.reconcile_active_run(session_id.to_owned()).await?
@@ -251,7 +251,7 @@ pub(super) async fn build_resume_config_from_snapshot(
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
     model: ResumeModelOptions,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     let agent_mode = match snapshot.behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
@@ -543,10 +543,10 @@ pub(super) async fn build_resume_config_from_snapshot(
     };
 
     let session_id = snapshot.session_id.clone();
-    Ok(OrchestratorRunConfig {
+    Ok(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id,
             store_path,
             snapshot,

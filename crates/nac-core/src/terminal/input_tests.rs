@@ -39,7 +39,7 @@ async fn blocked_delivery_has_bounded_fifo_capacity_and_does_not_hold_cancellati
         true,
     )
     .unwrap();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let first = input.enqueue_user(b"first", &cancellation).unwrap();
     started_receiver
         .recv_timeout(Duration::from_secs(1))
@@ -75,7 +75,7 @@ async fn accepted_input_timeout_reports_uncertainty_without_resending() {
     )
     .unwrap();
     let receipt = input
-        .enqueue_user(b"once", &ThreadCancellation::default())
+        .enqueue_user(b"once", &RunCancellation::default())
         .unwrap();
     started_receiver
         .recv_timeout(Duration::from_secs(1))
@@ -87,7 +87,7 @@ async fn accepted_input_timeout_reports_uncertainty_without_resending() {
         .contains("delivery is unconfirmed"));
     release.send(()).unwrap();
     let final_receipt = input
-        .enqueue_user(b"end", &ThreadCancellation::default())
+        .enqueue_user(b"end", &RunCancellation::default())
         .unwrap();
     await_receipt(final_receipt).await.unwrap();
     assert_eq!(*bytes.lock().unwrap(), b"onceend");
@@ -112,7 +112,7 @@ async fn reclaim_fences_queued_and_future_packets_at_actual_writer_admission() {
         .control
         .ticket("process", InputController::Agent)
         .unwrap();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let first = input
         .enqueue(b"in-flight", ticket.clone(), &cancellation)
         .unwrap();
@@ -182,13 +182,13 @@ async fn stop_rejects_queued_input_and_same_controller_handoff_advances_revision
     )
     .unwrap();
     let first = input
-        .enqueue_user(b"once", &ThreadCancellation::default())
+        .enqueue_user(b"once", &RunCancellation::default())
         .unwrap();
     started_receiver
         .recv_timeout(Duration::from_secs(1))
         .unwrap();
     let queued = input
-        .enqueue_user(b"never", &ThreadCancellation::default())
+        .enqueue_user(b"never", &RunCancellation::default())
         .unwrap();
     input.control.stop();
     release.send(()).unwrap();
@@ -224,13 +224,13 @@ async fn queued_packet_rechecks_root_liveness_at_the_writer_boundary() {
         observed.load(std::sync::atomic::Ordering::SeqCst)
     }));
     let first = input
-        .enqueue_user(b"in-flight", &ThreadCancellation::default())
+        .enqueue_user(b"in-flight", &RunCancellation::default())
         .unwrap();
     started_receiver
         .recv_timeout(Duration::from_secs(1))
         .unwrap();
     let queued = input
-        .enqueue_user(b"after-exit", &ThreadCancellation::default())
+        .enqueue_user(b"after-exit", &RunCancellation::default())
         .unwrap();
     alive.store(false, std::sync::atomic::Ordering::SeqCst);
     release.send(()).unwrap();
@@ -264,7 +264,7 @@ async fn cancelled_model_generation_cannot_commit_queued_future_input() {
         .control
         .ticket("root", InputController::Agent)
         .unwrap();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let first = input
         .enqueue(b"in-flight", ticket.clone(), &cancellation)
         .unwrap();

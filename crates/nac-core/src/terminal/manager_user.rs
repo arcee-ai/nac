@@ -90,7 +90,7 @@ impl TerminalManager {
         backend: &Arc<ExecutionBackend>,
         environment: nac_contracts::CommandEnvironmentSnapshot,
         expected_config_version: Option<i64>,
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<()> {
         validate_geometry(cols, rows)?;
         if !self.owns_user_terminal_name(&name) || !self.preserve_retained_on_settlement {
@@ -318,7 +318,7 @@ impl TerminalManager {
         &self,
         name: &str,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<()> {
         self.check_user_name(name)?;
         // Legacy input has no revision. It is valid only for untouched initial
@@ -365,7 +365,7 @@ impl TerminalManager {
         name: &str,
         cols: u16,
         rows: u16,
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<()> {
         self.check_user_name(name)?;
         validate_geometry(cols, rows)?;

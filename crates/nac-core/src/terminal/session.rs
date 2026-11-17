@@ -374,7 +374,7 @@ impl TerminalSession {
         &mut self,
         bytes: &[u8],
         ticket: super::InputTicket,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
     ) -> Result<super::input::InputReceipt> {
         if ticket.incarnation != self.output_id {
             return Err(anyhow::anyhow!("terminal incarnation changed"));

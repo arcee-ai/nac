@@ -80,27 +80,49 @@ pub fn fresh_general_child_messages(
     parent_working_directory: &str,
     description: &str,
 ) -> Result<Vec<Message>> {
-    let parent_system = parent_messages.first().and_then(|message| match message {
-        Message::System { content } => Some(content.as_str()),
-        _ => None,
-    });
-    let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
-    let delegating_parent_base =
-        crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
-    // Schema-17 prototypes and hand-authored fixture rows may predate the
-    // canonical direct system head. They still get a safe fresh child prompt,
-    // but have no persisted project-instruction suffix to inherit.
-    let project_suffix = parent_system
-        .and_then(|system| {
-            system
-                .strip_prefix(&delegating_parent_base)
-                .or_else(|| system.strip_prefix(&parent_base))
-        })
-        .unwrap_or_default();
+    let instructions = InheritedProjectInstructions::from_parent_transcript(
+        parent_messages,
+        parent_working_directory,
+    );
     let mut child =
         crate::agent::render_general_child_system_prompt(parent_working_directory, description);
-    child.push_str(project_suffix);
+    child.push_str(instructions.suffix);
     Ok(vec![Message::System { content: child }])
+}
+
+// Existing transcripts contain the rendered system head, not separate guidance.
+// Keep this compatibility decoder at the child boundary so the inherited bytes
+// have an explicit owner until a durable representation can replace it.
+struct InheritedProjectInstructions<'a> {
+    suffix: &'a str,
+}
+
+impl<'a> InheritedProjectInstructions<'a> {
+    fn from_parent_transcript(
+        parent_messages: &'a [Message],
+        parent_working_directory: &str,
+    ) -> Self {
+        let parent_system = parent_messages.first().and_then(|message| match message {
+            Message::System { content } => Some(content.as_str()),
+            _ => None,
+        });
+        let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
+        let delegating_parent_base =
+            crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
+        // Schema-17 prototypes and hand-authored fixture rows may predate the
+        // canonical direct system head. They still get a safe fresh child prompt,
+        // but have no persisted project-instruction suffix to inherit.
+        let project_suffix = parent_system
+            .and_then(|system| {
+                system
+                    .strip_prefix(&delegating_parent_base)
+                    .or_else(|| system.strip_prefix(&parent_base))
+            })
+            .unwrap_or_default();
+        Self {
+            suffix: project_suffix,
+        }
+    }
 }
 
 pub fn parent_prompt_working_directory(
@@ -186,6 +208,41 @@ pub fn check_continuation_description(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_project_suffix_is_exact_and_legacy_heads_stay_empty() {
+        let cwd = "/workspace";
+        let suffix = "\n\nProject guidance:\n  preserve whitespace\n";
+        let parent = format!("{}{suffix}", crate::agent::render_direct_system_prompt(cwd));
+        let messages =
+            fresh_general_child_messages(&[Message::System { content: parent }], cwd, "task")
+                .unwrap();
+        let Message::System { content } = &messages[0] else {
+            panic!("expected system head")
+        };
+        assert_eq!(
+            content,
+            &format!(
+                "{}{suffix}",
+                crate::agent::render_general_child_system_prompt(cwd, "task")
+            )
+        );
+        let legacy = fresh_general_child_messages(
+            &[Message::System {
+                content: "legacy".into(),
+            }],
+            cwd,
+            "task",
+        )
+        .unwrap();
+        let Message::System { content } = &legacy[0] else {
+            panic!("expected system head");
+        };
+        assert_eq!(
+            content,
+            &crate::agent::render_general_child_system_prompt(cwd, "task")
+        );
+    }
 
     #[test]
     fn delegating_parent_does_not_give_managed_orchestrator_instructions_to_child() {
