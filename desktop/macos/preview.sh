@@ -170,15 +170,7 @@ case "$mode" in
         ;;
     startup-smoke) exec python3 -B desktop/macos/startup_smoke.py "$app" "$output/startup-evidence" ;;
     smoke)
-        xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 -O \
-            desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift desktop/macos/ProtocolTests.swift \
-            -o "$output/EngineProtocolTests"
-        "$output/EngineProtocolTests"
-        xcrun swiftc -swift-version 5 -target arm64-apple-macosx14.0 -O \
-            desktop/macos/EngineProtocol.swift desktop/macos/EngineFailure.swift \
-            desktop/macos/NativeCommandState.swift desktop/macos/NativeCommandStateTests.swift \
-            -o "$output/NativeCommandStateTests"
-        "$output/NativeCommandStateTests"
+        bash desktop/macos/smoke_controls.sh "$output"
         python3 -B -m unittest discover -s desktop/macos -p 'test_*.py'
         exec python3 -B desktop/macos/smoke.py "$app" "$output/evidence"
         ;;
