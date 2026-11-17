@@ -39,11 +39,7 @@ test("actual Electron notification adapter uses private profile and withdraws it
     app = await _electron.launch({
       args: [fixture],
       env: {
-        ...Object.fromEntries(
-          Object.entries(process.env).filter(
-            (entry): entry is [string, string] => entry[1] !== undefined,
-          ),
-        ),
+        PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
         HOME: path.join(directory, "home"),
         TMPDIR: path.join(directory, "tmp"),
         XDG_CONFIG_HOME: path.join(directory, "xdg"),
@@ -84,14 +80,24 @@ test("actual Electron notification adapter uses private profile and withdraws it
     expect(result.retained).toBe(0);
     console.log("Private native notification probe:", JSON.stringify(result));
     expect(["system-managed", "unavailable"]).toContain(result.settings.status);
+    const receipt = test.info().outputPath("notification-submission.json");
+    await fs.mkdir(path.dirname(receipt), { recursive: true });
+    await fs.writeFile(
+      receipt,
+      JSON.stringify(
+        {
+          ...result,
+          observedBanner: false,
+          observedHumanClick: false,
+          limitation:
+            "OS submission callback is not signed native banner/click/withdraw qualification",
+        },
+        null,
+        2,
+      ) + "\n",
+    );
     await test.info().attach("notification-submission.json", {
-      body: JSON.stringify({
-        ...result,
-        observedBanner: false,
-        observedHumanClick: false,
-        limitation:
-          "OS submission callback is not signed native banner/click/withdraw qualification",
-      }),
+      path: receipt,
       contentType: "application/json",
     });
   } finally {
