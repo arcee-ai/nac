@@ -121,6 +121,36 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
     123_456,
   );
+
+  const another = await request.post(`${harness.baseUrl}/sessions`, {
+    data: {
+      behavior: "direct",
+      cwd: path.join(harness.runRoot, "workspace"),
+      backend: "chatgpt-codex-responses",
+      model: "gpt-6.1-sol",
+      reasoning_effort: "medium",
+    },
+  });
+  expect(another.ok()).toBeTruthy();
+  const anotherConfig = `${harness.baseUrl}/sessions/${(await another.json()).metadata.session_id}/config`;
+  const openai = catalog.providers.find(
+    (provider: { id: string }) => provider.id === "openai-responses",
+  );
+  const target = openai.models.find((entry: { id: string }) => entry.id === "gpt-6.1-sol");
+  const providerSwitch = await request.patch(anotherConfig, {
+    data: {
+      backend: "openai-responses",
+      model: "gpt-6.1-sol",
+      base_url: "https://api.openai.com/v1",
+      api_key_env: "OPENAI_API_KEY",
+    },
+  });
+  expect(providerSwitch.ok()).toBeTruthy();
+  const switchedProviderConfig = await (await request.get(anotherConfig)).json();
+  expect(switchedProviderConfig.automatic_compaction).toBe(false);
+  expect(switchedProviderConfig.orchestrator_compaction_threshold).toBe(
+    target.limits.automatic_compaction_threshold,
+  );
   expect((await (await request.get(configUrl)).json()).automatic_compaction).toBe(false);
   expect((await request.patch(configUrl, { data: { model: "gpt-6-astra" } })).ok()).toBeTruthy();
   expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(

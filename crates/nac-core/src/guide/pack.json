@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "179275dad0312536670d5c74c09fbc3c77427083216267e8a4bfafd1ffb36c27",
+  "fingerprint": "6ba3a1302815fd0d914925636e4d1159309ccc65efeaa9e82024bca91aa452e3",
   "router_digest": "1eda1fb478eaa3ac8fcc1d76ca4d47eee96c567c525fa34864f3d7bbab0303bf",
   "documents": [
     {
@@ -163,7 +163,7 @@
       "document_id": "models",
       "title": "Model configuration",
       "source_path": "docs/configuration/model.md",
-      "content_digest": "57d159a8075057d317fce3a2cb44c69669982129cb432dd653beb6f3751c354c",
+      "content_digest": "3bd2b7ef2af53c06b758c43aab6420aa7bf79b600c1217ad5bbe5a8dfab3b1b3",
       "sections": [
         {
           "section_id": "overview",
@@ -178,7 +178,7 @@
         {
           "section_id": "orchestrator-compaction-threshold",
           "title": "Compaction threshold",
-          "text": "## Compaction threshold\n\nThe current API spelling `orchestrator_compaction_threshold` also controls\ncheckpoint creation for direct sessions. It is an optional absolute token count;\nomission defaults to 70% of the resolved effective input budget, capped by any lower provider auto-compaction limit, while `null` or `0`\ndisables new checkpoints. GET returns the persisted value; PATCH omission\npreserves it and `null` or `0` disables it. Existing valid checkpoints remain\nactive on resume. The neutral-contract retirement slice (ALL-615) owns renaming\nthis wire key.\n\nAutomatic compaction preserves the canonical transcript and keeps checkpoint\nrows private. `POST /sessions/{session_id}/compact` requests compaction without\nsubmitting a prompt and is refused during another run or manual compaction.\n\n"
+          "text": "## Compaction threshold\n\nThe current API spelling `orchestrator_compaction_threshold` also controls\ncheckpoint creation for direct sessions. It is an optional absolute token count;\nomission defaults to 70% of the planning budget, while `null` or `0` disables\nnew checkpoints. For Codex, the budget is the effective input limit, capped by\nany lower provider auto-compaction limit. GET returns the current resolved value\nfor automatic sessions and the persisted value for fixed sessions; PATCH omission\npreserves the policy and `null` or `0` disables it. Existing valid checkpoints remain\nactive on resume. The neutral-contract retirement slice (ALL-615) owns renaming\nthis wire key.\n\nAutomatic compaction preserves the canonical transcript and keeps checkpoint\nrows private. `POST /sessions/{session_id}/compact` requests compaction without\nsubmitting a prompt and is refused during another run or manual compaction.\n\n"
         },
         {
           "section_id": "api-key-selection",

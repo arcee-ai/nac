@@ -72,6 +72,13 @@ fn non_codex_default_compaction_keeps_the_context_window() {
         model.resolved_limits().automatic_compaction_threshold,
         Some(280_000)
     );
+    model.max_input_tokens = None;
+    assert_eq!(model.resolved_limits().effective_input_tokens, 272_000);
+    assert_eq!(model.resolved_limits().input_origin, LimitOrigin::Estimated);
+    assert_eq!(
+        model.resolved_limits().automatic_compaction_threshold,
+        Some(280_000)
+    );
 }
 
 #[test]

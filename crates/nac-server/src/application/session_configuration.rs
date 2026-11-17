@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{anyhow, Result};
 use nac_core::{
     light_model::LightModelSettings,
-    model::{validate_model_configuration, EffectiveModelSettings},
+    model::{validate_model_configuration, BackendKind, EffectiveModelSettings},
     sessions,
 };
 
@@ -181,6 +181,13 @@ impl<'a> SessionConfigurationApplication<'a> {
             extra_headers.clone(),
             prospective.allow_insecure_http,
         )?;
+        if prospective.automatic_compaction && backend != BackendKind::ChatGptCodexResponses {
+            // A Codex automatic policy must not follow later non-Codex
+            // catalog changes; freeze that provider's default on the switch.
+            prospective.orchestrator_compaction_threshold =
+                nac_core::model::automatic_compaction_threshold(backend, &prospective.model);
+            prospective.automatic_compaction = false;
+        }
         let mounted_override = self.manager.managed_model().filter(|profile| {
             profile.matches_settings_override(
                 backend,

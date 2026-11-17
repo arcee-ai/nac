@@ -307,8 +307,16 @@ impl ModelMetadata {
                     LimitOrigin::Profile
                 },
             )
-        } else {
+        } else if matches!(
+            self.provider,
+            BackendKind::AnthropicMessages | BackendKind::ArceeAuth | BackendKind::ArceeApi
+        ) {
             (self.context_window, self.context_origin)
+        } else {
+            (
+                self.context_window.saturating_sub(self.max_tokens).max(1),
+                LimitOrigin::Estimated,
+            )
         };
         // Other backends historically compact against their context window;
         // reporting a separate input cap must not silently change that default.

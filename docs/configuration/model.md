@@ -37,9 +37,11 @@ reference.
 
 The current API spelling `orchestrator_compaction_threshold` also controls
 checkpoint creation for direct sessions. It is an optional absolute token count;
-omission defaults to 70% of the resolved effective input budget, capped by any lower provider auto-compaction limit, while `null` or `0`
-disables new checkpoints. GET returns the persisted value; PATCH omission
-preserves it and `null` or `0` disables it. Existing valid checkpoints remain
+omission defaults to 70% of the planning budget, while `null` or `0` disables
+new checkpoints. For Codex, the budget is the effective input limit, capped by
+any lower provider auto-compaction limit. GET returns the current resolved value
+for automatic sessions and the persisted value for fixed sessions; PATCH omission
+preserves the policy and `null` or `0` disables it. Existing valid checkpoints remain
 active on resume. The neutral-contract retirement slice (ALL-615) owns renaming
 this wire key.
 
