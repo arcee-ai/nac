@@ -1,4 +1,14 @@
 {
   "schema_version": 1,
-  "exceptions": []
+  "exceptions": [
+    {
+      "advisory": "RUSTSEC-2026-0543",
+      "package": "crates.io:chrono",
+      "context": "Cargo.lock",
+      "reason": "Allison explicitly accepts the temporary maintenance risk of locked chrono 0.4.45 while the supported MCP/OAuth dependency chain migrates. This informational unmaintained advisory has no patched version; rmcp 3.10.0 still requires Chrono. Only this exact advisory, package and source context are excepted; other findings and scanner errors remain blocking.",
+      "owner": "@allisoneer",
+      "linked_issue": "https://github.com/arcee-ai/nac/issues/711",
+      "expires": "2026-12-17T23:59:59Z"
+    }
+  ]
 }
